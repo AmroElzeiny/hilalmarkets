@@ -1,0 +1,14 @@
+{
+  "framework": "python-pytest-playwright",
+  "browser": "chromium",
+  "appEntrypoint": "ai_market_monitor.main:app",
+  "baseUrlEnv": "BROWSER_E2E_BASE_URL",
+  "allowProductionEnv": "ALLOW_PROD_E2E",
+  "headedEnv": "BROWSER_E2E_HEADED",
+  "reportsDir": "reports/playwright",
+  "artifactsDir": "test-results/browser",
+  "htmlReportDir": "playwright-report",
+  "junitReport": "reports/playwright/playwright-results.xml",
+  "jsonSummary": "reports/playwright/playwright-summary.json",
+  "markdownSummary": "PLAYWRIGHT_E2E_REPORT.md"
+}

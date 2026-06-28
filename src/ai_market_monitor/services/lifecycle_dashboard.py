@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_market_monitor.db.models import (
+    Alert,
+    AlertInboxItem,
+    SetupConditionResult,
+    SetupInstance,
+    SetupLifecycleEvent,
+    Strategy,
+    StrategyCondition,
+    StrategyVersion,
+)
+from ai_market_monitor.db.models.enums import ConditionOutcome, SetupLifecycleState
+
+LIFECYCLE_STAGES = (
+    ("detected", "Detected"),
+    ("partial_match", "Partial match"),
+    ("conditions_complete", "Conditions complete"),
+    ("alert_delivered", "Alert delivered"),
+    ("resolution", "No longer matching"),
+)
+
+STAGE_BY_STATE = {
+    SetupLifecycleState.CANDIDATE_DETECTED: 0,
+    SetupLifecycleState.DETECTED: 0,
+    SetupLifecycleState.FORMING: 1,
+    SetupLifecycleState.NEAR_CONFIRMATION: 1,
+    SetupLifecycleState.ARMED: 1,
+    SetupLifecycleState.BLOCKED: 1,
+    SetupLifecycleState.DATA_UNAVAILABLE: 1,
+    SetupLifecycleState.CONFIRMED: 2,
+    SetupLifecycleState.ALERT_SENT: 3,
+    SetupLifecycleState.SUPPRESSED: 3,
+    SetupLifecycleState.ENTRY_ACTIVE: 3,
+    SetupLifecycleState.ENTRY_ZONE_ACTIVE: 3,
+    SetupLifecycleState.ENTRY_TOUCHED: 3,
+    SetupLifecycleState.ENTRY_ZONE_MISSED: 4,
+    SetupLifecycleState.ENTRY_MISSED: 4,
+    SetupLifecycleState.INVALIDATED: 4,
+    SetupLifecycleState.EXPIRED: 4,
+    SetupLifecycleState.TARGET_1_REACHED: 4,
+    SetupLifecycleState.TARGET_2_REACHED: 4,
+    SetupLifecycleState.TARGET_REACHED: 4,
+    SetupLifecycleState.STOP_REACHED: 4,
+    SetupLifecycleState.STOP_LEVEL_REACHED: 4,
+    SetupLifecycleState.MANUALLY_CLOSED: 4,
+    SetupLifecycleState.COMPLETED: 4,
+    SetupLifecycleState.CLOSED: 4,
+}
+
+
+async def lifecycle_cards(
+    session: AsyncSession,
+    user_id: UUID,
+    *,
+    limit: int = 100,
+    muted_setup_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    muted_setup_ids = muted_setup_ids or set()
+    setup_rows = (
+        await session.execute(
+            select(SetupInstance, Strategy.name)
+            .join(StrategyVersion, StrategyVersion.id == SetupInstance.strategy_version_id)
+            .join(Strategy, Strategy.id == StrategyVersion.strategy_id)
+            .where(
+                SetupInstance.user_id == user_id,
+                SetupInstance.state != SetupLifecycleState.EXPIRED,
+            )
+            .order_by(SetupInstance.last_evaluated_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    setup_rows = [
+        (setup, strategy_name)
+        for setup, strategy_name in setup_rows
+        if str(setup.id) not in muted_setup_ids
+    ]
+    if not setup_rows:
+        return []
+
+    setup_ids = [setup.id for setup, _ in setup_rows]
+    events = (
+        await session.scalars(
+            select(SetupLifecycleEvent)
+            .where(SetupLifecycleEvent.setup_instance_id.in_(setup_ids))
+            .order_by(SetupLifecycleEvent.occurred_at.asc())
+        )
+    ).all()
+    condition_rows = (
+        await session.execute(
+            select(SetupConditionResult, StrategyCondition)
+            .join(
+                StrategyCondition,
+                StrategyCondition.id == SetupConditionResult.strategy_condition_id,
+            )
+            .where(SetupConditionResult.setup_instance_id.in_(setup_ids))
+            .order_by(SetupConditionResult.evaluated_at.desc())
+        )
+    ).all()
+    alert_rows = (
+        await session.scalars(
+            select(Alert)
+            .where(Alert.setup_instance_id.in_(setup_ids))
+            .order_by(Alert.created_at.desc())
+        )
+    ).all()
+    inbox_rows = (
+        await session.scalars(
+            select(AlertInboxItem)
+            .where(
+                AlertInboxItem.setup_instance_id.in_(setup_ids),
+                AlertInboxItem.archived_at.is_(None),
+            )
+            .order_by(AlertInboxItem.created_at.desc())
+        )
+    ).all()
+
+    events_by_setup: dict[UUID, list[SetupLifecycleEvent]] = defaultdict(list)
+    for event in events:
+        events_by_setup[event.setup_instance_id].append(event)
+
+    latest_conditions: dict[UUID, dict[str, tuple[SetupConditionResult, StrategyCondition]]] = (
+        defaultdict(dict)
+    )
+    for result, definition in condition_rows:
+        latest_conditions[result.setup_instance_id].setdefault(
+            result.condition_key,
+            (result, definition),
+        )
+
+    latest_alert_by_setup: dict[UUID, Alert] = {}
+    for alert in alert_rows:
+        if alert.setup_instance_id is not None:
+            latest_alert_by_setup.setdefault(alert.setup_instance_id, alert)
+
+    latest_inbox_by_setup: dict[UUID, AlertInboxItem] = {}
+    for item in inbox_rows:
+        if item.setup_instance_id is not None:
+            latest_inbox_by_setup.setdefault(item.setup_instance_id, item)
+
+    return [
+        _lifecycle_card(
+            setup,
+            strategy_name,
+            events_by_setup.get(setup.id, []),
+            latest_conditions.get(setup.id, {}),
+            latest_alert_by_setup.get(setup.id),
+            latest_inbox_by_setup.get(setup.id),
+        )
+        for setup, strategy_name in setup_rows
+    ]
+
+
+def stage_index(state: SetupLifecycleState) -> int:
+    return STAGE_BY_STATE.get(state, 0)
+
+
+def state_label(state: SetupLifecycleState | str) -> str:
+    value = state.value if isinstance(state, SetupLifecycleState) else state
+    return value.replace("_", " ").title()
+
+
+def _lifecycle_card(
+    setup: SetupInstance,
+    strategy_name: str,
+    events: list[SetupLifecycleEvent],
+    conditions: dict[str, tuple[SetupConditionResult, StrategyCondition]],
+    latest_alert: Alert | None = None,
+    latest_inbox_item: AlertInboxItem | None = None,
+) -> dict[str, Any]:
+    current_index = stage_index(setup.state)
+    stage_times: dict[int, datetime] = {0: setup.first_detected_at}
+    for event in events:
+        event_index = stage_index(event.to_state)
+        stage_times.setdefault(event_index, event.occurred_at)
+    if setup.confirmed_at is not None:
+        stage_times.setdefault(2, setup.confirmed_at)
+    if setup.closed_at is not None:
+        stage_times.setdefault(4, setup.closed_at)
+
+    stages = []
+    for index, (key, label) in enumerate(LIFECYCLE_STAGES):
+        if index < current_index:
+            status = "done"
+        elif index == current_index:
+            status = "current"
+        else:
+            status = "pending"
+        stages.append(
+            {
+                "key": key,
+                "label": label,
+                "status": status,
+                "timestamp": stage_times.get(index),
+                "detail": state_label(setup.state) if index == current_index else None,
+            }
+        )
+
+    passed: list[dict[str, Any]] = []
+    monitoring: list[dict[str, Any]] = []
+    for result, definition in conditions.values():
+        payload = {
+            "key": result.condition_key,
+            "name": definition.label,
+            "timeframe": definition.timeframe or setup.timeframe,
+            "state": result.outcome.value,
+            "actual": (result.actual_value or {}).get("value"),
+            "required": (result.required_value or {}).get("value"),
+            "evaluated_at": result.evaluated_at,
+        }
+        if result.outcome == ConditionOutcome.PASSED:
+            passed.append(payload)
+        else:
+            monitoring.append(payload)
+
+    completed_events = [
+        {
+            "label": state_label(event.to_state),
+            "timestamp": event.occurred_at,
+            "reason": event.reason_code.replace("_", " "),
+        }
+        for event in events
+    ]
+    if not completed_events:
+        completed_events.append(
+            {
+                "label": "Detected",
+                "timestamp": setup.first_detected_at,
+                "reason": "setup detected",
+            }
+        )
+    return {
+        "id": setup.id,
+        "symbol": setup.symbol,
+        "exchange": setup.exchange,
+        "timeframe": setup.timeframe,
+        "direction": setup.direction,
+        "strategy_name": strategy_name,
+        "state": setup.state.value,
+        "state_label": state_label(setup.state),
+        "stage_index": current_index,
+        "completion_score": float(setup.completion_score),
+        "first_detected_at": setup.first_detected_at,
+        "last_evaluated_at": setup.last_evaluated_at,
+        "stages": stages,
+        "completed_events": completed_events,
+        "passed_conditions": passed,
+        "monitoring_conditions": monitoring,
+        "latest_alert_id": latest_alert.id if latest_alert else None,
+        "latest_alert_title": latest_alert.title if latest_alert else None,
+        "latest_inbox_item_id": latest_inbox_item.id if latest_inbox_item else None,
+        "latest_inbox_state": latest_inbox_item.state if latest_inbox_item else None,
+    }

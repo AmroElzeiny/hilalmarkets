@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Describe your crypto setup once. Monitor spot markets, follow setup lifecycles, and receive explainable alerts.">
+  <title>TraceEdge | See your setup forming</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("amm-theme")||"dark";</script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-launch-polish">
+  <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
+  <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-launch-polish"></script>
+  <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
+  <script defer src="{{ url_for('static', path='/app.js') }}"></script>
+  <style>
+    .proof-panel{
+      background:
+        radial-gradient(circle at 100% 0,rgba(139,92,246,.22),transparent 12rem),
+        #0a0a0a!important;
+      color:#fff!important;
+      border-color:rgba(196,181,253,.26)!important;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 22px 60px rgba(0,0,0,.24);
+    }
+    .proof-panel small,.proof-panel .freshness{color:rgba(196,181,253,.58)!important}
+    html[data-theme="dark"] .proof-panel{
+      background:
+        radial-gradient(circle at 100% 0,rgba(196,181,253,.22),transparent 12rem),
+        #1b1428!important;
+    }
+    html[data-theme="light"] .monitor-card,
+    html[data-theme="light"] .receipt,
+    html[data-theme="light"] .investigation,
+    html[data-theme="light"] .channel-cards article{
+      background:
+        radial-gradient(circle at 92% 8%,rgba(139,92,246,.18),transparent 14rem),
+        #17131f!important;
+      color:#fff!important;
+    }
+    html[data-theme="light"] .receipt span,
+    html[data-theme="light"] .investigation small,
+    html[data-theme="light"] .channel-cards p{color:rgba(255,255,255,.72)!important}
+    html[data-theme="dark"] .receipt,
+    html[data-theme="dark"] .investigation,
+    html[data-theme="dark"] .channel-cards article{
+      background:
+        radial-gradient(circle at 92% 8%,rgba(196,181,253,.18),transparent 14rem),
+        #211832!important;
+    }
+    .price-card h3{
+      width:max-content;
+      max-width:100%;
+      display:inline-flex;
+      align-items:baseline;
+      gap:8px;
+      margin-block:8px 12px;
+      padding:12px 16px;
+      border-radius:18px;
+      background:#0a0a0a;
+      color:#fff;
+    }
+    .price-card h3 small{font-weight:700!important;color:#c4b5fd!important}
+    .price-card.featured h3{
+      background:#fff!important;
+      color:#111114!important;
+    }
+    html[data-theme="dark"] .price-card:not(.featured) h3{
+      background:#f4f0ff;
+      color:#111114;
+    }
+    .price-card.featured .button-primary{
+      background:#fff!important;
+      color:#111114!important;
+      box-shadow:0 16px 42px rgba(255,255,255,.18)!important;
+    }
+    footer{
+      background:#08070d!important;
+      color:#fff!important;
+      border-top:1px solid rgba(196,181,253,.16);
+    }
+    html[data-theme="dark"] footer{
+      background:#17131f!important;
+    }
+    footer a,footer p,.footer-bottom{color:rgba(255,255,255,.72)!important}
+
+    /* Landing contrast refresh requested for the guidebook purple palette. */
+    html[data-theme="light"] .radar-header,
+    html[data-theme="light"] .market-list{
+      background:#f7f3ff!important;
+      color:#17131f!important;
+      border-color:rgba(75,54,105,.16)!important;
+    }
+    html[data-theme="dark"] .radar-header,
+    html[data-theme="dark"] .market-list{
+      background:#17131f!important;
+      color:#f7f3ff!important;
+      border-color:rgba(196,181,253,.28)!important;
+    }
+    html[data-theme="light"] .proof-panel{
+      background:
+        radial-gradient(circle at 100% 0,rgba(139,92,246,.22),transparent 12rem),
+        #0a0a0a!important;
+      color:#f7f3ff!important;
+    }
+    html[data-theme="dark"] .proof-panel{
+      background:
+        radial-gradient(circle at 100% 0,rgba(196,181,253,.24),transparent 12rem),
+        #f7f3ff!important;
+      color:#17131f!important;
+    }
+    html[data-theme="light"] .mini-radar{
+      background:
+        radial-gradient(circle at 100% 0,rgba(139,92,246,.22),transparent 10rem),
+        #0a0a0a!important;
+      color:#f7f3ff!important;
+      border-color:rgba(196,181,253,.28)!important;
+    }
+    html[data-theme="dark"] .mini-radar{
+      background:
+        radial-gradient(circle at 100% 0,rgba(196,181,253,.24),transparent 10rem),
+        #f7f3ff!important;
+      color:#17131f!important;
+      border-color:rgba(75,54,105,.16)!important;
+    }
+    html[data-theme="light"] .receipt,
+    html[data-theme="light"] .investigation,
+    html[data-theme="light"] .channel-cards article{
+      background:
+        radial-gradient(circle at 92% 8%,rgba(139,92,246,.20),transparent 14rem),
+        #17131f!important;
+      color:#f7f3ff!important;
+    }
+    html[data-theme="dark"] .receipt,
+    html[data-theme="dark"] .investigation,
+    html[data-theme="dark"] .channel-cards article{
+      background:
+        radial-gradient(circle at 92% 8%,rgba(196,181,253,.20),transparent 14rem),
+        #f7f3ff!important;
+      color:#17131f!important;
+    }
+    html[data-theme="light"] .investigation span,
+    html[data-theme="light"] .investigation small,
+    html[data-theme="light"] .receipt span,
+    html[data-theme="light"] .channel-cards article p,
+    html[data-theme="light"] .channel-cards article h3{
+      color:#f7f3ff!important;
+    }
+    html[data-theme="dark"] .investigation span,
+    html[data-theme="dark"] .investigation small,
+    html[data-theme="dark"] .receipt span,
+    html[data-theme="dark"] .channel-cards article p,
+    html[data-theme="dark"] .channel-cards article h3{
+      color:#302a39!important;
+    }
+    html[data-theme="light"] footer{
+      background:#050408!important;
+    }
+    html[data-theme="dark"] footer{
+      background:#17131f!important;
+    }
+    html[data-theme="light"] footer a{
+      color:#8b5cf6!important;
+      font-weight:650;
+    }
+    html[data-theme="light"] footer p,
+    html[data-theme="light"] .footer-bottom{
+      color:rgba(247,243,255,.74)!important;
+    }
+    .price-card h3{
+      background:#2b0d54!important;
+      color:#f7f3ff!important;
+    }
+    .price-card h3 small,
+    .price-card.featured h3 small{
+      color:#4c1d95!important;
+      font-weight:760!important;
+    }
+    .price-card.featured h3{
+      background:#f7f3ff!important;
+      color:#17131f!important;
+    }
+    .price-card:not(.featured) .button-secondary{
+      background:#2b0d54!important;
+      color:#f7f3ff!important;
+      border-color:rgba(196,181,253,.34)!important;
+    }
+    .final-cta,
+    .risk-notice{
+      background:
+        radial-gradient(circle at 100% 0,rgba(139,92,246,.20),transparent 16rem),
+        #17131f!important;
+      color:#f7f3ff!important;
+      border-color:rgba(196,181,253,.24)!important;
+    }
+    html[data-theme="dark"] .final-cta,
+    html[data-theme="dark"] .risk-notice{
+      background:
+        radial-gradient(circle at 100% 0,rgba(196,181,253,.22),transparent 16rem),
+        #241737!important;
+    }
+    html[data-theme="dark"] .final-cta>p:not(.eyebrow){
+      color:#f3effa!important;
+    }
+
+    /* Final landing-page visual tuning. */
+    html[data-theme="light"] .monitor-card{
+      background:
+        radial-gradient(circle at 100% 0,rgba(196,181,253,.20),transparent 14rem),
+        #f7f3ff!important;
+      color:#17131f!important;
+      border-color:rgba(75,54,105,.16)!important;
+      box-shadow:0 24px 70px rgba(75,54,105,.16)!important;
+    }
+    html[data-theme="light"] .monitor-card .window-bar,
+    html[data-theme="light"] .monitor-card .radar-header,
+    html[data-theme="light"] .monitor-card .market-list{
+      background:#fff!important;
+      color:#17131f!important;
+      border-color:rgba(75,54,105,.14)!important;
+    }
+    html[data-theme="light"] .monitor-card .market-row{
+      background:#17131f!important;
+      color:#f7f3ff!important;
+      border-color:rgba(196,181,253,.20)!important;
+    }
+    html[data-theme="light"] .monitor-card .market-row.active{
+      background:#241737!important;
+      box-shadow:0 12px 34px rgba(75,54,105,.18)!important;
+    }
+    html[data-theme="light"] .market-name strong,
+    html[data-theme="light"] .score strong{
+      color:#f7f3ff!important;
+    }
+    html[data-theme="light"] .market-name small{
+      color:#c4b5fd!important;
+    }
+    html[data-theme="dark"] .market-name strong,
+    html[data-theme="dark"] .score strong{
+      color:#17131f!important;
+    }
+    html[data-theme="dark"] .market-name small{
+      color:#4c1d95!important;
+    }
+    html[data-theme="light"] .proof-panel,
+    html[data-theme="dark"] .proof-panel{
+      background:
+        radial-gradient(circle at 100% 0,rgba(139,92,246,.24),transparent 12rem),
+        #0a0a0a!important;
+      color:#f7f3ff!important;
+      border-color:rgba(196,181,253,.28)!important;
+    }
+    html[data-theme="light"] .hero .button-primary span,
+    html[data-theme="light"] .final-cta .button-primary span{
+      color:#f7f3ff!important;
+    }
+    .support-strip,
+    .support-strip span{
+      color:#f7f3ff!important;
+    }
+    .feature-number{
+      width:46px!important;
+      height:46px!important;
+      display:inline-grid!important;
+      place-items:center!important;
+      border-radius:50%!important;
+      background:linear-gradient(135deg,#c4b5fd,#8b5cf6)!important;
+      color:#f7f3ff!important;
+      font-size:15px!important;
+      font-weight:750!important;
+      line-height:1!important;
+      box-shadow:0 14px 34px rgba(139,92,246,.26)!important;
+    }
+    .feature-copy .feature-number{
+      margin-bottom:12px!important;
+    }
+    .lifecycle .current i{
+      box-shadow:0 0 0 5px rgba(167,139,250,.18)!important;
+    }
+    html[data-theme="light"] .pricing-grid .price-card:not(.featured) h3{
+      background:#c4b5fd!important;
+      color:#4c1d95!important;
+    }
+    html[data-theme="light"] .pricing-grid .price-card.featured h3{
+      background:#f7f3ff!important;
+      color:#2b0d54!important;
+    }
+    html[data-theme="light"] .pricing-grid .price-card.featured h3 small{
+      color:#2b0d54!important;
+    }
+    html[data-theme="light"] .pricing-grid .price-card:nth-child(3) h3 small{
+      color:#f7f3ff!important;
+    }
+    html[data-theme="light"] .price-card.featured .button-primary{
+      background:#2b0d54!important;
+      color:#f7f3ff!important;
+      box-shadow:0 18px 44px rgba(75,29,149,.24)!important;
+    }
+    html[data-theme="light"] .price-card:not(.featured) .button-secondary{
+      background:#c4b5fd!important;
+      color:#2b0d54!important;
+      border-color:rgba(139,92,246,.28)!important;
+    }
+    html[data-theme="light"] footer,
+    footer{
+      background:#111114!important;
+      color:#e6e6eb!important;
+    }
+    footer a,
+    footer strong{
+      color:#e6e6eb!important;
+    }
+    footer p{
+      color:rgba(230,230,235,.78)!important;
+    }
+    .footer-bottom,
+    .footer-bottom span{
+      color:rgba(230,230,235,.82)!important;
+    }
+    .risk-notice{
+      font-size:13px!important;
+      line-height:1.7!important;
+    }
+    .risk-notice strong{
+      font-size:14px!important;
+      color:#f7f3ff!important;
+    }
+    .risk-notice p{
+      font-size:13px!important;
+      line-height:1.7!important;
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="TraceEdge home">
+      <span class="brand-mark">AM</span>
+      <span>TraceEdge</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="hero-actions">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode">
+        <span class="theme-toggle-track"><i></i></span>
+      </button>
+      <a class="button button-small button-primary" href="{{ dashboard_entry_url }}">Dashboard</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero section-shell">
+      <div class="hero-copy reveal">
+        <p class="eyebrow"><span class="status-dot"></span> Personal market monitoring, explained</p>
+        <h1>See your setup forming <span>before it confirms.</span></h1>
+        <p class="hero-lead">Describe your setup once. TraceEdge scans spot markets and explains each forming lifecycle.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="/signup">Sign up <span aria-hidden="true">&rarr;</span></a>
+          <a class="button button-secondary" href="#how">How it works</a>
+        </div>
+        <ul class="trust-list" aria-label="Product boundaries">
+          <li>No trading API keys</li>
+          <li>No automatic execution</li>
+          <li>You make every decision</li>
+        </ul>
+      </div>
+
+      <div class="monitor-card reveal" id="demo">
+        <div class="window-bar">
+          <div><span></span><span></span><span></span></div>
+          <p>Lifecycle Watchlist</p>
+          <small>Live example</small>
+        </div>
+        <div class="radar-header">
+          <div><p>Liquidity Sweep + Trend</p><span>Binance spot &middot; 15m</span></div>
+          <span class="scan-badge">Scanning 342 pairs</span>
+        </div>
+        <div class="market-list" role="list">
+          <button class="market-row active" data-market="sol" role="listitem">
+            <span class="coin coin-sol">S</span>
+            <span class="market-name"><strong>SOL / USDT</strong><small>Improving</small></span>
+            <span class="score"><strong>85%</strong><i style="--score:85%"></i></span>
+          </button>
+          <button class="market-row" data-market="link" role="listitem">
+            <span class="coin coin-link">L</span>
+            <span class="market-name"><strong>LINK / USDT</strong><small>Stable</small></span>
+            <span class="score"><strong>70%</strong><i style="--score:70%"></i></span>
+          </button>
+          <button class="market-row" data-market="eth" role="listitem">
+            <span class="coin coin-eth">E</span>
+            <span class="market-name"><strong>ETH / USDT</strong><small>Weakening</small></span>
+            <span class="score"><strong>55%</strong><i style="--score:55%"></i></span>
+          </button>
+        </div>
+        <div class="proof-panel" aria-live="polite">
+          <div class="proof-title"><strong id="proof-symbol">SOL/USDT</strong><span id="proof-status">Near confirmation</span></div>
+          <div id="proof-rules"></div>
+          <p class="freshness">Candle closed 14:45 UTC &middot; Data fresh 1.8s ago</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="support-strip" aria-label="Initial platform coverage">
+      <span>Built for crypto spot traders</span>
+      <span>Multi-timeframe rules</span>
+      <span>Telegram + Discord</span>
+      <span>Condition-level proof</span>
+    </section>
+
+    <section class="section-shell section-block" id="how">
+      <div class="section-heading reveal">
+        <p class="eyebrow">From idea to monitor</p>
+        <h2>Your setup, translated into rules you can inspect.</h2>
+        <p>AI helps structure what you mean. A deterministic scanner handles every market calculation after you approve it.</p>
+      </div>
+      <div class="steps-grid">
+        <article class="step-card reveal"><span>1</span><h3>Describe the setup</h3><p>Write naturally or begin with a tested template. Choose exchange, timeframe, universe and risk limits.</p></article>
+        <article class="step-card reveal"><span>2</span><h3>Review the interpretation</h3><p>Inspect every rule, assumption and unsupported term. Edit or clarify anything before it can run.</p></article>
+        <article class="step-card reveal"><span>3</span><h3>Approve and preview</h3><p>Run the rules over recent data. Activation remains locked until you approve the exact strategy version.</p></article>
+        <article class="step-card reveal"><span>4</span><h3>Monitor, then decide</h3><p>Receive forming and confirmed setup alerts with evidence. You verify the opportunity and choose what to do.</p></article>
+      </div>
+    </section>
+
+    <section class="dark-section" id="features">
+      <div class="section-shell">
+        <div class="section-heading light reveal">
+          <p class="eyebrow">More context than a signal</p>
+          <h2>Know what is close, what failed, and why.</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-wide reveal">
+            <div class="feature-copy"><span class="feature-number">1</span><h3>Lifecycle Watchlist</h3><p>Rank active setup lifecycles by completion. See passed rules, missing thresholds and whether each candidate is improving or weakening.</p></div>
+            <div class="mini-radar">
+              <div><span>SOL/USDT</span><i><b style="width:85%"></b></i><strong>85%</strong></div>
+              <div><span>LINK/USDT</span><i><b style="width:70%"></b></i><strong>70%</strong></div>
+              <div><span>ETH/USDT</span><i><b style="width:55%"></b></i><strong>55%</strong></div>
+            </div>
+          </article>
+          <article class="feature-card reveal">
+            <span class="feature-number">2</span><h3>Explainable Condition Proof</h3><p>Every alert includes required and actual values, pass/fail state, candle time, exchange, freshness and strategy version.</p>
+            <div class="receipt">
+              <p><span>4h close &gt; EMA 200</span><b class="pass">PASS</b></p>
+              <p><span>Volume &ge; 1.5x</span><b class="pass">PASS</b></p>
+              <p><span>Stop distance &lt; 2%</span><b class="pass">PASS</b></p>
+            </div>
+          </article>
+          <article class="feature-card reveal">
+            <span class="feature-number">3</span><h3>Why Wasn't I Alerted?</h3><p>Investigate a symbol and time. Reconstruct failed rules, exclusions, incomplete candles, cooldowns and data incidents.</p>
+            <div class="investigation"><span>BTC/USDT &middot; 10:30 UTC</span><strong>Blocked by candle close</strong><small>The 15m candle was incomplete when the condition briefly passed.</small></div>
+          </article>
+          <article class="feature-card feature-wide reveal">
+            <div class="feature-copy"><span class="feature-number">4</span><h3>One setup. A complete lifecycle.</h3><p>Follow a persistent monitor from first detection through partial match, condition completion, alert delivery, invalidation or expiration.</p></div>
+            <div class="lifecycle" aria-label="Setup lifecycle example">
+              <div class="done"><i></i><span>Detected<small>14:00</small></span></div>
+              <div class="done"><i></i><span>Partial match<small>14:15</small></span></div>
+              <div class="current"><i></i><span>Conditions complete<small>14:45</small></span></div>
+              <div><i></i><span>Alert delivered<small>Ready</small></span></div>
+              <div><i></i><span>No longer matching<small>Pending</small></span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-shell section-block capabilities">
+      <div class="section-heading reveal"><p class="eyebrow">Monitoring toolkit</p><h2>The standard capabilities serious monitoring needs.</h2></div>
+      <div class="capability-list reveal">
+        <span>AND / OR rule groups</span><span>Multi-timeframe filters</span><span>Technical indicators</span><span>Candlestick patterns</span><span>Price action</span><span>Volume and liquidity filters</span><span>Spread and listing-age filters</span><span>Optional entry, stop and target context</span><span>Optional reward-to-risk validation</span><span>Candle close or intrabar</span><span>Cooldowns and deduplication</span><span>Forward testing</span><span>Recent-market preview</span><span>Chart snapshots</span><span>Performance analytics</span>
+      </div>
+    </section>
+
+    <section class="channels-section">
+      <div class="section-shell channels-grid">
+        <div class="reveal"><p class="eyebrow">Alerts where they belong</p><h2>Start quickly in Telegram. Go deeper on the web.</h2><p>Telegram is the fastest path to onboarding and immediate alerts. The web dashboard supports detailed strategy editing, proof tables, analytics and billing. Add Discord later for organized channels, communities and support.</p><a class="button button-primary join-trace-button telegram-cta" href="{{ telegram_url }}">Join the trace &rarr;</a></div>
+        <div class="channel-cards reveal">
+          <article><span class="channel-icon telegram" aria-hidden="true"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/telegram.svg" alt=""></span><h3>Telegram</h3><p>Primary onboarding, alerts and quick setup status.</p></article>
+          <article><span class="channel-icon discord" aria-hidden="true"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/discord.svg" alt=""></span><h3>Discord</h3><p>Optional alert channels, community and role management.</p></article>
+          <article><span class="channel-icon web">W</span><h3>Web dashboard</h3><p>Advanced rules, analytics, lifecycles and account controls.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-shell section-block" id="pricing">
+      <div class="section-heading centered reveal"><p class="eyebrow">Configurable plans</p><h2>Choose the monitoring capacity you need.</h2><p>Plans are constrained by active strategies, monitored symbols, scan frequency and advanced features, not by promises of trading results.</p></div>
+      <div class="pricing-grid">
+        <article class="price-card reveal"><p>Demo / Free</p><h3>$0</h3><p class="plan-description">A light way to understand the monitor before upgrading.</p><ul><li>One active monitor</li><li>Up to 50 spot pairs</li><li>15-minute timeframe or higher</li><li>Telegram only</li></ul><a class="button button-secondary telegram-cta" href="{{ telegram_url }}">Start free</a></article>
+        <article class="price-card featured reveal"><p>Pro</p><h3>$29 <small>/ month</small></h3><p class="plan-description">Full individual monitoring with Telegram, Discord and lifecycle evidence.</p><ul><li>Up to 10 active strategies</li><li>All supported spot pairs</li><li>Telegram and Discord alerts</li><li>Lifecycle and forensic history</li></ul><a class="button button-primary telegram-cta" href="{{ telegram_url }}">Start Pro trial</a></article>
+        <article class="price-card reveal"><p>Creator / Community</p><h3>$79+ <small>/ month</small></h3><p class="plan-description">Shared strategy workflows for creators and private communities.</p><ul><li>Shared templates and channels</li><li>Discord role integration</li><li>Community delivery</li><li>White-label options by plan</li></ul><a class="button button-secondary" href="mailto:support@example.com">Contact us</a></article>
+      </div>
+      <p class="trial-note reveal"><strong>About the trial:</strong> The monitoring cycle lasts 14 calendar days and starts when the first approved live monitor activates. If no qualifying live setup alert is successfully delivered during a cycle, the trial renews automatically unless the no-alert outcome was caused by user-side ineligibility. Historical preview, sample proof receipts and forward testing are included so the experience does not depend on rare live setups appearing.</p>
+    </section>
+
+    <section class="faq-section" id="faq">
+      <div class="section-shell faq-grid">
+        <div class="section-heading reveal"><p class="eyebrow">Questions, answered plainly</p><h2>What TraceEdge does and does not do.</h2></div>
+        <div class="faq-list reveal">
+          <details><summary>Does it place trades for me?</summary><p>No. Version one does not connect to exchange trading APIs or execute orders. It monitors, explains and alerts; every trading decision remains yours.</p></details>
+          <details><summary>Does AI decide whether a setup passed?</summary><p>No. AI can translate your description and explain deterministic results. Indicator calculations and rule outcomes come from the rule engine, and you must approve the structured interpretation.</p></details>
+          <details><summary>Can I use more than one timeframe?</summary><p>Yes. A 15-minute entry can depend on a four-hour trend filter or other declared supporting timeframes.</p></details>
+          <details><summary>What if my setup is subjective?</summary><p>The interpretation identifies ambiguous or unsupported terms and asks you to define them. A strategy cannot activate while those issues remain unresolved.</p></details>
+          <details><summary>Are alerts guaranteed to be accurate or immediate?</summary><p>No. Exchange outages, network delay, incomplete data and software failures can affect results. Each receipt exposes candle timing and data freshness so you can verify it.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta section-shell reveal" id="start">
+      <p class="eyebrow">Stop checking every chart</p>
+      <h2>Teach the monitor what matters to you.</h2>
+      <p>Build your first structured setup, inspect the interpretation and preview it on recent market data.</p>
+      <a class="button button-primary" href="/signup">Join us <span>&rarr;</span></a>
+    </section>
+
+    <section class="risk-notice section-shell" id="risk">
+      <strong>Risk disclaimer</strong>
+      <p>TraceEdge is a market-monitoring and decision-support product, not a broker, exchange, fiduciary or source of guaranteed financial advice. Alerts may be delayed, incomplete or incorrect. Crypto assets are volatile and trading can result in substantial loss. Verify all data independently and make your own decisions. The platform does not execute trades in version one.</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="section-shell footer-grid"><div><a class="brand" href="#top"><span class="brand-mark">AM</span><span>TraceEdge</span></a><p>Explainable crypto market monitoring for individual traders.</p></div><div><strong>Product</strong><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></div><div><strong>Legal</strong><a href="#risk">Risk disclosure</a><a href="#risk">Terms</a><a href="#risk">Privacy</a></div><div><strong>Support</strong><a href="mailto:support@example.com">Contact support</a><a href="#faq">Help center</a></div></div>
+    <div class="section-shell footer-bottom"><span>&copy; 2026 TraceEdge</span><span>Monitoring, not automatic trading.</span></div>
+  </footer>
+</body>
+</html>

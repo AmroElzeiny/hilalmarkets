@@ -1,0 +1,122 @@
+from dataclasses import dataclass
+from functools import lru_cache
+from uuid import UUID
+
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.database import get_db_session
+from ai_market_monitor.core.security import (
+    InvalidContinuationToken,
+    OnboardingAccessTokenService,
+)
+from ai_market_monitor.db.models import User
+from ai_market_monitor.db.models.enums import UserRole, UserStatus
+from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
+from ai_market_monitor.services.market_preview import CcxtMarketDataProvider, MarketPreviewService
+
+
+@dataclass(frozen=True, slots=True)
+class OnboardingPrincipal:
+    user_id: UUID
+    session_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class AdminPrincipal:
+    user_id: UUID
+    role: UserRole
+
+
+@dataclass(frozen=True, slots=True)
+class UserPrincipal:
+    user_id: UUID
+    role: UserRole
+
+
+def get_onboarding_principal(
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> OnboardingPrincipal:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing onboarding bearer token")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        payload = OnboardingAccessTokenService(settings).decode(token)
+        return OnboardingPrincipal(
+            user_id=UUID(payload["user_id"]), session_id=UUID(payload["session_id"])
+        )
+    except (InvalidContinuationToken, KeyError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@lru_cache
+def get_market_data_provider() -> CcxtMarketDataProvider | FixtureMarketDataProvider:
+    settings = get_settings()
+    if (
+        settings.tracedge_market_data_mode == "fixture"
+        or settings.tracedge_fixture_market_data_enabled
+    ):
+        return FixtureMarketDataProvider()
+    return CcxtMarketDataProvider(settings)
+
+
+def get_market_previewer(settings: Settings = Depends(get_settings)) -> MarketPreviewService:
+    return MarketPreviewService(
+        get_market_data_provider(),
+        candle_limit=settings.preview_candle_limit,
+        settings=settings,
+    )
+
+
+async def get_admin_principal(
+    x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> AdminPrincipal:
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing admin principal")
+    if settings.app_env not in {"development", "test"}:
+        raise HTTPException(
+            status_code=401,
+            detail="Header principals are disabled outside development/test",
+        )
+    try:
+        user_id = UUID(x_user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid admin principal") from exc
+    user = await session.get(User, user_id)
+    if user is None or user.role not in {UserRole.ADMIN, UserRole.SUPPORT}:
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return AdminPrincipal(user_id=user.id, role=user.role)
+
+
+async def get_user_principal(
+    x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> UserPrincipal:
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing user principal")
+    if settings.app_env not in {"development", "test"}:
+        raise HTTPException(
+            status_code=401,
+            detail="Header principals are disabled outside development/test",
+        )
+    try:
+        user_id = UUID(x_user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid user principal") from exc
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid user principal")
+    if user.status == UserStatus.SUSPENDED:
+        raise HTTPException(status_code=403, detail="User account is suspended")
+    return UserPrincipal(user_id=user.id, role=user.role)
+
+
+def require_admin(principal: AdminPrincipal = Depends(get_admin_principal)) -> AdminPrincipal:
+    if principal.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Administrator role required")
+    return principal

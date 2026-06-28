@@ -1,0 +1,366 @@
+import hashlib
+import hmac
+import secrets
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.security import (
+    InvalidContinuationToken,
+    WebSessionTokenService,
+    hash_password,
+    opaque_token,
+    token_digest,
+    verify_password,
+)
+from ai_market_monitor.db.models import (
+    DashboardPreference,
+    EmailAuthChallenge,
+    User,
+    UserIdentity,
+    WebSession,
+)
+from ai_market_monitor.db.models.enums import IdentityProvider, UserStatus
+from ai_market_monitor.services.email_delivery import AuthEmailService
+
+SESSION_COOKIE_NAME = "amm_session"
+SESSION_DAYS = 30
+
+
+class WebAuthError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class WebAuthService:
+    def __init__(self, session: AsyncSession, settings: Settings):
+        self.session = session
+        self.settings = settings
+
+    async def signup_or_signin_email(
+        self,
+        *,
+        email: str,
+        password: str,
+        display_name: str | None,
+    ) -> tuple[User, bool]:
+        normalized = normalize_email(email)
+        if not normalized:
+            raise WebAuthError("invalid_email", "Enter a valid email address.")
+        password_error = password_validation_error(password)
+        if password_error:
+            raise WebAuthError("invalid_password", password_error)
+        identity = await self.session.scalar(
+            select(UserIdentity).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        created = False
+        if identity is None:
+            user = User(display_name=display_name or normalized.split("@", 1)[0])
+            self.session.add(user)
+            await self.session.flush()
+            identity = UserIdentity(
+                user_id=user.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject=normalized,
+                normalized_identifier=normalized,
+                display_identifier=email.strip(),
+                password_hash=hash_password(password),
+                is_verified=True,
+                is_primary=True,
+                verified_at=datetime.now(UTC),
+                profile_data={},
+            )
+            self.session.add(identity)
+            self.session.add(
+                DashboardPreference(
+                    user_id=user.id,
+                    theme="dark",
+                    default_timezone=user.timezone,
+                    default_dashboard_path="/dashboard",
+                    notification_preferences={
+                        "timezone": "UTC",
+                        "near_miss_enabled": True,
+                        "near_miss_threshold": 70,
+                        "maximum_alerts_per_hour": 50,
+                        "alert_channels": ["telegram"],
+                        "channels": ["telegram"],
+                        "providers": ["binance", "bybit"],
+                        "alert_days": ["Every Day"],
+                        "alert_hours": [],
+                    },
+                )
+            )
+            created = True
+        else:
+            existing_user = await self.session.get(User, identity.user_id)
+            if existing_user is None:
+                raise WebAuthError("identity_broken", "This identity is not linked correctly.")
+            if existing_user.status == UserStatus.SUSPENDED:
+                raise WebAuthError("account_suspended", "This account is suspended.")
+            if not verify_password(password, identity.password_hash):
+                raise WebAuthError("invalid_login", "Email or password is incorrect.")
+            user = existing_user
+            user.last_seen_at = datetime.now(UTC)
+        await self.session.flush()
+        return user, created
+
+    async def request_email_code(
+        self,
+        *,
+        email: str,
+        purpose: str,
+        requested_ip: str | None = None,
+    ) -> bool:
+        normalized = normalize_email(email)
+        if not normalized or purpose not in {"login", "password_reset"}:
+            return False
+        identity = await self.session.scalar(
+            select(UserIdentity).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        if identity is None:
+            return False
+        user = await self.session.get(User, identity.user_id)
+        if user is None or user.status == UserStatus.SUSPENDED:
+            return False
+        now = datetime.now(UTC)
+        latest = await self.session.scalar(
+            select(EmailAuthChallenge)
+            .where(
+                EmailAuthChallenge.email == normalized,
+                EmailAuthChallenge.purpose == purpose,
+            )
+            .order_by(EmailAuthChallenge.created_at.desc())
+            .limit(1)
+        )
+        if latest is not None and (_as_aware(latest.created_at) + timedelta(seconds=60)) > now:
+            raise WebAuthError(
+                "code_recently_sent",
+                "A code was sent recently. Wait one minute before requesting another.",
+            )
+        if latest is not None and latest.consumed_at is None:
+            latest.consumed_at = now
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        challenge = EmailAuthChallenge(
+            user_id=user.id,
+            email=normalized,
+            purpose=purpose,
+            code_digest=self._auth_code_digest(normalized, purpose, code),
+            created_at=now,
+            expires_at=now + timedelta(minutes=self.settings.auth_code_ttl_minutes),
+            attempts=0,
+            max_attempts=self.settings.auth_code_max_attempts,
+            requested_ip_hash=self._request_ip_hash(requested_ip),
+        )
+        self.session.add(challenge)
+        await self.session.flush()
+        await AuthEmailService(self.settings).send_code(
+            recipient=identity.display_identifier or normalized,
+            code=code,
+            purpose=purpose,
+        )
+        return True
+
+    async def signin_with_email_code(self, *, email: str, code: str) -> User:
+        user, _ = await self._consume_email_code(email=email, code=code, purpose="login")
+        user.last_seen_at = datetime.now(UTC)
+        await self.session.flush()
+        return user
+
+    async def reset_password_with_email_code(
+        self,
+        *,
+        email: str,
+        code: str,
+        password: str,
+    ) -> User:
+        password_error = password_validation_error(password)
+        if password_error:
+            raise WebAuthError("invalid_password", password_error)
+        user, identity = await self._consume_email_code(
+            email=email,
+            code=code,
+            purpose="password_reset",
+        )
+        identity.password_hash = hash_password(password)
+        user.last_seen_at = datetime.now(UTC)
+        await self.session.flush()
+        return user
+
+    async def _consume_email_code(
+        self,
+        *,
+        email: str,
+        code: str,
+        purpose: str,
+    ) -> tuple[User, UserIdentity]:
+        normalized = normalize_email(email)
+        if not normalized or not code.isdigit() or len(code) != 6:
+            raise WebAuthError("invalid_code", "Enter the six-digit code from your email.")
+        challenge = await self.session.scalar(
+            select(EmailAuthChallenge)
+            .where(
+                EmailAuthChallenge.email == normalized,
+                EmailAuthChallenge.purpose == purpose,
+                EmailAuthChallenge.consumed_at.is_(None),
+            )
+            .order_by(EmailAuthChallenge.created_at.desc())
+            .limit(1)
+        )
+        now = datetime.now(UTC)
+        if challenge is None or _as_aware(challenge.expires_at) <= now:
+            raise WebAuthError("code_expired", "The code is invalid or expired.")
+        if challenge.attempts >= challenge.max_attempts:
+            challenge.consumed_at = now
+            raise WebAuthError("code_locked", "Too many attempts. Request a new code.")
+        challenge.attempts += 1
+        expected = self._auth_code_digest(normalized, purpose, code)
+        if not hmac.compare_digest(expected, challenge.code_digest):
+            if challenge.attempts >= challenge.max_attempts:
+                challenge.consumed_at = now
+            raise WebAuthError("invalid_code", "The code is invalid or expired.")
+        challenge.consumed_at = now
+        identity = await self.session.scalar(
+            select(UserIdentity).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        if identity is None:
+            raise WebAuthError("identity_broken", "This identity is not linked correctly.")
+        user = await self.session.get(User, identity.user_id)
+        if user is None:
+            raise WebAuthError("identity_broken", "This identity is not linked correctly.")
+        if user.status == UserStatus.SUSPENDED:
+            raise WebAuthError("account_suspended", "This account is suspended.")
+        return user, identity
+
+    def _auth_code_digest(self, email: str, purpose: str, code: str) -> str:
+        secret = self.settings.app_secret_key.get_secret_value().encode("utf-8")
+        payload = f"{email}:{purpose}:{code}".encode()
+        return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+    def _request_ip_hash(self, requested_ip: str | None) -> str | None:
+        if not requested_ip:
+            return None
+        secret = self.settings.app_secret_key.get_secret_value().encode("utf-8")
+        return hmac.new(secret, requested_ip.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    async def signin_email(self, *, email: str, password: str) -> User:
+        normalized = normalize_email(email)
+        if not normalized:
+            raise WebAuthError("invalid_email", "Enter a valid email address.")
+        password = password or ""
+        if not password:
+            raise WebAuthError("invalid_login", "Email or password is incorrect.")
+        identity = await self.session.scalar(
+            select(UserIdentity).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        if identity is None:
+            raise WebAuthError("invalid_login", "No verified account exists for that email.")
+        if not verify_password(password, identity.password_hash):
+            raise WebAuthError("invalid_login", "Email or password is incorrect.")
+        user = await self.session.get(User, identity.user_id)
+        if user is None:
+            raise WebAuthError("identity_broken", "This identity is not linked correctly.")
+        if user.status == UserStatus.SUSPENDED:
+            raise WebAuthError("account_suspended", "This account is suspended.")
+        user.last_seen_at = datetime.now(UTC)
+        await self.session.flush()
+        return user
+
+    async def create_session(self, user: User, *, user_agent: str | None = None) -> str:
+        raw = opaque_token()
+        row = WebSession(
+            user_id=user.id,
+            session_digest=token_digest(raw),
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(days=SESSION_DAYS),
+            user_agent=user_agent,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return WebSessionTokenService(self.settings).issue(row.id, raw)
+
+    async def current_user(self, cookie_value: str | None) -> User | None:
+        if not cookie_value:
+            return None
+        try:
+            payload = WebSessionTokenService(self.settings).decode(cookie_value)
+            session_id = UUID(payload["session_id"])
+            digest = token_digest(payload["token"])
+        except (InvalidContinuationToken, KeyError, ValueError):
+            return None
+        row = await self.session.get(WebSession, session_id)
+        now = datetime.now(UTC)
+        expires_at = _as_aware(row.expires_at) if row is not None else now
+        if (
+            row is None
+            or row.revoked_at is not None
+            or expires_at <= now
+            or row.session_digest != digest
+        ):
+            return None
+        user = await self.session.get(User, row.user_id)
+        if user is None or user.status == UserStatus.SUSPENDED:
+            return None
+        row.last_seen_at = now
+        user.last_seen_at = now
+        return user
+
+    async def revoke(self, cookie_value: str | None) -> None:
+        if not cookie_value:
+            return
+        try:
+            payload = WebSessionTokenService(self.settings).decode(cookie_value)
+            session_id = UUID(payload["session_id"])
+        except (InvalidContinuationToken, KeyError, ValueError):
+            return
+        row = await self.session.get(WebSession, session_id)
+        if row is not None:
+            row.revoked_at = datetime.now(UTC)
+            await self.session.flush()
+
+
+def normalize_email(email: str) -> str:
+    value = email.strip().casefold()
+    if "@" not in value or value.startswith("@") or value.endswith("@"):
+        return ""
+    return value
+
+
+def normalize_password(password: str) -> str:
+    return password if not password_validation_error(password) else ""
+
+
+def password_validation_error(password: str) -> str | None:
+    value = password or ""
+    if len(value) < 6:
+        return "Password must contain at least 6 characters."
+    if not any(character.islower() for character in value):
+        return "Password must include a lowercase letter."
+    if not any(character.isupper() for character in value):
+        return "Password must include a capital letter."
+    if not any(character.isdigit() for character in value):
+        return "Password must include a number."
+    if not any(not character.isalnum() for character in value):
+        return "Password must include a special character."
+    return None
+
+
+def _as_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

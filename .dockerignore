@@ -1,0 +1,13 @@
+.git
+.agents
+.codex
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.py[cod]
+*.log
+exports
+ai_market_monitor.db
+VvvebJs

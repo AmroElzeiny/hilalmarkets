@@ -1,0 +1,646 @@
+from __future__ import annotations
+
+import asyncio
+import html
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
+
+import pytest
+from playwright.sync_api import Page, sync_playwright
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+TEST_PASSWORD = "TraceEdge1!"
+REPORTS: dict[str, Any] = {
+    "started_at": datetime.now(UTC).isoformat(),
+    "tests": {},
+    "console_errors": [],
+    "failed_network_calls": [],
+    "page_errors": [],
+    "artifacts": {},
+}
+
+
+@dataclass(frozen=True)
+class RunningApp:
+    base_url: str
+    auto_started: bool
+    database_url: str | None
+    command: str
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--browser-base-url",
+        action="store",
+        default=None,
+        help="Run browser E2E tests against an existing TraceEdge server.",
+    )
+    parser.addoption(
+        "--browser-headed",
+        action="store_true",
+        default=False,
+        help="Run Chromium headed for browser E2E debugging.",
+    )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
+    outcome = yield
+    report = outcome.get_result()
+    setattr(item, f"rep_{report.when}", report)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if report.when != "call" or "tests/browser" not in report.nodeid.replace("\\", "/"):
+        return
+    REPORTS["tests"][report.nodeid] = {
+        "outcome": report.outcome,
+        "duration_seconds": round(report.duration, 3),
+        "longrepr": str(report.longrepr) if report.failed else "",
+    }
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    root = Path(str(session.config.rootpath))
+    metadata = getattr(session.config, "_traceedge_e2e", {})
+    reports_dir = root / "reports" / "playwright"
+    html_dir = root / "playwright-report"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    html_dir.mkdir(parents=True, exist_ok=True)
+    tests = REPORTS["tests"]
+    summary = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "started_at": REPORTS["started_at"],
+        "base_url": metadata.get("base_url") or os.environ.get("BROWSER_E2E_BASE_URL"),
+        "browser": "chromium",
+        "auto_started": metadata.get("auto_started", False),
+        "command": _actual_pytest_command(),
+        "app_command": metadata.get("command") or "not started by browser fixture",
+        "exitstatus": exitstatus,
+        "tests_run": len(tests),
+        "passed": sum(1 for item in tests.values() if item["outcome"] == "passed"),
+        "failed": sum(1 for item in tests.values() if item["outcome"] == "failed"),
+        "skipped": sum(1 for item in tests.values() if item["outcome"] == "skipped"),
+        "console_errors": REPORTS["console_errors"],
+        "failed_network_calls": REPORTS["failed_network_calls"],
+        "page_errors": REPORTS["page_errors"],
+        "artifacts": REPORTS["artifacts"],
+        "tests": tests,
+        "remaining_browser_side_risks": [
+            "Live Telegram/Discord message delivery is not exercised without real test tokens.",
+            "Quick Scan interpretation is mocked for browser determinism; light-scan submission uses the backend fixture market-data provider.",
+            "Long-running worker scans and production billing webhooks remain covered by non-browser tests/manual checks.",
+        ],
+    }
+    (reports_dir / "playwright-summary.json").write_text(
+        json.dumps(summary, indent=2, default=str),
+        encoding="utf-8",
+    )
+    (root / "PLAYWRIGHT_E2E_REPORT.md").write_text(
+        _markdown_report(summary),
+        encoding="utf-8",
+    )
+    (html_dir / "index.html").write_text(_html_report(summary), encoding="utf-8")
+
+
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="session")
+def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
+    configured_url = (
+        pytestconfig.getoption("--browser-base-url")
+        or os.environ.get("BROWSER_E2E_BASE_URL")
+        or ""
+    ).strip()
+    if configured_url:
+        _guard_base_url(configured_url)
+        _wait_for_health(configured_url, timeout_seconds=45)
+        app = RunningApp(
+            base_url=configured_url.rstrip("/"),
+            auto_started=False,
+            database_url=os.environ.get("DATABASE_URL"),
+            command=f"existing server at {configured_url.rstrip('/')}",
+        )
+        pytestconfig._traceedge_e2e = app.__dict__
+        yield app
+        return
+
+    artifacts_dir = repo_root / "test-results" / "browser"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    database_path = artifacts_dir / "browser-e2e.sqlite"
+    if database_path.exists():
+        database_path.unlink()
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    database_url = f"sqlite+aiosqlite:///{database_path.resolve().as_posix()}"
+    env = os.environ.copy()
+    env.update(
+        {
+            "APP_ENV": "test",
+            "APP_SECRET_KEY": "browser-e2e-secret-key-32-characters-minimum",
+            "DATABASE_URL": database_url,
+            "PUBLIC_BASE_URL": base_url,
+            "ALLOW_MOCK_PROVIDERS": "true",
+            "SCANNING_ENABLED": "false",
+            "TRACEDGE_MARKET_DATA_MODE": "fixture",
+            "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED": "true",
+            "MARKET_DATA_PROVIDER": "ccxt",
+            "AI_INTERPRETER_PROVIDER": "rules",
+            "OPENAI_EXPLANATION_ENABLED": "false",
+            "TELEGRAM_ENABLED": "false",
+            "DISCORD_ENABLED": "false",
+            "BILLING_ENABLED": "false",
+            "BILLING_PROVIDER": "static",
+            "EMAIL_ADAPTER": "memory",
+            "LOG_LEVEL": "WARNING",
+        }
+    )
+    env["PYTHONPATH"] = _with_pythonpath(repo_root)
+    migration = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    if migration.returncode != 0:
+        pytest.fail(
+            "Could not migrate browser E2E database.\n"
+            f"STDOUT:\n{migration.stdout}\nSTDERR:\n{migration.stderr}"
+        )
+
+    command = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "ai_market_monitor.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+    ]
+    server_log_path = artifacts_dir / "browser-e2e-server.log"
+    server_log = server_log_path.open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        command,
+        cwd=repo_root,
+        env=env,
+        stdout=server_log,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        _wait_for_health(base_url, timeout_seconds=75, process=process)
+        app = RunningApp(
+            base_url=base_url,
+            auto_started=True,
+            database_url=database_url,
+            command=" ".join(command),
+        )
+        pytestconfig._traceedge_e2e = app.__dict__
+        yield app
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        server_log.close()
+
+
+@pytest.fixture
+def base_url(browser_app: RunningApp) -> str:
+    return browser_app.base_url
+
+
+@pytest.fixture
+def page(
+    browser_app: RunningApp,
+    request: pytest.FixtureRequest,
+    repo_root: Path,
+):
+    artifacts_root = repo_root / "test-results" / "browser" / _safe_name(request.node.nodeid)
+    artifacts_root.mkdir(parents=True, exist_ok=True)
+    headed = bool(request.config.getoption("--browser-headed")) or os.environ.get(
+        "BROWSER_E2E_HEADED"
+    ) in {"1", "true", "yes"}
+    runtime_errors: dict[str, list[str]] = {"console": [], "page": [], "network": []}
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=not headed)
+        context = browser.new_context(
+            base_url=browser_app.base_url,
+            viewport={"width": 1440, "height": 1000},
+            record_video_dir=str(artifacts_root / "videos"),
+        )
+        context.tracing.start(screenshots=True, snapshots=True, sources=True)
+        page = context.new_page()
+
+        page.on(
+            "console",
+            lambda message: runtime_errors["console"].append(
+                f"{message.type}: {message.text}"
+            )
+            if message.type == "error" and not _allowed_console_error(message.text)
+            else None,
+        )
+        page.on("pageerror", lambda exc: runtime_errors["page"].append(str(exc)))
+        page.on(
+            "response",
+            lambda response: runtime_errors["network"].append(
+                f"{response.status} {response.url}"
+            )
+            if _critical_failed_response(browser_app.base_url, response)
+            else None,
+        )
+
+        yield page
+
+        call_report = getattr(request.node, "rep_call", None)
+        call_failed = bool(call_report and call_report.failed)
+        runtime_failed = any(runtime_errors.values())
+        artifacts: dict[str, str] = {}
+        if call_failed or runtime_failed:
+            screenshot = artifacts_root / "failure.png"
+            trace = artifacts_root / "trace.zip"
+            try:
+                page.screenshot(path=str(screenshot), full_page=True)
+                artifacts["screenshot"] = _relative(repo_root, screenshot)
+            except Exception:
+                pass
+            try:
+                context.tracing.stop(path=str(trace))
+                artifacts["trace"] = _relative(repo_root, trace)
+            except Exception:
+                pass
+        else:
+            context.tracing.stop()
+        context.close()
+        video = page.video.path() if page.video else None
+        if video and Path(video).exists():
+            if call_failed or runtime_failed:
+                artifacts["video"] = _relative(repo_root, Path(video))
+            else:
+                Path(video).unlink(missing_ok=True)
+        browser.close()
+
+    REPORTS["artifacts"][request.node.nodeid] = artifacts
+    for kind, messages in runtime_errors.items():
+        for message in messages:
+            REPORTS[
+                "failed_network_calls" if kind == "network" else f"{kind}_errors"
+            ].append({"test": request.node.nodeid, "message": message})
+    if runtime_failed and not call_failed:
+        pytest.fail(_format_runtime_errors(runtime_errors))
+
+
+def assert_no_raw_traceback(page: Page) -> None:
+    body = page.locator("body").inner_text(timeout=10_000)
+    forbidden = [
+        "Traceback (most recent call last)",
+        "RuntimeConfigurationError",
+        "Internal Server Error",
+    ]
+    found = [item for item in forbidden if item in body]
+    assert not found, f"Raw server/runtime output visible in browser: {found}"
+
+
+def unique_email(prefix: str) -> str:
+    return f"{prefix}+{uuid4().hex[:10]}@example.com"
+
+
+def signup(page: Page, base_url: str, email: str | None = None) -> str:
+    email = email or unique_email("browser-e2e")
+    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
+    page.get_by_test_id("auth-email").fill(email)
+    page.get_by_test_id("auth-password").fill(TEST_PASSWORD)
+    page.get_by_test_id("auth-repeat-password").fill(TEST_PASSWORD)
+    page.get_by_test_id("auth-submit").click()
+    page.wait_for_url(re.compile(r".*/dashboard(\?.*)?$"), timeout=20_000)
+    page.get_by_test_id("dashboard-root").wait_for(state="attached", timeout=10_000)
+    assert_no_raw_traceback(page)
+    return email
+
+
+def seed_alert_proof(database_url: str, email: str) -> str:
+    if not database_url:
+        pytest.skip("Seeded proof test requires the auto-started browser database URL.")
+
+    async def _seed() -> str:
+        from ai_market_monitor.db.models import Alert, User, UserIdentity
+        from ai_market_monitor.db.models.enums import AlertType, IdentityProvider
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test user identity found for {email}.")
+            user = await session.get(User, identity.user_id)
+            if user is None:
+                raise AssertionError(f"No browser test user found for {email}.")
+            now = datetime.now(UTC)
+            alert = Alert(
+                user_id=user.id,
+                alert_type=AlertType.CONFIRMED,
+                deduplication_key=f"browser-e2e-proof-{uuid4()}",
+                title="SOL/USDT - Bullish Setup Confirmed",
+                body="Deterministic proof receipt seeded for browser E2E.",
+                proof_receipt={
+                    "strategy_name": "Browser E2E Proof Strategy",
+                    "strategy_version": 1,
+                    "schema_hash": "e2e-proof-hash",
+                    "symbol": "SOL/USDT",
+                    "exchange": "binance",
+                    "timeframe": "15m",
+                    "evaluation_time": now.isoformat(),
+                    "market_data_timestamp": now.isoformat(),
+                    "conditions": [
+                        {
+                            "condition_id": "rsi_recovery",
+                            "name": "RSI crosses above 30",
+                            "required_value": {"operator": "crosses_above", "threshold": 30},
+                            "actual_value": {"previous": 28.2, "current": 31.4},
+                            "state": "passed",
+                        },
+                        {
+                            "condition_id": "volume_ratio",
+                            "name": "Volume at least 1.5x average",
+                            "required_value": {"operator": "gte", "threshold": 1.5},
+                            "actual_value": {"value": 1.72},
+                            "state": "passed",
+                        },
+                    ],
+                    "entry_zone": {"low": 100.0, "high": 101.0},
+                    "reward_to_risk": 2.5,
+                    "setup_completion_score": 100,
+                },
+                candle_timestamp=now,
+            )
+            session.add(alert)
+            await session.commit()
+            alert_id = str(alert.id)
+        await engine.dispose()
+        return alert_id
+
+    return _run_async_in_thread(_seed)
+
+
+def _run_async_in_thread(factory):
+    result: list[Any] = []
+    errors: list[BaseException] = []
+
+    def _target() -> None:
+        try:
+            result.append(asyncio.run(factory()))
+        except BaseException as exc:  # pragma: no cover - re-raised in caller.
+            errors.append(exc)
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    thread.join()
+    if errors:
+        raise errors[0]
+    return result[0]
+
+
+def _guard_base_url(base_url: str) -> None:
+    parsed = urlparse(base_url)
+    if (
+        parsed.hostname not in LOCAL_HOSTS
+        and os.environ.get("ALLOW_PROD_E2E", "").lower() != "true"
+    ):
+        pytest.exit(
+            f"Refusing browser E2E against non-local URL {base_url}. "
+            "Set ALLOW_PROD_E2E=true to override intentionally.",
+            returncode=2,
+        )
+
+
+def _wait_for_health(
+    base_url: str,
+    *,
+    timeout_seconds: int,
+    process: subprocess.Popen[str] | None = None,
+) -> None:
+    deadline = time.time() + timeout_seconds
+    url = f"{base_url.rstrip('/')}/health"
+    last_error = ""
+    while time.time() < deadline:
+        if process is not None and process.poll() is not None:
+            output = process.stdout.read() if process.stdout else ""
+            raise RuntimeError(f"TraceEdge server exited before health check.\n{output}")
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if 200 <= response.status < 300:
+                    return
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error = str(exc)
+        time.sleep(0.5)
+    output = ""
+    if process is not None and process.stdout and process.poll() is not None:
+        try:
+            output = process.stdout.read()
+        except Exception:
+            output = ""
+    raise RuntimeError(f"Timed out waiting for {url}. Last error: {last_error}\n{output}")
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _with_pythonpath(repo_root: Path) -> str:
+    paths = [str(repo_root / "src")]
+    if os.environ.get("PYTHONPATH"):
+        paths.append(os.environ["PYTHONPATH"])
+    return os.pathsep.join(paths)
+
+
+def _allowed_console_error(message: str) -> bool:
+    allow = [
+        "favicon.ico",
+        "api.iconify.design",
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "cdn.jsdelivr.net",
+    ]
+    return any(item in message for item in allow)
+
+
+def _critical_failed_response(base_url: str, response: Any) -> bool:
+    if response.status < 500:
+        return False
+    base_host = urlparse(base_url).netloc
+    parsed = urlparse(response.url)
+    return parsed.netloc == base_host and "/api/" in parsed.path
+
+
+def _format_runtime_errors(runtime_errors: dict[str, list[str]]) -> str:
+    lines = ["Browser runtime errors were detected:"]
+    for kind, messages in runtime_errors.items():
+        if messages:
+            lines.append(f"{kind}:")
+            lines.extend(f"- {message}" for message in messages)
+    return "\n".join(lines)
+
+
+def _safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)[:150]
+
+
+def _relative(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _actual_pytest_command() -> str:
+    executable = Path(sys.executable)
+    display_executable = (
+        r".venv\Scripts\python.exe" if ".venv" in executable.parts else str(executable)
+    )
+    return " ".join([display_executable, "-m", "pytest", *sys.argv[1:]])
+
+
+def _markdown_report(summary: dict[str, Any]) -> str:
+    tests = summary["tests"]
+    rows = "\n".join(
+        f"| `{nodeid}` | {item['outcome']} | {item['duration_seconds']} |"
+        for nodeid, item in sorted(tests.items())
+    )
+    return f"""# Playwright E2E Report
+
+Generated: {summary['generated_at']}
+
+Base URL tested: {summary.get('base_url') or 'not recorded'}
+Browser: {summary['browser']}
+App auto-started: {summary['auto_started']}
+Command: `{summary['command']}`
+App command: `{summary['app_command']}`
+
+## Result
+
+- Tests run: {summary['tests_run']}
+- Passed: {summary['passed']}
+- Failed: {summary['failed']}
+- Skipped: {summary['skipped']}
+- Screenshots/traces/videos: `test-results/browser`
+- HTML report: `playwright-report/index.html`
+- JUnit XML: `reports/playwright/playwright-results.xml`
+- JSON summary: `reports/playwright/playwright-summary.json`
+
+## Tests
+
+| Test | Outcome | Seconds |
+| --- | --- | ---: |
+{rows or '| none | not run | 0 |'}
+
+## Runtime Checks
+
+- Critical console errors: {len(summary['console_errors'])}
+- Critical API/network errors: {len(summary['failed_network_calls'])}
+- Page errors: {len(summary['page_errors'])}
+
+## Tested User Flow Summary
+
+- Browser signup and session creation.
+- Dashboard navigation and Strategy Builder entry.
+- Prompt interpretation coverage preview for RSI, volume, and EMA.
+- Strategy Board opening, condition drawer editing, draft save, reload, and metadata preservation.
+- Provider-required prompt blocking for open-interest requirements.
+- Publish flow for executable monitors and active monitor list visibility.
+- Quick Scan/Finder prompt interpretation and backend fixture light-scan result rendering path.
+- Seeded deterministic proof receipt API visibility.
+- Strategy Cockpit and integrations smoke screens.
+
+## Remaining Browser-Side Risks
+
+{chr(10).join(f'- {item}' for item in summary['remaining_browser_side_risks'])}
+
+## Next Recommended Fixes
+
+- Add a dedicated visual proof receipt page if product wants proof viewing outside the cockpit API.
+- Keep Quick Scan browser coverage on fixture market data; add a separate staging-only live-provider smoke test before using real exchange candles in browser E2E.
+- Run the same browser suite in CI after installing Chromium with `.venv\\Scripts\\python.exe -m playwright install chromium`.
+"""
+
+
+def _html_report(summary: dict[str, Any]) -> str:
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(nodeid)}</td>"
+        f"<td>{html.escape(item['outcome'])}</td>"
+        f"<td>{item['duration_seconds']}</td>"
+        "</tr>"
+        for nodeid, item in sorted(summary["tests"].items())
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TraceEdge Playwright E2E Report</title>
+  <style>
+    body {{ font-family: Inter, Segoe UI, sans-serif; margin: 2rem; background: #0a0a0a; color: #f5f5f5; }}
+    .card {{ border: 1px solid #3b2a5f; border-radius: 18px; padding: 1rem; margin-bottom: 1rem; background: #111114; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th, td {{ border-bottom: 1px solid #2f2544; padding: .75rem; text-align: left; }}
+    strong, a {{ color: #c4b5fd; }}
+  </style>
+</head>
+<body>
+  <h1>TraceEdge Playwright E2E Report</h1>
+  <section class="card">
+    <p><strong>Generated:</strong> {html.escape(str(summary['generated_at']))}</p>
+    <p><strong>Base URL:</strong> {html.escape(str(summary.get('base_url') or 'not recorded'))}</p>
+    <p><strong>Browser:</strong> {html.escape(summary['browser'])}</p>
+    <p><strong>Auto-started:</strong> {summary['auto_started']}</p>
+    <p><strong>Command:</strong> <code>{html.escape(summary['command'])}</code></p>
+    <p><strong>App command:</strong> <code>{html.escape(summary['app_command'])}</code></p>
+  </section>
+  <section class="card">
+    <h2>Summary</h2>
+    <p>Run {summary['tests_run']} / passed {summary['passed']} / failed {summary['failed']} / skipped {summary['skipped']}</p>
+    <p>Console errors: {len(summary['console_errors'])}; API/network errors: {len(summary['failed_network_calls'])}; page errors: {len(summary['page_errors'])}</p>
+  </section>
+  <section class="card">
+    <h2>Tests</h2>
+    <table><thead><tr><th>Test</th><th>Outcome</th><th>Seconds</th></tr></thead><tbody>{rows}</tbody></table>
+  </section>
+  <section class="card">
+    <h2>Artifacts</h2>
+    <p>Failure screenshots, traces, and videos are written under <code>test-results/browser</code>.</p>
+  </section>
+</body>
+</html>
+"""

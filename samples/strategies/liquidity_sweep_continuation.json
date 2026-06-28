@@ -1,0 +1,110 @@
+{
+  "strategy_name": "Liquidity Sweep Continuation",
+  "market_type": "spot",
+  "exchanges": ["binance"],
+  "quote_assets": ["USDT"],
+  "symbols": ["SOL/USDT", "LINK/USDT"],
+  "excluded_symbols": [],
+  "primary_timeframe": "15m",
+  "higher_timeframes": ["4h"],
+  "trigger_mode": "candle_close",
+  "logic": {
+    "operator": "AND",
+    "conditions": [
+      {
+        "condition_id": "price_above_4h_ema_200",
+        "name": "Price above four-hour EMA 200",
+        "type": "indicator",
+        "left": {"kind": "price", "field": "close"},
+        "operator": "gt",
+        "right": {
+          "kind": "indicator",
+          "name": "ema",
+          "parameters": {"period": 200, "field": "close"}
+        },
+        "timeframe": "4h",
+        "required_data": ["4h_closed_candles"],
+        "weight": 2,
+        "mandatory": true,
+        "explanation_template": "4h close/EMA condition is {state}: actual {actual}; required {required}."
+      },
+      {
+        "condition_id": "bullish_liquidity_sweep",
+        "name": "Bullish liquidity sweep",
+        "type": "price_action",
+        "pattern": "bullish_liquidity_sweep",
+        "operator": "is_true",
+        "expected_state": true,
+        "timeframe": "15m",
+        "parameters": {"lookback": 20},
+        "required_data": ["15m_closed_candles"],
+        "weight": 2,
+        "mandatory": true
+      },
+      {
+        "condition_id": "relative_volume",
+        "name": "Volume at least 1.5x average",
+        "type": "indicator",
+        "indicator": "volume_ratio",
+        "operator": "gte",
+        "threshold": 1.5,
+        "timeframe": "15m",
+        "parameters": {"period": 20},
+        "required_data": ["15m_volume"],
+        "weight": 1.5,
+        "mandatory": true
+      }
+    ]
+  },
+  "entry": {
+    "calculation": "signal_close",
+    "zone_percent": 0.3,
+    "expires_after_candles": 3
+  },
+  "stop": {
+    "method": "fixed_percent",
+    "value": 1.5
+  },
+  "targets": [
+    {"label": "T1", "method": "risk_multiple", "value": 2.0, "size_percent": 50},
+    {"label": "T2", "method": "risk_multiple", "value": 3.0, "size_percent": 50}
+  ],
+  "risk_rules": {
+    "maximum_stop_percent": 2.0,
+    "minimum_reward_to_risk": 2.0,
+    "estimated_fee_bps": 10,
+    "estimated_slippage_bps": 5
+  },
+  "liquidity_rules": {
+    "min_quote_volume_24h": 1000000,
+    "min_average_candle_volume": 1000,
+    "max_spread_bps": 20,
+    "min_listing_age_days": 30,
+    "min_historical_candles": 30,
+    "exclude_stablecoins": true,
+    "exclude_leveraged_tokens": true
+  },
+  "near_miss_rules": {
+    "enabled": true,
+    "thresholds": [70, 80, 90],
+    "mandatory_fail_cap": 90,
+    "one_condition_remaining_enabled": true
+  },
+  "alert_rules": {
+    "forming_alerts": true,
+    "near_miss_threshold": 70,
+    "channels": ["telegram"],
+    "cooldown_seconds": 900,
+    "maximum_alerts_per_hour": 5,
+    "daily_alert_budget": 25
+  },
+  "expiry_rules": {
+    "expire_after_candles": 3,
+    "expire_if_price_moves_beyond_entry_percent": 2.0
+  },
+  "forward_test": {
+    "enabled": true,
+    "estimated_fee_bps": 10,
+    "estimated_slippage_bps": 5
+  }
+}

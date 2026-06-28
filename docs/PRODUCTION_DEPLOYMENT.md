@@ -1,0 +1,104 @@
+# Production Deployment
+
+Production startup is fail-closed. Set `APP_ENV=production`, `ALLOW_MOCK_PROVIDERS=false`, a
+non-default 32+ character `APP_SECRET_KEY`, PostgreSQL `DATABASE_URL`, Redis, and an HTTPS
+`PUBLIC_BASE_URL`.
+
+Enable only configured integrations:
+
+```text
+SCANNING_ENABLED=true
+TRACEDGE_MARKET_DATA_MODE=ccxt
+TRACEDGE_FIXTURE_MARKET_DATA_ENABLED=false
+MARKET_DATA_PROVIDER=ccxt
+MARKET_DATA_EXCHANGE=binance
+AI_INTERPRETER_PROVIDER=openai
+TELEGRAM_ENABLED=true
+TELEGRAM_ADAPTER=http
+DISCORD_ENABLED=true
+DISCORD_ADAPTER=http
+BILLING_ENABLED=true
+BILLING_PROVIDER=nowpayments
+EMAIL_ADAPTER=smtp
+```
+
+Then provide every secret documented in `.env.example`. For OpenAI interpretation, set
+`OPENAI_API_KEY` and keep `OPENAI_MODEL` configurable. For Binance public spot data, API keys are
+optional; if you add `BINANCE_API_KEY` and `BINANCE_API_SECRET`, do not grant withdrawal or trade
+permissions for the v1 monitoring-only product. For NOWPayments, set
+`NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_BASE_URL`, and `BILLING_WEBHOOK_SECRET` for IPN signature
+verification. Stripe remains behind the billing-provider abstraction, but it is not the configured
+payment path for this build.
+
+Passwordless login and password reset use short-lived email codes. Configure an SMTP account
+before enabling those actions in production:
+
+```text
+EMAIL_ADAPTER=smtp
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_USE_TLS=true
+AUTH_CODE_TTL_MINUTES=10
+AUTH_CODE_MAX_ATTEMPTS=5
+```
+
+The database stores only an HMAC digest of each six-digit code. Codes are single-use, expire after
+the configured TTL, allow a limited number of attempts, and are throttled to one request per
+email/purpose each minute. Replace every placeholder with values from the chosen email provider;
+do not commit provider credentials.
+
+Condition-context providers are independently configurable:
+
+```text
+COINGECKO_ENABLED=false
+ALTERNATIVE_ME_ENABLED=false
+FRED_ENABLED=false
+BINANCE_DERIVATIVES_ENABLED=false
+CRYPTO_INDEX_API_URL=
+CRYPTO_INDEX_API_KEY=
+MACRO_MARKET_API_URL=
+MACRO_MARKET_API_KEY=
+EVENT_FEED_API_URL=
+EVENT_FEED_API_KEY=
+TOKEN_CATEGORY_API_URL=
+TOKEN_CATEGORY_API_KEY=
+DERIVATIVES_CONTEXT_API_URL=
+DERIVATIVES_CONTEXT_API_KEY=
+MARKET_METADATA_API_URL=
+MARKET_METADATA_API_KEY=
+CONTEXT_PROVIDER_TIMEOUT_SECONDS=15
+CONTEXT_FETCH_CONCURRENCY=8
+MARKET_BREADTH_MAX_SYMBOLS=100
+ON_DEMAND_SCAN_CONCURRENCY=8
+```
+
+These feeds are optional globally but required by strategies that reference their capability
+family. Each context endpoint receives the category, requested condition keys, exchange, symbol,
+timeframe, quote assets, and evaluation timestamp. It must return a `values` object and an
+optional `as_of` timestamp. Unreachable or incomplete providers produce condition-level
+`unavailable` proof and never a guessed pass.
+
+Binance and Bybit public data supply cross-market candles, breadth, rankings, order-book
+microstructure, funding, and open-interest values where the exchange supports them. API keys are
+not required for those public endpoints.
+
+Deploy:
+
+```powershell
+docker compose build
+docker compose run --rm api alembic upgrade head
+docker compose up -d api worker scheduler
+docker compose ps
+```
+
+The current migration head includes `email_auth_challenges`, which is required for one-time-code
+login and password reset.
+
+Verify `/health`, `/api/v1/status/summary`, worker ping, scheduled `ScanJob` rows, provider webhook
+delivery, and one deterministic staging strategy before opening registrations.
+
+Do not claim production readiness until chart storage, API-wide authentication/rate limiting,
+monitoring exports, backup drills, and provider sandbox tests are completed.

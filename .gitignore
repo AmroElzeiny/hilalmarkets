@@ -1,0 +1,53 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+ai_market_monitor.db
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+*.tmp
+*.bak
+
+# Local Codex/agent state
+.agents/
+.codex/
+
+# Runtime/generated artifacts
+exports/
+playwright-report/
+test-results/
+reports/playwright/
+reports/**/*.xml
+reports/**/*.json
+browser-videos/
+browser-screenshots/
+traces/
+VvvebJs/
+
+# Dependency caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Secrets and private credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+*credentials*.json
+*token*.json

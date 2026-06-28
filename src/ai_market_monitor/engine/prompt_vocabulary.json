@@ -1,0 +1,416 @@
+{
+  "version": "2026-06-28",
+  "description": "Data-driven trader-language vocabulary for deterministic prompt semantics. These phrases map to existing TraceEdge condition capabilities only when context gates pass.",
+  "timeframes": {
+    "one-minute": "1m",
+    "1 minute": "1m",
+    "one minute": "1m",
+    "1-minute": "1m",
+    "three-minute": "3m",
+    "three minute": "3m",
+    "3 minute": "3m",
+    "3-minute": "3m",
+    "five-minute": "5m",
+    "five minute": "5m",
+    "5 minute": "5m",
+    "5-minute": "5m",
+    "fifteen-minute": "15m",
+    "fifteen minute": "15m",
+    "15 minute": "15m",
+    "15-minute": "15m",
+    "thirty-minute": "30m",
+    "thirty minute": "30m",
+    "30 minute": "30m",
+    "30-minute": "30m",
+    "hourly": "1h",
+    "one-hour": "1h",
+    "one hour": "1h",
+    "1 hour": "1h",
+    "1-hour": "1h",
+    "four-hour": "4h",
+    "four hour": "4h",
+    "4 hour": "4h",
+    "4-hour": "4h",
+    "daily": "1d",
+    "one day": "1d",
+    "1 day": "1d"
+  },
+  "phrase_groups": [
+    {
+      "key": "candle_bullish",
+      "semantic_type": "condition",
+      "canonical_intent": "candle_direction_bullish",
+      "capability_key": "green_candle",
+      "condition_type": "candle_pattern",
+      "operand_name": "green_candle",
+      "direction": "bullish",
+      "default_label": "Bullish candle close",
+      "context_required": ["candle", "close_open"],
+      "blocked_context": ["news", "project", "roadmap", "community", "team"],
+      "phrases": [
+        "green candle",
+        "bullish candle",
+        "positive candle",
+        "up candle",
+        "candle closed up",
+        "candle closed higher",
+        "candle finished green",
+        "candle ended green",
+        "candle body positive",
+        "close above open",
+        "price closed above open",
+        "candle close above open",
+        "candle closes green",
+        "closed green"
+      ]
+    },
+    {
+      "key": "candle_bearish",
+      "semantic_type": "condition",
+      "canonical_intent": "candle_direction_bearish",
+      "capability_key": "red_candle",
+      "condition_type": "candle_pattern",
+      "operand_name": "red_candle",
+      "direction": "bearish",
+      "default_label": "Bearish candle close",
+      "context_required": ["candle", "close_open"],
+      "blocked_context": ["news", "project", "roadmap", "community", "team"],
+      "phrases": [
+        "red candle",
+        "bearish candle",
+        "negative candle",
+        "down candle",
+        "candle closed down",
+        "candle closed lower",
+        "candle finished red",
+        "candle ended red",
+        "candle body negative",
+        "close below open",
+        "price closed below open",
+        "candle close below open",
+        "candle closes red",
+        "closed red"
+      ]
+    },
+    {
+      "key": "candle_growth_up",
+      "semantic_type": "condition",
+      "canonical_intent": "candle_body_percent_up",
+      "capability_key": "candle_change_percent",
+      "condition_type": "candle_pattern",
+      "operand_name": "candle_change_percent",
+      "direction": "up",
+      "default_label": "Candle body rose by threshold",
+      "context_required": ["candle"],
+      "requires_threshold_percent": true,
+      "phrases": [
+        "candle grew",
+        "candle increased",
+        "candle moved up",
+        "candle body up",
+        "candle closed higher",
+        "last candle up",
+        "previous candle up",
+        "candle rose",
+        "candle gained"
+      ]
+    },
+    {
+      "key": "candle_drop_down",
+      "semantic_type": "condition",
+      "canonical_intent": "candle_body_percent_down",
+      "capability_key": "candle_change_percent",
+      "condition_type": "candle_pattern",
+      "operand_name": "candle_change_percent",
+      "direction": "down",
+      "default_label": "Candle body fell by threshold",
+      "context_required": ["candle"],
+      "requires_threshold_percent": true,
+      "phrases": [
+        "candle dropped",
+        "candle fell",
+        "candle moved down",
+        "candle body down",
+        "candle closed lower",
+        "last candle down",
+        "previous candle down",
+        "candle dumped",
+        "candle lost"
+      ]
+    },
+    {
+      "key": "price_percent_up",
+      "semantic_type": "condition",
+      "canonical_intent": "price_percent_change_up",
+      "capability_key": "percent_change_lookback",
+      "condition_type": "price_action",
+      "operand_name": "percent_change_up",
+      "direction": "up",
+      "default_label": "Price increased by threshold",
+      "context_required": ["price_move"],
+      "blocked_context": ["candle"],
+      "requires_threshold_percent": true,
+      "phrases": [
+        "coin up",
+        "price up",
+        "grew",
+        "increased",
+        "pumped",
+        "moved up",
+        "gained",
+        "rose",
+        "rallied",
+        "jumped",
+        "is up"
+      ]
+    },
+    {
+      "key": "price_percent_down",
+      "semantic_type": "condition",
+      "canonical_intent": "price_percent_change_down",
+      "capability_key": "percent_change_lookback",
+      "condition_type": "price_action",
+      "operand_name": "percent_change_down",
+      "direction": "down",
+      "default_label": "Price decreased by threshold",
+      "context_required": ["price_move"],
+      "blocked_context": ["candle"],
+      "requires_threshold_percent": true,
+      "phrases": [
+        "coin down",
+        "price down",
+        "dropped",
+        "dumped",
+        "fell",
+        "lost",
+        "moved down",
+        "decreased",
+        "is down",
+        "sold off"
+      ]
+    },
+    {
+      "key": "volume_strong",
+      "semantic_type": "condition",
+      "canonical_intent": "relative_volume_above_average",
+      "capability_key": "volume_ratio",
+      "condition_type": "indicator",
+      "operand_name": "volume_ratio",
+      "default_label": "Volume above average",
+      "default_threshold": 1.5,
+      "default_comparator": "gte",
+      "phrases": [
+        "strong volume",
+        "heavy volume",
+        "volume above average",
+        "volume spike",
+        "unusual volume",
+        "high relative volume",
+        "volume expansion"
+      ]
+    },
+    {
+      "key": "volume_not_dead",
+      "semantic_type": "condition",
+      "canonical_intent": "minimum_relative_volume_assumption",
+      "capability_key": "volume_ratio",
+      "condition_type": "indicator",
+      "operand_name": "volume_ratio",
+      "default_label": "Volume not dead",
+      "default_threshold": 1.0,
+      "default_comparator": "gte",
+      "assumption": "Casual 'volume not dead' language is treated as volume at or above its 20-candle average.",
+      "phrases": [
+        "volume not dead",
+        "volume is not dead",
+        "not dead volume",
+        "volume isn't dead",
+        "volume alive"
+      ]
+    },
+    {
+      "key": "volume_weak",
+      "semantic_type": "condition",
+      "canonical_intent": "relative_volume_below_average",
+      "capability_key": "volume_dry_up",
+      "condition_type": "indicator",
+      "operand_name": "volume_ratio",
+      "default_label": "Weak volume",
+      "default_threshold": 0.8,
+      "default_comparator": "lte",
+      "phrases": [
+        "low volume",
+        "weak volume",
+        "dead volume",
+        "volume dry-up",
+        "volume dry up",
+        "quiet volume"
+      ]
+    },
+    {
+      "key": "vwap_reclaim",
+      "semantic_type": "condition",
+      "canonical_intent": "price_reclaims_vwap",
+      "capability_key": "vwap_reclaim",
+      "condition_type": "indicator",
+      "operand_name": "vwap",
+      "default_label": "Price reclaims VWAP",
+      "default_comparator": "crosses_above",
+      "phrases": [
+        "reclaim vwap",
+        "reclaimed vwap",
+        "back above vwap",
+        "regained vwap",
+        "vwap reclaim"
+      ]
+    },
+    {
+      "key": "vwap_above",
+      "semantic_type": "condition",
+      "canonical_intent": "price_above_vwap",
+      "capability_key": "price_vs_vwap",
+      "condition_type": "indicator",
+      "operand_name": "vwap",
+      "default_label": "Price above VWAP",
+      "default_comparator": "gt",
+      "phrases": [
+        "holding vwap",
+        "price above vwap",
+        "above vwap",
+        "vwap support"
+      ]
+    },
+    {
+      "key": "ema_above",
+      "semantic_type": "condition",
+      "canonical_intent": "price_above_ema",
+      "capability_key": "price_above_ema",
+      "condition_type": "indicator",
+      "operand_name": "ema",
+      "default_label": "Price above EMA",
+      "default_comparator": "gt",
+      "default_period": 200,
+      "phrases": [
+        "above ema",
+        "holding ema",
+        "price over ema",
+        "back above the ema",
+        "above the ema"
+      ]
+    },
+    {
+      "key": "ema_reclaim",
+      "semantic_type": "condition",
+      "canonical_intent": "price_reclaims_ema",
+      "capability_key": "ma_reclaim",
+      "condition_type": "indicator",
+      "operand_name": "ema",
+      "default_label": "Price reclaims EMA",
+      "default_comparator": "crosses_above",
+      "default_period": 200,
+      "phrases": [
+        "reclaimed ema",
+        "reclaim ema",
+        "regained ema",
+        "back over ema"
+      ]
+    },
+    {
+      "key": "ema_below",
+      "semantic_type": "condition",
+      "canonical_intent": "price_below_ema",
+      "capability_key": "price_below_ema",
+      "condition_type": "indicator",
+      "operand_name": "ema",
+      "default_label": "Price below EMA",
+      "default_comparator": "lt",
+      "default_period": 200,
+      "phrases": [
+        "below ema",
+        "lost ema",
+        "under ema",
+        "price below ema",
+        "price under ema",
+        "rejected from ema"
+      ]
+    },
+    {
+      "key": "rsi_recovering",
+      "semantic_type": "condition",
+      "canonical_intent": "rsi_crosses_above_30",
+      "capability_key": "rsi_exits_oversold",
+      "condition_type": "indicator",
+      "operand_name": "rsi",
+      "default_label": "RSI recovering from oversold",
+      "default_threshold": 30,
+      "default_comparator": "crosses_above",
+      "phrases": [
+        "rsi recovering",
+        "rsi recovery",
+        "rsi crosses back above 30",
+        "rsi exits oversold"
+      ]
+    },
+    {
+      "key": "session_new_york",
+      "semantic_type": "condition",
+      "canonical_intent": "new_york_session_filter",
+      "capability_key": "time_window",
+      "condition_type": "market_filter",
+      "operand_name": "time_window",
+      "default_label": "New York session filter",
+      "default_parameters": {"session": "new_york", "start_hour": 13.5, "end_hour": 20, "timezone": "UTC"},
+      "phrases": [
+        "new york session",
+        "ny session",
+        "during new york",
+        "new york hours"
+      ]
+    },
+    {
+      "key": "provider_news",
+      "semantic_type": "provider_required",
+      "canonical_intent": "news_or_event_context",
+      "capability_key": "high_impact_market_news",
+      "provider_required": "event_feed",
+      "phrases": [
+        "positive news",
+        "negative news",
+        "bullish news",
+        "bearish news",
+        "news catalyst"
+      ]
+    },
+    {
+      "key": "provider_open_interest",
+      "semantic_type": "provider_required",
+      "canonical_intent": "derivatives_open_interest_context",
+      "capability_key": "open_interest_rising",
+      "provider_required": "derivatives_context",
+      "phrases": [
+        "open interest rising",
+        "open interest falling",
+        "oi rising",
+        "oi increasing"
+      ]
+    },
+    {
+      "key": "vague_strength",
+      "semantic_type": "vague",
+      "canonical_intent": "needs_measurable_definition",
+      "phrases": [
+        "strong coin",
+        "weak coin",
+        "looks strong",
+        "ready to pump",
+        "high probability",
+        "clean setup",
+        "good setup",
+        "momentum building"
+      ]
+    }
+  ],
+  "negation_phrases": ["avoid", "without", "no", "not", "exclude", "must not", "should not have", "don't show", "filter out", "is not", "isn't", "did not", "didn't", "does not", "doesn't"],
+  "required_phrases": ["must", "only if", "required", "has to", "need", "make sure", "mandatory"],
+  "optional_phrases": ["optional", "nice to have", "bonus", "prefer", "extra confirmation", "if possible", "better if", "confirmation only"]
+}

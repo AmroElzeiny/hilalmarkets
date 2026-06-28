@@ -1,0 +1,1228 @@
+import base64
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import func, select
+
+from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.cockpit_service import StrategyCockpitService
+from ai_market_monitor.db.models import (
+    Alert,
+    AlertDelivery,
+    AlertInboxItem,
+    AuditEvent,
+    ChartSnapshot,
+    DashboardPreference,
+    EdgeHealthSnapshot,
+    MissedMoveAnalysis,
+    ReferralRelationship,
+    ScanJob,
+    ScanResult,
+    SetupConditionResult,
+    SetupInstance,
+    SetupLifecycleEvent,
+    Strategy,
+    StrategyCondition,
+    StrategySuggestion,
+    StrategyTemplate,
+    StrategyVersion,
+    SupportRequest,
+    SupportTicketMessage,
+    UserExportJob,
+    UserFeedback,
+    UserStrategyPreference,
+)
+from ai_market_monitor.db.models.enums import (
+    AlertType,
+    ConditionOutcome,
+    ConditionType,
+    DeliveryChannel,
+    DeliveryStatus,
+    ScanJobStatus,
+    ScanOutcome,
+    SetupLifecycleState,
+    StrategyStatus,
+    StrategyVersionStatus,
+)
+from ai_market_monitor.services.dashboard_jobs import DashboardJobService
+from tests.factories import candles, load_strategy
+
+
+class DashboardFakeMarketProvider:
+    async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
+        return ["SOL/USDT"]
+
+    async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
+        minutes = {"1m": 1, "15m": 15, "4h": 240, "1d": 1440}.get(timeframe, 15)
+        return candles(
+            limit,
+            start=datetime(2026, 6, 20, tzinfo=UTC),
+            minutes=minutes,
+            close=100,
+            volume=1000,
+        )
+
+    async def fetch_ohlcv_range(self, exchange, symbol, timeframe, start, end, limit):
+        minutes = {"1m": 1, "15m": 15, "4h": 240, "1d": 1440}.get(timeframe, 15)
+        return candles(limit, start=start, minutes=minutes, close=100, volume=1000)
+
+    async def fetch_universe_metadata(
+        self,
+        exchange,
+        symbols,
+        *,
+        include_listing_dates=False,
+    ):
+        return {
+            symbol: {
+                "quote_volume_24h": 25_000_000,
+                "spread_bps": 3,
+                "listed_at": datetime(2020, 1, 1, tzinfo=UTC),
+                "market_cap": 1_000_000_000,
+                "relative_strength_btc": 2.5,
+                "category": "layer-1",
+                "data_quality_ok": True,
+            }
+            for symbol in symbols
+        }
+
+    async def close(self) -> None:
+        return None
+
+
+async def _signup(client, email: str = "dashboard-api@example.com") -> None:
+    response = await client.post(
+        "/signup",
+        data={
+            "email": email,
+            "display_name": "Dashboard API",
+            "password": "CorrectHorse123!",
+            "repeat_password": "CorrectHorse123!",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+
+async def test_dashboard_api_uses_session_cookie_for_current_user(test_context):
+    await _signup(test_context["client"])
+
+    response = await test_context["client"].get("/api/v1/dashboard/current-user")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["email"] == "dashboard-api@example.com"
+    assert payload["role"] == "user"
+
+
+async def test_dashboard_capabilities_endpoint_exposes_registry_and_templates(test_context):
+    await _signup(test_context["client"], "dashboard-capabilities@example.com")
+
+    response = await test_context["client"].get("/api/v1/dashboard/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["counts"]["total"] == 473
+    assert payload["counts"]["executable"] == 473
+    assert payload["counts"]["recognized_not_executable"] == 0
+    assert len(payload["builtin_templates"]) >= 20
+    assert any(item["key"] == "time_window" for item in payload["items"])
+    assert payload["schema_version"] == "2.0"
+    assert any(item["key"] == "ichimoku_cloud" for item in payload["items"])
+    assert any(item["key"] == "within_last" for item in payload["logic_operators"])
+    assert all("condition_template" in item for item in payload["items"])
+    assert any(
+        template["key"] == "six_month_high_breakout" for template in payload["builtin_templates"]
+    )
+
+
+async def test_dashboard_strategy_builder_interpretation_feedback_is_audited(test_context):
+    await _signup(test_context["client"], "dashboard-builder-feedback@example.com")
+
+    response = await test_context["client"].post(
+        "/api/v1/dashboard/strategies/interpret/feedback",
+        json={
+            "feedback_type": "missed_condition",
+            "raw_prompt": "Find RSI below 30 and volume above average.",
+            "prompt_coverage_report": {"coverage_score": 80, "confidence_score": 75},
+            "strategy": {"conditions": {"children": [{"key": "rsi"}]}},
+        },
+    )
+
+    assert response.status_code == 201
+    async with test_context["session_factory"]() as session:
+        event = await session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "strategy_builder.interpretation_feedback"
+            )
+        )
+        assert event is not None
+        assert event.metadata_redacted["feedback_type"] == "missed_condition"
+        assert event.metadata_redacted["coverage_score"] == 80
+
+
+async def test_dashboard_analytics_coverage_uses_scan_jobs(test_context):
+    await _signup(test_context["client"], "dashboard-coverage@example.com")
+    async with test_context["session_factory"]() as session:
+        from ai_market_monitor.db.models import User
+
+        user = await session.scalar(select(User))
+        strategy = Strategy(user_id=user.id, name="Coverage monitor")
+        session.add(strategy)
+        await session.flush()
+        definition = load_strategy().model_dump(mode="json")
+        version = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=1,
+            status=StrategyVersionStatus.ACTIVE,
+            source_type="template",
+            source_text="coverage test",
+            schema_json=definition,
+            schema_hash="coverage-test",
+        )
+        session.add(version)
+        await session.flush()
+        job = ScanJob(
+            strategy_version_id=version.id,
+            idempotency_key="coverage-test-job",
+            status=ScanJobStatus.SUCCEEDED,
+            scheduled_for=datetime(2026, 6, 23, tzinfo=UTC),
+            completed_at=datetime(2026, 6, 23, 0, 1, tzinfo=UTC),
+            symbols_planned=10,
+            symbols_scanned=8,
+        )
+        session.add(job)
+        await session.flush()
+        for index in range(8):
+            session.add(
+                ScanResult(
+                    scan_job_id=job.id,
+                    strategy_version_id=version.id,
+                    exchange="binance",
+                    symbol=f"COIN{index}/USDT",
+                    timeframe="15m",
+                    direction="long",
+                    outcome=ScanOutcome.FORMING,
+                    completion_score=80,
+                    candle_closed_at=datetime(2026, 6, 23, tzinfo=UTC),
+                    evaluated_at=datetime(2026, 6, 23, 0, 1, tzinfo=UTC),
+                    data_freshness_ms=500,
+                    is_candle_complete=True,
+                    proof_summary={},
+                )
+            )
+        session.add(
+            ScanResult(
+                scan_job_id=job.id,
+                strategy_version_id=version.id,
+                exchange="bybit",
+                symbol="COIN0/USDT:USDT",
+                timeframe="15m",
+                direction="long",
+                outcome=ScanOutcome.FORMING,
+                completion_score=80,
+                candle_closed_at=datetime(2026, 6, 23, tzinfo=UTC),
+                evaluated_at=datetime(2026, 6, 23, 0, 1, tzinfo=UTC),
+                data_freshness_ms=500,
+                is_candle_complete=True,
+                proof_summary={},
+            )
+        )
+        await session.commit()
+
+    response = await test_context["client"].get("/api/v1/dashboard/analytics/coverage")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbols_eligible"] == 10
+    assert payload["symbols_scanned"] == 8
+    assert payload["coverage_percentage"] == 80
+    assert payload["deterministic"] is True
+
+    dashboard = await test_context["client"].get("/dashboard")
+    assert dashboard.status_code == 200
+    assert "Coverage score</span><strong>80%</strong>" in dashboard.text
+
+
+async def test_dashboard_strategy_template_is_persisted(test_context):
+    await _signup(test_context["client"], "dashboard-template@example.com")
+    definition = load_strategy().model_dump(mode="json")
+
+    created_strategy = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "dashboard test"},
+    )
+    assert created_strategy.status_code == 201
+    strategy_id = created_strategy.json()["strategy"]["id"]
+
+    template = await test_context["client"].post(
+        "/api/v1/dashboard/templates",
+        json={
+            "name": "Dashboard Template",
+            "category": "price_action",
+            "tags": ["test"],
+            "definition": definition,
+            "source_strategy_id": strategy_id,
+        },
+    )
+    assert template.status_code == 201
+
+    async with test_context["session_factory"]() as session:
+        template_id = UUID(template.json()["template"]["id"])
+        assert (await session.get(StrategyTemplate, template_id)) is not None
+
+
+async def test_dashboard_chart_candles_use_provider_dependency(test_context):
+    await _signup(test_context["client"], "dashboard-chart@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+
+    response = await test_context["client"].get(
+        "/api/v1/dashboard/charts/candles?exchange=binance&symbol=SOL/USDT&timeframe=15m&limit=12"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "SOL/USDT"
+    assert len(payload["items"]) == 12
+    assert payload["items"][0]["is_closed"] is True
+
+
+async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_context):
+    await _signup(test_context["client"], "dashboard-lifecycles@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+    detected_at = datetime(2026, 6, 20, 14, 0, tzinfo=UTC)
+    confirmed_at = detected_at + timedelta(minutes=15)
+
+    async with test_context["session_factory"]() as session:
+        from ai_market_monitor.db.models import User
+
+        user = await session.scalar(select(User))
+        strategy = Strategy(user_id=user.id, name="Lifecycle continuation")
+        session.add(strategy)
+        await session.flush()
+        definition = load_strategy().model_dump(mode="json")
+        version = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=1,
+            status=StrategyVersionStatus.ACTIVE,
+            source_type="template",
+            source_text="lifecycle dashboard test",
+            schema_json=definition,
+            schema_hash="lifecycle-dashboard-test",
+        )
+        session.add(version)
+        await session.flush()
+        passed_definition = StrategyCondition(
+            strategy_version_id=version.id,
+            condition_key="price_above_ema",
+            label="Price above four hour EMA",
+            node_type="condition",
+            condition_type=ConditionType.INDICATOR,
+            timeframe="15m",
+            comparator="gt",
+            left_operand={"kind": "price", "name": "close"},
+            right_operand={"kind": "indicator", "name": "ema", "parameters": {"period": 200}},
+            required_value=Decimal("100"),
+            weight=Decimal("1"),
+            sequence=0,
+            is_required=True,
+        )
+        pending_definition = StrategyCondition(
+            strategy_version_id=version.id,
+            condition_key="volume_confirmation",
+            label="Volume confirmation above average",
+            node_type="condition",
+            condition_type=ConditionType.INDICATOR,
+            timeframe="15m",
+            comparator="gte",
+            left_operand={"kind": "indicator", "name": "volume_ratio"},
+            right_operand={"kind": "constant", "value": 1.5},
+            required_value=Decimal("1.5"),
+            weight=Decimal("1"),
+            sequence=1,
+            is_required=True,
+        )
+        session.add_all([passed_definition, pending_definition])
+        await session.flush()
+        scan_job = ScanJob(
+            strategy_version_id=version.id,
+            idempotency_key="lifecycle-dashboard-job",
+            status=ScanJobStatus.SUCCEEDED,
+            scheduled_for=confirmed_at,
+            completed_at=confirmed_at,
+            symbols_planned=1,
+            symbols_scanned=1,
+        )
+        session.add(scan_job)
+        await session.flush()
+        scan_result = ScanResult(
+            scan_job_id=scan_job.id,
+            strategy_version_id=version.id,
+            exchange="binance",
+            symbol="SOL/USDT",
+            timeframe="15m",
+            direction="long",
+            outcome=ScanOutcome.CONFIRMED,
+            completion_score=Decimal("85"),
+            candle_closed_at=confirmed_at,
+            evaluated_at=confirmed_at,
+            data_freshness_ms=400,
+            is_candle_complete=True,
+            proof_summary={},
+        )
+        session.add(scan_result)
+        await session.flush()
+        setup = SetupInstance(
+            user_id=user.id,
+            strategy_version_id=version.id,
+            latest_scan_result_id=scan_result.id,
+            exchange="binance",
+            symbol="SOL/USDT",
+            timeframe="15m",
+            direction="long",
+            setup_key="sol-lifecycle-dashboard",
+            state=SetupLifecycleState.CONFIRMED,
+            completion_score=Decimal("85"),
+            first_detected_at=detected_at,
+            last_evaluated_at=confirmed_at,
+            confirmed_at=confirmed_at,
+            entry_zone_low=Decimal("99"),
+            entry_zone_high=Decimal("101"),
+            stop_price=Decimal("97"),
+            target_price=Decimal("107"),
+            target_levels=[{"price": 104}, {"price": 107}],
+        )
+        session.add(setup)
+        await session.flush()
+        session.add(
+            SetupInstance(
+                user_id=user.id,
+                strategy_version_id=version.id,
+                exchange="binance",
+                symbol="ETH/USDT",
+                timeframe="15m",
+                direction="long",
+                setup_key="expired-lifecycle-dashboard",
+                state=SetupLifecycleState.EXPIRED,
+                completion_score=Decimal("60"),
+                first_detected_at=detected_at,
+                last_evaluated_at=confirmed_at,
+                closed_at=confirmed_at,
+                close_reason="expired",
+            )
+        )
+        session.add_all(
+            [
+                SetupLifecycleEvent(
+                    setup_instance_id=setup.id,
+                    from_state=None,
+                    to_state=SetupLifecycleState.DETECTED,
+                    reason_code="candidate_detected",
+                    evidence={},
+                    occurred_at=detected_at,
+                ),
+                SetupLifecycleEvent(
+                    setup_instance_id=setup.id,
+                    from_state=SetupLifecycleState.FORMING,
+                    to_state=SetupLifecycleState.CONFIRMED,
+                    reason_code="all_required_conditions_passed",
+                    evidence={},
+                    occurred_at=confirmed_at,
+                ),
+                SetupConditionResult(
+                    setup_instance_id=setup.id,
+                    scan_result_id=scan_result.id,
+                    strategy_condition_id=passed_definition.id,
+                    condition_key=passed_definition.condition_key,
+                    outcome=ConditionOutcome.PASSED,
+                    required_value={"value": 100},
+                    actual_value={"value": 102},
+                    distance_to_pass=Decimal("0"),
+                    contribution_score=Decimal("1"),
+                    candle_timestamp=confirmed_at,
+                    evaluated_at=confirmed_at,
+                    data_freshness_ms=400,
+                ),
+                SetupConditionResult(
+                    setup_instance_id=setup.id,
+                    scan_result_id=scan_result.id,
+                    strategy_condition_id=pending_definition.id,
+                    condition_key=pending_definition.condition_key,
+                    outcome=ConditionOutcome.PENDING,
+                    required_value={"value": 1.5},
+                    actual_value={"value": 1.42},
+                    distance_to_pass=Decimal("0.08"),
+                    contribution_score=Decimal("0.85"),
+                    candle_timestamp=confirmed_at,
+                    evaluated_at=confirmed_at,
+                    data_freshness_ms=400,
+                ),
+            ]
+        )
+        await session.commit()
+        setup_id = setup.id
+
+    page = await test_context["client"].get("/dashboard/lifecycles")
+    assert page.status_code == 200
+    assert "One setup. A complete lifecycle." in page.text
+    assert "SOL/USDT" in page.text
+    assert "ETH/USDT" not in page.text
+    assert "lifecycle-chart-dialog" in page.text
+    assert "Confirmed" in page.text
+
+    chart = await test_context["client"].get(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/chart?timeframe=15m"
+    )
+    assert chart.status_code == 200
+    chart_payload = chart.json()
+    assert chart_payload["candles"]
+    assert chart_payload["setup"]["state"] == "confirmed"
+    assert chart_payload["completed_conditions"][0]["key"] == "price_above_ema"
+    assert chart_payload["missing_conditions"][0]["key"] == "volume_confirmation"
+    assert any(marker["kind"] == "condition" for marker in chart_payload["markers"])
+    assert all(len(marker["text"].split()) <= 5 for marker in chart_payload["markers"])
+
+    annotations = [
+        {
+            "id": "trend-1",
+            "type": "line",
+            "time1": 1781964000,
+            "price1": 99.5,
+            "time2": 1781964900,
+            "price2": 103.25,
+            "color": "#60a5fa",
+        },
+        {
+            "id": "note-1",
+            "type": "text",
+            "time1": 1781964900,
+            "price1": 102.0,
+            "text": "Volume still pending",
+            "color": "#60a5fa",
+        },
+    ]
+    saved = await test_context["client"].put(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/annotations",
+        json={"timeframe": "15m", "annotations": annotations},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["annotation_count"] == 2
+
+    restored = await test_context["client"].get(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/chart?timeframe=15m"
+    )
+    assert restored.status_code == 200
+    assert restored.json()["annotations"] == annotations
+    muted = await test_context["client"].post(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/mute"
+    )
+    assert muted.status_code == 200
+    muted_page = await test_context["client"].get("/dashboard/lifecycles")
+    assert "SOL/USDT" not in muted_page.text
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(func.count(ChartSnapshot.id))) == 1
+        assert (
+            await session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.action == "lifecycle_chart.annotations_saved"
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.action == "setup.lifecycle_muted"
+                )
+            )
+            == 1
+        )
+
+
+async def test_dashboard_scan_prompt_interpret_understands_breakout(test_context):
+    await _signup(test_context["client"], "dashboard-prompt@example.com")
+
+    response = await test_context["client"].post(
+        "/api/v1/dashboard/scan-now/interpret",
+        json={
+            "prompt": "prices breaking all time high in the last 6 months",
+            "exchange": "binance",
+            "quote_currency": "USDT",
+            "timeframe": "15m",
+            "symbols": [],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["activation_blocked"] is False
+    assert payload["strategy"]["conditions"]["children"][0]["left"]["name"] == "higher_high"
+    assert "All eligible USDT spot pairs" in payload["understanding"]["pair_universe"]
+    assert payload["understanding"]["risk"]["enabled"] is False
+    assert payload["strategy"]["risk"]["enabled"] is False
+
+
+async def test_dashboard_settings_persist_alert_schedule_without_theme_field(test_context):
+    await _signup(test_context["client"], "dashboard-settings@example.com")
+
+    response = await test_context["client"].post(
+        "/dashboard/settings",
+        data={
+            "timezone": "Europe/Moscow",
+            "near_miss_enabled": "true",
+            "near_miss_threshold": "82",
+            "maximum_alerts_per_hour": "7",
+            "alert_channels": ["telegram", "discord"],
+            "providers": ["binance", "bybit"],
+            "alert_days": ["Monday", "Friday"],
+            "alert_hours": ["09:00", "21:00"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    async with test_context["session_factory"]() as session:
+        preference = await session.scalar(select(DashboardPreference))
+        assert preference is not None
+        assert preference.theme == "dark"
+        assert preference.default_timezone == "Europe/Moscow"
+        assert preference.notification_preferences["near_miss_enabled"] is True
+        assert preference.notification_preferences["near_miss_threshold"] == 82
+        assert preference.notification_preferences["maximum_alerts_per_hour"] == 7
+        assert preference.notification_preferences["alert_channels"] == ["telegram", "discord"]
+        assert preference.notification_preferences["channels"] == ["telegram", "discord"]
+        assert preference.notification_preferences["providers"] == ["binance", "bybit"]
+        assert preference.notification_preferences["alert_days"] == ["Monday", "Friday"]
+        assert preference.notification_preferences["alert_hours"] == ["09:00", "21:00"]
+
+
+async def test_dashboard_theme_toggle_persists_without_full_settings_submit(test_context):
+    await _signup(test_context["client"], "dashboard-theme-toggle@example.com")
+
+    response = await test_context["client"].put(
+        "/api/v1/dashboard/preferences/theme",
+        json={"theme": "light"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["theme"] == "light"
+    async with test_context["session_factory"]() as session:
+        preference = await session.scalar(select(DashboardPreference))
+        assert preference.theme == "light"
+        assert preference.notification_preferences["theme"] == "light"
+
+
+async def test_dashboard_publish_marks_monitor_active(test_context):
+    await _signup(test_context["client"], "dashboard-publish@example.com")
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "publish test"},
+    )
+    assert created.status_code == 201
+    payload = created.json()
+
+    published = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
+        json={
+            "strategy_version_id": payload["version"]["id"],
+            "expected_schema_hash": payload["version"]["schema_hash"],
+        },
+    )
+
+    assert published.status_code == 200
+    assert published.json()["strategy"]["status"] == "active"
+    async with test_context["session_factory"]() as session:
+        strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
+        assert strategy.status == StrategyStatus.ACTIVE
+        assert strategy.active_version_id == UUID(payload["version"]["id"])
+    monitors = await test_context["client"].get("/dashboard/monitors")
+    assert ">active<" in monitors.text
+    detail = await test_context["client"].get(f"/dashboard/strategies/{payload['strategy']['id']}")
+    assert "<strong>active</strong>" in detail.text
+
+
+async def test_dashboard_export_downloads_json_and_csv(test_context):
+    await _signup(test_context["client"], "dashboard-jobs@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+    definition = load_strategy().model_dump(mode="json")
+    created_strategy = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "dashboard job test"},
+    )
+    assert created_strategy.status_code == 201
+
+    export = await test_context["client"].post(
+        "/api/v1/dashboard/exports",
+        json={"export_type": "dashboard", "format": "json", "filters": {}},
+    )
+    assert export.status_code == 201
+    export_id = export.json()["job"]["id"]
+    run_export = await test_context["client"].post(f"/api/v1/dashboard/exports/{export_id}/run")
+    assert run_export.status_code == 200
+    assert run_export.json()["job"]["status"] == "succeeded"
+    download = await test_context["client"].get(f"/api/v1/dashboard/exports/{export_id}/download")
+    assert download.status_code == 200
+    assert download.json()["export_type"] == "dashboard"
+
+    csv_export = await test_context["client"].post(
+        "/api/v1/dashboard/exports",
+        json={"export_type": "strategies", "format": "csv", "filters": {}},
+    )
+    assert csv_export.status_code == 201
+    csv_id = csv_export.json()["job"]["id"]
+    csv_run = await test_context["client"].post(f"/api/v1/dashboard/exports/{csv_id}/run")
+    assert csv_run.status_code == 200
+    csv_download = await test_context["client"].get(
+        f"/api/v1/dashboard/exports/{csv_id}/download"
+    )
+    assert csv_download.status_code == 200
+    assert csv_download.headers["content-type"].startswith("text/csv")
+    assert "record_type,id,name,status,timestamp,data" in csv_download.text
+
+    async with test_context["session_factory"]() as session:
+        assert await session.get(UserExportJob, UUID(export_id)) is not None
+
+
+async def test_setup_replay_and_near_miss_dashboard_sections_are_hidden(test_context):
+    await _signup(test_context["client"], "dashboard-hidden-sections@example.com")
+
+    page = await test_context["client"].get("/dashboard/setup-replay")
+    radar = await test_context["client"].get("/dashboard/near-miss")
+    create = await test_context["client"].post("/api/v1/dashboard/setup-replay", json={})
+    listing = await test_context["client"].get("/api/v1/dashboard/setup-replay")
+    chart = await test_context["client"].get(
+        "/api/v1/dashboard/charts/replay/00000000-0000-0000-0000-000000000000"
+    )
+
+    assert page.status_code == 404
+    assert radar.status_code == 404
+    assert create.status_code == 404
+    assert listing.status_code == 404
+    assert chart.status_code == 404
+    openapi = await test_context["client"].get("/openapi.json")
+    assert not any("setup-replay" in path for path in openapi.json().get("paths", {}))
+    dashboard = await test_context["client"].get("/dashboard")
+    assert "Setup Replay" not in dashboard.text
+    assert "Near-Miss Radar" not in dashboard.text
+
+
+async def test_dashboard_web_notifications_deliver_pending_web_alerts(test_context):
+    await _signup(test_context["client"], "dashboard-web-notification@example.com")
+    async with test_context["session_factory"]() as session:
+        from ai_market_monitor.db.models import User
+
+        user = await session.scalar(select(User))
+        alert = Alert(
+            user_id=user.id,
+            alert_type=AlertType.CONFIRMED,
+            deduplication_key="dashboard-web-alert",
+            title="SOL/USDT confirmed",
+            body="Deterministic proof attached.",
+            proof_receipt={"symbol": "SOL/USDT", "setup_completion_score": 100},
+            candle_timestamp=datetime.now(UTC),
+        )
+        session.add(alert)
+        await session.flush()
+        delivery = AlertDelivery(
+            alert_id=alert.id,
+            channel=DeliveryChannel.WEB,
+            destination_key=f"dashboard:{user.id}",
+            status=DeliveryStatus.PENDING,
+        )
+        session.add(delivery)
+        await session.commit()
+        delivery_id = delivery.id
+
+    response = await test_context["client"].get("/api/v1/dashboard/notifications/web")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["symbol"] == "SOL/USDT"
+    assert item["completion_rate"] == 100
+    async with test_context["session_factory"]() as session:
+        delivery = await session.get(AlertDelivery, delivery_id)
+        assert delivery.status == DeliveryStatus.DELIVERED
+
+
+async def test_historical_replay_is_hidden_and_inaccessible(test_context):
+    await _signup(test_context["client"], "dashboard-backtest-disabled@example.com")
+
+    page = await test_context["client"].get("/dashboard/backtests")
+    create = await test_context["client"].post("/api/v1/dashboard/backtests", json={})
+    listing = await test_context["client"].get("/api/v1/dashboard/backtests")
+    chart = await test_context["client"].get(
+        "/api/v1/dashboard/charts/backtest/00000000-0000-0000-0000-000000000000"
+    )
+
+    assert page.status_code == 404
+    assert create.status_code == 404
+    assert listing.status_code == 404
+    assert chart.status_code == 404
+    openapi = await test_context["client"].get("/openapi.json")
+    assert not any(
+        "backtest" in path for path in openapi.json().get("paths", {})
+    )
+    dashboard = await test_context["client"].get("/dashboard")
+    assert "Historical Replay" not in dashboard.text
+    assert "/dashboard/backtests" not in dashboard.text
+
+
+async def test_dashboard_support_ticket_api_creates_thread_message(test_context):
+    await _signup(test_context["client"], "dashboard-support@example.com")
+
+    response = await test_context["client"].post(
+        "/api/v1/dashboard/support/tickets",
+        json={
+            "email": "dashboard-support@example.com",
+            "subject": "Missing SOL alert",
+            "description": "Please investigate the 15m candle.",
+            "context": {"symbol": "SOL/USDT"},
+            "screenshots": [
+                {
+                    "filename": "chart.png",
+                    "content_type": "image/png",
+                    "data_base64": base64.b64encode(
+                        b"\x89PNG\r\n\x1a\nsupport-image"
+                    ).decode(),
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    async with test_context["session_factory"]() as session:
+        ticket_id = UUID(response.json()["ticket"]["id"])
+        ticket = await session.get(SupportRequest, ticket_id)
+        assert ticket is not None
+        assert ticket.category == "general"
+        assert ticket.context["contact_email"] == "dashboard-support@example.com"
+        assert ticket.context["screenshot_count"] == 1
+        message = await session.scalar(
+            select(SupportTicketMessage).where(
+                SupportTicketMessage.support_request_id == ticket_id
+            )
+        )
+        assert message.attachments[0]["content_type"] == "image/png"
+
+
+async def test_referral_page_shows_paid_conversion_reward_balance(test_context):
+    await _signup(test_context["client"], "referrer@example.com")
+    async with test_context["session_factory"]() as session:
+        from ai_market_monitor.db.models import User
+
+        referrer = await session.scalar(select(User))
+        referred = User(display_name="Referred trader")
+        session.add(referred)
+        await session.flush()
+        session.add(
+            ReferralRelationship(
+                referrer_user_id=referrer.id,
+                referred_user_id=referred.id,
+                status="paid_converted",
+                reward_status="eligible_after_first_paid_month",
+                metadata_json={"reward_amount_usd": "12.50"},
+            )
+        )
+        await session.commit()
+
+    response = await test_context["client"].get("/dashboard/referrals")
+    assert response.status_code == 200
+    assert "Rewards require paid conversion" in response.text
+    assert "$12.50" in response.text
+
+
+async def test_advanced_dashboard_pages_render(test_context):
+    await _signup(test_context["client"], "dashboard-pages@example.com")
+
+    for path, expected in [
+        ("/dashboard/strategies/new", "Strategy Builder"),
+        ("/dashboard/strategies/new", "How do you want to create your monitor?"),
+        ("/dashboard/strategies/new", "Generate understanding preview"),
+        ("/dashboard/strategies/new", "Visual Strategy Canvas"),
+        ("/dashboard/strategies/new", "Search condition library"),
+        ("/dashboard/strategies/new", "Monitor Overview"),
+        ("/dashboard/strategies/new", "Proof &amp; Review"),
+        ("/dashboard/strategies/new", "Six-Month High Breakout"),
+        ("/dashboard/analytics", "Analytics"),
+        ("/dashboard/integrations", "Integrations"),
+        ("/dashboard/exports", "Exports"),
+        ("/dashboard/lifecycles", "One setup. A complete lifecycle."),
+        ("/dashboard/settings", "America/New_York"),
+        ("/dashboard/settings", "modern-listbox"),
+    ]:
+        response = await test_context["client"].get(path)
+        assert response.status_code == 200
+        assert expected in response.text
+
+    dashboard = await test_context["client"].get("/dashboard")
+    assert "Alerts & Proof" not in dashboard.text
+    assert "Latest Setups" not in dashboard.text
+    assert "Strategy Cockpit" not in dashboard.text
+    assert "Coverage score" in dashboard.text
+    assert "data-sidebar-toggle" in dashboard.text
+    assert "sidebar-create-quick" in dashboard.text
+    assert "sidebar-logout" in dashboard.text
+    assert "data-theme-toggle" in dashboard.text
+    assert dashboard.text.index("Strategy Builder") < dashboard.text.index("Monitors")
+    assert "Import or clone" not in dashboard.text
+    assert "Open Setup Replay" not in dashboard.text
+    assert "Near-Miss Radar" not in dashboard.text
+
+    removed_latest = await test_context["client"].get("/dashboard/setups")
+    assert removed_latest.status_code == 404
+    removed_cockpit = await test_context["client"].get("/dashboard/cockpit")
+    assert removed_cockpit.status_code == 404
+
+    landing = await test_context["client"].get("/")
+    assert "data-theme-toggle" in landing.text
+    assert "theme.js" in landing.text
+
+
+async def test_strategy_cockpit_validation_forecast_suggestion_and_preferences(test_context):
+    await _signup(test_context["client"], "cockpit-flow@example.com")
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "cockpit flow"},
+    )
+    assert created.status_code == 201
+    strategy_id = created.json()["strategy"]["id"]
+
+    validation = await test_context["client"].post(
+        "/api/v1/dashboard/cockpit/strategies/validate",
+        json={"definition": definition, "strategy_id": strategy_id},
+    )
+    assert validation.status_code == 200
+    assert validation.json()["blocking"] is False
+
+    health = await test_context["client"].get(
+        f"/api/v1/dashboard/cockpit/strategies/{strategy_id}/health"
+    )
+    assert health.status_code == 200
+    assert 0 <= health.json()["score"] <= 100
+    assert "profitability" in health.json()["non_advisory_notice"]
+
+    forecast = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/strategies/{strategy_id}/frequency-forecast"
+    )
+    assert forecast.status_code == 200
+    assert forecast.json()["estimated_min_per_week"] <= forecast.json()[
+        "estimated_max_per_week"
+    ]
+
+    suggestion = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/strategies/{strategy_id}/suggestions",
+        json={"action": "make_less_noisy"},
+    )
+    assert suggestion.status_code == 201
+    suggestion_id = suggestion.json()["id"]
+    assert suggestion.json()["diff"]
+
+    applied = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/suggestions/{suggestion_id}/apply"
+    )
+    assert applied.status_code == 200
+    assert applied.json()["draft_version"]["status"] == "draft"
+    assert "not activated" in applied.json()["message"]
+
+    preferences = await test_context["client"].get(
+        "/api/v1/dashboard/cockpit/preferences"
+    )
+    assert preferences.status_code == 200
+    updated = await test_context["client"].put(
+        "/api/v1/dashboard/cockpit/preferences",
+        json={"preferences": {"preferred_entry_timeframe": "15m"}},
+    )
+    assert updated.json()["preferences"]["preferred_entry_timeframe"] == "15m"
+    forgotten = await test_context["client"].delete(
+        "/api/v1/dashboard/cockpit/preferences"
+    )
+    assert forgotten.json()["forgotten"] is True
+
+    page = await test_context["client"].get("/dashboard/cockpit")
+    assert page.status_code == 404
+    monitors = await test_context["client"].get("/dashboard/monitors")
+    assert monitors.status_code == 200
+    assert "My Monitors" in monitors.text
+    assert "Health" in monitors.text
+    assert "Latency" in monitors.text
+    assert "Alert Quality Inbox" not in monitors.text
+
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(func.count(EdgeHealthSnapshot.id))) == 1
+        assert await session.scalar(select(func.count(StrategySuggestion.id))) == 1
+        assert await session.scalar(select(func.count(UserStrategyPreference.id))) == 1
+
+
+async def test_cockpit_feedback_inbox_proof_and_timeline(test_context):
+    await _signup(test_context["client"], "cockpit-inbox@example.com")
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        from ai_market_monitor.db.models import User
+
+        user = await session.scalar(select(User))
+        strategy = Strategy(user_id=user.id, name="Cockpit inbox monitor")
+        session.add(strategy)
+        await session.flush()
+        definition = load_strategy().model_dump(mode="json")
+        version = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=1,
+            status=StrategyVersionStatus.ACTIVE,
+            source_type="template",
+            schema_json=definition,
+            schema_hash="cockpit-inbox-version",
+        )
+        session.add(version)
+        await session.flush()
+        setup = SetupInstance(
+            user_id=user.id,
+            strategy_version_id=version.id,
+            exchange="binance",
+            symbol="SOL/USDT",
+            timeframe="15m",
+            direction="long",
+            setup_key="cockpit-inbox-setup",
+            state=SetupLifecycleState.CONFIRMED,
+            completion_score=Decimal("100"),
+            first_detected_at=now - timedelta(minutes=30),
+            last_evaluated_at=now,
+            confirmed_at=now,
+        )
+        session.add(setup)
+        await session.flush()
+        session.add(
+            SetupLifecycleEvent(
+                setup_instance_id=setup.id,
+                from_state=SetupLifecycleState.FORMING,
+                to_state=SetupLifecycleState.CONFIRMED,
+                reason_code="all_required_conditions_passed",
+                evidence={},
+                occurred_at=now,
+            )
+        )
+        alert = Alert(
+            user_id=user.id,
+            strategy_version_id=version.id,
+            setup_instance_id=setup.id,
+            alert_type=AlertType.CONFIRMED,
+            deduplication_key="cockpit-inbox-alert",
+            title="SOL/USDT confirmed",
+            body="All mandatory conditions passed.",
+            proof_receipt={
+                "strategy_name": strategy.name,
+                "strategy_version": "1",
+                "symbol": "SOL/USDT",
+                "timeframe": "15m",
+                "setup_state": "confirmed",
+                "conditions": [
+                    {
+                        "condition_id": "trend",
+                        "name": "Trend filter",
+                        "state": "passed",
+                        "actual_value": 102,
+                        "required_value": 100,
+                    }
+                ],
+            },
+            candle_timestamp=now,
+        )
+        session.add(alert)
+        await session.commit()
+        alert_id = alert.id
+        setup_id = setup.id
+
+    feedback = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/alerts/{alert_id}/feedback",
+        json={"feedback_type": "too_early", "source": "dashboard"},
+    )
+    assert feedback.status_code == 201
+
+    proof = await test_context["client"].get(
+        f"/api/v1/dashboard/cockpit/alerts/{alert_id}/proof"
+    )
+    assert proof.status_code == 200
+    assert proof.json()["proof_receipt"]["conditions"][0]["actual_value"] == 102
+
+    timeline = await test_context["client"].get(
+        f"/api/v1/dashboard/cockpit/setups/{setup_id}/timeline"
+    )
+    assert timeline.status_code == 200
+    assert timeline.json()["timeline"][0]["state"] == "confirmed"
+
+    inbox = await test_context["client"].get("/api/v1/dashboard/cockpit/inbox")
+    assert inbox.status_code == 200
+    item = next(
+        row for row in inbox.json()["items"] if row["alert_id"] == str(alert_id)
+    )
+    reviewed = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/inbox/{item['id']}",
+        json={"action": "review"},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["reviewed_at"] is not None
+
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(func.count(UserFeedback.id))) == 1
+        assert await session.scalar(select(func.count(AlertInboxItem.id))) >= 1
+
+
+async def test_cockpit_universe_preview_and_version_experiment(test_context):
+    await _signup(test_context["client"], "cockpit-experiment@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "experiment base"},
+    )
+    strategy_id = created.json()["strategy"]["id"]
+    first_version_id = created.json()["version"]["id"]
+    revised_definition = load_strategy().model_copy(deep=True)
+    revised_definition.alerts.cooldown_seconds = 1800
+    revised = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions",
+        json={
+            "definition": revised_definition.model_dump(mode="json"),
+            "source_text": "experiment variant",
+        },
+    )
+    assert revised.status_code == 201
+    second_version_id = revised.json()["version"]["id"]
+
+    universe = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/strategies/{strategy_id}/universe-preview",
+        json={
+            "include_symbols": [],
+            "exclude_symbols": [],
+            "include_categories": ["layer-1"],
+            "rank_by": "relative_strength",
+        },
+    )
+    assert universe.status_code == 200
+    assert universe.json()["summary"]["provider_symbols"] == 1
+    assert universe.json()["included_symbols"] == ["SOL/USDT"]
+    assert universe.json()["summary"]["deferred_filters"] == []
+    assert universe.json()["included_metadata"]["SOL/USDT"]["spread_bps"] == 3
+
+    experiment = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/strategies/{strategy_id}/experiments",
+        json={
+            "name": "Cooldown comparison",
+            "version_ids": [first_version_id, second_version_id],
+            "mode": "dry_run",
+        },
+    )
+    assert experiment.status_code == 201
+    assert experiment.json()["comparison"]["schema_diff"]
+
+    promoted = await test_context["client"].post(
+        f"/api/v1/dashboard/cockpit/experiments/{experiment.json()['id']}/promote",
+        json={"version_id": second_version_id},
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["promoted_version_id"] == second_version_id
+
+
+async def test_cockpit_missed_move_analyzer_saves_deterministic_replay(test_context):
+    await _signup(test_context["client"], "cockpit-missed-move@example.com")
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "missed move monitor"},
+    )
+    strategy_id = created.json()["strategy"]["id"]
+
+    response = await test_context["client"].post(
+        "/api/v1/dashboard/cockpit/missed-moves",
+        json={
+            "strategy_id": strategy_id,
+            "symbol": "SOL/USDT",
+            "approximate_time": "2026-06-20T12:00:00Z",
+            "direction": "long",
+            "exchange": "binance",
+            "timeframe": "15m",
+            "target_move_threshold": 5,
+            "question": "Why was there no alert before the move?",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+async def test_prompt_interpretation_applies_saved_strategy_preferences(test_context):
+    await _signup(test_context["client"], "cockpit-preference-prompt@example.com")
+    saved = await test_context["client"].put(
+        "/api/v1/dashboard/cockpit/preferences",
+        json={
+            "preferences": {
+                "preferred_trigger_mode": "intrabar",
+                "preferred_alert_channels": ["web"],
+                "typical_max_alerts_per_hour": 12,
+            }
+        },
+    )
+    assert saved.status_code == 200
+
+    interpreted = await test_context["client"].post(
+        "/api/v1/dashboard/scan-now/interpret",
+        json={
+            "prompt": "RSI crosses above 30",
+            "exchange": "binance",
+            "quote_currency": "USDT",
+            "timeframe": "15m",
+            "symbols": ["SOL/USDT"],
+        },
+    )
+
+    assert interpreted.status_code == 200
+    payload = interpreted.json()
+    assert payload["strategy"]["trigger_mode"] == "intrabar"
+    assert payload["strategy"]["alerts"]["channels"] == ["web"]
+    assert payload["strategy"]["alerts"]["maximum_alerts_per_hour"] == 12
+    assert payload["personal_preferences_applied"]
+
+
+async def test_publish_blocks_critical_strategy_conflicts(test_context):
+    await _signup(test_context["client"], "cockpit-conflict-publish@example.com")
+    definition = load_strategy().model_dump(mode="json")
+    lower = definition["conditions"]["children"][1]
+    lower["key"] = "volume_above_two"
+    lower["left"] = {
+        "kind": "market_metric",
+        "name": "volume_multiplier",
+        "parameters": {"period": 20},
+    }
+    lower["comparator"] = "gte"
+    lower["right"] = {"kind": "constant", "value": 2}
+    upper = dict(lower)
+    upper["key"] = "volume_below_one"
+    upper["label"] = "Volume below one"
+    upper["comparator"] = "lte"
+    upper["right"] = {"kind": "constant", "value": 1}
+    definition["conditions"]["children"] = [lower, upper]
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "contradictory thresholds"},
+    )
+    assert created.status_code == 201
+
+    published = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{created.json()['strategy']['id']}/publish",
+        json={
+            "strategy_version_id": created.json()["version"]["id"],
+            "expected_schema_hash": created.json()["version"]["schema_hash"],
+        },
+    )
+
+    assert published.status_code == 409
+    assert published.json()["detail"] == "strategy_conflict_detected"

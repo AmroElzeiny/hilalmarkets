@@ -1,0 +1,548 @@
+from celery import Celery
+
+from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.logging import configure_logging
+from ai_market_monitor.core.startup import validate_runtime_configuration
+
+settings = get_settings()
+validate_runtime_configuration(settings)
+configure_logging(settings.log_level)
+app = Celery("ai_market_monitor", broker=settings.redis_url, backend=settings.redis_url)
+app.conf.update(
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    timezone="UTC",
+    enable_utc=True,
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
+    beat_schedule={
+        "evaluate-due-trial-cycles-every-hour": {
+            "task": "ai_market_monitor.evaluate_due_trial_cycles",
+            "schedule": 60 * 60,
+        },
+        "send-trial-cycle-reminders-every-hour": {
+            "task": "ai_market_monitor.send_trial_cycle_reminders",
+            "schedule": 60 * 60,
+        },
+        "reconcile-trial-alert-deliveries-every-five-minutes": {
+            "task": "ai_market_monitor.reconcile_trial_alert_deliveries",
+            "schedule": 5 * 60,
+        },
+        "repair-trial-cycle-counters-every-six-hours": {
+            "task": "ai_market_monitor.repair_trial_cycle_counters",
+            "schedule": 6 * 60 * 60,
+        },
+        "retry-discord-deliveries-every-five-minutes": {
+            "task": "ai_market_monitor.retry_discord_deliveries",
+            "schedule": 5 * 60,
+        },
+        "retry-telegram-deliveries-every-minute": {
+            "task": "ai_market_monitor.retry_telegram_deliveries",
+            "schedule": 60,
+        },
+        "poll-telegram-updates": {
+            "task": "ai_market_monitor.poll_telegram_updates",
+            "schedule": settings.telegram_polling_interval_seconds,
+        },
+        "sync-discord-roles-every-five-minutes": {
+            "task": "ai_market_monitor.process_discord_role_sync",
+            "schedule": 5 * 60,
+        },
+        "record-database-health-every-minute": {
+            "task": "ai_market_monitor.record_database_health",
+            "schedule": 60,
+        },
+        "schedule-due-scans-every-minute": {
+            "task": "ai_market_monitor.schedule_due_scans",
+            "schedule": 60,
+        },
+        "recover-stale-scan-jobs-every-five-minutes": {
+            "task": "ai_market_monitor.recover_stale_scan_jobs",
+            "schedule": 5 * 60,
+        },
+        "expire-setup-instances-every-minute": {
+            "task": "ai_market_monitor.expire_setup_instances",
+            "schedule": 60,
+        },
+        "process-dashboard-replay-jobs-every-thirty-seconds": {
+            "task": "ai_market_monitor.process_dashboard_replay_jobs",
+            "schedule": 30,
+        },
+        "process-dashboard-export-jobs-every-minute": {
+            "task": "ai_market_monitor.process_dashboard_export_jobs",
+            "schedule": 60,
+        },
+        "evaluate-strategy-health-every-hour": {
+            "task": "ai_market_monitor.evaluate_strategy_health",
+            "schedule": 60 * 60,
+        },
+    },
+)
+
+
+def _run_async_task(coro) -> dict:
+    import asyncio
+
+    return asyncio.run(_run_with_worker_cleanup(coro))
+
+
+async def _run_with_worker_cleanup(coro) -> dict:
+    try:
+        return await coro
+    finally:
+        # Celery prefork workers call these async tasks through short-lived
+        # event loops. asyncpg connections are bound to the loop that created
+        # them, so pooled connections must not survive into the next task loop.
+        import sys
+
+        database_module = sys.modules.get("ai_market_monitor.core.database")
+        if database_module is not None:
+            engine = getattr(database_module, "engine", None)
+            if engine is not None:
+                await engine.dispose()
+
+
+@app.task(name="ai_market_monitor.evaluate_due_trial_cycles")
+def evaluate_due_trial_cycles() -> dict:
+    return _run_async_task(_evaluate_due_trial_cycles())
+
+
+@app.task(name="ai_market_monitor.send_trial_cycle_reminders")
+def send_trial_cycle_reminders() -> dict:
+    return _run_async_task(_send_trial_cycle_reminders())
+
+
+@app.task(name="ai_market_monitor.reconcile_trial_alert_deliveries")
+def reconcile_trial_alert_deliveries() -> dict:
+    return _run_async_task(_reconcile_trial_alert_deliveries())
+
+
+@app.task(name="ai_market_monitor.repair_trial_cycle_counters")
+def repair_trial_cycle_counters() -> dict:
+    return _run_async_task(_repair_trial_cycle_counters())
+
+
+@app.task(name="ai_market_monitor.expire_trials")
+def expire_trials() -> dict:
+    return _run_async_task(_evaluate_due_trial_cycles())
+
+
+@app.task(name="ai_market_monitor.trial_reminders_due")
+def trial_reminders_due() -> dict:
+    return _run_async_task(_send_trial_cycle_reminders())
+
+
+@app.task(name="ai_market_monitor.retry_discord_deliveries")
+def retry_discord_deliveries() -> dict:
+    return _run_async_task(_retry_discord_deliveries())
+
+
+@app.task(name="ai_market_monitor.retry_telegram_deliveries")
+def retry_telegram_deliveries() -> dict:
+    return _run_async_task(_retry_telegram_deliveries())
+
+
+@app.task(name="ai_market_monitor.poll_telegram_updates")
+def poll_telegram_updates() -> dict:
+    return _run_async_task(_poll_telegram_updates())
+
+
+@app.task(name="ai_market_monitor.process_discord_role_sync")
+def process_discord_role_sync() -> dict:
+    return _run_async_task(_process_discord_role_sync())
+
+
+@app.task(name="ai_market_monitor.record_database_health")
+def record_database_health() -> dict:
+    return _run_async_task(_record_database_health())
+
+
+@app.task(name="ai_market_monitor.schedule_due_scans")
+def schedule_due_scans() -> dict:
+    return _run_async_task(_schedule_due_scans())
+
+
+@app.task(name="ai_market_monitor.recover_stale_scan_jobs")
+def recover_stale_scan_jobs() -> dict:
+    return _run_async_task(_recover_stale_scan_jobs())
+
+
+@app.task(bind=True, name="ai_market_monitor.run_scan_job")
+def run_scan_job(self, job_id: str) -> dict:
+    worker_id = getattr(self.request, "hostname", None) or getattr(self.request, "id", "unknown")
+    return _run_async_task(_run_scan_job(job_id, worker_id=str(worker_id)))
+
+
+@app.task(name="ai_market_monitor.expire_setup_instances")
+def expire_setup_instances() -> dict:
+    return _run_async_task(_expire_setup_instances())
+
+
+@app.task(name="ai_market_monitor.process_dashboard_replay_jobs")
+def process_dashboard_replay_jobs() -> dict:
+    return _run_async_task(_process_dashboard_replay_jobs())
+
+
+@app.task(name="ai_market_monitor.process_dashboard_export_jobs")
+def process_dashboard_export_jobs() -> dict:
+    return _run_async_task(_process_dashboard_export_jobs())
+
+
+@app.task(name="ai_market_monitor.evaluate_strategy_health")
+def evaluate_strategy_health() -> dict:
+    return _run_async_task(_evaluate_strategy_health())
+
+
+async def _evaluate_due_trial_cycles() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.trials import TrialLifecycleService
+
+    async with SessionFactory() as session:
+        affected = await TrialLifecycleService(session, settings).evaluate_due_cycles()
+        await session.commit()
+        return {"cycles_evaluated": len(affected)}
+
+
+async def _send_trial_cycle_reminders() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.trials import TrialLifecycleService
+
+    async with SessionFactory() as session:
+        alerts = await TrialLifecycleService(session, settings).create_due_reminder_messages()
+        await session.commit()
+        return {"reminder_alerts_enqueued": len(alerts)}
+
+
+async def _reconcile_trial_alert_deliveries() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.trials import TrialLifecycleService
+
+    async with SessionFactory() as session:
+        result = await TrialLifecycleService(session, settings).reconcile_alert_deliveries()
+        await session.commit()
+        return result
+
+
+async def _repair_trial_cycle_counters() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.trials import TrialLifecycleService
+
+    async with SessionFactory() as session:
+        result = await TrialLifecycleService(session, settings).repair_cycle_counters()
+        await session.commit()
+        return result
+
+
+async def _retry_discord_deliveries() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.discord.service import DiscordAlertService
+
+    async with SessionFactory() as session:
+        if not settings.discord_enabled:
+            return {"retried": 0, "disabled": True}
+        retried = await DiscordAlertService(session, settings=settings).retry_due_deliveries()
+        await session.commit()
+        return {"retried": len(retried)}
+
+
+async def _retry_telegram_deliveries() -> dict:
+    if not settings.telegram_enabled:
+        return {"processed": 0, "disabled": True}
+    if settings.telegram_adapter != "http" or settings.telegram_bot_token is None:
+        return {"processed": 0, "disabled": True, "reason": "telegram_http_not_configured"}
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.notifications import TelegramDeliveryService
+    from ai_market_monitor.telegram.adapter import TelegramHttpAdapter
+
+    async with SessionFactory() as session:
+        processed = await TelegramDeliveryService(
+            session,
+            settings,
+            TelegramHttpAdapter(settings),
+        ).process_due()
+        await session.commit()
+        return {"processed": len(processed)}
+
+
+async def _poll_telegram_updates() -> dict:
+    if not settings.telegram_enabled or not settings.telegram_polling_enabled:
+        return {"processed": 0, "disabled": True}
+    if settings.telegram_adapter != "http" or settings.telegram_bot_token is None:
+        return {"processed": 0, "disabled": True, "reason": "telegram_http_not_configured"}
+
+    from sqlalchemy import Integer, cast, func, select
+
+    from ai_market_monitor.api.routers.telegram import process_telegram_update
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import TelegramUpdateReceipt
+    from ai_market_monitor.services.market_preview import (
+        CcxtMarketDataProvider,
+        MarketPreviewService,
+    )
+    from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
+
+    adapter = TelegramHttpAdapter(settings)
+    try:
+        if settings.telegram_polling_clear_webhook:
+            await adapter.delete_webhook(drop_pending_updates=False)
+        else:
+            webhook = await adapter.get_webhook_info()
+            if webhook.get("url"):
+                return {
+                    "processed": 0,
+                    "webhook_active": True,
+                    "hint": "Set TELEGRAM_POLLING_CLEAR_WEBHOOK=true for local polling.",
+                }
+    except TelegramDeliveryError as exc:
+        return {"processed": 0, "failed": 1, "error_code": exc.code}
+
+    provider = CcxtMarketDataProvider(settings)
+    previewer = MarketPreviewService(
+        provider,
+        candle_limit=settings.preview_candle_limit,
+        settings=settings,
+    )
+    processed = 0
+    failed = 0
+    try:
+        async with SessionFactory() as session:
+            latest = await session.scalar(
+                select(func.max(cast(TelegramUpdateReceipt.update_id, Integer)))
+            )
+            updates = await adapter.get_updates(
+                offset=(int(latest) + 1 if latest is not None else None),
+                limit=settings.telegram_polling_limit,
+                timeout=0,
+            )
+            for update in updates:
+                try:
+                    result = await process_telegram_update(
+                        update,
+                        session=session,
+                        settings=settings,
+                        previewer=previewer,
+                        adapter=adapter,
+                    )
+                    if result.get("ok"):
+                        processed += 1
+                except Exception:
+                    failed += 1
+                    await session.rollback()
+        return {"processed": processed, "failed": failed}
+    finally:
+        await provider.close()
+
+
+async def _process_discord_role_sync() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.discord.service import DiscordRoleSyncService
+
+    async with SessionFactory() as session:
+        if not settings.discord_enabled:
+            return {"processed": 0, "disabled": True}
+        processed = await DiscordRoleSyncService(session, settings=settings).process_due()
+        await session.commit()
+        return {"processed": len(processed)}
+
+
+async def _record_database_health() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models.enums import HealthStatus
+    from ai_market_monitor.services.reliability import ReliabilityService
+
+    async with SessionFactory() as session:
+        service = ReliabilityService(session)
+        status = await service.check_database()
+        await service.record_metric(
+            component="database",
+            metric_name="connectivity",
+            status=status,
+            value=1 if status == HealthStatus.HEALTHY else 0,
+            unit="boolean",
+        )
+        await session.commit()
+        return {"database": status.value}
+
+
+async def _schedule_due_scans() -> dict:
+    if not settings.scanning_enabled:
+        return {"scheduled": 0, "disabled": True}
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.scanner import ScanScheduler
+
+    async with SessionFactory() as session:
+        scheduler = ScanScheduler(session, settings)
+        live_jobs = await scheduler.schedule_due()
+        experiment_jobs = await scheduler.schedule_due_experiments()
+        jobs = [*live_jobs, *experiment_jobs]
+        await session.commit()
+    for job in jobs:
+        run_scan_job.delay(str(job.id))
+    return {
+        "scheduled": len(jobs),
+        "live_jobs": len(live_jobs),
+        "experiment_jobs": len(experiment_jobs),
+    }
+
+
+async def _recover_stale_scan_jobs() -> dict:
+    if not settings.scanning_enabled:
+        return {"recovered": 0, "disabled": True}
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.scanner import ScanScheduler
+
+    async with SessionFactory() as session:
+        jobs = await ScanScheduler(session, settings).recover_stale_or_retryable()
+        await session.commit()
+    for job in jobs:
+        run_scan_job.delay(str(job.id))
+    return {"recovered": len(jobs)}
+
+
+async def _run_scan_job(job_id: str, *, worker_id: str) -> dict:
+    if not settings.scanning_enabled:
+        return {"job_id": job_id, "status": "disabled", "disabled": True}
+    from uuid import UUID
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import ScanJob, StrategyExperiment
+    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.scanner import ScanOrchestrator
+
+    provider = CcxtMarketDataProvider(settings)
+    try:
+        async with SessionFactory() as session:
+            summary = await ScanOrchestrator(session, provider, settings=settings).run_job(
+                UUID(job_id),
+                worker_id=worker_id,
+            )
+            job = await session.get(ScanJob, UUID(job_id))
+            experiment_id = (job.metrics or {}).get("experiment_id") if job else None
+            if experiment_id:
+                from ai_market_monitor.cockpit_service import StrategyCockpitService
+
+                experiment = await session.get(StrategyExperiment, UUID(str(experiment_id)))
+                if experiment is not None:
+                    await StrategyCockpitService(session).refresh_experiment(experiment)
+            await session.commit()
+            return {
+                "job_id": str(summary.job_id),
+                "status": summary.status.value,
+                "symbols_planned": summary.symbols_planned,
+                "symbols_scanned": summary.symbols_scanned,
+                "matches_found": summary.matches_found,
+                "failures": summary.failures,
+            }
+    finally:
+        await provider.close()
+
+
+async def _expire_setup_instances() -> dict:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import SetupInstance
+    from ai_market_monitor.db.models.enums import (
+        TERMINAL_SETUP_STATES,
+        SetupLifecycleState,
+    )
+    from ai_market_monitor.services.lifecycle import transition_setup
+
+    async with SessionFactory() as session:
+        now = datetime.now(UTC)
+        setups = (
+            await session.scalars(
+                select(SetupInstance).where(
+                    SetupInstance.expires_at.is_not(None),
+                    SetupInstance.expires_at <= now,
+                    SetupInstance.state.not_in(TERMINAL_SETUP_STATES),
+                )
+            )
+        ).all()
+        expired = 0
+        for setup in setups:
+            try:
+                session.add(
+                    transition_setup(
+                        setup,
+                        SetupLifecycleState.EXPIRED,
+                        reason_code="expiry_time_reached",
+                        occurred_at=now,
+                    )
+                )
+                expired += 1
+            except ValueError:
+                continue
+        await session.commit()
+        return {"expired": expired}
+
+
+async def _process_dashboard_replay_jobs() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.dashboard_jobs import DashboardJobService
+    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+
+    provider = CcxtMarketDataProvider(settings)
+    try:
+        async with SessionFactory() as session:
+            jobs = await DashboardJobService(session, provider, settings).process_replay_jobs()
+            await session.commit()
+            return {"processed": len(jobs)}
+    finally:
+        await provider.close()
+
+
+async def _process_dashboard_export_jobs() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.dashboard_jobs import DashboardJobService
+    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+
+    provider = CcxtMarketDataProvider(settings)
+    try:
+        async with SessionFactory() as session:
+            jobs = await DashboardJobService(session, provider, settings).process_export_jobs()
+            await session.commit()
+            return {"processed": len(jobs)}
+    finally:
+        await provider.close()
+
+
+async def _evaluate_strategy_health() -> dict:
+    from sqlalchemy import select
+
+    from ai_market_monitor.cockpit_service import StrategyCockpitService
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import Strategy
+    from ai_market_monitor.db.models.enums import StrategyStatus
+    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+
+    provider = CcxtMarketDataProvider(settings)
+    try:
+        async with SessionFactory() as session:
+            strategies = (
+                await session.scalars(
+                    select(Strategy).where(
+                        Strategy.status.in_(
+                            [
+                                StrategyStatus.ACTIVE,
+                                StrategyStatus.FORWARD_TEST,
+                                StrategyStatus.PAUSED,
+                            ]
+                        ),
+                        Strategy.archived_at.is_(None),
+                    )
+                )
+            ).all()
+            service = StrategyCockpitService(session)
+            for strategy in strategies:
+                health = await service.edge_health(strategy, provider=provider)
+                await service.detect_decay(strategy)
+                await service.sync_inbox(strategy.user_id)
+                await service.create_weekly_health_summary(strategy, health)
+            await session.commit()
+            return {"evaluated": len(strategies)}
+    finally:
+        await provider.close()

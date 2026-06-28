@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TraceEdge | {{ title }}</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("amm-theme")||"dark";</script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-purple">
+  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260625-purple-shell">
+  <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
+  <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-purple"></script>
+  <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
+</head>
+<body class="theme-dark">
+  <header class="site-header">
+    <a class="brand" href="/"><span class="brand-mark">AM</span><span>TraceEdge</span></a>
+    <nav><a href="/how-it-works">How It Works</a><a href="/pricing">Pricing</a><a href="/about">About</a><a href="/faq">FAQ</a><a href="/risk">Risk</a></nav>
+    <div class="hero-actions">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode"><span class="theme-toggle-track"><i></i></span></button>
+      <a class="button button-small button-ghost" href="/signup">Sign Up</a>
+    </div>
+  </header>
+  <main class="section-shell section-block">
+    <p class="eyebrow">TraceEdge</p>
+    <h1>{{ title }}</h1>
+    {% if page == 'pricing' %}
+      <div class="plan-grid">{% for code, plan in plans.items() if code != 'pro_trial' %}<article class="plan-card"><h3>{{ plan.name }}</h3><strong>${{ plan.monthly_price }} / month</strong><p>{{ plan.description or 'Configurable monitoring plan.' }}</p><a class="button button-primary" href="/signup">Start</a></article>{% endfor %}</div>
+    {% elif page == 'risk' %}
+      <p class="hero-lead">TraceEdge is market-monitoring and decision support. It does not guarantee profits, predict the future, act as a broker, or place trades. Alerts can be delayed, incomplete or incorrect. You make every trading decision.</p>
+    {% elif page == 'faq' %}
+      <div class="faq-list"><details open><summary>Does it trade for me?</summary><p>No. Version one does not request exchange trading keys or execute orders.</p></details><details><summary>Does AI detect every candle?</summary><p>No. AI interprets strategy text; deterministic services calculate indicators and rule outcomes.</p></details></div>
+    {% elif page == 'about' %}
+      <p class="hero-lead">TraceEdge tracks approved crypto spot-market setups, ranks near-misses, explains proof receipts, and helps investigate why an alert did or did not fire.</p>
+    {% else %}
+      <p class="hero-lead">Describe a setup, approve the structured interpretation, preview recent data, then let the deterministic scanner monitor markets while you decide what to do.</p>
+    {% endif %}
+  </main>
+</body>
+</html>

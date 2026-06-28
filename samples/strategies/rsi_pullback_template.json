@@ -1,0 +1,51 @@
+{
+  "strategy_name": "RSI Pullback Template",
+  "market_type": "spot",
+  "exchanges": ["binance"],
+  "quote_assets": ["USDT"],
+  "symbols": [],
+  "excluded_symbols": [],
+  "primary_timeframe": "1h",
+  "higher_timeframes": ["4h"],
+  "trigger_mode": "candle_close",
+  "logic": {
+    "operator": "AND",
+    "conditions": [
+      {
+        "condition_id": "trend_filter",
+        "name": "Price above 4h EMA 200",
+        "type": "indicator",
+        "left": {"kind": "price", "field": "close"},
+        "operator": "gt",
+        "right": {
+          "kind": "indicator",
+          "name": "ema",
+          "parameters": {"period": 200, "field": "close"}
+        },
+        "timeframe": "4h",
+        "weight": 2,
+        "mandatory": true
+      },
+      {
+        "condition_id": "rsi_pullback",
+        "name": "RSI below 35",
+        "type": "indicator",
+        "indicator": "rsi",
+        "operator": "lt",
+        "threshold": 35,
+        "timeframe": "1h",
+        "parameters": {"period": 14, "field": "close"},
+        "weight": 1,
+        "mandatory": true
+      }
+    ]
+  },
+  "entry": {},
+  "stop": {"method": "atr", "atr_period": 14, "atr_multiplier": 1.5},
+  "targets": [{"label": "T1", "method": "risk_multiple", "value": 2}],
+  "risk_rules": {"maximum_stop_percent": 5, "minimum_reward_to_risk": 2},
+  "liquidity_rules": {"min_historical_candles": 220},
+  "near_miss_rules": {"thresholds": [70, 80, 90]},
+  "alert_rules": {"channels": ["telegram"], "near_miss_threshold": 75},
+  "expiry_rules": {"expire_after_candles": 5}
+}

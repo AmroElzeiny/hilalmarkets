@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TraceEdge | {{ title }}</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("amm-theme")||"dark";</script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-purple">
+  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260625-purple-shell">
+  <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
+  <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-purple"></script>
+  <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
+</head>
+<body class="auth-body theme-dark">
+  <main class="auth-card">
+    <div class="auth-card-head">
+      <a class="brand" href="/"><span class="brand-mark">AM</span><span>TraceEdge</span></a>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode"><span class="theme-toggle-track"><i></i></span></button>
+    </div>
+    <h1>{{ title }}</h1>
+    {% if message %}<div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>{% endif %}
+    {% if error %}<div class="dash-flash error">{{ error.replace('_', ' ').title() }}</div>{% endif %}
+    <p>Payment confirmation comes from the billing provider webhook. If your plan does not update immediately, check again shortly.</p>
+    <a class="button button-primary" href="/dashboard/billing">Back to Billing</a>
+  </main>
+</body>
+</html>
