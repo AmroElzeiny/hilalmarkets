@@ -286,6 +286,18 @@ class LifecycleAnnotationSaveRequest(BaseModel):
     annotations: list[LifecycleChartAnnotation] = Field(default_factory=list, max_length=200)
 
 
+class TradingViewStorageRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    timeframe: str = Field(default="1m", pattern=r"^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$")
+    symbol: str | None = Field(default=None, min_length=3, max_length=40)
+    chart_id: str | None = Field(default=None, max_length=120)
+    layout_id: str | None = Field(default=None, max_length=120)
+    name: str | None = Field(default=None, max_length=160)
+    chart_data: dict[str, Any] | list[Any] | str | None = None
+    line_tools_state: dict[str, Any] | list[Any] | None = None
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -407,6 +419,36 @@ async def _symbol_chart_snapshot(
         .order_by(ChartSnapshot.updated_at.desc())
         .limit(1)
     )
+
+
+async def _ensure_symbol_chart_snapshot(
+    session: AsyncSession,
+    user_id: UUID,
+    exchange: str,
+    symbol: str,
+    timeframe: str,
+    *,
+    setup_id: UUID | None = None,
+    strategy_version_id: UUID | None = None,
+) -> ChartSnapshot:
+    snapshot = await _symbol_chart_snapshot(session, user_id, exchange, symbol, timeframe)
+    if snapshot is not None:
+        return snapshot
+    snapshot = ChartSnapshot(
+        user_id=user_id,
+        subject_type="symbol_workspace",
+        subject_id=_symbol_workspace_id(exchange, symbol),
+        exchange=exchange,
+        symbol=symbol,
+        timeframe=timeframe,
+        chart_config={},
+        proof_reference={
+            "setup_instance_id": str(setup_id) if setup_id else None,
+            "strategy_version_id": str(strategy_version_id) if strategy_version_id else None,
+        },
+    )
+    session.add(snapshot)
+    return snapshot
 
 
 def _short_marker_label(value: str) -> str:
@@ -1188,7 +1230,7 @@ async def setup_chart(
 async def lifecycle_chart(
     setup_id: UUID,
     timeframe: str = Query(
-        default="15m",
+        default="1m",
         pattern=r"^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
     ),
     principal: UserPrincipal = Depends(get_dashboard_principal),
@@ -1370,6 +1412,226 @@ async def lifecycle_chart(
             else []
         ),
         "annotations_saved_at": snapshot.updated_at if snapshot is not None else None,
+        "tradingview_layout": (
+            (snapshot.chart_config or {}).get("tradingview_layout")
+            if snapshot is not None
+            else None
+        ),
+        "tradingview_drawings": (
+            (snapshot.chart_config or {}).get("tradingview_drawings")
+            if snapshot is not None
+            else None
+        ),
+    }
+
+
+@router.get("/lifecycles/{setup_id}/tradingview-layout")
+async def lifecycle_tradingview_layout(
+    setup_id: UUID,
+    timeframe: str = Query(
+        default="1m",
+        pattern=r"^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+    ),
+    symbol: str | None = Query(default=None, min_length=3, max_length=40),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    setup = await _owned_setup(session, principal.user_id, setup_id)
+    target_symbol = (symbol or setup.symbol).upper()
+    snapshot = await _symbol_chart_snapshot(
+        session,
+        principal.user_id,
+        setup.exchange,
+        target_symbol,
+        timeframe,
+    )
+    config = snapshot.chart_config if snapshot is not None else {}
+    layout = dict(config.get("tradingview_layout") or {})
+    chart_id = str(layout.get("chart_id") or f"lifecycle-{setup.id}-{target_symbol}-{timeframe}")
+    return {
+        "saved": bool(layout.get("chart_data")),
+        "setup_id": setup.id,
+        "symbol": target_symbol,
+        "exchange": setup.exchange,
+        "timeframe": timeframe,
+        "chart_id": chart_id,
+        "layout_id": str(layout.get("layout_id") or chart_id),
+        "name": layout.get("name") or f"{target_symbol} lifecycle",
+        "chart_data": layout.get("chart_data"),
+        "saved_at": layout.get("saved_at"),
+        "charts": [
+            {
+                "id": chart_id,
+                "name": layout.get("name") or f"{target_symbol} lifecycle",
+                "symbol": target_symbol,
+                "resolution": timeframe,
+                "timestamp": layout.get("saved_at"),
+            }
+        ]
+        if layout.get("chart_data")
+        else [],
+    }
+
+
+@router.put("/lifecycles/{setup_id}/tradingview-layout")
+async def save_lifecycle_tradingview_layout(
+    setup_id: UUID,
+    payload: TradingViewStorageRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    setup = await _owned_setup(session, principal.user_id, setup_id)
+    target_symbol = (payload.symbol or setup.symbol).upper()
+    chart_id = payload.chart_id or f"lifecycle-{setup.id}-{target_symbol}-{payload.timeframe}"
+    layout_id = payload.layout_id or chart_id
+    snapshot = await _ensure_symbol_chart_snapshot(
+        session,
+        principal.user_id,
+        setup.exchange,
+        target_symbol,
+        payload.timeframe,
+        setup_id=setup.id,
+        strategy_version_id=setup.strategy_version_id,
+    )
+    config = dict(snapshot.chart_config or {})
+    config["tradingview_layout"] = {
+        "chart_id": chart_id,
+        "layout_id": layout_id,
+        "name": payload.name or f"{target_symbol} lifecycle",
+        "symbol": target_symbol,
+        "timeframe": payload.timeframe,
+        "chart_data": payload.chart_data,
+        "saved_at": _now().isoformat(),
+        "library": "tradingview-charting-library",
+    }
+    snapshot.chart_config = config
+    snapshot.proof_reference = {
+        "setup_instance_id": str(setup.id),
+        "strategy_version_id": str(setup.strategy_version_id),
+    }
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="user",
+            action="lifecycle_chart.tradingview_layout_saved",
+            target_type="setup_instance",
+            target_id=str(setup.id),
+            metadata_redacted={
+                "symbol": target_symbol,
+                "timeframe": payload.timeframe,
+                "chart_id": chart_id,
+            },
+            created_at=_now(),
+        )
+    )
+    await session.commit()
+    await session.refresh(snapshot)
+    return {
+        "saved": True,
+        "setup_id": setup.id,
+        "symbol": target_symbol,
+        "timeframe": payload.timeframe,
+        "chart_id": chart_id,
+        "layout_id": layout_id,
+        "saved_at": snapshot.updated_at,
+    }
+
+
+@router.get("/lifecycles/{setup_id}/tradingview-drawings")
+async def lifecycle_tradingview_drawings(
+    setup_id: UUID,
+    timeframe: str = Query(
+        default="1m",
+        pattern=r"^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+    ),
+    symbol: str | None = Query(default=None, min_length=3, max_length=40),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    setup = await _owned_setup(session, principal.user_id, setup_id)
+    target_symbol = (symbol or setup.symbol).upper()
+    snapshot = await _symbol_chart_snapshot(
+        session,
+        principal.user_id,
+        setup.exchange,
+        target_symbol,
+        timeframe,
+    )
+    config = snapshot.chart_config if snapshot is not None else {}
+    drawings = dict(config.get("tradingview_drawings") or {})
+    return {
+        "saved": bool(drawings.get("line_tools_state")),
+        "setup_id": setup.id,
+        "symbol": target_symbol,
+        "exchange": setup.exchange,
+        "timeframe": timeframe,
+        "layout_id": drawings.get("layout_id"),
+        "chart_id": drawings.get("chart_id"),
+        "line_tools_state": drawings.get("line_tools_state"),
+        "saved_at": drawings.get("saved_at"),
+    }
+
+
+@router.put("/lifecycles/{setup_id}/tradingview-drawings")
+async def save_lifecycle_tradingview_drawings(
+    setup_id: UUID,
+    payload: TradingViewStorageRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    setup = await _owned_setup(session, principal.user_id, setup_id)
+    target_symbol = (payload.symbol or setup.symbol).upper()
+    chart_id = payload.chart_id or f"lifecycle-{setup.id}-{target_symbol}-{payload.timeframe}"
+    layout_id = payload.layout_id or chart_id
+    snapshot = await _ensure_symbol_chart_snapshot(
+        session,
+        principal.user_id,
+        setup.exchange,
+        target_symbol,
+        payload.timeframe,
+        setup_id=setup.id,
+        strategy_version_id=setup.strategy_version_id,
+    )
+    config = dict(snapshot.chart_config or {})
+    config["tradingview_drawings"] = {
+        "chart_id": chart_id,
+        "layout_id": layout_id,
+        "symbol": target_symbol,
+        "timeframe": payload.timeframe,
+        "line_tools_state": payload.line_tools_state,
+        "saved_at": _now().isoformat(),
+        "library": "tradingview-charting-library",
+    }
+    snapshot.chart_config = config
+    snapshot.proof_reference = {
+        "setup_instance_id": str(setup.id),
+        "strategy_version_id": str(setup.strategy_version_id),
+    }
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="user",
+            action="lifecycle_chart.tradingview_drawings_saved",
+            target_type="setup_instance",
+            target_id=str(setup.id),
+            metadata_redacted={
+                "symbol": target_symbol,
+                "timeframe": payload.timeframe,
+                "chart_id": chart_id,
+            },
+            created_at=_now(),
+        )
+    )
+    await session.commit()
+    await session.refresh(snapshot)
+    return {
+        "saved": True,
+        "setup_id": setup.id,
+        "symbol": target_symbol,
+        "timeframe": payload.timeframe,
+        "chart_id": chart_id,
+        "layout_id": layout_id,
+        "saved_at": snapshot.updated_at,
     }
 
 

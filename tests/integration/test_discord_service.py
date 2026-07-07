@@ -289,15 +289,7 @@ async def test_discord_alert_embed_delivery_reuses_setup_thread_and_suppresses_d
         assert "User-defined trade context" in field_names
         assert embed.metadata["proof"]["conditions"][0]["state"] == "passed"
         action_labels = {action.label for action in embed.actions}
-        assert {
-            "View Full Proof",
-            "Good Alert",
-            "Too Early",
-            "Too Late",
-            "False Alert",
-            "Open Replay",
-            "Improve Monitor",
-        }.issubset(action_labels)
+        assert action_labels == {"🔄 View lifecycle", "📊 Dashboard", "🔕 Mute symbol"}
 
         gateway.fail_next_embed = True
         second_alert = Alert(

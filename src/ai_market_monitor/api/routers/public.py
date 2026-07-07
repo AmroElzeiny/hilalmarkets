@@ -3,6 +3,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
@@ -55,5 +57,42 @@ async def dashboard_entry(
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(settings: Settings = Depends(get_settings)) -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "traceedge",
+        "environment": settings.app_env,
+    }
+
+
+@router.get("/health/deep")
+async def deep_health(
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    checks: dict[str, str] = {"database": "ok", "redis": "ok"}
+
+    try:
+        await session.execute(text("SELECT 1"))
+    except Exception:
+        checks["database"] = "error"
+
+    redis_client = Redis.from_url(
+        settings.redis_url,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
+    try:
+        await redis_client.ping()
+    except Exception:
+        checks["redis"] = "error"
+    finally:
+        await redis_client.aclose()
+
+    status = "ok" if all(value == "ok" for value in checks.values()) else "degraded"
+    return {
+        "status": status,
+        "service": "traceedge",
+        "environment": settings.app_env,
+        "checks": checks,
+    }

@@ -174,6 +174,7 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
         database_url="postgresql+asyncpg://user:password@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
+        ai_interpreter_provider="rules",
         telegram_enabled=False,
         discord_enabled=False,
         billing_enabled=False,
@@ -188,6 +189,7 @@ def test_deployed_runtime_rejects_fixture_market_data_and_unwired_provider_flags
         database_url="postgresql+asyncpg://user:password@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
+        ai_interpreter_provider="rules",
         tracedge_market_data_mode="fixture",
         tracedge_fixture_market_data_enabled=True,
         coingecko_enabled=True,
@@ -213,6 +215,7 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
         database_url="postgresql+asyncpg://user:password@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
+        ai_interpreter_provider="rules",
         telegram_enabled=True,
         telegram_adapter="none",
         discord_enabled=True,
@@ -225,3 +228,21 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
     assert "TELEGRAM_ADAPTER=http" in message
     assert "NoopDiscordGateway" in message
     assert "StaticBillingProvider" in message
+
+
+def test_production_runtime_rejects_placeholder_credentials():
+    settings = Settings(
+        app_env="production",
+        app_secret_key="REPLACE_WITH_64_RANDOM_CHARACTERS",
+        database_url="postgresql+asyncpg://user:REPLACE_WITH_PASSWORD@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        ai_interpreter_provider="openai",
+        openai_api_key="REPLACE_WITH_OPENAI_API_KEY",
+    )
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+    message = str(error.value)
+    assert "APP_SECRET_KEY must not use a placeholder" in message
+    assert "DATABASE_URL must not contain placeholder credentials" in message
+    assert "OPENAI_API_KEY must not use a placeholder" in message

@@ -471,9 +471,16 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
     assert page.status_code == 200
     assert "One setup. A complete lifecycle." in page.text
     assert "SOL/USDT" in page.text
-    assert "ETH/USDT" not in page.text
+    assert "ETH/USDT" in page.text
+    assert "Expired" in page.text
     assert "lifecycle-chart-dialog" in page.text
     assert "Confirmed" in page.text
+
+    default_chart = await test_context["client"].get(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/chart"
+    )
+    assert default_chart.status_code == 200
+    assert default_chart.json()["setup"]["selected_timeframe"] == "1m"
 
     chart = await test_context["client"].get(
         f"/api/v1/dashboard/lifecycles/{setup_id}/chart?timeframe=15m"
@@ -518,6 +525,48 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
     )
     assert restored.status_code == 200
     assert restored.json()["annotations"] == annotations
+
+    layout = await test_context["client"].put(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/tradingview-layout",
+        json={
+            "timeframe": "1m",
+            "symbol": "SOL/USDT",
+            "chart_id": "tv-chart-1",
+            "layout_id": "tv-layout-1",
+            "name": "SOL lifecycle workspace",
+            "chart_data": {"content": "serialized-layout", "symbol": "BINANCE:SOLUSDT"},
+        },
+    )
+    assert layout.status_code == 200
+    assert layout.json()["chart_id"] == "tv-chart-1"
+    restored_layout = await test_context["client"].get(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/tradingview-layout?timeframe=1m&symbol=SOL/USDT"
+    )
+    assert restored_layout.status_code == 200
+    assert restored_layout.json()["saved"] is True
+    assert restored_layout.json()["chart_data"]["content"] == "serialized-layout"
+    assert restored_layout.json()["charts"][0]["id"] == "tv-chart-1"
+
+    drawings = await test_context["client"].put(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/tradingview-drawings",
+        json={
+            "timeframe": "1m",
+            "symbol": "SOL/USDT",
+            "chart_id": "tv-chart-1",
+            "layout_id": "tv-layout-1",
+            "line_tools_state": {
+                "__traceedge_type": "Map",
+                "entries": [["line-1", {"tool": "trend_line"}]],
+            },
+        },
+    )
+    assert drawings.status_code == 200
+    restored_drawings = await test_context["client"].get(
+        f"/api/v1/dashboard/lifecycles/{setup_id}/tradingview-drawings?timeframe=1m&symbol=SOL/USDT"
+    )
+    assert restored_drawings.status_code == 200
+    assert restored_drawings.json()["line_tools_state"]["entries"][0][0] == "line-1"
+
     muted = await test_context["client"].post(
         f"/api/v1/dashboard/lifecycles/{setup_id}/mute"
     )
@@ -525,11 +574,27 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
     muted_page = await test_context["client"].get("/dashboard/lifecycles")
     assert "SOL/USDT" not in muted_page.text
     async with test_context["session_factory"]() as session:
-        assert await session.scalar(select(func.count(ChartSnapshot.id))) == 1
+        assert await session.scalar(select(func.count(ChartSnapshot.id))) == 2
         assert (
             await session.scalar(
                 select(func.count(AuditEvent.id)).where(
                     AuditEvent.action == "lifecycle_chart.annotations_saved"
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.action == "lifecycle_chart.tradingview_layout_saved"
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.action == "lifecycle_chart.tradingview_drawings_saved"
                 )
             )
             == 1
@@ -641,7 +706,7 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
         strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
         assert strategy.status == StrategyStatus.ACTIVE
         assert strategy.active_version_id == UUID(payload["version"]["id"])
-    monitors = await test_context["client"].get("/dashboard/monitors")
+    monitors = await test_context["client"].get("/dashboard/strategies/new#monitors")
     assert ">active<" in monitors.text
     detail = await test_context["client"].get(f"/dashboard/strategies/{payload['strategy']['id']}")
     assert "<strong>active</strong>" in detail.text
@@ -851,9 +916,7 @@ async def test_advanced_dashboard_pages_render(test_context):
         ("/dashboard/strategies/new", "Monitor Overview"),
         ("/dashboard/strategies/new", "Proof &amp; Review"),
         ("/dashboard/strategies/new", "Six-Month High Breakout"),
-        ("/dashboard/analytics", "Analytics"),
         ("/dashboard/integrations", "Integrations"),
-        ("/dashboard/exports", "Exports"),
         ("/dashboard/lifecycles", "One setup. A complete lifecycle."),
         ("/dashboard/settings", "America/New_York"),
         ("/dashboard/settings", "modern-listbox"),
@@ -871,7 +934,10 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "sidebar-create-quick" in dashboard.text
     assert "sidebar-logout" in dashboard.text
     assert "data-theme-toggle" in dashboard.text
-    assert dashboard.text.index("Strategy Builder") < dashboard.text.index("Monitors")
+    assert "Activity snapshot" in dashboard.text
+    assert "Lifecycle States" in dashboard.text
+    assert "Top Symbols" in dashboard.text
+    assert "analytics-coverage-panel" not in dashboard.text
     assert "Import or clone" not in dashboard.text
     assert "Open Setup Replay" not in dashboard.text
     assert "Near-Miss Radar" not in dashboard.text
@@ -949,7 +1015,7 @@ async def test_strategy_cockpit_validation_forecast_suggestion_and_preferences(t
 
     page = await test_context["client"].get("/dashboard/cockpit")
     assert page.status_code == 404
-    monitors = await test_context["client"].get("/dashboard/monitors")
+    monitors = await test_context["client"].get("/dashboard/strategies/new#monitors")
     assert monitors.status_code == 200
     assert "My Monitors" in monitors.text
     assert "Health" in monitors.text

@@ -192,12 +192,8 @@ def test_compact_alert_actions_include_feedback_replay_and_improvement():
     )
     labels = {action.label for action in presentation.actions}
 
-    assert {"Good Alert", "Too Early", "Too Late", "False Alert"}.issubset(labels)
-    assert {"Open Replay", "Improve Monitor", "View Full Proof"}.issubset(labels)
-    assert any(
-        action.action_id == f"feedback:false_alert:{alert_id}"
-        for action in presentation.actions
-    )
+    assert labels == {"🔄 View lifecycle", "📊 Dashboard", "🔕 Mute symbol"}
+    assert any(action.action_id == f"mute_symbol:{alert_id}" for action in presentation.actions)
 
 
 def test_research_only_alert_copy_does_not_show_entry_or_rr_context():

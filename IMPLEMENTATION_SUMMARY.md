@@ -797,3 +797,67 @@ Remaining risks:
   badge remains a UI polish improvement.
 - Git metadata in this local checkout is broken, so tracked generated artifacts could not be
   removed with `git rm --cached`; see `REPO_HYGIENE_AUDIT.md`.
+
+## Live VPS Deployment Preparation
+
+Date: 2026-07-06
+
+Deployment target:
+
+- Landing page: `https://trace-edge.com`
+- Dashboard/app: `https://app.trace-edge.com`
+- `https://www.trace-edge.com` redirects to `https://trace-edge.com`
+
+Files added:
+
+- `docker-compose.prod.yml`
+- `deploy/Caddyfile`
+- `.env.production.example`
+- `deploy/deploy.sh`
+- `scripts/deployment_smoke.py`
+- `DEPLOY_TRACE_EDGE_LIVE.md`
+- `TRACE_EDGE_LIVE_DEPLOYMENT_REPORT.md`
+- `tests/integration/test_public_health.py`
+
+Files updated:
+
+- `.gitignore`
+- `src/ai_market_monitor/api/routers/public.py`
+- `src/ai_market_monitor/core/config.py`
+- `src/ai_market_monitor/core/startup.py`
+
+Behavior changed:
+
+- Added shallow `/health` metadata for deployment probes.
+- Added `/health/deep` database and Redis checks without leaking exception details.
+- Added `APP_BASE_URL` as a first-class setting for `https://app.trace-edge.com`.
+- Production/staging validation now requires `APP_BASE_URL` to be HTTPS when set.
+- Production/staging validation now rejects placeholder credentials such as `REPLACE_*` in
+  critical fields.
+- Added a production Compose stack with Caddy, API, worker, scheduler, Postgres, Redis, and
+  persistent volumes.
+- Added a Caddy configuration for `trace-edge.com`, `app.trace-edge.com`, and the `www` redirect.
+- Added a deployment smoke script for health, landing, dashboard, and static assets.
+
+Commands to run after this change:
+
+- `.venv\Scripts\python.exe -m pytest tests\integration\test_public_health.py -q`
+- `$env:TRACEDGE_ENV_FILE='.env.production.example'; docker compose --env-file .env.production.example -f docker-compose.prod.yml config`
+- `.venv\Scripts\python.exe scripts\deployment_smoke.py --base-url http://127.0.0.1:8000`
+
+Validation run:
+
+- `.venv\Scripts\python.exe -m pytest tests\integration\test_public_health.py tests\unit\test_reliability_security.py -q` passed: `10 passed`.
+- `$env:TRACEDGE_ENV_FILE='.env.production.example'; docker compose --env-file .env.production.example -f docker-compose.prod.yml config` passed.
+- Production runtime validation passed with `.env.production.example` plus safe dummy replacements
+  for placeholder credentials.
+- `.venv\Scripts\python.exe scripts\deployment_smoke.py --help` passed.
+
+Manual deployment remains:
+
+- Copy `.env.production.example` to `.env.production` on the VPS.
+- Fill real secrets and provider credentials.
+- Configure Cloudflare proxied A records for `@`, `www`, and `app`.
+- Run `bash deploy/deploy.sh` from the VPS repository root.
+- Verify Telegram, Discord, NOWPayments, SMTP, and real market-data behavior before inviting beta
+  users.

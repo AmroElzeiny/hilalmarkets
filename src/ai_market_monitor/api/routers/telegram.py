@@ -282,15 +282,17 @@ def _fallback_outbound(update: dict[str, Any]) -> TelegramOutboundMessage | None
                 "Please choose a relevant option below."
             ),
             buttons=[
-                TelegramButton("Create Monitor", "create_monitor"),
+                TelegramButton("Dashboard", "open_dashboard"),
                 TelegramButton("Sign up / sign in", "account:auth"),
             ],
             menu=[
-                "Create Monitor",
                 "My Monitors",
                 "Lifecycles",
-                "Subscription",
+                "Trial",
+                "Pricing",
+                "Settings",
                 "Support",
+                "About",
             ],
         )
     message = _parse_message(update)
@@ -303,14 +305,17 @@ def _fallback_outbound(update: dict[str, Any]) -> TelegramOutboundMessage | None
             "Use the current app-menu option again, or go back and choose the relevant screen."
         ),
         buttons=[
-            TelegramButton("Create Monitor", "create_monitor"),
-            TelegramButton("Use Template", "mode_template"),
-            TelegramButton("Go Back", "back:previous"),
+            TelegramButton("Dashboard", "open_dashboard"),
+            TelegramButton("Main Menu", "back:main"),
         ],
         menu=[
-            "Create Monitor",
-            "Use Template",
-            "Go Back",
+            "My Monitors",
+            "Lifecycles",
+            "Trial",
+            "Pricing",
+            "Settings",
+            "Support",
+            "About",
         ],
     )
 

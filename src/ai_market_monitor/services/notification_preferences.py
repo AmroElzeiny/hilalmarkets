@@ -24,6 +24,7 @@ class NotificationPreference:
     muted_symbols: set[str] | None = None
     muted_strategy_ids: set[str] | None = None
     muted_strategy_until: dict[str, str] | None = None
+    muted_strategy_symbols: dict[str, set[str]] | None = None
     muted_setup_instance_ids: set[str] | None = None
 
 
@@ -61,6 +62,10 @@ class NotificationPreferenceService:
                 str(key): str(value)
                 for key, value in (data.get("muted_strategy_until", {}) or {}).items()
             },
+            muted_strategy_symbols={
+                str(key): set(map(str.upper, value or []))
+                for key, value in (data.get("muted_strategy_symbols", {}) or {}).items()
+            },
             muted_setup_instance_ids=set(map(str, data.get("muted_setup_instance_ids", []))),
         )
 
@@ -96,6 +101,10 @@ class NotificationPreferenceService:
             preference.muted_strategy_ids or set()
         ):
             return set()
+        if alert.strategy_version_id is not None and symbol:
+            muted_strategy_symbols = preference.muted_strategy_symbols or {}
+            if symbol in muted_strategy_symbols.get(str(alert.strategy_version_id), set()):
+                return set()
         if alert.strategy_version_id is not None:
             muted_until = (preference.muted_strategy_until or {}).get(
                 str(alert.strategy_version_id)

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./ai_market_monitor.db"
     redis_url: str = "redis://localhost:6379/0"
     public_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
+    app_base_url: AnyHttpUrl | None = None
     log_level: str = "INFO"
     allow_mock_providers: bool = True
     scanning_enabled: bool = False
@@ -142,6 +143,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "market_metadata_api_url",
+        "app_base_url",
         "crypto_index_api_url",
         "macro_market_api_url",
         "event_feed_api_url",

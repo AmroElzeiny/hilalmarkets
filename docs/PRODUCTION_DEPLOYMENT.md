@@ -1,5 +1,9 @@
 # Production Deployment
 
+For the current single-VPS live deployment path for `trace-edge.com` and `app.trace-edge.com`,
+use [`DEPLOY_TRACE_EDGE_LIVE.md`](../DEPLOY_TRACE_EDGE_LIVE.md). The notes below remain useful
+for integration-specific production settings.
+
 Production startup is fail-closed. Set `APP_ENV=production`, `ALLOW_MOCK_PROVIDERS=false`, a
 non-default 32+ character `APP_SECRET_KEY`, PostgreSQL `DATABASE_URL`, Redis, and an HTTPS
 `PUBLIC_BASE_URL`.

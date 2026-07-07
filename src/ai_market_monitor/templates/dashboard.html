@@ -1749,7 +1749,7 @@
       <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-label="Expand or collapse navigation">
         <img src="https://api.iconify.design/lucide:panel-left.svg?color=%23c4b5fd" alt="" aria-hidden="true">
       </button>
-      <button class="theme-toggle sidebar-theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode">
+      <button class="theme-toggle sidebar-theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true">
         <span class="theme-toggle-track"><i></i></span>
       </button>
     </div>
@@ -1762,11 +1762,7 @@
     <nav class="dash-nav" data-testid="dashboard-nav">
       <a class="{{ 'active' if page == 'home' else '' }}" href="/dashboard"><img src="https://api.iconify.design/lucide:layout-dashboard.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Overview</span></a>
       <a class="{{ 'active' if page == 'scan' else '' }}" href="/dashboard/scan-now"><img src="https://api.iconify.design/lucide:search.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Quick Scan</span></a>
-      <a class="{{ 'active' if page == 'strategy_builder' else '' }}" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:workflow.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Strategy Builder</span></a>
-      <a class="{{ 'active' if page in ['monitors', 'strategy_detail', 'strategy_versions'] else '' }}" href="/dashboard/monitors"><img src="https://api.iconify.design/lucide:radar.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Monitors</span></a>
       <a class="{{ 'active' if page == 'lifecycles' else '' }}" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Lifecycles</span></a>
-      <a class="{{ 'active' if page == 'analytics' else '' }}" href="/dashboard/analytics"><img src="https://api.iconify.design/lucide:bar-chart-3.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Analytics</span></a>
-      <a class="{{ 'active' if page == 'exports' else '' }}" href="/dashboard/exports"><img src="https://api.iconify.design/lucide:download.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Exports</span></a>
       <a class="{{ 'active' if page == 'billing' else '' }}" href="/dashboard/billing"><img src="https://api.iconify.design/lucide:credit-card.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Billing</span></a>
       <a class="{{ 'active' if page == 'integrations' else '' }}" href="/dashboard/integrations"><img src="https://api.iconify.design/lucide:plug.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Integrations</span></a>
       <a class="{{ 'active' if page == 'settings' else '' }}" href="/dashboard/settings"><img src="https://api.iconify.design/lucide:sliders-horizontal.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Settings</span></a>
@@ -1805,7 +1801,7 @@
           <p>Run Quick Scan, build approved monitors, and inspect lifecycle evidence from one calmer screen.</p>
           <div class="button-row">
             <a class="button button-primary" href="/dashboard/scan-now"><img src="https://api.iconify.design/lucide:search.svg?color=%23ffffff" alt="" aria-hidden="true"> Run Quick Scan</a>
-            <a class="button button-primary" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="" aria-hidden="true"> Open Strategy Builder</a>
+            <a class="button button-primary" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="" aria-hidden="true"> Create a monitor</a>
             <a class="button button-secondary" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"> Open Lifecycles</a>
           </div>
         </div>
@@ -1902,6 +1898,76 @@
           {% endif %}
         </article>
       </section>
+
+      <section class="dash-panel analytics-hero-panel">
+        <div>
+          <p class="eyebrow">Activity snapshot</p>
+          <h2>Monitor activity in one calmer summary.</h2>
+          <p>These summaries describe lifecycle volume, alert proof, and symbol activity. They are not trading-performance guarantees.</p>
+        </div>
+        <div class="analytics-stat-grid">
+          <article>
+            <img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="" aria-hidden="true">
+            <span>Total setups</span>
+            <strong>{{ analytics.setup_count }}</strong>
+            <small>Tracked lifecycle instances</small>
+          </article>
+          <article>
+            <img src="https://api.iconify.design/lucide:bell-ring.svg?color=%23ffffff" alt="" aria-hidden="true">
+            <span>Alerts</span>
+            <strong>{{ analytics.alert_count }}</strong>
+            <small>Confirmed, forming, and lifecycle</small>
+          </article>
+          <article>
+            <img src="https://api.iconify.design/lucide:file-check-2.svg?color=%23ffffff" alt="" aria-hidden="true">
+            <span>Lifecycle evidence</span>
+            <strong>{{ analytics.near_miss_count }}</strong>
+            <small>Completion-score snapshots</small>
+          </article>
+        </div>
+      </section>
+      <section class="dash-grid two overview-analytics-grid">
+        <article class="dash-panel analytics-breakdown-panel">
+          <div class="section-head compact-head">
+            <div>
+              <p class="eyebrow">Lifecycle distribution</p>
+              <h2>Lifecycle States</h2>
+            </div>
+            <img src="https://api.iconify.design/lucide:git-branch.svg?color=%23c4b5fd" alt="" aria-hidden="true">
+          </div>
+          {% if analytics.state_rows %}
+            <div class="analytics-bar-list">
+              {% for state, count in analytics.state_rows %}
+                <div class="analytics-bar-row">
+                  <span>{{ state.value.replace('_', ' ').title() }}</span>
+                  <strong>{{ count }}</strong>
+                  <i style="--bar:{{ count if count < 100 else 100 }}%"></i>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}<div class="dash-empty">No lifecycle data yet.</div>{% endif %}
+        </article>
+        <article class="dash-panel analytics-breakdown-panel">
+          <div class="section-head compact-head">
+            <div>
+              <p class="eyebrow">Symbol activity</p>
+              <h2>Top Symbols</h2>
+            </div>
+            <img src="https://api.iconify.design/lucide:candlestick-chart.svg?color=%23c4b5fd" alt="" aria-hidden="true">
+          </div>
+          {% if analytics.symbol_rows %}
+            <div class="analytics-symbol-list">
+              {% for symbol, count, last_seen in analytics.symbol_rows %}
+                <div>
+                  <strong>{{ symbol }}</strong>
+                  <span>{{ count }} setup{{ '' if count == 1 else 's' }}</span>
+                  <small>{{ last_seen|short_dt(user.timezone) if last_seen else '-' }}</small>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}<div class="dash-empty">No symbol activity yet.</div>{% endif %}
+        </article>
+      </section>
     {% elif page == 'strategy_builder' %}
       <section class="builder-shell" data-builder-shell data-testid="strategy-builder-root">
         <section class="dash-panel builder-start-screen" data-builder-intro data-testid="strategy-builder-entry">
@@ -1910,21 +1976,30 @@
           <div class="creation-direction-grid">
             <article class="creation-card recommended">
               <div class="creation-card-top">
-                <span class="creation-icon" aria-hidden="true">AI</span>
-                <span class="badge">Recommended</span>
+                <span class="creation-icon" aria-hidden="true">
+                  <img src="https://api.iconify.design/lucide:bot-message-square.svg?color=%23ffffff" alt="">
+                </span>
+                <span class="badge creation-recommended-badge">
+                  <img src="https://api.iconify.design/lucide:badge-check.svg?color=%23c4b5fd" alt="" aria-hidden="true">
+                  Recommended
+                </span>
               </div>
               <h3>Describe my strategy</h3>
               <p>Turn plain English into an editable strategy map.</p>
               <button class="button button-primary" type="button" data-builder-direction="prompt" data-testid="strategy-builder-describe">Describe strategy</button>
             </article>
             <article class="creation-card">
-              <span class="creation-icon" aria-hidden="true">MAP</span>
+              <span class="creation-icon" aria-hidden="true">
+                <img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="">
+              </span>
               <h3>Build visually</h3>
               <p>Compose conditions and logic without writing code.</p>
               <button class="button button-secondary" type="button" data-builder-direction="canvas" data-testid="strategy-builder-canvas">Open blank canvas</button>
             </article>
             <article class="creation-card">
-              <span class="creation-icon" aria-hidden="true">TPL</span>
+              <span class="creation-icon" aria-hidden="true">
+                <img src="https://api.iconify.design/lucide:layout-template.svg?color=%23ffffff" alt="">
+              </span>
               <h3>Start from template</h3>
               <p>Choose a proven structure and make it yours.</p>
               <button class="button button-secondary" type="button" data-builder-direction="templates" data-testid="strategy-builder-templates">Browse templates</button>
@@ -2429,9 +2504,7 @@
           </dialog>
         </form>
       </section>
-      <script id="amm-builder-schema" type="application/json">{% if version and version.schema_json %}{{ version.schema_json | tojson }}{% else %}{}{% endif %}</script>
-    {% elif page == 'monitors' %}
-      <section class="dash-panel monitors-hub">
+      <section id="monitors" class="dash-panel monitors-hub">
         <div class="section-head">
           <div>
             <p class="eyebrow">Monitors</p>
@@ -2493,6 +2566,7 @@
           <div class="dash-empty">No monitors yet. Create a monitor, approve its structured rules, then activate it.</div>
         {% endif %}
       </section>
+      <script id="amm-builder-schema" type="application/json">{% if version and version.schema_json %}{{ version.schema_json | tojson }}{% else %}{}{% endif %}</script>
     {% elif page == 'strategy_detail' %}
       <section class="dash-grid two">
         <article class="dash-panel">
@@ -2805,13 +2879,13 @@
                       <span>Chart</span>
                     </button>
                     {% if item.latest_alert_id %}
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-proof="{{ item.latest_alert_id }}">View proof</button>
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-feedback="{{ item.latest_alert_id }}">Feedback</button>
+                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-proof="{{ item.latest_alert_id }}" hidden aria-hidden="true">View proof</button>
+                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-feedback="{{ item.latest_alert_id }}" hidden aria-hidden="true">Feedback</button>
                     {% endif %}
-                    <button class="lifecycle-chart-button muted-action" type="button" data-inbox-timeline="{{ item.id }}">Timeline</button>
+                    <button class="lifecycle-chart-button muted-action" type="button" data-inbox-timeline="{{ item.id }}" hidden aria-hidden="true">Timeline</button>
                     {% if item.latest_inbox_item_id %}
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-review="{{ item.latest_inbox_item_id }}">Mark reviewed</button>
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-archive="{{ item.latest_inbox_item_id }}">Archive</button>
+                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-review="{{ item.latest_inbox_item_id }}" hidden aria-hidden="true">Mark reviewed</button>
+                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-archive="{{ item.latest_inbox_item_id }}" hidden aria-hidden="true">Archive</button>
                     {% endif %}
                   </div>
                 </div>
@@ -2959,7 +3033,7 @@
         </div>
         <div class="cockpit-quick-stack">
           <a class="button button-primary" href="/dashboard/lifecycles">Open Lifecycles</a>
-          <a class="button button-secondary" href="/dashboard/monitors">Control Monitors</a>
+          <a class="button button-secondary" href="/dashboard/strategies/new#monitors">Control Monitors</a>
           <a class="button button-secondary" href="/dashboard/scan-now">Run Quick Scan</a>
         </div>
       </article>
@@ -3072,7 +3146,7 @@
           <div class="dash-empty">The inbox is empty. New proof, lifecycle, feedback, and health events will appear here.</div>
         {% endif %}
       </section>
-    {% elif page == 'analytics' %}
+    {% elif false %}
       <section class="dash-panel analytics-hero-panel">
         <div>
           <p class="eyebrow">Analytics</p>
@@ -3173,7 +3247,7 @@
           {% else %}<div class="dash-empty">No symbol performance data yet.</div>{% endif %}
         </article>
       </section>
-    {% elif page == 'exports' %}
+    {% elif false %}
       <section class="dash-grid two">
         <article class="dash-panel">
           <h2>Exports</h2>

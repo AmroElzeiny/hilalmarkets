@@ -147,8 +147,6 @@ class AlertPresentation:
         base = (public_base_url or "").rstrip("/")
         proof_url = f"{base}/dashboard/lifecycles" if base else None
         dashboard_url = f"{base}/dashboard/lifecycles" if base else None
-        replay_url = f"{base}/dashboard/lifecycles" if base else None
-        improve_url = f"{base}/dashboard/monitors" if base else None
         score = proof.get("setup_completion_score")
         trust = proof.get("alert_trust_score")
         trust_payload: dict[str, Any] = trust if isinstance(trust, dict) else {}
@@ -170,25 +168,10 @@ class AlertPresentation:
         if market_data_timestamp is not None:
             setup_age = _duration(created_at - market_data_timestamp)
         actions = [
-            AlertActionPresentation("View Full Proof", f"proof:{alert.id}", proof_url),
-            AlertActionPresentation("Open Chart", f"chart:{alert.id}", alert.chart_snapshot_url),
-            AlertActionPresentation("Good Alert", f"feedback:good_alert:{alert.id}"),
-            AlertActionPresentation("Too Early", f"feedback:too_early:{alert.id}"),
-            AlertActionPresentation("Too Late", f"feedback:too_late:{alert.id}"),
-            AlertActionPresentation("False Alert", f"feedback:false_alert:{alert.id}"),
-            AlertActionPresentation("Open Replay", f"replay:{alert.id}", replay_url),
-            AlertActionPresentation("Improve Monitor", f"improve:{alert.id}", improve_url),
-            AlertActionPresentation(
-                "Mute Monitor",
-                f"mute_strategy:{alert.strategy_version_id}",
-            ),
-            AlertActionPresentation("Open Dashboard", f"dashboard:{alert.id}", dashboard_url),
+            AlertActionPresentation("🔄 View lifecycle", f"dashboard_lifecycle:{alert.id}", dashboard_url),
+            AlertActionPresentation("📊 Dashboard", f"dashboard:{alert.id}", dashboard_url),
+            AlertActionPresentation("🔕 Mute symbol", f"mute_symbol:{alert.id}"),
         ]
-        if alert.alert_type == AlertType.NEAR_MISS:
-            actions.insert(
-                5,
-                AlertActionPresentation("Mute Near-Miss", f"mute_near_miss:{alert.id}"),
-            )
         return cls(
             alert_id=str(alert.id),
             strategy_id=str(alert.strategy_version_id) if alert.strategy_version_id else None,

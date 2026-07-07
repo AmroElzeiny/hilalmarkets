@@ -1,28 +1,20 @@
 (function () {
   const storageKey = "amm-theme";
 
-  function systemTheme() {
-    return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  }
-
   function currentTheme() {
-    const stored = window.localStorage.getItem(storageKey);
-    if (stored === "light" || stored === "dark") return stored;
-    const dashboardTheme = document.body?.className.match(/theme-(light|dark)/)?.[1];
-    return dashboardTheme || systemTheme();
+    return "light";
   }
 
   function applyTheme(theme, persist = true) {
-    const resolved = theme === "light" ? "light" : "dark";
+    const resolved = "light";
     document.documentElement.dataset.theme = resolved;
     document.body?.classList.remove("theme-light", "theme-dark", "theme-system");
     document.body?.classList.add(`theme-${resolved}`);
     document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+      button.hidden = true;
+      button.setAttribute("aria-hidden", "true");
       button.setAttribute("aria-pressed", String(resolved === "light"));
-      button.setAttribute(
-        "aria-label",
-        resolved === "light" ? "Switch to dark mode" : "Switch to light mode",
-      );
+      button.setAttribute("aria-label", "Color mode is fixed to light mode");
       button.dataset.theme = resolved;
     });
     if (persist) window.localStorage.setItem(storageKey, resolved);
@@ -46,11 +38,8 @@
   document.addEventListener("DOMContentLoaded", () => {
     applyTheme(currentTheme(), false);
     document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const next = currentTheme() === "dark" ? "light" : "dark";
-        applyTheme(next);
-        await saveDashboardTheme(next);
-      });
+      button.hidden = true;
+      button.setAttribute("aria-hidden", "true");
     });
   });
 })();

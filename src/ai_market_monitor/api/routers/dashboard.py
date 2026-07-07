@@ -31,7 +31,6 @@ from ai_market_monitor.db.models import (
     Trial,
     TrialCycle,
     User,
-    UserExportJob,
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, StrategyStatus, UserRole
@@ -114,7 +113,7 @@ ALERT_DAYS = [
     "Sunday",
 ]
 ALERT_HOURS = [f"{hour:02d}:00" for hour in range(24)]
-SUPPORTED_THEMES = ["dark", "light"]
+SUPPORTED_THEMES = ["light"]
 
 
 async def _current_user(
@@ -170,6 +169,100 @@ def _near_miss_view(item: NearMissSnapshot) -> dict:
     }
 
 
+async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict]:
+    strategies = (
+        await session.scalars(
+            select(Strategy)
+            .where(
+                Strategy.user_id == user.id,
+                Strategy.archived_at.is_(None),
+                Strategy.status != StrategyStatus.ARCHIVED,
+            )
+            .order_by(Strategy.created_at.desc())
+        )
+    ).all()
+    cockpit_service = StrategyCockpitService(session)
+    monitor_cards = []
+    for strategy in strategies:
+        health = await cockpit_service.edge_health(strategy, persist=False)
+        bottlenecks = await cockpit_service.condition_bottlenecks(
+            strategy,
+            limit=300,
+            persist=False,
+        )
+        latest_scan = None
+        if strategy.active_version_id:
+            latest_scan = await session.scalar(
+                select(ScanJob)
+                .where(ScanJob.strategy_version_id == strategy.active_version_id)
+                .order_by(ScanJob.created_at.desc())
+                .limit(1)
+            )
+        latency_label = "No completed scan yet"
+        if latest_scan and latest_scan.completed_at and latest_scan.scheduled_for:
+            seconds = max(
+                0,
+                int((latest_scan.completed_at - latest_scan.scheduled_for).total_seconds()),
+            )
+            latency_label = f"{seconds}s scan latency"
+        elif latest_scan:
+            latency_label = latest_scan.status.value.replace("_", " ").title()
+        monitor_cards.append(
+            {
+                "strategy": strategy,
+                "health": health,
+                "main_bottleneck": bottlenecks.get("main_bottleneck"),
+                "latest_scan": latest_scan,
+                "latency_label": latency_label,
+            }
+        )
+    return monitor_cards
+
+
+async def _analytics_context(session: AsyncSession, user: User) -> dict:
+    setup_count = await session.scalar(
+        select(func.count(SetupInstance.id)).where(SetupInstance.user_id == user.id)
+    )
+    alert_count = await session.scalar(select(func.count(Alert.id)).where(Alert.user_id == user.id))
+    near_miss_count = await session.scalar(
+        select(func.count(NearMissSnapshot.id))
+        .join(StrategyVersion, NearMissSnapshot.strategy_version_id == StrategyVersion.id)
+        .join(Strategy, StrategyVersion.strategy_id == Strategy.id)
+        .where(
+            Strategy.user_id == user.id,
+            NearMissSnapshot.completion_score < 100,
+        )
+    )
+    state_rows = (
+        await session.execute(
+            select(SetupInstance.state, func.count(SetupInstance.id))
+            .where(SetupInstance.user_id == user.id)
+            .group_by(SetupInstance.state)
+        )
+    ).all()
+    symbol_rows = (
+        await session.execute(
+            select(
+                SetupInstance.symbol,
+                func.count(SetupInstance.id),
+                func.max(SetupInstance.last_evaluated_at),
+            )
+            .where(SetupInstance.user_id == user.id)
+            .group_by(SetupInstance.symbol)
+            .order_by(func.count(SetupInstance.id).desc())
+            .limit(12)
+        )
+    ).all()
+    return {
+        "setup_count": setup_count or 0,
+        "alert_count": alert_count or 0,
+        "near_miss_count": near_miss_count or 0,
+        "coverage": await market_coverage_for_user(session, user.id),
+        "state_rows": state_rows,
+        "symbol_rows": symbol_rows,
+    }
+
+
 def _alert_view(alert: Alert) -> dict:
     trust = alert_trust_score_from_proof(alert.proof_receipt or {})
     return {
@@ -210,11 +303,11 @@ async def _send_telegram_connected_notification(
                     "counts and account-linked alerts."
                 ),
                 buttons=[
-                    TelegramButton("Create Monitor", "create_monitor"),
-                    TelegramButton("Claim Trial", "claim_trial"),
-                    TelegramButton("Open Dashboard", "open_dashboard"),
+                    TelegramButton("Dashboard", "open_dashboard"),
+                    TelegramButton("Lifecycles", "menu:latest_setups"),
+                    TelegramButton("Pricing", "pricing"),
                 ],
-                menu=["Create Monitor", "My Monitors", "Lifecycles", "Subscription", "Support"],
+                menu=["My Monitors", "Lifecycles", "Trial", "Pricing", "Settings", "Support", "About"],
             )
         )
     except TelegramDeliveryError:
@@ -238,9 +331,9 @@ async def _context(
         dashboard_preference = await session.scalar(
             select(DashboardPreference).where(DashboardPreference.user_id == user.id)
         )
-    dashboard_theme = dashboard_preference.theme if dashboard_preference is not None else "dark"
+    dashboard_theme = "light"
     if dashboard_theme not in SUPPORTED_THEMES:
-        dashboard_theme = "dark"
+        dashboard_theme = "light"
     telegram_username = (
         settings.telegram_bot_username.lstrip("@").strip()
         if settings.telegram_bot_username
@@ -800,6 +893,7 @@ async def dashboard_home(
             trial=trial,
             entitlement=entitlement,
             overview=overview,
+            analytics=await _analytics_context(session, user),
         ),
     )
 
@@ -811,67 +905,8 @@ async def monitors_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    strategies = (
-        await session.scalars(
-            select(Strategy)
-            .where(
-                Strategy.user_id == user.id,
-                Strategy.archived_at.is_(None),
-                Strategy.status != StrategyStatus.ARCHIVED,
-            )
-            .order_by(Strategy.created_at.desc())
-        )
-    ).all()
-    cockpit_service = StrategyCockpitService(session)
-    monitor_cards = []
-    for strategy in strategies:
-        health = await cockpit_service.edge_health(strategy, persist=False)
-        bottlenecks = await cockpit_service.condition_bottlenecks(
-            strategy,
-            limit=300,
-            persist=False,
-        )
-        latest_scan = None
-        if strategy.active_version_id:
-            latest_scan = await session.scalar(
-                select(ScanJob)
-                .where(ScanJob.strategy_version_id == strategy.active_version_id)
-                .order_by(ScanJob.created_at.desc())
-                .limit(1)
-            )
-        latency_label = "No completed scan yet"
-        if latest_scan and latest_scan.completed_at and latest_scan.scheduled_for:
-            seconds = max(
-                0,
-                int((latest_scan.completed_at - latest_scan.scheduled_for).total_seconds()),
-            )
-            latency_label = f"{seconds}s scan latency"
-        elif latest_scan:
-            latency_label = latest_scan.status.value.replace("_", " ").title()
-        monitor_cards.append(
-            {
-                "strategy": strategy,
-                "health": health,
-                "main_bottleneck": bottlenecks.get("main_bottleneck"),
-                "latest_scan": latest_scan,
-                "latency_label": latency_label,
-            }
-        )
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="monitors",
-            title="My Monitors",
-            strategies=strategies,
-            monitor_cards=monitor_cards,
-        ),
-    )
+) -> RedirectResponse:
+    return _redirect("/dashboard/strategies/new?message=monitors_moved_to_create_monitor#monitors")
 
 
 @router.get("/dashboard/strategies/new", response_class=HTMLResponse, include_in_schema=False)
@@ -902,6 +937,7 @@ async def new_strategy_builder_page(
             version=None,
             templates=templates_list,
             builtin_templates=builtin_template_payloads(),
+            monitor_cards=await _monitor_cards_context(session, user),
         ),
     )
 
@@ -1005,6 +1041,7 @@ async def strategy_builder_edit_page(
             version=version,
             templates=templates_list,
             builtin_templates=builtin_template_payloads(),
+            monitor_cards=await _monitor_cards_context(session, user),
         ),
     )
 
@@ -1060,10 +1097,10 @@ async def pause_monitor(
             actor_type="dashboard_user",
         )
         await session.commit()
-        return _redirect("/dashboard/monitors?message=monitor_paused")
+        return _redirect("/dashboard/strategies/new?message=monitor_paused#monitors")
     except MonitorOperationError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/monitors?error={exc.code}")
+        return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
 
 
 @router.post("/dashboard/monitors/{strategy_id}/resume", include_in_schema=False)
@@ -1079,10 +1116,10 @@ async def resume_monitor(
             actor_type="dashboard_user",
         )
         await session.commit()
-        return _redirect("/dashboard/monitors?message=monitor_resumed")
+        return _redirect("/dashboard/strategies/new?message=monitor_resumed#monitors")
     except MonitorOperationError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/monitors?error={exc.code}")
+        return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
 
 
 @router.post("/dashboard/monitors/{strategy_id}/delete", include_in_schema=False)
@@ -1098,10 +1135,10 @@ async def delete_monitor(
             actor_type="dashboard_user",
         )
         await session.commit()
-        return _redirect("/dashboard/monitors?message=monitor_deleted")
+        return _redirect("/dashboard/strategies/new?message=monitor_deleted#monitors")
     except MonitorOperationError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/monitors?error={exc.code}")
+        return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
 
 
 @router.get("/dashboard/create-monitor", response_class=HTMLResponse, include_in_schema=False)
@@ -1274,60 +1311,8 @@ async def analytics_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    setup_count = await session.scalar(
-        select(func.count(SetupInstance.id)).where(SetupInstance.user_id == user.id)
-    )
-    alert_count = await session.scalar(select(func.count(Alert.id)).where(Alert.user_id == user.id))
-    near_miss_count = await session.scalar(
-        select(func.count(NearMissSnapshot.id))
-        .join(StrategyVersion, NearMissSnapshot.strategy_version_id == StrategyVersion.id)
-        .join(Strategy, StrategyVersion.strategy_id == Strategy.id)
-        .where(
-            Strategy.user_id == user.id,
-            NearMissSnapshot.completion_score < 100,
-        )
-    )
-    state_rows = (
-        await session.execute(
-            select(SetupInstance.state, func.count(SetupInstance.id))
-            .where(SetupInstance.user_id == user.id)
-            .group_by(SetupInstance.state)
-        )
-    ).all()
-    symbol_rows = (
-        await session.execute(
-            select(
-                SetupInstance.symbol,
-                func.count(SetupInstance.id),
-                func.max(SetupInstance.last_evaluated_at),
-            )
-            .where(SetupInstance.user_id == user.id)
-            .group_by(SetupInstance.symbol)
-            .order_by(func.count(SetupInstance.id).desc())
-            .limit(12)
-        )
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="analytics",
-            title="Analytics",
-            analytics={
-                "setup_count": setup_count or 0,
-                "alert_count": alert_count or 0,
-                "near_miss_count": near_miss_count or 0,
-                "coverage": await market_coverage_for_user(session, user.id),
-                "state_rows": state_rows,
-                "symbol_rows": symbol_rows,
-            },
-        ),
-    )
+) -> RedirectResponse:
+    return _redirect("/dashboard?message=analytics_moved_to_overview")
 
 
 @router.get("/dashboard/trial", response_class=HTMLResponse, include_in_schema=False)
@@ -1575,28 +1560,8 @@ async def exports_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    jobs = (
-        await session.scalars(
-            select(UserExportJob)
-            .where(UserExportJob.user_id == user.id)
-            .order_by(UserExportJob.created_at.desc())
-            .limit(30)
-        )
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="exports",
-            title="Exports",
-            export_jobs=jobs,
-        ),
-    )
+) -> RedirectResponse:
+    return _redirect("/dashboard?message=exports_hidden")
 
 
 @router.get("/dashboard/settings", response_class=HTMLResponse, include_in_schema=False)
@@ -1667,7 +1632,7 @@ async def settings_submit(
         preference = DashboardPreference(
             user_id=user.id,
             default_timezone=timezone,
-            theme="dark",
+            theme="light",
         )
         session.add(preference)
     else:

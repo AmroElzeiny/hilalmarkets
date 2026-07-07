@@ -72,7 +72,6 @@ async def lifecycle_cards(
             .join(Strategy, Strategy.id == StrategyVersion.strategy_id)
             .where(
                 SetupInstance.user_id == user_id,
-                SetupInstance.state != SetupLifecycleState.EXPIRED,
             )
             .order_by(SetupInstance.last_evaluated_at.desc())
             .limit(limit)

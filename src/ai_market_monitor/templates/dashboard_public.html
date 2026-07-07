@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TraceEdge | {{ title }}</title>
-  <script>document.documentElement.dataset.theme=localStorage.getItem("amm-theme")||"dark";</script>
+  <script>document.documentElement.dataset.theme="light";localStorage.setItem("amm-theme","light");</script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-purple">
   <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260625-purple-shell">
@@ -12,12 +12,12 @@
   <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-purple"></script>
   <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
 </head>
-<body class="theme-dark">
+<body class="theme-light">
   <header class="site-header">
     <a class="brand" href="/"><span class="brand-mark">AM</span><span>TraceEdge</span></a>
     <nav><a href="/how-it-works">How It Works</a><a href="/pricing">Pricing</a><a href="/about">About</a><a href="/faq">FAQ</a><a href="/risk">Risk</a></nav>
     <div class="hero-actions">
-      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode"><span class="theme-toggle-track"><i></i></span></button>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true"><span class="theme-toggle-track"><i></i></span></button>
       <a class="button button-small button-ghost" href="/signup">Sign Up</a>
     </div>
   </header>

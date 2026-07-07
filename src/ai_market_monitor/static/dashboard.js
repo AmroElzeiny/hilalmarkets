@@ -1142,7 +1142,7 @@
             }),
           });
           showToast("Monitor published and marked active.");
-          window.location.href = `/dashboard/monitors?message=monitor_published&t=${Date.now()}`;
+          window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
           return;
         }
         showToast("Draft monitor saved.");
@@ -2834,9 +2834,9 @@
               expected_schema_hash: version.schema_hash,
             }),
           });
-          setBuilderActionStatus("Monitor is live. Redirecting to My Monitors...", "success");
+          setBuilderActionStatus("Monitor is live. Opening My Monitors...", "success");
           showToast("Monitor published and marked active.");
-          window.location.href = `/dashboard/monitors?message=monitor_published&t=${Date.now()}`;
+          window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
           return;
         }
         setBuilderActionStatus("Draft saved successfully. You can keep editing, validate, or start monitoring.", "success");
@@ -4369,6 +4369,8 @@
     const workspace = {
       setupId: null,
       timeframe: null,
+      currentExchange: null,
+      currentSymbol: null,
       widget: null,
       payloadCache: new Map(),
     };
@@ -4434,6 +4436,7 @@
     }
 
     function ensureTradingViewChartingLibrary() {
+      const missingLibraryMessage = "TradingView Charting Library is not installed at /static/charting_library/charting_library.js. Install the official private TradingView package to enable the vertical drawing toolbar, header symbol search, and saved drawings.";
       if (window.__traceedgeChartingLibraryLoaded && window.TradingView?.widget) {
         return Promise.resolve();
       }
@@ -4447,7 +4450,7 @@
             window.__traceedgeChartingLibraryLoaded = true;
             existing.dataset.loaded = "true";
             if (window.TradingView?.widget) resolve();
-            else reject(new Error("TradingView Charting Library loaded, but window.TradingView.widget was not available."));
+            else reject(new Error("TradingView Charting Library loaded, but window.TradingView.widget was not available. Check that the official charting_library package was copied completely, including bundles."));
           }, { once: true });
           existing.addEventListener("error", reject, { once: true });
         });
@@ -4461,11 +4464,9 @@
           window.__traceedgeChartingLibraryLoaded = true;
           script.dataset.loaded = "true";
           if (window.TradingView?.widget) resolve();
-          else reject(new Error("TradingView Charting Library loaded, but window.TradingView.widget was not available."));
+          else reject(new Error("TradingView Charting Library loaded, but window.TradingView.widget was not available. Check that the official charting_library package was copied completely, including bundles."));
         }, { once: true });
-        script.addEventListener("error", () => reject(new Error(
-          "Licensed TradingView package unavailable; using the native TraceEdge chart.",
-        )), { once: true });
+        script.addEventListener("error", () => reject(new Error(missingLibraryMessage)), { once: true });
         document.head.appendChild(script);
       });
     }
@@ -4508,7 +4509,7 @@
     }
 
     function tradingViewInterval(timeframe) {
-      const normalized = String(timeframe || "15m").toLowerCase();
+      const normalized = String(timeframe || "1m").toLowerCase();
       const mapping = {
         "1m": "1",
         "3m": "3",
@@ -4521,11 +4522,11 @@
         "1d": "D",
         "1w": "W",
       };
-      return mapping[normalized] || "15";
+      return mapping[normalized] || "1";
     }
 
     function resolutionToTimeframe(resolution) {
-      const normalized = String(resolution || "15").toUpperCase();
+      const normalized = String(resolution || "1").toUpperCase();
       const mapping = {
         "1": "1m",
         "3": "3m",
@@ -4538,13 +4539,58 @@
         "D": "1d",
         "1D": "1d",
       };
-      return mapping[normalized] || "15m";
+      return mapping[normalized] || "1m";
     }
 
     function tradingViewSymbol(exchange, symbol) {
       const provider = String(exchange || "binance").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const pair = String(symbol || "BTC/USDT").toUpperCase().replace(/[^A-Z0-9]/g, "");
       return `${provider || "BINANCE"}:${pair || "BTCUSDT"}`;
+    }
+
+    function pairFromCompact(value) {
+      const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const quotes = ["USDT", "USDC", "BUSD", "USD", "BTC", "ETH"];
+      const quote = quotes.find((item) => compact.endsWith(item) && compact.length > item.length);
+      if (!quote) return compact.includes("/") ? compact : `${compact}/USDT`;
+      return `${compact.slice(0, -quote.length)}/${quote}`;
+    }
+
+    function parseTradingViewSymbol(value, fallbackExchange, fallbackSymbol) {
+      const raw = String(value || "").trim();
+      const [exchangePart, symbolPart] = raw.includes(":")
+        ? raw.split(":", 2)
+        : [fallbackExchange || "binance", raw || fallbackSymbol || "BTC/USDT"];
+      const exchange = String(exchangePart || fallbackExchange || "binance").toLowerCase().replace(/[^a-z0-9]/g, "") || "binance";
+      const symbol = pairFromCompact(symbolPart || fallbackSymbol || "BTC/USDT");
+      return { exchange, symbol };
+    }
+
+    function symbolSearchResults(userInput, fallbackExchange) {
+      const exchange = String(fallbackExchange || "binance").toUpperCase();
+      const query = String(userInput || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const symbols = [
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "LINK/USDT",
+        "BNB/USDT",
+        "XRP/USDT",
+        "AVAX/USDT",
+        "ADA/USDT",
+        "DOGE/USDT",
+        "MATIC/USDT",
+      ];
+      return symbols
+        .filter((symbol) => !query || symbol.replace(/[^A-Z0-9]/g, "").includes(query))
+        .map((symbol) => ({
+          symbol: tradingViewSymbol(exchange, symbol),
+          full_name: tradingViewSymbol(exchange, symbol),
+          description: `${symbol} spot`,
+          exchange,
+          ticker: tradingViewSymbol(exchange, symbol),
+          type: "crypto",
+        }));
     }
 
     function candleSeconds(value) {
@@ -4555,31 +4601,65 @@
 
     function chartingLibraryDatafeed(initialPayload) {
       const supportedResolutions = ["1", "3", "5", "15", "30", "60", "120", "240", "D"];
-      const symbolName = tradingViewSymbol(initialPayload.setup.exchange, initialPayload.setup.symbol);
-      workspace.payloadCache.set(workspace.timeframe, initialPayload);
+      const lifecycleSymbolName = tradingViewSymbol(initialPayload.setup.exchange, initialPayload.setup.symbol);
+      workspace.currentExchange = initialPayload.setup.exchange;
+      workspace.currentSymbol = initialPayload.setup.symbol;
+      workspace.payloadCache.set(`${lifecycleSymbolName}|${workspace.timeframe}`, initialPayload);
 
-      async function payloadForResolution(resolution) {
+      async function payloadForResolution(symbolInfo, resolution) {
         const timeframe = resolutionToTimeframe(resolution);
-        if (workspace.payloadCache.has(timeframe)) return workspace.payloadCache.get(timeframe);
-        const payload = await api(
-          `/lifecycles/${workspace.setupId}/chart?timeframe=${encodeURIComponent(timeframe)}`,
+        const parsed = parseTradingViewSymbol(
+          symbolInfo?.ticker || symbolInfo?.name || lifecycleSymbolName,
+          initialPayload.setup.exchange,
+          initialPayload.setup.symbol,
         );
-        workspace.payloadCache.set(timeframe, payload);
+        const cacheKey = `${tradingViewSymbol(parsed.exchange, parsed.symbol)}|${timeframe}`;
+        if (workspace.payloadCache.has(cacheKey)) return workspace.payloadCache.get(cacheKey);
+        const lifecycleSymbol = parsed.exchange === String(initialPayload.setup.exchange).toLowerCase()
+          && parsed.symbol === String(initialPayload.setup.symbol).toUpperCase();
+        let payload;
+        if (lifecycleSymbol) {
+          payload = await api(
+            `/lifecycles/${workspace.setupId}/chart?timeframe=${encodeURIComponent(timeframe)}`,
+          );
+        } else {
+          const candlesPayload = await api(
+            `/charts/candles?exchange=${encodeURIComponent(parsed.exchange)}&symbol=${encodeURIComponent(parsed.symbol)}&timeframe=${encodeURIComponent(timeframe)}&limit=1000`,
+          );
+          payload = {
+            setup: {
+              ...initialPayload.setup,
+              exchange: parsed.exchange,
+              symbol: parsed.symbol,
+              selected_timeframe: timeframe,
+            },
+            candles: safeArray(candlesPayload.items),
+            markers: [],
+            overlays: {},
+            completed_conditions: [],
+            missing_conditions: [],
+            generic_symbol: true,
+          };
+        }
+        workspace.payloadCache.set(cacheKey, payload);
         return payload;
       }
 
       function applySideEvidence(payload) {
-        workspace.timeframe = payload.setup.selected_timeframe;
-        renderConditionList(
-          missingConditions,
-          payload.missing_conditions,
-          "No unmet deterministic conditions remain.",
-        );
-        renderConditionList(
-          completedConditions,
-          payload.completed_conditions,
-          "No condition has passed yet.",
-        );
+        workspace.timeframe = payload.setup.selected_timeframe || workspace.timeframe || "1m";
+        workspace.currentExchange = payload.setup.exchange;
+        workspace.currentSymbol = payload.setup.symbol;
+        if (payload.generic_symbol) {
+          if (missingConditions) {
+            missingConditions.innerHTML = `<p class="dash-muted">Symbol changed to ${escapeHtml(payload.setup.symbol)}. Lifecycle conditions remain attached to ${escapeHtml(initialPayload.setup.symbol)}.</p>`;
+          }
+          if (completedConditions) {
+            completedConditions.innerHTML = `<p class="dash-muted">Switch back to ${escapeHtml(initialPayload.setup.symbol)} to see deterministic condition completion marks.</p>`;
+          }
+          return;
+        }
+        renderConditionList(missingConditions, payload.missing_conditions, "No unmet deterministic conditions remain.");
+        renderConditionList(completedConditions, payload.completed_conditions, "No condition has passed yet.");
       }
 
       function barsFromPayload(payload, from, to) {
@@ -4607,18 +4687,25 @@
             supported_resolutions: supportedResolutions,
           }), 0);
         },
-        searchSymbols(_userInput, _exchange, _symbolType, onResultReadyCallback) {
-          onResultReadyCallback([]);
+        searchSymbols(userInput, exchange, _symbolType, onResultReadyCallback) {
+          onResultReadyCallback(symbolSearchResults(userInput, exchange || initialPayload.setup.exchange));
         },
-        resolveSymbol(_symbolName, onSymbolResolvedCallback) {
+        resolveSymbol(symbolName, onSymbolResolvedCallback) {
+          const parsed = parseTradingViewSymbol(
+            symbolName,
+            initialPayload.setup.exchange,
+            initialPayload.setup.symbol,
+          );
+          const resolvedName = tradingViewSymbol(parsed.exchange, parsed.symbol);
           window.setTimeout(() => onSymbolResolvedCallback({
-            name: symbolName,
-            ticker: symbolName,
-            description: `${initialPayload.setup.symbol} lifecycle evidence`,
+            name: resolvedName,
+            ticker: resolvedName,
+            full_name: resolvedName,
+            description: `${parsed.symbol} spot market`,
             type: "crypto",
             session: "24x7",
-            exchange: initialPayload.setup.exchange.toUpperCase(),
-            listed_exchange: initialPayload.setup.exchange.toUpperCase(),
+            exchange: parsed.exchange.toUpperCase(),
+            listed_exchange: parsed.exchange.toUpperCase(),
             timezone: "Etc/UTC",
             minmov: 1,
             pricescale: 100000,
@@ -4629,9 +4716,9 @@
             supported_resolutions: supportedResolutions,
           }), 0);
         },
-        async getBars(_symbolInfo, resolution, periodParams, onHistoryCallback, onErrorCallback) {
+        async getBars(symbolInfo, resolution, periodParams, onHistoryCallback, onErrorCallback) {
           try {
-            const payload = await payloadForResolution(resolution);
+            const payload = await payloadForResolution(symbolInfo, resolution);
             applySideEvidence(payload);
             const bars = barsFromPayload(payload, periodParams?.from, periodParams?.to);
             onHistoryCallback(bars, { noData: bars.length === 0 });
@@ -4641,7 +4728,11 @@
         },
         async getMarks(_symbolInfo, from, to, onDataCallback, resolution) {
           try {
-            const payload = await payloadForResolution(resolution);
+            const payload = await payloadForResolution(_symbolInfo, resolution);
+            if (payload.generic_symbol) {
+              onDataCallback([]);
+              return;
+            }
             const marks = safeArray(payload.markers)
               .map((marker, index) => {
                 const time = candleSeconds(marker.time);
@@ -4671,16 +4762,142 @@
       };
     }
 
+    function serializeTradingViewState(value) {
+      if (value instanceof Map) {
+        return {
+          __traceedge_type: "Map",
+          entries: Array.from(value.entries()).map(([key, item]) => [
+            key,
+            serializeTradingViewState(item),
+          ]),
+        };
+      }
+      if (value instanceof Set) {
+        return {
+          __traceedge_type: "Set",
+          values: Array.from(value.values()).map(serializeTradingViewState),
+        };
+      }
+      if (Array.isArray(value)) return value.map(serializeTradingViewState);
+      if (value && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [key, serializeTradingViewState(item)]),
+        );
+      }
+      return value;
+    }
+
+    function deserializeTradingViewState(value) {
+      if (Array.isArray(value)) return value.map(deserializeTradingViewState);
+      if (value && typeof value === "object") {
+        if (value.__traceedge_type === "Map") {
+          return new Map(
+            safeArray(value.entries).map(([key, item]) => [key, deserializeTradingViewState(item)]),
+          );
+        }
+        if (value.__traceedge_type === "Set") {
+          return new Set(safeArray(value.values).map(deserializeTradingViewState));
+        }
+        return Object.fromEntries(
+          Object.entries(value)
+            .filter(([key]) => key !== "__traceedge_type")
+            .map(([key, item]) => [key, deserializeTradingViewState(item)]),
+        );
+      }
+      return value;
+    }
+
+    function tradingViewStorageAdapter() {
+      const layoutName = () => `${workspace.currentSymbol || "Lifecycle"} saved chart`;
+      const storageParams = () => {
+        const symbol = workspace.currentSymbol || "BTC/USDT";
+        const timeframe = workspace.timeframe || "1m";
+        const query = `timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`;
+        return { symbol, timeframe, query };
+      };
+      return {
+        async getAllCharts() {
+          const { query } = storageParams();
+          const payload = await api(`/lifecycles/${workspace.setupId}/tradingview-layout?${query}`);
+          return safeArray(payload.charts).map((chart) => ({
+            id: chart.id,
+            name: chart.name || layoutName(),
+            symbol: chart.symbol || workspace.currentSymbol,
+            resolution: tradingViewInterval(chart.resolution || workspace.timeframe),
+            timestamp: chart.timestamp ? Math.floor(new Date(chart.timestamp).getTime() / 1000) : Math.floor(Date.now() / 1000),
+          }));
+        },
+        async saveChart(chartData) {
+          const { symbol, timeframe } = storageParams();
+          const chartId = chartData?.id || `lifecycle-${workspace.setupId}-${symbol}-${timeframe}`;
+          const response = await api(`/lifecycles/${workspace.setupId}/tradingview-layout`, {
+            method: "PUT",
+            body: JSON.stringify({
+              timeframe,
+              symbol,
+              chart_id: chartId,
+              layout_id: chartId,
+              name: chartData?.name || layoutName(),
+              chart_data: serializeTradingViewState(chartData),
+            }),
+          });
+          setStatus("TradingView layout saved with your dashboard profile.");
+          return response.chart_id || chartId;
+        },
+        async getChartContent(chartId) {
+          const { query } = storageParams();
+          const payload = await api(`/lifecycles/${workspace.setupId}/tradingview-layout?${query}`);
+          if (!payload.chart_data) return null;
+          return deserializeTradingViewState(payload.chart_data);
+        },
+        async removeChart(_chartId) {
+          return true;
+        },
+        async saveLineToolsAndGroups(layoutId, chartId, state) {
+          const { symbol, timeframe } = storageParams();
+          await api(`/lifecycles/${workspace.setupId}/tradingview-drawings`, {
+            method: "PUT",
+            body: JSON.stringify({
+              timeframe,
+              symbol,
+              layout_id: layoutId || `lifecycle-${workspace.setupId}-${symbol}-${timeframe}`,
+              chart_id: chartId || `lifecycle-${workspace.setupId}-${symbol}-${timeframe}`,
+              line_tools_state: serializeTradingViewState(state),
+            }),
+          });
+          setStatus("TradingView drawings saved. They will be restored for this symbol and timeframe.");
+          return true;
+        },
+        async loadLineToolsAndGroups(_layoutId, _chartId) {
+          const { query } = storageParams();
+          const payload = await api(`/lifecycles/${workspace.setupId}/tradingview-drawings?${query}`);
+          return payload.line_tools_state
+            ? deserializeTradingViewState(payload.line_tools_state)
+            : null;
+        },
+        async getAllStudyTemplates() { return []; },
+        async getStudyTemplateContent() { return null; },
+        async saveStudyTemplate() { return null; },
+        async removeStudyTemplate() { return true; },
+        async getDrawingTemplates() { return []; },
+        async loadDrawingTemplate() { return null; },
+        async saveDrawingTemplate() { return null; },
+        async removeDrawingTemplate() { return true; },
+      };
+    }
+
     async function renderTradingView(payload) {
       if (!widgetHost) return;
       await ensureTradingViewChartingLibrary();
       widgetHost.replaceChildren();
       const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
       const background = theme === "light" ? "#f3efff" : "#151021";
+      workspace.currentExchange = payload.setup.exchange;
+      workspace.currentSymbol = payload.setup.symbol;
       workspace.widget = new window.TradingView.widget({
         autosize: true,
         symbol: tradingViewSymbol(payload.setup.exchange, payload.setup.symbol),
-        interval: tradingViewInterval(workspace.timeframe),
+        interval: tradingViewInterval(workspace.timeframe || "1m"),
         datafeed: chartingLibraryDatafeed(payload),
         library_path: "/static/charting_library/",
         timezone: "Etc/UTC",
@@ -4689,13 +4906,28 @@
         locale: "en",
         toolbar_bg: theme === "light" ? "#f3efff" : "#151021",
         enable_publishing: false,
-        allow_symbol_change: false,
+        allow_symbol_change: true,
         hide_side_toolbar: false,
         withdateranges: true,
         save_image: true,
+        auto_save_delay: 3,
+        load_last_chart: true,
+        save_load_adapter: tradingViewStorageAdapter(),
+        drawings_access: { type: "black", tools: [] },
+        favorites: {
+          intervals: ["1", "3", "5", "15", "30", "60", "240", "D"],
+          chartTypes: ["Candles"],
+        },
         studies: [],
-        enabled_features: ["study_templates", "chart_property_page_trading"],
-        disabled_features: ["header_symbol_search", "symbol_search_hot_key"],
+        enabled_features: [
+          "study_templates",
+          "chart_property_page_trading",
+          "saveload_separate_drawings_storage",
+          "header_resolutions",
+          "symbol_search_hot_key",
+          "left_toolbar",
+        ],
+        disabled_features: [],
         overrides: {
           "paneProperties.background": background,
           "paneProperties.backgroundType": "solid",
@@ -4711,6 +4943,18 @@
         },
         container_id: "lifecycle-tradingview-widget",
       });
+      if (workspace.widget?.onChartReady) {
+        workspace.widget.onChartReady(() => {
+          setStatus("TradingView tools are ready. Drawings and layouts autosave for this symbol and timeframe.");
+          if (workspace.widget?.subscribe) {
+            workspace.widget.subscribe("onAutoSaveNeeded", () => {
+              if (typeof workspace.widget.saveChartToServer === "function") {
+                workspace.widget.saveChartToServer();
+              }
+            });
+          }
+        });
+      }
     }
 
     async function renderTradingViewLightweight(payload) {
@@ -4812,11 +5056,11 @@
     async function loadLifecycleChart(setupId, timeframe) {
       destroyChart();
       workspace.setupId = setupId;
-      workspace.timeframe = timeframe;
+      workspace.timeframe = timeframe || "1m";
       setStatus("Loading TradingView chart and deterministic evidence...");
       try {
         const payload = await api(
-          `/lifecycles/${setupId}/chart?timeframe=${encodeURIComponent(timeframe)}`,
+          `/lifecycles/${setupId}/chart?timeframe=${encodeURIComponent(workspace.timeframe)}`,
         );
         workspace.timeframe = payload.setup.selected_timeframe;
         title.textContent = `${payload.setup.symbol} - ${payload.setup.state_label}`;
@@ -4838,14 +5082,14 @@
         );
         try {
           await renderTradingView(payload);
-          setStatus("TradingView Charting Library is using deterministic lifecycle candles and condition marks.");
+          setStatus("TradingView Charting Library is using deterministic lifecycle candles, header controls, drawing tools, and saved drawings.");
         } catch (chartError) {
           try {
             await renderTradingViewLightweight(payload);
-            setStatus("TradingView Lightweight Charts rendered deterministic lifecycle candles and condition marks.");
+            setStatus(`${chartError.message} Showing the Lightweight Charts fallback, which does not include TradingView's vertical drawing toolbar or full header controls.`);
           } catch (fallbackError) {
             renderLifecycleNativeChart(payload, fallbackError);
-            setStatus("Native lifecycle chart rendered from deterministic candles and condition marks.");
+            setStatus(`${chartError.message} Native lifecycle chart rendered from deterministic candles and condition marks.`);
           }
         }
       } catch (error) {
@@ -4857,7 +5101,7 @@
     document.querySelectorAll("[data-lifecycle-chart]").forEach((button) => {
       button.addEventListener("click", () => {
         dialog.showModal();
-        loadLifecycleChart(button.dataset.lifecycleChart, button.dataset.timeframe || "15m");
+        loadLifecycleChart(button.dataset.lifecycleChart, "1m");
       });
     });
     async function closeDialog() {

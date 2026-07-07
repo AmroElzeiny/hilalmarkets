@@ -78,40 +78,32 @@ from ai_market_monitor.telegram.types import (
 )
 
 PRIMARY_MENU = [
-    "🔍 Quick Scan",
-    "📡 Create Monitor",
     "📋 My Monitors",
-    "🚦 Near-Miss Radar",
-    "🎬 Setup Replay",
-    "✅ Latest Alerts",
+    "🔄 Lifecycles",
     "🎁 Trial",
-    "💳 Subscription",
+    "💸 Pricing",
     "⚙️ Settings",
     "🆘 Support",
     "ℹ️ About",
 ]
 
-PRIMARY_MENU = [
-    item for item in PRIMARY_MENU if "Near-Miss Radar" not in item and "Setup Replay" not in item
-]
-PRIMARY_MENU.insert(3, "Lifecycles")
-
 MAIN_MENU_TEXT = (
-    "Home - Main Menu\n\n"
+    "🏠 Main Menu\n\n"
     "Welcome to TraceEdge.\n\n"
-    "Describe your setup once. I monitor crypto spot markets, show what is forming, "
-    "and send explainable alerts.\n\n"
-    "This is monitoring and decision support. It does not guarantee outcomes or place trades "
-    "for you."
+    "📈 I monitor approved crypto spot-market conditions.\n"
+    "🔄 Lifecycles show what is forming, complete, invalidated, or expired.\n"
+    "🧾 Alerts include deterministic proof.\n\n"
+    "Decision support only. It does not guarantee outcomes or place trades."
 )
 
 MAIN_MENU_BUTTONS = [
-    TelegramButton("🔍 Quick Scan", "quick_scan"),
-    TelegramButton("📡 Create Monitor", "create_monitor"),
-    TelegramButton("🎁 Claim Trial", "claim_trial"),
-    TelegramButton("View a Sample Alert", "sample_alert"),
-    TelegramButton("See How It Works", "how_it_works"),
-    TelegramButton("Sign up / sign in", "account:auth"),
+    TelegramButton("📋 My Monitors", "menu:my_monitors"),
+    TelegramButton("🔄 Lifecycles", "menu:latest_setups"),
+    TelegramButton("🎁 Trial", "account:signup"),
+    TelegramButton("💸 Pricing", "pricing"),
+    TelegramButton("⚙️ Settings", "dashboard:settings"),
+    TelegramButton("🆘 Support", "menu:support"),
+    TelegramButton("ℹ️ About", "menu:about"),
 ]
 
 MONITOR_FILTER_HELP = (
@@ -288,11 +280,11 @@ class TelegramBotService:
                 enabled=normalized.startswith("Enable"),
             )
         if normalized in {"Claim Trial", "Trial"}:
-            return await self._claim_trial(
-                self._callback_from_message(message, "claim_trial"), conversation
+            return await self._account_link_callback(
+                self._callback_from_message(message, "account:signup"), conversation
             )
         if normalized in {"View a Sample Alert", "Sample Alert"}:
-            return self._sample_alert_callback(self._callback_from_message(message, "sample_alert"))
+            return self._about_message(message)
         if normalized == "View Proof":
             return self._sample_proof_callback(self._callback_from_message(message, "sample_proof"))
         if normalized == "View Full Proof":
@@ -333,11 +325,7 @@ class TelegramBotService:
                 self._callback_from_message(message, "feedback:ignored"), conversation
             )
         if normalized == "See How It Works":
-            return self._plain(
-                message,
-                "1. Describe a setup.\n2. Review structured rules.\n"
-                "3. Approve the exact version.\n4. I monitor markets and explain alerts.",
-            )
+            return self._about_message(message)
         if normalized == "Open Main Website":
             return self._plain(
                 message,
@@ -350,7 +338,7 @@ class TelegramBotService:
                     )
                 ],
             )
-        if normalized == "Open Dashboard":
+        if normalized in {"Open Dashboard", "Dashboard"}:
             return await self._dashboard_callback(
                 self._callback_from_message(message, "dashboard:home"), conversation
             )
@@ -428,8 +416,8 @@ class TelegramBotService:
                 message,
                 "Draft rejected. Nothing was activated.",
                 buttons=[
-                    TelegramButton("Create Monitor", "create_monitor"),
-                    TelegramButton("My Monitors", "dashboard:monitors"),
+                    TelegramButton("Dashboard", "dashboard:builder"),
+                    TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
         if normalized == "Cancel":
@@ -452,34 +440,26 @@ class TelegramBotService:
             }[normalized]
             return await self._billing_checkout_message(message, conversation, plan_code)
         if normalized in {"Back", "Go Back", "Main Menu"}:
-            return await self._previous_message(message, conversation)
+            return await self._main_menu_message(message, conversation)
         if normalized == "Create Monitor":
-            await self._push_navigation(conversation, "create_monitor")
-            return await self._begin_create_monitor(message, conversation)
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:builder"), conversation
+            )
         if normalized == "Quick Scan":
-            await self._push_navigation(conversation, "quick_scan")
-            conversation.flow = "light_scan"
-            conversation.step = "collect_prompt"
-            await self.session.commit()
-            return self._plain(
-                message,
-                "Quick Scan\n\nDescribe what you want to find in one sentence. "
-                "Example: RSI crosses back above 30, price is above the 4h EMA 200, "
-                "and volume is at least 1.5x average.\n\n"
-                "Use words like must/only if for required rules. Use prefer/optional "
-                "for non-blocking confirmations.\n\n"
-                "This runs a lightweight scan without saving or activating a monitor.",
-                buttons=[TelegramButton("Go Back", "back:previous")],
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:scan"), conversation
             )
         if normalized in {"My Monitors", "My Drafts"}:
             await self._push_navigation(conversation, "menu:my_monitors")
             return await self._my_monitors(message, conversation)
         if normalized in {"Use Existing Strategy", "Previous Scans"}:
-            await self._push_navigation(conversation, "menu:scan_market_now")
-            return await self._scan_market_now(message, conversation)
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:scan"), conversation
+            )
         if normalized == "Describe New Condition":
-            await self._push_navigation(conversation, "create_monitor")
-            return await self._begin_create_monitor(message, conversation)
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:builder"), conversation
+            )
         if normalized == "Top Near-Misses":
             await self._push_navigation(conversation, "menu:latest_setups")
             return await self._latest_setups(message, conversation)
@@ -490,8 +470,7 @@ class TelegramBotService:
             await self._push_navigation(conversation, "menu:latest_setups")
             return await self._latest_setups(message, conversation, category=normalized.lower())
         if normalized in {"Usage and Limits", "Manage Billing", "Compare Plans"}:
-            await self._push_navigation(conversation, "menu:subscription")
-            return await self._subscription(message, conversation)
+            return self._pricing_message(message)
         if normalized in {
             "Alert Channels",
             "Alert Schedule",
@@ -501,7 +480,9 @@ class TelegramBotService:
             "Near-Miss Alerts",
             "Time Zone",
         }:
-            return await self._settings_choice(message, conversation, normalized)
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:settings"), conversation
+            )
         if normalized in {
             "Report Missing Alert",
             "Technical Issue",
@@ -514,26 +495,24 @@ class TelegramBotService:
                 "Billing Issue": "billing",
                 "Strategy Help": "strategy_help",
             }[normalized]
-            return await self._support(
-                self._callback_from_message(message, f"support:{category}"), conversation
-            )
+            return self._support_menu_message(message)
         if normalized in {"Scan Market Now", "Quick Scan"}:
-            await self._push_navigation(conversation, "menu:scan_market_now")
-            return await self._scan_market_now(message, conversation)
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:scan"), conversation
+            )
         if conversation.flow == "light_scan" and conversation.step == "collect_prompt":
             return await self._run_light_scan_message(message, conversation)
         if normalized in {"Near-Miss Radar", "Lifecycles"}:
             await self._push_navigation(conversation, "menu:latest_setups")
             return await self._latest_setups(message, conversation)
         if normalized == "Latest Alerts":
-            await self._push_navigation(conversation, "menu:latest_alerts")
             return await self._latest_alerts(message, conversation)
         if normalized == "Trial":
-            await self._push_navigation(conversation, "menu:trial")
-            return await self._trial(message, conversation)
-        if normalized == "Subscription":
-            await self._push_navigation(conversation, "menu:subscription")
-            return await self._subscription(message, conversation)
+            return await self._account_link_callback(
+                self._callback_from_message(message, "account:signup"), conversation
+            )
+        if normalized in {"Subscription", "Pricing"}:
+            return self._pricing_message(message)
         if normalized == "Performance":
             await self._push_navigation(conversation, "menu:performance")
             return self._plain(
@@ -544,67 +523,13 @@ class TelegramBotService:
                 buttons=self._back_buttons("dashboard:performance"),
             )
         if normalized == "About":
-            await self._push_navigation(conversation, "menu:about")
-            return self._plain(
-                message,
-                "About TraceEdge\n\n"
-                "It monitors approved crypto spot-market setups and sends explainable "
-                "decision-support alerts. It does not place trades, request withdrawal "
-                "permissions, or guarantee outcomes.\n\n"
-                "Lifecycles show markets close to your rules. Proof Receipts show "
-                "required versus actual values for every deterministic condition.\n\n"
-                f"Dashboard: {self._dashboard_url('/dashboard')}\n"
-                f"Pricing: {self._dashboard_url('/pricing')}\n"
-                f"Risk: {self._dashboard_url('/risk')}",
-                buttons=self._back_buttons("dashboard:about"),
-            )
+            return self._about_message(message)
         if normalized == "Settings":
-            await self._push_navigation(conversation, "menu:settings")
-            return self._plain(
-                message,
-                "Settings\n\nChoose what you want to adjust.",
-                buttons=[
-                    TelegramButton("Alert Channels", "settings:channels"),
-                    TelegramButton("Alert Frequency", "settings:frequency"),
-                    TelegramButton("Near-Miss Threshold", "settings:threshold"),
-                    TelegramButton("Time Zone", "settings:timezone"),
-                    TelegramButton("Open Dashboard", "dashboard:settings"),
-                    TelegramButton("Go Back", "back:previous"),
-                ],
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:settings"), conversation
             )
         if normalized == "Support":
-            await self._push_navigation(conversation, "menu:support")
-            contact_lines = []
-            if self.settings.support_telegram_username:
-                contact_lines.append(
-                    f"Telegram: https://t.me/{self.settings.support_telegram_username}"
-                )
-            if self.settings.support_email:
-                contact_lines.append(f"Email: {self.settings.support_email}")
-            contact = "\n".join(contact_lines) or "Support contact placeholders are not configured."
-            return self._plain(
-                message,
-                "Support options:\n- Report incorrect alert\n- Report missing alert\n"
-                "- Billing issue\n- Technical issue\n- Request custom strategy\n\n" + contact,
-                buttons=[
-                    *(
-                        [
-                            TelegramButton(
-                                "Message Support",
-                                "external:support",
-                                url=f"https://t.me/{self.settings.support_telegram_username}",
-                            )
-                        ]
-                        if self.settings.support_telegram_username
-                        else []
-                    ),
-                    TelegramButton("Report Missing Alert", "support:missing_alert"),
-                    TelegramButton("Technical Issue", "support:technical_issue"),
-                    TelegramButton("Billing Issue", "support:billing"),
-                    TelegramButton("Strategy Help", "support:strategy_help"),
-                    TelegramButton("Go Back", "back:previous"),
-                ],
-            )
+            return self._support_menu_message(message)
         if normalized == "Setup Replay":
             await self._push_navigation(conversation, "menu:latest_setups")
             return await self._latest_setups(message, conversation)
@@ -691,9 +616,19 @@ class TelegramBotService:
                     callback.data, callback, conversation
                 ) or self._plain_callback(callback, "That menu is no longer available.")
             elif callback.data == "claim_trial":
-                response = await self._claim_trial(callback, conversation)
+                response = await self._account_link_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="account:signup",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
             elif callback.data == "sample_alert":
-                response = self._sample_alert_callback(callback)
+                response = self._about_callback(callback)
             elif callback.data == "sample_proof":
                 response = self._sample_proof_callback(callback)
             elif callback.data == "mute_near_miss":
@@ -706,23 +641,32 @@ class TelegramBotService:
             elif callback.data in {"proof:view", "mute_strategy", "ignore_symbol"}:
                 response = await self._utility_callback(callback, conversation)
             elif callback.data == "how_it_works":
-                response = self._plain_callback(
-                    callback,
-                    "1. Describe a setup.\n2. Review structured rules.\n"
-                    "3. Approve the exact version.\n4. I monitor markets and explain alerts.",
-                    buttons=self._back_buttons("dashboard:how"),
-                )
+                response = self._about_callback(callback)
+            elif callback.data == "pricing":
+                response = self._pricing_callback(callback)
             elif callback.data == "create_monitor":
-                response = await self._begin_create_monitor_callback(callback, conversation)
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:builder",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
             elif callback.data == "quick_scan":
-                conversation.flow = "light_scan"
-                conversation.step = "collect_prompt"
-                await self.session.flush()
-                response = self._plain_callback(
-                    callback,
-                    "Quick Scan\n\nDescribe what you want to find in one sentence. "
-                    "I will run a lightweight scan without saving or activating a monitor.",
-                    buttons=self._back_buttons("back:main"),
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:scan",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
                 )
             elif callback.data == "mode_describe":
                 conversation.flow = "create_monitor"
@@ -768,7 +712,17 @@ class TelegramBotService:
             elif callback.data == "explain_rule":
                 response = await self._explain_current_strategy_callback(callback, conversation)
             elif callback.data == "back:create":
-                response = await self._begin_create_monitor_callback(callback, conversation)
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:builder",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
             elif callback.data == "billing:free":
                 response = await self._activate_free_plan_message(
                     self._message_from_callback(callback),
@@ -789,21 +743,53 @@ class TelegramBotService:
                     UUID(strategy_id),
                 )
             elif callback.data == "scan:template":
-                response = self._scan_template_menu_callback(callback)
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:scan",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
             elif callback.data.startswith("scan_provider:"):
-                response = await self._set_scan_provider(callback, conversation)
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:scan",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
             elif callback.data == "scan:new":
-                conversation.flow = "light_scan"
-                conversation.step = "collect_prompt"
-                await self.session.flush()
-                response = self._plain_callback(
-                    callback,
-                    "Quick Scan\n\nDescribe the market condition you want to find. "
-                    "This runs a one-off scan without saving a live monitor.",
-                    buttons=self._back_buttons("back:main"),
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:scan",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
                 )
             elif callback.data.startswith("scan_template:"):
-                response = await self._run_light_scan_template(callback, conversation)
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:scan",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
             elif callback.data == "near:top":
                 response = await self._latest_setups(
                     self._message_from_callback(callback), conversation
@@ -819,43 +805,81 @@ class TelegramBotService:
                     category=callback.data.partition(":")[2],
                 )
             elif callback.data.startswith("settings:day:"):
-                response = await self._set_alert_day(
-                    self._message_from_callback(callback),
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:settings",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
                     conversation,
-                    callback.data.partition("settings:day:")[2],
                 )
             elif callback.data.startswith("settings:hour:"):
-                response = await self._toggle_alert_hour(
-                    self._message_from_callback(callback),
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:settings",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
                     conversation,
-                    callback.data.partition("settings:hour:")[2],
                 )
             elif callback.data.startswith("settings:near_miss:"):
-                response = await self._set_near_miss_preference(
-                    self._message_from_callback(callback),
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:settings",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
                     conversation,
-                    enabled=callback.data.endswith(":on"),
                 )
             elif callback.data.startswith("settings:timezone:"):
-                response = await self._set_timezone_preference(
-                    self._message_from_callback(callback),
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:settings",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
                     conversation,
-                    callback.data.partition("settings:timezone:")[2],
                 )
             elif callback.data.startswith("settings:"):
-                action = callback.data.partition(":")[2]
-                label = {
-                    "channels": "Alert Channels",
-                    "days": "Alert Days",
-                    "hours": "Alert Hours",
-                    "near_miss": "Near-Miss Alerts",
-                    "timezone": "Time Zone",
-                }.get(action, action)
-                response = await self._settings_choice(
-                    self._message_from_callback(callback), conversation, label
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:settings",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
                 )
             elif callback.data.startswith("dashboard:"):
                 response = await self._dashboard_callback(callback, conversation)
+            elif callback.data.startswith("dashboard_lifecycle:"):
+                response = await self._dashboard_callback(
+                    TelegramCallback(
+                        callback_query_id=callback.callback_query_id,
+                        telegram_user_id=callback.telegram_user_id,
+                        chat_id=callback.chat_id,
+                        data="dashboard:lifecycles",
+                        message_id=callback.message_id,
+                        created_at=callback.created_at,
+                    ),
+                    conversation,
+                )
+            elif callback.data.startswith("mute_symbol:"):
+                response = await self._mute_symbol_from_alert(callback, conversation)
             elif callback.data.startswith("mute_strategy:"):
                 response = await self._mute_strategy_from_alert(callback, conversation)
             elif callback.data in {
@@ -886,12 +910,9 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_confirmed_alert(result),
             buttons=[
-                TelegramButton("View Full Proof", "proof:view"),
-                TelegramButton("Open Chart", "external:chart", url=self._chart_url(result)),
-                TelegramButton("Mark Entered", "feedback:entered"),
-                TelegramButton("Ignore", "feedback:ignored"),
-                TelegramButton("Mute Strategy", "mute_strategy"),
-                TelegramButton("Open Dashboard", "open_dashboard"),
+                TelegramButton("🔄 View lifecycle", "dashboard:lifecycles"),
+                TelegramButton("📊 Dashboard", "open_dashboard"),
+                TelegramButton("🔕 Mute symbol", "mute_strategy"),
             ],
             menu=[],
         )
@@ -903,8 +924,9 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_lifecycle_update(result),
             buttons=[
-                TelegramButton("View Proof", "proof:view"),
-                TelegramButton("Open Chart", "external:chart", url=self._chart_url(result)),
+                TelegramButton("🔄 View lifecycle", "dashboard:lifecycles"),
+                TelegramButton("📊 Dashboard", "open_dashboard"),
+                TelegramButton("🔕 Mute symbol", "mute_strategy"),
             ],
             menu=[],
         )
@@ -938,9 +960,8 @@ class TelegramBotService:
             "Risk acknowledgement now appears after your setup is interpreted and previewed, "
             "right before live activation. Trial claiming requires sign-up first.",
             buttons=[
-                TelegramButton("Create Monitor", "create_monitor"),
                 TelegramButton("Sign up / sign in", "account:auth"),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -974,7 +995,7 @@ class TelegramBotService:
         if preference is None:
             preference = DashboardPreference(
                 user_id=conversation.user_id,
-                theme="dark",
+                theme="light",
                 default_timezone="UTC",
             )
             self.session.add(preference)
@@ -1007,23 +1028,99 @@ class TelegramBotService:
             ],
         )
 
+    async def _mute_symbol_from_alert(
+        self,
+        callback: TelegramCallback,
+        conversation: TelegramConversationState,
+    ) -> TelegramOutboundMessage:
+        raw_alert_id = callback.data.partition(":")[2]
+        try:
+            alert_id = UUID(raw_alert_id)
+        except ValueError:
+            return self._plain_callback(
+                callback,
+                "This symbol mute action has expired.",
+                buttons=[TelegramButton("🏠 Main Menu", "back:main")],
+            )
+        alert = await self.session.get(Alert, alert_id)
+        if alert is None or alert.user_id != conversation.user_id:
+            return self._plain_callback(
+                callback,
+                "This alert action is unavailable or belongs to another account.",
+                buttons=[TelegramButton("🏠 Main Menu", "back:main")],
+            )
+        proof = alert.proof_receipt or {}
+        symbol = str(proof.get("symbol") or "").upper()
+        if not symbol or alert.strategy_version_id is None:
+            return self._plain_callback(
+                callback,
+                "This alert does not include enough strategy-symbol context to mute safely.",
+                buttons=[
+                    TelegramButton("Dashboard", "dashboard:settings"),
+                    TelegramButton("🏠 Main Menu", "back:main"),
+                ],
+            )
+        preference = await self.session.scalar(
+            select(DashboardPreference).where(
+                DashboardPreference.user_id == conversation.user_id
+            )
+        )
+        if preference is None:
+            preference = DashboardPreference(
+                user_id=conversation.user_id,
+                theme="light",
+                default_timezone="UTC",
+            )
+            self.session.add(preference)
+        settings = dict(preference.notification_preferences or {})
+        muted_by_strategy = {
+            str(key): list(value or [])
+            for key, value in (settings.get("muted_strategy_symbols", {}) or {}).items()
+        }
+        version_key = str(alert.strategy_version_id)
+        symbols = {str(item).upper() for item in muted_by_strategy.get(version_key, [])}
+        symbols.add(symbol)
+        muted_by_strategy[version_key] = sorted(symbols)
+        settings["muted_strategy_symbols"] = muted_by_strategy
+        preference.notification_preferences = settings
+        self.session.add(
+            AuditEvent(
+                actor_user_id=conversation.user_id,
+                actor_type="telegram_user",
+                action="strategy_symbol.notifications_muted",
+                target_type="alert",
+                target_id=str(alert.id),
+                metadata_redacted={
+                    "strategy_version_id": version_key,
+                    "symbol": symbol,
+                    "source": "telegram_alert_action",
+                },
+                created_at=datetime.now(UTC),
+            )
+        )
+        await self.session.commit()
+        return self._plain_callback(
+            callback,
+            f"🔕 Muted {symbol} for this strategy. Future setups from this pair will not be delivered.",
+            buttons=[
+                TelegramButton("🔄 Lifecycles", "dashboard:lifecycles"),
+                TelegramButton("🏠 Main Menu", "back:main"),
+            ],
+        )
+
     @staticmethod
     def _main_menu_buttons(*, linked: bool, trial_claimed: bool = False) -> list[TelegramButton]:
         buttons = [
-            TelegramButton("🔍 Quick Scan", "quick_scan"),
-            TelegramButton("📡 Create Monitor", "create_monitor"),
-            TelegramButton("View a Sample Alert", "sample_alert"),
-            TelegramButton("See How It Works", "how_it_works"),
+            TelegramButton("📋 My Monitors", "menu:my_monitors"),
+            TelegramButton("🔄 Lifecycles", "menu:latest_setups"),
+            TelegramButton("🎁 Trial", "account:signup"),
+            TelegramButton("💸 Pricing", "pricing"),
+            TelegramButton("⚙️ Settings", "dashboard:settings"),
+            TelegramButton("🆘 Support", "menu:support"),
+            TelegramButton("ℹ️ About", "menu:about"),
         ]
-        if not trial_claimed:
-            buttons.insert(2, TelegramButton("🎁 Claim Trial", "claim_trial"))
         if linked:
-            buttons.extend(
-                [
-                    TelegramButton("💳 Subscription", "menu:subscription"),
-                    TelegramButton("Open Dashboard", "open_dashboard"),
-                ]
-            )
+            buttons.insert(0, TelegramButton("📊 Dashboard", "open_dashboard"))
         else:
             buttons.append(TelegramButton("Sign up / sign in", "account:auth"))
         return buttons
@@ -1035,11 +1132,13 @@ class TelegramBotService:
             "🔍 ",
             "📡 ",
             "📋 ",
+            "🔄 ",
             "🚦 ",
             "🎬 ",
             "✅ ",
             "🎁 ",
             "💳 ",
+            "💸 ",
             "⚙ ",
             "🆘 ",
             "ℹ ",
@@ -1048,6 +1147,9 @@ class TelegramBotService:
         legacy = {
             "Why No Alert?": "Lifecycles",
             "Latest Setups": "Lifecycles",
+            "Subscription": "Pricing",
+            "Pricings": "Pricing",
+            "See How It Works": "About",
         }
         return legacy.get(normalized, normalized)
 
@@ -1073,7 +1175,7 @@ class TelegramBotService:
             message,
             text,
             buttons=[
-                *([] if trial_claimed else [TelegramButton("Claim Trial", "claim_trial")]),
+                TelegramButton("Claim trial", "account:signup"),
                 TelegramButton(
                     "Open Main Website",
                     "external:website",
@@ -1081,7 +1183,93 @@ class TelegramBotService:
                 ),
                 *([] if linked else [TelegramButton("Sign up / sign in", "account:auth")]),
             ],
-            menu=["Open Main Website"] if trial_claimed else ["Claim Trial", "Open Main Website"],
+            menu=["Trial", "About"],
+        )
+
+    def _about_text(self) -> str:
+        return (
+            "ℹ️ About TraceEdge\n\n"
+            "📌 What it does:\n"
+            "- Monitors approved crypto spot-market conditions.\n"
+            "- Tracks setup lifecycles from forming to complete, invalidated, or expired.\n"
+            "- Sends compact alerts with deterministic proof.\n\n"
+            "🧠 How it works:\n"
+            "1. You describe what to watch in the Dashboard.\n"
+            "2. AI converts words into structured rules.\n"
+            "3. You approve the interpretation.\n"
+            "4. The deterministic scanner monitors markets.\n\n"
+            "🛡️ What it does not do:\n"
+            "- It does not place trades.\n"
+            "- It does not guarantee outcomes.\n"
+            "- It does not ask for wallet seed phrases or withdrawal keys.\n\n"
+            "Use Telegram for quick status and alerts. Use Dashboard for monitor building, "
+            "settings, tickets, and billing."
+        )
+
+    def _about_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
+        return self._plain(
+            message,
+            self._about_text(),
+            buttons=[
+                TelegramButton("📊 Dashboard", "dashboard:home"),
+                TelegramButton("💸 Pricing", "pricing"),
+                TelegramButton("🏠 Main Menu", "back:main"),
+            ],
+        )
+
+    def _about_callback(self, callback: TelegramCallback) -> TelegramOutboundMessage:
+        return self._plain_callback(
+            callback,
+            self._about_text(),
+            buttons=[
+                TelegramButton("📊 Dashboard", "dashboard:home"),
+                TelegramButton("💸 Pricing", "pricing"),
+                TelegramButton("🏠 Main Menu", "back:main"),
+            ],
+        )
+
+    def _pricing_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
+        pricing_url = self._dashboard_url("/pricing#pricing")
+        return self._plain(
+            message,
+            "💸 Pricing\n\nCompare plans on the public pricing page.",
+            buttons=[
+                TelegramButton("Open Pricing", "external:pricing", url=pricing_url),
+                TelegramButton("🏠 Main Menu", "back:main"),
+            ],
+        )
+
+    def _pricing_callback(self, callback: TelegramCallback) -> TelegramOutboundMessage:
+        pricing_url = self._dashboard_url("/pricing#pricing")
+        return self._plain_callback(
+            callback,
+            "💸 Pricing\n\nCompare plans on the public pricing page.",
+            buttons=[
+                TelegramButton("Open Pricing", "external:pricing", url=pricing_url),
+                TelegramButton("🏠 Main Menu", "back:main"),
+            ],
+        )
+
+    def _support_menu_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
+        buttons = []
+        if self.settings.support_telegram_username:
+            buttons.append(
+                TelegramButton(
+                    "Telegram support",
+                    "external:support",
+                    url=f"https://t.me/{self.settings.support_telegram_username}",
+                )
+            )
+        buttons.extend(
+            [
+                TelegramButton("Create a ticket", "dashboard:support"),
+                TelegramButton("🏠 Main Menu", "back:main"),
+            ]
+        )
+        return self._plain(
+            message,
+            "🆘 Support\n\nChoose one option. Tickets are created in Dashboard so context and screenshots stay attached.",
+            buttons=buttons,
         )
 
     @staticmethod
@@ -1189,7 +1377,7 @@ class TelegramBotService:
                 buttons=[
                     TelegramButton("Sign up", "account:signup"),
                     TelegramButton("Sign in", "account:signin"),
-                    TelegramButton("Go Back", "back:previous"),
+                    TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
         try:
@@ -1208,8 +1396,8 @@ class TelegramBotService:
                 callback,
                 text,
                 buttons=[
-                    TelegramButton("Create Monitor", "create_monitor"),
-                    TelegramButton("Open Dashboard", "open_dashboard"),
+                    TelegramButton("Dashboard", "open_dashboard"),
+                    TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
         except TrialError as exc:
@@ -1893,8 +2081,8 @@ class TelegramBotService:
             buttons=[
                 TelegramButton("Top Near-Misses", "near:top"),
                 TelegramButton("One Condition Remaining", "near:one_left"),
-                TelegramButton("Open Dashboard", "dashboard:near_miss"),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("Dashboard", "dashboard:lifecycles"),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -1914,12 +2102,12 @@ class TelegramBotService:
         ).all()
         if strategies:
             lines = [
-                f"{index}. {strategy.name} - {strategy.status.value}"
+                f"{index}. {strategy.name} - {strategy.status.value.replace('_', ' ')}"
                 for index, strategy in enumerate(strategies[:10], start=1)
             ]
-            text = "My Monitors\n\n" + "\n".join(lines) + "\n\nChoose a numbered action below."
+            text = "📋 My Monitors\n\n" + "\n".join(lines) + "\n\nManage changes in Dashboard."
         else:
-            text = "My Monitors\n\nNo monitors yet. Create one from a template or description."
+            text = "📋 My Monitors\n\nNo monitors yet. Create your first monitor in Dashboard."
         state = dict(conversation.state_data or {})
         state["monitor_index_map"] = {
             str(index): str(strategy.id) for index, strategy in enumerate(strategies[:10], start=1)
@@ -1928,32 +2116,14 @@ class TelegramBotService:
         await self.session.flush()
         control_buttons: list[TelegramButton] = []
         for index, strategy in enumerate(strategies[:5], start=1):
-            if strategy.status == StrategyStatus.ACTIVE:
-                control_buttons.append(
-                    TelegramButton(f"Pause #{index}", f"monitor:pause:{strategy.id}")
-                )
-            elif strategy.status == StrategyStatus.PAUSED:
-                control_buttons.append(
-                    TelegramButton(f"Resume #{index}", f"monitor:resume:{strategy.id}")
-                )
-            elif strategy.status == StrategyStatus.DRAFT:
-                control_buttons.append(
-                    TelegramButton(f"Approve #{index}", f"monitor:approve:{strategy.id}")
-                )
-            control_buttons.extend(
-                [
-                    TelegramButton(f"Edit #{index}", f"monitor:edit:{strategy.id}"),
-                    TelegramButton(f"Delete #{index}", f"monitor:delete:{strategy.id}"),
-                ]
-            )
+            control_buttons.append(TelegramButton(f"Manage #{index}", "dashboard:monitors"))
         return self._plain(
             message,
             text,
             buttons=[
                 *control_buttons,
-                TelegramButton("Create Monitor", "create_monitor"),
-                TelegramButton("Open Dashboard", "dashboard:monitors"),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("Dashboard", "dashboard:monitors"),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -2037,8 +2207,8 @@ class TelegramBotService:
                 TelegramButton("Forming", "latest:forming"),
                 TelegramButton("Invalidated", "latest:invalidated"),
                 TelegramButton("Expired", "latest:expired"),
-                TelegramButton("Open Lifecycles", "dashboard:lifecycles"),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("Dashboard", "dashboard:lifecycles"),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -2047,46 +2217,7 @@ class TelegramBotService:
         message: TelegramInboundMessage,
         conversation: TelegramConversationState,
     ) -> TelegramOutboundMessage:
-        user_id = self._require_user_id(conversation)
-        alerts = (
-            await self.session.scalars(
-                select(Alert)
-                .where(Alert.user_id == user_id)
-                .order_by(Alert.created_at.desc())
-                .limit(8)
-            )
-        ).all()
-        if alerts:
-            lines = []
-            for alert in alerts:
-                proof = alert.proof_receipt or {}
-                trust = proof.get("alert_trust_score") or {}
-                score = proof.get("setup_completion_score")
-                score_text = f"{float(score):.0f}%" if isinstance(score, int | float) else "n/a"
-                trust_text = (
-                    f"{trust.get('grade', 'n/a')} {float(trust.get('score')):.0f}%"
-                    if isinstance(trust.get("score"), int | float)
-                    else str(trust.get("grade", "n/a"))
-                )
-                lines.append(
-                    f"- {alert.title}: {proof.get('symbol', 'Market')} "
-                    f"score {score_text}, trust {trust_text}"
-                )
-            text = "Latest Alerts\n\n" + "\n".join(lines)
-        else:
-            text = (
-                "Latest Alerts\n\nNo alerts yet. Confirmed setups, Near-Miss alerts, "
-                "lifecycle updates, reliability notices and trial messages will appear here."
-            )
-        return self._plain(
-            message,
-            text,
-            buttons=[
-                TelegramButton("Open Lifecycles", "dashboard:lifecycles"),
-                TelegramButton("Lifecycles", "dashboard:lifecycles"),
-                TelegramButton("Go Back", "back:previous"),
-            ],
-        )
+        return await self._latest_setups(message, conversation)
 
     async def _subscription(
         self, message: TelegramInboundMessage, conversation: TelegramConversationState
@@ -2126,25 +2257,8 @@ class TelegramBotService:
     async def _trial(
         self, message: TelegramInboundMessage, conversation: TelegramConversationState
     ) -> TelegramOutboundMessage:
-        trial = await self.session.scalar(
-            select(Trial).where(Trial.user_id == conversation.user_id)
-        )
-        if trial is None:
-            return self._plain(
-                message,
-                "Trial\n\nYou have not claimed the conditional monitoring trial yet.",
-                buttons=[TelegramButton("Claim Trial", "claim_trial")],
-            )
-        return self._plain(
-            message,
-            f"Trial\n\nStatus: {trial.status.value}\nEnds: {trial.ends_at.isoformat()}\n"
-            "Renewal rule: if no qualifying live alert is successfully delivered during a "
-            "cycle, the trial can renew automatically unless the account is ineligible.",
-            buttons=[
-                TelegramButton("Trial Status", "dashboard:trial"),
-                TelegramButton("Upgrade", "dashboard:billing"),
-                TelegramButton("Go Back", "back:previous"),
-            ],
+        return await self._account_link_callback(
+            self._callback_from_message(message, "account:signup"), conversation
         )
 
     async def _main_menu_message(
@@ -2208,7 +2322,7 @@ class TelegramBotService:
         if action == "menu:trial":
             return await self._trial(message, conversation)
         if action == "menu:subscription":
-            return await self._subscription(message, conversation)
+            return self._pricing_message(message)
         if action == "menu:performance":
             return self._plain(
                 message,
@@ -2218,19 +2332,7 @@ class TelegramBotService:
                 buttons=self._back_buttons("dashboard:performance"),
             )
         if action == "menu:about":
-            return self._plain(
-                message,
-                "About TraceEdge\n\n"
-                "It monitors approved crypto spot-market setups and sends explainable "
-                "decision-support alerts. It does not place trades, request withdrawal "
-                "permissions, or guarantee outcomes.\n\n"
-                "Lifecycles show markets close to your rules. Proof Receipts show "
-                "required versus actual values for every deterministic condition.\n\n"
-                f"Dashboard: {self._dashboard_url('/dashboard')}\n"
-                f"Pricing: {self._dashboard_url('/pricing')}\n"
-                f"Risk: {self._dashboard_url('/risk')}",
-                buttons=self._back_buttons("dashboard:about"),
-            )
+            return self._about_message(message)
         if action == "menu:connect_discord":
             return self._plain(
                 message,
@@ -2239,51 +2341,11 @@ class TelegramBotService:
                 buttons=self._back_buttons("dashboard:connections"),
             )
         if action == "menu:settings":
-            return self._plain(
-                message,
-                "Settings\n\nChoose what you want to adjust.",
-                buttons=[
-                    TelegramButton("Alert Channels", "settings:channels"),
-                    TelegramButton("Alert Days", "settings:days"),
-                    TelegramButton("Alert Hours", "settings:hours"),
-                    TelegramButton("Near-Miss Alerts", "settings:near_miss"),
-                    TelegramButton("Time Zone", "settings:timezone"),
-                    TelegramButton("Open Dashboard", "dashboard:settings"),
-                    TelegramButton("Go Back", "back:previous"),
-                ],
+            return await self._dashboard_callback(
+                self._callback_from_message(message, "dashboard:settings"), conversation
             )
         if action == "menu:support":
-            contact_lines = []
-            if self.settings.support_telegram_username:
-                contact_lines.append(
-                    f"Telegram: https://t.me/{self.settings.support_telegram_username}"
-                )
-            if self.settings.support_email:
-                contact_lines.append(f"Email: {self.settings.support_email}")
-            contact = "\n".join(contact_lines) or "Support contact placeholders are not configured."
-            return self._plain(
-                message,
-                "Support options:\n- Report incorrect alert\n- Report missing alert\n"
-                "- Billing issue\n- Technical issue\n- Request custom strategy\n\n" + contact,
-                buttons=[
-                    *(
-                        [
-                            TelegramButton(
-                                "Message Support",
-                                "external:support",
-                                url=f"https://t.me/{self.settings.support_telegram_username}",
-                            )
-                        ]
-                        if self.settings.support_telegram_username
-                        else []
-                    ),
-                    TelegramButton("Report Missing Alert", "support:missing_alert"),
-                    TelegramButton("Technical Issue", "support:technical_issue"),
-                    TelegramButton("Billing Issue", "support:billing"),
-                    TelegramButton("Strategy Help", "support:strategy_help"),
-                    TelegramButton("Go Back", "back:previous"),
-                ],
-            )
+            return self._support_menu_message(message)
         if action in {"menu:why_no_alert", "menu:setup_replay"}:
             await self._push_navigation(conversation, "menu:latest_setups")
             return await self._latest_setups(message, conversation)
@@ -2659,7 +2721,17 @@ class TelegramBotService:
         conversation: TelegramConversationState,
     ) -> TelegramOutboundMessage | None:
         if action == "create_monitor":
-            return await self._begin_create_monitor_callback(callback, conversation)
+            return await self._dashboard_callback(
+                TelegramCallback(
+                    callback_query_id=callback.callback_query_id,
+                    telegram_user_id=callback.telegram_user_id,
+                    chat_id=callback.chat_id,
+                    data="dashboard:builder",
+                    message_id=callback.message_id,
+                    created_at=callback.created_at,
+                ),
+                conversation,
+            )
         message_screen = await self._render_message_screen(
             action, self._message_from_callback(callback), conversation
         )
@@ -2682,16 +2754,13 @@ class TelegramBotService:
         if action == "account:auth":
             return self._account_auth_callback(callback)
         if action == "sample_alert":
-            return self._sample_alert_callback(callback)
+            return self._about_callback(callback)
         if action == "sample_proof":
             return self._sample_proof_callback(callback)
         if action == "how_it_works":
-            return self._plain_callback(
-                callback,
-                "1. Describe a setup.\n2. Review structured rules.\n"
-                "3. Approve the exact version.\n4. I monitor markets and explain alerts.",
-                buttons=self._back_buttons("dashboard:how"),
-            )
+            return self._about_callback(callback)
+        if action == "pricing":
+            return self._pricing_callback(callback)
         if self._is_utility_action(action):
             utility_callback = TelegramCallback(
                 callback_query_id=callback.callback_query_id,
@@ -2707,41 +2776,7 @@ class TelegramBotService:
     async def _previous_message(
         self, message: TelegramInboundMessage, conversation: TelegramConversationState
     ) -> TelegramOutboundMessage:
-        state = dict(conversation.state_data or {})
-        stack = [str(item) for item in state.get("nav_stack", [])]
-        if len(stack) <= 1:
-            state["nav_stack"] = []
-            state.pop("current_screen", None)
-            conversation.state_data = state
-            await self.session.commit()
-            return self._plain(
-                message,
-                MAIN_MENU_TEXT,
-                buttons=self._main_menu_buttons(
-                    linked=await self._has_email_identity(self._require_user_id(conversation)),
-                    trial_claimed=await self._has_claimed_trial(
-                        self._require_user_id(conversation)
-                    ),
-                ),
-            )
-        stack.pop()
-        previous = stack[-1]
-        state["nav_stack"] = stack
-        state["current_screen"] = previous
-        conversation.state_data = state
-        await self.session.flush()
-        previous_response = await self._render_message_screen(previous, message, conversation)
-        if previous_response is not None:
-            return previous_response
-        await self.session.commit()
-        return self._plain(
-            message,
-            MAIN_MENU_TEXT,
-            buttons=self._main_menu_buttons(
-                linked=await self._has_email_identity(self._require_user_id(conversation)),
-                trial_claimed=await self._has_claimed_trial(self._require_user_id(conversation)),
-            ),
-        )
+        return await self._main_menu_message(message, conversation)
 
     async def _utility_callback(
         self, callback: TelegramCallback, conversation: TelegramConversationState
@@ -2829,34 +2864,24 @@ class TelegramBotService:
             "Feedback recorded. I will not change your strategy without explicit approval.",
             buttons=[
                 TelegramButton("Lifecycles", "dashboard:lifecycles"),
-                TelegramButton("Open Dashboard", "open_dashboard"),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("Dashboard", "open_dashboard"),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
     async def _support(
         self, callback: TelegramCallback, conversation: TelegramConversationState
     ) -> TelegramOutboundMessage:
-        category = callback.data.partition(":")[2] or "support"
-        contact_lines = []
-        buttons = []
-        if self.settings.support_telegram_username:
-            support_url = f"https://t.me/{self.settings.support_telegram_username}"
-            contact_lines.append(f"Telegram: {support_url}")
-            buttons.append(TelegramButton("Message Support", "external:support", url=support_url))
-        if self.settings.support_email:
-            contact_lines.append(f"Email: {self.settings.support_email}")
-        contact = "\n".join(contact_lines) or "Support contact placeholders are not configured."
-        buttons.append(TelegramButton("Go Back", "back:previous"))
-        return self._plain_callback(
-            callback,
-            "Support\n\n"
-            f"Reason: {category.replace('_', ' ')}\n"
-            "Please contact support directly and include this short context if useful:\n"
-            f"User: tg:{callback.telegram_user_id}\n"
-            f"Ref: {conversation.correlation_id}\n\n"
-            f"{contact}",
-            buttons=buttons,
+        return await self._dashboard_callback(
+            TelegramCallback(
+                callback_query_id=callback.callback_query_id,
+                telegram_user_id=callback.telegram_user_id,
+                chat_id=callback.chat_id,
+                data="dashboard:support",
+                message_id=callback.message_id,
+                created_at=callback.created_at,
+            ),
+            conversation,
         )
 
     async def _account_link_callback(
@@ -2952,23 +2977,6 @@ class TelegramBotService:
     async def _previous_callback(
         self, callback: TelegramCallback, conversation: TelegramConversationState
     ) -> TelegramOutboundMessage:
-        state = dict(conversation.state_data or {})
-        stack = [str(item) for item in state.get("nav_stack", [])]
-        if len(stack) <= 1:
-            state["nav_stack"] = []
-            state.pop("current_screen", None)
-            conversation.state_data = state
-            await self.session.flush()
-            return await self._main_menu_callback(callback, conversation)
-        stack.pop()
-        previous = stack[-1]
-        state["nav_stack"] = stack
-        state["current_screen"] = previous
-        conversation.state_data = state
-        await self.session.flush()
-        previous_response = await self._render_callback_screen(previous, callback, conversation)
-        if previous_response is not None:
-            return previous_response
         return await self._main_menu_callback(callback, conversation)
 
     def _action_needed_callback(
@@ -3008,9 +3016,9 @@ class TelegramBotService:
             callback,
             f"Action needed: {message}",
             buttons=[
-                TelegramButton("Create Monitor", "create_monitor"),
                 TelegramButton("Sign up / sign in", "account:auth"),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("Dashboard", "dashboard:builder"),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -3305,13 +3313,16 @@ class TelegramBotService:
             "about": "/about",
             "billing": "/dashboard/billing",
             "trial": "/dashboard/trial",
-            "monitors": "/dashboard/monitors",
+            "builder": "/dashboard/strategies/new",
+            "create_monitor": "/dashboard/strategies/new",
+            "monitors": "/dashboard/strategies/new#monitors",
             "scan": "/dashboard/scan-now",
             "near_miss": "/dashboard/lifecycles",
             "lifecycles": "/dashboard/lifecycles",
             "setups": "/dashboard/lifecycles",
             "alerts": "/dashboard/lifecycles",
             "settings": "/dashboard/settings",
+            "support": "/dashboard/support",
             "connections": "/dashboard/connections",
             "performance": "/dashboard",
             "setup_replay": "/dashboard/lifecycles",
@@ -3339,7 +3350,7 @@ class TelegramBotService:
                 buttons=[
                     TelegramButton("Open Sign Up", "external:signup", url=signup_url),
                     TelegramButton("Open Sign In", "external:signin", url=signin_url),
-                    TelegramButton("Go Back", "back:previous"),
+                    TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
         try:
@@ -3355,14 +3366,14 @@ class TelegramBotService:
             return self._plain_callback(
                 callback,
                 f"Could not create dashboard link: {escape(str(exc))}",
-                buttons=[TelegramButton("Go Back", "back:previous")],
+                buttons=[TelegramButton("🏠 Main Menu", "back:main")],
             )
         return self._plain_callback(
             callback,
             f"Open the secure dashboard link below. It expires shortly:\n{url}",
             buttons=[
-                TelegramButton("Open Dashboard", "external:dashboard", url=url),
-                TelegramButton("Go Back", "back:previous"),
+                TelegramButton("Dashboard", "external:dashboard", url=url),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -3416,10 +3427,10 @@ class TelegramBotService:
         buttons: list[TelegramButton] = []
         if dashboard_action:
             if dashboard_action.startswith("back:"):
-                buttons.append(TelegramButton("Go Back", dashboard_action))
+                buttons.append(TelegramButton("🏠 Main Menu", "back:main"))
                 return buttons
-            buttons.append(TelegramButton("Open Dashboard", dashboard_action))
-        buttons.append(TelegramButton("Go Back", "back:previous"))
+            buttons.append(TelegramButton("Dashboard", dashboard_action))
+        buttons.append(TelegramButton("🏠 Main Menu", "back:main"))
         return buttons
 
     @staticmethod

@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -37,6 +38,12 @@ browser-videos/
 browser-screenshots/
 traces/
 VvvebJs/
+
+# Proprietary TradingView Charting Library files.
+# Keep the placeholder README tracked; install licensed files locally only.
+src/ai_market_monitor/static/charting_library/*
+!src/ai_market_monitor/static/charting_library/README.md
+src/ai_market_monitor/static/datafeeds/
 
 # Dependency caches
 node_modules/

@@ -26,7 +26,7 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
 
     expect(page.get_by_test_id("dashboard-root")).to_be_attached()
     expect(page.get_by_test_id("dashboard-nav")).to_be_visible()
-    page.get_by_test_id("dashboard-nav").get_by_text("Strategy Builder").click()
+    page.locator(".sidebar-create-quick").click()
     page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=10_000)
     expect(page.get_by_test_id("strategy-builder-entry")).to_be_visible()
     assert_no_raw_traceback(page)
@@ -87,7 +87,7 @@ def test_provider_required_prompt_blocks_activation(page: Page, base_url: str) -
     else:
         expect(page.get_by_test_id("critical-activation-blocker")).to_be_visible()
 
-    page.goto(f"{base_url}/dashboard/monitors", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
     statuses = [text.strip().lower() for text in page.get_by_test_id("monitor-status").all_inner_texts()]
     assert "active" not in statuses
     assert_no_raw_traceback(page)
@@ -148,7 +148,7 @@ def test_approve_and_publish_executable_monitor(page: Page, base_url: str) -> No
         timeout=25_000,
     )
     page.get_by_test_id("strategy-publish").click()
-    page.wait_for_url(re.compile(r".*/dashboard/monitors.*"), timeout=30_000)
+    page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=30_000)
     row = page.get_by_test_id("monitor-row").first
     expect(row).to_be_visible()
     expect(row.get_by_test_id("monitor-status")).to_contain_text("active")
@@ -235,7 +235,7 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
 
 def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("monitor-lifecycle-smoke"))
-    page.goto(f"{base_url}/dashboard/monitors", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
     expect(page.locator("body")).to_contain_text("My Monitors")
     expect(page.locator("body")).not_to_contain_text("Alert Quality Inbox")
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")

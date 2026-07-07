@@ -12,9 +12,8 @@ from ai_market_monitor.db.models import (
     TelegramDashboardLink,
     Trial,
     UserFeedback,
-    UserIdentity,
 )
-from ai_market_monitor.db.models.enums import IdentityProvider, StrategyStatus
+from ai_market_monitor.db.models.enums import StrategyStatus
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.telegram.service import TelegramBotService
 from ai_market_monitor.telegram.types import (
@@ -126,7 +125,8 @@ async def test_telegram_start_records_attribution_and_persistent_menu(test_conte
         assert "Welcome to TraceEdge" in response.text
         assert "Choose what you want to do next." not in response.text
         assert any(button.text == "Sign up / sign in" for button in response.buttons)
-        assert any("Create Monitor" in item for item in response.menu)
+        assert not any("Create Monitor" in item for item in response.menu)
+        assert any("Lifecycles" in item for item in response.menu)
         conversation = await db.scalar(select(TelegramConversationState))
         assert conversation is not None
         assert conversation.flow == "onboarding"
@@ -154,7 +154,7 @@ async def test_telegram_callback_idempotency_for_old_disclaimer_button(test_cont
         assert await db.scalar(select(func.count(Trial.id))) == 0
 
 
-async def test_telegram_claim_trial_requires_dashboard_signup(test_context):
+async def test_telegram_trial_button_hands_off_to_dashboard_signup(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
@@ -166,31 +166,9 @@ async def test_telegram_claim_trial_requires_dashboard_signup(test_context):
                 data="claim_trial",
             )
         )
-        assert "requires a Dashboard account" in blocked.text
-        assert any(button.callback_data == "account:signup" for button in blocked.buttons)
-
-        conversation = await db.scalar(select(TelegramConversationState))
-        db.add(
-            UserIdentity(
-                user_id=conversation.user_id,
-                provider=IdentityProvider.EMAIL,
-                provider_subject="trial@example.com",
-                normalized_identifier="trial@example.com",
-                display_identifier="trial@example.com",
-                is_verified=True,
-            )
-        )
-        await db.commit()
-        claimed = await service.handle_callback(
-            TelegramCallback(
-                callback_query_id="cb-trial-claimed",
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                data="claim_trial",
-            )
-        )
-        assert "Trial claimed successfully" in claimed.text
-        assert await db.scalar(select(func.count(Trial.id))) == 1
+        assert "Open this secure Dashboard link" in blocked.text
+        assert any(button.url and "/signup?telegram_link=" in button.url for button in blocked.buttons)
+        assert await db.scalar(select(func.count(Trial.id))) == 0
 
 
 async def test_telegram_create_approve_and_activate_monitor(test_context):
@@ -273,14 +251,15 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
             )
         )
         assert "Lifecycles" in radar.text
-        subscription = await service.handle_message(
+        pricing = await service.handle_message(
             TelegramInboundMessage(
                 telegram_user_id="tg-100",
                 chat_id="chat-100",
                 text="Subscription",
             )
         )
-        assert "No active trial or subscription" in subscription.text
+        assert "Pricing" in pricing.text
+        assert any(button.url and "/pricing#pricing" in button.url for button in pricing.buttons)
         await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-feedback",
@@ -289,17 +268,16 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
                 data="feedback:incorrect_match",
             )
         )
-        support_response = await service.handle_callback(
-            TelegramCallback(
-                callback_query_id="cb-support",
+        support_response = await service.handle_message(
+            TelegramInboundMessage(
                 telegram_user_id="tg-100",
                 chat_id="chat-100",
-                data="support:missing_alert",
+                text="Support",
             )
         )
         assert await db.scalar(select(func.count(UserFeedback.id))) == 1
-        assert "Please contact support directly" in support_response.text
-        assert "tg:tg-100" in support_response.text
+        assert "Support" in support_response.text
+        assert any(button.callback_data == "dashboard:support" for button in support_response.buttons)
 
 
 async def test_telegram_dashboard_actions_handoff_to_signup_when_unlinked(test_context):
@@ -350,7 +328,7 @@ async def test_telegram_submenus_have_back_buttons_and_templates_create_drafts(t
                     text=label,
                 )
             )
-            assert any(button.callback_data == "back:previous" for button in response.buttons)
+            assert any(button.callback_data in {"back:main", "dashboard:settings", "dashboard:scan"} for button in response.buttons)
 
         await service.handle_callback(
             TelegramCallback(
@@ -390,7 +368,7 @@ async def test_telegram_quick_scan_template_uses_selected_provider(test_context)
                 data="scan_provider:bybit",
             )
         )
-        assert "Bybit" in selected.text
+        assert "Dashboard account first" in selected.text
 
         templated = await service.handle_callback(
             TelegramCallback(
@@ -400,14 +378,11 @@ async def test_telegram_quick_scan_template_uses_selected_provider(test_context)
                 data="scan_template:six_month_high_breakout",
             )
         )
-        assert "Quick Scan results" in templated.text
-        assert "- Exchange: bybit" in templated.text
-        assert "SOL/USDT" in templated.text
-        assert "Risk/R:R filter: not requested" in templated.text
+        assert "Dashboard account first" in templated.text
         assert await db.scalar(select(func.count(Strategy.id))) == 0
 
 
-async def test_telegram_back_returns_one_step_before_main_menu(test_context):
+async def test_telegram_back_returns_main_menu(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
@@ -438,21 +413,11 @@ async def test_telegram_back_returns_one_step_before_main_menu(test_context):
                 data="back:previous",
             )
         )
-        assert "My Monitors" in previous.text
-
-        home = await service.handle_callback(
-            TelegramCallback(
-                callback_query_id="cb-back-home",
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                data="back:previous",
-            )
-        )
-        assert "Welcome to TraceEdge" in home.text
-        assert "Choose what you want to do next." not in home.text
+        assert "Welcome to TraceEdge" in previous.text
+        assert "Choose what you want to do next." not in previous.text
 
 
-async def test_telegram_my_monitors_controls_pause_edit_and_delete(test_context):
+async def test_telegram_my_monitors_links_to_dashboard_management(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
@@ -476,45 +441,14 @@ async def test_telegram_my_monitors_controls_pause_edit_and_delete(test_context)
 
         assert "Live monitor - active" in monitors.text
         assert not any(button.text == "Active Monitors" for button in monitors.buttons)
-        paused = await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="Pause #1",
-            )
-        )
-        assert "Live monitor - paused" in paused.text
+        assert any(button.text == "Manage #1" for button in monitors.buttons)
+        assert not any(button.text.startswith("Edit #") for button in monitors.buttons)
+        assert not any(button.text.startswith("Delete #") for button in monitors.buttons)
         strategy = await db.scalar(select(Strategy).where(Strategy.name == "Live monitor"))
-        assert strategy.status == StrategyStatus.PAUSED
-
-        edit = await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="Edit #1",
-            )
-        )
-        assert "Editing Live monitor" in edit.text
-
-        await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="My Monitors",
-            )
-        )
-        deleted = await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="Delete #1",
-            )
-        )
-        assert "No monitors yet" in deleted.text
-        assert strategy.status == StrategyStatus.ARCHIVED
+        assert strategy.status == StrategyStatus.ACTIVE
 
 
-async def test_telegram_settings_store_alert_schedule_and_near_miss_preference(test_context):
+async def test_telegram_settings_hands_off_to_dashboard(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
@@ -526,33 +460,8 @@ async def test_telegram_settings_store_alert_schedule_and_near_miss_preference(t
                 text="Alert Days",
             )
         )
-        assert "Alert Days" in days.text
-        await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="Monday",
-            )
-        )
-        await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="09:00",
-            )
-        )
-        await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                text="Enable Near-Miss Alerts",
-            )
-        )
-
-        prefs = await db.scalar(select(DashboardPreference))
-        assert prefs.notification_preferences["alert_days"] == ["Monday"]
-        assert prefs.notification_preferences["alert_hours"] == ["09:00"]
-        assert prefs.notification_preferences["near_miss_enabled"] is True
+        assert "Dashboard account first" in days.text
+        assert await db.scalar(select(DashboardPreference)) is None
 
 
 async def test_telegram_signup_buttons_use_real_dashboard_links(test_context):
@@ -582,11 +491,11 @@ async def test_telegram_signup_buttons_use_real_dashboard_links(test_context):
         )
 
 
-async def test_telegram_manual_setup_text_from_create_menu_interprets(test_context):
+async def test_telegram_create_monitor_hands_off_to_dashboard(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
-        await service.handle_callback(
+        response = await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-create-manual",
                 telegram_user_id="tg-100",
@@ -594,24 +503,11 @@ async def test_telegram_manual_setup_text_from_create_menu_interprets(test_conte
                 data="create_monitor",
             )
         )
-
-        summary = await service.handle_message(
-            TelegramInboundMessage(
-                telegram_user_id="tg-100",
-                chat_id="chat-100",
-                username="market_trader",
-                text=(
-                    "Find bullish liquidity sweeps. Price above the four-hour 200 EMA. "
-                    "Volume at least 1.5 times average."
-                ),
-            )
-        )
-
-        assert "structured interpretation" in summary.text
-        assert await db.scalar(select(func.count(Strategy.id))) == 1
+        assert "Dashboard account first" in response.text
+        assert await db.scalar(select(func.count(Strategy.id))) == 0
 
 
-async def test_telegram_unsupported_setup_highlights_action_required(test_context):
+async def test_telegram_removed_create_flow_does_not_interpret_free_text(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
@@ -633,10 +529,9 @@ async def test_telegram_unsupported_setup_highlights_action_required(test_contex
             )
         )
 
-        assert summary.parse_mode == "HTML"
-        assert "<b>[ACTION REQUIRED] Unsupported conditions</b>" in summary.text
-        assert "No supported deterministic monitor condition" in summary.text
-        assert "</b>" in summary.text
+        assert summary.parse_mode is None
+        assert "Choose an item from the menu" in summary.text
+        assert await db.scalar(select(func.count(Strategy.id))) == 0
 
 
 async def test_telegram_new_monitor_resets_stale_approval_state(test_context):
@@ -702,7 +597,7 @@ async def test_telegram_new_monitor_resets_stale_approval_state(test_context):
         assert await db.scalar(select(func.count(Strategy.id))) == 2
 
 
-async def test_telegram_approve_before_interpretation_shows_relevant_create_menu(test_context):
+async def test_telegram_approve_before_interpretation_points_to_dashboard(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
@@ -725,5 +620,5 @@ async def test_telegram_approve_before_interpretation_shows_relevant_create_menu
 
         assert "Action needed" in response.text
         assert "Complete strategy interpretation" in response.text
-        assert any(button.callback_data == "mode_describe" for button in response.buttons)
+        assert any(button.callback_data == "dashboard:builder" for button in response.buttons)
         assert not any(button.text == "Create Monitor" for button in response.buttons)

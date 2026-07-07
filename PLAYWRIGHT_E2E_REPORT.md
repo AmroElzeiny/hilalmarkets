@@ -1,12 +1,12 @@
 # Playwright E2E Report
 
-Generated: 2026-06-28T07:46:09.424756+00:00
+Generated: 2026-07-06T18:20:15.402774+00:00
 
-Base URL tested: http://127.0.0.1:35457
+Base URL tested: http://127.0.0.1:8992
 Browser: chromium
 App auto-started: True
-Command: `.venv\Scripts\python.exe -m pytest`
-App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 35457`
+Command: `.venv\Scripts\python.exe -m pytest tests\browser -q`
+App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 8992`
 
 ## Result
 
@@ -23,15 +23,15 @@ App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor` | passed | 4.206 |
-| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 2.392 |
-| `tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke` | passed | 3.101 |
-| `tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation` | passed | 3.67 |
-| `tests/browser/test_dashboard_e2e.py::test_quick_scan_finder_prompt_flow` | passed | 2.286 |
-| `tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims` | passed | 1.498 |
-| `tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload` | passed | 7.17 |
-| `tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board` | passed | 3.854 |
-| `tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke` | passed | 1.553 |
+| `tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor` | passed | 4.717 |
+| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 2.912 |
+| `tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke` | passed | 1.685 |
+| `tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation` | passed | 3.269 |
+| `tests/browser/test_dashboard_e2e.py::test_quick_scan_finder_prompt_flow` | passed | 2.027 |
+| `tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims` | passed | 1.826 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload` | passed | 6.462 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board` | passed | 3.932 |
+| `tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke` | passed | 2.354 |
 
 ## Runtime Checks
 
