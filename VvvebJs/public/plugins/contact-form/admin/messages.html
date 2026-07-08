@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+
+  <base href="">
+
+  <title>Vvveb - Messages</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body class="messages">
+
+  <div id="container">
+
+    <div class="sidebar" data-v-copy-from="index.html,.sidebar"></div>
+
+    <div class="main">
+
+      <div class="clearfix top-header" data-v-copy-from="index.html,.top-header">
+
+      </div>
+
+      <form id="settings-form" action="" method="post" class="settings" data-v-product>
+        <input type="hidden" name="action" id="action" value="save">
+        <input type="hidden" name="csrf" data-v-csrf>
+		
+        <div class="actions">
+          <div class="title">
+            <h4 class="text-muted mt-2">
+              <i class="icon-mail-outline"></i>
+              Messages
+            </h4>
+          </div>
+          <div class="btns">
+
+          </div>
+        </div>
+        <div>
+          <div id="main-content">
+
+         	<div class="notifications" data-v-notifications data-v-copy-from="index.html,.notifications"></div>
+
+            <div class="content clearfix settings">
+
+			<div class="bulk-actions px-2 mb-2" style="display:none">
+				<!--
+			   <button type="button" data-bs-toggle="collapse" href="#filters" aria-expanded="false"
+						aria-controls="filters" title="Edit selected"
+						class="btn btn-primary btn-sm">
+					<i class="icon-create-outline"></i> Edit selected
+				</button>
+				-->
+			   <button type="submit" name="action" value="delete" aria-expanded="false" data-v-check-permission-delete
+						title="Delete selected"
+						class="btn btn-outline-secondary bg-body-tertiary text-danger">
+						<i class="icon-trash-outline"></i> Delete selected
+				</button>
+			
+			</div>	
+
+			<div class="table-responsive">
+                <table class="table table-hover middle-align" data-v-messages>
+
+
+                  <thead>
+                    <tr>
+                      <th class="col-cb">
+                        <div class="checkbox_outer">
+
+                          <label class="form-check">
+                            <input type="checkbox" class="form-check-input" value="4" name="message[]" data-v-vvveb-action="table.bulkSelect">
+                            <span class="form-check-label"></span>
+                            <span class="custom-control-description">&nbsp;</span>
+                          </label>
+
+
+                        </div>
+                      </th>
+					  
+					  <th style="width:200px;text-align:center;">
+                        <i class="la la-image"></i><span>Name</span>
+                      </th>
+                                            
+                      <th class="message">
+                        <i class="icon-cube-outline"></i><span>Subject</span>
+                      </th>                      
+    
+                      <th class="message">
+                        <i class="icon-cube-outline"></i><span>Email</span>
+                      </th>
+                      <th class="message">
+                        <i class="icon-cube-outline"></i><span>First name</span>
+                      </th>
+                      
+					  <th class="message">
+                        <i class="icon-cube-outline"></i><span>Last name</span>
+					  </th>
+
+					  <th class="message">
+                        <i class="icon-cube-outline"></i><span>Date added</span>
+					  </th>
+
+                      <th class="actions text-center" style="width:150px">
+                        <i class="la la-edit"></i><span>Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="message" data-v-message data-v-class-if-active="message.status=0">
+                      <td class="checkbox">
+                        <label class="form-check">
+                          <input type="checkbox" class="form-check-input" value="4" name="message_id[]" data-v-vvveb-action="table.selectRow" data-v-message-message_id>
+                          <span class="form-check-label"></span>
+                          <span class="custom-control-description">&nbsp;</span>
+                        </label>
+
+                      </td>
+
+                      <td class="img" style="width:200px;text-align:center;">
+                        <a href="/admin?module=products&amp;action=product&amp;id=4" data-v-message-edit-url>
+                          <span data-v-message-type>Type</span>
+                        </a>
+                      </td>
+
+                      <td>
+						  <a href="/admin?module=products&amp;action=product&amp;id=4" data-v-message-edit-url>
+                          <span data-v-message-subject>Data</span>
+                          </a>
+                      </td>
+
+                      <td>
+                          <span data-v-message-email>Email</span>
+                          <span data-v-message-mail>Mail</span>
+                      </td>
+                      <td>
+                          <span data-v-message-firstname>First name</span>
+                          <span data-v-message-first_name>First name</span>
+						  <span data-v-message-name>Name</span>
+                      </td>
+                      <td>
+                          <span data-v-message-lastname>Last name</span>
+                          <span data-v-message-last_name>Last name</span>
+                      </td>
+						<td>
+						  <span data-v-message-updated_at data-filter-friendly_date title="{$message.created_at}">Date</span>
+                      </td>
+
+                      <td class="actions" style="min-width:200px">
+
+                        <div class="btn-group">
+                          <a class="btn btn-icon btn-outline-secondary" data-v-message-edit-url>
+                            <i class="la la-pencil-alt text-primary"></i>
+                            <span>View</span>
+                          </a>
+
+                          <button type="button" class="btn btn-icon btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false" data-bs-reference="parent">
+
+                            <span class="visually-hidden">Toggle primary</span>
+                          </button>
+                          <ul class="dropdown-menu">
+							  <li data-v-check-permission-delete>
+								<button type="submit" name="message_id[]" value="" aria-expanded="false" class="dropdown-item text-danger" onclick="document.getElementById('action').value='delete';return confirm('Are you sure?')" data-v-message-message_id>							
+									<i class="icon-trash-outline"></i><span>Delete</span>
+								</button>
+                            </li>
+                          </ul>
+                        </div>
+
+                      </td>
+                    </tr>
+					<tr data-v-if-not="this.count > 0" class="no-items">
+						<td colspan="100">
+							<div class="text-center mb-4">
+								<div>
+									<i class="icon-mail-outline display-4 lh-1 text-secondary text-opacity-75"></i>
+									<div class="mt-3">No messages to display!</div>
+								</div>
+							</div>
+						</td>
+					</tr>
+                  </tbody>
+                </table>
+                
+                <div class="d-flex justify-content-end ">
+					<div id="pagination" data-v-pagination data-v-copy-from="content/posts.html,#pagination"></div>
+                </div>
+              </div>
+                  
+            </div>
+          </div>
+      </form>
+
+    </div>
+  
+	 <div id="main-footer" data-v-copy-from="index.html,#main-footer"></div>
+  </div>
+
+
+  <script src="js/popper.min.js"></script>
+  <script src="js/bootstrap.min.js"></script>
+  <script id="admin-js" type="module" src="/js/admin.js"></script>
+  <script type="module" src="/js/admin.js"></script>
+
+</body>
+</html>

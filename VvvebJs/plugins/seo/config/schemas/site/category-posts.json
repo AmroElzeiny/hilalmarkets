@@ -1,0 +1,31 @@
+{
+ "@context": "https://schema.org",
+  "@graph": [
+    {
+	  "@@data-v-component-content-category":"category",
+	  "@type": "CollectionPage",
+	  "@id": "url @@data-v-category-full-url",
+	  "name": "Product name  @@data-v-category-name",
+	  "url": "url @@data-v-category-full-url",
+      "description": "Description  @@data-v-category-content"
+    }, {
+      "@type": "ItemList",
+      "@id": "https://www.example.com/categories/outerwear#itemlist  @@data-v-category-url",
+      "name": "Post list",
+      "itemListOrder": "https://schema.org/ItemListUnordered",
+      "itemListElement @@data-v-component-posts @@data-v-taxonomy_item_id=url": [
+        {
+          "@type": "ListItem",
+          "@@data-v-post":"post",
+          "position": 1,
+          "item": {
+            "@type": "Post",
+            "name": "Name @@data-v-post-name",
+            "image @@data-v-post-image": "image",
+            "url": "url @@data-v-post-full-url",
+          }
+        }
+      ]
+    }
+  ]
+}

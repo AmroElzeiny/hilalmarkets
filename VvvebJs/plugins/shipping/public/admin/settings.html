@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+  
+
+  <base href="">
+
+  <title>Vvveb - Shipping methods</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body>
+
+  <div id="container">
+
+    <div class="sidebar" data-v-copy-from="index.html,.sidebar">
+    </div>
+
+
+    <div class="main">
+
+      <div class="clearfix top-header" data-v-copy-from="index.html,.top-header">
+
+      </div>
+
+      <form id="shipping-form" action="" method="post" class="settings" data-v-product>
+        <input type="hidden" name="action" id="action" value="save">
+        <input type="hidden" name="csrf" data-v-csrf>
+		
+        <div class="actions">
+          <div class="title">
+            <h4 class="text-muted mt-2">
+              <i class="la la-shipping-fast la-lg"></i>
+              Shipping methods
+            </h4>
+          </div>
+          <div class="btns">
+			<a href="{$this.adminPath}index.php?module=plugin/plugins" title="Plugins list"
+					class="btn btn-icon btn-outline-secondary me-2">
+						<i class="la la-arrow-left"></i><span>Plugins list</span>
+			</a>  
+          <button type="submit" href="" class="btn btn-primary btn-icon ms-1" title="Save post">
+            <i class="icon-create-outline"></i> <span>Save settings</span>
+          </button>
+        </div>
+        </div>
+        <div>
+          <div id="main-content">
+
+         	<div class="notifications" data-v-notifications data-v-copy-from="index.html,.notifications"></div>
+
+            <div class="content clearfix shipping px-4 row">
+
+
+			  <ul class="nav nav-tabs" id="option"role="tablist" data-v-methods>
+				<li class="nav-item me-2">
+				  <button class="btn btn-outline-secondary btn-icon py-1 mb-1" type="button" onclick="addTab(this)">
+					<i class="la la-plus"></i> 
+					<span>Add shipping method</span> 
+				  </button>
+				</li>
+				<li class="nav-item" data-v-method>
+				  <a href="#tab-option0" class="nav-link" data-bs-toggle="tab" data-v-method-shipping_method_id>
+					<span data-v-method-name>Default</span>
+					<i class="la la-minus-circle text-danger ms-2" onclick="removeTab(this, 'shipping_method_id')"></i> 
+					</a>
+				</li>
+				<li class="nav-item d-none tab-nav-template">
+				  <a href="#tab-template" class="nav-link" data-bs-toggle="tab">
+					<span>New shipping method</span>
+					<i class="la la-minus-circle text-danger ms-2" onclick="removeTab(this, 'shipping_method_id')"></i> 
+					</a>
+				</li>
+			  </ul>
+
+			 <div class="tab-content" data-v-methods>
+
+				<div class="tab-pane" data-type="text" id="tab-option0" data-v-method>
+
+				  <div class="row mb-3">
+					<label for="input-geo-region" class="col-sm-2 col-form-label">Geo Region</label>
+					<div class="col-sm-10">
+					  <select name="methods[0][region_group_id]" id="input-geo-region" class="form-select" data-v-region_group_id>
+							<option value="0"> --- All zones --- </option>
+							<option value="0" data-v-option>All Regions</option>
+							<option value="1" data-v-option>US Shipping</option>
+							<option value="2" data-v-option>UK VAT Region</option>
+						</select>
+					</div>
+				  </div>
+				  
+				  <div class="row mb-3">
+					<label for="input-shipping-status" class="col-sm-2 col-form-label">Shipping status</label>
+					<div class="col-sm-10">
+						<select name="methods[0][shipping_status_id]" id="input-shipping-status" class="form-select" data-v-shipping_status_id>
+							  <option value="1" data-v-option>Pending</option>
+							  <option value="2" data-v-option>Complete</option>
+					  </select>
+					</div>
+				  </div>
+				  
+				  <div class="row mb-3">
+					<label for="input-sort-order" class="col-sm-2 col-form-label">Sort Order</label>
+					<div class="col-sm-10">
+					  <input type="text" name="methods[0][sort_order]" value="1" placeholder="Sort Order" id="input-sort-order" class="form-control method">
+					</div>
+				  </div>
+
+						
+					<div class="mt-5">
+						<ul class="nav nav-tabs language-nav mb-3 me-3" id="seo-language-nav" data-v-languages="seo" style="margin-top: -2.5rem;right: 2.5rem;">
+							<li class="nav-item" data-v-language>
+								<a href="#language1" class="nav-link" data-bs-toggle="tab" aria-expanded="true" data-v-language-link>
+									<!-- img src="language/en-gb/en-gb.png" title="English" data-v-language-img --> 
+									<span data-v-language-name>English</span>
+								</a>
+							</li>
+						 </ul>
+						 
+							 
+							 
+						   <div class="tab-content" data-v-languages="seo" style="clear:both">
+							<div class="tab-pane" id="language1" data-v-language data-v-language-id>
+
+							  <div class="row mb-3">
+									<label for="input-title" class="col-sm-2 col-form-label">Name</label>
+									<div class="col-sm-10">
+									  <input type="text" name="methods[0][lang][1][title]" value="" id="input-title" class="form-control" placeholder="Flat rate shipping" data-v-lang-title>
+									</div>
+								  </div>
+								  <div class="row mb-3">
+									<label for="input-description" class="col-sm-2 col-form-label">Shipping instructions/message</label>
+									<div class="col-sm-10">
+									  <textarea name="methods[0][lang][1][description]" value="0" rows="5" placeholder="Pay the courier on delivery" id="input-description" class="form-control" data-v-lang-description></textarea>
+									</div>
+								  </div>
+								<div class="row mb-3">
+									<label for="input-free" class="col-sm-2 col-form-label">
+										<span>Free shipping message</span>
+										<span title="Use %s to display cost difference">
+										  <i class="la la-lg la-question-circle text-primary"></i>
+										</span>		
+									</label>
+									<div class="col-sm-10">
+									  <textarea name="methods[0][lang][1][free_message]" value="0" rows="3" placeholder="Add more products worth at least %s to get free shipping!" id="input-free" class="form-control" data-v-lang-free_message>Add more products worth at least %s to get free shipping!</textarea>
+									</div>
+								  </div>
+							
+								</div>
+							</div>
+
+						</div>		
+
+
+					  <div class="row mb-3">
+						<label for="input-tax-type" class="col-sm-2 col-form-label">Tax Class</label>
+						<div class="col-sm-10">
+						  <select name="methods[0][tax_type_id]" id="input-tax-type" class="form-select" data-v-tax_type_id>
+							  <option value="0"> --- None --- </option>
+							  <option value="10" data-v-option>Downloadable Products</option>
+							  <option value="9" data-v-option>Taxable Goods</option>
+						  </select>
+						</div>
+					  </div>
+					  
+					  <div class="row mb-3">
+						<label for="input-cost" class="col-sm-2 col-form-label">
+							<span>Base Cost</span>
+							<span title="Leave empty to for free shipping">
+							  <i class="la la-lg la-question-circle text-primary"></i>
+							</span>								
+						</label>
+						<div class="col-sm-10">
+						  <input type="text" name="methods[0][cost]" value="3.00" placeholder="Cost" id="input-cost" class="form-control method">
+						</div>
+					  </div>					  
+					  
+					  <div class="row mb-3">
+						<label for="input-base-weight" class="col-sm-2 col-form-label">
+							<span>Base Max Weight</span>
+							<span title="Apply weight rates if weight is exceeded">
+							  <i class="la la-lg la-question-circle text-primary"></i>
+							</span>								
+						</label>
+						<div class="col-sm-10">
+						  <input type="text" name="methods[0][base-weight]" value="5" placeholder="5" id="input-base-weight" class="form-control method">
+						</div>
+					  </div>
+
+						<div class="row mb-3">
+							<label for="input-free-shipping" class="col-sm-2 col-form-label">
+								<span>Cart total for free shipping</span>
+								<span title="Set to zero to disable free shipping">
+								  <i class="la la-lg la-question-circle text-primary"></i>
+								</span>								
+							</label>
+							<div class="col-sm-10">
+							  <input type="text" name="methods[0][free_shipping]" value="0.00" step="0.01" min="0"  placeholder="Total for free shipping" id="input-free-shipping" class="form-control method">
+							</div>
+						  </div>
+						  
+						<div class="table-responsive">
+							<table class="table table-hover table-bordered weight-table" data-v-weights>
+								<thead>
+								<tr>
+									<th class="text-start">
+										<span>Cart weight</span>
+										<span title="E.g. if more than 5kg add $1.00 for each additional kg">
+										  <i class="la la-lg la-question-circle text-primary"></i>
+										</span>
+									</th>
+									<th class="text-end">Weight unit price</th>
+									<th class="text-end">
+										<button type="button" class="btn btn-sm btn-primary" id="add-weight-btn" onclick='addTemplate(".weight-template", "weight", ".weight-table", this)'>
+											<i class="la la-plus la-lg text-white"></i>
+										</button>
+									</th>
+								</tr>
+								</thead>
+								<tbody>
+									<tr data-v-weight>
+									  <td class="text-start">
+											<div class="input-group">
+											  <input name="methods[0][weight][0][above_weight]" value="5" placeholder="Weight" class="form-control" type="number" data-v-weight-above_weight>
+											  <!--
+											  <select name="methods[0][weight][0][above_weight_unit]" class="form-select" data-v-user_group_id>
+												<option value="1" data-v-option>Kg</option>
+												<option value="1" data-v-option>Lb</option>
+											  </select>
+											  -->
+											</div>										  
+									  </td>
+									  <td class="text-end">
+											<div class="input-group">
+											  <input name="methods[0][weight][0][price]" value="1" placeholder="1.00" class="form-control" type="number" step="0.01" data-v-weight-price>
+											  <!--
+											  <select name="methods[0][weight][0][price_unit]" class="form-select" data-v-user_group_id>
+												<option value="1" data-v-option>Kg</option>
+												<option value="1" data-v-option>Lb</option>
+											  </select>
+											  -->
+											</div>										  
+									  </td>
+									  <td class="text-end">
+										<button type="button" onclick="removeRow(this)" class="btn btn-sm btn-danger">
+										  <i class="la la-minus-circle la-lg"></i>
+										</button>
+									  </td>
+									</tr>	
+									<tr class="d-none weight-template">
+									  <td class="text-start">
+												<div class="input-group">
+												  <input name="methods[0][weight][#][above_weight]" value="5" placeholder="Weight" class="form-control method" type="number" disabled data-v-weight-above_weight>
+												  <!--
+												  <select name="methods[0][weight][0][above_weight_unit]" class="form-select" data-v-user_group_id>
+													<option value="1" data-v-option>Kg</option>
+													<option value="1" data-v-option>Lb</option>
+												  </select>
+												  -->
+												</div>										  
+										  </td>
+										  <td class="text-end">
+												<div class="input-group">
+												  <input name="methods[0][weight][#][price]" value="1" placeholder="Price" class="form-control method" type="number" step="0.01" disabled data-v-weight-price>
+												  <!--
+												  <select name="methods[0][weight][0][price_unit]" class="form-select" data-v-user_group_id>
+													<option value="1" data-v-option>Kg</option>
+													<option value="1" data-v-option>Lb</option>
+												  </select>
+												  -->
+												</div>										  
+										  </td>
+									  <td class="text-end">
+										<button type="button" onclick="removeRow(this)" class="btn btn-sm btn-danger">
+										  <i class="la la-minus-circle la-lg"></i>
+										</button>
+									  </td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+				
+					</div>						
+
+
+			<div class="tab-pane tab-content-template d-none" data-type="text" data-id="#">			
+				
+
+				  <div class="row mb-3">
+					<label for="input-geo-region" class="col-sm-2 col-form-label">Geo Region</label>
+					<div class="col-sm-10">
+					  <select name="methods[0][region_group_id]" id="input-geo-region" class="form-select" disabled data-v-region_group_id>
+							<option value="0"> --- All zones --- </option>
+							<option value="0" data-v-option>All Regions</option>
+							<option value="1" data-v-option>US Shipping</option>
+							<option value="2" data-v-option>UK VAT Region</option>
+						</select>
+					</div>
+				  </div>
+
+				  <div class="row mb-3">
+					<label for="input-shipping-status" class="col-sm-2 col-form-label">Shipping status</label>
+					<div class="col-sm-10">
+						<select name="methods[0][shipping_status_id]" id="input-shipping-status" class="form-select" disabled data-v-shipping_status_id>
+							  <option value="1" data-v-option>Pending</option>
+							  <option value="2" data-v-option>Complete</option>
+					  </select>
+					</div>
+				  </div>
+
+				  <div class="row mb-3">
+					<label for="input-sort-order" class="col-sm-2 col-form-label">Sort Order</label>
+					<div class="col-sm-10">
+					  <input type="text" name="methods[0][sort_order]" value="1" placeholder="Sort Order" id="input-sort-order" disabled class="form-control method">
+					</div>
+				  </div>
+
+						
+					<div class="mt-5">
+						<ul class="nav nav-tabs language-nav mb-3 me-3" id="seo-language-nav" data-v-languages="shipping" style="margin-top: -2.5rem;right: 2.5rem;">
+							<li class="nav-item" data-v-language>
+								<a href="#language1" class="nav-link" data-bs-toggle="tab" aria-expanded="true" data-v-language-link>
+									<!-- img src="language/en-gb/en-gb.png" title="English" data-v-language-img --> 
+									<span data-v-language-name>English</span>
+								</a>
+							</li>
+						 </ul>
+						 
+							 
+						   <div class="tab-content" data-v-languages="shipping" style="clear:both">
+							<div class="tab-pane" id="language1" data-v-language data-v-language-id>
+
+							  <div class="row mb-3">
+									<label for="input-title" class="col-sm-2 col-form-label">Name</label>
+									<div class="col-sm-10">
+									  <input type="text" name="methods[0][lang][1][title]" value="" id="input-title" class="form-control" placeholder="New shipping method" disabled data-v-lang-title>
+									</div>
+								  </div>
+								  <div class="row mb-3">
+									<label for="input-description" class="col-sm-2 col-form-label">Shipping instructions/message</label>
+									<div class="col-sm-10">
+									  <textarea name="methods[0][lang][1][description]" value="0" rows="5" placeholder="Pay the courier on delivery" id="input-description" class="form-control" disabled data-v-lang-description></textarea>
+									</div>
+								  </div>							  
+								  <div class="row mb-3">
+									<label for="input-free" class="col-sm-2 col-form-label">
+										<span>Free shipping message</span>
+										<span title="Use %s to display cost difference">
+										  <i class="la la-lg la-question-circle text-primary"></i>
+										</span>		
+									</label>
+									<div class="col-sm-10">
+									  <textarea name="methods[0][lang][1][free_message]" value="0" rows="3" placeholder="Add more products worth at least %s to get free shipping!" id="input-free" class="form-control" disabled data-v-lang-free_message>Add more products worth at least %s to get free shipping!</textarea>
+									</div>
+								  </div>
+
+							
+								</div>
+							</div>
+
+						</div>
+						
+						  <div class="row mb-3">
+							<label for="input-tax-type" class="col-sm-2 col-form-label">Tax Class</label>
+							<div class="col-sm-10">
+							  <select name="methods[0][tax_type_id]" id="input-tax-type" class="form-select" disabled data-v-tax_type_id>
+								  <option value="0"> --- None --- </option>
+								  <option value="10" data-v-option>Downloadable Products</option>
+								  <option value="9" data-v-option>Taxable Goods</option>
+							  </select>
+							</div>
+						  </div>
+						<div class="row mb-3">
+							<label for="input-cost" class="col-sm-2 col-form-label">
+								<span>Base Cost</span>
+								<span title="Leave empty to for free shipping">
+								  <i class="la la-lg la-question-circle text-primary"></i>
+								</span>								
+							</label>
+							<div class="col-sm-10">
+							  <input type="text" name="methods[0][cost]" value="3.00" placeholder="Cost" id="input-cost" class="form-control method" disabled>
+							</div>
+						  </div>
+						  <div class="row mb-3">
+							<label for="input-base-weight" class="col-sm-2 col-form-label">
+								<span>Base Max Weight</span>
+								<span title="Apply weight rates if weight is exceeded">
+								  <i class="la la-lg la-question-circle text-primary"></i>
+								</span>								
+							</label>
+							<div class="col-sm-10">
+							  <input type="text" name="methods[0][base-weight]" value="5" placeholder="5" id="input-base-weight" disabled class="form-control method">
+							</div>
+						  </div>
+						<div class="row mb-3">
+							<label for="input-free-shipping" class="col-sm-2 col-form-label">
+								<span>Cart total for free shipping</span>
+								<span title="Set to zero to disable free shipping">
+								  <i class="la la-lg la-question-circle text-primary"></i>
+								</span>								
+							</label>
+							<div class="col-sm-10">
+							  <input type="text" name="methods[0][free_shipping]" value="0.00" step="0.01" min="0"  placeholder="Total for free shipping" id="input-free-shipping" class="form-control method" disabled>
+							</div>
+						  </div>
+
+						<div class="table-responsive">
+							<table class="table table-hover table-bordered weight-table" data-v-weights>
+								<thead>
+								<tr>
+									<th class="text-start">
+										<span>Cart weight</span>
+										<span title="E.g. if more than 5kg add $1.00 for each additional kg">
+										  <i class="la la-lg la-question-circle text-primary"></i>
+										</span>
+									</th>
+									<th class="text-end">Weight unit price</th>
+									<th class="text-end">
+										<button type="button" class="btn btn-sm btn-primary" id="add-weight-btn" onclick='addTemplate(".weight-template", "weight", ".weight-table", this)'>
+											<i class="la la-plus la-lg text-white"></i>
+										</button>
+									</th>
+								</tr>
+								</thead>
+								<tbody>
+									<tr data-v-weight>
+									  <td class="text-start">
+											<div class="input-group">
+											  <input name="methods[0][weight][0][above_weight]" value="5" placeholder="Weight" class="form-control" type="number" data-v-weight-above_weight>
+											  <!--
+											  <select name="methods[0][weight][0][above_weight_unit]" class="form-select" data-v-user_group_id>
+												<option value="1" data-v-option>Kg</option>
+												<option value="1" data-v-option>Lb</option>
+											  </select>
+											  -->
+											</div>										  
+									  </td>
+									  <td class="text-end">
+											<div class="input-group">
+											  <input name="methods[0][weight][0][price]" value="1.00" placeholder="Weight" class="form-control" type="number" step="0.01" data-v-weight-price>
+											  <!--
+											  <select name="methods[0][weight][0][price_unit]" class="form-select" data-v-user_group_id>
+												<option value="1" data-v-option>Kg</option>
+												<option value="1" data-v-option>Lb</option>
+											  </select>
+											  -->
+											</div>										  
+									  </td>
+									  <td class="text-end">
+										<button type="button" onclick="removeRow(this)" class="btn btn-sm btn-danger">
+										  <i class="la la-minus-circle la-lg"></i>
+										</button>
+									  </td>
+									</tr>	
+									<tr class="d-none weight-template">
+									  <td class="text-start">
+												<div class="input-group">
+												  <input name="methods[0][weight][#][above_weight]" value="5" placeholder="Weight" class="form-control method" type="number" disabled data-v-weight-above_weight>
+												  <!--
+												  <select name="methods[0][weight][0][above_weight_unit]" class="form-select" data-v-user_group_id>
+													<option value="1" data-v-option>Kg</option>
+													<option value="1" data-v-option>Lb</option>
+												  </select>
+												  -->
+												</div>										  
+										  </td>
+										  <td class="text-end">
+												<div class="input-group">
+												  <input name="methods[0][weight][#][price]" value="1.00" placeholder="Weight" class="form-control method" type="number" step="0.01" disabled data-v-weight-price>
+												  <!--
+												  <select name="methods[0][weight][0][price_unit]" class="form-select" data-v-user_group_id>
+													<option value="1" data-v-option>Kg</option>
+													<option value="1" data-v-option>Lb</option>
+												  </select>
+												  -->
+												</div>										  
+										  </td>
+									  <td class="text-end">
+										<button type="button" onclick="removeRow(this)" class="btn btn-sm btn-danger">
+										  <i class="la la-minus-circle la-lg"></i>
+										</button>
+									  </td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+
+				</div>						
+			</div>						
+
+				</div>			
+
+            </div>
+          </div>
+      </form>
+
+    </div>
+  </div>
+
+
+  <script src="js/popper.min.js"></script>
+  <script src="js/bootstrap.min.js"></script>
+  <script id="admin-js" type="module" src="/js/admin.js"></script>
+  <script type="module" src="/js/admin.js"></script>
+  <script id="functions-js" src="/js/admin/functions.js"></script>
+
+</body>
+
+</html>

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
+import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -73,6 +74,7 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService, export_file_path
+from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.lifecycle_dashboard import state_label
@@ -84,6 +86,7 @@ from ai_market_monitor.services.template_catalog import builtin_template_payload
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard-api"])
+logger = structlog.get_logger(__name__)
 
 
 class StrategyCreateRequest(BaseModel):
@@ -2827,6 +2830,23 @@ async def create_support_ticket(
     )
     session.add(message)
     await session.commit()
+    try:
+        await AuthEmailService(settings).send_support_ticket(
+            recipient=settings.support_inbox_email,
+            ticket_id=ticket.id,
+            user_id=principal.user_id,
+            requester_email=contact_email,
+            subject=payload.subject,
+            description=payload.description,
+            context=ticket.context,
+            screenshots=decoded_screenshots,
+        )
+    except EmailDeliveryError as exc:
+        logger.warning(
+            "support.ticket_email_failed",
+            ticket_id=str(ticket.id),
+            error_code=exc.code,
+        )
     await AdminNotificationService(settings).send_support_ticket(
         (
             f"Support request\n"

@@ -1,0 +1,49 @@
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "@@data-v-component-product":"product",
+  "aggregateRating  @@data-v-component-reviews": {
+    "@type": "AggregateRating",
+    "ratingValue": "3.5 @@data-v-reviews-rating_int",
+    "reviewCount": "11 @@data-v-reviews-count"
+  },
+  "description @@data-filter-cdata @@data-v-product-content": "Description.",
+  "name @@data-v-product-name": "Kenmore White 17\" Microwave",
+  "image @@data-v-product-image": "kenmore-microwave-17in.jpg",
+  "offers @@data-v-if=product.old_price": {
+    "@type": "Offer",
+    "availability": "https://schema.org/InStock",
+    "price": "55.00 @@data-v-product-price_tax",
+    "priceCurrency": "USD @@data-v-product-old_price_currency"
+  },
+  "review @@data-v-component-reviews": [
+    {
+      "@type": "Review",
+      "@@data-v-review":"review",
+      "author": "Ellie @@data-v-review-author",
+      "datePublished": "2011-04-01  @@data-v-review-created_at",
+      "reviewBody": "The lamp burned out and now I have to replace it. @@data-v-review-content",
+      "name": "",
+      "reviewRating": {
+        "@type": "Rating",
+        "bestRating": "5",
+        "ratingValue": "1 @@data-v-review-rating",
+        "worstRating": "1"
+      }
+    },
+    {
+      "@type": "Review",
+      "@@data-v-review":"review",
+      "author": "Lucas",
+      "datePublished": "2011-03-25",
+      "reviewBody": "Great microwave for the price. It is small and fits in my apartment.",
+      "name": "",
+      "reviewRating": {
+        "@type": "Rating",
+        "bestRating": "5",
+        "ratingValue": "4",
+        "worstRating": "1"
+      }
+    }
+  ]
+}

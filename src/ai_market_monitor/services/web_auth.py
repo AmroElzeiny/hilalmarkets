@@ -19,6 +19,7 @@ from ai_market_monitor.core.security import (
 from ai_market_monitor.db.models import (
     DashboardPreference,
     EmailAuthChallenge,
+    PendingEmailSignup,
     User,
     UserIdentity,
     WebSession,
@@ -111,6 +112,143 @@ class WebAuthService:
         await self.session.flush()
         return user, created
 
+    async def request_signup_email_code(
+        self,
+        *,
+        email: str,
+        password: str,
+        display_name: str | None,
+        telegram_link: str | None = None,
+        requested_ip: str | None = None,
+    ) -> bool:
+        normalized = normalize_email(email)
+        if not normalized:
+            raise WebAuthError("invalid_email", "Enter a valid email address.")
+        password_error = password_validation_error(password)
+        if password_error:
+            raise WebAuthError("invalid_password", password_error)
+        existing_identity = await self.session.scalar(
+            select(UserIdentity.id).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        if existing_identity is not None:
+            raise WebAuthError("account_exists", "This email already has an account.")
+
+        now = datetime.now(UTC)
+        latest = await self.session.scalar(
+            select(PendingEmailSignup)
+            .where(PendingEmailSignup.email == normalized)
+            .order_by(PendingEmailSignup.created_at.desc())
+            .limit(1)
+        )
+        if latest is not None and (_as_aware(latest.created_at) + timedelta(seconds=60)) > now:
+            raise WebAuthError(
+                "code_recently_sent",
+                "A code was sent recently. Wait one minute before requesting another.",
+            )
+        if latest is not None and latest.consumed_at is None:
+            latest.consumed_at = now
+
+        code = self._new_auth_code()
+        pending = PendingEmailSignup(
+            email=normalized,
+            display_identifier=email.strip(),
+            password_hash=hash_password(password),
+            telegram_link=telegram_link,
+            code_digest=self._auth_code_digest(normalized, "signup", code),
+            created_at=now,
+            expires_at=now + timedelta(minutes=self.settings.auth_code_ttl_minutes),
+            attempts=0,
+            max_attempts=self.settings.auth_code_max_attempts,
+            requested_ip_hash=self._request_ip_hash(requested_ip),
+        )
+        self.session.add(pending)
+        await self.session.flush()
+        await AuthEmailService(self.settings).send_code(
+            recipient=email.strip(),
+            code=code,
+            purpose="signup",
+        )
+        return True
+
+    async def complete_signup_with_email_code(self, *, email: str, code: str) -> User:
+        normalized = normalize_email(email)
+        if not normalized or not code.isdigit() or len(code) != 6:
+            raise WebAuthError("invalid_code", "Enter the six-digit code from your email.")
+        pending = await self.session.scalar(
+            select(PendingEmailSignup)
+            .where(
+                PendingEmailSignup.email == normalized,
+                PendingEmailSignup.consumed_at.is_(None),
+            )
+            .order_by(PendingEmailSignup.created_at.desc())
+            .limit(1)
+        )
+        now = datetime.now(UTC)
+        if pending is None or _as_aware(pending.expires_at) <= now:
+            raise WebAuthError("code_expired", "The code is invalid or expired.")
+        if pending.attempts >= pending.max_attempts:
+            pending.consumed_at = now
+            raise WebAuthError("code_locked", "Too many attempts. Request a new code.")
+        pending.attempts += 1
+        expected = self._auth_code_digest(normalized, "signup", code)
+        if not hmac.compare_digest(expected, pending.code_digest):
+            if pending.attempts >= pending.max_attempts:
+                pending.consumed_at = now
+            raise WebAuthError("invalid_code", "The code is invalid or expired.")
+
+        existing_identity = await self.session.scalar(
+            select(UserIdentity.id).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        if existing_identity is not None:
+            pending.consumed_at = now
+            raise WebAuthError("account_exists", "This email already has an account.")
+
+        user = User(display_name=normalized.split("@", 1)[0])
+        self.session.add(user)
+        await self.session.flush()
+        self.session.add(
+            UserIdentity(
+                user_id=user.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject=normalized,
+                normalized_identifier=normalized,
+                display_identifier=pending.display_identifier,
+                password_hash=pending.password_hash,
+                is_verified=True,
+                is_primary=True,
+                verified_at=now,
+                profile_data={},
+            )
+        )
+        self.session.add(
+            DashboardPreference(
+                user_id=user.id,
+                theme="dark",
+                default_timezone=user.timezone,
+                default_dashboard_path="/dashboard",
+                notification_preferences={
+                    "timezone": "UTC",
+                    "near_miss_enabled": True,
+                    "near_miss_threshold": 70,
+                    "maximum_alerts_per_hour": 50,
+                    "alert_channels": ["telegram"],
+                    "channels": ["telegram"],
+                    "providers": ["binance", "bybit"],
+                    "alert_days": ["Every Day"],
+                    "alert_hours": [],
+                },
+            )
+        )
+        pending.consumed_at = now
+        await self.session.flush()
+        return user
+
     async def request_email_code(
         self,
         *,
@@ -149,7 +287,7 @@ class WebAuthService:
             )
         if latest is not None and latest.consumed_at is None:
             latest.consumed_at = now
-        code = f"{secrets.randbelow(1_000_000):06d}"
+        code = self._new_auth_code()
         challenge = EmailAuthChallenge(
             user_id=user.id,
             email=normalized,
@@ -248,6 +386,12 @@ class WebAuthService:
         secret = self.settings.app_secret_key.get_secret_value().encode("utf-8")
         payload = f"{email}:{purpose}:{code}".encode()
         return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+    def _new_auth_code(self) -> str:
+        fixed = self.settings.auth_test_fixed_code
+        if self.settings.app_env == "test" and fixed and fixed.isdigit() and len(fixed) == 6:
+            return fixed
+        return f"{secrets.randbelow(1_000_000):06d}"
 
     def _request_ip_hash(self, requested_ip: str | None) -> str | None:
         if not requested_ip:

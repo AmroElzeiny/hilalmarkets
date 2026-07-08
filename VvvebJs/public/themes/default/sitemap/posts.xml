@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url>
+ <loc>http://example.com/mypage</loc>
+ <lastmod>2011-06-27T19:34:00+01:00</lastmod>
+ <!-- optional additional tags -->
+</url>
+<url>
+ ...
+</url>
+</urlset>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+  
+
+  <base href="">
+
+  <title>Vvveb - Seo Plugin</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body>
+
+	<ul class="nav nav-tabs" id="seo-tab">
+	
+	  <li class="nav-item" role="presentation">
+		<a class="nav-link" href="#seo-social" data-bs-toggle="tab">Seo</a>
+	  </li>
+	<!--
+	  <li class="nav-item" role="presentation">
+		<a class="nav-link" href="#seo-options" data-bs-toggle="tab">SEO Options</a>
+	  </li>
+	-->
+
+	</ul>
+	
+	<div class="tab-content"  id="seo-tab-content">
+		
+		<div class="tab-pane" id="seo-social" role="tabpanel">
+		
+	
+		  <ul class="nav nav-tabs language-nav" id="seo-language-nav" data-v-languages="seo">
+			<li class="nav-item" data-v-language>
+				<a href="#language1" class="nav-link" data-bs-toggle="tab" aria-expanded="true" data-v-language-link>
+					<!-- img src="language/en-gb/en-gb.png" title="English" data-v-language-img --> 
+					<span data-v-language-name>English</span>
+				</a>
+			</li>
+		 </ul>
+		 
+			 
+			 
+		   <div class="tab-content" data-v-languages="seo" style="clear:both">
+			<div class="tab-pane" id="language1" data-v-language data-v-language-id>
+
+				<label class="form-label fw-bold border-bottom d-block mb-4 py-3">Open Graph</label>
+
+				<div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Open Graph Title</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-name" placeholder="Title" name="seo[og][1][title]" data-v-seo-title>
+					</div>
+				 </div>		 
+
+				 <div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Open Graph Description</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-slug" placeholder="Description" name="seo[og][1][description]" data-v-seo-description>
+					</div>
+				  </div>		 
+
+				<label class="form-label fw-bold border-bottom d-block mb-4 py-3">Twitter</label>
+			
+				<div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Twitter Title</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-name" placeholder="Title" name="seo[twitter][1][title]" data-v-seo-title>
+					</div>
+				 </div>		 
+				  
+				  <div class="mb-3 row">
+					<label for="input-description" class="col-sm-2 col-form-label" >Twitter Description</label>
+					<div class="col-sm-10">
+					  <textarea type="email" class="form-control" id="input-description" placeholder="Description" name="seo[twitter][1][content]" data-v-seo-content></textarea>
+					</div>
+				  </div>
+
+
+				<div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Twitter label 1</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-name" placeholder="Label" name="seo[twitter][1][label1]" data-v-seo-label1>
+					</div>
+				 </div>		 
+
+				<div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Twitter data 1</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-name" placeholder="Data" name="seo[twitter][1][data1]" data-v-seo-data1>
+					</div>
+				 </div>					
+				 
+				 <div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Twitter label 2</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-name" placeholder="Label" name="seo[twitter][1][label2]" data-v-seo-label2>
+					</div>
+				 </div>		 
+
+				<div class="mb-3 row">
+					<label for="input-site-title" class="col-sm-2 col-form-label">Twitter data 21</label>
+					<div class="col-sm-10">
+					  <input type="text" class="form-control" id="input-name" placeholder="Data" name="seo[twitter][1][data2]" data-v-seo-data2>
+					</div>
+				 </div>		 
+			
+				</div>
+			</div>
+			<!-- .tab-content -->
+
+		</div>
+
+		<!--
+		<div class="tab-pane" id="seo-options" role="tabpanel">
+			seo options
+		</div>
+		-->
+
+ 
+	</div>
+	<!-- .tab-content -->
+
+</body>
+</html>

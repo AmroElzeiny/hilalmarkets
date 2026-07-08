@@ -173,6 +173,7 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "BILLING_ENABLED": "false",
             "BILLING_PROVIDER": "static",
             "EMAIL_ADAPTER": "memory",
+            "AUTH_TEST_FIXED_CODE": "123456",
             "LOG_LEVEL": "WARNING",
         }
     )
@@ -338,6 +339,9 @@ def signup(page: Page, base_url: str, email: str | None = None) -> str:
     page.get_by_test_id("auth-password").fill(TEST_PASSWORD)
     page.get_by_test_id("auth-repeat-password").fill(TEST_PASSWORD)
     page.get_by_test_id("auth-submit").click()
+    page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+    page.locator("input[name='code']").fill("123456")
+    page.get_by_role("button", name=re.compile("Verify and create account", re.I)).click()
     page.wait_for_url(re.compile(r".*/dashboard(\?.*)?$"), timeout=20_000)
     page.get_by_test_id("dashboard-root").wait_for(state="attached", timeout=10_000)
     assert_no_raw_traceback(page)

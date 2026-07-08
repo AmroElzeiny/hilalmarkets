@@ -1,0 +1,136 @@
+.field_group div.actions {
+	margin-bottom:0;
+}
+
+.dragzone {
+	padding-bottom:3rem;
+	padding-top:3rem;
+}
+
+.dragzone .row, .dragzone .col {
+	border: 1px dashed transparent;
+	border: 1px solid #ddd;
+	min-height:50px;
+	transition: width 266ms, height 266ms;
+}
+
+.dragzone .row, .dragzone .col,
+.dragzone .row:hover, .dragzone .row:hover .col {
+	border: 1px solid #ddd;
+	position:relative;
+}
+
+.dragzone .row:hover .col:last-child,
+.dragzone .row .col:last-child,
+.dragzone .col.dragstart + .col {
+	border-right:1px solid #ddd;
+}
+
+.dragzone .col {
+	border-right:none;
+}
+
+.dragzone .row {
+	padding:0.5rem 1.5rem;
+	margin-bottom:1rem;
+}
+
+.dragzone .col {
+	padding:0.5rem 1.5rem;
+	border-right:none;
+	position:relative;
+}
+
+.dragzone .col > .row {
+	margin-top:2rem;
+}
+
+.dragzone > .row::before, 
+.dragzone > .row > .col::before,
+.col > .row::before, 
+.col > .row > .col::before {
+  position:absolute;
+  left:0px;
+  top:0px;
+  height:10px;
+  content: '....';
+  width: 20px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  line-height: 5px;
+  padding: 0px 4px 10px;
+  cursor: move;
+  vertical-align: middle;
+  font-size: 12px;
+  font-family: sans-serif;
+  letter-spacing: 2px;
+  color: #eee;
+  text-shadow: 1px 0 1px black;
+  content: '.. .. .. ..';
+}
+
+.col > .edit {
+	display:none;
+}
+
+
+.dragover {
+}
+
+.dragstart {
+	max-width:50%;
+	max-height:30%;
+}
+
+.dragzone.drop, .row.drop {
+	background:lightyellow;
+}
+
+.col.drop::after {
+	content:"";
+	width:10px;
+	height:100%;
+	background:yellow;
+	display:block;
+	right:0;
+	top:0;
+	
+	position:absolute;
+}
+
+.dragenter {
+	
+}
+
+#actions {
+	position:absolute;
+	//display:none;
+	left:-5000px;
+	top:0;
+	opacity: 0;
+	border-bottom-left-radius: 10px;
+	transition: opacity 1s;
+}
+
+#edit, .edit {
+    position: absolute;
+    left: auto;
+    top: auto;
+    width: 100%;
+    width: calc(100% - 80px);
+    opacity:0;
+    height:0;
+    transition: opacity 0.15s ease-out;
+    background:var(--bs-body-bg);
+    overflow:hidden;
+}
+
+#edit.show,
+.edit.show {
+    opacity:1;
+    height:auto;
+    transition: opacity 0.25s ease-in;
+	box-shadow:0px 20px 30px 5px rgba(var(--bs-body-color-rgb), 0.08), 0px 100px 100px 10px var(--bs-body-bg);
+}

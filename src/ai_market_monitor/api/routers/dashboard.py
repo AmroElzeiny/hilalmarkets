@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -65,6 +66,18 @@ from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMes
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 router = APIRouter(tags=["dashboard"])
+_signup_lock_guard = asyncio.Lock()
+_signup_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _signup_lock_for(email: str) -> asyncio.Lock:
+    key = normalize_email(email) or email.strip().casefold()
+    async with _signup_lock_guard:
+        lock = _signup_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _signup_locks[key] = lock
+        return lock
 
 
 def _short_datetime(value: datetime | None, timezone_name: str = "UTC") -> str:
@@ -492,25 +505,69 @@ async def signup_submit(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
+    signup_lock = await _signup_lock_for(email)
+    async with signup_lock:
+        service = WebAuthService(session, settings)
+        try:
+            if password != repeat_password:
+                raise WebAuthError("password_mismatch", "Password fields must match.")
+            await service.request_signup_email_code(
+                email=email,
+                password=password,
+                display_name=None,
+                telegram_link=telegram_link,
+                requested_ip=request.client.host if request.client else None,
+            )
+            await session.commit()
+        except (WebAuthError, EmailDeliveryError) as exc:
+            await session.rollback()
+            code = getattr(exc, "code", "signup_failed")
+            if code == "code_recently_sent":
+                query = {"message": "code_sent", "email": email}
+                if telegram_link:
+                    query["telegram_link"] = telegram_link
+                return _redirect(f"/signup/verify?{urlencode(query)}")
+            return _redirect(f"/signup?error={code}")
+
+    query = {"message": "code_sent", "email": email}
+    if telegram_link:
+        query["telegram_link"] = telegram_link
+    return _redirect(f"/signup/verify?{urlencode(query)}")
+
+
+@router.get("/signup/verify", response_class=HTMLResponse, include_in_schema=False)
+async def signup_verify_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "auth.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=await _current_user(request, session, settings),
+            page="signup_verify",
+            title="Verify Your Email",
+        ),
+    )
+
+
+@router.post("/signup/verify", include_in_schema=False)
+async def signup_verify_submit(
+    request: Request,
+    email: str = Form(...),
+    code: str = Form(...),
+    telegram_link: str | None = Form(None),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
     service = WebAuthService(session, settings)
     linked_telegram_user_id: str | None = None
     try:
-        if password != repeat_password:
-            raise WebAuthError("password_mismatch", "Password fields must match.")
-        normalized_email = normalize_email(email)
-        existing_identity = await session.scalar(
-            select(UserIdentity.id).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized_email,
-            )
-        )
-        if existing_identity is not None:
-            return _redirect("/signup?error=account_exists")
-        user, created = await service.signup_or_signin_email(
-            email=email,
-            password=password,
-            display_name=None,
-        )
+        user = await service.complete_signup_with_email_code(email=email, code=code)
         telegram_connected = False
         if telegram_link:
             linked_telegram_user_id = await TelegramAccountLinkService(session, settings).complete(
@@ -519,15 +576,14 @@ async def signup_submit(
             telegram_connected = True
         cookie = await service.create_session(user, user_agent=request.headers.get("user-agent"))
         await session.commit()
-    except (ValueError, TelegramAccountLinkError) as exc:
+    except (WebAuthError, TelegramAccountLinkError) as exc:
         await session.rollback()
-        code = getattr(exc, "code", "signup_failed")
-        return _redirect(f"/signup?error={code}")
-    message = (
-        "telegram_connected"
-        if telegram_connected
-        else ("account_created" if created else "login_successful")
-    )
+        query = {"error": getattr(exc, "code", "invalid_code"), "email": email}
+        if telegram_link:
+            query["telegram_link"] = telegram_link
+        return _redirect(f"/signup/verify?{urlencode(query)}")
+
+    message = "telegram_connected" if telegram_connected else "account_created"
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response = _redirect(f"/dashboard?message={message}")
     response.set_cookie(

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+  <base href="">
+
+  <title>Vvveb - Gravatar Plugin Settings</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body>
+
+  <div id="container">
+
+    <div class="sidebar" data-v-copy-from="index.html,.sidebar">
+    </div>
+
+
+    <div class="main">
+
+      <div class="clearfix top-header" data-v-copy-from="index.html,.top-header">
+      </div>
+
+      <form id="settings-form" action="" method="post" class="settings" data-v-product>
+        <input type="hidden" name="action" id="action" value="save">
+        <input type="hidden" name="csrf" data-v-csrf>
+		
+        <div class="actions">
+          <div class="title">
+            <h4 class="text-muted mt-2">
+              <i class="icon-chatbox-outline"></i>
+              <span>Gravatar plugin</span>
+            </h4>
+          </div>
+          <div class="btns">
+			<a href="{$this.adminPath}index.php?module=plugin/plugins" title="Plugins list"
+					class="btn btn-icon btn-outline-secondary me-2">
+						<i class="la la-arrow-left"></i><span>Plugins list</span>
+			</a>  
+          <button type="submit" href="" class="btn btn-primary btn-icon ms-1" title="Save post">
+            <i class="icon-create-outline"></i> <span>Save settings</span>
+          </button>
+        </div>
+        </div>
+        <div>
+          <div id="main-content">
+
+         	<div class="notifications" data-v-notifications data-v-copy-from="index.html,.notifications"></div>
+
+            <div class="content clearfix settings px-4">
+
+				<h5>Options</h5>
+             
+				<div class="mb-3">
+					<label for="settings[size]" class="col-form-label d-inline-block">Avatar size</label>
+					
+					  <input type="number" class="form-control d-inline-block w-auto" name="settings[size]" value="60">
+					
+				  </div>
+				
+				<hr>
+				
+				<h5>Maximum Rating</h5>
+				
+					<div class="form-check"><label class="form-check-label"><input type="radio" class="form-check-input" name="settings[rating]" value="G" checked="checked"> G — Suitable for all audiences</label></div>
+					<div class="form-check"><label class="form-check-label"><input type="radio" class="form-check-input" name="settings[rating]" value="PG"> PG — Possibly offensive, usually for audiences 13 and above</label></div>
+					<div class="form-check"><label class="form-check-label"><input type="radio" class="form-check-input" name="settings[rating]" value="R"> R — Intended for adult audiences above 17</label></div>
+					<div class="form-check"><label class="form-check-label"><input type="radio" class="form-check-input" name="settings[rating]" value="X"> X — Even more mature than above</label></div>
+				
+				<hr>
+				
+				<h5>Default Avatar</h5>
+
+				<p>
+					For users without a custom avatar of their own, you can either display a generic logo or a generated one based on their email address.
+				</p>
+
+
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_mystery" value="mm" checked="checked"> 
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;d=mm&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=128&amp;d=mm&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async"> 
+						Mystery Person
+					</label>
+				</div>
+				
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_blank" value="blank" />
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;d=blank&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=64&amp;d=blank&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async" />
+						Blank
+					</label>
+				</div>
+
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_gravatar" value="" />
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=64&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async" />
+							Gravatar Logo
+					</label>
+				</div>
+
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_identicon" value="identicon" /> 
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;d=identicon&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=64&amp;d=identicon&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async" />
+						Identicon (Generated)
+					</label>
+				</div>
+
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_wavatar" value="wavatar" />
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;d=wavatar&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=64&amp;d=wavatar&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async" />
+						Wavatar (Generated)
+					</label>
+				</div>
+
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_monsterid" value="monsterid" />
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;d=monsterid&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=64&amp;d=monsterid&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async" />
+						MonsterID (Generated)
+					</label>
+				</div>
+
+				<div class="form-check form-check-inline">
+					<label class="form-check-label btn btn-outline-secondary">
+						<input type="radio" name="settings[default]" class="form-check-input" id="avatar_retro" value="retro" />
+						<img alt="" src="//gravatar.com/avatar/test?s=64&amp;d=retro&amp;f=y&amp;r=g" srcset="//gravatar.com/avatar/test?s=64&amp;d=retro&amp;f=y&amp;r=g 2x" height="64" width="64" loading="lazy" decoding="async" />
+						Retro (Generated)
+					</label>
+				</div>
+
+            </div>
+          </div>
+      </form>
+
+    </div>
+  </div>
+
+  <script src="js/popper.min.js"></script>
+  <script src="js/bootstrap.min.js"></script>
+  <script id="admin-js" type="module" src="/js/admin.js"></script>
+  <script type="module" src="/js/admin.js"></script>
+
+</body>
+
+</html>

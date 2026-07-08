@@ -91,7 +91,8 @@ class DashboardFakeMarketProvider:
         return None
 
 
-async def _signup(client, email: str = "dashboard-api@example.com") -> None:
+async def _signup(test_context, email: str = "dashboard-api@example.com") -> None:
+    client = test_context["client"]
     response = await client.post(
         "/signup",
         data={
@@ -103,10 +104,19 @@ async def _signup(client, email: str = "dashboard-api@example.com") -> None:
         follow_redirects=False,
     )
     assert response.status_code == 303
+    assert response.headers["location"].startswith("/signup/verify")
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    verified = await client.post(
+        "/signup/verify",
+        data={"email": email, "code": code},
+        follow_redirects=False,
+    )
+    assert verified.status_code == 303
+    assert verified.headers["location"].startswith("/dashboard")
 
 
 async def test_dashboard_api_uses_session_cookie_for_current_user(test_context):
-    await _signup(test_context["client"])
+    await _signup(test_context)
 
     response = await test_context["client"].get("/api/v1/dashboard/current-user")
 
@@ -117,7 +127,7 @@ async def test_dashboard_api_uses_session_cookie_for_current_user(test_context):
 
 
 async def test_dashboard_capabilities_endpoint_exposes_registry_and_templates(test_context):
-    await _signup(test_context["client"], "dashboard-capabilities@example.com")
+    await _signup(test_context, "dashboard-capabilities@example.com")
 
     response = await test_context["client"].get("/api/v1/dashboard/capabilities")
 
@@ -138,7 +148,7 @@ async def test_dashboard_capabilities_endpoint_exposes_registry_and_templates(te
 
 
 async def test_dashboard_strategy_builder_interpretation_feedback_is_audited(test_context):
-    await _signup(test_context["client"], "dashboard-builder-feedback@example.com")
+    await _signup(test_context, "dashboard-builder-feedback@example.com")
 
     response = await test_context["client"].post(
         "/api/v1/dashboard/strategies/interpret/feedback",
@@ -163,7 +173,7 @@ async def test_dashboard_strategy_builder_interpretation_feedback_is_audited(tes
 
 
 async def test_dashboard_analytics_coverage_uses_scan_jobs(test_context):
-    await _signup(test_context["client"], "dashboard-coverage@example.com")
+    await _signup(test_context, "dashboard-coverage@example.com")
     async with test_context["session_factory"]() as session:
         from ai_market_monitor.db.models import User
 
@@ -246,7 +256,7 @@ async def test_dashboard_analytics_coverage_uses_scan_jobs(test_context):
 
 
 async def test_dashboard_strategy_template_is_persisted(test_context):
-    await _signup(test_context["client"], "dashboard-template@example.com")
+    await _signup(test_context, "dashboard-template@example.com")
     definition = load_strategy().model_dump(mode="json")
 
     created_strategy = await test_context["client"].post(
@@ -274,7 +284,7 @@ async def test_dashboard_strategy_template_is_persisted(test_context):
 
 
 async def test_dashboard_chart_candles_use_provider_dependency(test_context):
-    await _signup(test_context["client"], "dashboard-chart@example.com")
+    await _signup(test_context, "dashboard-chart@example.com")
     test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
         DashboardFakeMarketProvider()
     )
@@ -291,7 +301,7 @@ async def test_dashboard_chart_candles_use_provider_dependency(test_context):
 
 
 async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_context):
-    await _signup(test_context["client"], "dashboard-lifecycles@example.com")
+    await _signup(test_context, "dashboard-lifecycles@example.com")
     test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
         DashboardFakeMarketProvider()
     )
@@ -610,7 +620,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
 
 
 async def test_dashboard_scan_prompt_interpret_understands_breakout(test_context):
-    await _signup(test_context["client"], "dashboard-prompt@example.com")
+    await _signup(test_context, "dashboard-prompt@example.com")
 
     response = await test_context["client"].post(
         "/api/v1/dashboard/scan-now/interpret",
@@ -633,7 +643,7 @@ async def test_dashboard_scan_prompt_interpret_understands_breakout(test_context
 
 
 async def test_dashboard_settings_persist_alert_schedule_without_theme_field(test_context):
-    await _signup(test_context["client"], "dashboard-settings@example.com")
+    await _signup(test_context, "dashboard-settings@example.com")
 
     response = await test_context["client"].post(
         "/dashboard/settings",
@@ -667,7 +677,7 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
 
 
 async def test_dashboard_theme_toggle_persists_without_full_settings_submit(test_context):
-    await _signup(test_context["client"], "dashboard-theme-toggle@example.com")
+    await _signup(test_context, "dashboard-theme-toggle@example.com")
 
     response = await test_context["client"].put(
         "/api/v1/dashboard/preferences/theme",
@@ -683,7 +693,7 @@ async def test_dashboard_theme_toggle_persists_without_full_settings_submit(test
 
 
 async def test_dashboard_publish_marks_monitor_active(test_context):
-    await _signup(test_context["client"], "dashboard-publish@example.com")
+    await _signup(test_context, "dashboard-publish@example.com")
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
@@ -713,7 +723,7 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
 
 
 async def test_dashboard_export_downloads_json_and_csv(test_context):
-    await _signup(test_context["client"], "dashboard-jobs@example.com")
+    await _signup(test_context, "dashboard-jobs@example.com")
     test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
         DashboardFakeMarketProvider()
     )
@@ -757,7 +767,7 @@ async def test_dashboard_export_downloads_json_and_csv(test_context):
 
 
 async def test_setup_replay_and_near_miss_dashboard_sections_are_hidden(test_context):
-    await _signup(test_context["client"], "dashboard-hidden-sections@example.com")
+    await _signup(test_context, "dashboard-hidden-sections@example.com")
 
     page = await test_context["client"].get("/dashboard/setup-replay")
     radar = await test_context["client"].get("/dashboard/near-miss")
@@ -780,7 +790,7 @@ async def test_setup_replay_and_near_miss_dashboard_sections_are_hidden(test_con
 
 
 async def test_dashboard_web_notifications_deliver_pending_web_alerts(test_context):
-    await _signup(test_context["client"], "dashboard-web-notification@example.com")
+    await _signup(test_context, "dashboard-web-notification@example.com")
     async with test_context["session_factory"]() as session:
         from ai_market_monitor.db.models import User
 
@@ -818,7 +828,7 @@ async def test_dashboard_web_notifications_deliver_pending_web_alerts(test_conte
 
 
 async def test_historical_replay_is_hidden_and_inaccessible(test_context):
-    await _signup(test_context["client"], "dashboard-backtest-disabled@example.com")
+    await _signup(test_context, "dashboard-backtest-disabled@example.com")
 
     page = await test_context["client"].get("/dashboard/backtests")
     create = await test_context["client"].post("/api/v1/dashboard/backtests", json={})
@@ -841,7 +851,8 @@ async def test_historical_replay_is_hidden_and_inaccessible(test_context):
 
 
 async def test_dashboard_support_ticket_api_creates_thread_message(test_context):
-    await _signup(test_context["client"], "dashboard-support@example.com")
+    await _signup(test_context, "dashboard-support@example.com")
+    test_context["settings"].email_test_outbox.clear()
 
     response = await test_context["client"].post(
         "/api/v1/dashboard/support/tickets",
@@ -876,10 +887,19 @@ async def test_dashboard_support_ticket_api_creates_thread_message(test_context)
             )
         )
         assert message.attachments[0]["content_type"] == "image/png"
+    outbox = test_context["settings"].email_test_outbox
+    assert len(outbox) == 1
+    assert outbox[0]["purpose"] == "support_ticket"
+    assert outbox[0]["recipient"] == "contact@trace-edge.com"
+    assert outbox[0]["subject"] == "TraceEdge support ticket: Missing SOL alert"
+    assert "dashboard-support@example.com" in outbox[0]["body"]
+    assert "Please investigate the 15m candle." in outbox[0]["body"]
+    assert outbox[0]["attachments"][0]["filename"] == "screenshot-1.png"
+    assert outbox[0]["attachments"][0]["content_type"] == "image/png"
 
 
 async def test_referral_page_shows_paid_conversion_reward_balance(test_context):
-    await _signup(test_context["client"], "referrer@example.com")
+    await _signup(test_context, "referrer@example.com")
     async with test_context["session_factory"]() as session:
         from ai_market_monitor.db.models import User
 
@@ -905,7 +925,7 @@ async def test_referral_page_shows_paid_conversion_reward_balance(test_context):
 
 
 async def test_advanced_dashboard_pages_render(test_context):
-    await _signup(test_context["client"], "dashboard-pages@example.com")
+    await _signup(test_context, "dashboard-pages@example.com")
 
     for path, expected in [
         ("/dashboard/strategies/new", "Strategy Builder"),
@@ -953,7 +973,7 @@ async def test_advanced_dashboard_pages_render(test_context):
 
 
 async def test_strategy_cockpit_validation_forecast_suggestion_and_preferences(test_context):
-    await _signup(test_context["client"], "cockpit-flow@example.com")
+    await _signup(test_context, "cockpit-flow@example.com")
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
@@ -1029,7 +1049,7 @@ async def test_strategy_cockpit_validation_forecast_suggestion_and_preferences(t
 
 
 async def test_cockpit_feedback_inbox_proof_and_timeline(test_context):
-    await _signup(test_context["client"], "cockpit-inbox@example.com")
+    await _signup(test_context, "cockpit-inbox@example.com")
     now = datetime.now(UTC)
     async with test_context["session_factory"]() as session:
         from ai_market_monitor.db.models import User
@@ -1142,7 +1162,7 @@ async def test_cockpit_feedback_inbox_proof_and_timeline(test_context):
 
 
 async def test_cockpit_universe_preview_and_version_experiment(test_context):
-    await _signup(test_context["client"], "cockpit-experiment@example.com")
+    await _signup(test_context, "cockpit-experiment@example.com")
     test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
         DashboardFakeMarketProvider()
     )
@@ -1200,7 +1220,7 @@ async def test_cockpit_universe_preview_and_version_experiment(test_context):
 
 
 async def test_cockpit_missed_move_analyzer_saves_deterministic_replay(test_context):
-    await _signup(test_context["client"], "cockpit-missed-move@example.com")
+    await _signup(test_context, "cockpit-missed-move@example.com")
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
@@ -1226,7 +1246,7 @@ async def test_cockpit_missed_move_analyzer_saves_deterministic_replay(test_cont
 
 
 async def test_prompt_interpretation_applies_saved_strategy_preferences(test_context):
-    await _signup(test_context["client"], "cockpit-preference-prompt@example.com")
+    await _signup(test_context, "cockpit-preference-prompt@example.com")
     saved = await test_context["client"].put(
         "/api/v1/dashboard/cockpit/preferences",
         json={
@@ -1259,7 +1279,7 @@ async def test_prompt_interpretation_applies_saved_strategy_preferences(test_con
 
 
 async def test_publish_blocks_critical_strategy_conflicts(test_context):
-    await _signup(test_context["client"], "cockpit-conflict-publish@example.com")
+    await _signup(test_context, "cockpit-conflict-publish@example.com")
     definition = load_strategy().model_dump(mode="json")
     lower = definition["conditions"]["children"][1]
     lower["key"] = "volume_above_two"

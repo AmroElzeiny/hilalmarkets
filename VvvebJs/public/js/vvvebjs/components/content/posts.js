@@ -1,0 +1,391 @@
+/**
+ * Vvveb
+ *
+ * Copyright (C) 2021  Ziadin Givan
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ */
+ 
+import {ServerComponent} from '../server-component.js';
+
+
+let template = 
+`
+<div class="container" data-v-component-posts="popular" data-v-limit="4">      
+<div class="row">
+
+	<div class="col-sm-12 col-md-6 col-lg mb-2" data-v-post data-v-id="6" data-v-type="post">
+
+	  <article class="card">
+		<img src="../../media/demo/posts/6.jpg" alt="" class="card-img-top" data-v-post-image>
+		
+		<div class="card-body">
+		  <div class="post-title card-title">
+			<a href="/hello-world-6" data-v-post-url title>
+			  <h3 data-v-post-name>Mauris viverra cursus ante laoreet eleifend</h3>
+			</a>
+		  </div>
+		  
+		  <p class="card-text text-muted" data-v-post-excerpt>Et et saepe suscipit debitis a accusamus nulla in amet molestiae voluptates dolor autem vitae optio ipsa mollitia voluptatem vitae.</p>
+		  <a href="/hello-world-6" data-v-post-url title>
+			<span>Read more</span>
+			<i class="la la-angle-right"></i>
+		  </a>
+		</div>
+	  </article>
+
+
+	</div>
+	
+	<div class="col-sm-12 col-md-6 col-lg mb-2" data-v-post data-v-id="5" data-v-type="post">
+
+	  <article class="card">
+		<img src="../../media/demo/posts/5.jpg" alt="" class="card-img-top" data-v-post-image>
+		
+		<div class="card-body">
+		  <div class="post-title card-title">
+			<a href="/hello-world-5" data-v-post-url title>
+			  <h3 data-v-post-name>Sed viverra pellentesque dictum. Aenean ligula justo, viverra in lacus porttitor</h3>
+			</a>
+		  </div>
+		  
+		  <p class="card-text text-muted" data-v-post-excerpt>Et ut aliquid blanditiis id sit et. Est ea ut tenetur veritatis recusandae est voluptatem.</p>
+		  <a href="/hello-world-5" data-v-post-url title>
+			<span>Read more</span>
+			<i class="la la-angle-right"></i>
+		  </a>
+		</div>
+	  </article>
+
+
+	</div>
+	
+	<div class="col-sm-12 col-md-6 col-lg mb-2" data-v-post data-v-id="4" data-v-type="post">
+
+	  <article class="card">
+		<img src="../../media/demo/posts/4.jpg" alt="" class="card-img-top" data-v-post-image>
+		
+		<div class="card-body">
+		  <div class="post-title card-title">
+			<a href="/hello-world-4" data-v-post-url title>
+			  <h3 data-v-post-name>Etiam leo nibh, consectetur nec orci et, tempus tempus ex</h3>
+			</a>
+		  </div>
+		  
+		  <p class="card-text text-muted" data-v-post-excerpt>
+			Lorem ipsum dolor sit amet, consectetur adipisicing elit. Corporis perferendis rem accusantium ducimus animi nesciunt expedita omnis aut quas molestias!
+			Mauris viverra</p>
+		  <a href="/hello-world-4" data-v-post-url title>
+			<span>Read more</span>
+			<i class="la la-angle-right"></i>
+		  </a>
+		</div>
+	  </article>
+
+
+	</div>
+	
+	<div class="col-sm-12 col-md-6 col-lg mb-2" data-v-post data-v-id="3" data-v-type="post">
+
+	  <article class="card">
+		<img src="../../media/demo/posts/3.jpg" alt="" class="card-img-top" data-v-post-image>
+		
+		<div class="card-body">
+		  <div class="post-title card-title">
+			<a href="/hello-world-3" data-v-post-url title>
+			  <h3 data-v-post-name>The work is accomplished, and there is no resting in it</h3>
+			</a>
+		  </div>
+		  
+		  <p class="card-text text-muted" data-v-post-excerpt>
+All in the world know the beauty of the beautiful, and in doing this they have (the idea of) what ugliness is; they all know the skill of the skilful, and in doing this they have (the idea of) what t</p>
+		  <a href="/hello-world-3" data-v-post-url title>
+			<span>Read more</span>
+			<i class="la la-angle-right"></i>
+		  </a>
+		</div>
+	  </article>
+
+	</div>
+  </div>
+</div>
+`;
+
+class PostsComponent extends ServerComponent{
+	constructor ()
+	{
+		super();
+
+		this.name = "Posts";
+		this.attributes = ["data-v-component-posts"],
+
+		this.image ="icons/posts.svg";
+		this.html = template;
+		
+		this.properties = [{
+			name: false,
+			key: "source",
+			inputtype: RadioButtonInput,
+			inline:false,
+			col:12,
+			htmlAttr:"data-v-source",
+			data: {
+				inline: true,
+				extraclass:"btn-group-fullwidth",
+				options: [{
+					value: "automatic",
+					icon:"la la-cog",
+					text: "Configuration",
+					title: "Configuration",
+					extraclass:"btn-sm",
+					checked:true,
+				},{
+					value: "autocomplete",
+					text: "Autocomplete",
+					title: "Autocomplete",
+					icon:"la la-search",
+					extraclass:"btn-sm",
+				}],
+			},
+			setGroup: group => {
+				document.querySelectorAll('.mb-2[data-group]').forEach(e => e.classList.add("d-none"));
+				document.querySelectorAll('.mb-2[data-group="'+ group + '"].d-none').forEach((el, i) => {
+					el.classList.remove("d-none");
+				});				
+				//return element;
+			},		
+			onChange : function(element, value, input)  {
+				this.setGroup(input.value);
+				return element;
+			}, 
+			init: function (node) {
+				//this.setGroup(node.dataset.vType);
+				//return 'autocomplete';
+				return node.dataset.vSource ?? "automatic";
+			},
+		},{
+			name: "Start from page",
+			group:"automatic",
+			col:6,
+			inline:false,
+			key: "page",
+			htmlAttr:"data-v-page",
+			data: {
+				value: "1",//default
+				min: "1",
+				max: "1024",
+				step: "1"
+			},        
+			inputtype: NumberInput,
+		},{
+			name: "Nr. of posts",
+			group:"automatic",
+			col:6,
+			inline:false,
+			key: "limit",
+			htmlAttr:"data-v-limit",
+			inputtype: NumberInput,
+			data: {
+				value: "4",//default
+				min: "1",
+				max: "1024",
+				step: "1"
+			},
+		},{
+			name: "Image size",
+			key: "image_size",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-image_size",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "",
+					text: "Default"
+				},{
+					value: "thumb",
+					text: "Thumb"
+				},{
+					value: "medium",
+					text: "Medium"
+				},{
+					value: "large",
+					text: "Large"
+				},{
+					value: "xlarge",
+					text: "Extra large"
+				}]
+			}		
+		},{
+			name: "Order by",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-order_by",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "NULL",
+					text: "Default"
+				},{
+					value: "created_at",
+					text: "Date added"
+				},{
+					value: "updated_at",
+					text: "Date modified"
+				}/*, {
+					value: "sales",
+					text: "Sales"
+				}*/]
+			}
+		},{	
+			name: "Order direction",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-direction",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "asc",
+					text: "Ascending"
+				},{
+					value: "desc",
+					text: "Descending"
+				}]
+			}
+		},{	
+			name: "Post type",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-type",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "",//post - default
+					text: "Post"
+				},{
+					value: "page",
+					text: "Page"
+				}]
+			}		
+		},{	
+			name: "Author",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-admin_id",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "",//post - default
+					text: "Post"
+				},{
+					value: "page",
+					text: "Page"
+				}]
+			}		
+		},{	
+			name: "Sticky",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-sticky",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "",//post - default
+					text: "Exclude"
+				},{
+					value: "true",
+					text: "Include"
+				}]
+			}		
+		},{
+			name: "Limit to categories",
+			group:"automatic",
+			key: "category",
+			htmlAttr:"data-v-category",
+			inline:false,
+			col:12,
+			inputtype: TagsInput,
+			data: {
+				url: window.location.pathname + "?module=editor/autocomplete&action=categories",
+			},
+
+		},{	
+			name: "Search",
+			group:"automatic",
+			key: "search",
+			col:12,
+			inline:false,
+			htmlAttr:"data-v-search",
+			inputtype: TextInput,
+		},{	
+			name: "Date format",
+			group:"automatic",
+			key: "date_format",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-date_format",
+			inputtype: TextInput,
+		},{	
+			name: "Excerpt limit",
+			group:"automatic",
+			key: "excerpt_limit",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-excerpt_limit",
+			inputtype: NumberInput,
+		},{
+			name: "Posts",
+			key: "posts",
+			group:"autocomplete",
+			htmlAttr:"data-v-post_id",
+			inline:false,
+			col:12,
+			inputtype: AutocompleteList,
+			data: {
+				url: window.location.pathname + "?module=editor/autocomplete&action=posts",
+			},
+
+		}];
+	}
+
+    init(node) {
+		document.querySelectorAll('.mb-2[data-group]').forEach((el, i) => {
+			el.classList.add("d-none");
+		});			
+		
+		let source = node.dataset.vSource;
+		if (!source) {
+			source = "automatic";
+		} 
+
+		document.querySelectorAll('.mb-2[data-group="' + source + '"]').forEach(e => e.classList.remove("d-none"));
+	}
+}
+
+let postsComponent = new PostsComponent;
+
+export {
+  postsComponent
+};

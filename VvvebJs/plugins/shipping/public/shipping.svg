@@ -1,0 +1,12 @@
+<?xml version="1.0" ?><svg data-name="Layer 3" id="Layer_3" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <style>
+            .cls-1{fill:none;stroke:#3c4044;stroke-linecap:round;stroke-linejoin:round}
+        </style>
+    </defs>
+    <path class="cls-1" d="M22.94 9v13.6h-9.66a2.42 2.42 0 0 0-4.83 0H6V9ZM31 17.8v4.8h-1.61a2.42 2.42 0 0 0-4.83 0h-1.62V13h3.37Z"/>
+    <path class="cls-1" d="M31 17.8v4.8h-1.61a2.42 2.42 0 0 0-4.83 0h-1.62v-4.8Z"/>
+    <ellipse class="cls-1" cx="10.86" cy="22.6" rx="2.42" ry="2.4"/>
+    <ellipse class="cls-1" cx="26.97" cy="22.6" rx="2.42" ry="2.4"/>
+    <path class="cls-1" d="M1 10.6h2.61M1 13.8h2.61M1 17h2.61"/>
+</svg>

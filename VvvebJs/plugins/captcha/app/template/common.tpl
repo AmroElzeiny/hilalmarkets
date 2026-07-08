@@ -1,0 +1,1 @@
+head|append = from(/public/plugins/captcha/captcha.html|head > *)

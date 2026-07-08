@@ -267,6 +267,26 @@ class EmailAuthChallenge(UUIDPrimaryKeyMixin, Base):
     requested_ip_hash: Mapped[str | None] = mapped_column(String(64))
 
 
+class PendingEmailSignup(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "pending_email_signups"
+    __table_args__ = (
+        Index("ix_pending_email_signup_email_created", "email", "created_at"),
+        Index("ix_pending_email_signup_expires", "expires_at"),
+    )
+
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    display_identifier: Mapped[str] = mapped_column(String(320), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    telegram_link: Mapped[str | None] = mapped_column(String(1000))
+    code_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    requested_ip_hash: Mapped[str | None] = mapped_column(String(64))
+
+
 class DashboardPreference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "dashboard_preferences"
     __table_args__ = (UniqueConstraint("user_id", name="uq_dashboard_preference_user"),)

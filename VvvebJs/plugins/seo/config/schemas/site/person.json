@@ -1,0 +1,25 @@
+{
+  "@context": "https://schema.org",
+  "@type": "Person",
+  "@@data-v-component-admin":"admin",
+  "@@data-v-admin_id":"url",
+/*
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": "Seattle",
+    "addressRegion": "WA",
+    "postalCode": "98052",
+    "streetAddress": "20341 Whitworth Institute 405 N. Whitworth"
+  },
+  "colleague": [
+    "http://www.xyz.edu/students/alicejones.html",
+    "http://www.xyz.edu/students/bobsmith.html"
+  ],
+*/
+  "email": "mailto:{$admin.email}",
+  "image": "{$admin.avatar_url}",
+//  "jobTitle": "Professor",
+  "name": "{$admin.display_name}",
+  "telephone": "{$admin.phone_number}",
+  "url": "{$admin.url}"
+}

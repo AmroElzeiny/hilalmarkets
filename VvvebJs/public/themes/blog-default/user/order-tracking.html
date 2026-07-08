@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head data-v-save-global="index.html,head">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8">
+
+  <base href="../">
+
+  <title>Vvveb - Orders</title>
+
+  <meta name="description" content="" />
+  <meta name="keywords" content="">
+  <meta name="author" content="">
+  <link rel="canonical" href="">
+
+  <link id="blog-default-css" href="css/style.css" rel="stylesheet" media="screen">
+  <link id="fonts-css" href="css/fonts.css" rel="stylesheet" media="screen">
+  <link id="vvvebjs-css" href="css/custom.css" rel="stylesheet" media="screen">
+
+
+
+
+
+
+
+
+  <link rel="sitemap" type="application/xml" title="Sitemap" href="/feed/index">
+  <link rel="alternate" type="application/rss+xml" title="Feed" href="/feed/posts" />
+  <link rel="alternate" type="application/rss+xml" title="Feed" href="/feed/pages" />
+  <link rel="alternate" type="application/rss+xml" title="Products" href="/feed/products" />
+  <link rel="alternate" type="application/rss+xml" title="Comments Feed" href="/feed/comments" />
+
+  <link rel="icon" type="image/x-icon" href="media/favicon.ico" data-v-global-site.favicon>
+
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <link rel="alternate" hreflang="" href="" />
+</head>
+
+
+<body>
+
+  <header id="main-header" data-v-save-global="index.html,#main-header">
+    <div class="container-fluid">
+      <nav class="navbar navbar-expand-lg p-4">
+
+        <div class="d-flex justify-content-between w-100" data-v-component-site>
+          <!-- hidden spacer to center brand on mobile -->
+          <span class="d-lg-none d-block">
+          </span>
+
+          <div>
+            <a class="navbar-brand d-lg-inline-block pb-0" href="index.html" data-url data-v-url-params='{"host":"*.*.*"}'>
+              <img src="img/logo.png" class="logo-default" data-v-site-logo>
+              <img src="img/logo.png" class="logo-sticky" data-v-site-logo-sticky>
+              <img src="img/logo-white.png" class="logo-default-dark" data-v-site-logo-dark>
+              <img src="img/logo-white.png" class="logo-default-dark-sticky" data-v-site-logo-dark-sticky>
+
+              <span data-v-site-description-title>Vvveb Blog</span>
+            </a>
+            <small class="d-block text-muted" data-v-site-description-description>minimal blog template</small>
+          </div>
+
+          <div class="text-end">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar">
+              <span class="navbar-toggler-icon"></span>
+            </button>
+          </div>
+        </div>
+
+
+        <div class="collapse navbar-collapse flex-grow-1 text-end" id="navbar" data-v-component-menu="header" data-v-slug="main-menu">
+          <ul class="navbar-nav ms-auto flex-nowrap" data-v-menu-items>
+            <li class="nav-item dropdown position-static" data-v-menu-item data-v-class-if-has-dropdown="category.children > 0" data-v-class-if-position-static="category.has-text">
+
+              <a class="nav-link dropdown-toggle" href="#" data-v-class-if-dropdown-toggle="category.children > 0" data-v-class-if-active="category.active" aria-expanded="false" data-v-menu-item-url>
+                <span data-v-menu-item-name data-v-if-not="category.type = 'text'"></span>
+                <span data-v-menu-item-content>
+                  <p>
+                    <img src="/media/vvveb.svg" height="24" alt="" class="me-2">Mega menu
+                  </p>
+                </span>
+              </a>
+
+              <div class="dropdown-menu" data-v-menu-item-recursive>
+                <div data-v-menu-item class="nav-item" data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" data-v-class-if-active="category.active" href="https://github.com/givanz/VvvebJs/wiki" data-v-menu-item-url>
+                    <span data-v-menu-item-name data-v-if-not="category.type = 'text'"></span>
+                    <span data-v-menu-item-content>
+                      <div class="row">
+                        <div class="col-6 align-self-center">
+                          <img src="img/demo/video-1.jpg" alt="Post" width="250" loading="lazy" class="rounded img-fluid">
+                        </div>
+                        <div class="col-6">
+                          <h4>Features</h4>
+                          <p class="text-muted">Just a few mentions, but there is more</p>
+                          <ul class="list-unstyled">
+                            <li class="text-primary">Page builder</li>
+                            <li class="text-primary">Mega menu</li>
+                            <li class="text-primary">Multi language</li>
+                            <li class="text-primary">Advanced SEO</li>
+                            <li class="text-primary">Ecommerce</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="https://github.com/givanz/VvvebJs/wiki" data-v-class-if-active="category.active" data-v-menu-item-url>
+                    <span data-v-menu-item-name data-v-if-not="category.type = 'text'">Developer Documentation</span>
+                    <span data-v-menu-item-content></span>
+                  </a>
+                </div>
+              </div>
+            </li>
+            <li class="nav-item dropdown position-static" data-v-menu-item data-v-class-if-has-dropdown="category.children > 0" data-v-class-if-position-static="category.has-text">
+
+              <a class="nav-link" href="https://themes.vvveb.com" data-v-if="category.children <= 0" data-v-menu-item-url>
+                <span data-v-menu-item-name>Pages</span>
+              </a>
+
+              <a class="nav-link dropdown-toggle" href="#" data-v-if="category.children > 0" data-bs-toggle="dropdown" aria-expanded="false" data-v-menu-item-url>
+                <span data-v-menu-item-name>Pages</span>
+              </a>
+
+              <div class="dropdown-menu" data-v-menu-item-recursive>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="index-no-sidebar.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Blog no sidebar</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/index.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Blog with sidebar</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/index-excerpts.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Blog with excerpts</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/post-image-header.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Post image header</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/post-image-hero.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Post image hero</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/post.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Post</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/page.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Page</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/archive.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Archive</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/tag.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Tag</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/category.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Category</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="content/user.html" data-v-menu-item-url>
+                    <span data-v-menu-item-name>User</span>
+                  </a>
+                </div>
+              </div>
+            </li>
+
+            <li class="nav-item" data-v-menu-item>
+              <a class="nav-link" href="content/index.html" data-v-menu-item-url>
+                <span data-v-menu-item-name>Blog</span>
+              </a>
+            </li>
+            <li class="nav-item" data-v-menu-item>
+              <a class="nav-link" href="contact.html" data-v-menu-item-url>
+                <span data-v-menu-item-name>Contact</span>
+              </a>
+            </li>
+            <li class="nav-item dropdown has-dropdown" data-v-menu-item>
+
+              <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" aria-expanded="false" data-v-menu-item-url>
+                <span data-v-menu-item-name>Resources</span>
+              </a>
+
+              <div class="dropdown-menu" data-v-menu-item-recursive>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="https://github.com/givanz/VvvebJs/wiki" data-v-menu-item-url>
+                    <span data-v-menu-item-name>User Documentation</span>
+                  </a>
+                </div>
+                <div data-v-menu-item class="nav-item" data-v-menu-item data-v-class-if-dropdown="category.children > 0">
+                  <a class="dropdown-item" href="https://github.com/givanz/VvvebJs/wiki" data-v-menu-item-url>
+                    <span data-v-menu-item-name>Developer Documentation</span>
+                  </a>
+                </div>
+              </div>
+
+            </li>
+            <li class="nav-item" data-v-menu-item>
+              <a class="nav-link" href="content/page.html" data-v-menu-item-url>
+                <span data-v-menu-item-name>About us</span>
+              </a>
+            </li>
+            <li class="nav-item ms-3">
+              <div data-v-component-language>
+                <form method="post" enctype="multipart/form-data" id="form-language" class="position-relative">
+
+                  <a class="dropdown-toggle nav-link " data-bs-toggle="dropdown" role="button" title="Language" aria-expanded="false">
+                    <!-- <i class="la la-flag me-1"></i> -->
+                    <!-- 
+							<img src="" data-v-language-info-img>
+							-->
+                    <span class="" data-v-language-info-slug>English</span>
+                  </a>
+
+
+                  <div class="dropdown-menu">
+
+                    <div data-v-language>
+                      <button class="dropdown-item" type="submit" value="eng" name="language" data-v-language-code>
+                        <!-- <i class="la la-flag la-lg me-2"></i> -->
+                        <img src="" loading="lazy" class="me-1" data-v-language-img>
+
+                        <!-- <a href="" data-v-language-url> -->
+                        <span data-v-language-name>English</span>
+                        <!-- </a> -->
+                      </button>
+                    </div>
+
+                    <div data-v-language>
+                      <button class="dropdown-item" type="submit" value="ro" name="language" data-v-language-code>
+                        <!-- <i class="la la-flag la-lg me-2"></i> -->
+                        <img src="" loading="lazy" class="me-1" data-v-language-img>
+                        <!-- <a href="" data-v-language-url>  -->
+                        <span data-v-language-name>Romanian</span>
+                        <!-- </a>  -->
+                      </button>
+                    </div>
+
+                  </div>
+                </form>
+              </div>
+            </li>
+            <li>
+              <div class="dropdown nav-item">
+                <a class="dropdown-toggle nav-link " href role="button" id="user-dropdown" data-bs-toggle="dropdown" aria-expanded="false" data-v-url="user/index">
+                  <i class="la la-lg la-user"></i>
+                  <span class="visually-hidden">User</span>
+                </a>
+
+                <div class="dropdown-menu dropdown-menu-end login-box user-box p-4" aria-labelledby="user-dropdown">
+
+                  <div data-v-component-user>
+
+                    <div class="notifications" data-v-notifications>
+
+                      <div class="alert alert-danger d-flex alert-dismissable" role="alert" data-v-notification-error data-v-type="login">
+
+                        <div class="icon align-middle me-2">
+                          <i class="align-middle la la-2x lh-1 la-exclamation-triangle"></i>
+                        </div>
+
+                        <div class="flex-grow-1 align-self-center text-small">
+                          <div>
+                            <div data-v-notification-text>
+                              This is a placeholder for a notification message.
+                            </div>
+                          </div>
+                        </div>
+
+
+                        <button type="button" class="btn-close align-middle" data-bs-dismiss="alert" aria-label="Close">
+                          <span aria-hidden="true">
+                          </span>
+                        </button>
+                      </div>
+
+                      <div class="alert alert-success d-flex  alert-dismissable d-flex" role="alert" data-v-notification-success data-v-type="login">
+
+                        <div class="icon align-middle me-2">
+                          <i class="align-middle la la-2x lh-1 la-check-circle"></i>
+                        </div>
+
+                        <div class="flex-grow-1 align-self-center align-middle" data-v-notification-text>
+                          This is a placeholder for a success message.
+                        </div>
+
+                        <button type="button" class="btn-close align-middle" data-bs-dismiss="alert" aria-label="Close">
+                          <span aria-hidden="true">
+                          </span>
+                        </button>
+                      </div>
+
+                      <div class="alert alert-primary d-flex alert-dismissable d-flex" role="alert" data-v-notification-info data-v-type="login">
+
+                        <div class="icon align-middle me-2">
+                          <i class="align-middle la la-2x lh-1  la-info-circle"></i>
+                        </div>
+
+                        <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                          This is a placeholder for a info message.
+                        </div>
+
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+                          <span aria-hidden="true">
+                          </span>
+                        </button>
+                      </div>
+
+                    </div>
+
+
+                    <form action method="post" enctype="multipart/form-data" data-v-url="user/login/index" data-v-vvveb-action="login" data-v-vvveb-on="submit" class="login-form">
+
+                      <input type="hidden" name="csrf" data-v-csrf>
+
+                      <div class="login-form" data-v-if-not="component.user_id">
+
+                        <div class="mb-3">
+                          <input type="email" name="email" value placeholder=" " id="user-email" class="form-control label-over" data-v-user-email required>
+                          <label class="form-label" for="user-email">E-Mail Address</label>
+                        </div>
+
+                        <div class="mb-3">
+
+                          <div class="input-group">
+                            <input type="password" minlength="4" autocorrect="off" autocomplete="current-password" class="form-control label-over" placeholder=" " id="user-password" name="password" value="" aria-label="Password" required>
+                            <label class="form-label" for="user-password">Password</label>
+                            <button class="btn btn-sm px-3 border border-start-0" type="button" onclick="togglePasswordInput(this, 'user-password')">
+                              <i class="la la-eye-slash"></i>
+                            </button>
+                          </div>
+                        </div>
+
+                        <button type="submit" value="Login" class="btn btn-primary py-2 btn-login w-100">
+
+                          <span class="loading d-none">
+                            <span class="spinner-border spinner-border-sm align-middle" role="status" aria-hidden="true">
+                            </span>
+                            <span>Authenticating</span>...
+                          </span>
+
+                          <span class="button-text">
+                            Login <i class="la la-arrow-right float-end ms-2"></i>
+                          </span>
+
+                        </button>
+                        <div class="my-2"></div>
+                        <a href="/user/reset" data-v-url="user/reset/index" class="my-2">Forgotten Password</a>
+
+                        <div class="my-2"></div>
+
+                        <hr class="text-secondary">
+                        <span>Don’t have an account?</span>
+                        <br>
+                        <a href="/user/signup" data-v-url="user/signup/index">Register Account</a>
+                        <span class="text-body-tertiary">|</span>
+                        <a href="/user/login" data-v-url="user/login/index">Login</a>
+
+                      </div>
+
+
+                      <div class="user-form" data-v-if="component.user_id">
+                        <div class="text-center" data-v-if="user.first_name">Welcome <b data-v-user-first_name data-filter-capitalize>John</b>
+                          <b data-v-user-last_name data-filter-capitalize>Doe</b>
+                        </div>
+                        <div class="text-center" data-v-if-not="user.first_name">Welcome <b data-v-user-username>johndoe</b>
+                        </div>
+
+                        <div class="dropdown-divider opacity-50 my-3"></div>
+
+                        <ul class="m-3 list-unstyled">
+                          <li>
+                            <a href="user" data-v-url="user/index">
+                              <i class="la la-user la-lg text-muted m-1"></i>
+                              <span>My account</span>
+                            </a>
+                          </li>
+                          <li>
+                            <a href="user/comments" data-v-url="user/comments/index">
+                              <i class="la la-comment la-lg text-muted m-1"></i>
+                              <span>Comments</span>
+                            </a>
+                          </li>
+                          <li>
+                            <a href="user/orders" data-v-url="user/orders/index">
+                              <i class="la la-shopping-bag la-lg text-muted m-1"></i>
+                              <span>Orders</span>
+                            </a>
+                          </li>
+                          <li>
+                            <a href="user/downloads" data-v-url="user/downloads/index">
+                              <i class="la la-hand-holding-heart la-lg text-muted m-1"></i>
+                              <span>Downloads</span>
+                            </a>
+                          </li>
+                          <li>
+                            <a href="user/wishlist" data-v-url="user/wishlist/index">
+                              <i class="la la-download la-lg text-muted m-1"></i>
+                              <span>Wishlist</span>
+                            </a>
+                          </li>
+                          <li>
+                            <a href="user/profile" data-v-url="user/profile/index">
+                              <i class="la la-cogs la-lg text-muted m-1"></i>
+                              <span>Profile</span>
+                            </a>
+                          </li>
+                        </ul>
+
+
+                        <input type="hidden" name="logout">
+
+                        <button type="submit" value="logout" class="btn btn-sm btn-primary w-100">
+
+                          <span class="loading d-none">
+                            <span class="spinner-border spinner-border-sm align-middle" role="status" aria-hidden="true">
+                            </span>
+                            <span>Loading ...</span>...
+                          </span>
+
+                          <span class="button-text">
+                            <i class="la la-sign-out-alt la-lg m-1"></i>
+                            <span>Log out</span>
+                            </a>
+                          </span>
+
+                        </button>
+                      </div>
+                    </form>
+
+
+                  </div>
+                </div>
+              </div>
+
+            </li>
+            <li>
+              <a id="color-theme-switch" class="nav-link" href="#" role="button" title="Switch sidebar color theme">
+                <i class="la la-sun"></i>
+              </a>
+            </li>
+          </ul>
+
+
+          <button class="btn btn-outline-secondary border-0" type="submit" title="Search" data-bs-toggle="modal" data-bs-target="#searchModal">
+            <div class="la-flip-horizontal">
+              <i class="la la-search la-lg" aria-hidden="true"></i>
+            </div>
+          </button>
+
+        </div>
+
+
+
+      </nav>
+    </div>
+
+  </header>
+
+
+  <main id="site-content" role="main">
+
+
+    <div class="container my-5">
+      <div class="row">
+
+        <div class="col-md-12 justify-content-center">
+
+          <div class="notifications" data-v-notifications>
+
+            <div class="alert alert-danger d-flex alert-dismissable" role="alert" data-v-notification-error>
+
+              <div class="icon align-middle me-2">
+                <i class="align-middle la la-2x lh-1 la-exclamation-triangle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center text-small">
+                <div>
+                  <div data-v-notification-text>
+                    This is a placeholder for a notification message.
+                  </div>
+                </div>
+              </div>
+
+
+              <button type="button" class="btn-close align-middle" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                </span>
+              </button>
+            </div>
+
+            <div class="alert alert-success d-flex  alert-dismissable d-flex" role="alert" data-v-notification-success>
+
+              <div class="icon align-middle me-2">
+                <i class="align-middle la la-2x lh-1 la-check-circle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center align-middle" data-v-notification-text>
+                This is a placeholder for a success message.
+              </div>
+
+              <button type="button" class="btn-close align-middle" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                </span>
+              </button>
+            </div>
+
+            <div class="alert alert-primary d-flex alert-dismissable d-flex" role="alert" data-v-notification-info>
+
+              <div class="icon align-middle me-2">
+                <i class="align-middle la la-2x lh-1  la-info-circle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                This is a placeholder for a info message.
+              </div>
+
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                </span>
+              </button>
+            </div>
+
+          </div>
+
+
+          <div data-v-if="this.validOrder">
+            <div data-v-customer_order_id="url" data-v-email="url" data-v-component-order>
+
+              <h2>Order ID: <span data-v-order-customer_order_id>#001</span>
+              </h2>
+
+              <div class="table-responsive order-table table-bordered">
+                <table class="table mb-0 text-nowrap align-middle" data-v-cart>
+                  <thead>
+                    <tr>
+                      <th class="text-center">Image</th>
+                      <th class="text-start">Product Name</th>
+                      <!-- <th class="text-start">Model</th> -->
+                      <th class="text-start">Quantity</th>
+                      <th class="text-end">Unit Price</th>
+                      <th class="text-end">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr data-v-order-product>
+                      <td class="text-center order-img">
+                        <a href="#40" data-v-order-product-url>
+                          <img src="#" alt="Product name" class="img-rounded" data-v-order-product-image width=50 loading="lazy">
+                        </a>
+                      </td>
+                      <td class="text-start">
+                        <a href="#40" target="_blank" data-v-order-product-url>
+                          <span data-v-order-product-name>Product name</span>
+                        </a>
+
+                        <div class="option" data-v-if="product.option_value">
+                          <div class="" data-v-product-option>
+                            <span data-v-product-option-option>Color</span>: <span data-v-product-option-name>Red</span>
+                            <span data-v-if="value.price">(<span data-v-product-option-price_formatted></span>)</span>
+                          </div>
+                          <div class="" data-v-product-option>
+                            <span data-v-product-option-option>Size</span>: <span data-v-product-option-name>XL</span>
+                            <span data-v-if="value.price">(<span data-v-product-option-price_formatted></span>)</span>
+                          </div>
+                          <div class="" data-v-product-option>
+                            <span data-v-product-option-option>Material</span>: <span data-v-product-option-name>Wool</span>
+                            <span data-v-if="value.price">(<span data-v-product-option-price_formatted></span>)</span>
+                          </div>
+                        </div>
+
+                        <div class="price">
+                          <span data-v-order-product-price_tax_formatted>$160.40</span>
+                        </div>
+                      </td>
+
+                      <!-- <td class="text-start">product 11</td> -->
+                      <td class="text-start">
+                        <span data-v-order-product-quantity>1</span>
+                      </td>
+                      <td class="text-end unit-price">
+                        <span data-v-order-product-price_formatted>1</span>
+                      </td>
+                      <!-- <td class="text-end price" data-v-order-product-price>$123.20</td> -->
+                      <td class="text-end total px-4">
+                        <span data-v-order-product-tax_formatted>$146.40</span>
+                      </td>
+                    </tr>
+                  </tbody>
+
+                  <tfoot data-v-order-totals>
+                    <tr data-v-order-totals-total>
+                      <td colspan="4" class="text-end">
+                        <small data-v-order-total-title>Sub-Total</small>:
+                      </td>
+                      <td class="text-end" data-v-order-total-value_formatted>$101.00</td>
+                    </tr>
+                    <tr data-v-order-totals-total>
+                      <td colspan="4" class="text-end">
+                        <small>Eco Tax (2.00):</small>
+                      </td>
+                      <td class="text-end">$2.00</td>
+                    </tr>
+                    <tr data-v-order-totals-total>
+                      <td colspan="4" class="text-end">
+                        <small>VAT (19%):</small>
+                      </td>
+                      <td class="text-end">$20.20</td>
+                    </tr>
+                    <tr data-v-order-totals-total>
+                      <td colspan="4" class="text-end">
+                        <small>Total:</small>
+                      </td>
+                      <td class="text-end">$123.20</td>
+                    </tr>
+                    <tr>
+                      <td colspan="4" class="text-end">Total:</td>
+                      <td class="text-end" data-v-order-total_formatted>$0</td>
+                    </tr>
+                  </tfoot>
+
+                </table>
+
+              </div>
+
+
+              <div data-v-order>
+
+                <div class="d-md-flex justify-content-between">
+                  <div class="d-flex align-items-center mb-2 mb-md-0">
+                    <span class="badge ms-2" data-v-order-order_status>Pending</span>
+                  </div>
+                </div>
+                <div class="mt-4">
+                  <div class="row">
+                    <div class="col-lg-6 col-md-12 col-12">
+                      <div class="mb-6">
+                        <div class="customer_details">
+                          <div class="clearfix">
+                            <h6 class="float-start">Customer Details</h6>
+                          </div>
+                          <div class="display mb-1 lh-lg">
+                            <div data-v-order-first_name data-first_name-text>First Name</div>
+                            <div data-v-order-last_name data-last_name-text>Last Name</div>
+                            <div data-v-order-email data-email-text>mail@mail.com</div>
+                            <div data-v-order-phone_number data-phone_number-text>12345678</div>
+
+                            <a data-v-order-user_url data-v-if="this.order.user_id">
+                              <span>View Profile</span>
+                            </a>
+
+                            <div data-v-if="this.order.comment">
+                              <h6 class="mt-2">Order note</h6>
+                              <div data-v-order-comment>12345678</div>
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                    <div class="col-lg-6 col-md-12 col-12">
+                      <div class="mb-6">
+                        <div class="order_details">
+                          <div class="clearfix">
+                            <h6 class="float-start">Order Details</h6>
+                          </div>
+
+                          <div class="display">
+                            <p class="mb-1 lh-lg">
+                            <table class="table table-borderless table-sm">
+                              <tr>
+                                <td>
+                                  <span class="text-muted">Order ID:</span>
+                                </td>
+                                <td>
+                                  <span data-v-order-order_id>001</span>
+                                </td>
+                              </tr>
+                              <!--
+			<tr>
+				<td><span class="text-muted">Order Invoice:</span> </td>
+				<td><span data-v-order-invoice_no>V1-</span></td>
+			</tr>
+			-->
+                              <tr>
+                                <td>
+                                  <span class="text-muted">Order Date:</span>
+                                </td>
+                                <td>
+                                  <details>
+                                    <summary>
+                                      <span>
+                                        <span data-v-order-created_at data-filter-friendly_date>23/10/2019</span>
+                                    </summary>
+                                    <p>
+                                      <span class="badge bg-light text-muted" data-v-order-created_at>23/10/2019</span>
+                                      </span>
+                                    </p>
+                                  </details>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>
+                                  <span class="text-muted">Payment method:</span>
+                                </td>
+                                <td>
+                                  <details>
+                                    <summary>
+                                      <span>
+                                        <span data-v-order-payment_title>Cash On Delivery</span>
+                                    </summary>
+                                    <p>
+                                      <span class="badge bg-light text-muted" data-v-order-payment_method>Cash data-payment_method>Cash-text On Delivery</span>
+                                      </span>
+                                      <br />
+                                      <span data-v-order-payment_description>Flat data-payment_description>Flat-text Shipping Rate</span>
+                                      <br />
+                                    </p>
+                                  </details>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>
+                                  <span class="text-muted">Shipping method:</span>
+                                </td>
+                                <td>
+                                  <details>
+                                    <summary>
+                                      <span data-v-order-shipping_title>Flat Shipping Rate</span>
+                                    </summary>
+
+                                    <p>
+                                      <span class="badge bg-light text-muted" data-v-order-shipping_method>Flat data-shipping_method>Flat-text Shipping Rate</span>
+                                      </span>
+                                      <br />
+                                      <span data-v-order-shipping_description>Flat data-shipping_description>Flat-text Shipping Rate</span>
+                                      <br />
+                                    </p>
+                                  </details>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>
+                                  <span class="text-muted">Order Total:</span>
+                                </td>
+                                <td>
+                                  <span data-v-order-total_formatted>$734.28</span>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>
+                                  <span class="text-muted">Reward points:</span>
+                                </td>
+                                <td>
+                                  <span data-v-order-points>$734.28</span>
+                                </td>
+                              </tr>
+                              <td>
+                                <span class="text-muted">Status</span>
+                              </td>
+                              <td>
+                                <span data-v-order-order_status>Pending</span>
+                                <!--
+				  <select class="form-select">
+					<option selected="">Status</option>
+					<option value="Success">Success</option>
+					<option value="Pending">Pending</option>
+					<option value="Cancel">Cancel</option>
+				  </select>
+				-->
+                              </td>
+                              </tr>
+                            </table>
+                            </p>
+                          </div>
+
+                        </div>
+
+
+                      </div>
+                    </div>
+                    <div class="col-lg-6 col-md-12 col-12">
+                      <div class="mb-6">
+                        <div class="billing_address">
+                          <div class="clearfix">
+                            <h6 class="float-start">Billing Address</h6>
+                          </div>
+                          <div class="display mb-1 lh-lg">
+                            <div data-v-order-billing_first_name data-billing_first_name-text></div>
+                            <div data-v-order-billing_last_name data-billing_last_name-text></div>
+                            <div data-v-order-billing_company data-billing_company-text></div>
+                            <div data-v-order-billing_address_1 data-billing_address_1-text></div>
+                            <div data-v-order-billing_address_2 data-billing_address_2-text></div>
+                            <div data-v-order-billing_city data-billing_city-text></div>
+                            <div data-v-order-billing_post_code data-billing_post_code-text></div>
+                            <div data-v-order-billing_country data-billing_country_id></div>
+                            <div data-v-order-billing_region data-billing_region></div>
+                            <!--
+		<div data-v-order-billing_fields data-billing_fields-text></div>
+		-->
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                    <div class="col-lg-6 col-md-12 col-12">
+                      <div class="mb-6">
+                        <div class="shipping_address">
+                          <div class="clearfix">
+                            <h6 class="float-start">Shipping Address</h6>
+                          </div>
+                          <div class="display mb-1 lh-lg">
+                            <div data-v-order-shipping_first_name data-shipping_first_name-text></div>
+                            <div data-v-order-shipping_last_name data-shipping_last_name-text></div>
+                            <div data-v-order-shipping_company data-shipping_company-text></div>
+                            <div data-v-order-shipping_address_1 data-shipping_address_1-text></div>
+                            <div data-v-order-shipping_address_2 data-shipping_address_2-text></div>
+                            <div data-v-order-shipping_city data-shipping_city-text></div>
+                            <div data-v-order-shipping_post_code data-shipping_post_code-text></div>
+                            <div data-v-order-shipping_country data-shipping_country_id-text></div>
+                            <div data-v-order-shipping_region data-shipping_region_id-text></div>
+                            <!--
+		<div data-v-order-shipping_fields data-shipping_fields-text></div>
+		-->
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-8 mx-auto">
+          <div class="card card-default mt-4">
+
+            <div class="card-header bg-body p-5 pb-2">
+              <h1 class="mb-1 h2 fw-bold">Order tracking</h1>
+              <p class="text-muted">Please fill the form below to search for your order.</p>
+
+              <div class="notifications" data-v-notifications>
+
+                <div class="alert alert-danger d-flex alert-dismissable" role="alert" data-v-notification-error data-v-type="return">
+
+                  <div class="icon align-middle me-2">
+                    <i class="align-middle la la-2x lh-1 la-exclamation-triangle"></i>
+                  </div>
+
+                  <div class="flex-grow-1 align-self-center text-small">
+                    <div>
+                      <div data-v-notification-text>
+                        This is a placeholder for a notification message.
+                      </div>
+                    </div>
+                  </div>
+
+
+                  <button type="button" class="btn-close align-middle" data-bs-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">
+                    </span>
+                  </button>
+                </div>
+
+                <div class="alert alert-success d-flex  alert-dismissable d-flex" role="alert" data-v-notification-success data-v-type="return">
+
+                  <div class="icon align-middle me-2">
+                    <i class="align-middle la la-2x lh-1 la-check-circle"></i>
+                  </div>
+
+                  <div class="flex-grow-1 align-self-center align-middle" data-v-notification-text>
+                    This is a placeholder for a success message.
+                  </div>
+
+                  <button type="button" class="btn-close align-middle" data-bs-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">
+                    </span>
+                  </button>
+                </div>
+
+                <div class="alert alert-primary d-flex alert-dismissable d-flex" role="alert" data-v-notification-info data-v-type="return">
+
+                  <div class="icon align-middle me-2">
+                    <i class="align-middle la la-2x lh-1  la-info-circle"></i>
+                  </div>
+
+                  <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                    This is a placeholder for a info message.
+                  </div>
+
+                  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">
+                    </span>
+                  </button>
+                </div>
+
+              </div>
+
+
+            </div>
+            <div class="card-body p-4">
+
+              <form action method="post" enctype="multipart/form-data">
+
+                <input type="hidden" name="csrf" data-v-csrf>
+                <input type="hidden" name="action" value="order">
+
+                <div class="login-form col-12 mx-auto">
+
+                  <div class="row mb-3">
+                    <label class="col-4 col-form-label" for="input-email">E-Mail Address</label>
+                    <div class="col-8">
+                      <input type="email" name="email" value placeholder="E-Mail Address" id="input-email" class="form-control" required>
+                    </div>
+                  </div>
+
+                  <div class="row mb-3">
+                    <label class="col-4 col-form-label" for="customer-order-id">Order id</label>
+                    <div class="col-8">
+
+                      <input type="text" minlength="4" autocorrect="off" class="form-control" placeholder="Order id" id="customer-order-id" name="customer_order_id" value="" aria-label="Order id" required>
+                    </div>
+                  </div>
+
+                  <div class="text-end">
+
+                    <button type="submit" name="login" value="Login" class="btn btn-primary">
+
+                      <span class="loading d-none">
+                        <span class="spinner-border spinner-border-sm align-middle" role="status" aria-hidden="true">
+                        </span>
+                        <span>Checking</span>...
+                      </span>
+
+                      <span class="button-text">
+                        <span>Submit</span>
+                        <i class="la la-arrow-right float-end ms-2"></i>
+                      </span>
+
+                    </button>
+
+                  </div>
+                </div>
+
+              </form>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer" data-v-save-global="index.html,.site-footer">
+
+    <div class="footer-copyright">
+      <div class="container">
+        <div class="d-flex flex-column flex-md-row align-items-center">
+          <div class="text-muted flex-grow-1">
+            <span class="me-2" data-v-component-site>
+              <img src="img/logo-white.png" class="logo-default-dark" data-v-site-logo-dark>
+              <img src="img/logo.png" class="logo-default" data-v-site-logo>
+            </span>
+
+            <a class="btn-link text-muted" href="content/page.html">Terms and conditions</a> |
+            <a class="btn-link text-muted" href="content/page.html">Privacy Policy</a>
+          </div>
+          <div class="text-muted">
+            &copy; <span data-v-year>2025</span>
+            <span data-v-global-site.description.title>Vvveb</span>. <span>Powered by</span>
+            <a href="https://vvveb.com" class="btn-link text-muted" target="_blank">Vvveb</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </footer>
+
+
+  <div class="bg-image"></div>
+
+  <div class="alert alert-light alert-dismissible fade alert-top" role="alert" style="display:none">
+    <div class="container">
+
+      <div class="message">
+        Product was added to cart.
+      </div>
+
+
+      <button type="button" class="btn-close" data-dismiss="alert" aria-label="Close"></button>
+    </div>
+  </div>
+
+  <div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <button type="button" class="btn-close btn-close-white small" data-bs-dismiss="modal" aria-label="Close"></button>
+      <div class="modal-content shadow border-0">
+        <div class="modal-body p-0">
+
+          <form action="{$this.global.path}/search" method="get">
+            <input type="hidden" name="route" value="search" />
+            <div class="d-flex">
+              <div class="input-group">
+                <input type="search" name="search" class="form-control border-0 p-3 px-4" id="headerSearch" placeholder="Start typing to search" data-v-vvveb-action="search" data-selector=".search-results" data-v-vvveb-on="input" data-url="{$this.global.path}/search" />
+                <button class="btn btn-outline-primary border-0" type="submit" title="Search">
+                  <div class="la-flip-horizontal">
+                    <i class="la la-search la-lg" aria-hidden="true"></i>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div class="loading d-none d-flex justify-content-center m-5">
+              <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </form>
+
+          <div class="search-results">
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="page-loading-status" class="progress progress-bar"></div>
+
+  <!-- Vvveb Common Js -->
+  <script id="popper-js" src="js/popper.min.js"></script>
+  <!-- <script src="js/bootstrap.min.js"></script> -->
+  <!-- <script src="js/bootstrap.bundle.min.js"></script> -->
+  <script id="bootstrap-js" src="js/bootstrap.min.js"></script>
+  <!-- Vvveb Ajax Common Js -->
+  <script id="app-js" src="/js/app.js"></script>
+
+  <!-- Animation -->
+
+  <link rel="stylesheet" href="js/aos.css" />
+  <noscript>
+    <style type="text/css">
+      [data-aos] {
+        opacity: 1 !important;
+        transform: translate(0) scale(1) !important;
+      }
+    </style>
+  </noscript>
+
+  <script src="js/aos.js"></script>
+  <script>
+	AOS.init();
+</script>
+
+  <script id="cart-js" src="/js/app/cart.js"></script>
+
+  <link id="glightbox-css" rel="stylesheet" href="/js/libs/glightbox/glightbox.css" />
+  <script id="glightbox-js" src="/js/libs/glightbox/glightbox.min.js"></script>
+
+  <script id="theme-js" src="/js/app/theme.js"></script>
+
+  <script type="speculationrules">
+{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"\/*"},{"not":{"href_matches":["\/public\/*","\/themes\/*","\/plugins\/*","\/cart\/*","\/checkout\/*","\/user\/*","\/*\\?(.+)"]}},{"not":{"selector_matches":"a[rel~=\"nofollow\"]"}},{"not":{"selector_matches":".no-prefetch, .no-prefetch a"}}]},"eagerness":"conservative"}]}
+</script>
+
+
+
+</body>
+
+</html>

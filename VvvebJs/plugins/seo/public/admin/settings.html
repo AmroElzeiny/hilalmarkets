@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+  
+
+  <base href="">
+
+  <title>Vvveb - Seo Plugin</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body>
+
+  <div id="container">
+
+    <div class="sidebar" data-v-copy-from="index.html,.sidebar">
+    </div>
+
+
+    <div class="main" data-v-seo>
+	
+
+      <div class="clearfix top-header" data-v-copy-from="index.html,.top-header">
+
+      </div>
+
+      <form id="settings-form" action="" method="post" class="settings" data-v-product>
+        <input type="hidden" name="action" id="action" value="save">
+        <input type="hidden" name="csrf" data-v-csrf>
+		
+        <div class="actions">
+          <div class="title">
+            <h4 class="text-muted mt-2">
+			  <i class="icon-search-outline"></i>              
+              <span>Seo plugin</span>
+            </h4>
+          </div>
+          <div class="btns">
+			<a href="{$this.adminPath}index.php?module=plugin/plugins" title="Plugins list"
+					class="btn btn-icon btn-outline-secondary me-2">
+						<i class="la la-arrow-left"></i><span>Plugins list</span>
+			</a>  
+          <button type="submit" href="" class="btn btn-primary btn-icon ms-1" title="Save post">
+            <i class="icon-create-outline"></i> Save settings
+          </button>
+          </div>
+        </div>
+        <div>
+          <div id="main-content">
+
+         	<div class="notifications" data-v-notifications data-v-copy-from="index.html,.notifications"></div>
+
+            <div class="content clearfix settings">
+
+
+				<ul class="nav nav-tabs" id="myTab" role="tablist">
+					<!--
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link active" id="general-tab" data-bs-toggle="tab" data-bs-target="#general" type="button" role="tab" aria-controls="general" aria-selected="true">
+						<span>General</span>
+						</button>
+					  </li>
+					  -->
+
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link active" id="webmaster-tools-tab" data-bs-toggle="tab" data-bs-target="#webmaster-tools" type="button" role="tab" aria-controls="webmaster-tools" aria-selected="false">
+						<i class="la la-lg la-tools text-secondary"></i>
+						<span>Webmaster Tools</span>
+						</button>
+					  </li>
+						
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link" id="social-tab" data-bs-toggle="tab" data-bs-target="#social" type="button" role="tab" aria-controls="social" aria-selected="false">
+						<i class="la la-lg la-project-diagram text-secondary"></i>
+						<span>Social networks</span>
+						</button>
+					  </li>		  
+
+					  <!--
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link" id="mail-tab" data-bs-toggle="tab" data-bs-target="#mail" type="button" role="tab" aria-controls="contact" aria-selected="false">Mail</button>
+					  </li>					 
+					  -->
+
+					   <li class="nav-item" role="presentation">
+						<button class="nav-link" id="robots-tab" data-bs-toggle="tab" data-bs-target="#robots" type="button" role="tab" aria-controls="robots" aria-selected="false">
+						<i class="la la-lg la-robot text-secondary"></i>
+						<span>Robots.txt</span>
+						</button>
+					  </li>					 
+					  
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link" id="rss-tab" data-bs-toggle="tab" data-bs-target="#rss" type="button" role="tab" aria-controls="rss" aria-selected="false">
+						<i class="la la-lg la-rss text-secondary"></i>
+						<span>Rss Content</span>
+						</button>
+					  </li>					 
+
+
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link" id="sitemaps-tab" data-bs-toggle="tab" data-bs-target="#sitemaps" type="button" role="tab" aria-controls="contact" aria-selected="false">
+						<i class="la la-lg la-sitemap text-secondary"></i>
+						<span>Sitemaps</span>
+						</button>
+					  </li>
+					  <li class="nav-item" role="presentation">
+						<button class="nav-link" id="title-tab" data-bs-toggle="tab" data-bs-target="#title" type="button" role="tab" aria-controls="contact" aria-selected="false">
+						<i class="la la-lg la-font text-secondary"></i>
+						<span>Title settings</span>
+						</button>
+					  </li>
+
+					   <li class="nav-item" role="presentation">
+							<button class="nav-link" id="content-types-tab" data-bs-toggle="tab" data-bs-target="#content-types" type="button" role="tab" aria-controls="content-types" aria-selected="false">
+							<i class="la la-lg la-file-alt text-secondary"></i>
+							<span>Content types</span>
+							</button>
+					  </li>		
+					  
+					  <li class="nav-item" role="presentation">
+							<button class="nav-link" id="product-type-tab" data-bs-toggle="tab" data-bs-target="#product-type" type="button" role="tab" aria-controls="product-type" aria-selected="false">
+							<i class="la la-lg la-box text-secondary"></i>
+							<span>Product types</span>
+							</button>
+					  </li>					 
+					
+					  <li class="nav-item" role="presentation">
+							<button class="nav-link" id="routes-tab" data-bs-toggle="tab" data-bs-target="#routes" type="button" role="tab" aria-controls="routes" aria-selected="false">
+							<i class="la la-lg la-stream text-secondary"></i>
+							<span>Routes</span>
+							</button>
+					  </li>					
+
+					  <li class="nav-item" role="presentation">
+							<button class="nav-link" id="schemas-markup-tab" data-bs-toggle="tab" data-bs-target="#schemas-markup" type="button" role="tab" aria-controls="schemas-markup" aria-selected="false">
+							<i class="la la-lg la-microchip text-secondary"></i>
+							<span>Schemas markup</span>
+							</button>
+					  </li>					
+					  <!--
+					  <li class="nav-item" role="presentation">
+							<button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced" type="button" role="tab" aria-controls="contact" aria-selected="false">
+							<i class="la la-lg la-cog text-secondary"></i>
+							<span>Advanced</span>
+							</button>
+					  </li> -->
+					  <!--
+					   <li class="nav-item" role="presentation">
+						<button class="nav-link" id="security-tab" data-bs-toggle="tab" data-bs-target="#security" type="button" role="tab" aria-controls="security" aria-selected="false">Security</button>
+					  </li> -->
+					</ul>
+					
+					<div class="tab-content py-3">
+					<!--
+						<div class="tab-pane show active" id="general" role="tabpanel" aria-labelledby="general-tab">
+
+						</div>
+						-->
+						<div class="tab-pane show active" id="webmaster-tools" role="tabpanel" aria-labelledby="webmaster-tools-tab">
+
+								<div class="row mb-3">
+								  <label for="input-google-site-verification" class="col-sm-2 col-form-label">
+									<i class="lab la-google la-2x lh-1 align-middle me-3"></i>
+									<span>Google Site Verification Code</span>
+									<a class="" target="_blank" href="https://www.google.com/site-verification/verification/verification?hl=en&tid=alternate&siteUrl="><i class="la la-lg la-question-circle text-primary"></i></a>
+									</label>
+								  <div class="col-sm-10">
+									<input type="text" class="form-control" placeholder="123A456B78901C2D3456E7890F1A234D" name="settings[site-verification][google-site-verification]" value>
+								  </div>
+								</div>
+
+								<div class="row mb-3">
+								  <label for="input-bing" class="col-sm-2 col-form-label">
+									<i class="lab la-windows la-2x lh-1 align-middle me-3"></i>
+									<span>Bing Verification Code</span>
+									<a class="" target="_blank" href="https://www.bing.com/toolbox/webmaster/#/Dashboard/?url="><i class="la la-lg la-question-circle text-primary"></i></a>
+									</label>
+								  <div class="col-sm-10">
+									<input type="text" class="form-control" placeholder="123A456B78901C2D3456E7890F1A234D" name="settings[site-verification][msvalidate.01]" value>
+								  </div>
+								</div>
+								
+								<div class="row mb-3">
+								  <label for="input-pinterest" class="col-sm-2 col-form-label">
+									<i class="lab la-pinterest la-2x lh-1 align-middle me-3"></i>
+									<span>Pinterest code</span>
+									</label>
+								  <div class="col-sm-10">
+									<input type="text" class="form-control" placeholder="123456a7b8901de2fa34bcdef5a67b90" name="settings[site-verification][p:domain_verify]" value>
+								  </div>
+								</div>		
+			
+								<div class="row mb-3">
+								  <label for="input-yandex" class="col-sm-2 col-form-label">
+									<i class="lab la-yandex la-2x lh-1 align-middle me-3"></i>
+									<span>Yandex code</span>
+									<a class="" target="_blank" href="https://webmaster.yandex.com/sites/add/"><i class="la la-lg la-question-circle text-primary"></i></a>
+								  </label>
+								  <div class="col-sm-10">
+									<input type="text" class="form-control" placeholder="12345abc678901d2" name="settings[site-verification][yandex-verification]" value>
+								  </div>
+								</div>						
+
+								<div class="row mb-3">
+								  <label for="input-baidu" class="col-sm-2 col-form-label">
+									<i class="la la-paw la-2x lh-1 align-middle me-3"></i>
+									<span>Baidu Site Verification Code</span>
+									<a class="" target="_blank" href="https://ziyuan.baidu.com/login/index?u=/site/siteadd"><i class="la la-lg la-question-circle text-primary"></i></a>
+									</label>
+								  <div class="col-sm-10">
+									<input type="text" class="form-control" placeholder="a12bcDEFGa" name="settings[site-verification][baidu-site-verification]" value>
+								  </div>
+								</div>
+								<div class="row mb-3">
+								  <label for="input-baidu" class="col-sm-2 col-form-label">
+									<i class="lab la-google-plus la-2x lh-1 align-middle me-3"></i>
+									<span>Google analytics</span>
+									<a class="" target="_blank" href="https://analytics.google.com/analytics/web/"><i class="la la-lg la-question-circle text-primary"></i></a>
+									</label>
+								  <div class="col-sm-10">
+									<input type="text" class="form-control" placeholder="G-ABCDEFGH7Z" name="settings[site-verification][google-analytics]" value>
+								  </div>
+								</div>					
+								<div class="row mb-3">
+								  <label for="input-baidu" class="col-sm-2 col-form-label">
+									<i class="la la-code la-2x lh-1 align-middle me-3"></i>
+									<span>Miscellaneous Verification</span>
+									</label>
+								  <div class="col-sm-10">
+									<textarea class="form-control" placeholder="" rows="3" name="settings[site-verification][miscellaneous-verification]">
+									</textarea>
+								  </div>
+								</div>
+							<!--
+									<meta name="google-site-verification" content="google-code" />
+									<meta name="msvalidate.01" content="bingcode" />
+									<meta name="p:domain_verify" content="pinterestcode" />
+									<meta name="yandex-verification" content="yandecode" />
+									<meta name="baidu-site-verification" content="baiducode" />
+							-->		
+									
+						</div>	
+
+						<div class="tab-pane" id="social" role="tabpanel" aria-labelledby="social-tab">
+							<div class="row mb-3">
+							  <label for="input-facebook" class="col-sm-2 col-form-label">
+								<i class="lab la-facebook la-2x lh-1 align-middle me-3"></i>
+								<span>Facebook</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://www.facebook.com/Profile" name="settings[social][facebook]" value>
+							  </div>
+							</div>
+
+							<div class="row mb-3">
+							  <label for="input-twitter" class="col-sm-2 col-form-label">
+								<i class="lab la-twitter la-2x lh-1 align-middle me-3"></i>
+								<span>Twitter/X</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://twitter.com/Profile" name="settings[social][twitter]" value>
+							  </div>
+							</div>
+
+							<div class="row mb-3">
+							  <label for="input-instagram" class="col-sm-2 col-form-label">
+								<i class="lab la-instagram la-2x lh-1 align-middle me-3"></i>
+								<span>Instagram</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://instagram.com/Profile" name="settings[social][instagram]" value>
+							  </div>
+							</div>
+
+							<div class="row mb-3">
+							  <label for="input-youtube" class="col-sm-2 col-form-label">
+								<i class="lab la-youtube la-2x lh-1 align-middle me-3"></i>
+								<span>Youtube</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://www.youtube.com/channel/Profile" name="settings[social][youtube]" value>
+							  </div>
+							</div>
+
+							<div class="row mb-3">
+							  <label for="input-linkedin" class="col-sm-2 col-form-label">
+								<i class="lab la-linkedin la-2x lh-1 align-middle me-3"></i>
+								<span>LinkedIn</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://www.linkedin.com/company/Profile/" name="settings[social][linkedin]" value>
+							  </div>
+							</div>
+							
+							<div class="row mb-3">
+							  <label for="input-pinterest" class="col-sm-2 col-form-label">
+								<i class="lab la-pinterest la-2x lh-1 align-middle me-3"></i>
+								<span>Pinterest</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://www.pinterest.com/Profile/" name="settings[social][pinterest]" value>
+							  </div>
+							</div>
+							
+							<div class="row mb-3">
+							  <label for="input-soundcloud" class="col-sm-2 col-form-label">
+								<i class="lab la-soundcloud la-2x lh-1 align-middle me-3"></i>
+								<span>SoundCloud</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://soundcloud.com/Profile" name="settings[social][soundcloud]" value>
+							  </div>
+							</div>
+							
+							<div class="row mb-3">
+							  <label for="input-tumblr" class="col-sm-2 col-form-label">
+								<i class="lab la-tumblr la-2x lh-1 align-middle me-3"></i>
+								<span>Tumblr</span>
+								
+								</label>
+							  <div class="col-sm-10">
+								<input type="text" class="form-control" placeholder="https://www.tumblr.com/blog/Profile" name="settings[social][tumblr]" value>
+							  </div>
+							</div>
+
+						</div>
+
+						<div class="tab-pane" id="robots" role="tabpanel" aria-labelledby="robots-tab">
+							<!--
+							<a href="/robots.txt" class="btn btn-primary me-3" target="_blank">
+								<i class="la la-pen"></i>
+								<span>Edit robots.txt</span>
+							</a>
+							-->
+							<a href="/robots.txt" target="_blank">View robots.txt</a>
+							
+							<textarea class="form-control mt-3" placeholder="" rows="15"  name="settings[robots][value]" disabled></textarea>
+						</div>
+
+						<div class="tab-pane" id="sitemaps" role="tabpanel" aria-labelledby="sitemaps-tab">
+
+							<table class="table table-bordered">
+							  <colgroup>
+								   <col span="1" style="width: 10%;">
+								   <col span="1" style="width: 80%;">
+								   <col span="1" style="width: 10%;">
+								</colgroup>							
+							  <tr class="bg-secondary-subtle">
+								<th class="">Include in page header</th>
+								<th class="vw-100">Feed</th>
+								<th class="text-end">Action</th>
+							  </tr>
+							
+							  <tr data-v-sitemap>
+							    <td>
+									<input class="form-check-input me-1" type="checkbox" value="">
+								</td>
+								<td>
+									<a href="javascript:void(0);" target="_blank" data-v-sitemap-url><span data-v-sitemap-slug>Filename</span></a>
+								</td>
+								<td class="text-end">
+									<a class="btn btn-sm btn-outline-secondary" href="javascript:void(0);" data-v-sitemap-edit>
+										<i class="la la-pencil-alt text-primary"></i>
+										<span>Edit</span>
+									</a>
+								</td>
+							  </tr>
+							</table>
+						</div>
+
+						<div class="tab-pane" id="rss" role="tabpanel" aria-labelledby="rss-tab">
+							<table class="table table-bordered">
+							  <colgroup>
+								   <col span="1" style="width: 10%;">
+								   <col span="1" style="width: 80%;">
+								   <col span="1" style="width: 10%;">
+								</colgroup>							
+							  <tr class="bg-secondary-subtle">
+								<th class="">Include in robots.txt</th>
+								<th class="vw-100">Feed</th>
+								<th class="text-end">Action</th>
+							  </tr>
+							
+							  <tr data-v-feed>
+							    <td>
+									<input class="form-check-input me-1" type="checkbox" value="">
+								</td>
+								<td>
+									<a href="javascript:void(0);" target="_blank" data-v-feed-url><span data-v-feed-slug>Filename</span></a>
+								</td>
+								<td class="text-end">
+									<a class="btn btn-sm btn-outline-secondary" href="javascript:void(0);" data-v-feed-edit>
+										<i class="la la-pencil-alt text-primary"></i>
+										<span>Edit</span>
+									</a>
+								</td>
+							  </tr>
+							</table>
+						</div>			
+						
+						<div class="tab-pane" id="title" role="tabpanel" aria-labelledby="title-tab">
+							
+
+								<div class="row mb-3">
+								  <label for="input-yandex" class="col-sm-2 col-form-label">
+									<span>Title separator</span>
+								  </label>
+								  <div class="col-sm-10">
+
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_hyphen]" value="hyphen" data-entity="-" checked="checked">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_hyphen]" class="">-</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_pipe]" value="pipe" data-entity="|">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_pipe]" class="">|</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_ndash]" value="ndash" data-entity="–">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_ndash]">–</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_mdash]" value="mdash" data-entity="—">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_mdash]">—</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_bull]" value="bull" data-entity="•">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_bull]" class="">•</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_middot]" value="middot" data-entity="·">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_middot]" class="">·</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_lsaquo]" value="lsaquo" data-entity="‹">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_lsaquo]" class="">‹</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_rsaquo]" value="rsaquo" data-entity="›">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_rsaquo]" class="">›</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_frasl]" value="frasl" data-entity="⁄">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_frasl]">⁄</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_laquo]" value="laquo" data-entity="«">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_laquo]" class="tsf-no-focus-ring tsf-title-separator-active">«</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_raquo]" value="raquo" data-entity="»">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_raquo]" class="">»</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_le]" value="le" data-entity="≤">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_le]">≤</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_ge]" value="ge" data-entity="≥">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_ge]">≥</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_lt]" value="lt" data-entity="<">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_lt]">&lt;</label>
+									
+									<input class="btn-check" type="radio" name="settings[title_separator]" id="settings[title_separator_gt]" value="gt" data-entity=">">
+									<label class="btn btn-outline-secondary" for="settings[title_separator_gt]">&gt;</label>	
+
+								  </div>
+								</div>							
+																					
+								
+							
+						</div>						
+						
+						<div class="tab-pane" id="content-types" role="tabpanel" aria-labelledby="content-types">
+							
+							<div class="card mb-3" data-v-post-type>
+								<h6 class="card-header border-bottom"  data-v-post-type-name>Post</h6>	
+							
+								<div class="card-body">
+									<div class="row mb-3">
+									  <label for="input-post" class="col-sm-2 col-form-label">
+										<span>Title</span>
+										</label>
+									  <div class="col-sm-10">
+										<input type="text" class="form-control" placeholder="" name="settings[post-type][post][title]" value="{title}{page}{separator}{title}">
+									  </div>
+									</div>								
+									
+									
+									<div class="row mb-3">
+									  <label for="input-post" class="col-sm-2 col-form-label">
+										<span>Schema</span>
+										  <button type="button" class="btn btn-sm btn-primary float-end py-0 px-1" onclick="addSchema('#schema-select-template', 'settings[post-type][{$type}][schema][0]',  '.row', this, '.row', '.col-sm-10')">
+											<i class="la la-plus la-lg text-white"></i>
+										  </button>
+										</label>
+
+
+									  <div class="col-sm-10">
+										<div class="schema-input input-group mt-2">
+									  
+											<select class="form-control" placeholder="" name="settings[post-type][post][schema][0]" data-v-seo-schema>
+												<option value="article" data-v-option>Article</option>
+											</select>
+																			
+										  <button type="button" class="btn btn-sm btn-outline-secondary -subtle" onclick="removeSchema(this)">
+											<i class="la la-trash text-danger"></i>
+										  </button>
+
+										</div>
+									  
+									  </div>
+									</div>	
+							
+								</div>
+							</div>
+							
+						</div>
+						<div class="tab-pane" id="product-type" role="tabpanel" aria-labelledby="product-type">
+
+							<div class="card mb-3" data-v-product-type>
+								<h6 class="card-header border-bottom"  data-v-product-type-name>Product</h6>	
+							
+								<div class="card-body">
+									<div class="row mb-3">
+									  <label for="input-product" class="col-sm-2 col-form-label">
+										<span>Title</span>
+										</label>
+									  <div class="col-sm-10">
+										<input type="text" class="form-control" placeholder="" name="settings[product-type][product][title]" value="{title}{page}{separator}{title}">
+									  </div>
+									</div>								
+									
+									
+									<div class="row mb-3">
+									  <label for="input-product" class="col-sm-2 col-form-label">
+										<span>Schema</span>
+										  <button type="button" class="btn btn-sm btn-primary float-end py-0 px-1" onclick="addSchema('#schema-select-template', 'settings[product-type][{$type}][schema][0]',  '.row', this, '.row', '.col-sm-10')">
+											<i class="la la-plus la-lg text-white"></i>
+										  </button>
+										</label>
+									  <div class="col-sm-10">
+										<div class="schema-input input-group mt-2">
+											<select class="form-control" placeholder="" name="settings[product-type][product][schema][0]" data-v-seo-schema>
+												<option value="article" data-v-option>Article</option>
+											</select>
+																			
+										  <button type="button" class="btn btn-sm btn-outline-secondary -subtle" onclick="removeSchema(this)">
+											<i class="la la-trash text-danger"></i>
+										  </button>
+
+										</div>
+									  </div>
+									</div>	
+							
+								</div>
+							</div>
+
+						</div>
+						
+						<div class="tab-pane" id="schemas-markup" role="tabpanel" aria-labelledby="schemas-markup-tab">
+							<table class="table table-bordered">
+							  <thead>	
+							  <colgroup>
+								   <col span="1" style="width: 80%;">
+								   <col span="1" style="width: 10%;">
+								</colgroup>							
+							  <tr class="bg-secondary-subtle">
+								<th class="vw-100">Schema</th>
+								<th class="text-end">Action</th>
+							  </tr>
+							  </thead>
+							
+							  <tbody>
+							  <tr data-v-schema>
+								<td>
+									<a href="javascript:void(0);" target="_blank" data-v-schema-url><span data-v-schema-title>Filename</span></a>
+								</td>
+								<td class="text-end">
+									<a class="btn btn-sm btn-outline-secondary" href="javascript:void(0);" data-v-schema-edit>
+										<i class="la la-pencil-alt text-primary"></i>
+										<span>Edit</span>
+									</a>
+								</td>
+							  </tr>
+							  <tbody>
+							</table>
+						</div>	
+
+						<div class="tab-pane" id="routes" role="tabpanel" aria-labelledby="routes">
+							
+							<table class="table table-bordered">
+							  <colgroup>
+								   <col span="1" style="width: 5%;">
+								   <col span="1" style="width: 30%;">
+								   <col span="1" style="width: 30%;">
+								   <col span="1" style="width: 30%;">
+								   <col span="1" style="width: 5%;">
+								</colgroup>							
+							  <tr class="bg-secondary-subtle">
+								<th class=""></th>
+								<th class="">Route</th>
+								<th class="">Title</th>
+								<th class="">Schema</th>
+								<th class="text-end">Action</th>
+							  </tr>
+							
+							  <tr data-v-route>
+							    <td>
+									<input class="form-check-input me-1" type="checkbox" value="">
+								</td>
+								<td>
+									<div class="small text-muted" data-v-route-description>Filename</div>
+									<a href="javascript:void(0);" target="_blank" data-v-route-url>
+										<span data-v-route-type>Filename</span>
+									</a>
+								</td>								
+								<td>
+									<input type="text" class="form-control" placeholder="" name="settings[route][route][title]" value="{title}{page}{separator}{title}" data-v-route-title>
+								</td>						
+								<td class="schema">
+									<div class="schema-input input-group mt-2">								
+										<select class="form-control" placeholder="" name="settings[route][route][schema][0]" data-v-seo-schema>
+											<option value="article" data-v-option>Article</option>
+										</select>
+	
+									  <button type="button" class="btn btn-sm btn-outline-secondary -subtle" onclick="removeSchema(this)">
+										<i class="la la-trash text-danger"></i>
+									  </button>
+
+									</div>
+								</td>
+								<td class="text-start">
+									  <button type="button" class="btn btn-sm btn-primary btn-icon py-0 px-1" onclick="addSchema('#schema-select-template', 'settings[route][{$type}][schema][0]', 'tr', this, 'tr', '.schema')">
+										<i class="la la-plus la-lg text-white"></i>
+									  </button>
+<!--
+									<a class="btn btn-sm btn-outline-secondary" href="javascript:void(0);">
+										<i class="la la-pencil-alt text-primary"></i>
+										<span>Edit</span>
+									</a>
+-->									
+								</td>
+							  </tr>
+							</table>							
+							
+							
+							<div class="card mb-3" data-v-route>
+								<h6 class="card-header border-bottom" data-v-route-type>Route</h6>	
+							
+								<div class="card-body">
+									<div class="row mb-3">
+									  <label for="input-post" class="col-sm-2 col-form-label">
+										<span>Title</span>
+										</label>
+									  <div class="col-sm-10">
+										<input type="text" class="form-control" placeholder="" name="settings[route][route][title]" value="{title}{page}{separator}{title}">
+									  </div>
+									</div>								
+									
+									
+									<div class="row mb-3">
+									  <label for="input-post" class="col-sm-2 col-form-label">
+										<span>Schema</span>
+									  </label>
+									  <div class="col-sm-10">
+
+										<div class="schema-input input-group mt-2">
+											<select class="form-control" placeholder="" name="settings[route][route][schema][0]" data-v-seo-schema>
+												<option value="article" data-v-option>Article</option>
+											</select>
+					
+										  <button type="button" class="btn btn-sm btn-outline-secondary -subtle" onclick="removeSchema(this)">
+											<i class="la la-trash text-danger"></i>
+										  </button>
+
+										</div>
+									  
+									  </div>
+									</div>	
+							
+								</div>
+							</div>
+							
+						</div>
+
+						
+						<div class="tab-pane" id="advanced" role="tabpanel" aria-labelledby="advanced-tab">
+							Advanced
+						</div>
+							 <!--
+						 <div class="tab-pane" id="security" role="tabpanel" aria-labelledby="security-tab">
+						</div>
+						-->
+				 
+						</div>
+
+            </div>
+          </div>
+      </form>
+
+    </div>
+
+	<div id="schema-select-template" class="d-none input-group mt-2">
+		<select class="form-control" placeholder="" name="settings[route][route][schema][0]" data-v-seo-schema>
+			<option value="article" data-v-option>Article</option>
+		</select>
+
+		  <button type="button" class="btn btn-sm btn-outline-secondary -subtle" onclick="removeSchema(this)">
+			<i class="la la-trash text-danger"></i>
+		  </button>
+
+	</div>
+
+</div>
+
+<script>
+//addTemplate('#schema-select-template', 'product_points, '#points')
+
+function addSchema(id, name, parent, element = false, parentElement = "table", container = "tbody") {
+	let newId = Math.floor(Math.random() * 10000);
+	let template = document.querySelector(id).cloneNode(true);
+	
+	//name = name.replace("[0]", "[" + newId + "]");
+	name = name.replace("[0]", "[]");
+	template.querySelectorAll('[data-v-seo-schema]', template).forEach(e => e.setAttribute("name", name));
+	template.classList.remove("d-none");
+	//addSchema('#schema-select-template', 'settings[product-type][post][schema][0]',  '.row', this, '.row', '.col-sm-10'
+	element = element.closest(parentElement);
+	return element.querySelector(parent + " " + container).append(template);
+}
+
+function removeSchema(e) {
+	return e.parentNode.remove();
+}
+</script>
+
+
+<!-- Modal -->
+<div data-v-copy-from="editor/code.html,#codeEditorModal">
+</div>
+<!-- save status toast -->
+<div class="toast-container" data-v-copy-from="editor/code.html,.toast-container"></div>
+
+<!-- code mirror - code editor syntax highlight -->
+<link href="libs/codemirror/lib/codemirror.css" rel="stylesheet"/>
+<link href="libs/codemirror/theme/material.css" rel="stylesheet"/>
+<script src="libs/codemirror/lib/codemirror.js"></script>
+
+
+<script src="libs/codemirror/lib/htmlmixed.js"></script>
+<script src="libs/codemirror/lib/xml.js"></script>
+<script src="libs/codemirror/lib/javascript.js"></script>
+<script src="libs/codemirror/lib/css.js"></script>
+<script src="libs/codemirror/lib/php.js"></script>
+<script src="libs/codemirror/lib/clike.js"></script>
+<script src="libs/codemirror/lib/formatting.js"></script>
+
+<script>
+let mediaPath = '{ $this->mediaPath }';
+let mediaScanUrl =  '{ $this->scanUrl }';
+let uploadUrl = '{ $this->uploadUrl }';
+let loadFileUrl = '{ $this->loadFileUrl }';
+let saveUrl = '{ $this->saveUrl }';
+let type = '{ $this->type }';
+</script>
+
+<script id="content-js"src="js/code-editor.js"></script>
+<script id="functions-js" src="/js/admin/functions.js"></script>
+<script id="popper-js" src="js/popper.min.js"></script>
+<script id="bootstrap-js" src="js/bootstrap.min.js"></script>
+<script id="theme-js" src="js/theme.js"></script>
+<script id="admin-js" type="module" src="/js/admin.js"></script>
+
+</body>
+</html>

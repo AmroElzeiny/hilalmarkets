@@ -7,6 +7,7 @@ from ai_market_monitor.db.models import (
     DisclaimerAcceptance,
     TelegramConnection,
     TelegramConversationState,
+    PendingEmailSignup,
     Trial,
     User,
     UserIdentity,
@@ -17,8 +18,42 @@ from ai_market_monitor.services.telegram_account_links import TelegramAccountLin
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
 
 
+async def _signup_and_verify(
+    test_context,
+    *,
+    email: str,
+    password: str = "CorrectHorse123!",
+    repeat_password: str | None = None,
+    telegram_link: str | None = None,
+):
+    data = {
+        "email": email,
+        "password": password,
+        "repeat_password": repeat_password or password,
+    }
+    if telegram_link:
+        data["telegram_link"] = telegram_link
+    requested = await test_context["client"].post(
+        "/signup",
+        data=data,
+        follow_redirects=False,
+    )
+    assert requested.status_code == 303
+    assert requested.headers["location"].startswith("/signup/verify")
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    verify_data = {"email": email, "code": code}
+    if telegram_link:
+        verify_data["telegram_link"] = telegram_link
+    verified = await test_context["client"].post(
+        "/signup/verify",
+        data=verify_data,
+        follow_redirects=False,
+    )
+    return requested, verified
+
+
 async def test_signup_creates_user_session_and_dashboard_access(test_context):
-    response = await test_context["client"].post(
+    requested = await test_context["client"].post(
         "/signup",
         data={
             "email": "Trader@example.com",
@@ -26,6 +61,19 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },
+        follow_redirects=False,
+    )
+    assert requested.status_code == 303
+    assert requested.headers["location"].startswith("/signup/verify")
+    assert "amm_session=" not in requested.headers.get("set-cookie", "")
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(User)) is None
+        assert await session.scalar(select(PendingEmailSignup)) is not None
+
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    response = await test_context["client"].post(
+        "/signup/verify",
+        data={"email": "Trader@example.com", "code": code},
         follow_redirects=False,
     )
     assert response.status_code == 303
@@ -47,16 +95,40 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
         assert await session.scalar(select(DisclaimerAcceptance)) is None
 
 
-async def test_signup_does_not_require_disclaimer_acceptance(test_context):
-    response = await test_context["client"].post(
+async def test_repeated_signup_submit_does_not_send_second_code(test_context):
+    test_context["settings"].email_test_outbox.clear()
+    payload = {
+        "email": "double-submit@example.com",
+        "password": "CorrectHorse123!",
+        "repeat_password": "CorrectHorse123!",
+    }
+
+    first = await test_context["client"].post(
         "/signup",
-        data={
-            "email": "trader@example.com",
-            "display_name": "Trader",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-        },
+        data=payload,
         follow_redirects=False,
+    )
+    assert first.status_code == 303
+    assert first.headers["location"].startswith("/signup/verify")
+    assert len(test_context["settings"].email_test_outbox) == 1
+    first_code = test_context["settings"].email_test_outbox[0]["code"]
+
+    second = await test_context["client"].post(
+        "/signup",
+        data=payload,
+        follow_redirects=False,
+    )
+
+    assert second.status_code == 303
+    assert second.headers["location"].startswith("/signup/verify")
+    assert len(test_context["settings"].email_test_outbox) == 1
+    assert test_context["settings"].email_test_outbox[0]["code"] == first_code
+
+
+async def test_signup_does_not_require_disclaimer_acceptance(test_context):
+    _, response = await _signup_and_verify(
+        test_context,
+        email="trader@example.com",
     )
     assert response.status_code == 303
     assert response.headers["location"].startswith("/dashboard")
@@ -71,15 +143,7 @@ async def test_signin_success_and_failure(test_context):
     assert failed.status_code == 303
     assert failed.headers["location"] == "/signin?error=invalid_login"
 
-    await test_context["client"].post(
-        "/signup",
-        data={
-            "email": "signin@example.com",
-            "display_name": "Signin",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-        },
-    )
+    await _signup_and_verify(test_context, email="signin@example.com")
     wrong = await test_context["client"].post(
         "/signin",
         data={"email": "signin@example.com", "password": "WrongHorse123"},
@@ -128,16 +192,10 @@ async def test_signup_with_telegram_link_connects_dashboard_account(test_context
         await session.commit()
 
     token = url.split("telegram_link=", 1)[1]
-    response = await test_context["client"].post(
-        "/signup",
-        data={
-            "email": "linked@example.com",
-            "display_name": "Linked",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-            "telegram_link": token,
-        },
-        follow_redirects=False,
+    _, response = await _signup_and_verify(
+        test_context,
+        email="linked@example.com",
+        telegram_link=token,
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/dashboard?message=telegram_connected"
@@ -231,15 +289,7 @@ async def test_signup_with_telegram_link_sends_connected_notification(test_conte
 
 
 async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
-    await test_context["client"].post(
-        "/signup",
-        data={
-            "email": "trial@example.com",
-            "display_name": "Trial",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-        },
-    )
+    await _signup_and_verify(test_context, email="trial@example.com")
     first = await test_context["client"].post("/dashboard/trial/claim", follow_redirects=False)
     second = await test_context["client"].post("/dashboard/trial/claim", follow_redirects=False)
     assert first.headers["location"] == "/dashboard/trial?message=trial_claimed"
@@ -250,15 +300,7 @@ async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
 
 
 async def test_payment_page_loads_and_static_checkout_redirects(test_context):
-    await test_context["client"].post(
-        "/signup",
-        data={
-            "email": "billing@example.com",
-            "display_name": "Billing",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-        },
-    )
+    await _signup_and_verify(test_context, email="billing@example.com")
     page = await test_context["client"].get("/dashboard/billing")
     assert page.status_code == 200
     assert "Subscription and Billing" in page.text
@@ -272,15 +314,7 @@ async def test_payment_page_loads_and_static_checkout_redirects(test_context):
 
 
 async def test_dashboard_settings_timezone_dropdown_persists(test_context):
-    await test_context["client"].post(
-        "/signup",
-        data={
-            "email": "timezone@example.com",
-            "display_name": "Timezone",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-        },
-    )
+    await _signup_and_verify(test_context, email="timezone@example.com")
 
     page = await test_context["client"].get("/dashboard/settings")
     assert page.status_code == 200
@@ -329,14 +363,7 @@ async def test_signup_password_confirmation_and_complexity_are_enforced(test_con
 
 
 async def test_email_code_login_and_password_reset(test_context):
-    await test_context["client"].post(
-        "/signup",
-        data={
-            "email": "code-login@example.com",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
-        },
-    )
+    await _signup_and_verify(test_context, email="code-login@example.com")
     await test_context["client"].post("/logout")
 
     requested = await test_context["client"].post(

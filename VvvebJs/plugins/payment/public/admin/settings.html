@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+  
+
+  <base href="">
+
+  <title>Vvveb - Payment methods</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body>
+
+  <div id="container">
+
+    <div class="sidebar" data-v-copy-from="index.html,.sidebar">
+    </div>
+
+
+    <div class="main">
+
+      <div class="clearfix top-header" data-v-copy-from="index.html,.top-header">
+
+      </div>
+
+      <form id="payment-form" action="" method="post" class="settings" data-v-product>
+        <input type="hidden" name="action" id="action" value="save">
+        <input type="hidden" name="csrf" data-v-csrf>
+        <div class="actions">
+          <div class="title">
+            <h4 class="text-muted mt-2">
+              <i class="la la-wallet la-lg"></i>
+              Payment methods
+            </h4>
+          </div>
+          <div class="btns">
+			<a href="{$this.adminPath}index.php?module=plugin/plugins" title="Plugins list"
+					class="btn btn-icon btn-outline-secondary me-2">
+						<i class="la la-arrow-left"></i><span>Plugins list</span>
+			</a>  
+          <button type="submit" href="" class="btn btn-primary btn-icon ms-1" title="Save post">
+            <i class="icon-create-outline"></i> <span>Save settings</span>
+          </button>
+        </div>
+        </div>
+        <div>
+          <div id="main-content">
+
+         	<div class="notifications" data-v-notifications data-v-copy-from="index.html,.notifications"></div>
+
+            <div class="content clearfix payment px-4 row">
+
+
+			  <ul class="nav nav-tabs" id="option"role="tablist" data-v-methods>
+				<li class="nav-item me-2">
+				  <button class="btn btn-outline-secondary btn-icon py-1 mb-1" type="button" onclick="addTab(this)">
+					<i class="la la-plus"></i> 
+					<span>Add payment method</span> 
+				  </button>
+				</li>
+				<li class="nav-item" data-v-method>
+				  <a href="#tab-option0" class="nav-link" data-bs-toggle="tab" data-v-method-payment_method_id>
+					<span data-v-method-name>Default</span>
+					<i class="la la-minus-circle text-danger ms-2" onclick="removeTab(this, 'payment_method_id')"></i> 
+					</a>
+				</li>
+				<li class="nav-item d-none tab-nav-template">
+				  <a href="#tab-template" class="nav-link" data-bs-toggle="tab">
+					<span>New payment method</span>
+					<i class="la la-minus-circle text-danger ms-2" onclick="removeTab(this, 'payment_method_id')"></i> 
+					</a>
+				</li>
+			  </ul>
+
+			 <div class="tab-content" data-v-methods>
+
+				<div class="tab-pane" data-type="text" id="tab-option0" data-v-method>
+
+				  <div class="row mb-3">
+					<label for="input-geo-region" class="col-sm-2 col-form-label">Geo Region</label>
+					<div class="col-sm-10">
+					  <select name="methods[0][region_group_id]" id="input-geo-region" class="form-select" data-v-region_group_id>
+							<option value="0"> --- All zones --- </option>
+							<option value="0" data-v-option>All Regions</option>
+							<option value="1" data-v-option>US Payment</option>
+							<option value="2" data-v-option>UK VAT Region</option>
+						</select>
+					</div>
+				  </div>
+				  
+				  <div class="row mb-3">
+					<label for="input-payment-status" class="col-sm-2 col-form-label">Payment status</label>
+					<div class="col-sm-10">
+						<select name="methods[0][payment_status_id]" id="input-payment-status" class="form-select" data-v-payment_status_id>
+							  <option value="1" data-v-option>Pending</option>
+							  <option value="2" data-v-option>Complete</option>
+					  </select>
+					</div>
+				  </div>
+				  
+				  <div class="row mb-3">
+					<label for="input-sort-order" class="col-sm-2 col-form-label">Sort Order</label>
+					<div class="col-sm-10">
+					  <input type="text" name="methods[0][sort_order]" value="1" placeholder="Sort Order" id="input-sort-order" class="form-control method">
+					</div>
+				  </div>
+
+						
+					<div class="mt-5">
+						<ul class="nav nav-tabs language-nav mb-3 me-3" id="seo-language-nav" data-v-languages="seo" style="margin-top: -2.5rem;right: 2.5rem;">
+							<li class="nav-item" data-v-language>
+								<a href="#language1" class="nav-link" data-bs-toggle="tab" aria-expanded="true" data-v-language-link>
+									<!-- img src="language/en-gb/en-gb.png" title="English" data-v-language-img --> 
+									<span data-v-language-name>English</span>
+								</a>
+							</li>
+						 </ul>
+						 
+							 
+							 
+						   <div class="tab-content" data-v-languages="seo" style="clear:both">
+							<div class="tab-pane" id="language1" data-v-language data-v-language-id>
+
+							  <div class="row mb-3">
+									<label for="input-title" class="col-sm-2 col-form-label">Name</label>
+									<div class="col-sm-10">
+									  <input type="text" name="methods[0][lang][1][title]" value="" id="input-title" class="form-control" placeholder="Cash on delivery" data-v-lang-title>
+									</div>
+								  </div>
+								  <div class="row mb-3">
+									<label for="input-description" class="col-sm-2 col-form-label">Payment instructions/message</label>
+									<div class="col-sm-10">
+									  <textarea name="methods[0][lang][1][description]" value="0" rows="5" placeholder="Pay the courier on delivery/Transfer to bank account ###" id="input-description" class="form-control" data-v-lang-description></textarea>
+									</div>
+								  </div>
+
+							
+								</div>
+							</div>
+
+						</div>		
+
+
+					  <div class="row mb-3">
+						<label for="input-tax-type" class="col-sm-2 col-form-label">Tax Class</label>
+						<div class="col-sm-10">
+						  <select name="methods[0][tax_type_id]" id="input-tax-type" class="form-select" data-v-tax_type_id>
+							  <option value="0"> --- None --- </option>
+							  <option value="10" data-v-option>Downloadable Products</option>
+							  <option value="9" data-v-option>Taxable Goods</option>
+						  </select>
+						</div>
+					  </div>
+					  
+					  <div class="row mb-3">
+						<label for="input-cost" class="col-sm-2 col-form-label">
+							<span>Cost</span>
+							<span title="Leave empty to for free payment">
+							  <i class="la la-lg la-question-circle text-primary"></i>
+							</span>								
+						</label>
+						<div class="col-sm-10">
+						  <input type="text" name="methods[0][cost]" value="0.00" step="0.01" min="0"  placeholder="Cost" id="input-cost" class="form-control method">
+						</div>
+					  </div>
+				
+					</div>						
+
+
+			<div class="tab-pane tab-content-template d-none" data-type="text" data-id="#">			
+				
+
+				  <div class="row mb-3">
+					<label for="input-geo-region" class="col-sm-2 col-form-label">Geo Region</label>
+					<div class="col-sm-10">
+					  <select name="methods[0][region_group_id]" id="input-geo-region" class="form-select" disabled data-v-region_group_id>
+							<option value="0"> --- All zones --- </option>
+							<option value="0" data-v-option>All Regions</option>
+							<option value="1" data-v-option>US Payment</option>
+							<option value="2" data-v-option>UK VAT Region</option>
+						</select>
+					</div>
+				  </div>
+				  
+				  <div class="row mb-3">
+					<label for="input-payment-status" class="col-sm-2 col-form-label">Payment status</label>
+					<div class="col-sm-10">
+						<select name="methods[0][payment_status_id]" id="input-payment-status" class="form-select" disabled data-v-payment_status_id>
+							  <option value="1" data-v-option>Pending</option>
+							  <option value="2" data-v-option>Complete</option>
+					  </select>
+					</div>
+				  </div>
+				  
+				  <div class="row mb-3">
+					<label for="input-sort-order" class="col-sm-2 col-form-label">Sort Order</label>
+					<div class="col-sm-10">
+					  <input type="text" name="methods[0][sort_order]" value="1" placeholder="Sort Order" id="input-sort-order" disabled class="form-control method">
+					</div>
+				  </div>
+
+						
+					<div class="mt-5">
+						<ul class="nav nav-tabs language-nav mb-3 me-3" id="seo-language-nav" data-v-languages="payment" style="margin-top: -2.5rem;right: 2.5rem;">
+							<li class="nav-item" data-v-language>
+								<a href="#language1" class="nav-link" data-bs-toggle="tab" aria-expanded="true" data-v-language-link>
+									<!-- img src="language/en-gb/en-gb.png" title="English" data-v-language-img --> 
+									<span data-v-language-name>English</span>
+								</a>
+							</li>
+						 </ul>
+						 
+							 
+						   <div class="tab-content" data-v-languages="payment" style="clear:both">
+							<div class="tab-pane" id="language1" data-v-language data-v-language-id>
+
+							  <div class="row mb-3">
+									<label for="input-title" class="col-sm-2 col-form-label">Name</label>
+									<div class="col-sm-10">
+									  <input type="text" name="methods[0][lang][1][title]" value="" id="input-title" class="form-control" placeholder="New payment method" disabled data-v-lang-title>
+									</div>
+								  </div>
+								  <div class="row mb-3">
+									<label for="input-description" class="col-sm-2 col-form-label">Payment instructions/message</label>
+									<div class="col-sm-10">
+									  <textarea name="methods[0][lang][1][description]" value="0" rows="5" placeholder="Pay the courier on delivery/Transfer to bank account ###" id="input-description" class="form-control" disabled data-v-lang-description></textarea>
+									</div>
+								  </div>
+
+							
+								</div>
+							</div>
+
+						</div>
+						
+						  <div class="row mb-3">
+							<label for="input-tax-type" class="col-sm-2 col-form-label">Tax Class</label>
+							<div class="col-sm-10">
+							  <select name="methods[0][tax_type_id]" id="input-tax-type" class="form-select" disabled data-v-tax_type_id>
+								  <option value="0"> --- None --- </option>
+								  <option value="10" data-v-option>Downloadable Products</option>
+								  <option value="9" data-v-option>Taxable Goods</option>
+							  </select>
+							</div>
+						  </div>
+						<div class="row mb-3">
+							<label for="input-cost" class="col-sm-2 col-form-label">
+								<span>Cost</span>
+								<span title="Leave empty to for free payment">
+								  <i class="la la-lg la-question-circle text-primary"></i>
+								</span>								
+							</label>
+							<div class="col-sm-10">
+							  <input type="text" name="methods[0][cost]" value="0.00" step="0.01" min="0"  placeholder="Cost" id="input-cost" class="form-control method" disabled>
+							</div>
+						  </div>
+	
+				</div>						
+			</div>						
+
+				</div>			
+
+            </div>
+          </div>
+      </form>
+
+    </div>
+  </div>
+
+
+  <script src="js/popper.min.js"></script>
+  <script src="js/bootstrap.min.js"></script>
+  <script id="admin-js" type="module" src="/js/admin.js"></script>
+  <script type="module" src="/js/admin.js"></script>
+  <script id="functions-js" src="/js/admin/functions.js"></script>
+
+</body>
+
+</html>

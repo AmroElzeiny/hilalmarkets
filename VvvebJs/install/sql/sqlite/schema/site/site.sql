@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS `site`;
+
+CREATE TABLE `site` (
+`site_id` INTEGER PRIMARY KEY AUTOINCREMENT,
+`name` TEXT NOT NULL,
+`settings` TEXT NOT NULL DEFAULT ''
+-- PRIMARY KEY (`site_id`)
+);

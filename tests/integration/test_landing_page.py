@@ -52,14 +52,23 @@ async def test_dashboard_entry_uses_saved_session_or_signup(test_context):
     assert anonymous.status_code == 303
     assert anonymous.headers["location"] == "/signup"
 
-    await test_context["client"].post(
+    requested = await test_context["client"].post(
         "/signup",
         data={
             "email": "entry@example.com",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },
+        follow_redirects=False,
     )
+    assert requested.headers["location"].startswith("/signup/verify")
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    verified = await test_context["client"].post(
+        "/signup/verify",
+        data={"email": "entry@example.com", "code": code},
+        follow_redirects=False,
+    )
+    assert verified.headers["location"].startswith("/dashboard")
     authenticated = await test_context["client"].get(
         "/dashboard-entry",
         follow_redirects=False,

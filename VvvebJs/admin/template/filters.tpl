@@ -1,0 +1,49 @@
+#filters input[name="module"]|value  = <?php echo htmlspecialchars(Vvveb\get('module'));?>
+#filters input[name="action"]|before = <?php $action = Vvveb\get('action');if ($action) {?>
+#filters input[name="action"]|value  = <?php echo htmlspecialchars(Vvveb\get('action'));?>
+#filters input[name="action"]|after  = <?php } ?>
+#filters input[name="type"]|value    = <?php echo $this->type ?? '';?>
+
+#filters|addClass = <?php if ($this->filter) echo 'show';?>
+#filters input[type="text"],#filters input[type="search"]|value = <?php 
+	$name = str_replace(['filter[',']'], '', '@@__name__@@');
+	if (isset($this->filter[$name])) echo htmlspecialchars($this->filter[$name]);
+?>
+
+#filters input.autocomplete|data-text = <?php
+$text = $name. '_text';
+if (isset($this->filter[$text])) echo htmlspecialchars($this->filter[$text]);
+?>
+
+
+@option = #filters select [data-v-option]
+@option|deleteAllButFirstChild
+
+#filters select|before = 
+<?php
+	 //set select name
+	 $selected = '';	
+	 $name = str_replace(['filter[',']'], '', '@@__name__@@');
+	 if (isset($_GET[$name])) {
+		 $selected = $_GET[$name];
+	 } else
+	 if (isset($this->filter[$name])) {
+		$selected = $this->filter[$name];
+	 }
+?>
+
+@option|before = <?php
+	if (isset($this->$name)) {
+	$options = 	$this->$name;
+	foreach($options as $key => $option){?>
+	
+		@option|value = $key
+		@option = <?php echo htmlspecialchars(Vvveb\humanReadable($option));?>
+
+@option|after = <?php
+}}?>
+
+@option|addNewAttribute = <?php if ($key == $selected) echo 'selected';?>
+
+#filters #all-sites|addNewAttribute = <?php if (isset($_GET['filter']['site_id']) && !$_GET['filter']['site_id']) echo 'checked';?>
+#filters #current-site|addNewAttribute = <?php if (!isset($_GET['filter']['site_id']) || $_GET['filter']['site_id']) echo 'checked';?>

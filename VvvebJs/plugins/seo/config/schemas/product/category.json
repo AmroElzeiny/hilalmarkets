@@ -1,0 +1,8 @@
+{
+  "@type": "ProductCollection",
+  "@@data-v-component-product-category":"category",
+  "@id": "https://www.example.com/categories/outerwear#collectionpage @@data-v-category-full-url",
+  "name": "Outerwear  @@data-v-category-name",
+  "url": "https://www.example.com/categories/outerwear  @@data-v-category-url",
+  "description": "Description  @@data-v-category-content"
+}

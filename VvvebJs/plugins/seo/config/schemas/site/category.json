@@ -1,0 +1,8 @@
+{
+  "@type": "CollectionPage",
+  "@@data-v-component-content-category":"category",
+  "@id": "@@data-v-category-full-url",
+  "name": "Name  @@data-v-category-name",
+  "url": "url  @@data-v-category-url",
+  "description": "Description  @@data-v-category-content"
+}

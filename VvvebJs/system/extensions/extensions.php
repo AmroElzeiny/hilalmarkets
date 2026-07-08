@@ -1,0 +1,300 @@
+<?php
+
+/**
+ * Vvveb
+ *
+ * Copyright (C) 2022  Ziadin Givan
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ */
+
+namespace Vvveb\System\Extensions;
+
+use function Vvveb\__;
+use function Vvveb\download;
+use function Vvveb\getUrl;
+use Vvveb\System\Event;
+use Vvveb\System\Functions\Str;
+use Vvveb\System\Import\Rss;
+use function Vvveb\unzip;
+
+abstract class Extensions {
+	static protected $extensions = [];
+
+	static protected $categories = [];
+
+	static protected $extension = 'extension';
+
+	static protected $baseDir = 'extension';
+
+	static protected $url;
+
+	static protected $feedUrl;
+
+	const KEY_VALUE_REGEX = '/^([\w ]+):\s+(.+)$/m';
+
+	static function getParams($comments) {
+		$results = [];
+
+		if (preg_match_all(static :: KEY_VALUE_REGEX, $comments, $matches)) {
+			$matches[1] = array_map(function ($key) {
+				return str_replace(' ','-',strtolower(trim($key)));
+			}, $matches[1]);
+
+			$results = array_combine($matches[1], $matches[2]);
+		}
+
+		return $results;
+	}
+
+	static function getComments($content) {
+		//$content = file_get_contents($file);
+		if (function_exists('token_get_all')) {
+			$docComments = [];
+
+			foreach (token_get_all($content) as $entry) {
+				if ($entry[0] == T_DOC_COMMENT || $entry[0] == T_COMMENT) {
+					$docComments[] = $entry[1];
+				}
+			}
+
+			return implode("\n", $docComments);
+		} else {
+			if (preg_match_all('@(?s)/\*.*?\*/@', $content, $matches, PREG_PATTERN_ORDER)) {
+				return implode("\n", $matches[0] ?? []);
+			}
+		}
+
+		return '';
+	}
+
+	static function getInfo($content, $name = false) {
+		$comments = static :: getComments($content);
+		$params   = static ::  getParams($comments);
+
+		if (isset($params['status'])) {
+			unset($params['status']);
+		}
+
+		if (isset($params['category']) && $name) {
+			static :: $categories[$params['category']][] = $name;
+		}
+
+		return $params;
+	}
+
+	static function getListInfo($path) {
+		if (isset(static :: $extensions[static :: $extension])) {
+			return static :: $extensions[static :: $extension];
+		} else {
+			static :: $extensions[static :: $extension] = [];
+		}
+
+		$adminPath = \Vvveb\adminPath();
+		$list    	 = glob($path);
+
+		foreach ($list as $file) {
+			$content		      = file_get_contents($file);
+			$dir			         = Str::match('@(.+)/[a-z]+.\w+$@', $file);
+			$folder		       = Str::match('@/([^/]+)/[a-z]+.\w+$@', $file);
+			$info           = static::getInfo($content, $folder);
+			$info['file']   = $file;
+			$info['folder'] = $folder;
+			$info['import'] = file_exists($dir . DS . 'import');
+
+			if (isset($info['settings'])) {
+				$info['settings']= str_replace('/admin/', $adminPath, $info['settings']);
+			}
+
+			// plugin folder does not match slug
+			if (! isset($info['slug']) || ($info['slug'] != $info['folder'])) {
+				$info['status'] = 'slug_folder_mismatch';
+				$info['slug']   = $info['folder'];
+			}
+
+			static :: $extensions[static :: $extension][$folder] = $info;
+		}
+
+		return static :: $extensions[static :: $extension];
+	}
+
+	static function getCategories() {
+		return static :: $categories;
+	}
+
+	static function download($url) {
+		$f    = false;
+		$temp = @tempnam(sys_get_temp_dir(), 'vvveb_plugin');
+
+		if (! $temp) {
+			$temp = @tmpfile();
+		}
+
+		//if temp still fails use cache dir, some shared hosting have this issue
+		if (! $temp) {
+			$temp = DIR_CACHE . APP . '.extension.' . md5($url) . '.zip';
+		}
+
+		if ($content = download($url)) {
+			$f  = file_put_contents($temp, $content, LOCK_EX);
+			if ($f) {
+				return $temp;
+			}
+		}
+
+		return $f;
+	}
+
+	static function validFile($file) {
+		if (strpos($file, '..') !== false) {
+			return false;
+		}
+
+		if (strpos($file, 'htaccess') !== false) {
+			return false;
+		}
+
+		//for public folder don't allow php and htaccess files
+		if (strpos($file, 'public') !== false) {
+			$extension = strtolower(substr($file, strrpos($file, '.') + 1));
+			if (in_array($extension, ['php', 'htaccess'])) {
+				return false;
+			}
+		}
+
+
+		return true;
+	}
+
+	static function install($extensionZipFile, $slug = false, $validate = true) {
+		$extension   = static :: $extension;
+		$success     = true;
+		$extractTo   = static :: $baseDir;
+		$fileCheck   = "$extension.php";
+		$valid       = false;
+
+		$zip = new \ZipArchive();
+
+		if ($zip->open($extensionZipFile/*, \ZipArchive::OVERWRITE*/) === true) {
+			$info       = false;
+			$folderName = $zip->getNameIndex(0);
+
+			//check if first entry is a directory
+			if (substr($folderName, -1, 1) != '/') {
+				if ($validate) {
+					throw new \Exception(sprintf('%s zip must have only %s folder!', $extensionZipFile, ucfirst($extension)));
+				}
+			} else {
+				$slug = trim($folderName, '/');
+			}
+
+			for ($i = $zip->numFiles - 1; ($i > 0 && $success == true); $i--) {
+				$file = $zip->getNameIndex($i);
+
+				if (! self :: validFile($file)) {
+					throw new \Exception(sprintf(__('Zip contains invalid file "%s"'), $file));
+				}
+
+				if ($validate) {
+					//check if all files inside the extension folder
+					if (strpos($file, $folderName) === false) {
+						$extractTo .= DS . $slug;
+
+						if ($validate) {
+							throw new \Exception(sprintf(__('%s zip should not have other files than %s folder!'), $extension, $extension));
+						}
+					}
+				}
+
+				// plugin.php must be in the top most folder
+				if (strpos($file, $fileCheck) !== false && substr_count($file, '/') < 2) {
+					$content = $zip->getFromName($file);
+					$info    = static::getInfo($content);
+
+					if (isset($info['slug']) && ($folderName == ($info['slug'] . '/'))) {
+						// Unzip Path
+						$success = $info['slug'];
+						$valid = true;
+					} else {
+						if ($validate) {
+							throw new \Exception(sprintf(__('%s slug `%s` does not match folder %s!'), $extension, $info['slug'] ?? '', $folderName));
+						} else {
+							$extractTo .= DS . $slug;
+							$info    = ['slug' => $slug];
+							$success = $info['slug'];
+						}
+					}
+
+					//break;
+				}
+			}
+
+			// no extension.php found then treat as generic extension/theme
+			if ($success && $valid) {
+				if (! is_writable($extractTo)) {
+					throw new \Exception(sprintf(__('%s folder not writable!'), str_replace(DIR_ROOT, '', $extractTo)));
+				}
+
+				if ($zip->extractTo($extractTo)) {
+					$success = $slug;
+					$info    = ['slug' => $slug];
+				} else {
+					$success = false;
+				}
+			}
+
+			$zip->close();
+
+			if (! $info) {
+				throw new \Exception(sprintf(__('No `%s.php` info found inside zip!'), $extension));
+			}
+		} else {
+			throw new \Exception(__('File is not a valid zip archive!'));
+		}
+
+		Event :: trigger(__CLASS__, __FUNCTION__, $extensionZipFile, $success);
+
+		return $success;
+	}
+
+	static function marketUrl() {
+		return static :: $url;
+	}
+
+	static function getMarketUrl($url, $params = [], $key = null) {
+		$query            = http_build_query($params);
+		$content          = getUrl($url . '?' . $query);
+
+		if ($content) {
+			$rss  = new Rss($content);
+
+			$key                                = $key ?? static :: $extension . 's';
+			$result[$key]                       = $rss->get($params['start'] ?? 1, $params['limit'] ?? 10);
+			$result['count']                    = $rss->value('count');
+
+			return $result;
+		}
+
+		return [];
+	}
+
+	static function getMarketCategories($params = [], $key = null) {
+		return static :: getMarketUrl(static :: $categoriesFeedUrl, $params, $key);
+	}
+
+	static function getMarketList($params = [], $key = null) {
+		return static :: getMarketUrl(static :: $feedUrl, $params, $key);
+	}
+}

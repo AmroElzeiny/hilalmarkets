@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS `vendor`;
+
+CREATE TABLE `vendor` (
+`vendor_id` INTEGER PRIMARY KEY AUTOINCREMENT,
+`admin_id` INT NOT NULL DEFAULT 0,
+`name` TEXT NOT NULL DEFAULT "",
+`slug` TEXT NOT NULL DEFAULT "",
+`image` TEXT NOT NULL,
+`sort_order` INTEGER NOT NULL DEFAULT 0
+-- PRIMARY KEY (`vendor_id`)
+);

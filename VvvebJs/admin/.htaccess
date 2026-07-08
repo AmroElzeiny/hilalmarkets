@@ -1,0 +1,5 @@
+Options -Indexes -ExecCGI -Includes -MultiViews
+
+<IfModule dir_module>
+    DirectoryIndex index.php
+</IfModule>

@@ -1,0 +1,23 @@
+{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "@@data-v-component-breadcrumb":"breadcrumb",
+ "@@data-v-absoluteURL":"true",
+ "itemListElement":
+ [
+  {
+   "@type": "ListItem",
+   "@@data-v-breadcrumb-item":"breadcrumb-item",
+   "position": "{$index}",
+   "name": "{$breadcrumb.text}",
+   "item @@data-v-if=\"breadcrumb.url\"":"{$breadcrumb.url}"
+  },
+  {
+   "@type": "ListItem",
+   "@@data-v-breadcrumb-item":"breadcrumb-item",
+   "position": "{$index}",
+   "name": "{$breadcrumb.text}",
+   "item @@data-v-if=\"breadcrumb.url\"":"{$breadcrumb.url}"
+  }
+ ]
+}

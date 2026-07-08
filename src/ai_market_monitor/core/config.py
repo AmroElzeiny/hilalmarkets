@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     context_fetch_concurrency: int = Field(default=8, ge=1, le=50)
     market_breadth_max_symbols: int = Field(default=100, ge=10, le=1000)
     support_telegram_username: str | None = None
-    support_email: str | None = None
+    support_email: str | None = "contact@trace-edge.com"
     admin_notify_telegram_user_id: str | None = None
     email_adapter: Literal["none", "smtp", "memory"] = "none"
     smtp_host: str | None = None
@@ -116,10 +116,13 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: SecretStr | None = None
     smtp_from_email: str | None = None
+    smtp_from_name: str | None = None
     smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
     auth_code_ttl_minutes: int = Field(default=10, ge=2, le=60)
     auth_code_max_attempts: int = Field(default=5, ge=1, le=10)
-    email_test_outbox: list[dict[str, str]] = Field(default_factory=list, exclude=True)
+    auth_test_fixed_code: str | None = None
+    email_test_outbox: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
     dashboard_export_directory: str = "./exports"
     chart_library_cdn_url: str | None = "/static/vendor/lightweight-charts.standalone.production.js"
 
@@ -162,6 +165,10 @@ class Settings(BaseSettings):
     @property
     def is_deployed(self) -> bool:
         return self.app_env in {"staging", "production"}
+
+    @property
+    def support_inbox_email(self) -> str:
+        return (self.support_email or "contact@trace-edge.com").strip()
 
 
 @lru_cache

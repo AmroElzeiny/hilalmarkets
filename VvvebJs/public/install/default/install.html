@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+    <link rel="icon" href="../../favicon.ico">
+    <base href="">
+    <title>Vvveb install</title>
+
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/install.css" rel="stylesheet">
+    <link href="../../admin/default/css/ionicons.css" rel="stylesheet">
+  </head>
+
+
+  <body class="h-100">
+
+	<div class="header">
+
+		<a id="color-theme-switch" title="Switch color theme">
+			<i class="la la-sun"></i>
+		</a>
+	</div>
+
+    <div id="container" class="container h-100">
+							
+			<div class="row align-items-center h-100">
+				<div class="col-12 mx-auto">
+
+							
+						<img id="logo" src="../../admin/default/img/logom.png">
+
+							<div class="notifications" data-v-notifications>
+								
+								<div class="card border-danger mb-3" role="alert" data-v-notification-error>
+
+									<h5 class="card-header bg-danger text-white">Errors</h5>
+									<div class="icon">
+										<i class="la la-exclamation-triangle fs-2"></i>
+									</div>
+
+									<div class="card-body">
+										<span class="text-danger"> &#10006;</span>
+										<span data-v-notification-text>
+											Can't connect to database
+										</span>
+									</div>
+									
+								</div>
+
+								<div class="alert alert-success d-flex  alert-dismissable d-flex" role="alert" data-v-notification-success>
+
+									<div class="icon">
+										<i class="la la-info-circle fs-2"></i>
+									</div>
+
+									<div class="flex-grow-1 align-self-center" data-v-notification-text></div>
+
+									<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+										<span aria-hidden="true">
+											<i class="la la-times"></i>
+										</span>
+									</button>
+								</div>
+								
+								<div class="alert alert-primary d-flex alert-dismissable d-flex" role="alert" data-v-notification-info>
+
+									<div class="icon">
+										<i class="la la-info-circle fs-2"></i>
+									</div>
+
+									<div class="flex-grow-1 align-self-center" data-v-notification-text></div>
+
+									<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+										<span aria-hidden="true">
+											<i class="la la-times"></i>
+										</span>
+									</button>
+								</div>
+
+							</div>
+
+							<div class="card border-danger mb-3" id="minimum_requirements" data-v-requirements>
+								<h5 class="card-header bg-danger text-white">Minimum requirements not met</h5>
+							
+							  <div class="card-body">
+								  
+									<div data-v-requirement><span class="text-danger"> &#10006; </span> <span data-v-requirement-text>Requirement not met</span></div>
+
+							  </div>
+							</div>
+
+							<div class="card">
+							  
+							  <div class="card-body">
+								
+								<p class="card-text" style="color:#777">These can be later changed from admin.</p>
+								
+									<form method="post">
+									 <div class="mb-3 row">
+										<label for="title" class="col-sm-3 col-form-label">Primary language</label>
+										<div class="col-sm-9">
+											<div class="input-group">
+											 <select name="language" class="form-select" data-v-language-list>
+												<option value="en">English</option>
+												<option value="ro">Romanian</option>
+											  </select>
+											  <button type="button" class="btn btn-sm py-0 btn-toggle fs-5" onclick="addLanguage()">
+												  <i class="icon-add-outline"></i>
+											   </button>
+											</div>
+										</div>
+									  </div>
+									 <div class="mb-3 row language-row d-none">
+										<label for="title" class="col-sm-3 col-form-label">Language</label>
+										<div class="col-sm-9">
+											<div class="input-group">
+											 <select name="languages[]" class="form-select" data-v-language-list>
+												<option value="en">English</option>
+												<option value="ro">Romanian</option>
+											  </select>
+											  <button type="button" class="btn btn-sm py-0 btn-toggle fs-5 text-danger" onclick="removeLanguage(this)">
+												  <i class="icon-close-outline"></i>
+											   </button>
+											</div>
+										</div>
+									  </div>
+									 <div class="mb-3 row">
+										<label for="title" class="col-sm-3 col-form-label">Website name</label>
+										<div class="col-sm-9">
+										  <input type="text" class="form-control" id="title" placeholder="Website name" name="settings[description][1][title]" value="" required>
+										</div>
+									  </div>
+									  <div class="mb-3 row">
+										<label for="email" class="col-sm-3 col-form-label">Email</label>
+										<div class="col-sm-9">
+										  <input type="email" class="form-control" id="email" placeholder="email" name="admin[email]" value="" required>
+										</div>
+									  </div>
+									  <div class="mb-3 row">
+										<label for="username" class="col-sm-3 col-form-label">User name</label>
+										<div class="col-sm-9">
+										  <input type="text" class="form-control" id="username" placeholder="User" name="admin[username]" value="admin" required>
+										</div>
+									  </div>
+									  <!--
+									  <div class="mb-3 row">
+										<label for="display_name" class="col-sm-3 col-form-label">Display name</label>
+										<div class="col-sm-9">
+										  <input type="text" class="form-control" id="display_name" placeholder="Username" name="admin[display_name]" value="Admin" required>
+										</div>
+									  </div>
+									  -->
+									  <div class="mb-3 row">
+										<label for="password" class="col-sm-3 col-form-label">Password</label>
+										<div class="col-sm-9">
+											<div class="input-group">
+											  <input type="text" class="form-control" id="password" placeholder="User password" name="admin[password]" value="" aria-label="User password" autocomplete="new-password">
+											  <button class="btn btn-sm py-0 btn-toggle fs-5" type="button" onclick="randomizePassword(this, 'password')">
+												<i class="icon-shuffle-outline"></i>
+												<!-- &#x1F3B2; -->
+												</button>
+											  <button class="btn btn-sm py-0 btn-toggle fs-5" type="button" onclick="togglePasswordInput(this, 'password')">
+			  									<i class="icon-eye-off-outline"></i>
+												<!-- &#x1F512; -->
+											  </button>
+											</div>
+										</div>
+									  </div>
+									  <div class="mb-3 row disabled">
+										<label for="display_name" class="col-sm-3 col-form-label">Admin login path</label>
+										<div class="col-sm-9">
+										  <div class="input-group">
+												<input type="text" class="form-control" id="admin-path" placeholder="Username" name="admin-path" value="admin" required>
+											  <button class="btn btn-sm py-0 btn-toggle fs-5" id="rand-path-btn" type="button" onclick="randomizeAdminPath()">
+											  	<i class="icon-shuffle-outline"></i>
+												<!-- &#x1F3B2; -->
+												</button>
+											</div>
+											<span class="small text-muted">Works only if web server document root is /public otherwise the login path is always /admin</span>
+											<div class="small text-muted" id="not-public-notice">
+												<span>If possible set your document root to /public for better security<span>
+												<a href="https://docs.vvveb.com/installation#secure-install">Secure install documentation</a>
+											</div>
+										</div>
+									  </div>
+																		  
+									 <div class="d-flex">
+
+										<div class="">
+											<h6 class="mb-3">Theme</h6>
+										
+										 <div class="list themes" data-v-themes>
+											 
+												<div class="list-card" data-v-theme data-v-class-if-active="theme.active">
+
+													<label class="form-check theme-check">						  
+														<input type="radio" class="form-check-input" value="/placeholder.svg" name="theme"><span class="form-check-label"></span>		
+													</label>				  
+
+													<!-- Card-->
+													<div class="card">
+														<img class="card-img-top img-fluid d-block mx-auto" src="..." alt="Card image cap" data-v-theme-screenshot_url data-v-theme-screenshot>
+														<div class="card-body">
+															<div class="info">
+																<a href="#" target="_blank"><h5 class="card-title" data-v-theme-name>Theme name</h5></a>
+																<!-- by <h6 class="card-subtitle mb-2 text-muted d-inline" data-v-theme-author>Author</h6>	-->
+															</div>
+
+														</div>
+													</div>
+												</div>
+												
+												<div class="list-card" data-v-theme>
+													
+													<label class="form-check">						  
+														<input type="radio" class="form-check-input" value="/placeholder.svg" name="theme"><span class="form-check-label"></span>		
+													</label>				  
+													<!-- Card-->
+													<div class="card">
+														<img class="card-img-top img-fluid d-block mx-auto" src="..." alt="Card image cap" data-v-theme-screenshot_url>
+														<div class="card-body">
+															<a href="#" target="_blank" data-v-theme-homepage><h5 class="card-title" data-v-theme-name>Theme name</h5></a>
+															<!-- by <h6 class="card-subtitle mb-2 text-muted d-inline" data-v-theme-author>Author</h6>	-->
+														</div>
+														  <div class="card-footer text-muted">
+													
+																<a href="#" class="btn btn-primary"><i class="icon-color-wand-outline"></i><span>Install</span></a>
+																<a href="#" class="btn btn-outline-primary" target="_blank" data-v-theme-preview_url><span>Preview</span></a>
+													
+														  </div>                
+													</div>
+												</div>
+											</div>
+										</div>
+									  
+										 <div class="homepage">
+											  <select name="homepage" class="form-select form-select-sm mb-1">
+												<option value="index.html">Homepage</option>
+												<option value="index-blog.html">Blog</option>
+												<option value="index-blog-excerpts.html">Blog excerpts</option>
+											  </select>
+											<iframe id="homepage" src=""></iframe>	
+										 </div> 
+									  </div>
+
+									  
+									  <div class="row align-items-center">
+										  <div class="col-md-6">
+											<div>
+												<div class="form-check">
+													<input type="checkbox" class="form-check-input" name="noecommerce" value="1" id="noecommerce">
+													<label class="form-check-label" for="noecommerce">
+														Disable ecommerce
+														<span class="form-text">(It can be enabled later)</span>
+													</label>
+													
+												  </div>
+											  </div>  
+										  
+										  </div>
+
+										  <div class="col-md-6">												  
+											  <button type="submit" class="btn btn-primary mt-4 float-end"><span>Finish install</span> &#10140;</button>
+										  </div>
+									  </div>
+								  </form>
+							  </div>
+					</div>
+				</div>
+			</div>
+    </div>					
+	
+<script>
+let publicPath = '{$this->publicPath}';
+function togglePasswordInput(element, id) {
+	let password = document.getElementById(id);
+	if (password.type == "password") {
+		password.type = "text"; 
+		//element.innerHTML = "&#x1F513;";
+		element.firstElementChild.className = "icon-eye-outline";
+	} else {
+		password.type = "password";
+		//element.innerHTML = "&#x1F512;";
+		element.firstElementChild.className = "icon-eye-off-outline";
+	}
+}			
+	
+function randomPassword(length, chars = "abcdefghijklmnopqrstuvwxyz!@#$%^&*()-+<>ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890") {
+	var pass = "";
+	for (var x = 0; x < length; x++) {
+		var i = Math.floor(Math.random() * chars.length);
+		pass += chars.charAt(i);
+	}
+	return pass;
+}
+
+function randomizePassword() {
+	document.getElementById("password").value = randomPassword(49);   
+}
+
+function randomizeAdminPath() {
+	document.getElementById("admin-path").value = 'vadmin-' + randomPassword(32, "abcdefghijklmnopqrstuvwxyz!@<>ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"); 
+};
+
+randomizePassword();
+
+let isRootPublic = {$this->isRootPublic};
+if (isRootPublic) {
+	randomizeAdminPath();
+	document.getElementById("not-public-notice").remove();
+} else {
+	document.getElementById("rand-path-btn").remove();
+	document.getElementById("admin-path").disabled = true;		
+}
+
+let homepage = document.getElementById("homepage");
+let homepageSelect = document.querySelector("[name='homepage']");
+let themes = document.querySelector(".themes");
+
+function changeTheme(theme) {
+	fetch(window.location.pathname + "?action=getThemeTemplates&theme=" + theme)
+		.then((response) => {
+			if (!response.ok) { throw new Error(response) }
+			return response.json()
+		})
+		.then((data) => {
+			homepageSelect.replaceChildren();
+			for (code in data) {
+				let template = code;
+				let name = data[code];
+				
+				let el = document.createElement('option');
+				el.textContent = name;
+				el.value = template;
+				homepageSelect.appendChild(el);
+			}
+			
+			changeHomepage();
+		})
+		.catch(error => {
+			console.log(error.statusText);
+			//displayToast("danger", "Error", "Error loading theme templates!");
+		});			
+}
+
+function changeHomepage() {
+	homepage.src = publicPath + "themes/" + document.querySelector('[name="theme"]:checked').value + "/" + homepageSelect.value;
+}
+
+homepageSelect.addEventListener("change", changeHomepage);
+themes.addEventListener("change", (e) => {
+	let element = event.target.closest("input");
+	if (element) {
+		changeTheme(element.value);
+	}
+});
+
+function iframeLoad(e) {
+	homepage.contentWindow.document.body.style.userSelect = "none";
+	homepage.contentWindow.document.body.addEventListener("click", (e) => {e.stopPropagation();e.preventDefault();return false;});
+}
+
+homepage.addEventListener("load", iframeLoad);
+changeHomepage();
+
+function addLanguage() {
+	let languages = document.querySelectorAll('.language-row');
+	let languageTemplate = languages[0];
+	let newLanguage = languageTemplate.cloneNode(true);
+	newLanguage.classList.remove("d-none");
+	languages[languages.length - 1].after(newLanguage);
+}
+
+function removeLanguage(element) {
+	let language = element.closest('.language-row');
+	language.remove();
+}
+
+</script>
+<script src="../../admin/default/js/theme.js"></script>
+</body>
+</html>

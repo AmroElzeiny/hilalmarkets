@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-07-08T16:57:14.941999+00:00",
+  "started_at": "2026-07-08T16:57:03.147401+00:00",
+  "base_url": "http://127.0.0.1:33952",
+  "browser": "chromium",
+  "auto_started": true,
+  "command": ".venv\\Scripts\\python.exe -m pytest tests\\integration\\test_dashboard_web.py::test_repeated_signup_submit_does_not_send_second_code tests\\integration\\test_dashboard_web.py::test_signup_creates_user_session_and_dashboard_access tests\\browser\\test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation -q",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 33952",
+  "exitstatus": 0,
+  "tests_run": 1,
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "console_errors": [],
+  "failed_network_calls": [],
+  "page_errors": [],
+  "artifacts": {
+    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {}
+  },
+  "tests": {
+    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {
+      "outcome": "passed",
+      "duration_seconds": 2.208,
+      "longrepr": ""
+    }
+  },
+  "remaining_browser_side_risks": [
+    "Live Telegram/Discord message delivery is not exercised without real test tokens.",
+    "Quick Scan interpretation is mocked for browser determinism; light-scan submission uses the backend fixture market-data provider.",
+    "Long-running worker scans and production billing webhooks remain covered by non-browser tests/manual checks."
+  ]
+}

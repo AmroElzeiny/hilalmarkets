@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+
+  <base href="../../">
+
+  <title>Recover password</title>
+
+
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body class="login">
+
+  <div class="d-flex align-items-center justify-content-center h-100">
+    <div class="login-container">
+
+
+      <div class="logo-content">
+        <a href="//www.vvveb.com" target="_blank">
+          <img src="img/logom.png" />
+        </a>
+      </div>
+
+
+
+      <form method="post" role="form" id="login" class="login-form fade-in-effect" enctype="multipart/form-data" action="">
+        <input type="hidden" name="csrf" data-v-csrf>
+        <input type="hidden" name="action" value="">
+
+        <div class="login-form-content">
+
+          <div class="notifications" data-v-notifications>
+
+            <div class="alert alert-danger d-flex alert-dismissable" role="alert" data-v-notification-error>
+
+              <div class="icon">
+                <i class="la la-exclamation-triangle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                Vvveb 0.2 is now available! <a href="update">Update now</a>
+              </div>
+
+
+              <button type="button" class="btn-close ms-2 mt-2" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                  <!-- <i class="la la-times"></i> -->
+                </span>
+              </button>
+            </div>
+
+            <div class="alert alert-success d-flex  alert-dismissable d-flex" role="alert" data-v-notification-success>
+
+              <div class="icon">
+                <i class="la la-check-circle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                You successfully read this important alert message.
+              </div>
+
+              <button type="button" class="btn-close ms-2 mt-2" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                  <!-- <i class="la la-times"></i> -->
+                </span>
+              </button>
+            </div>
+
+            <div class="alert alert-warning d-flex alert-dismissable d-flex" role="alert" data-v-notification-warning>
+
+              <div class="icon">
+                <i class="la la-exclamation-triangle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                You successfully read this important warning message.
+              </div>
+
+              <button type="button" class="btn-close ms-2 mt-2" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                  <!-- <i class="la la-times"></i> -->
+                </span>
+              </button>
+            </div>
+
+            <div class="alert alert-primary d-flex alert-dismissable d-flex" role="alert" data-v-notification-info>
+
+              <div class="icon">
+                <i class="la la-info-circle"></i>
+              </div>
+
+              <div class="flex-grow-1 align-self-center" data-v-notification-text>
+                You successfully read this important alert message.
+              </div>
+
+              <button type="button" class="btn-close ms-2 mt-2" data-bs-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                  <!-- <i class="la la-times"></i> -->
+                </span>
+              </button>
+            </div>
+
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label d-flex justify-content-between align-items-center">
+              <span>New password</span>
+            </label>
+
+            <div class="input-group">
+              <input type="password" minlength="6" autocorrect="off" autocorrect="off" class="form-control" id="password" name="password" autocomplete="off" value="" aria-label="Password" required>
+              <div class="input-group-append">
+                <button class="btn px-3" type="button" onclick="togglePasswordInput(this, 'password')">
+                  <i class="icon-eye-off-outline"></i>
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+
+          <div class="mb-4">
+            <label class="form-label d-flex justify-content-between align-items-center">
+              <span>Confirm password</span>
+            </label>
+
+            <div class="input-group">
+              <input type="password" minlength="6" autocorrect="off" autocorrect="off" class="form-control" id="confirm-password" name="confirm_password" autocomplete="off" value="" aria-label="Password" required>
+              <div class="input-group-append">
+                <button class="btn px-3" type="button" onclick="togglePasswordInput(this, 'confirm-password')">
+                  <i class="icon-eye-off-outline"></i>
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+
+
+          <div class="mb-4 mt-4">
+
+            <button type="submit" class="btn btn-primary btn-icon w-100">
+              <span>Change password</span>
+              <i class="icon-chevron-forward-outline float-end ms-2"></i>
+            </button>
+
+          </div>
+
+
+
+        </div>
+    </div>
+  </div>
+
+  </form>
+
+  </div>
+  </div>
+</body>
+
+<script>
+function togglePasswordInput(element, input) {
+	let password = document.getElementById(input);
+	if (password.type == "password") {
+		password.type = "text"; 
+		let i = element.querySelector("i")
+		i.classList.add("icon-eye-outline")
+		i.classList.remove("icon-eye-off-outline");
+	} else {
+		password.type = "password";
+		let i = element.querySelector("i")
+		i.classList.remove("icon-eye-outline")
+		i.classList.add("icon-eye-off-outline");
+	}
+}
+</script>
+
+</html>

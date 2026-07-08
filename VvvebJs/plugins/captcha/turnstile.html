@@ -1,0 +1,15 @@
+<html>
+<head>
+	<script id="turnstile-js" src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
+	<script>
+		VvvebTheme.ajax.afterLoad = () => {
+			document.querySelectorAll(".cf-turnstile").forEach(e => turnstile.execute(e, {}));
+		}
+	</script>
+</head>
+<body>
+	<form class="turnstile-form">
+		<div class="cf-turnstile" data-sitekey="[use your own site key]"></div>
+	</form>
+</body>
+</html>

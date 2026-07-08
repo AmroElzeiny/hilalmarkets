@@ -1,0 +1,21 @@
+{
+  "@context": "https://schema.org",
+  "@type": "NewsArticle",
+  "@@data-v-component-post":"post",
+  "headline": "{$post.name|htmlspecialchars}",
+  "image": "{$post.image}",
+/*  
+  "image  @@data-v-post-images": [
+	"https://example.com/photos/1x1/photo.jpg @@data-v-post-image @@data-v-post-image-src",
+	"https://example.com/photos/4x3/photo.jpg @@data-v-post-image @@data-v-post-image-src",
+	"https://example.com/photos/16x9/photo.jpg @@data-v-post-image @@data-v-post-image-src"
+   ],
+*/   
+  "datePublished": "{$post.pubDate}",
+  "dateModified": "{$post.modDate}",
+  "author @@data-v-component-admin @@data-v-admin_id=\"url\"": [{
+	  "@type": "Person",
+	  "name": "{$admin.display_name}",
+	  "url": "{$admin.url}"
+	}]
+}

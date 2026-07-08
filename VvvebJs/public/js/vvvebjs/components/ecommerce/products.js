@@ -1,0 +1,413 @@
+/**
+ * Vvveb
+ *
+ * Copyright (C) 2021  Ziadin Givan
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ */
+ 
+ 
+import {ServerComponent} from '../server-component.js';
+
+let template = 
+`
+<div class="container" data-v-component-products="popular" data-v-limit="3">
+    <div class="row">
+        <div class="col-sm-12 col-md-6 col-lg mb-2" data-v-product="" data-v-id="19">
+            <article class="single-product-wrapper">
+
+                <a href="/product/product-nineteen" data-v-product-url="" title="Product 19"> </a>
+                <div class="product-image">
+                    <a href="/product/product-nineteen" data-v-product-url="" title="Product 19">
+
+                        <img src="../../media/demo/products/1-1.webp" data-v-product-alt="" alt="Product 19"
+                            data-v-product-image="thumb">
+
+
+                        <img class="hover-img" src="../../media/demo/products/1-2.webp"
+                            data-v-product-alt="" alt="Product 19" data-v-product-image-1="thumb" data-v-id="52"
+                            data-v-type="product_image">
+                    </a>
+
+
+                    <div class="product-favourite">
+                        <a href="/product/product-nineteen" data-v-product-url="" data-v-product-title=""
+                            class="la la-heart" title="Product 19"></a>
+                    </div>
+                </div>
+
+
+                <div class="product-content">
+
+                    <a href="/product/product-nineteen" data-v-product-url="" title="Product 19">
+                        <h6 data-v-product-name="">Product 19</h6>
+                    </a>
+
+                    <p class="product-price" data-v-product-price_tax_formatted="">$256.99</p>
+
+
+                    <div class="hover-content">
+
+                        <div class="add-to-cart-btn">
+                            <input type="hidden" name="product_id" value="19" data-v-product-product_id="">
+                            <a href="/product/product-nineteen" class="btn btn-primary w-100"
+                                data-v-product-url="cart/cart/index" data-v-vvveb-action="addToCart"
+                                data-product_id="19" title="Product 19">
+                                <span class="loading d-none">
+                                    <span class="spinner-border spinner-border-sm align-middle" role="status"
+                                        aria-hidden="true"> </span>
+                                    <span>Add to cart</span>...
+                                </span>
+
+                                <span class="button-text">
+                                    Add to cart
+                                </span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </article>
+        </div>
+        <div class="col-sm-12 col-md-6 col-lg mb-2" data-v-product="" data-v-id="18">
+            <article class="single-product-wrapper">
+
+                <a href="/product/product-eighteen" data-v-product-url="" title="Product 18"> </a>
+                <div class="product-image">
+                    <a href="/product/product-eighteen" data-v-product-url="" title="Product 18">
+
+                        <img src="../../media/demo/products/1-1.webp" data-v-product-alt="" alt="Product 18"
+                            data-v-product-image="thumb">
+
+
+                        <img class="hover-img" src="../../media/demo/products/1-2.webp"
+                            data-v-product-alt="" alt="Product 18" data-v-product-image-1="thumb" data-v-id="49"
+                            data-v-type="product_image">
+                    </a>
+
+
+                    <div class="product-favourite">
+                        <a href="/product/product-eighteen" data-v-product-url="" data-v-product-title=""
+                            class="la la-heart" title="Product 18"></a>
+                    </div>
+                </div>
+
+
+                <div class="product-content">
+
+                    <a href="/product/product-eighteen" data-v-product-url="" title="Product 18">
+                        <h6 data-v-product-name="">Product 18</h6>
+                    </a>
+
+                    <p class="product-price" data-v-product-price_tax_formatted="">$129.00</p>
+
+
+                    <div class="hover-content">
+
+                        <div class="add-to-cart-btn">
+                            <input type="hidden" name="product_id" value="18" data-v-product-product_id="">
+                            <a href="/product/product-eighteen" class="btn btn-primary w-100"
+                                data-v-product-url="cart/cart/index" data-v-vvveb-action="addToCart"
+                                data-product_id="18" title="Product 18">
+                                <span class="loading d-none">
+                                    <span class="spinner-border spinner-border-sm align-middle" role="status"
+                                        aria-hidden="true"> </span>
+                                    <span>Add to cart</span>...
+                                </span>
+
+                                <span class="button-text">
+                                    Add to cart
+                                </span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </article>
+        </div>
+        <div class="col-sm-12 col-md-6 col-lg mb-2" data-v-product="" data-v-id="17">
+            <article class="single-product-wrapper">
+
+                <a href="/product/product-seventeen" data-v-product-url="" title="Product 17"> </a>
+                <div class="product-image">
+                    <a href="/product/product-seventeen" data-v-product-url="" title="Product 17">
+
+                        <img src="../../media/demo/products/1-1.webp" data-v-product-alt="" alt="Product 17"
+                            data-v-product-image="thumb">
+
+
+                        <img class="hover-img" src="../../media/demo/products/1-1.webp"
+                            data-v-product-alt="" alt="Product 17" data-v-product-image-1="thumb" data-v-id="47"
+                            data-v-type="product_image">
+                    </a>
+
+
+                    <div class="product-favourite">
+                        <a href="/product/product-seventeen" data-v-product-url="" data-v-product-title=""
+                            class="la la-heart" title="Product 17"></a>
+                    </div>
+                </div>
+
+
+                <div class="product-content">
+
+                    <a href="/product/product-seventeen" data-v-product-url="" title="Product 17">
+                        <h6 data-v-product-name="">Product 17</h6>
+                    </a>
+
+                    <p class="product-price" data-v-product-price_tax_formatted="">$129.00</p>
+
+
+                    <div class="hover-content">
+
+                        <div class="add-to-cart-btn">
+                            <input type="hidden" name="product_id" value="17" data-v-product-product_id="">
+                            <a href="/product/product-seventeen" class="btn btn-primary w-100"
+                                data-v-product-url="cart/cart/index" data-v-vvveb-action="addToCart"
+                                data-product_id="17" title="Product 17">
+                                <span class="loading d-none">
+                                    <span class="spinner-border spinner-border-sm align-middle" role="status"
+                                        aria-hidden="true"> </span>
+                                    <span>Add to cart</span>...
+                                </span>
+
+                                <span class="button-text">
+                                    Add to cart
+                                </span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </article>
+        </div>
+    </div>
+</div>			
+`;
+
+class ProductsComponent extends ServerComponent{
+	constructor ()
+	{
+		super();
+
+		this.name = "Products";
+		this.attributes = ["data-v-component-products"],
+
+		this.image ="icons/products.svg";
+		this.html = template;
+		
+		this.properties = [{
+			name: false,
+			key: "source",
+			inputtype: RadioButtonInput,
+			inline:false,
+			col:12,
+			htmlAttr:"data-v-source",
+			data: {
+				inline: true,
+				extraclass:"btn-group-fullwidth btn-group-sm",
+				options: [{
+					value: "automatic",
+					icon:"la la-cog",
+					text: "Configuration",
+					title: "Configuration",
+					checked:true,
+				},{
+					value: "autocomplete",
+					text: "Autocomplete",
+					title: "Autocomplete",
+					icon:"la la-search",
+				}],
+			},
+			
+			setGroup: group => {
+				document.querySelectorAll('.mb-2[data-group]').forEach(e => e.classList.add("d-none"));
+				document.querySelectorAll('.mb-2[data-group="'+ group + '"].d-none').forEach((el, i) => {
+					el.classList.remove("d-none");
+				});	
+				//return element;
+			}, 		
+			onChange : function(element, value, input)  {
+				this.setGroup(input.value);
+				return element;
+			}, 
+			init: function (node) {
+				//this.setGroup(node.dataset.vSource);
+				//return 'autocomplete';
+				return node.dataset.vSource;
+			},            
+		},{
+			name: "Products",
+			key: "products",
+			group:"autocomplete",
+			htmlAttr:"data-v-product_id",
+			inline:false,
+			col:12,
+			inputtype: AutocompleteList,
+			data: {
+				url: window.location.pathname + "?module=editor/autocomplete&action=products",
+			},
+		},{
+			name: "Nr. of products",
+			group:"automatic",
+			col:6,
+			inline:false,
+			key: "limit",
+			htmlAttr:"data-v-limit",
+			inputtype: NumberInput,
+			data: {
+				value: "4",//default
+				min: "1",
+				max: "1024",
+				step: "1"
+			},        
+		},{
+			name: "Start from page",
+			group:"automatic",
+			col:6,
+			inline:false,
+			key: "page",
+			htmlAttr:"data-v-page",
+			data: {
+				value: "1",//default
+				min: "1",
+				max: "1024",
+				step: "1"
+			},        
+			inputtype: NumberInput,
+		},{
+			name: "Order by",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-order_by",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "NULL",
+					text: "Default"
+				},{
+					value: "price",
+					text: "Price"
+				},{
+					value: "created_at",
+					text: "Date added"
+				},{
+					value: "updated_at",
+					text: "Date modified"
+				}/*, {
+					value: "sales",
+					text: "Sales"
+				}*/]
+			}
+		},{
+			name: "Image size",
+			key: "image_size",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-image_size",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "",
+					text: "Default"
+				},{
+					value: "thumb",
+					text: "Thumb"
+				},{
+					value: "medium",
+					text: "Medium"
+				},{
+					value: "large",
+					text: "Large"
+				},{
+					value: "xlarge",
+					text: "Extra large"
+				}]
+			}		
+		},{
+			name: "Product type",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-type",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "",//product - default
+					text: "Product"
+				}]
+			}
+		},{
+			name: "Order direction",
+			group:"automatic",
+			key: "order",
+			col:6,
+			inline:false,
+			htmlAttr:"data-v-direction",
+			inputtype: SelectInput,
+			data: {
+				options: [{
+					value: "asc",
+					text: "Ascending"
+				},{
+					value: "desc",
+					text: "Descending"
+				}]
+			}
+		},{
+			name: "Limit to categories",
+			group:"automatic",
+			key: "category",
+			htmlAttr:"data-v-category",
+			inline:false,
+			col:12,
+			inputtype: TagsInput,
+			data: {
+				url: window.location.pathname + "?module=editor/autocomplete&action=categories",
+			},
+
+		},{
+			name: "Limit to manufacturers",
+			group:"automatic",
+			key: "manufacturer",
+			htmlAttr:"data-v-manufacturer",
+			inline:false,
+			col:12,
+			inputtype: TagsInput,
+			data: {
+				url: window.location.pathname + "?module=editor/autocomplete&action=manufacturers",
+			},
+		}];
+	}
+
+    init(node)	{
+		document.querySelectorAll('.mb-2[data-group]').forEach((el, i) => {
+			el.classList.add("d-none");
+		});			
+		
+		let source = node.dataset.vSource;
+		if (!source) {
+			source = "automatic";
+		} 
+
+		document.querySelectorAll('.mb-2[data-group="' + source + '"]').forEach(e => e.classList.remove("d-none"));
+	}
+}
+
+let productsComponent = new ProductsComponent;
+
+export {
+  productsComponent
+};

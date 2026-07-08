@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <link rel="icon" href="/favicon.ico">
+  <base href="">
+
+  <title>Vvveb - Content Plugin</title>
+
+  <link href="css/admin.css" rel="stylesheet">
+</head>
+
+
+<body>
+
+  <div id="container">
+
+    <div class="sidebar" data-v-copy-from="index.html,.sidebar">
+    </div>
+
+
+    <div class="main">
+
+      <div class="clearfix top-header" data-v-copy-from="index.html,.top-header">
+      </div>
+
+      <form id="settings-form" action="" method="post" class="settings" data-v-product>
+        <input type="hidden" name="action" id="action" value="save">
+        <input type="hidden" name="csrf" data-v-csrf>
+		
+        <div class="actions">
+          <div class="title">
+            <h4 class="text-muted mt-2">
+              <i class="la la-file-alt la-lg"></i>
+              Content Plugin
+            </h4>
+          </div>
+          <div class="btns">
+			<a href="{$this.adminPath}index.php?module=plugin/plugins" title="Plugins list"
+					class="btn btn-icon btn-outline-secondary me-2">
+						<i class="la la-arrow-left"></i><span>Plugins list</span>
+			</a>  
+          <button type="submit" href="" class="btn btn-primary btn-icon ms-1" title="Save post">
+            <i class="icon-create-outline"></i> Save settings
+          </button>
+          </div>
+        </div>
+        <div>
+          <div id="main-content">
+
+         	<div class="notifications" data-v-notifications data-v-copy-from="index.html,.notifications"></div>
+
+            <div class="content clearfix settings">
+
+                  <div class="card mb-3">
+					<div class="card-header">
+						<label for="input-site-title" class="col-form-label">Start content</label>
+					</div>
+                    <div class="card--body">
+					  <textarea  class="form-control border-0" placeholder="Start content here ... " name="settings[start]" rows="9"></textarea>
+                    </div>
+                  </div>
+                  
+                  <div class="card mb-3">
+					<div class="card-header">
+						<label for="input-site-title" class="col-form-label">End content</label>
+					</div>
+                    <div class="card--body">
+					  <textarea  class="form-control border-0" placeholder="End content here ... " name="settings[end]" rows="9"></textarea>
+                    </div>
+                  </div>
+                  
+            </div>
+          </div>
+      </form>
+
+    </div>
+  </div>
+
+  <script src="js/popper.min.js"></script>
+  <script src="js/bootstrap.min.js"></script>
+  <script id="admin-js" type="module" src="/js/admin.js"></script>
+  <script type="module" src="/js/admin.js"></script>
+
+</body>
+</html>

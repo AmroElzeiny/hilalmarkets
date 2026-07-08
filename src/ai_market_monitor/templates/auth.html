@@ -50,6 +50,12 @@
       position:relative;
       z-index:1;
     }
+    .auth-logo{
+      display:block;
+      width:160px;
+      max-width:42vw;
+      height:auto;
+    }
     .auth-title-block h1{font-weight:610!important;letter-spacing:-.04em}
     .auth-title-block p{line-height:1.6}
     .auth-form label{
@@ -134,7 +140,7 @@
   <main class="auth-layout">
     <section class="auth-card">
       <div class="auth-card-head">
-        <a class="brand" href="/"><span class="brand-mark">AM</span><span>TraceEdge</span></a>
+        <a class="brand" href="/" aria-label="TraceEdge home"><img class="auth-logo" src="{{ url_for('static', path='/logo_purple.svg') }}" alt="TraceEdge"></a>
         <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true"><span class="theme-toggle-track"><i></i></span></button>
       </div>
       <div class="auth-title-block">
@@ -142,7 +148,9 @@
         <h1>{{ title }}</h1>
         <p>Manage monitors, lifecycles, billing, and alert settings from one calm workspace.</p>
       </div>
-    {% if message == 'code_sent' %}
+    {% if message == 'code_sent' and page == 'signup_verify' %}
+      <div class="dash-flash success">A six-digit code was sent to your email. Enter it below to create your dashboard account.</div>
+    {% elif message == 'code_sent' %}
       <div class="dash-flash success">A six-digit code was sent if that email belongs to an account.</div>
     {% elif message %}
       <div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>
@@ -156,6 +164,12 @@
       <div class="dash-flash error">Use at least 6 characters with a lowercase letter, capital letter, number and special character.</div>
     {% elif error == 'email_unavailable' %}
       <div class="dash-flash error">Email delivery is not configured. Check the SMTP settings and try again.</div>
+    {% elif error == 'email_adapter_disabled' %}
+      <div class="dash-flash error">Email delivery is disabled. Set EMAIL_ADAPTER=smtp in the active environment and restart the app.</div>
+    {% elif error == 'smtp_required_fields_missing' %}
+      <div class="dash-flash error">SMTP is enabled, but required fields are missing. Check SMTP_HOST and SMTP_FROM_EMAIL in the active environment.</div>
+    {% elif error == 'smtp_delivery_failed' %}
+      <div class="dash-flash error">The SMTP provider did not accept the message. Check SMTP credentials, TLS, sender address and provider logs.</div>
     {% elif error in ['invalid_code', 'code_expired'] %}
       <div class="dash-flash error">The one-time code is invalid or expired.</div>
     {% elif error == 'code_locked' %}
@@ -186,7 +200,7 @@
           <label>Repeat password <input name="repeat_password" type="password" required minlength="6" autocomplete="new-password" data-testid="auth-repeat-password"></label>
           <div class="auth-inline-error" data-password-error hidden>Passwords must match.</div>
         {% endif %}
-        <button class="button button-primary" type="submit" data-testid="auth-submit">{{ 'Create Account' if page == 'signup' else 'Sign In' }}</button>
+        <button class="button button-primary" type="submit" data-testid="auth-submit">{{ 'Send Verification Code' if page == 'signup' else 'Sign In' }}</button>
       </form>
       {% if page == 'signin' %}
         <div class="auth-alternative-actions">
@@ -194,6 +208,14 @@
           <a class="text-link" href="/reset-password">Reset password</a>
         </div>
       {% endif %}
+    {% elif page == 'signup_verify' %}
+      <form method="post" action="/signup/verify" class="auth-form">
+        <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
+        <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" autofocus></label>
+        {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
+        <button class="button button-primary" type="submit">Verify and create account</button>
+      </form>
+      <p class="auth-switch"><a href="/signup{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Start again</a></p>
     {% elif page == 'signin_code' %}
       {% if message == 'code_sent' or request.query_params.get('email') %}
         <form method="post" action="/signin/code/verify" class="auth-form">
@@ -240,7 +262,6 @@
     {% endif %}
     </section>
     <aside class="auth-side-panel" aria-label="TraceEdge access summary">
-      <span class="auth-side-kicker">TraceEdge</span>
       <h2>Build monitors with proof, not guesswork.</h2>
       <div class="auth-side-list">
         <span><img src="https://api.iconify.design/lucide:badge-check.svg?color=%23ffffff" alt="" aria-hidden="true">AI interpretation requires your approval.</span>
@@ -252,6 +273,10 @@
   <script>
     document.querySelectorAll("[data-password-form]").forEach((form) => {
       form.addEventListener("submit", (event) => {
+        if (form.dataset.submitting === "true") {
+          event.preventDefault();
+          return;
+        }
         const password = form.elements.password?.value || "";
         const repeat = form.elements.repeat_password?.value || "";
         const error = form.querySelector("[data-password-error]");
@@ -262,6 +287,13 @@
           return;
         }
         if (error) error.hidden = true;
+        form.dataset.submitting = "true";
+        const submit = form.querySelector("button[type='submit']");
+        if (submit) {
+          submit.disabled = true;
+          submit.dataset.originalText = submit.textContent || "";
+          submit.textContent = form.dataset.passwordForm === "signup" ? "Sending code..." : "Processing...";
+        }
       });
     });
   </script>

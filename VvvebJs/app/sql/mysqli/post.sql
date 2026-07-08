@@ -1,0 +1,125 @@
+-- Posts
+
+	import(/admin/post.sql);
+
+	
+	-- overwrite get post defined in admin to get omit things like get all post descriptions
+
+	-- get one post
+
+	CREATE PROCEDURE get(
+		IN post_id INT,
+		IN site_id INT,
+		IN slug CHAR,
+		IN language_id INT,
+		IN comment_count INT,
+		IN comment_status INT,
+		IN type CHAR,
+		OUT fetch_row,
+	)
+	BEGIN
+
+		SELECT _.*,pd.*,ad.admin_id,ad.username,ad.display_name,ad.email, ad.avatar, ad.bio, ad.first_name, ad.last_name
+		
+		@IF isset(:comment_count)
+			THEN
+				,(SELECT COUNT(c.comment_id) 
+						FROM comment c 
+					WHERE 
+						_.post_id = c.post_id
+					
+						@IF isset(:comment_status)
+						THEN
+							AND c.status = :comment_status
+						END @IF
+					) 
+				
+				AS comment_count
+			END @IF 
+			
+			FROM post AS _
+			LEFT JOIN post_content pd ON (_.post_id = pd.post_id AND pd.language_id = :language_id)  
+			LEFT JOIN admin ad ON (_.admin_id = ad.admin_id)  
+
+			@IF isset(:site_id)
+			THEN
+				LEFT JOIN post_to_site ps ON (ps.post_id = _.post_id AND ps.site_id = :site_id)
+			END @IF		
+		WHERE 1 = 1
+
+        	@IF isset(:slug) && !(isset(:post_id) && :post_id) 
+        	THEN 
+			AND pd.slug = :slug 
+        	END @IF			
+
+        	@IF isset(:post_id)
+        	THEN
+			AND _.post_id = :post_id
+        	END @IF			
+			
+        	@IF isset(:type)
+        	THEN
+			AND _.type = :type
+        	END @IF			
+
+        LIMIT 1; 
+		
+		
+		SELECT `key` as array_key,value as array_value FROM post_meta as _
+			WHERE _.post_id = @result.post_id
+		
+          
+	END
+	
+	-- get all languages content
+
+	CREATE PROCEDURE getContent(
+		IN post_id INT,
+		IN site_id INT,
+		IN status INT,
+		IN slug CHAR,
+		IN type CHAR,
+		OUT fetch_all,
+	)
+	BEGIN
+
+		SELECT post.*,_.post_id,_.slug,_.name,_.content,_.meta_keywords,_.meta_description,_.language_id,post.template,language.code,language.slug as language,language.slug as array_key
+			FROM post_content AS _
+			LEFT JOIN language ON (language.language_id = _.language_id)
+			LEFT JOIN post ON (post.post_id = _.post_id)
+
+			@IF isset(:site_id)
+			THEN
+				LEFT JOIN post_to_site ps ON (ps.post_id = _.post_id AND ps.site_id = :site_id)
+			END @IF			
+			
+		WHERE 1 = 1
+
+		@IF isset(:slug) && !(isset(:post_id) && :post_id) 
+		THEN 
+			AND _.post_id = (SELECT post_id FROM post_content WHERE slug = :slug LIMIT 1)
+		END @IF			
+
+		@IF isset(:post_id) && :post_id > 0
+		THEN
+			AND _.post_id = :post_id
+		END @IF	
+		
+		@IF isset(:type) && :type
+		THEN 
+			AND post.type = :type
+		END @IF
+		
+		@IF isset(:site_id)
+		THEN
+			AND ps.site_id = :site_id
+		END @IF			
+	END
+
+	-- Get categories
+
+	CREATE PROCEDURE postCategories(
+		IN  post_id INT,
+	)
+	BEGIN
+	END

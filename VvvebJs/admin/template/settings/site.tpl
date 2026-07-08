@@ -1,0 +1,335 @@
+import(crud.tpl, {"type":"site"})
+
+[data-v-theme-list] option|deleteAllButFirst
+
+[data-v-theme-list] option|before = <?php
+	foreach ($this->themeList as $code => $theme) {
+?>
+
+	[data-v-theme-list] option|value = $code
+	[data-v-theme-list] option|addNewAttribute = <?php if (isset($this->site['theme']) && ($code == $this->site['theme'])) echo 'selected';?>
+	[data-v-theme-list] option = $theme['name']
+
+[data-v-theme-list] option|after = <?php 
+} ?>
+
+[data-v-template-list]|before = <?php $template_id = 0; ?>
+@templates-select-option = [data-v-template-list] [data-v-option]
+
+@templates-select-option|deleteAllButFirstChild
+
+@templates-select-option|before = <?php
+	$options = 	$this->templateList;
+	$optgroup = false;
+	foreach($options as $key => $option){?>
+	
+		@templates-select-option|value = $option
+		@templates-select-option = <?php echo htmlspecialchars(ucfirst($option));?>
+
+@templates-select-option|after = <?php
+}?>
+
+
+@templates-select-option|before = <?php
+if (($optgroup != $option['folder'])) {
+	$optgroup = $option['folder'];
+	echo '<optgroup label="' . ucfirst($optgroup) . '">';
+}
+?>
+
+@templates-select-option|after = <?php
+if (($optgroup != $option['folder'])) {
+	$optgroup = $option['folder'];
+	echo "/<optgroup>";
+}
+?>
+
+@templates-select-option|value = $option['file']
+@templates-select-option|addNewAttribute = <?php if (isset($this->site['template'][$template_id]) && $option['file']== $this->site['template'][$template_id]) echo 'selected';?>
+@templates-select-option = <?php echo htmlspecialchars(ucfirst($option['title']));?>
+
+
+input[data-v-site-*]|value = <?php
+	$name = '@@__data-v-site-(*)__@@';
+	$_default = '@@__value__@@';
+	 if (isset($_POST['site'][$name])) {
+		$value = $_POST['site'][$name]; 
+	 } else if (isset($this->site[$name])) {
+		$value = $this->site[$name];
+	 } else { 
+		$value = $_default;
+	}
+	
+	echo htmlspecialchars($value);
+?>		
+
+input[data-v-site-*][type=checkbox]|addNewAttribute = <?php
+	if (isset($this->site[$name])) echo 'checked';
+?>
+
+
+#settings-form [data-v-site-*]|innerText = $this->site['@@__data-v-site-(*)__@@']
+#settings-form [data-v-site-*]|title = $this->site['@@__data-v-site-(*)__@@']
+#settings-form a[data-v-site-*]|href = $this->site['@@__data-v-site-(*)__@@']
+
+
+input[data-v-setting]|value = <?php 
+	$_setting = '@@__data-v-setting__@@';
+	$_default = '@@__value__@@';
+	$value = $_POST['settings'][$_setting] ?? $this->setting[$_setting] ?? $_default;
+	echo htmlspecialchars($value);
+	//name="settings[setting-name] > get only setting-name
+	//$_setting = '@@__name:\[(.*)\]__@@';
+?>
+
+img[data-v-setting]|src = <?php 
+	$_setting = '@@__data-v-setting__@@';
+	$_default = '@@__value__@@';
+	$value = $this->setting[$_setting] ?? $_default;
+	echo htmlspecialchars($value);
+	//name="settings[setting-name] > get only setting-name
+	//$_setting = '@@__name:\[(.*)\]__@@';
+?>
+
+[data-v-date_format]|deleteAllButFirst
+
+[data-v-date_format]|before = <?php
+	$custom = true;
+	foreach($this->date_format as $format => $text) {
+		$checked = ($this->site['date_format'] ?? 'F j, Y') == $format;
+		if ($checked) $custom = false;
+	?>
+	
+	[data-v-date_format-text] = $text
+	[data-v-date_format-value] = $format
+	input[data-v-date_format-value]|value = $format
+	input[data-v-date_format-value]|addNewAttribute = <?php if ($checked) echo 'checked';?>
+	#date_format_custom|addNewAttribute = <?php if ($custom) echo 'checked';?>
+	
+[data-v-date_format]|after = <?php
+	}
+?>	
+
+[data-v-time_format]|deleteAllButFirst
+
+[data-v-time_format]|before = <?php
+	$custom = true;
+	foreach($this->time_format as $format => $text) {
+		$checked = ($this->site['time_format'] ?? 'H:i') == $format;
+		if ($checked) $custom = false;
+	?>
+	
+	[data-v-time_format-text] = $text
+	[data-v-time_format-value] = $format
+	input[data-v-time_format-value]|value = $format
+	input[data-v-time_format-value]|addNewAttribute = <?php if ($checked) echo 'checked';?>
+	#time_format_custom|addNewAttribute = <?php if ($custom) echo 'checked';?>
+	
+[data-v-time_format]|after = <?php
+	}
+?>	
+
+
+
+[data-v-resize]|before = <?php
+$setting = '@@__name:\[(.*)\]__@@';
+?>
+
+[data-v-resize] option|deleteAllButFirstChild
+
+[data-v-resize] option|before = <?php
+    if (isset($this->resize))
+	foreach ($this->resize as $value => $name) {
+?>
+
+	[data-v-resize] option|value = $value
+	[data-v-resize] option|addNewAttribute = <?php if (isset($this->site[$setting]) && $this->site[$setting] == $value) echo 'selected';?>
+	[data-v-resize] option = $name
+
+[data-v-resize] option|after = <?php 
+} ?>
+
+select[data-v-formats]|before = 
+<?php
+	 $name = 'formats';
+	 $selected = '';	
+	 if (isset($this->setting['image_format'])) 
+	 $selected = $this->setting['image_format'];
+?>
+
+[data-v-formats] [data-v-option]|deleteAllButFirstChild
+[data-v-formats] [data-v-option]|before = <?php 
+	if (isset($this->$name))
+	foreach ($this->$name as $value => $text) {
+	?>
+
+	[data-v-formats] [data-v-option]|value = $text
+	[data-v-formats] [data-v-option]|addNewAttribute = <?php if ($text == $selected) echo 'selected';?>
+	[data-v-formats] [data-v-option] = $text
+
+[data-v-formats] [data-v-option]|after = <?php 
+} ?>
+
+/*
+
+select[data-v-setting]|before = 
+<?php
+	$name = '@@__data-v-setting__@@';
+
+	 $selected = '';	
+	 if (isset($this->setting[$name])) 
+	 $selected = $this->setting[$name];
+?>
+
+[data-v-setting] [data-v-option]|deleteAllButFirstChild
+[data-v-setting] [data-v-option]|before = <?php 
+	if (isset($this->$name))
+	foreach ($this->$name as $value => $text) {
+	?>
+
+	[data-v-setting] [data-v-option]|value = $value
+	[data-v-setting] [data-v-option]|addNewAttribute = <?php if ($value == $selected) echo 'selected';?>
+	[data-v-setting] [data-v-option] = $text
+
+[data-v-setting] [data-v-option]|after = <?php 
+} ?>
+*/
+
+input[type="checkbox"][data-v-setting]|addNewAttribute = <?php
+	if (isset($this->setting[$_setting])) echo 'checked';
+?>
+
+
+
+/* language tabs */
+
+[data-v-languages]|before = <?php $_lang_instance = '@@__data-v-languages__@@';$_i = 0;?>
+@language = [data-v-languages] [data-v-language]
+@language|deleteAllButFirstChild
+//@language|addClass = <?php if ($_i == 0) echo 'active';?>
+
+@language|before = <?php
+
+foreach ($this->languagesList as $language) {
+	$content = $this->site['description'][$language['language_id']] ?? [];
+?>
+	[data-v-languages] [data-v-language-id]|id = <?php echo 'lang-' . $language['code'] . '-' . $_lang_instance;?>
+	[data-v-languages] [data-v-language-id]|addClass = <?php if ($_i == 0) echo 'show active';?>
+
+	@language [data-v-language-name] = $language['name']
+	@language [data-v-language-img]|title = $language['name']
+	@language [data-v-language-img]|src = <?php echo 'language/' . $language['code'] . '/' . $language['code'] . '.png';?>
+	@language [data-v-language-link]|href = <?php echo '#lang-' . $language['code'] . '-' . $_lang_instance?>
+	@language [data-v-language-link]|addClass = <?php if ($_i == 0) echo 'active';?>
+	
+	//home template4
+	@language [data-v-template-list]|name = <?php echo 'site[template][' . $language['language_id'] .']'; $template_id = $language['language_id'];?>
+	@language .new-homepage|value = $language['language_id']
+	
+@language|after = <?php 
+$_i++;
+}
+?>
+
+[data-v-languages] input[data-v-site-description-*]|name = <?php echo 'settings[description][' . $language['language_id'] . '][@@__data-v-site-description-(*)__@@]';?>
+[data-v-languages] textarea[data-v-site-description-*]|name = <?php echo 'settings[description][' . $language['language_id'] . '][@@__data-v-site-description-(*)__@@]';?>
+
+[data-v-languages] input[data-v-site-description-*]|value = <?php
+	$desc = '@@__data-v-site-description-(*)__@@';
+	if (isset($content[$desc])) 
+		echo htmlspecialchars($content[$desc]);
+?>
+
+[data-v-languages] [data-v-site-description-*]|innerText = <?php
+	$desc = '@@__data-v-site-description-(*)__@@';
+	if (isset($this->site['description'][$language['language_id']][$desc])) 
+		echo htmlspecialchars($this->site['description'][$language['language_id']][$desc]);
+?>
+
+
+/* Languages */
+
+#all-languages-check|addNewAttribute = <?php if (!isset($this->site['languages']) || empty($this->site['languages'])) echo 'checked';?>
+
+[data-v-language-list] [data-v-language]|deleteAllButFirstChild
+
+[data-v-language-list] [data-v-language]|before = <?php
+$this->site['languages'] = (array)($this->site['languages'] ?? []);
+foreach ($this->languagesList as $lang) { ?>
+	
+	[data-v-language-list] [data-v-language] [data-v-*]|innerText                   = $lang['@@__data-v-(*)__@@']
+	[data-v-language-list] [data-v-language] input[type="checkbox"]|addNewAttribute = <?php if (isset($this->site['languages']) && in_array($lang['language_id'], $this->site['languages'])) echo 'checked';?>
+	
+	[data-v-language-list] [data-v-language] input[type="checkbox"]|name = <?php echo 'settings[languages]['. $lang['slug'] . ']';?>
+	[data-v-language-list] [data-v-language] input[type="checkbox"]|id   = <?php echo 'lang-'. $lang['language_id'];?>
+	[data-v-language-list] [data-v-language] label|for                   = <?php echo 'lang-'. $lang['language_id'];?>
+
+	
+	[data-v-language-list] [data-v-language]|after = <?php
+}?>
+
+/* Currencies */
+
+#all-currencies-check|addNewAttribute = <?php if (!isset($this->site['currencies']) || empty($this->site['currencies'])) echo 'checked';?>
+
+[data-v-currency-list] [data-v-currency]|deleteAllButFirstChild
+
+[data-v-currency-list] [data-v-currency]|before = <?php
+$this->site['currencies'] = (array)($this->site['currencies'] ?? []);
+foreach ($this->currenciesList as $code => $currency) { ?>
+	
+	[data-v-currency-list] [data-v-currency] [data-v-*]|innerText                   = $currency['@@__data-v-(*)__@@']
+	[data-v-currency-list] [data-v-currency] input[type="checkbox"]|addNewAttribute = <?php if (isset($this->site['currencies']) && in_array($currency['currency_id'], $this->site['currencies'])) echo 'checked';?>
+	
+	[data-v-currency-list] [data-v-currency] input[type="checkbox"]|name = <?php echo 'settings[currencies]['. $code . ']';?>
+	[data-v-currency-list] [data-v-currency] input[type="checkbox"]|id   = <?php echo 'currency-'. $currency['currency_id'];?>
+	[data-v-currency-list] [data-v-currency] label|for                   = <?php echo 'currency-'. $currency['currency_id'];?>
+
+	
+	[data-v-currency-list] [data-v-currency]|after = <?php
+}?>
+
+
+@route = [data-v-routes] [data-v-route]
+@route|deleteAllButFirstChild
+
+@route|before = <?php
+$i = 0;
+foreach ($this->routes as $route => $config) { ?>
+
+	@route [data-v-route-route]|name = <?php echo "route[$i][route]";?>
+	@route [data-v-route-module]|name = <?php echo "route[$i][module]";?>
+	@route [data-v-route-edit]|name = <?php echo "route[$i][edit]";?>
+	@route [data-v-route-route] = $route
+	@route input[data-v-route-module] = $config['module']
+	@route input[data-v-route-edit] = $config['edit']
+	
+@route|after = <?php $i++; } ?>
+
+@module = [data-v-route-module] option
+@module|deleteAllButFirstChild
+
+@module|before = <?php
+
+foreach ($this->modules as $namespace => $module) {
+	foreach ($module as $controller => $actions) {
+	if (!is_array($actions)) $actions = $module; 	
+	foreach ($actions as $name => $action) { ?>
+
+	@module = $action
+	@module|value = $action
+	
+	//cover rule shorthand syntax where action is ommited when index  
+	@module|addNewAttribute = <?php 
+	if (( $config['module'] == $action) || 
+		( $config['module'] . '/index' == $action ) || 
+		( $config['module'] . '/index/index' == $action ) || 
+		( $config['module']  == $action . '/index' ) ||
+		( $config['module']  == $action . '/index/index' )
+	) echo 'selected';?>
+	
+@module|after = <?php } } } ?>
+
+[name="routes-type"]|addNewAttribute = <?php if (isset($this->routesType) && $this->routesType == '@@__value__@@') echo 'checked';?>
+
+#siteRoutes|style = <?php if (isset($this->routesType) && $this->routesType == 'global') echo 'display:none';?>

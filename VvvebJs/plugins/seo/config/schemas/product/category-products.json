@@ -1,0 +1,37 @@
+{
+ "@context": "https://schema.org",
+  "@graph": [
+    {
+	  "@@data-v-component-product-category":"category",
+	  "@type": "ProductCollection",
+	  "@id": "url @@data-v-category-full-url",
+	  "name": "Product name  @@data-v-category-name",
+	  "url": "url @@data-v-category-full-url",
+      "description": "Description  @@data-v-category-content"
+    }, {
+      "@type": "ItemList",
+      "@id": "https://www.example.com/categories/outerwear#itemlist  @@data-v-category-url",
+      "name": "Outerwear product list",
+      "itemListOrder": "https://schema.org/ItemListUnordered",
+      "itemListElement @@data-v-component-products @@data-v-taxonomy_item_id=url": [
+        {
+          "@type": "ListItem",
+          "@@data-v-product":"product",
+          "position": 1,
+          "item": {
+            "@type": "Product",
+            "name": "Name @@data-v-product-name",
+            "image @@data-v-product-image": "image",
+            "url": "url @@data-v-product-full-url",
+            "offers": {
+              "@type": "Offer",
+              "price": "120.00 @@data-v-product-price_tax",
+              "priceCurrency": "EUR @@data-v-price_currency",
+              "availability": "https://schema.org/InStock"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+Options -Indexes -ExecCGI -Includes -MultiViews
+
+<Files *.php>
+ order allow,deny
+ deny from all
+</Files>
