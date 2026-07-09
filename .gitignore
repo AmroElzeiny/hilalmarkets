@@ -3,3 +3,36 @@
 !.env.example
 !.env.production.example
 .env.production.
+*.db
+*.sqlite
+*.sqlite3
+data/
+# Local databases and SQLite sidecar files
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local DB folders
+instance/
+var/
+tmp/
+
+# DB backups/dumps
+*.dump
+*.backup
+*.bak
+*.sql.gz
+*.sql.zip
+
+# Vvveb local sqlite storage
+VvvebJs/storage/sqlite/*
+!VvvebJs/storage/sqlite/.htaccess
