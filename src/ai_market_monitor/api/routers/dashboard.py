@@ -1611,11 +1611,16 @@ async def connections_page(
         select(DiscordConnection).where(DiscordConnection.user_id == user.id)
     )
     telegram_connect_url = None
+    telegram_start_command = None
     try:
         telegram_connect_url = await TelegramAccountLinkService(
             session,
             settings,
         ).create_dashboard_start_link(user_id=user.id)
+        if telegram_connect_url and "?start=" in telegram_connect_url:
+            telegram_start_command = (
+                "/start " + telegram_connect_url.split("?start=", 1)[1].split("&", 1)[0]
+            )
         await session.commit()
     except TelegramAccountLinkError:
         await session.rollback()
@@ -1632,6 +1637,7 @@ async def connections_page(
             telegram=telegram,
             discord=discord,
             telegram_connect_url=telegram_connect_url,
+            telegram_start_command=telegram_start_command,
         ),
     )
 

@@ -423,7 +423,7 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
 
     async def _seed() -> None:
         from ai_market_monitor.db.models import TelegramConnection, UserIdentity
-        from ai_market_monitor.db.models.enums import IdentityProvider
+        from ai_market_monitor.db.models.enums import ConnectionStatus, IdentityProvider
 
         engine = create_async_engine(database_url)
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -443,6 +443,7 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
                     telegram_user_id=f"browser-tg-{suffix}",
                     chat_id=f"browser-chat-{suffix}",
                     username="browser_trace_user",
+                    status=ConnectionStatus.ACTIVE,
                 )
             )
             await session.commit()

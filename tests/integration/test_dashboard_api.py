@@ -40,6 +40,7 @@ from ai_market_monitor.db.models.enums import (
     AlertType,
     ConditionOutcome,
     ConditionType,
+    ConnectionStatus,
     DeliveryChannel,
     DeliveryStatus,
     IdentityProvider,
@@ -132,6 +133,8 @@ async def _connect_telegram(test_context, username: str = "traceuser") -> None:
                 telegram_user_id=f"tg-{suffix}",
                 chat_id=f"chat-{suffix}",
                 username=username,
+                status=ConnectionStatus.ACTIVE,
+                connected_at=datetime.now(UTC),
             )
         )
         await session.commit()

@@ -441,6 +441,8 @@ async def test_integrations_telegram_link_opens_new_tab_and_creates_pending_link
     assert page.status_code == 200
     assert 'target="_blank"' in page.text
     assert "https://t.me/trace_edge_bot?start=link_" in page.text
+    assert "Telegram Web fallback" in page.text
+    assert "/start link_" in page.text
     assert "Under Maintenance" in page.text
     async with test_context["session_factory"]() as session:
         pending = await session.scalar(select(TelegramDashboardLink))

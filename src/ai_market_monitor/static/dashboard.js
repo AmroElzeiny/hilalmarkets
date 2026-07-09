@@ -52,8 +52,12 @@
 
   const pendingMonitorPublishKey = "traceedge-pending-monitor-publish";
 
+  function notificationChannelRequiredUrl(message = "notification_channel_required") {
+    return `/dashboard/integrations?message=${encodeURIComponent(message)}&t=${Date.now()}`;
+  }
+
   function pendingMonitorPublishUrl() {
-    return `/dashboard/integrations?message=notification_channel_required&t=${Date.now()}`;
+    return notificationChannelRequiredUrl("notification_channel_required");
   }
 
   function savePendingMonitorPublish(strategyId, version) {
@@ -70,7 +74,9 @@
   }
 
   function connectedNotificationChannel(payload) {
-    return Boolean(payload?.telegram || payload?.discord);
+    const channelActive = (channel) =>
+      Boolean(channel && channel.status === "active" && channel.alerts_enabled !== false);
+    return channelActive(payload?.telegram) || channelActive(payload?.discord);
   }
 
   async function hasNotificationChannel() {
@@ -3798,6 +3804,11 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const result = document.getElementById("scan-result");
+      if (!(await hasNotificationChannel())) {
+        showToast("Connect Telegram or Discord before running Quick Scan.", "error");
+        window.location.href = notificationChannelRequiredUrl("quick_scan_channel_required");
+        return;
+      }
       if (mode.value !== "prompt" && !field(form, "strategy_version_id").value) {
         if (result) {
           result.hidden = false;
@@ -5451,6 +5462,7 @@
     const connectLink = rootElement.querySelector("[data-telegram-connect-link]");
     const connectedButton = rootElement.querySelector("[data-telegram-connected-button]");
     const disconnectButton = rootElement.querySelector("[data-telegram-disconnect]");
+    const webFallback = rootElement.querySelector("[data-telegram-web-fallback]");
     let pendingPublishInFlight = false;
 
     function titleize(value) {
@@ -5461,7 +5473,7 @@
 
     function render(payload) {
       const telegram = payload?.telegram;
-      const connected = Boolean(telegram);
+      const connected = connectedNotificationChannel({ telegram });
       const statusText = connected ? titleize(telegram.status) : "Not Connected";
       if (status) {
         status.textContent = statusText;
@@ -5486,6 +5498,9 @@
       }
       if (disconnectButton) {
         disconnectButton.hidden = !connected;
+      }
+      if (webFallback) {
+        webFallback.hidden = connected;
       }
     }
 
@@ -5537,6 +5552,12 @@
 
     poll();
     window.setInterval(poll, 5000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) void poll();
+    });
+    window.addEventListener("focus", () => {
+      void poll();
+    });
     disconnectButton?.addEventListener("click", async () => {
       if (!window.confirm("Remove the Telegram connection from this dashboard account? Telegram alerts will stop until you link it again.")) {
         return;
@@ -5599,8 +5620,8 @@
       if (document.hidden) return;
       try {
         const payload = await api("/integrations");
-        updateButton("telegram", Boolean(payload.telegram));
-        updateButton("discord", Boolean(payload.discord));
+        updateButton("telegram", connectedNotificationChannel({ telegram: payload.telegram }));
+        updateButton("discord", connectedNotificationChannel({ discord: payload.discord }));
       } catch {
         return;
       }
@@ -5608,6 +5629,12 @@
 
     poll();
     window.setInterval(poll, 5000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) void poll();
+    });
+    window.addEventListener("focus", () => {
+      void poll();
+    });
   }
 
   function initWebNotifications() {

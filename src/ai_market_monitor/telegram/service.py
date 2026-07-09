@@ -184,6 +184,17 @@ class TelegramBotService:
                 message,
                 start_param.removeprefix("link_"),
             )
+        if not start_param:
+            existing_conversation = await self._conversation(message.telegram_user_id)
+            if (
+                existing_conversation is not None
+                and existing_conversation.flow == "telegram_link"
+                and existing_conversation.step == "confirm"
+            ):
+                return self._telegram_link_confirmation_message(
+                    message,
+                    existing_conversation,
+                )
         attribution = self._parse_deep_link(start_param)
         assertion = IdentityAssertionTokenService(self.settings).issue(
             "telegram", message.telegram_user_id
@@ -251,6 +262,19 @@ class TelegramBotService:
         if conversation is None:
             return self._plain(message, "Send /start to begin or resume onboarding.")
         text = message.text.strip()
+        if conversation.flow == "telegram_link" and conversation.step == "confirm":
+            normalized_link_text = self._normalize_menu_text(text).casefold()
+            if "yes" in normalized_link_text and "connect" in normalized_link_text:
+                return await self._confirm_dashboard_telegram_link(
+                    self._callback_from_message(message, "telegram_link:confirm"),
+                    conversation,
+                )
+            if normalized_link_text in {"cancel", "go back", "back", "main menu"}:
+                return await self._cancel_dashboard_telegram_link(
+                    self._callback_from_message(message, "telegram_link:cancel"),
+                    conversation,
+                )
+            return self._telegram_link_confirmation_message(message, conversation)
         if conversation.flow == "create_monitor" and conversation.step == "collect_setup_text":
             try:
                 return await self._receive_setup_text(message, conversation)
@@ -3188,6 +3212,29 @@ class TelegramBotService:
             correlation_id=conversation.correlation_id,
         )
 
+    def _telegram_link_confirmation_message(
+        self,
+        message: TelegramInboundMessage,
+        conversation: TelegramConversationState,
+    ) -> TelegramOutboundMessage:
+        visible_email = str(
+            (conversation.state_data or {}).get("dashboard_email")
+            or "this dashboard account"
+        )
+        return TelegramOutboundMessage(
+            chat_id=message.chat_id,
+            text=(
+                "Telegram connection\n\n"
+                f"Connect this Telegram account to {visible_email}?\n\n"
+                "After confirmation, this Telegram chat can receive TraceEdge notifications."
+            ),
+            buttons=[
+                TelegramButton("Yes, connect", "telegram_link:confirm"),
+                TelegramButton("Cancel", "telegram_link:cancel"),
+            ],
+            correlation_id=conversation.correlation_id,
+        )
+
     async def _confirm_dashboard_telegram_link(
         self,
         callback: TelegramCallback,
@@ -3231,6 +3278,7 @@ class TelegramBotService:
                 self._dashboard_button("Dashboard"),
                 TelegramButton("Main Menu", "back:main"),
             ],
+            menu=PRIMARY_MENU,
         )
 
     async def _cancel_dashboard_telegram_link(

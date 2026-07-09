@@ -554,12 +554,23 @@ async def test_telegram_dashboard_start_link_requires_confirmation_and_connects(
         assert "Connect this Telegram account to dashboard-link@example.com" in prompt.text
         assert await db.scalar(select(TelegramConnection)) is None
 
-        connected = await service.handle_callback(
-            TelegramCallback(
-                callback_query_id="cb-confirm-dashboard-link",
+        resumed = await service.handle_message(
+            TelegramInboundMessage(
                 telegram_user_id="tg-dashboard-link",
                 chat_id="chat-dashboard-link",
-                data="telegram_link:confirm",
+                username="linked_trader",
+                text="/start",
+            )
+        )
+        assert "Connect this Telegram account to dashboard-link@example.com" in resumed.text
+        assert await db.scalar(select(TelegramConnection)) is None
+
+        connected = await service.handle_message(
+            TelegramInboundMessage(
+                telegram_user_id="tg-dashboard-link",
+                chat_id="chat-dashboard-link",
+                username="linked_trader",
+                text="Yes, connect",
             )
         )
 

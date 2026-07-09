@@ -2,8 +2,15 @@ import pytest
 from sqlalchemy import func, select
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
-from ai_market_monitor.db.models import Alert, ScanResult, SetupInstance, UsageRecord, User
-from ai_market_monitor.db.models.enums import ConditionType
+from ai_market_monitor.db.models import (
+    Alert,
+    ScanResult,
+    SetupInstance,
+    TelegramConnection,
+    UsageRecord,
+    User,
+)
+from ai_market_monitor.db.models.enums import ConditionType, ConnectionStatus
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
 from ai_market_monitor.schemas.strategy import Comparator, ConditionRule, Operand, OperandKind
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
@@ -60,6 +67,16 @@ def scan_strategy():
         }
     )
     return strategy.model_copy(update={"universe": universe, "risk": risk})
+
+
+def telegram_connection(user: User, suffix: str) -> TelegramConnection:
+    return TelegramConnection(
+        user_id=user.id,
+        telegram_user_id=f"tg-{suffix}",
+        chat_id=f"chat-{suffix}",
+        username=f"trace_{suffix}",
+        status=ConnectionStatus.ACTIVE,
+    )
 
 
 async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_context):
@@ -139,6 +156,8 @@ async def test_light_scan_succeeds_without_saved_strategy_or_approval(test_conte
     async with test_context["session_factory"]() as session:
         user = User(display_name="Quick Scan")
         session.add(user)
+        await session.flush()
+        session.add(telegram_connection(user, "quick-scan"))
         await session.commit()
 
     response = await test_context["client"].post(
@@ -166,6 +185,30 @@ async def test_light_scan_succeeds_without_saved_strategy_or_approval(test_conte
         assert usage.metadata_json["scan_mode"] == "light_prompt"
 
 
+async def test_light_scan_requires_notification_channel(test_context):
+    provider = ConfirmedOnDemandProvider()
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: provider
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Quick Scan No Channel")
+        session.add(user)
+        await session.commit()
+
+    response = await test_context["client"].post(
+        "/api/v1/dashboard/light-scan",
+        headers={"X-User-ID": str(user.id)},
+        json={
+            "prompt": "Bring me symbols with price above 50 dollars",
+            "exchange": "binance",
+            "quote_currency": "USDT",
+            "timeframe": "15m",
+            "symbols": ["SOL/USDT"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "notification_channel_required"
+
+
 async def test_light_scan_blank_symbols_returns_broad_universe_matches_by_default(
     test_context,
 ):
@@ -174,6 +217,8 @@ async def test_light_scan_blank_symbols_returns_broad_universe_matches_by_defaul
     async with test_context["session_factory"]() as session:
         user = User(display_name="Quick Scan Broad Universe")
         session.add(user)
+        await session.flush()
+        session.add(telegram_connection(user, "quick-broad"))
         await session.commit()
 
     response = await test_context["client"].post(
@@ -201,6 +246,8 @@ async def test_light_scan_accepts_broad_universe_and_fast_timeframes(test_contex
     async with test_context["session_factory"]() as session:
         user = User(display_name="Quick Scan Broad Fast")
         session.add(user)
+        await session.flush()
+        session.add(telegram_connection(user, "quick-fast"))
         await session.commit()
 
     broad = await test_context["client"].post(

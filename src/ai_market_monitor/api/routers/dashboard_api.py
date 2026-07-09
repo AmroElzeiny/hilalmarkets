@@ -52,6 +52,7 @@ from ai_market_monitor.db.models import (
 from ai_market_monitor.db.models.enums import (
     AlertType,
     ConditionOutcome,
+    ConnectionStatus,
     DeliveryChannel,
     DeliveryStatus,
     IdentityProvider,
@@ -374,6 +375,26 @@ async def _owned_strategy(
     if strategy is None or strategy.user_id != user_id:
         raise HTTPException(status_code=404, detail="Strategy not found")
     return strategy
+
+
+async def _has_active_notification_channel(session: AsyncSession, user_id: UUID) -> bool:
+    telegram = await session.scalar(
+        select(TelegramConnection.id).where(
+            TelegramConnection.user_id == user_id,
+            TelegramConnection.status == ConnectionStatus.ACTIVE,
+            TelegramConnection.alerts_enabled.is_(True),
+        )
+    )
+    if telegram is not None:
+        return True
+    discord = await session.scalar(
+        select(DiscordConnection.id).where(
+            DiscordConnection.user_id == user_id,
+            DiscordConnection.status == ConnectionStatus.ACTIVE,
+            DiscordConnection.alerts_enabled.is_(True),
+        )
+    )
+    return discord is not None
 
 
 async def _owned_version(
@@ -1001,13 +1022,7 @@ async def publish_strategy_version(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="Strategy version not found")
-    telegram = await session.scalar(
-        select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
-    )
-    discord = await session.scalar(
-        select(DiscordConnection).where(DiscordConnection.user_id == principal.user_id)
-    )
-    if telegram is None and discord is None:
+    if not await _has_active_notification_channel(session, principal.user_id):
         raise HTTPException(status_code=409, detail="notification_channel_required")
     expected_hash = payload.expected_schema_hash or version.schema_hash
     try:
@@ -1910,6 +1925,14 @@ async def dashboard_scan_now(
     session: AsyncSession = Depends(get_db_session),
     provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> OnDemandScanResponse:
+    if not await _has_active_notification_channel(session, principal.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "notification_channel_required",
+                "message": "Connect Telegram or Discord before running Quick Scan.",
+            },
+        )
     try:
         response = await OnDemandScanService(session, provider).run(principal.user_id, payload)
         await session.commit()
@@ -2056,6 +2079,14 @@ async def dashboard_light_scan(
     provider: MarketDataProvider = Depends(get_market_data_provider),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    if not await _has_active_notification_channel(session, principal.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "notification_channel_required",
+                "message": "Connect Telegram or Discord before running Quick Scan.",
+            },
+        )
     preview = await configured_strategy_interpreter(settings).interpret(
         _guided_from_scan_prompt(payload)
     )

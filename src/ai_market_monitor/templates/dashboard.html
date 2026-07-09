@@ -2254,6 +2254,25 @@
       margin: 0 !important;
     }
 
+    .telegram-web-fallback {
+      flex-basis: 100%;
+      margin: 2px 0 0 !important;
+      color: rgba(58, 58, 70, .78) !important;
+      font-size: .82rem !important;
+    }
+
+    .telegram-web-fallback code {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      margin-left: 4px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(167, 139, 250, .14);
+      color: #4C1D95;
+      white-space: nowrap;
+    }
+
     [data-lifecycle-mute] span {
       color: #4C1D95 !important;
     }
@@ -2375,6 +2394,8 @@
     <div id="dash-toast" class="dash-toast" hidden></div>
     {% if message == 'notification_channel_required' %}
       <div class="dash-flash error">This monitor needs at least one notification channel. Link Telegram or Discord, then TraceEdge will activate it automatically.</div>
+    {% elif message == 'quick_scan_channel_required' %}
+      <div class="dash-flash error">Quick Scan needs at least one notification channel first. Link Telegram or Discord, then run the scan again.</div>
     {% elif message %}
       <div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>
     {% endif %}
@@ -3908,6 +3929,7 @@
         </div>
       </section>
     {% elif page == 'integrations' %}
+      {% set telegram_active = telegram and telegram.status.value == 'active' and telegram.alerts_enabled %}
       <section class="dash-panel integrations-hub" data-testid="integrations-root" data-integrations-auto-refresh>
         <div class="section-head integrations-hero-head">
           <div>
@@ -3924,7 +3946,7 @@
           <article>
             <img src="https://api.iconify.design/lucide:send.svg?color=%23c4b5fd" alt="" aria-hidden="true">
             <span>Telegram</span>
-            <strong data-telegram-summary-status>{{ telegram.status.value|replace('_', ' ')|title if telegram else 'Not Connected' }}</strong>
+            <strong data-telegram-summary-status>{{ telegram.status.value|replace('_', ' ')|title if telegram_active else 'Not Connected' }}</strong>
           </article>
           <article>
             <img src="https://api.iconify.design/lucide:messages-square.svg?color=%23c4b5fd" alt="" aria-hidden="true">
@@ -3944,7 +3966,7 @@
               <div class="integration-icon telegram">
                 <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/telegram.svg" alt="" aria-hidden="true">
               </div>
-              <span class="integration-status-pill {{ 'connected' if telegram else 'pending' }}" data-telegram-status>{{ telegram.status.value|replace('_', ' ')|title if telegram else 'Not connected' }}</span>
+              <span class="integration-status-pill {{ 'connected' if telegram_active else 'pending' }}" data-telegram-status>{{ telegram.status.value|replace('_', ' ')|title if telegram_active else 'Not connected' }}</span>
             </div>
             <div class="integration-copy">
               <span class="condition-category">Primary alerts</span>
@@ -3956,9 +3978,12 @@
               <span><img src="https://api.iconify.design/lucide:clock-3.svg?color=%23c4b5fd" alt="" aria-hidden="true"> <span data-telegram-delivery>{{ telegram.last_delivery_at|short_dt(user.timezone) if telegram and telegram.last_delivery_at else 'No delivery recorded yet' }}</span></span>
             </div>
             <div class="telegram-integration-actions">
-              <a class="button button-primary" href="{{ telegram_connect_url or telegram_url }}" target="_blank" rel="noopener" data-telegram-connect-link {{ 'hidden' if telegram else '' }}>Link Telegram</a>
-              <button class="button button-primary button-secondary telegram-connected-button" type="button" disabled aria-disabled="true" data-telegram-connected-button {{ '' if telegram else 'hidden' }}>Telegram Connected</button>
-              <button class="button button-secondary telegram-remove-button" type="button" data-telegram-disconnect {{ '' if telegram else 'hidden' }}>Remove Telegram</button>
+              <a class="button button-primary" href="{{ telegram_connect_url or telegram_url }}" target="_blank" rel="noopener" data-telegram-connect-link {{ 'hidden' if telegram_active else '' }}>Link Telegram</a>
+              <button class="button button-primary button-secondary telegram-connected-button" type="button" disabled aria-disabled="true" data-telegram-connected-button {{ '' if telegram_active else 'hidden' }}>Telegram Connected</button>
+              <button class="button button-secondary telegram-remove-button" type="button" data-telegram-disconnect {{ '' if telegram_active else 'hidden' }}>Remove Telegram</button>
+              {% if telegram_start_command %}
+                <p class="telegram-web-fallback" {{ 'hidden' if telegram_active else '' }} data-telegram-web-fallback>Telegram Web fallback: send <code>{{ telegram_start_command }}</code></p>
+              {% endif %}
             </div>
           </article>
 
