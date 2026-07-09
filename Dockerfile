@@ -10,6 +10,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY scripts ./scripts
 COPY alembic.ini ./
 COPY alembic ./alembic
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
