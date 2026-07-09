@@ -216,6 +216,44 @@ async def test_notification_preferences_enforce_user_wide_hourly_cap(test_contex
         assert second_deliveries == []
 
 
+async def test_notification_preferences_enforce_user_wide_daily_cap(test_context):
+    async with test_context["session_factory"]() as session:
+        user = await _user(session)
+        session.add(
+            TelegramConnection(
+                user_id=user.id,
+                telegram_user_id="tg-daily-cap",
+                chat_id="chat-daily-cap",
+                status=ConnectionStatus.ACTIVE,
+                alerts_enabled=True,
+            )
+        )
+        session.add(
+            DashboardPreference(
+                user_id=user.id,
+                notification_preferences={
+                    "channels": ["telegram"],
+                    "maximum_alerts_per_hour": 50,
+                    "maximum_alerts_per_day": 1,
+                    "timezone": "UTC",
+                },
+            )
+        )
+        first = await _alert(session, user, suffix="daily-first")
+        first_deliveries = await NotificationDispatcher(session).enqueue(
+            first,
+            load_strategy(),
+        )
+        second = await _alert(session, user, suffix="daily-second")
+        second_deliveries = await NotificationDispatcher(session).enqueue(
+            second,
+            load_strategy(),
+        )
+
+        assert len(first_deliveries) == 1
+        assert second_deliveries == []
+
+
 async def test_notification_schedule_uses_selected_timezone(test_context):
     async with test_context["session_factory"]() as session:
         user = await _user(session)

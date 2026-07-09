@@ -156,6 +156,13 @@ def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
 
 
+def _no_store(response: HTMLResponse) -> HTMLResponse:
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 def _near_miss_view(item: NearMissSnapshot) -> dict:
     missing = item.missing_conditions or []
     closest = max(
@@ -316,7 +323,11 @@ async def _send_telegram_connected_notification(
                     "counts and account-linked alerts."
                 ),
                 buttons=[
-                    TelegramButton("Dashboard", "open_dashboard"),
+                    TelegramButton(
+                        "Dashboard",
+                        "external:dashboard",
+                        url=f"{str(settings.public_base_url).rstrip('/')}/dashboard",
+                    ),
                     TelegramButton("Lifecycles", "menu:latest_setups"),
                     TelegramButton("Pricing", "pricing"),
                 ],
@@ -481,7 +492,7 @@ async def signup_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _no_store(templates.TemplateResponse(
         request,
         "auth.html",
         await _context(
@@ -492,7 +503,7 @@ async def signup_page(
             page="signup",
             title="Sign Up",
         ),
-    )
+    ))
 
 
 @router.post("/signup", include_in_schema=False)
@@ -541,7 +552,7 @@ async def signup_verify_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _no_store(templates.TemplateResponse(
         request,
         "auth.html",
         await _context(
@@ -552,7 +563,7 @@ async def signup_verify_page(
             page="signup_verify",
             title="Verify Your Email",
         ),
-    )
+    ))
 
 
 @router.post("/signup/verify", include_in_schema=False)
@@ -645,7 +656,7 @@ async def signin_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _no_store(templates.TemplateResponse(
         request,
         "auth.html",
         await _context(
@@ -656,7 +667,7 @@ async def signin_page(
             page="signin",
             title="Sign In",
         ),
-    )
+    ))
 
 
 @router.get("/signin/code", response_class=HTMLResponse, include_in_schema=False)
@@ -665,7 +676,7 @@ async def signin_code_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _no_store(templates.TemplateResponse(
         request,
         "auth.html",
         await _context(
@@ -676,7 +687,7 @@ async def signin_code_page(
             page="signin_code",
             title="Login With One-Time Code",
         ),
-    )
+    ))
 
 
 @router.post("/signin/code/request", include_in_schema=False)
@@ -757,7 +768,7 @@ async def reset_password_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _no_store(templates.TemplateResponse(
         request,
         "auth.html",
         await _context(
@@ -768,7 +779,7 @@ async def reset_password_page(
             page="reset_password",
             title="Reset Password",
         ),
-    )
+    ))
 
 
 @router.post("/reset-password/request", include_in_schema=False)
@@ -779,11 +790,16 @@ async def reset_password_request(
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     try:
-        await WebAuthService(session, settings).request_email_code(
+        sent = await WebAuthService(session, settings).request_email_code(
             email=email,
             purpose="password_reset",
             requested_ip=request.client.host if request.client else None,
         )
+        if not sent:
+            raise WebAuthError(
+                "account_not_registered",
+                "No registered account exists for that email.",
+            )
         await session.commit()
     except (WebAuthError, EmailDeliveryError) as exc:
         await session.rollback()
@@ -1594,6 +1610,15 @@ async def connections_page(
     discord = await session.scalar(
         select(DiscordConnection).where(DiscordConnection.user_id == user.id)
     )
+    telegram_connect_url = None
+    try:
+        telegram_connect_url = await TelegramAccountLinkService(
+            session,
+            settings,
+        ).create_dashboard_start_link(user_id=user.id)
+        await session.commit()
+    except TelegramAccountLinkError:
+        await session.rollback()
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -1606,6 +1631,7 @@ async def connections_page(
             title="Integrations",
             telegram=telegram,
             discord=discord,
+            telegram_connect_url=telegram_connect_url,
         ),
     )
 
@@ -1655,6 +1681,7 @@ async def settings_submit(
     near_miss_enabled: str = Form("true"),
     near_miss_threshold: int = Form(70),
     maximum_alerts_per_hour: int = Form(50),
+    maximum_alerts_per_day: int = Form(500),
     alert_channels: list[str] = Form(default=["telegram"]),
     providers: list[str] = Form(default=["binance", "bybit"]),
     alert_days: list[str] = Form(default=["Every Day"]),
@@ -1664,7 +1691,7 @@ async def settings_submit(
 ) -> RedirectResponse:
     if timezone not in SUPPORTED_TIMEZONES:
         return _redirect("/dashboard/settings?error=unsupported_timezone")
-    allowed_channels = {"telegram", "discord", "web"}
+    allowed_channels = {"telegram", "discord"}
     channels = [channel for channel in alert_channels if channel in allowed_channels]
     if not channels:
         channels = ["telegram"]
@@ -1700,6 +1727,7 @@ async def settings_submit(
             "near_miss_enabled": near_miss_enabled == "true",
             "near_miss_threshold": max(1, min(100, near_miss_threshold)),
             "maximum_alerts_per_hour": max(1, min(1000, maximum_alerts_per_hour)),
+            "maximum_alerts_per_day": max(1, min(10000, maximum_alerts_per_day)),
             "alert_channels": channels,
             "channels": channels,
             "providers": selected_providers,

@@ -7,6 +7,7 @@ from ai_market_monitor.db.models import (
     DisclaimerAcceptance,
     TelegramConnection,
     TelegramConversationState,
+    TelegramDashboardLink,
     PendingEmailSignup,
     Trial,
     User,
@@ -413,3 +414,35 @@ async def test_email_code_login_and_password_reset(test_context):
         follow_redirects=False,
     )
     assert new_password.headers["location"] == "/dashboard?message=login_successful"
+
+
+async def test_reset_password_unknown_email_shows_not_registered(test_context):
+    test_context["settings"].email_test_outbox.clear()
+    requested = await test_context["client"].post(
+        "/reset-password/request",
+        data={"email": "missing-reset@example.com"},
+        follow_redirects=False,
+    )
+
+    assert requested.status_code == 303
+    assert requested.headers["location"] == "/reset-password?error=account_not_registered"
+    assert test_context["settings"].email_test_outbox == []
+    page = await test_context["client"].get(requested.headers["location"])
+    assert page.status_code == 200
+    assert "This email is not registered. Please sign up first." in page.text
+
+
+async def test_integrations_telegram_link_opens_new_tab_and_creates_pending_link(test_context):
+    test_context["settings"].telegram_bot_username = "trace_edge_bot"
+    await _signup_and_verify(test_context, email="dashboard-telegram-link@example.com")
+
+    page = await test_context["client"].get("/dashboard/integrations")
+
+    assert page.status_code == 200
+    assert 'target="_blank"' in page.text
+    assert "https://t.me/trace_edge_bot?start=link_" in page.text
+    assert "Under Maintenance" in page.text
+    async with test_context["session_factory"]() as session:
+        pending = await session.scalar(select(TelegramDashboardLink))
+        assert pending is not None
+        assert pending.telegram_user_id == "pending"

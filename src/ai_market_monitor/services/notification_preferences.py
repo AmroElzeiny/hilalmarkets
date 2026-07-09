@@ -17,6 +17,7 @@ class NotificationPreference:
     near_miss_threshold: int = 70
     lifecycle_enabled: bool = True
     maximum_alerts_per_hour: int = 50
+    maximum_alerts_per_day: int = 500
     timezone: str = "UTC"
     alert_days: set[str] | None = None
     alert_hours: set[str] | None = None
@@ -51,6 +52,10 @@ class NotificationPreferenceService:
             maximum_alerts_per_hour=max(
                 1,
                 min(1000, int(data.get("maximum_alerts_per_hour", 50))),
+            ),
+            maximum_alerts_per_day=max(
+                1,
+                min(10000, int(data.get("maximum_alerts_per_day", 500))),
             ),
             timezone=str(data.get("timezone") or (row.default_timezone if row else "UTC")),
             alert_days=set(map(str, data.get("alert_days", ["Every Day"]))),
@@ -131,6 +136,20 @@ class NotificationPreferenceService:
             .where(Alert.user_id == user_id, AlertDelivery.created_at >= since)
         )
         if (hourly_count or 0) >= preference.maximum_alerts_per_hour:
+            return set()
+        try:
+            zone = ZoneInfo(preference.timezone)
+        except ZoneInfoNotFoundError:
+            zone = ZoneInfo("UTC")
+        local_now = datetime.now(UTC).astimezone(zone)
+        local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_utc = local_start.astimezone(UTC)
+        daily_count = await self.session.scalar(
+            select(func.count(func.distinct(Alert.id)))
+            .join(AlertDelivery, AlertDelivery.alert_id == Alert.id)
+            .where(Alert.user_id == user_id, AlertDelivery.created_at >= day_start_utc)
+        )
+        if (daily_count or 0) >= preference.maximum_alerts_per_day:
             return set()
         return set(requested) & preference.channels
 

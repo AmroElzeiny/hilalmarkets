@@ -1,17 +1,17 @@
 # Playwright E2E Report
 
-Generated: 2026-07-08T16:57:14.941999+00:00
+Generated: 2026-07-09T00:06:57.398989+00:00
 
-Base URL tested: http://127.0.0.1:33952
+Base URL tested: http://127.0.0.1:41350
 Browser: chromium
 App auto-started: True
-Command: `.venv\Scripts\python.exe -m pytest tests\integration\test_dashboard_web.py::test_repeated_signup_submit_does_not_send_second_code tests\integration\test_dashboard_web.py::test_signup_creates_user_session_and_dashboard_access tests\browser\test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation -q`
-App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 33952`
+Command: `.venv\Scripts\python.exe -m pytest tests\browser\test_dashboard_e2e.py -q`
+App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 41350`
 
 ## Result
 
-- Tests run: 1
-- Passed: 1
+- Tests run: 9
+- Passed: 9
 - Failed: 0
 - Skipped: 0
 - Screenshots/traces/videos: `test-results/browser`
@@ -23,7 +23,15 @@ App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 2.208 |
+| `tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor` | passed | 5.344 |
+| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 2.549 |
+| `tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke` | passed | 2.274 |
+| `tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation` | passed | 7.999 |
+| `tests/browser/test_dashboard_e2e.py::test_quick_scan_finder_prompt_flow` | passed | 2.666 |
+| `tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims` | passed | 2.187 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload` | passed | 7.821 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board` | passed | 4.987 |
+| `tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke` | passed | 1.9 |
 
 ## Runtime Checks
 

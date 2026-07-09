@@ -63,8 +63,11 @@ def test_provider_required_prompt_blocks_activation(page: Page, base_url: str) -
     page.get_by_test_id("strategy-prompt-goal").fill(
         "Only alert if BTC is above EMA 200 on 1h."
     )
+    _add_prompt_section(page, "must")
     page.get_by_test_id("strategy-prompt-must").fill("Open interest is rising.")
+    _add_prompt_section(page, "universe")
     page.get_by_test_id("strategy-prompt-universe").fill("BTC/USDT on Binance spot.")
+    _add_prompt_section(page, "timeframe")
     page.get_by_test_id("strategy-prompt-timeframe").fill("1h.")
     page.get_by_test_id("strategy-interpret-submit").click()
 
@@ -265,8 +268,11 @@ def _open_builder(page: Page, base_url: str) -> None:
 def _submit_executable_prompt(page: Page) -> None:
     _choose_describe_path(page)
     page.get_by_test_id("strategy-prompt-goal").fill(EXECUTABLE_PROMPT["goal"])
+    _add_prompt_section(page, "must")
     page.get_by_test_id("strategy-prompt-must").fill(EXECUTABLE_PROMPT["must"])
+    _add_prompt_section(page, "universe")
     page.get_by_test_id("strategy-prompt-universe").fill(EXECUTABLE_PROMPT["universe"])
+    _add_prompt_section(page, "timeframe")
     page.get_by_test_id("strategy-prompt-timeframe").fill(EXECUTABLE_PROMPT["timeframe"])
     page.get_by_test_id("strategy-interpret-submit").click()
     expect(page.get_by_test_id("prompt-coverage-panel")).to_be_visible(timeout=20_000)
@@ -284,6 +290,12 @@ def _choose_describe_path(page: Page) -> None:
         except AssertionError:
             page.wait_for_timeout(500)
     expect(goal).to_be_visible(timeout=10_000)
+
+
+def _add_prompt_section(page: Page, key: str) -> None:
+    button = page.locator(f'[data-add-prompt-section="{key}"]')
+    expect(button).to_be_visible(timeout=10_000)
+    button.click()
 
 
 def _create_executable_board(page: Page, base_url: str) -> None:

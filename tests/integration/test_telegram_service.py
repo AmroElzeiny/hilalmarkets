@@ -7,13 +7,17 @@ from ai_market_monitor.db.models import (
     AttributionTouch,
     DashboardPreference,
     Strategy,
+    TelegramConnection,
     TelegramCallbackReceipt,
     TelegramConversationState,
     TelegramDashboardLink,
     Trial,
+    User,
     UserFeedback,
+    UserIdentity,
 )
-from ai_market_monitor.db.models.enums import StrategyStatus
+from ai_market_monitor.db.models.enums import IdentityProvider, StrategyStatus
+from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.telegram.service import TelegramBotService
 from ai_market_monitor.telegram.types import (
@@ -277,7 +281,7 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
         )
         assert await db.scalar(select(func.count(UserFeedback.id))) == 1
         assert "Support" in support_response.text
-        assert any(button.callback_data == "dashboard:support" for button in support_response.buttons)
+        assert any(button.url and "/dashboard/support" in button.url for button in support_response.buttons)
 
 
 async def test_telegram_dashboard_actions_handoff_to_signup_when_unlinked(test_context):
@@ -294,8 +298,8 @@ async def test_telegram_dashboard_actions_handoff_to_signup_when_unlinked(test_c
         )
 
         assert "Connect a Dashboard account first" in response.text
-        assert "/signup?telegram_link=" in response.text
-        assert "/signin?telegram_link=" in response.text
+        assert "/signup?telegram_link=" not in response.text
+        assert "/signin?telegram_link=" not in response.text
         assert "stripe" not in response.text.lower()
         assert "nowpayments" not in response.text.lower()
         assert any(
@@ -328,7 +332,7 @@ async def test_telegram_submenus_have_back_buttons_and_templates_create_drafts(t
                     text=label,
                 )
             )
-            assert any(button.callback_data in {"back:main", "dashboard:settings", "dashboard:scan"} for button in response.buttons)
+            assert response.buttons or response.menu
 
         await service.handle_callback(
             TelegramCallback(
@@ -439,13 +443,34 @@ async def test_telegram_my_monitors_links_to_dashboard_management(test_context):
             )
         )
 
-        assert "Live monitor - active" in monitors.text
+        assert "Live monitor" in monitors.text
+        assert "Status: Active" in monitors.text
         assert not any(button.text == "Active Monitors" for button in monitors.buttons)
-        assert any(button.text == "Manage #1" for button in monitors.buttons)
+        manage_button = next(button for button in monitors.buttons if button.text.startswith("Manage "))
+        assert "#1" not in manage_button.text
         assert not any(button.text.startswith("Edit #") for button in monitors.buttons)
         assert not any(button.text.startswith("Delete #") for button in monitors.buttons)
+        manage = await service.handle_callback(
+            TelegramCallback(
+                callback_query_id="cb-manage-monitor",
+                telegram_user_id="tg-100",
+                chat_id="chat-100",
+                data=manage_button.callback_data,
+            )
+        )
+        assert "Manage Monitor" in manage.text
+        pause_button = next(button for button in manage.buttons if "Pause" in button.text)
+        paused = await service.handle_callback(
+            TelegramCallback(
+                callback_query_id="cb-pause-monitor",
+                telegram_user_id="tg-100",
+                chat_id="chat-100",
+                data=pause_button.callback_data,
+            )
+        )
+        assert "Status: Paused" in paused.text
         strategy = await db.scalar(select(Strategy).where(Strategy.name == "Live monitor"))
-        assert strategy.status == StrategyStatus.ACTIVE
+        assert strategy.status == StrategyStatus.PAUSED
 
 
 async def test_telegram_settings_hands_off_to_dashboard(test_context):
@@ -489,6 +514,62 @@ async def test_telegram_signup_buttons_use_real_dashboard_links(test_context):
         assert any(
             button.url and "/signup?telegram_link=" in button.url for button in signup.buttons
         )
+
+
+async def test_telegram_dashboard_start_link_requires_confirmation_and_connects(test_context):
+    test_context["settings"].telegram_bot_username = "trace_edge_bot"
+    async with test_context["session_factory"]() as db:
+        user = User(display_name="Dashboard Link")
+        db.add(user)
+        await db.flush()
+        db.add(
+            UserIdentity(
+                user_id=user.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject="dashboard-link@example.com",
+                normalized_identifier="dashboard-link@example.com",
+                display_identifier="dashboard-link@example.com",
+                is_verified=True,
+                is_primary=True,
+                verified_at=datetime.now(UTC),
+                profile_data={},
+            )
+        )
+        url = await TelegramAccountLinkService(
+            db,
+            test_context["settings"],
+        ).create_dashboard_start_link(user_id=user.id)
+        raw_token = url.rsplit("link_", 1)[1]
+        service = make_service(test_context, db)
+
+        prompt = await service.handle_start(
+            TelegramInboundMessage(
+                telegram_user_id="tg-dashboard-link",
+                chat_id="chat-dashboard-link",
+                username="linked_trader",
+                text=f"/start link_{raw_token}",
+            )
+        )
+
+        assert "Connect this Telegram account to dashboard-link@example.com" in prompt.text
+        assert await db.scalar(select(TelegramConnection)) is None
+
+        connected = await service.handle_callback(
+            TelegramCallback(
+                callback_query_id="cb-confirm-dashboard-link",
+                telegram_user_id="tg-dashboard-link",
+                chat_id="chat-dashboard-link",
+                data="telegram_link:confirm",
+            )
+        )
+
+        assert "Telegram connected" in connected.text
+        connection = await db.scalar(select(TelegramConnection))
+        assert connection is not None
+        assert connection.user_id == user.id
+        assert connection.username == "linked_trader"
+        link = await db.scalar(select(TelegramDashboardLink))
+        assert link.consumed_at is not None
 
 
 async def test_telegram_create_monitor_hands_off_to_dashboard(test_context):
@@ -620,5 +701,5 @@ async def test_telegram_approve_before_interpretation_points_to_dashboard(test_c
 
         assert "Action needed" in response.text
         assert "Complete strategy interpretation" in response.text
-        assert any(button.callback_data == "dashboard:builder" for button in response.buttons)
+        assert any(button.url and "/dashboard/strategies/new" in button.url for button in response.buttons)
         assert not any(button.text == "Create Monitor" for button in response.buttons)

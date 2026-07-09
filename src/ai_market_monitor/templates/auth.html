@@ -56,7 +56,7 @@
       max-width:42vw;
       height:auto;
     }
-    .auth-title-block h1{font-weight:610!important;letter-spacing:-.04em}
+    .auth-title-block h1{font-weight:500!important;letter-spacing:-.04em}
     .auth-title-block p{line-height:1.6}
     .auth-form label{
       padding:12px;
@@ -94,14 +94,21 @@
     }
     .auth-side-panel h2{
       max-width:520px;
+      margin-right:38px!important;
       font-size:clamp(32px,4vw,54px);
       line-height:1.02;
-      font-weight:560!important;
+      font-weight:500!important;
       letter-spacing:-.045em;
+    }
+    .auth-form label,
+    .auth-switch,
+    .auth-side-list span{
+      font-weight:520!important;
     }
     .auth-side-list{
       display:grid;
       gap:12px;
+      margin-right:38px!important;
     }
     .auth-side-list span{
       position:relative;
@@ -129,10 +136,16 @@
     }
     html[data-theme="light"] .auth-form label{background:#fff;color:#111114}
     html[data-theme="light"] .auth-side-panel{background:linear-gradient(145deg,#fff,rgba(196,181,253,.18))!important}
+    .auth-alternative-actions .text-link[href="/reset-password"]{
+      color:#17131f!important;
+      font-weight:520!important;
+    }
     @media(max-width:980px){
       .auth-layout{grid-template-columns:1fr!important}
       .auth-card{min-height:auto}
       .auth-card::after{width:180px;height:180px;opacity:.34}
+      .auth-side-panel h2,
+      .auth-side-list{margin-right:0!important}
     }
   </style>
 </head>
@@ -158,6 +171,9 @@
     {% if error == 'account_exists' %}
       <div class="dash-flash error">This email already has an account. Please sign in instead.</div>
       <p><a class="button button-primary" href="/signin{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign In</a></p>
+    {% elif error == 'account_not_registered' %}
+      <div class="dash-flash error">This email is not registered. Please sign up first.</div>
+      <p><a class="button button-primary" href="/signup{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign Up</a></p>
     {% elif error == 'password_mismatch' %}
       <div class="dash-flash error">Password and repeat password must match.</div>
     {% elif error == 'invalid_password' %}
@@ -262,7 +278,7 @@
     {% endif %}
     </section>
     <aside class="auth-side-panel" aria-label="TraceEdge access summary">
-      <h2>Build monitors with proof, not guesswork.</h2>
+      <h2>Proof-led market monitoring.</h2>
       <div class="auth-side-list">
         <span><img src="https://api.iconify.design/lucide:badge-check.svg?color=%23ffffff" alt="" aria-hidden="true">AI interpretation requires your approval.</span>
         <span><img src="https://api.iconify.design/lucide:scan-line.svg?color=%23ffffff" alt="" aria-hidden="true">Deterministic scanner handles market evidence.</span>
@@ -271,6 +287,17 @@
     </aside>
   </main>
   <script>
+    function clearSensitiveAuthFields() {
+      document
+        .querySelectorAll('input[type="password"], input[name="code"]')
+        .forEach((field) => {
+          field.value = "";
+        });
+    }
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) clearSensitiveAuthFields();
+    });
+    window.addEventListener("pagehide", clearSensitiveAuthFields);
     document.querySelectorAll("[data-password-form]").forEach((form) => {
       form.addEventListener("submit", (event) => {
         if (form.dataset.submitting === "true") {

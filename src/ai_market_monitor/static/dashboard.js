@@ -25,9 +25,26 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = payload.detail || payload.message || response.statusText;
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      throw new Error(friendlyApiError(detail));
     }
     return payload;
+  }
+
+  function friendlyApiError(detail) {
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const strategyVersionIssue = detail.find((item) => {
+        const loc = Array.isArray(item?.loc) ? item.loc : [];
+        return loc.includes("strategy_version_id");
+      });
+      if (strategyVersionIssue) return "Strategy version is missing or invalid.";
+      const firstMessage = detail.find((item) => item?.msg)?.msg;
+      return firstMessage || "The request needs one required field before it can run.";
+    }
+    if (detail && typeof detail === "object") {
+      return detail.message || detail.detail || "The request could not be processed.";
+    }
+    return "The request could not be processed.";
   }
 
   const defaultCapabilities = {
@@ -1168,6 +1185,7 @@
     let selectedLibraryGroup = null;
     let selectedLibraryCategory = "";
     const selectedTemplateCategories = new Set();
+    let pendingTemplateSchema = null;
     let drawerSaveHandler = null;
     let lastFocusedElement = null;
     let builderSaving = false;
@@ -1428,7 +1446,13 @@
           ? "Start live monitoring"
           : "Run validation first. If you click now, the system will validate before activation.";
         if (builderSaving && button.dataset.previousLabel) return;
-        button.disabled = button.closest(".legacy-builder-cards") ? !ready : false;
+        button.disabled = !ready;
+      });
+      form.querySelectorAll("[data-builder-validate]").forEach((button) => {
+        button.dataset.validationState = ready ? "passed" : "required";
+        button.disabled = ready;
+        button.setAttribute("aria-disabled", String(ready));
+        button.title = ready ? "Validation passed" : "Validate this monitor before activation";
       });
     }
 
@@ -2280,7 +2304,7 @@
           content: `
             <fieldset class="drawer-channel-picker">
               <legend>Alert channels</legend>
-              ${["telegram", "discord", "dashboard"].map((channel) => `<label><input type="checkbox" data-alert-channel value="${channel}" ${safeArray(schema.alerts?.channels).includes(channel) ? "checked" : ""}><span>${titleize(channel)}</span></label>`).join("")}
+              ${["telegram", "discord"].map((channel) => `<label><input type="checkbox" data-alert-channel value="${channel}" ${safeArray(schema.alerts?.channels).includes(channel) ? "checked" : ""}><span>${titleize(channel)}</span></label>`).join("")}
             </fieldset>
             <div class="drawer-field-grid">
               <label>Forming alerts<select data-section-field="forming_alerts">${optionMarkup([{value: "true", label: "On"}, {value: "false", label: "Off"}], String(schema.alerts?.forming_alerts !== false))}</select></label>
@@ -2867,6 +2891,180 @@
     renderStrategyCanvas(true);
     showMode(form.dataset.strategyId ? "canvas" : "choose", form.dataset.strategyId ? "Saved" : "Visual");
 
+    const promptSectionDefinitions = {
+      must: {
+        title: "Must-have rules",
+        rows: 4,
+        placeholder: "Example: RSI crosses above 30, price above 4h EMA 200, volume expands",
+        testid: "strategy-prompt-must",
+      },
+      optional: {
+        title: "Optional confirmations",
+        rows: 3,
+        placeholder: "Example: VWAP reclaim is preferred, volume confirmation is optional",
+        testid: "strategy-prompt-optional",
+      },
+      universe: {
+        title: "Markets and symbols",
+        rows: 2,
+        placeholder: "Binance USDT spot pairs, or SOL/USDT, LINK/USDT",
+        testid: "strategy-prompt-universe",
+      },
+      timeframe: {
+        title: "Timeframe",
+        rows: 2,
+        placeholder: "15m trigger with 4h trend filter",
+        testid: "strategy-prompt-timeframe",
+      },
+      alerts: {
+        title: "Alert and risk preferences",
+        rows: 3,
+        placeholder: "Candle close only, Telegram, max stop 2%, no near-miss unless close",
+      },
+      avoid: {
+        title: "Things to avoid",
+        rows: 3,
+        placeholder: "Example: avoid low-liquidity coins, no bearish engulfing in the last 5 candles",
+      },
+      extra: {
+        title: "Extra instructions",
+        rows: 3,
+        placeholder: "Anything preferred, unclear, or discretionary that should be clarified",
+      },
+    };
+
+    function updatePromptAddButtons() {
+      document.querySelectorAll("[data-add-prompt-section]").forEach((button) => {
+        button.disabled = Boolean(document.querySelector(`[data-builder-prompt-part="${button.dataset.addPromptSection}"]`));
+      });
+    }
+
+    function ensurePromptSection(key, initialValue = "") {
+      if (!promptSectionDefinitions[key]) return null;
+      let existing = document.querySelector(`[data-builder-prompt-part="${key}"]`);
+      if (existing) {
+        if (initialValue && !existing.value.trim()) existing.value = initialValue;
+        existing.focus?.();
+        updatePromptAddButtons();
+        return existing;
+      }
+      const target = document.querySelector("[data-prompt-extra-fields]");
+      if (!target) return null;
+      const definition = promptSectionDefinitions[key];
+      const label = document.createElement("label");
+      label.className = "prompt-field-card";
+      label.dataset.promptSectionCard = key;
+      label.innerHTML = `
+        <span>${escapeHtml(definition.title)}</span>
+        <button class="prompt-field-remove" type="button" data-remove-prompt-section="${escapeHtml(key)}">Remove</button>
+        <textarea data-builder-prompt-part="${escapeHtml(key)}" rows="${escapeHtml(definition.rows)}" placeholder="${escapeHtml(definition.placeholder)}"${definition.testid ? ` data-testid="${escapeHtml(definition.testid)}"` : ""}></textarea>
+      `;
+      target.appendChild(label);
+      existing = label.querySelector(`[data-builder-prompt-part="${key}"]`);
+      if (initialValue) existing.value = initialValue;
+      label.querySelector("[data-remove-prompt-section]")?.addEventListener("click", () => {
+        label.remove();
+        updatePromptAddButtons();
+      });
+      existing.focus?.();
+      updatePromptAddButtons();
+      return existing;
+    }
+
+    function templateConditionBucket(condition) {
+      if (condition?.required === false) return "optional";
+      const label = String(condition?.label || "").toLowerCase();
+      const comparator = String(condition?.comparator || "").toLowerCase();
+      const leftName = String(condition?.left?.name || condition?.left?.field || "").toLowerCase();
+      if (
+        comparator === "is_false" ||
+        label.includes("avoid") ||
+        label.includes("not ") ||
+        label.includes("without ") ||
+        leftName.includes("not_")
+      ) {
+        return "avoid";
+      }
+      if (condition?.condition_type === "risk") return "alerts";
+      return "must";
+    }
+
+    function templatePromptParts(templateSchema) {
+      const leaves = collectConditionLeaves(templateSchema.conditions);
+      const requiredRules = [];
+      const optionalRules = [];
+      const avoidRules = [];
+      const alertRules = [];
+      leaves.forEach((condition) => {
+        const line = `- ${conditionSentence(condition)}`;
+        const bucket = templateConditionBucket(condition);
+        if (bucket === "optional") optionalRules.push(line);
+        else if (bucket === "avoid") avoidRules.push(line);
+        else if (bucket === "alerts") alertRules.push(line);
+        else requiredRules.push(line);
+      });
+      const universe = templateSchema.universe
+        ? `${templateSchema.universe.exchange || "Selected exchange"} spot ${safeArray(templateSchema.universe.quote_currencies).join(", ") || "quotes"}`
+        : "Selected spot universe";
+      const timeframe = `${templateSchema.base_timeframe || "15m"}${safeArray(templateSchema.supporting_timeframes).length ? ` with ${safeArray(templateSchema.supporting_timeframes).join(", ")} context` : ""}`;
+      const channels = safeArray(templateSchema.alerts?.channels);
+      const alertPreferences = [
+        templateSchema.trigger_mode ? `Trigger mode: ${templateSchema.trigger_mode.replace(/_/g, " ")}` : "",
+        channels.length ? `Channels: ${channels.join(", ")}` : "",
+        templateSchema.risk?.enabled ? "Risk context is enabled because this template includes risk rules." : "",
+        ...alertRules,
+      ].filter(Boolean).join("\n");
+      return {
+        goal: [
+          `Use the ${templateSchema.name || "selected"} template.`,
+          templateSchema.description || "",
+          "Explain any missing must-have rules instead of inventing values.",
+        ].filter(Boolean).join(" "),
+        must: requiredRules.join("\n"),
+        optional: optionalRules.join("\n"),
+        avoid: avoidRules.join("\n"),
+        universe,
+        timeframe,
+        alerts: alertPreferences,
+      };
+    }
+
+    function applyTemplateToPrompt(templateSchema) {
+      const parts = templatePromptParts(templateSchema);
+      const goal = document.querySelector('[data-builder-prompt-part="goal"]');
+      if (goal) {
+        goal.value = parts.goal || "";
+        goal.focus?.();
+      }
+      Object.entries(parts).forEach(([key, value]) => {
+        if (key === "goal" || !String(value || "").trim()) return;
+        const input = ensurePromptSection(key, value);
+        if (input) input.value = value;
+      });
+      field(form, "builder_prompt").value = buildStructuredPrompt("builder");
+    }
+
+    function openTemplateUseDialog(templateSchema) {
+      pendingTemplateSchema = templateSchema || defaultSchema();
+      const dialog = document.getElementById("template-use-dialog");
+      if (!dialog) {
+        applySchema(pendingTemplateSchema, {
+          interpreter: "dashboard-template",
+          assumptions: [],
+          ambiguities: [],
+          unsupported_conditions: [],
+          source_text: null,
+        }, "Template loaded. Review the map before monitoring.", "Template");
+        return;
+      }
+      dialog.showModal();
+    }
+
+    document.querySelectorAll("[data-add-prompt-section]").forEach((button) => {
+      button.addEventListener("click", () => ensurePromptSection(button.dataset.addPromptSection));
+    });
+    updatePromptAddButtons();
+
     document.querySelectorAll("[data-builder-direction]").forEach((button) => {
       button.addEventListener("click", () => {
         const mode = button.dataset.builderDirection;
@@ -2879,7 +3077,7 @@
     });
     document.querySelectorAll("[data-clarification-template]").forEach((button) => {
       button.addEventListener("click", () => {
-        const prompt = document.querySelector('[data-builder-prompt-part="extra"]') || field(form, "builder_prompt");
+        const prompt = ensurePromptSection("extra") || field(form, "builder_prompt");
         prompt.value = `${prompt.value.trim()} ${button.dataset.clarificationTemplate}`.trim();
         prompt.focus?.();
       });
@@ -2892,9 +3090,9 @@
       });
     });
     document.querySelector("[data-improve-builder-prompt]")?.addEventListener("click", () => {
-      const optional = document.querySelector('[data-builder-prompt-part="optional"]');
-      const avoid = document.querySelector('[data-builder-prompt-part="avoid"]');
-      const alerts = document.querySelector('[data-builder-prompt-part="alerts"]');
+      const optional = ensurePromptSection("optional");
+      const avoid = ensurePromptSection("avoid");
+      const alerts = ensurePromptSection("alerts");
       if (optional && !optional.value.trim()) optional.value = "Volume confirmation is optional unless specified.";
       if (avoid && !avoid.value.trim()) avoid.value = "Avoid low-liquidity pairs and unsupported discretionary wording.";
       if (alerts && !alerts.value.trim()) alerts.value = "Candle close only, dashboard alerts, default cooldown.";
@@ -3009,13 +3207,7 @@
       blank.name = "Untitled Monitor";
       blank.description = "Build a deterministic market monitor.";
       blank.conditions.children = [];
-      applySchema(blank, {
-        interpreter: "dashboard-blank-template",
-        assumptions: [],
-        ambiguities: [],
-        unsupported_conditions: [],
-        source_text: null,
-      }, "Blank canvas loaded. Add the first condition.", "Visual");
+      openTemplateUseDialog(blank);
     });
     document.querySelector("[data-preview-blank-template]")?.addEventListener("click", () => {
       const blank = defaultSchema();
@@ -3027,18 +3219,28 @@
       button.addEventListener("click", () => previewTemplate(safeJson(button.dataset.previewTemplate || "{}", defaultSchema())));
     });
     document.querySelectorAll("[data-template-schema]").forEach((button) => {
-      button.addEventListener("click", () => applySchema(
-        safeJson(button.dataset.templateSchema || "{}", defaultSchema()),
-        {
-          interpreter: "dashboard-template",
-          assumptions: [],
-          ambiguities: [],
-          unsupported_conditions: [],
-          source_text: null,
-        },
-        "Template loaded. Review the map before monitoring.",
-        "Template",
-      ));
+      button.addEventListener("click", () => openTemplateUseDialog(safeJson(button.dataset.templateSchema || "{}", defaultSchema())));
+    });
+    document.querySelectorAll("[data-close-template-use]").forEach((button) => {
+      button.addEventListener("click", () => document.getElementById("template-use-dialog")?.close());
+    });
+    document.querySelector("[data-template-use-canvas]")?.addEventListener("click", () => {
+      if (!pendingTemplateSchema) return;
+      document.getElementById("template-use-dialog")?.close();
+      applySchema(pendingTemplateSchema, {
+        interpreter: "dashboard-template",
+        assumptions: [],
+        ambiguities: [],
+        unsupported_conditions: [],
+        source_text: null,
+      }, "Template loaded. Review the map before monitoring.", "Template");
+    });
+    document.querySelector("[data-template-use-prompt]")?.addEventListener("click", () => {
+      if (!pendingTemplateSchema) return;
+      document.getElementById("template-use-dialog")?.close();
+      showMode("prompt", "Prompt");
+      applyTemplateToPrompt(pendingTemplateSchema);
+      showToast("Template copied into Describe Strategy. Edit the wording, then preview mechanics.");
     });
     function updateTemplateFilter() {
       const selectedCategories = Array.from(selectedTemplateCategories);
@@ -3252,10 +3454,11 @@
     const translateButton = document.querySelector("[data-interpret-builder-prompt]");
     const aiSummary = document.getElementById("builder-ai-summary");
     translateButton?.addEventListener("click", async () => {
+      const mainGoal = document.querySelector('[data-builder-prompt-part="goal"]')?.value.trim() || "";
       const prompt = buildStructuredPrompt("builder");
       field(form, "builder_prompt").value = prompt;
-      if (!prompt) {
-        showToast("Describe the monitor before generating a preview.", "error");
+      if (!mainGoal) {
+        showToast("Start with what the monitor should find, then add any optional detail boxes you need.", "error");
         return;
       }
       renderLoadingState(aiSummary, "Processing your strategy into deterministic mechanics...");
@@ -3547,6 +3750,18 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const result = document.getElementById("scan-result");
+      if (mode.value !== "prompt" && !field(form, "strategy_version_id").value) {
+        if (result) {
+          result.hidden = false;
+          result.classList.add("error");
+          result.innerHTML = `
+            <strong style="color:#b4234f">Strategy version</strong>
+            <p>Missing. Choose an approved strategy version before running Quick Scan.</p>
+          `;
+        }
+        showToast("Strategy version is missing.", "error");
+        return;
+      }
       renderScanProgress(result, "Scanning live market data now...");
       try {
         const symbols = csv(field(form, "symbols").value);
@@ -5178,6 +5393,81 @@
     });
   }
 
+  function initIntegrations() {
+    const rootElement = document.querySelector("[data-integrations-auto-refresh]");
+    if (!rootElement) return;
+    const status = rootElement.querySelector("[data-telegram-status]");
+    const summaryStatus = rootElement.querySelector("[data-telegram-summary-status]");
+    const username = rootElement.querySelector("[data-telegram-username]");
+    const delivery = rootElement.querySelector("[data-telegram-delivery]");
+    const connectLink = rootElement.querySelector("[data-telegram-connect-link]");
+    const connectedButton = rootElement.querySelector("[data-telegram-connected-button]");
+    const disconnectButton = rootElement.querySelector("[data-telegram-disconnect]");
+
+    function titleize(value) {
+      return String(value || "not connected")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    }
+
+    function render(payload) {
+      const telegram = payload?.telegram;
+      const connected = Boolean(telegram);
+      const statusText = connected ? titleize(telegram.status) : "Not Connected";
+      if (status) {
+        status.textContent = statusText;
+        status.classList.toggle("connected", connected);
+        status.classList.toggle("pending", !connected);
+      }
+      if (summaryStatus) summaryStatus.textContent = statusText;
+      if (username) username.textContent = telegram?.username ? `@${telegram.username}` : "Username not set";
+      if (delivery) {
+        delivery.textContent = telegram?.last_delivery_at
+          ? "Delivery recorded"
+          : "No delivery recorded yet";
+      }
+      if (connectLink) {
+        connectLink.hidden = connected;
+        connectLink.textContent = "Link Telegram";
+        connectLink.classList.remove("button-secondary");
+        connectLink.removeAttribute("aria-disabled");
+      }
+      if (connectedButton) {
+        connectedButton.hidden = !connected;
+      }
+      if (disconnectButton) {
+        disconnectButton.hidden = !connected;
+      }
+    }
+
+    async function poll() {
+      if (document.hidden) return;
+      try {
+        render(await api("/integrations"));
+      } catch {
+        return;
+      }
+    }
+
+    poll();
+    window.setInterval(poll, 5000);
+    disconnectButton?.addEventListener("click", async () => {
+      if (!window.confirm("Remove the Telegram connection from this dashboard account? Telegram alerts will stop until you link it again.")) {
+        return;
+      }
+      disconnectButton.disabled = true;
+      try {
+        await api("/integrations/telegram", { method: "DELETE" });
+        render({ telegram: null });
+        showToast("Telegram connection removed.");
+      } catch (error) {
+        showToast(error.message, "error");
+      } finally {
+        disconnectButton.disabled = false;
+      }
+    });
+  }
+
   function initInboxFilter() {
     const filter = document.querySelector("[data-inbox-filter]");
     if (!filter) return;
@@ -5301,6 +5591,7 @@
     initLifecycles();
     initSettings();
     initReferralCopy();
+    initIntegrations();
     initInboxFilter();
     initWebNotifications();
   });

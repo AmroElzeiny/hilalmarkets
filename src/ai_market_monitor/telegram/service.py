@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.platforms import Platform
 from ai_market_monitor.core.security import IdentityAssertionTokenService
 from ai_market_monitor.db.models import (
     Alert,
@@ -51,7 +50,6 @@ from ai_market_monitor.schemas.onboarding import (
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService
-from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.onboarding import OnboardingError, OnboardingService
@@ -181,6 +179,11 @@ class TelegramBotService:
 
     async def handle_start(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
         start_param = message.text.partition(" ")[2].strip()
+        if start_param.startswith("link_"):
+            return await self._handle_dashboard_start_link(
+                message,
+                start_param.removeprefix("link_"),
+            )
         attribution = self._parse_deep_link(start_param)
         assertion = IdentityAssertionTokenService(self.settings).issue(
             "telegram", message.telegram_user_id
@@ -416,7 +419,7 @@ class TelegramBotService:
                 message,
                 "Draft rejected. Nothing was activated.",
                 buttons=[
-                    TelegramButton("Dashboard", "dashboard:builder"),
+                    self._dashboard_button("Dashboard", "/dashboard/strategies/new"),
                     TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
@@ -539,7 +542,7 @@ class TelegramBotService:
                 "Lifecycles\n\nReplay is hidden. Use lifecycle cards for setup state, "
                 "missing conditions, proof context and chart evidence.",
                 buttons=[
-                    TelegramButton("Open Lifecycles", "dashboard:lifecycles"),
+                    self._dashboard_button("Open Lifecycles", "/dashboard/lifecycles"),
                     TelegramButton("Support", "support:missing_alert"),
                     TelegramButton("Go Back", "back:previous"),
                 ],
@@ -599,6 +602,10 @@ class TelegramBotService:
                 response = self._account_auth_callback(callback)
             elif callback.data in {"account:signup", "account:signin"}:
                 response = await self._account_link_callback(callback, conversation)
+            elif callback.data == "telegram_link:confirm":
+                response = await self._confirm_dashboard_telegram_link(callback, conversation)
+            elif callback.data == "telegram_link:cancel":
+                response = await self._cancel_dashboard_telegram_link(callback, conversation)
             elif callback.data == "open_dashboard":
                 response = await self._dashboard_callback(
                     TelegramCallback(
@@ -736,12 +743,19 @@ class TelegramBotService:
                 )
             elif callback.data.startswith("monitor:"):
                 _, action, strategy_id = callback.data.split(":", 2)
-                response = await self._handle_monitor_action_by_id(
-                    self._message_from_callback(callback),
-                    conversation,
-                    action,
-                    UUID(strategy_id),
-                )
+                if action == "manage":
+                    response = await self._monitor_manage_options_by_id(
+                        callback,
+                        conversation,
+                        UUID(strategy_id),
+                    )
+                else:
+                    response = await self._handle_monitor_action_by_id(
+                        self._message_from_callback(callback),
+                        conversation,
+                        action,
+                        UUID(strategy_id),
+                    )
             elif callback.data == "scan:template":
                 response = await self._dashboard_callback(
                     TelegramCallback(
@@ -910,8 +924,8 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_confirmed_alert(result),
             buttons=[
-                TelegramButton("🔄 View lifecycle", "dashboard:lifecycles"),
-                TelegramButton("📊 Dashboard", "open_dashboard"),
+                self._dashboard_button("🔄 View lifecycle", "/dashboard/lifecycles"),
+                self._dashboard_button("📊 Dashboard"),
                 TelegramButton("🔕 Mute symbol", "mute_strategy"),
             ],
             menu=[],
@@ -924,8 +938,8 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_lifecycle_update(result),
             buttons=[
-                TelegramButton("🔄 View lifecycle", "dashboard:lifecycles"),
-                TelegramButton("📊 Dashboard", "open_dashboard"),
+                self._dashboard_button("🔄 View lifecycle", "/dashboard/lifecycles"),
+                self._dashboard_button("📊 Dashboard"),
                 TelegramButton("🔕 Mute symbol", "mute_strategy"),
             ],
             menu=[],
@@ -1023,7 +1037,7 @@ class TelegramBotService:
             f"{strategy.name} notifications are muted for 24 hours. "
             "The monitor and evidence remain saved.",
             buttons=[
-                TelegramButton("Open Settings", "dashboard:settings"),
+                self._dashboard_button("Open Settings", "/dashboard/settings"),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -1056,7 +1070,7 @@ class TelegramBotService:
                 callback,
                 "This alert does not include enough strategy-symbol context to mute safely.",
                 buttons=[
-                    TelegramButton("Dashboard", "dashboard:settings"),
+                    self._dashboard_button("Dashboard", "/dashboard/settings"),
                     TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
@@ -1103,13 +1117,12 @@ class TelegramBotService:
             callback,
             f"🔕 Muted {symbol} for this strategy. Future setups from this pair will not be delivered.",
             buttons=[
-                TelegramButton("🔄 Lifecycles", "dashboard:lifecycles"),
+                self._dashboard_button("🔄 Lifecycles", "/dashboard/lifecycles"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
-    @staticmethod
-    def _main_menu_buttons(*, linked: bool, trial_claimed: bool = False) -> list[TelegramButton]:
+    def _main_menu_buttons(self, *, linked: bool, trial_claimed: bool = False) -> list[TelegramButton]:
         buttons = [
             TelegramButton("📋 My Monitors", "menu:my_monitors"),
             TelegramButton("🔄 Lifecycles", "menu:latest_setups"),
@@ -1120,7 +1133,7 @@ class TelegramBotService:
             TelegramButton("ℹ️ About", "menu:about"),
         ]
         if linked:
-            buttons.insert(0, TelegramButton("📊 Dashboard", "open_dashboard"))
+            buttons.insert(0, self._dashboard_button("📊 Dashboard"))
         else:
             buttons.append(TelegramButton("Sign up / sign in", "account:auth"))
         return buttons
@@ -1211,7 +1224,7 @@ class TelegramBotService:
             message,
             self._about_text(),
             buttons=[
-                TelegramButton("📊 Dashboard", "dashboard:home"),
+                self._dashboard_button("📊 Dashboard"),
                 TelegramButton("💸 Pricing", "pricing"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
@@ -1222,9 +1235,8 @@ class TelegramBotService:
             callback,
             self._about_text(),
             buttons=[
-                TelegramButton("📊 Dashboard", "dashboard:home"),
+                self._dashboard_button("📊 Dashboard"),
                 TelegramButton("💸 Pricing", "pricing"),
-                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -1235,7 +1247,6 @@ class TelegramBotService:
             "💸 Pricing\n\nCompare plans on the public pricing page.",
             buttons=[
                 TelegramButton("Open Pricing", "external:pricing", url=pricing_url),
-                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -1246,7 +1257,6 @@ class TelegramBotService:
             "💸 Pricing\n\nCompare plans on the public pricing page.",
             buttons=[
                 TelegramButton("Open Pricing", "external:pricing", url=pricing_url),
-                TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
 
@@ -1262,8 +1272,7 @@ class TelegramBotService:
             )
         buttons.extend(
             [
-                TelegramButton("Create a ticket", "dashboard:support"),
-                TelegramButton("🏠 Main Menu", "back:main"),
+                self._dashboard_button("Create a ticket", "/dashboard/support"),
             ]
         )
         return self._plain(
@@ -1396,7 +1405,7 @@ class TelegramBotService:
                 callback,
                 text,
                 buttons=[
-                    TelegramButton("Dashboard", "open_dashboard"),
+                    self._dashboard_button("Dashboard"),
                     TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
@@ -1461,9 +1470,7 @@ class TelegramBotService:
             return self._plain(
                 message,
                 "Connect a Dashboard account first. Payment links require sign up/sign in so "
-                "the subscription attaches to the correct account.\n\n"
-                f"Sign up: {signup_url}\n"
-                f"Sign in: {signin_url}",
+                "the subscription attaches to the correct account.",
                 buttons=[
                     TelegramButton("Open Sign Up", "external:signup", url=signup_url),
                     TelegramButton("Open Sign In", "external:signin", url=signin_url),
@@ -1491,7 +1498,7 @@ class TelegramBotService:
             "Payment confirmation comes from the billing provider webhook.",
             buttons=[
                 TelegramButton("Open Payment Link", "external:payment", url=checkout.checkout_url),
-                TelegramButton("Subscription", "dashboard:billing"),
+                self._dashboard_button("Subscription", "/dashboard/billing"),
             ],
             menu=["Subscription", "Support", "Go Back"],
         )
@@ -1536,7 +1543,7 @@ class TelegramBotService:
                 TelegramButton("Use a template", "mode_template"),
                 TelegramButton("Describe my setup", "mode_describe"),
                 TelegramButton("Import strategy", "mode_import"),
-                TelegramButton("My Drafts", "dashboard:monitors"),
+                self._dashboard_button("My Drafts", "/dashboard/strategies/new#monitors"),
                 TelegramButton("Go Back", "back:previous"),
             ],
             menu=[
@@ -1562,7 +1569,7 @@ class TelegramBotService:
                 TelegramButton("Use a template", "mode_template"),
                 TelegramButton("Describe my setup", "mode_describe"),
                 TelegramButton("Import strategy", "mode_import"),
-                TelegramButton("My Drafts", "dashboard:monitors"),
+                self._dashboard_button("My Drafts", "/dashboard/strategies/new#monitors"),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -1677,19 +1684,12 @@ class TelegramBotService:
     ) -> TelegramOutboundMessage:
         user_id = self._require_user_id(conversation)
         if self.market_data_provider is None:
-            url = await DashboardLinkService(self.session, self.settings).create(
-                user_id=user_id,
-                source_platform=Platform.TELEGRAM,
-                source_subject=message.telegram_user_id,
-                target_path="/dashboard/scan-now",
-            )
-            await self.session.commit()
             return self._plain(
                 message,
                 "Quick Scan is ready, but this Telegram runtime does not have a market-data "
-                "provider attached. Open the secure dashboard Quick Scan page to run it.",
+                "provider attached. Open the dashboard Quick Scan page to run it.",
                 buttons=[
-                    TelegramButton("Open Quick Scan", "dashboard:scan", url=url),
+                    self._dashboard_button("Open Quick Scan", "/dashboard/scan-now"),
                     TelegramButton("Go Back", "back:previous"),
                 ],
             )
@@ -1710,7 +1710,7 @@ class TelegramBotService:
                 f"Action needed: {escape(str(exc))}",
                 buttons=[
                     TelegramButton("Try Again", "quick_scan"),
-                    TelegramButton("Open Dashboard", "dashboard:scan"),
+                    self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
                     TelegramButton("Go Back", "back:previous"),
                 ],
             )
@@ -1723,7 +1723,7 @@ class TelegramBotService:
                 "Try a broader prompt or leave symbols unrestricted in Dashboard.",
                 buttons=[
                     TelegramButton("Run Again", "quick_scan"),
-                    TelegramButton("Open Dashboard", "dashboard:scan"),
+                    self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
                     TelegramButton("Go Back", "back:previous"),
                 ],
             )
@@ -1774,7 +1774,7 @@ class TelegramBotService:
             buttons=[
                 TelegramButton("Save as Monitor", "create_monitor"),
                 TelegramButton("Run Again", "quick_scan"),
-                TelegramButton("Open Dashboard", "dashboard:scan"),
+                self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -2081,7 +2081,7 @@ class TelegramBotService:
             buttons=[
                 TelegramButton("Top Near-Misses", "near:top"),
                 TelegramButton("One Condition Remaining", "near:one_left"),
-                TelegramButton("Dashboard", "dashboard:lifecycles"),
+                self._dashboard_button("Dashboard", "/dashboard/lifecycles"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2101,11 +2101,22 @@ class TelegramBotService:
             )
         ).all()
         if strategies:
-            lines = [
-                f"{index}. {strategy.name} - {strategy.status.value.replace('_', ' ')}"
-                for index, strategy in enumerate(strategies[:10], start=1)
-            ]
-            text = "📋 My Monitors\n\n" + "\n".join(lines) + "\n\nManage changes in Dashboard."
+            lines = []
+            for strategy in strategies[:10]:
+                status = strategy.status.value.replace("_", " ").title()
+                icon = {
+                    StrategyStatus.ACTIVE: "🟣",
+                    StrategyStatus.PAUSED: "⏸️",
+                    StrategyStatus.DRAFT: "📝",
+                    StrategyStatus.ARCHIVED: "🗄️",
+                }.get(strategy.status, "•")
+                scan_state = "live alerts on" if strategy.status == StrategyStatus.ACTIVE else "alerts off"
+                lines.append(f"{icon} {escape(strategy.name)}\n   Status: {status} · {scan_state}")
+            text = (
+                "📋 My Monitors\n\n"
+                + "\n\n".join(lines)
+                + "\n\nTap Manage to pause, resume, or archive a monitor."
+            )
         else:
             text = "📋 My Monitors\n\nNo monitors yet. Create your first monitor in Dashboard."
         state = dict(conversation.state_data or {})
@@ -2115,14 +2126,15 @@ class TelegramBotService:
         conversation.state_data = state
         await self.session.flush()
         control_buttons: list[TelegramButton] = []
-        for index, strategy in enumerate(strategies[:5], start=1):
-            control_buttons.append(TelegramButton(f"Manage #{index}", "dashboard:monitors"))
+        for strategy in strategies[:5]:
+            label = strategy.name if len(strategy.name) <= 24 else f"{strategy.name[:21]}..."
+            control_buttons.append(TelegramButton(f"Manage {label}", f"monitor:manage:{strategy.id}"))
         return self._plain(
             message,
             text,
             buttons=[
                 *control_buttons,
-                TelegramButton("Dashboard", "dashboard:monitors"),
+                self._dashboard_button("Dashboard", "/dashboard/strategies/new#monitors"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2144,7 +2156,7 @@ class TelegramBotService:
                 TelegramButton("Describe New Condition", "scan:new"),
                 TelegramButton("Use Template", "scan:template"),
                 TelegramButton("Previous Scans", "scan:previous"),
-                TelegramButton("Open Dashboard", "dashboard:scan"),
+                self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -2189,25 +2201,55 @@ class TelegramBotService:
             if states:
                 query = query.where(SetupInstance.state.in_(states))
         setups = (await self.session.scalars(query)).all()
-        title = f"Lifecycles - {category.title()}" if category else "Lifecycles"
+        category_labels = {
+            "confirmed": "✅ Confirmed",
+            "forming": "⏳ Forming",
+            "invalidated": "❌ Invalidated",
+            "expired": "⌛ Expired",
+        }
+        title = (
+            f"🔄 Lifecycles · {category_labels.get(category, category.title())}"
+            if category
+            else "🔄 Lifecycles"
+        )
         if setups:
-            lines = [
-                f"- {setup.symbol}: {setup.state.value} ({setup.completion_score}%) "
-                f"last checked {setup.last_evaluated_at.isoformat()}"
-                for setup in setups
-            ]
+            lines = []
+            for setup in setups:
+                state = setup.state.value.replace("_", " ").title()
+                icon = {
+                    SetupLifecycleState.CANDIDATE_DETECTED: "🔎",
+                    SetupLifecycleState.DETECTED: "🔎",
+                    SetupLifecycleState.FORMING: "⏳",
+                    SetupLifecycleState.NEAR_CONFIRMATION: "🟣",
+                    SetupLifecycleState.CONFIRMED: "✅",
+                    SetupLifecycleState.INVALIDATED: "❌",
+                    SetupLifecycleState.EXPIRED: "⌛",
+                    SetupLifecycleState.ENTRY_MISSED: "⌛",
+                    SetupLifecycleState.ENTRY_ZONE_MISSED: "⌛",
+                }.get(setup.state, "•")
+                score = f"{round(setup.completion_score or 0):.0f}%"
+                checked = (
+                    setup.last_evaluated_at.strftime("%Y-%m-%d %H:%M UTC")
+                    if setup.last_evaluated_at
+                    else "not checked yet"
+                )
+                lines.append(
+                    f"{icon} {escape(setup.symbol)} · {score}\n"
+                    f"   {state}\n"
+                    f"   Last checked: {checked}"
+                )
             text = f"{title}\n\n" + "\n".join(lines)
         else:
-            text = f"{title}\n\nNo setup lifecycle instances matched this view."
+            text = f"{title}\n\nNo lifecycle cards matched this view yet."
         return self._plain(
             message,
             text,
             buttons=[
-                TelegramButton("Confirmed", "latest:confirmed"),
-                TelegramButton("Forming", "latest:forming"),
-                TelegramButton("Invalidated", "latest:invalidated"),
-                TelegramButton("Expired", "latest:expired"),
-                TelegramButton("Dashboard", "dashboard:lifecycles"),
+                TelegramButton("⏳ Forming", "latest:forming"),
+                TelegramButton("✅ Confirmed", "latest:confirmed"),
+                TelegramButton("❌ Invalidated", "latest:invalidated"),
+                TelegramButton("⌛ Expired", "latest:expired"),
+                self._dashboard_button("Dashboard", "/dashboard/lifecycles"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2242,7 +2284,7 @@ class TelegramBotService:
                 TelegramButton("Upgrade Trader", "billing:checkout:trader"),
                 TelegramButton("Upgrade Pro", "billing:checkout:pro"),
                 TelegramButton("Upgrade Creator", "billing:checkout:creator"),
-                TelegramButton("Usage and Limits", "dashboard:billing"),
+                self._dashboard_button("Usage and Limits", "/dashboard/billing"),
                 TelegramButton("Go Back", "back:previous"),
             ],
             menu=[
@@ -2378,6 +2420,44 @@ class TelegramBotService:
             )
         return await self._handle_monitor_action_by_id(
             message, conversation, action, UUID(strategy_id)
+        )
+
+    async def _monitor_manage_options_by_id(
+        self,
+        callback: TelegramCallback,
+        conversation: TelegramConversationState,
+        strategy_id: UUID,
+    ) -> TelegramOutboundMessage:
+        user_id = self._require_user_id(conversation)
+        strategy = await self.session.get(Strategy, strategy_id)
+        if strategy is None or strategy.user_id != user_id or strategy.status == StrategyStatus.ARCHIVED:
+            return self._plain_callback(
+                callback,
+                "Monitor not found. Open My Monitors again.",
+                buttons=[TelegramButton("📋 My Monitors", "menu:my_monitors")],
+            )
+        status = strategy.status.value.replace("_", " ").title()
+        buttons: list[TelegramButton] = []
+        if strategy.status == StrategyStatus.ACTIVE:
+            buttons.append(TelegramButton("⏸️ Pause", f"monitor:pause:{strategy.id}"))
+        elif strategy.status == StrategyStatus.PAUSED:
+            buttons.append(TelegramButton("▶️ Resume", f"monitor:resume:{strategy.id}"))
+        buttons.extend(
+            [
+                TelegramButton("🗄️ Delete", f"monitor:delete:{strategy.id}"),
+                self._dashboard_button("Dashboard", "/dashboard/strategies/new#monitors"),
+                TelegramButton("📋 My Monitors", "menu:my_monitors"),
+            ]
+        )
+        return self._plain_callback(
+            callback,
+            (
+                f"📋 Manage Monitor\n\n"
+                f"{escape(strategy.name)}\n"
+                f"Status: {status}\n\n"
+                "Choose an action. Paused monitors stay saved but do not send notifications."
+            ),
+            buttons=buttons,
         )
 
     async def _handle_monitor_action_by_id(
@@ -2648,6 +2728,7 @@ class TelegramBotService:
                     "near_miss_enabled": True,
                     "near_miss_threshold": 70,
                     "maximum_alerts_per_hour": 50,
+                    "maximum_alerts_per_day": 500,
                     "providers": ["binance", "bybit"],
                 },
             )
@@ -2657,6 +2738,7 @@ class TelegramBotService:
         data.setdefault("near_miss_enabled", True)
         data.setdefault("near_miss_threshold", 70)
         data.setdefault("maximum_alerts_per_hour", 50)
+        data.setdefault("maximum_alerts_per_day", 500)
         data.setdefault("providers", ["binance", "bybit"])
         return data
 
@@ -2863,8 +2945,8 @@ class TelegramBotService:
             callback,
             "Feedback recorded. I will not change your strategy without explicit approval.",
             buttons=[
-                TelegramButton("Lifecycles", "dashboard:lifecycles"),
-                TelegramButton("Dashboard", "open_dashboard"),
+                self._dashboard_button("Lifecycles", "/dashboard/lifecycles"),
+                self._dashboard_button("Dashboard"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2906,7 +2988,6 @@ class TelegramBotService:
         return self._plain_callback(
             callback,
             "Open this secure Dashboard link. It expires shortly.\n\n"
-            f"{url}\n\n"
             "After you submit the form, come back to Telegram. I will recognize the linked "
             "Dashboard account for trial status, subscription dates and monitor stats.",
             buttons=[
@@ -2999,7 +3080,7 @@ class TelegramBotService:
                     buttons=[
                         TelegramButton("Describe Setup", "mode_describe"),
                         TelegramButton("Use Template", "mode_template"),
-                        TelegramButton("My Drafts", "dashboard:monitors"),
+                        self._dashboard_button("My Drafts", "/dashboard/strategies/new#monitors"),
                         TelegramButton("Cancel", "cancel"),
                     ],
                 )
@@ -3017,7 +3098,7 @@ class TelegramBotService:
             f"Action needed: {message}",
             buttons=[
                 TelegramButton("Sign up / sign in", "account:auth"),
-                TelegramButton("Dashboard", "dashboard:builder"),
+                self._dashboard_button("Dashboard", "/dashboard/strategies/new"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -3062,12 +3143,119 @@ class TelegramBotService:
             connection.username = message.username
             connection.status = ConnectionStatus.ACTIVE
 
+    async def _handle_dashboard_start_link(
+        self,
+        message: TelegramInboundMessage,
+        raw_token: str,
+    ) -> TelegramOutboundMessage:
+        try:
+            user, email = await TelegramAccountLinkService(
+                self.session,
+                self.settings,
+            ).pending_dashboard_start_link(raw_token)
+        except TelegramAccountLinkError as exc:
+            await self.session.rollback()
+            return self._plain(
+                message,
+                f"This Telegram connection link is not available: {escape(str(exc))}\n\n"
+                "Open the dashboard Integrations page and request a fresh Telegram link.",
+                buttons=[self._dashboard_button("Dashboard")],
+            )
+        conversation = await self._upsert_conversation(
+            message,
+            user_id=user.id,
+            onboarding_session_id=None,
+            flow="telegram_link",
+            step="confirm",
+            state_data={
+                "telegram_dashboard_link_token": raw_token,
+                "dashboard_email": email,
+            },
+        )
+        await self.session.commit()
+        visible_email = email or "this dashboard account"
+        return TelegramOutboundMessage(
+            chat_id=message.chat_id,
+            text=(
+                "🔗 Telegram connection\n\n"
+                f"Connect this Telegram account to {visible_email}?\n\n"
+                "After confirmation, this Telegram chat can receive TraceEdge notifications."
+            ),
+            buttons=[
+                TelegramButton("✅ Yes, connect", "telegram_link:confirm"),
+                TelegramButton("Cancel", "telegram_link:cancel"),
+            ],
+            correlation_id=conversation.correlation_id,
+        )
+
+    async def _confirm_dashboard_telegram_link(
+        self,
+        callback: TelegramCallback,
+        conversation: TelegramConversationState,
+    ) -> TelegramOutboundMessage:
+        raw_token = str((conversation.state_data or {}).get("telegram_dashboard_link_token") or "")
+        try:
+            user, email = await TelegramAccountLinkService(
+                self.session,
+                self.settings,
+            ).complete_dashboard_start_link(
+                raw_token=raw_token,
+                telegram_user_id=callback.telegram_user_id,
+                chat_id=callback.chat_id,
+                username=conversation.username,
+            )
+        except TelegramAccountLinkError as exc:
+            return self._plain_callback(
+                callback,
+                f"Could not connect Telegram: {escape(str(exc))}\n\n"
+                "Open the dashboard Integrations page and request a fresh link.",
+                buttons=[self._dashboard_button("Dashboard")],
+            )
+        conversation.user_id = user.id
+        conversation.flow = "main_menu"
+        conversation.step = "idle"
+        conversation.state_data = {
+            **(conversation.state_data or {}),
+            "dashboard_linked_at": datetime.now(UTC).isoformat(),
+            "dashboard_email": email,
+        }
+        await self.session.flush()
+        return self._plain_callback(
+            callback,
+            (
+                "✅ Telegram connected\n\n"
+                f"Linked to {email or 'your dashboard account'}.\n"
+                "Your dashboard will refresh the Integrations status automatically."
+            ),
+            buttons=[
+                self._dashboard_button("Dashboard"),
+                TelegramButton("Main Menu", "back:main"),
+            ],
+        )
+
+    async def _cancel_dashboard_telegram_link(
+        self,
+        callback: TelegramCallback,
+        conversation: TelegramConversationState,
+    ) -> TelegramOutboundMessage:
+        conversation.flow = "main_menu"
+        conversation.step = "idle"
+        state = dict(conversation.state_data or {})
+        state.pop("telegram_dashboard_link_token", None)
+        conversation.state_data = state
+        await self.session.flush()
+        return self._plain_callback(
+            callback,
+            "Telegram connection cancelled.",
+            buttons=[TelegramButton("Main Menu", "back:main")],
+        )
+
     async def _upsert_conversation(
         self,
         message: TelegramInboundMessage,
         *,
         user_id: UUID,
-        onboarding_session_id: UUID,
+        onboarding_session_id: UUID | None,
         flow: str,
         step: str,
         state_data: dict,
@@ -3295,19 +3483,12 @@ class TelegramBotService:
         normalized = path if path.startswith("/") else f"/{path}"
         return f"{str(self.settings.public_base_url).rstrip('/')}{normalized}"
 
-    @staticmethod
-    def _chart_url(result: EvaluationResult) -> str:
-        if result.chart_reference and result.chart_reference.startswith(("http://", "https://")):
-            return result.chart_reference
-        exchange = result.exchange.upper()
-        symbol = result.symbol.replace("/", "").replace("-", "").upper()
-        return f"https://www.tradingview.com/chart/?symbol={exchange}:{symbol}"
+    def _dashboard_button(self, label: str = "Dashboard", path: str = "/dashboard") -> TelegramButton:
+        return TelegramButton(label, "external:dashboard", url=self._dashboard_url(path))
 
-    async def _dashboard_callback(
-        self, callback: TelegramCallback, conversation: TelegramConversationState
-    ) -> TelegramOutboundMessage:
-        page = callback.data.partition(":")[2] or "home"
-        paths = {
+    @staticmethod
+    def _dashboard_path_for_page(page: str) -> str:
+        return {
             "home": "/dashboard",
             "how": "/how-it-works",
             "about": "/about",
@@ -3327,7 +3508,21 @@ class TelegramBotService:
             "performance": "/dashboard",
             "setup_replay": "/dashboard/lifecycles",
             "why_no_alert": "/dashboard/lifecycles",
-        }
+        }.get(page, "/dashboard")
+
+    @staticmethod
+    def _chart_url(result: EvaluationResult) -> str:
+        if result.chart_reference and result.chart_reference.startswith(("http://", "https://")):
+            return result.chart_reference
+        exchange = result.exchange.upper()
+        symbol = result.symbol.replace("/", "").replace("-", "").upper()
+        return f"https://www.tradingview.com/chart/?symbol={exchange}:{symbol}"
+
+    async def _dashboard_callback(
+        self, callback: TelegramCallback, conversation: TelegramConversationState
+    ) -> TelegramOutboundMessage:
+        page = callback.data.partition(":")[2] or "home"
+        path = self._dashboard_path_for_page(page)
         user_id = self._require_user_id(conversation)
         if not await self._has_email_identity(user_id):
             signup_url = await TelegramAccountLinkService(self.session, self.settings).create(
@@ -3344,37 +3539,17 @@ class TelegramBotService:
             return self._plain_callback(
                 callback,
                 "Connect a Dashboard account first. This secure link binds Dashboard to "
-                "Telegram so monitor stats, trial status and subscription dates stay in sync.\n\n"
-                f"Sign up: {signup_url}\n"
-                f"Sign in: {signin_url}",
+                "Telegram so monitor stats, trial status and subscription dates stay in sync.",
                 buttons=[
                     TelegramButton("Open Sign Up", "external:signup", url=signup_url),
                     TelegramButton("Open Sign In", "external:signin", url=signin_url),
-                    TelegramButton("🏠 Main Menu", "back:main"),
                 ],
-            )
-        try:
-            url = await DashboardLinkService(self.session, self.settings).create(
-                user_id=user_id,
-                source_platform=Platform.TELEGRAM,
-                source_subject=callback.telegram_user_id,
-                target_path=paths.get(page, "/dashboard"),
-            )
-            await self.session.commit()
-        except DashboardLinkError as exc:
-            await self.session.rollback()
-            return self._plain_callback(
-                callback,
-                f"Could not create dashboard link: {escape(str(exc))}",
-                buttons=[TelegramButton("🏠 Main Menu", "back:main")],
             )
         return self._plain_callback(
             callback,
-            f"Open the secure dashboard link below. It expires shortly:\n{url}",
-            buttons=[
-                TelegramButton("Dashboard", "external:dashboard", url=url),
-                TelegramButton("🏠 Main Menu", "back:main"),
-            ],
+            "Open Dashboard in your browser.",
+            buttons=[self._dashboard_button("Dashboard", path)],
+            menu=PRIMARY_MENU,
         )
 
     @staticmethod
@@ -3422,14 +3597,14 @@ class TelegramBotService:
             "settings:timezone",
         }
 
-    @staticmethod
-    def _back_buttons(dashboard_action: str | None = None) -> list[TelegramButton]:
+    def _back_buttons(self, dashboard_action: str | None = None) -> list[TelegramButton]:
         buttons: list[TelegramButton] = []
         if dashboard_action:
             if dashboard_action.startswith("back:"):
                 buttons.append(TelegramButton("🏠 Main Menu", "back:main"))
                 return buttons
-            buttons.append(TelegramButton("Dashboard", dashboard_action))
+            page = dashboard_action.partition(":")[2] if dashboard_action.startswith("dashboard:") else "home"
+            buttons.append(self._dashboard_button("Dashboard", self._dashboard_path_for_page(page)))
         buttons.append(TelegramButton("🏠 Main Menu", "back:main"))
         return buttons
 
@@ -3442,11 +3617,17 @@ class TelegramBotService:
         menu: list[str] | None = None,
         parse_mode: str | None = None,
     ) -> TelegramOutboundMessage:
-        selected_menu = PRIMARY_MENU if menu is None and not buttons else menu or []
+        actual_buttons = buttons or []
+        if menu is None and not actual_buttons:
+            selected_menu = PRIMARY_MENU
+        elif menu is None and actual_buttons and all(button.url is None for button in actual_buttons):
+            selected_menu = [button.text for button in actual_buttons]
+        else:
+            selected_menu = menu or []
         return TelegramOutboundMessage(
             chat_id=message.chat_id,
             text=text,
-            buttons=buttons or [],
+            buttons=actual_buttons,
             menu=selected_menu,
             parse_mode=parse_mode,
         )
@@ -3460,11 +3641,17 @@ class TelegramBotService:
         menu: list[str] | None = None,
         parse_mode: str | None = None,
     ) -> TelegramOutboundMessage:
-        selected_menu = PRIMARY_MENU if menu is None and not buttons else menu or []
+        actual_buttons = buttons or []
+        if menu is None and not actual_buttons:
+            selected_menu = PRIMARY_MENU
+        elif menu is None and actual_buttons and all(button.url is None for button in actual_buttons):
+            selected_menu = [button.text for button in actual_buttons]
+        else:
+            selected_menu = menu or []
         return TelegramOutboundMessage(
             chat_id=callback.chat_id,
             text=text,
-            buttons=buttons or [],
+            buttons=actual_buttons,
             menu=selected_menu,
             parse_mode=parse_mode,
         )

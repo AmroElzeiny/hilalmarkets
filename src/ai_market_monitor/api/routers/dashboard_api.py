@@ -43,6 +43,7 @@ from ai_market_monitor.db.models import (
     SupportRequest,
     SupportTicketMessage,
     TelegramConnection,
+    TelegramConversationState,
     Trial,
     User,
     UserExportJob,
@@ -2735,6 +2736,53 @@ async def integrations(
             for test in tests
         ],
     }
+
+
+@router.delete("/integrations/telegram")
+async def disconnect_telegram(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    connection = await session.scalar(
+        select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
+    )
+    if connection is None:
+        return {"ok": True, "telegram": None, "already_disconnected": True}
+
+    telegram_user_id = connection.telegram_user_id
+    identities = (
+        await session.scalars(
+            select(UserIdentity).where(
+                UserIdentity.user_id == principal.user_id,
+                UserIdentity.provider == IdentityProvider.TELEGRAM,
+            )
+        )
+    ).all()
+    conversations = (
+        await session.scalars(
+            select(TelegramConversationState).where(
+                TelegramConversationState.telegram_user_id == telegram_user_id
+            )
+        )
+    ).all()
+    for conversation in conversations:
+        await session.delete(conversation)
+    for identity in identities:
+        await session.delete(identity)
+    await session.delete(connection)
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="dashboard_user",
+            action="telegram.disconnected",
+            target_type="telegram_connection",
+            target_id=telegram_user_id,
+            metadata_redacted={"source": "dashboard"},
+            created_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    return {"ok": True, "telegram": None}
 
 
 @router.post("/support/tickets", status_code=status.HTTP_201_CREATED)

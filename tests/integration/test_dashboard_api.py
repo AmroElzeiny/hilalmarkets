@@ -29,8 +29,11 @@ from ai_market_monitor.db.models import (
     StrategyVersion,
     SupportRequest,
     SupportTicketMessage,
+    TelegramConnection,
+    TelegramConversationState,
     UserExportJob,
     UserFeedback,
+    UserIdentity,
     UserStrategyPreference,
 )
 from ai_market_monitor.db.models.enums import (
@@ -39,6 +42,7 @@ from ai_market_monitor.db.models.enums import (
     ConditionType,
     DeliveryChannel,
     DeliveryStatus,
+    IdentityProvider,
     ScanJobStatus,
     ScanOutcome,
     SetupLifecycleState,
@@ -652,6 +656,7 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
             "near_miss_enabled": "true",
             "near_miss_threshold": "82",
             "maximum_alerts_per_hour": "7",
+            "maximum_alerts_per_day": "120",
             "alert_channels": ["telegram", "discord"],
             "providers": ["binance", "bybit"],
             "alert_days": ["Monday", "Friday"],
@@ -669,11 +674,59 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
         assert preference.notification_preferences["near_miss_enabled"] is True
         assert preference.notification_preferences["near_miss_threshold"] == 82
         assert preference.notification_preferences["maximum_alerts_per_hour"] == 7
+        assert preference.notification_preferences["maximum_alerts_per_day"] == 120
         assert preference.notification_preferences["alert_channels"] == ["telegram", "discord"]
         assert preference.notification_preferences["channels"] == ["telegram", "discord"]
         assert preference.notification_preferences["providers"] == ["binance", "bybit"]
         assert preference.notification_preferences["alert_days"] == ["Monday", "Friday"]
         assert preference.notification_preferences["alert_hours"] == ["09:00", "21:00"]
+
+
+async def test_dashboard_disconnect_telegram_removes_backend_connection(test_context):
+    await _signup(test_context, "dashboard-disconnect-telegram@example.com")
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(UserIdentity.user_id))
+        connection = TelegramConnection(
+            user_id=user,
+            telegram_user_id="tg-disconnect",
+            chat_id="chat-disconnect",
+            username="traceuser",
+        )
+        identity = UserIdentity(
+            user_id=user,
+            provider=IdentityProvider.TELEGRAM,
+            provider_subject="tg-disconnect",
+            display_identifier="@traceuser",
+            is_verified=True,
+            is_primary=False,
+            profile_data={},
+        )
+        conversation = TelegramConversationState(
+            user_id=user,
+            telegram_user_id="tg-disconnect",
+            chat_id="chat-disconnect",
+            flow="main_menu",
+            step="idle",
+            state_data={},
+            correlation_id="test-disconnect",
+        )
+        session.add_all([connection, identity, conversation])
+        await session.commit()
+
+    response = await test_context["client"].delete("/api/v1/dashboard/integrations/telegram")
+
+    assert response.status_code == 200
+    assert response.json()["telegram"] is None
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(TelegramConnection)) is None
+        assert await session.scalar(
+            select(UserIdentity).where(UserIdentity.provider == IdentityProvider.TELEGRAM)
+        ) is None
+        assert await session.scalar(select(TelegramConversationState)) is None
+        audit = await session.scalar(
+            select(AuditEvent).where(AuditEvent.action == "telegram.disconnected")
+        )
+        assert audit is not None
 
 
 async def test_dashboard_theme_toggle_persists_without_full_settings_submit(test_context):

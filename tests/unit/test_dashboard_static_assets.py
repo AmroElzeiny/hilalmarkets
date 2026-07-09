@@ -101,15 +101,19 @@ def test_traceedge_dashboard_interaction_polish_is_present():
     assert "data-template-categories" in template
     assert 'data-builder-right-tab="coverage"' in template
     assert 'data-board-tab="coverage"' in template
-    assert 'data-builder-prompt-part="optional"' in template
-    assert 'data-builder-prompt-part="avoid"' in template
-    assert 'data-builder-prompt-part="notes"' in template
+    assert 'data-builder-prompt-part="goal"' in template
+    assert 'data-add-prompt-section="optional"' in template
+    assert 'data-add-prompt-section="avoid"' in template
+    assert 'data-add-prompt-section="extra"' in template
+    assert 'data-add-prompt-section="notes"' not in template
     assert "data-prompt-example-chip" in template
     assert "data-improve-builder-prompt" in template
-    assert "data-check-builder-meaning" in template
+    assert "data-check-builder-meaning" not in template
     assert "Show canvas" in template
     assert "Open workflow board" not in template
     assert "selectedTemplateCategories" in script
+    assert "templatePromptParts" in script
+    assert "applyTemplateToPrompt" in script
     assert "updateTemplateFilter" in script
     assert "renderStrategyBoard" in script
     assert "renderCoveragePanel" in script

@@ -781,7 +781,6 @@
     }
 
     body.sidebar-collapsed .dash-nav a.active,
-    body.sidebar-collapsed .sidebar-create-quick.active,
     body.sidebar-collapsed .sidebar-toggle:focus-visible,
     body.sidebar-collapsed .sidebar-logout:focus-visible {
       background: rgba(139,92,246,.26) !important;
@@ -1723,6 +1722,477 @@
       background: #f3efff;
     }
 
+    /* Focused UX adjustments requested for the private beta dashboard pass. */
+    .theme-toggle.sidebar-theme-toggle {
+      display: none !important;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    body.dashboard-body .dash-main {
+      gap: 16px !important;
+      row-gap: 16px !important;
+    }
+
+    .overview-hero-panel,
+    .builder-shell {
+      margin-block: 0 !important;
+    }
+
+    .overview-kpi-grid,
+    .overview-workbench,
+    .analytics-hero-panel,
+    .overview-analytics-grid {
+      margin-top: 16px !important;
+      margin-bottom: 0 !important;
+    }
+
+    .builder-shell,
+    .builder-start-screen,
+    .monitors-hub {
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+
+    .overview-kpi-grid,
+    .overview-workbench,
+    .overview-analytics-grid,
+    .analytics-stat-grid,
+    .creation-direction-grid,
+    .monitor-card-grid {
+      gap: 16px !important;
+    }
+
+    .builder-shell + .monitors-hub {
+      margin-top: 16px !important;
+    }
+
+    body.dashboard-body.theme-light .overview-hero-panel .button.button-secondary,
+    body.dashboard-body.theme-light .overview-workbench .button.button-secondary,
+    body.dashboard-body.theme-light .builder-shell .button.button-secondary,
+    body.dashboard-body.theme-light .overview-hero-panel .button[href="/dashboard/scan-now"],
+    body.dashboard-body.theme-light .monitor-card-actions .button.button-secondary,
+    body.dashboard-body.theme-light .builder-header-actions .button.button-secondary {
+      background: transparent !important;
+      color: #3A3A46 !important;
+      border-color: rgba(58,58,70,.26) !important;
+      box-shadow: none !important;
+    }
+
+    body.dashboard-body.theme-light .overview-hero-panel .button.button-secondary:hover,
+    body.dashboard-body.theme-light .overview-workbench .button.button-secondary:hover,
+    body.dashboard-body.theme-light .builder-shell .button.button-secondary:hover,
+    body.dashboard-body.theme-light .overview-hero-panel .button[href="/dashboard/scan-now"]:hover,
+    body.dashboard-body.theme-light .monitor-card-actions .button.button-secondary:hover,
+    body.dashboard-body.theme-light .builder-header-actions .button.button-secondary:hover {
+      background: rgba(167,139,250,.10) !important;
+      border-color: rgba(139,92,246,.40) !important;
+      color: #17131f !important;
+    }
+
+    .overview-quick-scan-button,
+    .overview-quick-scan-button * {
+      font-weight: 520 !important;
+    }
+
+    .overview-hero-panel h2,
+    .analytics-hero-panel h2 {
+      font-weight: 520 !important;
+    }
+
+    .overview-kpi-card strong,
+    .orbit-core strong,
+    .analytics-stat-grid strong,
+    .analytics-bar-row strong,
+    .analytics-symbol-list strong {
+      font-weight: 520 !important;
+    }
+
+    .overview-orbit-card .orbit-chip.one,
+    body:not(.sidebar-collapsed) .overview-orbit-card .orbit-chip.one,
+    body.sidebar-collapsed .overview-orbit-card .orbit-chip.one {
+      left: 8px !important;
+      bottom: 8px !important;
+      right: auto !important;
+      top: auto !important;
+    }
+
+    .overview-orbit-card .orbit-chip.two,
+    body:not(.sidebar-collapsed) .overview-orbit-card .orbit-chip.two,
+    body.sidebar-collapsed .overview-orbit-card .orbit-chip.two {
+      right: 8px !important;
+      top: 8px !important;
+      left: auto !important;
+      bottom: auto !important;
+    }
+
+    body.dashboard-body.theme-light .overview-orbit-card .orbit-chip.one,
+    body.dashboard-body.theme-light .overview-orbit-card .orbit-chip.two {
+      background: rgba(255,255,255,.48) !important;
+      color: #3A3A46 !important;
+      box-shadow: 0 10px 26px rgba(75,54,105,.10) !important;
+      backdrop-filter: blur(12px);
+    }
+
+    .sidebar-create-quick,
+    .sidebar-create-quick span {
+      color: #fff !important;
+    }
+
+    body:not(.sidebar-collapsed) .dash-brand .brand-mark,
+    body:not(.sidebar-collapsed) .dash-brand .brand-name {
+      display: none !important;
+    }
+
+    body:not(.sidebar-collapsed) .dash-brand .sidebar-logo-full {
+      display: block !important;
+      width: 148px !important;
+      height: auto !important;
+    }
+
+    body.sidebar-collapsed .dash-brand .sidebar-logo-full {
+      display: none !important;
+    }
+
+    .sidebar-logo-full {
+      display: none;
+    }
+
+    .creation-card.recommended .creation-card-top {
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      flex-wrap: wrap !important;
+    }
+
+    .creation-ai-badge {
+      background: rgba(139,92,246,.12) !important;
+      border-color: rgba(196,181,253,.38) !important;
+      color: #3A3A46 !important;
+    }
+
+    .creation-card {
+      padding-bottom: 12px !important;
+    }
+
+    .creation-card > .button {
+      align-self: end !important;
+      margin-top: auto !important;
+      margin-bottom: 0 !important;
+    }
+
+    .builder-path-head h2,
+    .builder-start-screen h2,
+    .prompt-side h3 {
+      font-weight: 520 !important;
+    }
+
+    .prompt-main.structured-prompt-grid {
+      display: grid !important;
+      gap: 14px !important;
+    }
+
+    .prompt-field-card {
+      position: relative;
+      display: grid !important;
+      gap: 8px !important;
+      border: 1px solid rgba(196,181,253,.24) !important;
+      border-radius: 20px !important;
+      padding: 14px !important;
+      background: rgba(139,92,246,.055) !important;
+      font-weight: 520 !important;
+    }
+
+    .prompt-field-card textarea,
+    .prompt-field-card input {
+      font-weight: 420 !important;
+    }
+
+    .prompt-field-remove {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid rgba(196,181,253,.28);
+      border-radius: 999px;
+      background: transparent;
+      color: #3A3A46;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 520;
+      cursor: pointer;
+    }
+
+    .prompt-add-panel p {
+      margin: 0 0 12px;
+      color: var(--dash-muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .prompt-add-list {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .prompt-add-list button {
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid rgba(196,181,253,.25);
+      border-radius: 14px;
+      background: rgba(255,255,255,.04);
+      color: #3A3A46;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 480;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .prompt-add-list button:hover,
+    .prompt-add-list button[disabled] {
+      background: rgba(139,92,246,.12);
+      border-color: rgba(139,92,246,.38);
+    }
+
+    .template-card {
+      grid-template-rows: auto auto minmax(48px,auto) auto 1fr !important;
+      align-content: stretch !important;
+    }
+
+    .template-card .button-row.compact {
+      display: grid !important;
+      grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+      gap: 10px !important;
+      align-self: end !important;
+      margin-top: auto !important;
+    }
+
+    .template-card .button-row.compact .button {
+      width: 100% !important;
+      min-width: 0 !important;
+      white-space: nowrap !important;
+    }
+
+    .template-meta {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fit,minmax(110px,1fr)) !important;
+      gap: 6px !important;
+      max-height: 62px !important;
+      overflow: hidden !important;
+    }
+
+    .template-meta span {
+      width: auto !important;
+      min-height: 28px !important;
+      display: grid !important;
+      place-items: center !important;
+      text-align: center !important;
+      line-height: 17px !important;
+      font-size: 10px !important;
+      letter-spacing: .05em !important;
+      overflow-wrap: anywhere !important;
+    }
+
+    .template-use-dialog {
+      width: min(520px, calc(100vw - 30px));
+      border: 1px solid rgba(196,181,253,.30);
+      border-radius: 24px;
+      background: var(--dash-panel);
+      color: var(--dash-text);
+      padding: 18px;
+      box-shadow: 0 26px 80px rgba(0,0,0,.32);
+    }
+
+    .template-use-options {
+      display: grid;
+      grid-template-columns: repeat(2,minmax(0,1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .builder-header-actions [data-builder-validate][data-validation-state="required"],
+    .builder-header-actions [data-publish-schema][data-ready="true"] {
+      border-color: transparent !important;
+      background: linear-gradient(135deg, #A78BFA, #8B5CF6) !important;
+      color: #FFFFFF !important;
+      box-shadow: 0 16px 42px rgba(139, 92, 246, .34) !important;
+    }
+
+    .builder-header-actions [data-builder-validate][disabled],
+    .builder-header-actions [data-publish-schema][disabled] {
+      filter: none !important;
+      opacity: .62 !important;
+      cursor: default !important;
+    }
+
+    @media (max-width: 1180px) {
+      .builder-left-rail button {
+        grid-template-columns: 1fr !important;
+        justify-items: center !important;
+        align-content: center !important;
+        text-align: center !important;
+        white-space: normal !important;
+      }
+      .builder-left-rail button span {
+        order: -1;
+      }
+      .strategy-board-steps,
+      .strategy-board-inspector {
+        resize: both !important;
+        min-width: 240px !important;
+        min-height: 160px !important;
+        background-image:
+          linear-gradient(135deg, transparent calc(100% - 18px), rgba(196,181,253,.36) calc(100% - 17px), transparent calc(100% - 8px)) !important;
+      }
+    }
+
+    @media (max-width: 950px) {
+      .builder-start-screen .creation-direction-grid,
+      .prompt-builder-grid,
+      .template-picker-grid {
+        grid-template-columns: 1fr !important;
+      }
+      .creation-card {
+        min-width: 0 !important;
+      }
+    }
+
+    @media (max-width: 800px) {
+      .builder-main-layout {
+        grid-template-columns: minmax(0,1fr) !important;
+      }
+      .builder-left-rail {
+        grid-auto-flow: column !important;
+        grid-auto-columns: minmax(96px,1fr) !important;
+        overflow-x: auto !important;
+      }
+    }
+
+    .lifecycle-chart-button,
+    .lifecycle-chart-button.muted-action {
+      font-weight: 500 !important;
+      color: #fff !important;
+    }
+
+    .lifecycle-chart-button span {
+      color: #fff !important;
+    }
+
+    .integration-copy h3 {
+      font-weight: 520 !important;
+    }
+
+    .integration-summary-grid span,
+    .integration-card .condition-category {
+      font-weight: 500 !important;
+    }
+
+    .integration-status-pill {
+      width: fit-content !important;
+      max-width: 100% !important;
+      white-space: nowrap !important;
+      justify-self: end !important;
+    }
+
+    .integration-card {
+      min-height: unset !important;
+      padding: clamp(18px, 2.2vw, 24px) !important;
+      align-content: start !important;
+      gap: 16px !important;
+    }
+
+    .integration-status {
+      gap: 8px !important;
+    }
+
+    .telegram-connected-button {
+      color: #fff !important;
+    }
+
+    .telegram-remove-button {
+      background: transparent !important;
+      color: #3A3A46 !important;
+    }
+
+    .telegram-integration-actions {
+      display: flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+      flex-wrap: wrap !important;
+      align-self: end !important;
+    }
+
+    .telegram-integration-actions .button {
+      align-self: center !important;
+      margin: 0 !important;
+    }
+
+    [data-lifecycle-mute] span {
+      color: #4C1D95 !important;
+    }
+
+    .prompt-add-panel h3 + .clarification-chip-list {
+      margin-top: 10px !important;
+    }
+
+    .prompt-add-panel h3:nth-of-type(3) {
+      margin-top: 10px !important;
+    }
+
+    .settings-card strong,
+    .settings-card b,
+    .settings-card label,
+    #dashboard-settings-form label,
+    #dashboard-settings-form legend,
+    #dashboard-settings-form option,
+    #dashboard-settings-form select,
+    #dashboard-settings-form input {
+      font-weight: 430 !important;
+    }
+
+    #dashboard-settings-form select,
+    #scan-now-form select {
+      font-family: Inter, Arial, sans-serif !important;
+      font-weight: 430 !important;
+      background-color: rgba(249,247,255,.94) !important;
+      border-color: rgba(196,181,253,.38) !important;
+      border-radius: 16px !important;
+      box-shadow: 0 10px 26px rgba(75,54,105,.08) !important;
+    }
+
+    #scan-now-form input::placeholder,
+    #scan-now-form textarea::placeholder {
+      font-weight: 380 !important;
+      color: rgba(58,58,70,.58) !important;
+    }
+
+    .choice-chip span {
+      font-weight: 430 !important;
+    }
+
+    .danger-button[data-forget-strategy-preferences] {
+      background: transparent !important;
+      color: #3A3A46 !important;
+      box-shadow: none !important;
+    }
+
+    body.dashboard-body .dash-grid.two:has(#dashboard-settings-form) {
+      gap: 16px !important;
+    }
+
+    .plan-card .button[disabled],
+    .plan-card .button[aria-disabled="true"] {
+      cursor: default !important;
+      opacity: .58 !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+
     @media (max-width: 760px) {
       .monitor-card-head,
       .monitor-health-strip {
@@ -1744,13 +2214,12 @@
   <aside class="dash-sidebar" data-dashboard-sidebar>
     <div class="sidebar-head">
       <a class="brand dash-brand" href="/dashboard" aria-label="TraceEdge dashboard">
-        <span class="brand-mark" aria-hidden="true">AM</span><span class="brand-name">TraceEdge</span>
+        <span class="brand-mark" aria-hidden="true">AM</span>
+        <img class="sidebar-logo-full" src="{{ url_for('static', path='/logo_purple.svg') }}" alt="TraceEdge">
+        <span class="brand-name">TraceEdge</span>
       </a>
       <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-label="Expand or collapse navigation">
         <img src="https://api.iconify.design/lucide:panel-left.svg?color=%23c4b5fd" alt="" aria-hidden="true">
-      </button>
-      <button class="theme-toggle sidebar-theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true">
-        <span class="theme-toggle-track"><i></i></span>
       </button>
     </div>
     <div class="sidebar-rail-controls" aria-label="Quick dashboard controls">
@@ -1800,9 +2269,9 @@
           <h2>Track the market without staring at every chart.</h2>
           <p>Run Quick Scan, build approved monitors, and inspect lifecycle evidence from one calmer screen.</p>
           <div class="button-row">
-            <a class="button button-primary" href="/dashboard/scan-now"><img src="https://api.iconify.design/lucide:search.svg?color=%23ffffff" alt="" aria-hidden="true"> Run Quick Scan</a>
+            <a class="button button-primary overview-quick-scan-button" href="/dashboard/scan-now"><img src="https://api.iconify.design/lucide:search.svg?color=%233A3A46" alt="" aria-hidden="true"> Run Quick Scan</a>
             <a class="button button-primary" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="" aria-hidden="true"> Create a monitor</a>
-            <a class="button button-secondary" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"> Open Lifecycles</a>
+            <a class="button button-secondary" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%233A3A46" alt="" aria-hidden="true"> Open Lifecycles</a>
           </div>
         </div>
         <div class="overview-orbit-card" aria-label="Monitoring summary visual">
@@ -1811,8 +2280,8 @@
             <strong>{{ overview.coverage.coverage_percentage|round|int }}%</strong>
             <span>coverage</span>
           </div>
-          <div class="orbit-chip one"><img src="https://api.iconify.design/lucide:bell-ring.svg?color=%23ffffff" alt="" aria-hidden="true">{{ overview.alerts_today }} alerts today</div>
-          <div class="orbit-chip two"><img src="https://api.iconify.design/lucide:activity.svg?color=%23ffffff" alt="" aria-hidden="true">{{ overview.active_lifecycle_count }} lifecycles</div>
+          <div class="orbit-chip one"><img src="https://api.iconify.design/lucide:bell-ring.svg?color=%233A3A46" alt="" aria-hidden="true">{{ overview.alerts_today }} alerts today</div>
+          <div class="orbit-chip two"><img src="https://api.iconify.design/lucide:activity.svg?color=%233A3A46" alt="" aria-hidden="true">{{ overview.active_lifecycle_count }} lifecycles</div>
         </div>
       </section>
 
@@ -1902,7 +2371,7 @@
       <section class="dash-panel analytics-hero-panel">
         <div>
           <p class="eyebrow">Activity snapshot</p>
-          <h2>Monitor activity in one calmer summary.</h2>
+          <h2>TraceEdge activity summary.</h2>
           <p>These summaries describe lifecycle volume, alert proof, and symbol activity. They are not trading-performance guarantees.</p>
         </div>
         <div class="analytics-stat-grid">
@@ -1979,9 +2448,9 @@
                 <span class="creation-icon" aria-hidden="true">
                   <img src="https://api.iconify.design/lucide:bot-message-square.svg?color=%23ffffff" alt="">
                 </span>
-                <span class="badge creation-recommended-badge">
-                  <img src="https://api.iconify.design/lucide:badge-check.svg?color=%23c4b5fd" alt="" aria-hidden="true">
-                  Recommended
+                <span class="badge creation-ai-badge">
+                  <img src="https://api.iconify.design/lucide:sparkles.svg?color=%23c4b5fd" alt="" aria-hidden="true">
+                  AI-powered
                 </span>
               </div>
               <h3>Describe my strategy</h3>
@@ -2021,44 +2490,23 @@
             <div class="prompt-builder-grid">
               <div class="prompt-main structured-prompt-grid">
                 <input name="builder_prompt" type="hidden">
-                <label>What should this monitor find?
+                <label class="prompt-field-card prompt-field-card-main">What should this monitor find?
                   <textarea data-builder-prompt-part="goal" rows="3" placeholder="Example: bullish continuation after RSI recovery" data-testid="strategy-prompt-goal"></textarea>
                 </label>
-                <label>Must-have rules
-                  <textarea data-builder-prompt-part="must" rows="4" placeholder="Example: RSI crosses above 30, price above 4h EMA 200, volume expands" data-testid="strategy-prompt-must"></textarea>
-                </label>
-                <label>Optional confirmations
-                  <textarea data-builder-prompt-part="optional" rows="3" placeholder="Example: VWAP reclaim is preferred, volume confirmation is optional" data-testid="strategy-prompt-optional"></textarea>
-                </label>
-                <div class="structured-prompt-row">
-                  <label>Markets and symbols
-                    <input data-builder-prompt-part="universe" placeholder="Binance USDT spot pairs, or SOL/USDT, LINK/USDT" data-testid="strategy-prompt-universe">
-                  </label>
-                  <label>Timeframe
-                    <input data-builder-prompt-part="timeframe" placeholder="15m trigger with 4h trend filter" data-testid="strategy-prompt-timeframe">
-                  </label>
-                </div>
-                <label>Alert and risk preferences
-                  <textarea data-builder-prompt-part="alerts" rows="3" placeholder="Candle close only, Telegram, max stop 2%, no near-miss unless close"></textarea>
-                </label>
-                <label>Things to avoid
-                  <textarea data-builder-prompt-part="avoid" rows="3" placeholder="Example: avoid low-liquidity coins, no bearish engulfing in the last 5 candles"></textarea>
-                </label>
-                <label>Paste from notes
-                  <textarea data-builder-prompt-part="notes" rows="4" placeholder="Paste any raw notes here. TraceEdge will still show what was understood before the board opens."></textarea>
-                </label>
-                <label>Extra instructions
-                  <textarea data-builder-prompt-part="extra" rows="3" placeholder="Anything preferred, unclear, or discretionary that should be clarified"></textarea>
-                </label>
+                <div class="prompt-extra-fields" data-prompt-extra-fields></div>
               </div>
-              <aside class="prompt-side">
-                <h3>Useful details</h3>
-                <ul>
-                  <li>Exchange, symbols, and timeframe</li>
-                  <li>Entry conditions and filters</li>
-                  <li>Candle close or intrabar trigger</li>
-                  <li>Volume, liquidity, and risk limits</li>
-                </ul>
+              <aside class="prompt-side prompt-add-panel">
+                <h3>Add detail</h3>
+                <p>Choose only the sections you need. Each added box can be removed before generating the preview.</p>
+                <div class="prompt-add-list" data-prompt-add-list>
+                  <button type="button" data-add-prompt-section="must">Must-have rules</button>
+                  <button type="button" data-add-prompt-section="optional">Optional confirmations</button>
+                  <button type="button" data-add-prompt-section="universe">Markets and symbols</button>
+                  <button type="button" data-add-prompt-section="timeframe">Timeframe</button>
+                  <button type="button" data-add-prompt-section="alerts">Alert and risk preferences</button>
+                  <button type="button" data-add-prompt-section="avoid">Things to avoid</button>
+                  <button type="button" data-add-prompt-section="extra">Extra instructions</button>
+                </div>
                 <h3>Quick clarifications</h3>
                 <div class="clarification-chip-list">
                   <button type="button" data-clarification-template="Use RSI length 14.">RSI length 14</button>
@@ -2074,9 +2522,9 @@
               </aside>
             </div>
             <div class="button-row">
-              <button class="button button-primary" type="button" data-interpret-builder-prompt data-testid="strategy-interpret-submit">Generate understanding preview</button>
-              <button class="button button-secondary" type="button" data-check-builder-meaning>Check what this means</button>
+              <button class="button button-primary" type="button" data-interpret-builder-prompt data-testid="strategy-interpret-submit">Preview mechanics</button>
               <button class="button button-secondary" type="button" data-improve-builder-prompt>Improve my prompt</button>
+              <button class="button button-secondary" type="button" data-builder-direction="templates">Choose template</button>
               <button class="button button-secondary" type="button" data-builder-direction="canvas">Build visually instead</button>
             </div>
             <section id="builder-ai-summary" class="prompt-understanding-preview" aria-live="polite" hidden data-testid="prompt-coverage-panel"></section>
@@ -2127,7 +2575,12 @@
                   <div class="mini-logic-tree"><span>Trend filter</span><i></i><span>Trigger</span><i></i><span>Alert</span></div>
                   <h3>{{ template.name }}</h3>
                   <p>{{ template.description }}</p>
-                  <div class="template-meta"><span>{{ template.schema_json.direction|title }}</span><span>{{ template.ui_categories[:2]|join(' + ') }}</span></div>
+                  <div class="template-meta">
+                    <span>{{ template.schema_json.direction|title }}</span>
+                    {% for category in template.ui_categories[:2] %}
+                      <span>{{ category }}</span>
+                    {% endfor %}
+                  </div>
                   <div class="button-row compact">
                     <button class="button button-secondary" type="button" data-preview-template='{{ template.schema_json | tojson }}'>Preview template</button>
                     <button class="button button-primary template-pill" type="button" data-template-schema='{{ template.schema_json | tojson }}'>Use template</button>
@@ -2139,7 +2592,7 @@
                   <div class="mini-logic-tree"><span>Saved map</span><i></i><span>Review</span><i></i><span>Alert</span></div>
                   <h3>{{ template.name }}</h3>
                   <p>{{ template.description or 'Saved custom monitor template.' }}</p>
-                  <div class="template-meta"><span>Custom</span><span>{{ template.category }}</span></div>
+                  <div class="template-meta"><span>Custom</span><span>{{ template.category|replace('_', ' ')|title }}</span></div>
                   <div class="button-row compact">
                     <button class="button button-secondary" type="button" data-preview-template='{{ template.schema_json | tojson }}'>Preview template</button>
                     <button class="button button-primary template-pill" type="button" data-template-schema='{{ template.schema_json | tojson }}'>Use template</button>
@@ -2169,7 +2622,7 @@
                 <button class="button button-secondary" type="button" data-save-draft data-testid="strategy-save-draft">Save draft</button>
                 <button class="button button-secondary" type="button" data-builder-preview-matches>Preview matches</button>
                 <button class="button button-secondary" type="button" data-builder-validate data-testid="strategy-validate">Validate</button>
-                <button class="button button-primary" type="button" data-publish-schema data-testid="strategy-publish">Start monitoring</button>
+                <button class="button button-primary" type="button" data-publish-schema data-testid="strategy-publish" disabled aria-disabled="true">Start monitoring</button>
               </div>
             </header>
             <div id="builder-action-status" class="builder-action-status" aria-live="polite" hidden data-testid="builder-action-status"></div>
@@ -2502,6 +2955,17 @@
               </aside>
             </div>
           </dialog>
+          <dialog id="template-use-dialog" class="template-use-dialog" aria-labelledby="template-use-title">
+            <div class="modal-header">
+              <div><span class="eyebrow">Use template</span><h2 id="template-use-title">Where should this template open?</h2></div>
+              <button class="icon-button" type="button" data-close-template-use aria-label="Close template options">x</button>
+            </div>
+            <p>Load the template into the visual canvas, or convert its conditions into a prompt you can edit first.</p>
+            <div class="template-use-options">
+              <button class="button button-primary" type="button" data-template-use-canvas>Use in canvas</button>
+              <button class="button button-secondary" type="button" data-template-use-prompt>Use in Describe Strategy</button>
+            </div>
+          </dialog>
         </form>
       </section>
       <section id="monitors" class="dash-panel monitors-hub">
@@ -2511,7 +2975,6 @@
             <h2>My Monitors</h2>
             <p>Control each monitor and review its health, scan freshness, and main blocker in one place.</p>
           </div>
-          <a class="button button-primary" href="/dashboard/strategies/new">New Monitor</a>
         </div>
         {% if monitor_cards %}
           <div class="monitor-card-grid">
@@ -2878,15 +3341,6 @@
                       <img src="https://api.iconify.design/lucide:chart-candlestick.svg?color=%23ffffff" alt="" aria-hidden="true">
                       <span>Chart</span>
                     </button>
-                    {% if item.latest_alert_id %}
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-proof="{{ item.latest_alert_id }}" hidden aria-hidden="true">View proof</button>
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-feedback="{{ item.latest_alert_id }}" hidden aria-hidden="true">Feedback</button>
-                    {% endif %}
-                    <button class="lifecycle-chart-button muted-action" type="button" data-inbox-timeline="{{ item.id }}" hidden aria-hidden="true">Timeline</button>
-                    {% if item.latest_inbox_item_id %}
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-review="{{ item.latest_inbox_item_id }}" hidden aria-hidden="true">Mark reviewed</button>
-                      <button class="lifecycle-chart-button muted-action" type="button" data-inbox-archive="{{ item.latest_inbox_item_id }}" hidden aria-hidden="true">Archive</button>
-                    {% endif %}
                   </div>
                 </div>
                 <div class="lifecycle-track" aria-label="{{ item.symbol }} lifecycle">
@@ -3319,13 +3773,19 @@
               <strong>${{ plan.monthly_price }} / month</strong>
               <p>{{ plan.description or 'Configurable monitoring plan.' }}</p>
               <ul><li>{{ plan.limits.get('active_strategies') }} active monitors</li><li>{{ plan.limits.get('symbols_per_strategy') }} symbols per strategy</li><li>{{ 'Telegram' if plan.features.get('telegram') else 'No Telegram' }}</li><li>{{ 'Discord included' if plan.features.get('discord') else 'Discord not included' }}</li></ul>
-              <form method="post" action="/dashboard/billing/checkout"><input type="hidden" name="plan_code" value="{{ code }}"><button class="button button-primary" type="submit">{{ 'Activate' if plan.monthly_price == 0 else 'Generate Payment Link' }}</button></form>
+              {% set is_current_plan = code == entitlement.plan.code %}
+              <form method="post" action="/dashboard/billing/checkout">
+                <input type="hidden" name="plan_code" value="{{ code }}">
+                <button class="button button-primary" type="submit" {% if is_current_plan %}disabled aria-disabled="true"{% endif %}>
+                  {{ 'Current Plan' if is_current_plan else ('Activate Free' if plan.monthly_price == 0 else 'Pay') }}
+                </button>
+              </form>
             </article>
           {% endfor %}
         </div>
       </section>
     {% elif page == 'integrations' %}
-      <section class="dash-panel integrations-hub" data-testid="integrations-root">
+      <section class="dash-panel integrations-hub" data-testid="integrations-root" data-integrations-auto-refresh>
         <div class="section-head integrations-hero-head">
           <div>
             <p class="eyebrow">Connected delivery</p>
@@ -3341,12 +3801,12 @@
           <article>
             <img src="https://api.iconify.design/lucide:send.svg?color=%23c4b5fd" alt="" aria-hidden="true">
             <span>Telegram</span>
-            <strong>{{ telegram.status.value|replace('_', ' ')|title if telegram else 'Not Connected' }}</strong>
+            <strong data-telegram-summary-status>{{ telegram.status.value|replace('_', ' ')|title if telegram else 'Not Connected' }}</strong>
           </article>
           <article>
             <img src="https://api.iconify.design/lucide:messages-square.svg?color=%23c4b5fd" alt="" aria-hidden="true">
             <span>Discord</span>
-            <strong>{{ discord.status.value|replace('_', ' ')|title if discord else 'Optional' }}</strong>
+            <strong>Under Maintenance</strong>
           </article>
           <article>
             <img src="https://api.iconify.design/lucide:bell-ring.svg?color=%23c4b5fd" alt="" aria-hidden="true">
@@ -3361,7 +3821,7 @@
               <div class="integration-icon telegram">
                 <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/telegram.svg" alt="" aria-hidden="true">
               </div>
-              <span class="integration-status-pill {{ 'connected' if telegram else 'pending' }}">{{ telegram.status.value|replace('_', ' ')|title if telegram else 'Not connected' }}</span>
+              <span class="integration-status-pill {{ 'connected' if telegram else 'pending' }}" data-telegram-status>{{ telegram.status.value|replace('_', ' ')|title if telegram else 'Not connected' }}</span>
             </div>
             <div class="integration-copy">
               <span class="condition-category">Primary alerts</span>
@@ -3369,10 +3829,14 @@
               <p>Fast onboarding, personal alerts, monitor controls, and support handoff in one lightweight channel.</p>
             </div>
             <div class="integration-status">
-              <span><img src="https://api.iconify.design/lucide:user-round.svg?color=%23c4b5fd" alt="" aria-hidden="true"> {{ '@' ~ telegram.username if telegram and telegram.username else 'Username not set' }}</span>
-              <span><img src="https://api.iconify.design/lucide:clock-3.svg?color=%23c4b5fd" alt="" aria-hidden="true"> {{ telegram.last_delivery_at|short_dt(user.timezone) if telegram and telegram.last_delivery_at else 'No delivery recorded yet' }}</span>
+              <span><img src="https://api.iconify.design/lucide:user-round.svg?color=%23c4b5fd" alt="" aria-hidden="true"> <span data-telegram-username>{{ '@' ~ telegram.username if telegram and telegram.username else 'Username not set' }}</span></span>
+              <span><img src="https://api.iconify.design/lucide:clock-3.svg?color=%23c4b5fd" alt="" aria-hidden="true"> <span data-telegram-delivery>{{ telegram.last_delivery_at|short_dt(user.timezone) if telegram and telegram.last_delivery_at else 'No delivery recorded yet' }}</span></span>
             </div>
-            <a class="button button-primary" href="{{ telegram_url }}">Open Telegram Bot</a>
+            <div class="telegram-integration-actions">
+              <a class="button button-primary" href="{{ telegram_connect_url or telegram_url }}" target="_blank" rel="noopener" data-telegram-connect-link {{ 'hidden' if telegram else '' }}>Link Telegram</a>
+              <button class="button button-primary button-secondary telegram-connected-button" type="button" disabled aria-disabled="true" data-telegram-connected-button {{ '' if telegram else 'hidden' }}>Telegram Connected</button>
+              <button class="button button-secondary telegram-remove-button" type="button" data-telegram-disconnect {{ '' if telegram else 'hidden' }}>Remove Telegram</button>
+            </div>
           </article>
 
           <article class="integration-card" data-testid="discord-integration-card">
@@ -3380,7 +3844,7 @@
               <div class="integration-icon discord">
                 <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/discord.svg" alt="" aria-hidden="true">
               </div>
-              <span class="integration-status-pill {{ 'connected' if discord else 'pending' }}">{{ discord.status.value|replace('_', ' ')|title if discord else 'Not connected' }}</span>
+              <span class="integration-status-pill pending">Under Maintenance</span>
             </div>
             <div class="integration-copy">
               <span class="condition-category">Optional delivery</span>
@@ -3391,7 +3855,7 @@
               <span><img src="https://api.iconify.design/lucide:server.svg?color=%23c4b5fd" alt="" aria-hidden="true"> {{ (discord.guild_id or 'DM mode / no server selected') if discord else 'Not linked yet' }}</span>
               <span><img src="https://api.iconify.design/lucide:hash.svg?color=%23c4b5fd" alt="" aria-hidden="true"> {{ (discord.channel_id or 'Channel not selected') if discord else 'Configure after connecting' }}</span>
             </div>
-            <a class="button button-secondary" href="/dashboard/settings">Manage channels</a>
+            <button class="button button-secondary" type="button" disabled aria-disabled="true">Under Maintenance</button>
           </article>
         </div>
       </section>
@@ -3423,10 +3887,14 @@
               <input name="maximum_alerts_per_hour" type="number" min="1" max="1000" value="{{ prefs.get('maximum_alerts_per_hour', 50) }}">
               <small>This user-wide cap is enforced across active monitors and delivery channels.</small>
             </label>
+            <label>Maximum alerts/day
+              <input name="maximum_alerts_per_day" type="number" min="1" max="10000" value="{{ prefs.get('maximum_alerts_per_day', 500) }}">
+              <small>This daily cap uses your selected timezone and is enforced before delivery.</small>
+            </label>
             <fieldset class="choice-field">
               <legend>Alert channels</legend>
               <div class="choice-chip-list">
-                {% for channel in ['telegram', 'discord', 'web'] %}
+                {% for channel in ['telegram', 'discord'] %}
                   <label class="choice-chip">
                     <input type="checkbox" name="alert_channels" value="{{ channel }}" {{ 'checked' if channel in prefs.get('alert_channels', prefs.get('channels', ['telegram'])) else '' }}>
                     <span>{{ channel.title() }}</span>
