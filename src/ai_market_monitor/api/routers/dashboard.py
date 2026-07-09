@@ -595,6 +595,11 @@ async def signup_verify_submit(
         return _redirect(f"/signup/verify?{urlencode(query)}")
 
     message = "telegram_connected" if telegram_connected else "account_created"
+    await AdminNotificationService(settings).send_signup_created(
+        user_id=user.id,
+        email=email,
+        source="dashboard",
+    )
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response = _redirect(f"/dashboard?message={message}")
     response.set_cookie(

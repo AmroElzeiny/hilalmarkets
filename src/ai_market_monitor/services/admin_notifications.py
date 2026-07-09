@@ -1,4 +1,5 @@
 from contextlib import suppress
+from uuid import UUID
 
 from ai_market_monitor.core.config import Settings
 
@@ -6,6 +7,32 @@ from ai_market_monitor.core.config import Settings
 class AdminNotificationService:
     def __init__(self, settings: Settings):
         self.settings = settings
+
+    async def send_signup_created(
+        self,
+        *,
+        user_id: UUID,
+        email: str,
+        source: str,
+    ) -> None:
+        await self.send(
+            f"New signup: {email} user:{user_id} source:{source}"
+        )
+
+    async def send_payment_received(
+        self,
+        *,
+        user_id: UUID,
+        email: str | None,
+        plan_code: str | None,
+        provider: str,
+        event_type: str,
+    ) -> None:
+        identity = email or f"user:{user_id}"
+        plan = plan_code or "unknown-plan"
+        await self.send(
+            f"Payment received: {identity} {plan} via {provider} ({event_type})"
+        )
 
     async def send(self, text: str) -> None:
         destination = self.settings.admin_notify_telegram_user_id

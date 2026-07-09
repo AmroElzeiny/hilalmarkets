@@ -3,11 +3,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS
+from ai_market_monitor.db.models import BillingEvent, UserIdentity
+from ai_market_monitor.db.models.enums import IdentityProvider
+from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService
 from ai_market_monitor.services.entitlements import (
     EntitlementError,
@@ -17,6 +21,12 @@ from ai_market_monitor.services.entitlements import (
 )
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+PAYMENT_SUCCESS_EVENT_TYPES = {
+    "checkout.session.completed",
+    "invoice.payment_succeeded",
+    "payment.finished",
+}
 
 
 class CheckoutRequest(BaseModel):
@@ -134,6 +144,16 @@ async def receive_billing_webhook(
             signature=x_nowpayments_sig if provider == "nowpayments" else x_billing_signature,
         )
         await session.commit()
+        await _notify_admin_payment_received(
+            session=session,
+            settings=settings,
+            provider=provider,
+            event_id=result.event_id,
+            event_type=result.event_type,
+            user_id=result.user_id,
+            replayed=result.replayed,
+            processing_status=result.processing_status,
+        )
         return {
             "event_id": result.event_id,
             "event_type": result.event_type,
@@ -146,3 +166,41 @@ async def receive_billing_webhook(
         raise HTTPException(
             status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
+
+
+async def _notify_admin_payment_received(
+    *,
+    session: AsyncSession,
+    settings: Settings,
+    provider: str,
+    event_id: str,
+    event_type: str,
+    user_id,
+    replayed: bool,
+    processing_status: str,
+) -> None:
+    if (
+        replayed
+        or processing_status != "processed"
+        or event_type not in PAYMENT_SUCCESS_EVENT_TYPES
+        or user_id is None
+    ):
+        return
+    event = await session.scalar(
+        select(BillingEvent).where(BillingEvent.provider_event_id == event_id)
+    )
+    data = dict((event.payload_redacted if event else {}).get("data") or {})
+    identity = await session.scalar(
+        select(UserIdentity).where(
+            UserIdentity.user_id == user_id,
+            UserIdentity.provider == IdentityProvider.EMAIL,
+            UserIdentity.is_primary.is_(True),
+        )
+    )
+    await AdminNotificationService(settings).send_payment_received(
+        user_id=user_id,
+        email=identity.normalized_identifier if identity else None,
+        plan_code=data.get("plan_code"),
+        provider=provider,
+        event_type=event_type,
+    )

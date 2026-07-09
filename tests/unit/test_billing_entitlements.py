@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import Settings
@@ -25,18 +26,21 @@ from ai_market_monitor.db.models import (
     TrialCycle,
     UsageRecord,
     User,
+    UserIdentity,
 )
 from ai_market_monitor.db.models.enums import (
     AlertType,
     ConnectionStatus,
     DeliveryChannel,
     DeliveryStatus,
+    IdentityProvider,
     StrategyStatus,
     StrategyVersionStatus,
     SubscriptionStatus,
     TrialStatus,
 )
 from ai_market_monitor.services.admin import AdminCommercialService
+from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService, BillingWebhookVerifier
 from ai_market_monitor.services.entitlements import (
     EntitlementError,
@@ -523,6 +527,98 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
         assert subscription is not None
         assert subscription.provider == "nowpayments"
         assert subscription.status == SubscriptionStatus.ACTIVE
+
+
+async def test_nowpayments_webhook_sends_single_admin_payment_notification(
+    test_context,
+    monkeypatch,
+):
+    test_context["settings"].billing_webhook_secret = SecretStr("secret")
+    sent = []
+
+    async def fake_payment_notice(
+        self,
+        *,
+        user_id,
+        email,
+        plan_code,
+        provider,
+        event_type,
+    ):
+        sent.append(
+            {
+                "user_id": user_id,
+                "email": email,
+                "plan_code": plan_code,
+                "provider": provider,
+                "event_type": event_type,
+            }
+        )
+
+    monkeypatch.setattr(
+        AdminNotificationService,
+        "send_payment_received",
+        fake_payment_notice,
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Paid User")
+        session.add(
+            UserIdentity(
+                user_id=user.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject="paid@example.com",
+                normalized_identifier="paid@example.com",
+                display_identifier="paid@example.com",
+                is_verified=True,
+                is_primary=True,
+                verified_at=datetime.now(UTC),
+                profile_data={},
+            )
+        )
+        await session.commit()
+
+    payload = {
+        "payment_id": "pay_admin_notice",
+        "payment_status": "finished",
+        "order_id": f"amm|{user.id}|pro|adminnotice",
+    }
+    body = json.dumps(payload).encode()
+    signed_body = json.dumps(
+        {
+            "order_id": payload["order_id"],
+            "payment_id": payload["payment_id"],
+            "payment_status": payload["payment_status"],
+        },
+        separators=(",", ":"),
+    ).encode()
+    from hashlib import sha512
+
+    signature = hmac.new(b"secret", signed_body, sha512).hexdigest()
+
+    first = await test_context["client"].post(
+        "/api/v1/billing/webhooks/nowpayments",
+        content=body,
+        headers={"x-nowpayments-sig": signature},
+    )
+    replay = await test_context["client"].post(
+        "/api/v1/billing/webhooks/nowpayments",
+        content=body,
+        headers={"x-nowpayments-sig": signature},
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["replayed"] is False
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["replayed"] is True
+    assert sent == [
+        {
+            "user_id": user.id,
+            "email": "paid@example.com",
+            "plan_code": "pro",
+            "provider": "nowpayments",
+            "event_type": "payment.finished",
+        }
+    ]
 
 
 async def test_past_due_subscription_update_does_not_convert_trial(test_context):

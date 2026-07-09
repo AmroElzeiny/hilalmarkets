@@ -16,6 +16,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import ConnectionStatus, IdentityProvider
 from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
+from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
 
 
@@ -94,6 +95,29 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
         assert identity.password_hash
         assert await session.scalar(select(WebSession)) is not None
         assert await session.scalar(select(DisclaimerAcceptance)) is None
+
+
+async def test_signup_verification_sends_admin_notification(test_context, monkeypatch):
+    sent = []
+
+    async def fake_signup_notice(self, *, user_id, email, source):
+        sent.append({"user_id": user_id, "email": email, "source": source})
+
+    monkeypatch.setattr(
+        AdminNotificationService,
+        "send_signup_created",
+        fake_signup_notice,
+    )
+
+    _, response = await _signup_and_verify(
+        test_context,
+        email="admin-notified@example.com",
+    )
+
+    assert response.status_code == 303
+    assert len(sent) == 1
+    assert sent[0]["email"] == "admin-notified@example.com"
+    assert sent[0]["source"] == "dashboard"
 
 
 async def test_repeated_signup_submit_does_not_send_second_code(test_context):
