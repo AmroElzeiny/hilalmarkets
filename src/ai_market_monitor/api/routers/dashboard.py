@@ -1685,7 +1685,7 @@ async def settings_submit(
     alert_channels: list[str] = Form(default=["telegram"]),
     providers: list[str] = Form(default=["binance", "bybit"]),
     alert_days: list[str] = Form(default=["Every Day"]),
-    alert_hours: list[str] = Form(default=[]),
+    alert_hours: list[str] = Form(default=ALERT_HOURS),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> RedirectResponse:

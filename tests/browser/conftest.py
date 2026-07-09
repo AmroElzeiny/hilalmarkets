@@ -417,6 +417,40 @@ def seed_alert_proof(database_url: str, email: str) -> str:
     return _run_async_in_thread(_seed)
 
 
+def seed_telegram_connection(database_url: str, email: str) -> None:
+    if not database_url:
+        pytest.skip("Seeded Telegram connection requires the auto-started browser database URL.")
+
+    async def _seed() -> None:
+        from ai_market_monitor.db.models import TelegramConnection, UserIdentity
+        from ai_market_monitor.db.models.enums import IdentityProvider
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test user identity found for {email}.")
+            suffix = uuid4().hex[:10]
+            session.add(
+                TelegramConnection(
+                    user_id=identity.user_id,
+                    telegram_user_id=f"browser-tg-{suffix}",
+                    chat_id=f"browser-chat-{suffix}",
+                    username="browser_trace_user",
+                )
+            )
+            await session.commit()
+        await engine.dispose()
+
+    _run_async_in_thread(_seed)
+
+
 def _run_async_in_thread(factory):
     result: list[Any] = []
     errors: list[BaseException] = []

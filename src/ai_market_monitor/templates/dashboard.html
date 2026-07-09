@@ -888,6 +888,109 @@
       min-height: 150px !important;
       padding: 10px !important;
       background-image: none !important;
+      scrollbar-width: thin;
+      scrollbar-color: #8b5cf6 #e0d8ff;
+    }
+
+    body.dashboard-body .modern-listbox::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    body.dashboard-body .modern-listbox::-webkit-scrollbar-track {
+      background: #e0d8ff;
+      border-radius: 999px;
+    }
+
+    body.dashboard-body .modern-listbox::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg,#a78bfa,#8b5cf6);
+      border: 2px solid #e0d8ff;
+      border-radius: 999px;
+    }
+
+    body.dashboard-body select:not([multiple]) {
+      cursor: pointer;
+    }
+
+    body.dashboard-body.theme-light #dashboard-settings-form select,
+    body.dashboard-body.theme-light #dashboard-settings-form .modern-listbox {
+      background-color: #f7f3ff !important;
+      border-color: rgba(139,92,246,.28) !important;
+      color: #3A3A46 !important;
+    }
+
+    .channel-status-row .channel-status-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 40px;
+      padding: 9px 12px;
+      border: 1px solid rgba(196,181,253,.28);
+      border-radius: 14px;
+      background: rgba(196,181,253,.12);
+      color: #3A3A46;
+      font-size: 13px;
+      font-weight: 480;
+      line-height: 1.2;
+      text-decoration: none;
+    }
+
+    .channel-status-row .channel-status-button.connected {
+      background: rgba(139,92,246,.16);
+      border-color: rgba(139,92,246,.35);
+      color: #17131f;
+    }
+
+    .channel-status-row .channel-status-button img {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+    }
+
+    .billing-limits-link {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      width: max-content;
+      min-height: 38px;
+      padding: 0 14px;
+      border: 1px solid rgba(58,58,70,.26);
+      border-radius: 999px;
+      background: transparent !important;
+      color: #3A3A46 !important;
+      font-weight: 480 !important;
+      text-decoration: none !important;
+    }
+
+    .billing-limits-link:hover {
+      border-color: rgba(139,92,246,.42);
+      background: rgba(167,139,250,.10) !important;
+    }
+
+    .schedule-field {
+      border: 1px solid rgba(196,181,253,.22);
+      border-radius: 18px;
+      padding: 12px;
+      background: rgba(167,139,250,.06);
+    }
+
+    .schedule-heading > span {
+      color: #3A3A46 !important;
+      font-weight: 520 !important;
+    }
+
+    .schedule-actions button {
+      border-color: rgba(139,92,246,.25) !important;
+      border-radius: 999px !important;
+      background: rgba(255,255,255,.38) !important;
+      color: #3A3A46 !important;
+      font-weight: 480 !important;
+    }
+
+    .schedule-actions button:hover {
+      border-color: rgba(139,92,246,.45) !important;
+      background: rgba(139,92,246,.14) !important;
+      color: #4C1D95 !important;
     }
 
     .lifecycle-chart-stage,
@@ -1753,6 +1856,7 @@
     .builder-start-screen,
     .monitors-hub {
       width: 100% !important;
+      max-width: none !important;
       box-sizing: border-box !important;
     }
 
@@ -1877,8 +1981,26 @@
       padding-bottom: 12px !important;
     }
 
+    .builder-start-screen .creation-card {
+      display: flex !important;
+      flex-direction: column !important;
+      align-content: stretch !important;
+    }
+
     .creation-card > .button {
-      align-self: end !important;
+      width: 100% !important;
+      align-self: stretch !important;
+      margin-top: auto !important;
+      margin-bottom: 0 !important;
+    }
+
+    .overview-workbench .overview-card {
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    .overview-workbench .overview-card > .button,
+    .overview-workbench .overview-card > .billing-limits-link {
       margin-top: auto !important;
       margin-bottom: 0 !important;
     }
@@ -2251,7 +2373,9 @@
 
   <main class="dash-main">
     <div id="dash-toast" class="dash-toast" hidden></div>
-    {% if message %}
+    {% if message == 'notification_channel_required' %}
+      <div class="dash-flash error">This monitor needs at least one notification channel. Link Telegram or Discord, then TraceEdge will activate it automatically.</div>
+    {% elif message %}
       <div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>
     {% endif %}
     {% if error %}
@@ -2325,11 +2449,11 @@
               <span>Trial ends</span><strong>{{ trial.ends_at|short_dt(user.timezone) }}</strong>
             </div>
           {% endif %}
-          <div class="channel-status-row">
-            <span class="{{ 'connected' if overview.telegram_connected else '' }}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/telegram.svg" alt=""> Telegram {{ 'connected' if overview.telegram_connected else 'not connected' }}</span>
-            <span class="{{ 'connected' if overview.discord_connected else '' }}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/discord.svg" alt=""> Discord {{ 'connected' if overview.discord_connected else 'not connected' }}</span>
+          <div class="channel-status-row" data-overview-channel-status>
+            <a class="channel-status-button {{ 'connected' if overview.telegram_connected else '' }}" href="/dashboard/integrations" data-overview-channel="telegram"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/telegram.svg" alt=""> <span>Telegram {{ 'connected' if overview.telegram_connected else 'not connected' }}</span></a>
+            <a class="channel-status-button {{ 'connected' if overview.discord_connected else '' }}" href="/dashboard/integrations" data-overview-channel="discord"><img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/discord.svg" alt=""> <span>Discord {{ 'connected' if overview.discord_connected else 'not connected' }}</span></a>
           </div>
-          <a class="text-link" href="/dashboard/billing">View billing and limits</a>
+          <a class="text-link billing-limits-link" href="/dashboard/billing">View billing and limits</a>
         </article>
 
         <article class="overview-card">
@@ -2361,7 +2485,6 @@
               <span style="--trust:{{ overview.latest_alert.trust_score.score|round|int }}%"></span>
               <strong>{{ overview.latest_alert.trust_score.grade }} {{ overview.latest_alert.trust_score.score|round|int }}%</strong>
             </div>
-            <a class="button button-secondary" href="/dashboard/lifecycles">Open Lifecycles</a>
           {% else %}
             <div class="dash-empty">No alerts yet. Proof receipts appear after scans find confirmed, forming, or lifecycle events.</div>
           {% endif %}
@@ -3790,7 +3913,7 @@
           <div>
             <p class="eyebrow">Connected delivery</p>
             <h2>Integrations</h2>
-            <p>Connect the channels that should receive research-match evidence. Telegram is the fast personal path; Discord is optional for teams and communities.</p>
+            <p>Choose where TraceEdge should send your monitor alerts. Link Telegram for quick personal updates, or Discord for team and community delivery.</p>
           </div>
           <span class="integration-hero-icon" aria-hidden="true">
             <img src="https://api.iconify.design/lucide:plug-zap.svg?color=%23ffffff" alt="">
@@ -3864,6 +3987,7 @@
         <h2>Settings</h2>
         <form id="dashboard-settings-form" class="dash-form" method="post" action="/dashboard/settings">
           {% set prefs = (preference.notification_preferences if preference else {}) or {} %}
+          {% set selected_alert_hours = prefs.get('alert_hours') or alert_hours %}
           <div class="form-grid">
             <label>Timezone
               <select name="timezone">
@@ -3871,6 +3995,7 @@
                   <option value="{{ timezone }}" {{ 'selected' if timezone == user.timezone else '' }}>{{ timezone }}</option>
                 {% endfor %}
               </select>
+              <small>Your alert days and hours use this timezone.</small>
             </label>
             <label>Near-Miss alerts
               <select name="near_miss_enabled">
@@ -3929,7 +4054,7 @@
                   <option value="{{ day }}" {{ 'selected' if day in prefs.get('alert_days', ['Every Day']) else '' }}>{{ day }}</option>
                 {% endfor %}
               </select>
-              <small>Click items to toggle them. "Every Day" overrides individual days.</small>
+              <small>Click items to toggle them. "Every Day" overrides individual days and follows your selected timezone.</small>
             </div>
             <div class="schedule-field">
               <div class="schedule-heading">
@@ -3942,10 +4067,10 @@
               </div>
               <select class="modern-listbox hours" name="alert_hours" multiple size="10" data-toggle-list="hours">
                 {% for hour in alert_hours %}
-                  <option value="{{ hour }}" {{ 'selected' if hour in prefs.get('alert_hours', []) else '' }}>{{ hour }}</option>
+                  <option value="{{ hour }}" {{ 'selected' if hour in selected_alert_hours else '' }}>{{ hour }}</option>
                 {% endfor %}
               </select>
-              <small>Leave all hours unselected to allow alerts at any hour on the selected days.</small>
+              <small>All hours are selected by default. Selected hours follow your timezone above.</small>
             </div>
           </div>
           <button class="button button-primary settings-save-float" type="submit" data-settings-save hidden>

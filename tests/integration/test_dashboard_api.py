@@ -1,7 +1,7 @@
 import base64
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 
@@ -117,6 +117,24 @@ async def _signup(test_context, email: str = "dashboard-api@example.com") -> Non
     )
     assert verified.status_code == 303
     assert verified.headers["location"].startswith("/dashboard")
+
+
+async def _connect_telegram(test_context, username: str = "traceuser") -> None:
+    async with test_context["session_factory"]() as session:
+        user_id = await session.scalar(
+            select(UserIdentity.user_id).where(UserIdentity.provider == IdentityProvider.EMAIL)
+        )
+        assert user_id is not None
+        suffix = uuid4().hex[:8]
+        session.add(
+            TelegramConnection(
+                user_id=user_id,
+                telegram_user_id=f"tg-{suffix}",
+                chat_id=f"chat-{suffix}",
+                username=username,
+            )
+        )
+        await session.commit()
 
 
 async def test_dashboard_api_uses_session_cookie_for_current_user(test_context):
@@ -747,6 +765,7 @@ async def test_dashboard_theme_toggle_persists_without_full_settings_submit(test
 
 async def test_dashboard_publish_marks_monitor_active(test_context):
     await _signup(test_context, "dashboard-publish@example.com")
+    await _connect_telegram(test_context, "dashboardpublisher")
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
@@ -773,6 +792,31 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
     assert ">active<" in monitors.text
     detail = await test_context["client"].get(f"/dashboard/strategies/{payload['strategy']['id']}")
     assert "<strong>active</strong>" in detail.text
+
+
+async def test_dashboard_publish_requires_notification_channel(test_context):
+    await _signup(test_context, "dashboard-publish-no-channel@example.com")
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "publish test"},
+    )
+    assert created.status_code == 201
+    payload = created.json()
+
+    published = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
+        json={
+            "strategy_version_id": payload["version"]["id"],
+            "expected_schema_hash": payload["version"]["schema_hash"],
+        },
+    )
+
+    assert published.status_code == 409
+    assert published.json()["detail"] == "notification_channel_required"
+    async with test_context["session_factory"]() as session:
+        strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
+        assert strategy.status != StrategyStatus.ACTIVE
 
 
 async def test_dashboard_export_downloads_json_and_csv(test_context):
@@ -983,7 +1027,7 @@ async def test_advanced_dashboard_pages_render(test_context):
     for path, expected in [
         ("/dashboard/strategies/new", "Strategy Builder"),
         ("/dashboard/strategies/new", "How do you want to create your monitor?"),
-        ("/dashboard/strategies/new", "Generate understanding preview"),
+        ("/dashboard/strategies/new", "Preview mechanics"),
         ("/dashboard/strategies/new", "Visual Strategy Canvas"),
         ("/dashboard/strategies/new", "Search condition library"),
         ("/dashboard/strategies/new", "Monitor Overview"),
@@ -1006,7 +1050,7 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "data-sidebar-toggle" in dashboard.text
     assert "sidebar-create-quick" in dashboard.text
     assert "sidebar-logout" in dashboard.text
-    assert "data-theme-toggle" in dashboard.text
+    assert "data-theme-toggle" not in dashboard.text
     assert "Activity snapshot" in dashboard.text
     assert "Lifecycle States" in dashboard.text
     assert "Top Symbols" in dashboard.text
@@ -1333,6 +1377,7 @@ async def test_prompt_interpretation_applies_saved_strategy_preferences(test_con
 
 async def test_publish_blocks_critical_strategy_conflicts(test_context):
     await _signup(test_context, "cockpit-conflict-publish@example.com")
+    await _connect_telegram(test_context, "conflictpublisher")
     definition = load_strategy().model_dump(mode="json")
     lower = definition["conditions"]["children"][1]
     lower["key"] = "volume_above_two"

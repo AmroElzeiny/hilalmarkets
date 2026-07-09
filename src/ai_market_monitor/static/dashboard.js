@@ -31,6 +31,9 @@
   }
 
   function friendlyApiError(detail) {
+    if (detail === "notification_channel_required") {
+      return "Connect Telegram or Discord before starting monitoring.";
+    }
     if (typeof detail === "string") return detail;
     if (Array.isArray(detail)) {
       const strategyVersionIssue = detail.find((item) => {
@@ -45,6 +48,47 @@
       return detail.message || detail.detail || "The request could not be processed.";
     }
     return "The request could not be processed.";
+  }
+
+  const pendingMonitorPublishKey = "traceedge-pending-monitor-publish";
+
+  function pendingMonitorPublishUrl() {
+    return `/dashboard/integrations?message=notification_channel_required&t=${Date.now()}`;
+  }
+
+  function savePendingMonitorPublish(strategyId, version) {
+    if (!strategyId || !version?.id) return;
+    window.localStorage.setItem(
+      pendingMonitorPublishKey,
+      JSON.stringify({
+        strategy_id: strategyId,
+        strategy_version_id: version.id,
+        expected_schema_hash: version.schema_hash || null,
+        created_at: new Date().toISOString(),
+      }),
+    );
+  }
+
+  function connectedNotificationChannel(payload) {
+    return Boolean(payload?.telegram || payload?.discord);
+  }
+
+  async function hasNotificationChannel() {
+    try {
+      return connectedNotificationChannel(await api("/integrations"));
+    } catch {
+      return false;
+    }
+  }
+
+  async function publishStrategyVersion(strategyId, version) {
+    return api(`/strategies/${strategyId}/publish`, {
+      method: "POST",
+      body: JSON.stringify({
+        strategy_version_id: version.id || version.strategy_version_id,
+        expected_schema_hash: version.schema_hash || version.expected_schema_hash || null,
+      }),
+    });
   }
 
   const defaultCapabilities = {
@@ -1151,13 +1195,13 @@
         const id = response.strategy?.id || strategyId;
         const version = response.version;
         if (shouldPublish && id && version) {
-          await api(`/strategies/${id}/publish`, {
-            method: "POST",
-            body: JSON.stringify({
-              strategy_version_id: version.id,
-              expected_schema_hash: version.schema_hash,
-            }),
-          });
+          if (!(await hasNotificationChannel())) {
+            savePendingMonitorPublish(id, version);
+            showToast("Connect Telegram or Discord before starting monitoring.", "error");
+            window.location.href = pendingMonitorPublishUrl();
+            return;
+          }
+          await publishStrategyVersion(id, version);
           showToast("Monitor published and marked active.");
           window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
           return;
@@ -2851,13 +2895,17 @@
           window.history.replaceState({}, "", `/dashboard/strategies/${id}/builder`);
         }
         if (shouldPublish && id && version) {
-          await api(`/strategies/${id}/publish`, {
-            method: "POST",
-            body: JSON.stringify({
-              strategy_version_id: version.id,
-              expected_schema_hash: version.schema_hash,
-            }),
-          });
+          if (!(await hasNotificationChannel())) {
+            savePendingMonitorPublish(id, version);
+            setBuilderActionStatus(
+              "Connect Telegram or Discord before starting monitoring. Opening Integrations...",
+              "error",
+            );
+            showToast("Connect Telegram or Discord before starting monitoring.", "error");
+            window.location.href = pendingMonitorPublishUrl();
+            return;
+          }
+          await publishStrategyVersion(id, version);
           setBuilderActionStatus("Monitor is live. Opening My Monitors...", "success");
           showToast("Monitor published and marked active.");
           window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
@@ -5403,6 +5451,7 @@
     const connectLink = rootElement.querySelector("[data-telegram-connect-link]");
     const connectedButton = rootElement.querySelector("[data-telegram-connected-button]");
     const disconnectButton = rootElement.querySelector("[data-telegram-disconnect]");
+    let pendingPublishInFlight = false;
 
     function titleize(value) {
       return String(value || "not connected")
@@ -5440,10 +5489,47 @@
       }
     }
 
+    async function maybeCompletePendingPublish(payload) {
+      if (pendingPublishInFlight || !connectedNotificationChannel(payload)) return;
+      const raw = window.localStorage.getItem(pendingMonitorPublishKey);
+      if (!raw) return;
+      let pending = null;
+      try {
+        pending = JSON.parse(raw);
+      } catch {
+        window.localStorage.removeItem(pendingMonitorPublishKey);
+        return;
+      }
+      if (!pending?.strategy_id || !pending?.strategy_version_id) {
+        window.localStorage.removeItem(pendingMonitorPublishKey);
+        return;
+      }
+      pendingPublishInFlight = true;
+      showToast("Notification channel connected. Activating your monitor...");
+      try {
+        await publishStrategyVersion(pending.strategy_id, {
+          id: pending.strategy_version_id,
+          schema_hash: pending.expected_schema_hash,
+        });
+        window.localStorage.removeItem(pendingMonitorPublishKey);
+        showToast("Monitor is active.");
+        window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
+      } catch (error) {
+        if (!/Telegram|Discord|notification channel/i.test(error.message)) {
+          window.localStorage.removeItem(pendingMonitorPublishKey);
+        }
+        showToast(error.message, "error");
+      } finally {
+        pendingPublishInFlight = false;
+      }
+    }
+
     async function poll() {
       if (document.hidden) return;
       try {
-        render(await api("/integrations"));
+        const payload = await api("/integrations");
+        render(payload);
+        await maybeCompletePendingPublish(payload);
       } catch {
         return;
       }
@@ -5489,6 +5575,39 @@
     }
     filter.addEventListener("change", applyFilter);
     applyFilter();
+  }
+
+  function initOverviewChannelStatus() {
+    const rootElement = document.querySelector("[data-overview-channel-status]");
+    if (!rootElement) return;
+    const buttons = {
+      telegram: rootElement.querySelector('[data-overview-channel="telegram"]'),
+      discord: rootElement.querySelector('[data-overview-channel="discord"]'),
+    };
+
+    function updateButton(channel, connected) {
+      const button = buttons[channel];
+      if (!button) return;
+      button.classList.toggle("connected", connected);
+      const label = button.querySelector("span");
+      if (label) {
+        label.textContent = `${channel === "telegram" ? "Telegram" : "Discord"} ${connected ? "connected" : "not connected"}`;
+      }
+    }
+
+    async function poll() {
+      if (document.hidden) return;
+      try {
+        const payload = await api("/integrations");
+        updateButton("telegram", Boolean(payload.telegram));
+        updateButton("discord", Boolean(payload.discord));
+      } catch {
+        return;
+      }
+    }
+
+    poll();
+    window.setInterval(poll, 5000);
   }
 
   function initWebNotifications() {
@@ -5592,6 +5711,7 @@
     initSettings();
     initReferralCopy();
     initIntegrations();
+    initOverviewChannelStatus();
     initInboxFilter();
     initWebNotifications();
   });

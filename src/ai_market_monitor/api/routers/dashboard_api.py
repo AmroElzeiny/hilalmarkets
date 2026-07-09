@@ -1001,6 +1001,14 @@ async def publish_strategy_version(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="Strategy version not found")
+    telegram = await session.scalar(
+        select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
+    )
+    discord = await session.scalar(
+        select(DiscordConnection).where(DiscordConnection.user_id == principal.user_id)
+    )
+    if telegram is None and discord is None:
+        raise HTTPException(status_code=409, detail="notification_channel_required")
     expected_hash = payload.expected_schema_hash or version.schema_hash
     try:
         approved = await StrategyService(session, settings.disclaimer_version).approve(

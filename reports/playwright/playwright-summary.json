@@ -1,74 +1,26 @@
 {
-  "generated_at": "2026-07-09T00:06:57.398989+00:00",
-  "started_at": "2026-07-09T00:06:02.565206+00:00",
-  "base_url": "http://127.0.0.1:41350",
+  "generated_at": "2026-07-09T17:33:19.287088+00:00",
+  "started_at": "2026-07-09T17:33:03.891483+00:00",
+  "base_url": "http://127.0.0.1:53160",
   "browser": "chromium",
   "auto_started": true,
-  "command": ".venv\\Scripts\\python.exe -m pytest tests\\browser\\test_dashboard_e2e.py -q",
-  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 41350",
+  "command": ".venv\\Scripts\\python.exe -m pytest tests\\unit\\test_dashboard_static_assets.py tests\\integration\\test_dashboard_api.py::test_dashboard_settings_persist_alert_schedule_without_theme_field tests\\integration\\test_dashboard_api.py::test_dashboard_publish_marks_monitor_active tests\\integration\\test_dashboard_api.py::test_dashboard_publish_requires_notification_channel tests\\integration\\test_dashboard_api.py::test_publish_blocks_critical_strategy_conflicts tests\\integration\\test_dashboard_api.py::test_advanced_dashboard_pages_render tests\\browser\\test_dashboard_e2e.py::test_approve_and_publish_executable_monitor -q",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 53160",
   "exitstatus": 0,
-  "tests_run": 9,
-  "passed": 9,
+  "tests_run": 1,
+  "passed": 1,
   "failed": 0,
   "skipped": 0,
   "console_errors": [],
   "failed_network_calls": [],
   "page_errors": [],
   "artifacts": {
-    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {},
-    "tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board": {},
-    "tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation": {},
-    "tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload": {},
-    "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {},
-    "tests/browser/test_dashboard_e2e.py::test_quick_scan_finder_prompt_flow": {},
-    "tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims": {},
-    "tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke": {},
-    "tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke": {}
+    "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {}
   },
   "tests": {
-    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {
-      "outcome": "passed",
-      "duration_seconds": 2.549,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board": {
-      "outcome": "passed",
-      "duration_seconds": 4.987,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation": {
-      "outcome": "passed",
-      "duration_seconds": 7.999,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload": {
-      "outcome": "passed",
-      "duration_seconds": 7.821,
-      "longrepr": ""
-    },
     "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {
       "outcome": "passed",
-      "duration_seconds": 5.344,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_quick_scan_finder_prompt_flow": {
-      "outcome": "passed",
-      "duration_seconds": 2.666,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims": {
-      "outcome": "passed",
-      "duration_seconds": 2.187,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke": {
-      "outcome": "passed",
-      "duration_seconds": 2.274,
-      "longrepr": ""
-    },
-    "tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke": {
-      "outcome": "passed",
-      "duration_seconds": 1.9,
+      "duration_seconds": 5.62,
       "longrepr": ""
     }
   },

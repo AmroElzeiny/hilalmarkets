@@ -66,7 +66,7 @@ def test_strategy_canvas_keeps_schema_and_api_compatibility_hooks():
         'api("/scan-now/interpret"',
         'api("/cockpit/strategies/validate"',
         'api("/scan-now"',
-        'api(`/strategies/${id}/publish`',
+        "publishStrategyVersion(strategyId",
     ):
         assert hook in source
 

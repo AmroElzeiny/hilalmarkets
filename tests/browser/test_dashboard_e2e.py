@@ -8,6 +8,7 @@ from playwright.sync_api import Page, expect
 from conftest import (
     assert_no_raw_traceback,
     seed_alert_proof,
+    seed_telegram_connection,
     signup,
     unique_email,
 )
@@ -142,8 +143,10 @@ def test_strategy_board_preserves_metadata_after_edit_save_reload(
     assert_no_raw_traceback(page)
 
 
-def test_approve_and_publish_executable_monitor(page: Page, base_url: str) -> None:
-    signup(page, base_url, unique_email("publish-monitor"))
+def test_approve_and_publish_executable_monitor(page: Page, base_url: str, browser_app) -> None:
+    email = signup(page, base_url, unique_email("publish-monitor"))
+    seed_telegram_connection(browser_app.database_url, email)
+    page.reload(wait_until="domcontentloaded")
     _create_executable_board(page, base_url)
     page.get_by_test_id("strategy-validate").click()
     expect(page.locator("#builder-validation-status")).to_contain_text(

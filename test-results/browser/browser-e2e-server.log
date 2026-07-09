@@ -1,191 +1,43 @@
-INFO:     Started server process [18160]
+INFO:     Started server process [23464]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:41350 (Press CTRL+C to quit)
-INFO:     127.0.0.1:45933 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32141 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32141 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56830 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:17883 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16641 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:20122 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:33955 - "GET /signup/verify?message=code_sent&email=dashboard-load%2Bc648a5171c%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:33955 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:20122 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:20122 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33955 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:20122 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50157 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50157 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63465 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7433 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36692 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:30287 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37164 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37164 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:37164 - "GET /signup/verify?message=code_sent&email=prompt-coverage%2B6f4be17e56%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37164 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:37164 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:30287 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37164 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37164 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7433 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7433 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7433 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7433 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37164 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7433 - "POST /api/v1/dashboard/strategies/interpret HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43495 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43495 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13763 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:18495 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43659 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10088 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:24980 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43659 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:43659 - "GET /signup/verify?message=code_sent&email=provider-required%2B93e858e1e1%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43659 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:43659 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43659 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10088 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43659 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10088 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10088 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10088 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10088 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43659 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59826 - "POST /api/v1/dashboard/strategies/interpret HTTP/1.1" 200 OK
-INFO:     127.0.0.1:23163 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:23163 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:20163 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56656 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:27312 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:8791 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:27312 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:27312 - "GET /signup/verify?message=code_sent&email=metadata-preservation%2Bcab14d12e3%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:27312 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:27312 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:27312 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:8791 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56656 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56656 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "POST /api/v1/dashboard/strategies/interpret HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "POST /api/v1/dashboard/strategies HTTP/1.1" 201 Created
-INFO:     127.0.0.1:16859 - "GET /dashboard/strategies/523cf6c5-50e3-4daf-a64d-cc7582101354/builder HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16859 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56656 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56656 - "POST /api/v1/dashboard/cockpit/strategies/validate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52657 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52657 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:2453 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65291 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:1583 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:49891 - "GET /signup/verify?message=code_sent&email=publish-monitor%2B00bfc6e54c%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:49891 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "POST /api/v1/dashboard/strategies/interpret HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "POST /api/v1/dashboard/cockpit/strategies/validate HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "POST /api/v1/dashboard/strategies HTTP/1.1" 201 Created
-INFO:     127.0.0.1:62400 - "POST /api/v1/dashboard/strategies/d9dd9e8d-946f-4b90-b243-a50b8be7798f/publish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "GET /dashboard/strategies/new?message=monitor_published&t=1783555603222 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62400 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49891 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16677 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16677 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:27715 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50290 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48439 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43675 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:38738 - "GET /signup/verify?message=code_sent&email=quick-scan%2B09b94b0cd8%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:38738 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43675 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43675 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "GET /dashboard/scan-now HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38738 - "POST /api/v1/dashboard/light-scan HTTP/1.1" 201 Created
-INFO:     127.0.0.1:37709 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37709 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:31852 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47790 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:31140 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9929 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:24114 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9929 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:9929 - "GET /signup/verify?message=code_sent&email=proof-receipt%2B428e39cd5e%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9929 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:9929 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9929 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:24114 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9929 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:31140 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:31140 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:31140 - "GET /api/v1/dashboard/cockpit/alerts/d114ea75-9b49-4b5f-930d-7572b0be853f/proof HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32402 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32402 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56555 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:11970 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:17260 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43852 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43852 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:43852 - "GET /signup/verify?message=code_sent&email=monitor-lifecycle-smoke%2B8bb1617f11%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43852 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:43852 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43852 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43852 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43852 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /dashboard/lifecycles HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62743 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50060 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60088 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38699 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56496 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56496 - "POST /signup HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:56496 - "GET /signup/verify?message=code_sent&email=integrations-smoke%2B74cc3bdd8c%40example.com HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56496 - "POST /signup/verify HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:56496 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56496 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56496 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /dashboard/integrations HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60819 - "GET /api/v1/dashboard/integrations HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56496 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
+INFO:     Uvicorn running on http://127.0.0.1:53160 (Press CTRL+C to quit)
+INFO:     127.0.0.1:62454 - "GET /health HTTP/1.1" 200 OK
+Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  File "C:\Users\amroe\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\amroe\AppData\Local\Programs\Python\Python312\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+INFO:     127.0.0.1:6919 - "GET /signup HTTP/1.1" 200 OK
+INFO:     127.0.0.1:6919 - "GET /static/styles.css?v=20260625-launch-polish HTTP/1.1" 200 OK
+INFO:     127.0.0.1:18788 - "GET /static/dashboard.css?v=20260625-launch-polish HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40558 - "GET /static/traceedge-polish.css?v=20260626-guidebook-board HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37664 - "GET /static/logo_purple.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34574 - "GET /static/theme.js?v=20260625-launch-polish HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /static/smooth-scroll.js?v=20260627-native-scroll HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "POST /signup HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:37194 - "GET /signup/verify?message=code_sent&email=publish-monitor%2B33d86ec662%40example.com HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "POST /signup/verify HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:37194 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34574 - "GET /static/traceedge-polish.css?v=20260627-sidebar-cockpit HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /static/dashboard.css?v=20260627-sidebar-rail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /static/dashboard.js?v=20260627-sidebar-tv HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34574 - "GET /static/vendor/lightweight-charts.standalone.production.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /api/v1/dashboard/integrations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34574 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34574 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
+INFO:     127.0.0.1:18788 - "GET /dashboard/strategies/new HTTP/1.1" 200 OK
+INFO:     127.0.0.1:18788 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "POST /api/v1/dashboard/strategies/interpret HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "POST /api/v1/dashboard/cockpit/strategies/validate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "POST /api/v1/dashboard/strategies HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37194 - "GET /api/v1/dashboard/integrations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "POST /api/v1/dashboard/strategies/1ee81886-48e9-4bd6-8ecf-601b99b6fee8/publish HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /dashboard/strategies/new?message=monitor_published&t=1783618398790 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37194 - "GET /api/v1/dashboard/capabilities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:18788 - "GET /api/v1/dashboard/notifications/web HTTP/1.1" 200 OK
