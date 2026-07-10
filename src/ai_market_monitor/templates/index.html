@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Describe your crypto setup once. Monitor spot markets, follow setup lifecycles, and receive explainable alerts.">
   <title>TraceEdge | See your setup forming</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script>document.documentElement.dataset.theme="light";localStorage.setItem("amm-theme","light");</script>
@@ -235,7 +236,7 @@
     </section>
 
     <section class="fixed-section section-shell">
-      <div class="channels-grid"><div><p class="fixed-eyebrow">Alerts where they belong</p><h2 class="section-title">Start quickly in Telegram. Go deeper on the web.</h2><p>Telegram is the fastest path to onboarding and immediate alerts. The web dashboard supports detailed strategy editing, proof tables, analytics and billing.</p><div style="margin-top:32px"><a class="fixed-button fixed-button-primary join-trace-button" href="{{ telegram_url }}">Join the trace <img class="button-arrow" src="https://api.iconify.design/lucide:arrow-right.svg?color=%23F7F3FF" alt="" aria-hidden="true"></a></div></div><div class="channel-cards"><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/telegram/26A5E4" alt=""></span><h3>Telegram</h3><p>Primary onboarding, alerts and quick setup status.</p></article><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/discord/5865F2" alt=""></span><h3>Discord</h3><p>Optional alert channels, community and role management.</p></article><article class="dark-card" style="grid-column:1/-1"><span class="dark-card-icon">W</span><h3>Web dashboard</h3><p>Advanced rules, analytics, lifecycles and account controls.</p></article></div></div>
+      <div class="channels-grid"><div><p class="fixed-eyebrow">Alerts where they belong</p><h2 class="section-title">Start quickly in Telegram. Go deeper on the web.</h2><p>Telegram is the fastest path to onboarding and immediate alerts. The web dashboard supports detailed strategy editing, proof tables, analytics and billing.</p><div style="margin-top:32px"><a class="fixed-button fixed-button-primary join-trace-button" href="{{ telegram_url }}">Join the trace <img class="button-arrow" src="https://api.iconify.design/lucide:arrow-right.svg?color=%23F7F3FF" alt="" aria-hidden="true"></a></div></div><div class="channel-cards"><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/telegram/26A5E4" alt=""></span><h3>Telegram</h3><p>Primary onboarding, alerts and quick setup status.</p></article><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/discord/5865F2" alt=""></span><h3>Discord</h3><p>Optional alert channels, community and role management.</p></article><article class="dark-card" style="grid-column:1/-1"><span class="dark-card-icon"><img src="{{ url_for('static', path='/favicon.png') }}" alt="" aria-hidden="true"></span><h3>Web dashboard</h3><p>Advanced rules, analytics, lifecycles and account controls.</p></article></div></div>
     </section>
 
     <section class="fixed-section section-shell pricing" id="pricing">

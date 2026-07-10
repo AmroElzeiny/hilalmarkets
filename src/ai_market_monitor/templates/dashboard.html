@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TraceEdge | {{ title }}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script>document.documentElement.dataset.theme=localStorage.getItem("amm-theme")||"{{ 'light' if dashboard_theme == 'light' else 'dark' }}";</script>
@@ -794,6 +795,20 @@
       margin: auto !important;
       justify-self: center !important;
       align-self: center !important;
+    }
+
+    .dash-brand .favicon-brand-mark {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      overflow: hidden;
+      padding: 0 !important;
+    }
+
+    .dash-brand .favicon-brand-mark img {
+      width: 34px;
+      height: 34px;
+      object-fit: contain;
     }
 
     body.sidebar-collapsed .dash-brand .brand-name,
@@ -2355,7 +2370,7 @@
   <aside class="dash-sidebar" data-dashboard-sidebar>
     <div class="sidebar-head">
       <a class="brand dash-brand" href="/dashboard" aria-label="TraceEdge dashboard">
-        <span class="brand-mark" aria-hidden="true">AM</span>
+        <span class="brand-mark favicon-brand-mark" aria-hidden="true"><img src="{{ url_for('static', path='/favicon.png') }}" alt=""></span>
         <img class="sidebar-logo-full" src="{{ url_for('static', path='/logo_purple.svg') }}" alt="TraceEdge">
         <span class="brand-name">TraceEdge</span>
       </a>
