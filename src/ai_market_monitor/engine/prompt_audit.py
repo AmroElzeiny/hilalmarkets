@@ -113,6 +113,15 @@ _MEANINGFUL_HINTS = {
     "dropped",
     "gained",
     "lost",
+    "head and shoulders",
+    "head & shoulders",
+    "head and sholders",
+    "head & sholders",
+    "neckline",
+    "double top",
+    "double bottom",
+    "triangle",
+    "chart pattern",
 }
 
 _FILLER_WORDS = {
@@ -332,7 +341,14 @@ def split_prompt_fragments(prompt: str) -> list[PromptFragment]:
             PromptFragment(
                 original=original,
                 normalized=normalized,
-                meaningful=_is_meaningful(normalized),
+                # Clarification answers are server-authored provenance records. They remain in
+                # the compiler input so a selected timeframe/threshold can affect the draft,
+                # but they are not fresh user instructions and must not be coverage-audited as
+                # standalone market mechanics.
+                meaningful=(
+                    _is_meaningful(normalized)
+                    and not _is_structured_clarification_answer(normalized)
+                ),
             )
         )
     return fragments or [
@@ -490,6 +506,21 @@ def _extract_intents(fragments: list[PromptFragment]) -> list[str]:
             intents.add("volume_liquidity")
         if any(word in text for word in ("candle", "doji", "hammer", "engulfing")):
             intents.add("candle_pattern")
+        if any(
+            phrase in text
+            for phrase in (
+                "head and shoulders",
+                "head & shoulders",
+                "head and sholders",
+                "head & sholders",
+                "neckline",
+                "double top",
+                "double bottom",
+                "triangle",
+                "chart pattern",
+            )
+        ):
+            intents.add("technical_pattern")
         if any(word in text for word in ("session", "midnight", "new york", "london")):
             intents.add("session_timing")
         if any(word in text for word in ("btc", "eth/btc", "alts outperforming")):
@@ -499,6 +530,32 @@ def _extract_intents(fragments: list[PromptFragment]) -> list[str]:
 
 def _is_meaningful(normalized: str) -> bool:
     if not normalized:
+        return False
+    routing_context = re.sub(
+        r"\b(?:alert|alerts|alerted|notify|notification|notifications|me|on|the|a|an|"
+        r"chart|timeframe|time frame|at|using|use|trigger)\b",
+        " ",
+        normalized,
+    )
+    routing_tokens = set(routing_context.split())
+    if routing_tokens and routing_tokens.issubset(
+        {
+            "1m",
+            "3m",
+            "5m",
+            "15m",
+            "30m",
+            "1h",
+            "2h",
+            "4h",
+            "6h",
+            "8h",
+            "12h",
+            "1d",
+            "close",
+            "intrabar",
+        }
+    ):
         return False
     tokens = set(normalized.split())
     if tokens and tokens.issubset(_FILLER_WORDS):
@@ -510,6 +567,16 @@ def _is_meaningful(normalized: str) -> bool:
 
 def _normalize(value: str) -> str:
     return " ".join(value.casefold().replace("-", " ").split())
+
+
+def _is_structured_clarification_answer(value: str) -> bool:
+    return bool(
+        re.match(
+            r"^clarification answer for [a-z0-9_]+\s*:",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _overlaps(left: str, right: str) -> bool:

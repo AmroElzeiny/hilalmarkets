@@ -1,29 +1,5 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TraceEdge | {{ title }}</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
-  <script>document.documentElement.dataset.theme="light";localStorage.setItem("amm-theme","light");</script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-purple">
-  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260625-purple-shell">
-  <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
-  <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-purple"></script>
-  <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
-</head>
-<body class="auth-body theme-light">
-  <main class="auth-card">
-    <div class="auth-card-head">
-      <a class="brand" href="/"><span class="brand-mark">AM</span><span>TraceEdge</span></a>
-      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true"><span class="theme-toggle-track"><i></i></span></button>
-    </div>
-    <h1>{{ title }}</h1>
-    {% if message %}<div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>{% endif %}
-    {% if error %}<div class="dash-flash error">{{ error.replace('_', ' ').title() }}</div>{% endif %}
-    <p>Payment confirmation comes from the billing provider webhook. If your plan does not update immediately, check again shortly.</p>
-    <a class="button button-primary" href="/dashboard/billing">Back to Billing</a>
-  </main>
-</body>
-</html>
+{% extends "hilal/base_dashboard.html" %}
+{% block content %}
+<section class="page-header"><div><span class="eyebrow">Plan &amp; Billing</span><h1>{{ title }}</h1><p>Payment status is confirmed by the billing provider webhook and reflected in your server-side entitlement.</p></div></section>
+<section class="panel" style="max-width:760px"><div class="empty-state"><div class="empty-icon"><span data-icon="{{ 'check' if message else 'alert' }}" data-icon-class="icon-lg"></span></div><h2>{{ message.replace('_', ' ').title() if message else error.replace('_', ' ').title() }}</h2><p>{{ 'Your billing request was recorded. Your plan updates only after verified provider confirmation.' if message else 'The billing request could not be completed. No entitlement was changed.' }}</p><a class="btn btn-primary" href="/dashboard/billing">Back to Plan &amp; Billing</a></div></section>
+{% endblock %}

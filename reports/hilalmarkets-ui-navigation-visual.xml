@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="21.440" timestamp="2026-07-14T22:24:32.095004+03:00" hostname="WIN-FOVCL5KBJ2M"><testcase classname="tests.browser.test_dashboard_e2e" name="test_screened_market_passport_and_mobile_visual_qa" time="21.373" /></testsuite></testsuites>

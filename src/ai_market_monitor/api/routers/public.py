@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
@@ -16,7 +17,7 @@ templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 router = APIRouter(tags=["public"])
 
 
-def _public_context(settings: Settings) -> dict[str, str]:
+def _public_context(settings: Settings) -> dict[str, object]:
     telegram_username = (
         settings.telegram_bot_username.lstrip("@").strip()
         if settings.telegram_bot_username
@@ -29,6 +30,8 @@ def _public_context(settings: Settings) -> dict[str, str]:
         "telegram_url": telegram_url,
         "discord_url": "/signup?message=discord_start",
         "dashboard_entry_url": "/dashboard-entry",
+        "support_email": settings.support_email,
+        "plans": PLAN_DEFINITIONS,
     }
 
 
@@ -39,7 +42,7 @@ async def landing_page(
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
-        name="index.html",
+        name="hilal/index.html",
         context=_public_context(settings),
     )
 
@@ -60,7 +63,7 @@ async def dashboard_entry(
 async def health(settings: Settings = Depends(get_settings)) -> dict[str, str]:
     return {
         "status": "ok",
-        "service": "traceedge",
+        "service": "hilalmarkets",
         "environment": settings.app_env,
     }
 
@@ -92,7 +95,7 @@ async def deep_health(
     status = "ok" if all(value == "ok" for value in checks.values()) else "degraded"
     return {
         "status": status,
-        "service": "traceedge",
+        "service": "hilalmarkets",
         "environment": settings.app_env,
         "checks": checks,
     }

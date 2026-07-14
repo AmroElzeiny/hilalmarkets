@@ -226,6 +226,35 @@ async def test_new_prompt_aliases_map_to_visual_condition_keys():
     }.issubset(keys)
 
 
+async def test_clarification_provenance_does_not_block_prompt_coverage():
+    preview = await RuleBasedStrategyInterpreter().interpret(
+        GuidedSetupRequest(
+            exchange="binance",
+            quote_currency="USDT",
+            timeframe="1d",
+            setup_mode="free_text",
+            setup_text=(
+                "RSI must be above 50 when the trigger occurs\n"
+                "Clarification answer for rsi_period: 14 (default)\n"
+                "Clarification answer for rsi_timeframe: Use the trigger timeframe"
+            ),
+            trigger_mode="candle_close",
+            delivery_channels=["telegram"],
+        )
+    )
+    rsi_rule = next(
+        condition
+        for condition in preview.strategy.conditions.children
+        if condition.left.name == "rsi"
+    )
+    assert rsi_rule.timeframe == "1d"
+    assert not any(
+        issue.code == "prompt_fragment_unclassified"
+        for issue in preview.unsupported_conditions
+    )
+    assert preview.raw_metadata["prompt_coverage_report"]["activation_blocked"] is False
+
+
 async def test_vague_aliases_are_deterministic_and_do_not_false_match_macro_terms():
     interpreter = RuleBasedStrategyInterpreter()
     guided = dict(
@@ -605,8 +634,8 @@ def test_risk_and_persisted_runtime_conditions_execute_inside_same_tree():
 
 
 def test_all_registered_capabilities_are_executable_and_schema_valid():
-    assert len(all_capabilities()) == 492
-    assert len(executable_capabilities()) == 492
+    assert len(all_capabilities()) == 502
+    assert len(executable_capabilities()) == 502
     assert unsupported_capabilities() == ()
     for capability in executable_capabilities():
         ConditionRule.model_validate(condition_template(capability))

@@ -3,165 +3,54 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TraceEdge | {{ title }}</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
-  <script>document.documentElement.dataset.theme="light";localStorage.setItem("amm-theme","light");</script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-launch-polish">
-  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260625-launch-polish">
-  <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
-  <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-launch-polish"></script>
-  <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
+  <meta name="description" content="Secure access to HilalMarkets screened market intelligence and guided monitoring.">
+  <title>{{ title }} · HilalMarkets</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-prototype">
   <style>
-    .auth-layout{
-      align-items:stretch;
-      width:min(1360px,calc(100% - 32px))!important;
-      grid-template-columns:minmax(0,3fr) minmax(260px,1fr)!important;
-      gap:clamp(18px,3vw,32px)!important;
-    }
-    .auth-card,.auth-side-panel{
-      border-radius:34px!important;
-      box-shadow:0 28px 90px rgba(0,0,0,.28)!important;
-    }
-    .auth-card{
-      position:relative;
-      overflow:hidden;
-      min-height:min(760px,calc(100vh - 48px));
-      background:
-        radial-gradient(circle at 100% 0,rgba(196,181,253,.18),transparent 18rem),
-        var(--trace-surface)!important;
-    }
-    .auth-card::after{
-      content:"";
-      position:absolute;
-      right:clamp(18px,3vw,42px);
-      bottom:clamp(18px,3vw,42px);
-      width:min(240px,28vw);
-      height:min(240px,28vw);
-      border-radius:50%;
-      background:
-        radial-gradient(circle at 38% 34%,rgba(196,181,253,.40),transparent 18%),
-        radial-gradient(circle at 60% 58%,rgba(139,92,246,.32),transparent 38%),
-        transparent;
-      filter:blur(.2px);
-      opacity:.58;
-      pointer-events:none;
-    }
-    .auth-card>*{
-      position:relative;
-      z-index:1;
-    }
-    .auth-logo{
-      display:block;
-      width:160px;
-      max-width:42vw;
-      height:auto;
-    }
-    .auth-title-block h1{font-weight:500!important;letter-spacing:-.04em}
-    .auth-title-block p{line-height:1.6}
-    .auth-form label{
-      padding:12px;
-      border:1px solid rgba(196,181,253,.16);
-      border-radius:18px;
-      background:rgba(255,255,255,.035);
-      transition:border-color .2s ease,transform .2s ease,background .2s ease;
-    }
-    .auth-form label:focus-within{
-      border-color:rgba(196,181,253,.50);
-      background:rgba(139,92,246,.10);
-      transform:translateY(-1px);
-    }
-    .auth-side-panel{
-      position:relative;
-      overflow:hidden;
-      display:grid;
-      align-content:center;
-      gap:22px;
-      background:
-        radial-gradient(circle at 75% 15%,rgba(196,181,253,.26),transparent 18rem),
-        linear-gradient(145deg,rgba(139,92,246,.16),rgba(255,255,255,.035)),
-        var(--trace-surface)!important;
-    }
-    .auth-side-panel::before{
-      content:"";
-      position:absolute;
-      width:220px;
-      height:220px;
-      right:-70px;
-      top:-70px;
-      border-radius:50%;
-      background:radial-gradient(circle,rgba(196,181,253,.34),transparent 68%);
-      pointer-events:none;
-    }
-    .auth-side-panel h2{
-      max-width:520px;
-      margin-right:38px!important;
-      font-size:clamp(32px,4vw,54px);
-      line-height:1.02;
-      font-weight:500!important;
-      letter-spacing:-.045em;
-    }
-    .auth-form label,
-    .auth-switch,
-    .auth-side-list span{
-      font-weight:520!important;
-    }
-    .auth-side-list{
-      display:grid;
-      gap:12px;
-      margin-right:38px!important;
-    }
-    .auth-side-list span{
-      position:relative;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:14px 16px;
-      border:1px solid rgba(196,181,253,.18);
-      border-radius:18px;
-      background:rgba(255,255,255,.045);
-      transition:transform .2s ease,border-color .2s ease;
-    }
-    .auth-side-list span:hover{
-      transform:translateX(4px);
-      border-color:rgba(196,181,253,.44);
-    }
-    .auth-side-list span img{
-      width:28px;
-      height:28px;
-      flex:0 0 auto;
-      padding:6px;
-      border-radius:10px;
-      background:linear-gradient(135deg,#c4b5fd,#8b5cf6);
-      box-shadow:0 12px 28px rgba(139,92,246,.28);
-    }
-    html[data-theme="light"] .auth-form label{background:#fff;color:#111114}
-    html[data-theme="light"] .auth-side-panel{background:linear-gradient(145deg,#fff,rgba(196,181,253,.18))!important}
-    .auth-alternative-actions .text-link[href="/reset-password"]{
-      color:#17131f!important;
-      font-weight:520!important;
-    }
-    @media(max-width:980px){
-      .auth-layout{grid-template-columns:1fr!important}
-      .auth-card{min-height:auto}
-      .auth-card::after{width:180px;height:180px;opacity:.34}
-      .auth-side-panel h2,
-      .auth-side-list{margin-right:0!important}
-    }
+    .auth-production-form{width:min(100%,520px)}
+    .auth-production-form>p{margin-top:8px}
+    .auth-fields{display:grid;gap:13px;margin-top:24px}
+    .auth-fields label{display:grid;gap:7px;color:var(--ink);font-size:.84rem;font-weight:650}
+    .auth-fields input{width:100%;min-height:48px;padding:0 15px;border:1px solid var(--line);border-radius:14px;background:var(--white);color:var(--ink);font:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
+    .auth-fields input:focus{border-color:var(--emerald-600);box-shadow:0 0 0 4px rgba(31,139,116,.11)}
+    .auth-fields small{color:var(--muted);font-weight:500}
+    .auth-fields .btn{width:100%;margin-top:4px}
+    .auth-alternative-actions{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:14px}
+    .auth-switch{margin-top:20px;text-align:center;color:var(--muted)}
+    .auth-switch a,.text-link{color:var(--emerald-800);font-weight:700}
+    .dash-flash{margin:16px 0;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:var(--emerald-50);color:var(--emerald-900);font-size:.86rem}
+    .dash-flash.error,.auth-inline-error{background:#fff2ef;border-color:#efc5bc;color:#9c3528}
+    .auth-inline-error{padding:10px 12px;border:1px solid #efc5bc;border-radius:10px;font-size:.82rem}
+    .auth-brand .logo small{color:#9bc8bb}
+    .auth-brand-copy{margin-top:90px;max-width:560px}
+    .auth-brand-copy h1{font-size:clamp(3rem,5vw,4.4rem);color:#fff}
+    .auth-brand-copy h1 span{color:#d2af63}
+    .auth-brand-copy p{font-size:1.05rem}
+    @media(max-width:900px){.auth-form-wrap{padding:34px 20px}.auth-production-form{max-width:560px}}
   </style>
 </head>
-<body class="auth-body theme-light">
-  <main class="auth-layout">
-    <section class="auth-card">
-      <div class="auth-card-head">
-        <a class="brand" href="/" aria-label="TraceEdge home"><img class="auth-logo" src="{{ url_for('static', path='/logo_purple.svg') }}" alt="TraceEdge"></a>
-        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true"><span class="theme-toggle-track"><i></i></span></button>
+<body>
+  <div class="auth-shell">
+    <section class="auth-brand">
+      <a class="logo" href="/"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt=""><span>HilalMarkets<small>Screened market intelligence</small></span></a>
+      <div class="auth-brand-copy">
+        <span class="eyebrow" style="color:#9bc8bb">Screened first. Watched continuously.</span>
+        <h1>Know what fits your values.<br><span>Know when it matters.</span></h1>
+        <p>Start with a disclosed Sharia methodology, choose the market behavior you care about, and keep every decision in your hands.</p>
       </div>
-      <div class="auth-title-block">
-        <p class="eyebrow">Secure dashboard access</p>
+      <div class="auth-visual">
+        <div class="auth-card-float one"><div class="row-between"><div class="coin"><div class="coin-logo" style="background:#222d48">SOL</div><div><strong>SOL/USDT</strong><small style="display:block;color:#a9c2bb">Breaking a recent high</small></div></div><span class="badge badge-dark">Eligible</span></div><div class="readiness"><strong style="color:white">80%</strong><span style="color:#b9cec8">ready</span></div><div class="progress"><span data-progress="80"></span></div></div>
+        <div class="auth-card-float two"><span class="kicker">Evidence at every step</span><div class="row" style="margin-top:10px"><span data-icon="passport" data-icon-class="icon"></span><strong style="color:white">Methodology HM-01 · Reviewed</strong></div></div>
+      </div>
+    </section>
+    <main class="auth-form-wrap">
+      <div class="auth-form auth-production-form">
+        <a href="/" class="logo" style="margin-bottom:38px"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt=""><span>HilalMarkets</span></a>
+        <span class="eyebrow">{{ 'Create your account' if page in ['signup', 'signup_verify'] else 'Secure dashboard access' }}</span>
         <h1>{{ title }}</h1>
-        <p>Manage monitors, lifecycles, billing, and alert settings from one calm workspace.</p>
-      </div>
+        <p>{{ 'Choose your screening policy and create your first Watch Plan.' if page in ['signup', 'signup_verify'] else 'Return to your screened market, Watch Plans, and latest evidence.' }}</p>
     {% if message == 'code_sent' and page == 'signup_verify' %}
       <div class="dash-flash success">A six-digit code was sent to your email. Enter it below to create your dashboard account.</div>
     {% elif message == 'code_sent' %}
@@ -171,10 +60,10 @@
     {% endif %}
     {% if error == 'account_exists' %}
       <div class="dash-flash error">This email already has an account. Please sign in instead.</div>
-      <p><a class="button button-primary" href="/signin{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign In</a></p>
+      <p><a class="btn btn-primary" href="/signin{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign In</a></p>
     {% elif error == 'account_not_registered' %}
       <div class="dash-flash error">This email is not registered. Please sign up first.</div>
-      <p><a class="button button-primary" href="/signup{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign Up</a></p>
+      <p><a class="btn btn-primary" href="/signup{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign Up</a></p>
     {% elif error == 'password_mismatch' %}
       <div class="dash-flash error">Password and repeat password must match.</div>
     {% elif error == 'invalid_password' %}
@@ -200,7 +89,7 @@
       <form
         method="post"
         action="/{{ page }}"
-        class="auth-form"
+        class="auth-fields"
         data-password-form="{{ page }}"
         data-testid="{{ 'signup-form' if page == 'signup' else 'login-form' }}"
       >
@@ -217,42 +106,42 @@
           <label>Repeat password <input name="repeat_password" type="password" required minlength="6" autocomplete="new-password" data-testid="auth-repeat-password"></label>
           <div class="auth-inline-error" data-password-error hidden>Passwords must match.</div>
         {% endif %}
-        <button class="button button-primary" type="submit" data-testid="auth-submit">{{ 'Send Verification Code' if page == 'signup' else 'Sign In' }}</button>
+        <button class="btn btn-primary" type="submit" data-testid="auth-submit">{{ 'Send Verification Code' if page == 'signup' else 'Sign In' }}</button>
       </form>
       {% if page == 'signin' %}
         <div class="auth-alternative-actions">
-          <a class="button button-secondary" href="/signin/code{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Login with one-time code</a>
+          <a class="btn btn-secondary" href="/signin/code{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Login with one-time code</a>
           <a class="text-link" href="/reset-password">Reset password</a>
         </div>
       {% endif %}
     {% elif page == 'signup_verify' %}
-      <form method="post" action="/signup/verify" class="auth-form">
+      <form method="post" action="/signup/verify" class="auth-fields">
         <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
         <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" autofocus></label>
         {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
-        <button class="button button-primary" type="submit">Verify and create account</button>
+        <button class="btn btn-primary" type="submit">Verify and create account</button>
       </form>
       <p class="auth-switch"><a href="/signup{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Start again</a></p>
     {% elif page == 'signin_code' %}
       {% if message == 'code_sent' or request.query_params.get('email') %}
-        <form method="post" action="/signin/code/verify" class="auth-form">
+        <form method="post" action="/signin/code/verify" class="auth-fields">
           <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
           <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label>
           {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
-          <button class="button button-primary" type="submit">Verify and sign in</button>
+          <button class="btn btn-primary" type="submit">Verify and sign in</button>
         </form>
         <p class="auth-switch"><a href="/signin/code">Request another code</a></p>
       {% else %}
-        <form method="post" action="/signin/code/request" class="auth-form">
+        <form method="post" action="/signin/code/request" class="auth-fields">
           <label>Email <input name="email" type="email" required autocomplete="email"></label>
           {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
-          <button class="button button-primary" type="submit">Send one-time code</button>
+          <button class="btn btn-primary" type="submit">Send one-time code</button>
         </form>
       {% endif %}
       <p class="auth-switch"><a href="/signin">Use password instead</a></p>
     {% elif page == 'reset_password' %}
       {% if message == 'code_sent' or request.query_params.get('email') %}
-        <form method="post" action="/reset-password/verify" class="auth-form" data-password-form="reset">
+        <form method="post" action="/reset-password/verify" class="auth-fields" data-password-form="reset">
           <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
           <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label>
           <label>New password
@@ -261,12 +150,12 @@
           </label>
           <label>Repeat new password <input name="repeat_password" type="password" required minlength="6" autocomplete="new-password"></label>
           <div class="auth-inline-error" data-password-error hidden>Passwords must match.</div>
-          <button class="button button-primary" type="submit">Set new password</button>
+          <button class="btn btn-primary" type="submit">Set new password</button>
         </form>
       {% else %}
-        <form method="post" action="/reset-password/request" class="auth-form">
+        <form method="post" action="/reset-password/request" class="auth-fields">
           <label>Email <input name="email" type="email" required autocomplete="email"></label>
-          <button class="button button-primary" type="submit">Send reset code</button>
+          <button class="btn btn-primary" type="submit">Send reset code</button>
         </form>
       {% endif %}
       <p class="auth-switch"><a href="/signin">Back to sign in</a></p>
@@ -277,16 +166,11 @@
     {% elif page == 'signin' %}
       <p class="auth-switch">New here? <a href="/signup{{ link_suffix }}">Create an account</a></p>
     {% endif %}
-    </section>
-    <aside class="auth-side-panel" aria-label="TraceEdge access summary">
-      <h2>Proof-led market monitoring.</h2>
-      <div class="auth-side-list">
-        <span><img src="https://api.iconify.design/lucide:badge-check.svg?color=%23ffffff" alt="" aria-hidden="true">AI interpretation requires your approval.</span>
-        <span><img src="https://api.iconify.design/lucide:scan-line.svg?color=%23ffffff" alt="" aria-hidden="true">Deterministic scanner handles market evidence.</span>
-        <span><img src="https://api.iconify.design/lucide:link-2.svg?color=%23ffffff" alt="" aria-hidden="true">Telegram, Discord, and dashboard stay linked.</span>
       </div>
-    </aside>
-  </main>
+    </main>
+  </div>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260714-prototype"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-production"></script>
   <script>
     function clearSensitiveAuthFields() {
       document

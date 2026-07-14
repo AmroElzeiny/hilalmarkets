@@ -91,7 +91,7 @@ PRIMARY_MENU = [
 
 MAIN_MENU_TEXT = (
     "🏠 Main Menu\n\n"
-    "Welcome to TraceEdge.\n\n"
+    "Welcome to HilalMarkets.\n\n"
     "📈 I monitor approved crypto spot-market conditions.\n"
     "🔄 Lifecycles show what is forming, complete, invalidated, or expired.\n"
     "🧾 Alerts include deterministic proof.\n\n"
@@ -1120,7 +1120,7 @@ class TelegramBotService:
             else False
         )
         text = (
-            "Welcome to the free TraceEdge starter screen.\n\n"
+            "Welcome to the free HilalMarkets starter screen.\n\n"
             "Use the free/trial path to create a monitor, preview how proof receipts work, "
             "and start monitoring without automatic trading.\n\n"
             "You stay responsible for every trading decision."
@@ -1142,7 +1142,7 @@ class TelegramBotService:
 
     def _about_text(self) -> str:
         return (
-            "ℹ️ About TraceEdge\n\n"
+            "ℹ️ About HilalMarkets\n\n"
             "📌 What it does:\n"
             "- Monitors approved crypto spot-market conditions.\n"
             "- Tracks setup lifecycles from forming to complete, invalidated, or expired.\n"
@@ -3180,7 +3180,7 @@ class TelegramBotService:
             text=(
                 "🔗 Telegram connection\n\n"
                 f"Connect this Telegram account to {visible_email}?\n\n"
-                "After confirmation, this Telegram chat can receive TraceEdge notifications."
+                "After confirmation, this Telegram chat can receive HilalMarkets notifications."
             ),
             buttons=[
                 TelegramButton("✅ Yes, connect", "telegram_link:confirm"),
@@ -3202,7 +3202,7 @@ class TelegramBotService:
             text=(
                 "Telegram connection\n\n"
                 f"Connect this Telegram account to {visible_email}?\n\n"
-                "After confirmation, this Telegram chat can receive TraceEdge notifications."
+                "After confirmation, this Telegram chat can receive HilalMarkets notifications."
             ),
             buttons=[
                 TelegramButton("Yes, connect", "telegram_link:confirm"),

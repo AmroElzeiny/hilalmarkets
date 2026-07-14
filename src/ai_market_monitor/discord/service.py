@@ -230,7 +230,7 @@ class DiscordConnectionService:
         if existing and existing.user_id != user.id:
             raise DiscordError(
                 "discord_identity_in_use",
-                "That Discord account is already connected to another TraceEdge user.",
+                "That Discord account is already connected to another HilalMarkets user.",
             )
         identity = IdentityInput(
             provider=IdentityProvider.DISCORD,
@@ -490,7 +490,7 @@ class DiscordAlertService:
         total_count = passed_count + len(presentation.missing_conditions)
         description = (
             f"Research match confirmed: {passed_count}/{total_count} condition checks passed. "
-            "TraceEdge does not execute trades."
+            "HilalMarkets does not execute trades."
         )
         actions = [
             DiscordAction(
@@ -1233,7 +1233,7 @@ class DiscordModerationService:
     @staticmethod
     def official_support_notice() -> str:
         return (
-            "Official TraceEdge support will never ask for seed phrases, "
+            "Official HilalMarkets support will never ask for seed phrases, "
             "wallet private keys, "
             "exchange withdrawal permissions, or remote desktop access."
         )

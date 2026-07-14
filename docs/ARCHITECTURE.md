@@ -1,4 +1,4 @@
-# Architecture Decision Record: Initial Platform Foundation
+# HilalMarkets Architecture
 
 Date: 2026-06-15
 

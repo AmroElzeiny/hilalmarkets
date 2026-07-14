@@ -21,16 +21,20 @@ class AuthEmailService:
 
     async def send_code(self, *, recipient: str, code: str, purpose: str) -> None:
         subjects = {
-            "login": "Your TraceEdge login code",
-            "password_reset": "Your TraceEdge password reset code",
-            "signup": "Verify your TraceEdge email",
-            "system_brain": "Your TraceEdge System Brain access code",
+            "login": "Your HilalMarkets login code",
+            "password_reset": "Your HilalMarkets password reset code",
+            "signup": "Verify your HilalMarkets email",
+            "system_brain": "Your HilalMarkets System Brain access code",
         }
-        subject = subjects.get(purpose, "Your TraceEdge verification code")
+        subject = subjects.get(purpose, "Your HilalMarkets verification code")
+        ttl_minutes = (
+            self.settings.system_brain_otp_ttl_minutes
+            if purpose == "system_brain"
+            else self.settings.auth_code_ttl_minutes
+        )
         body = (
-            f"Your TraceEdge verification code is {code}.\n\n"
-            f"It expires in "
-            f"{self.settings.system_brain_otp_ttl_minutes if purpose == 'system_brain' else self.settings.auth_code_ttl_minutes} minutes. "
+            f"Your HilalMarkets verification code is {code}.\n\n"
+            f"It expires in {ttl_minutes} minutes. "
             "If you did not request this code, you can ignore this email."
         )
         if self.settings.email_adapter == "memory":
@@ -74,10 +78,10 @@ class AuthEmailService:
         screenshots: list[tuple[str, str, bytes]],
     ) -> None:
         subject = " ".join(subject.split())[:180] or "Support request"
-        email_subject = f"TraceEdge support ticket: {subject}"
+        email_subject = f"HilalMarkets support ticket: {subject}"
         context_json = json.dumps(context, ensure_ascii=False, indent=2, default=str)
         body = (
-            "A new TraceEdge support ticket was created.\n\n"
+            "A new HilalMarkets support ticket was created.\n\n"
             f"Ticket ID: {ticket_id}\n"
             f"User ID: {user_id}\n"
             f"Requester email: {requester_email or 'not provided'}\n"

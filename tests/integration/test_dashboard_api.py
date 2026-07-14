@@ -189,8 +189,8 @@ async def test_dashboard_capabilities_endpoint_exposes_registry_and_templates(te
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["counts"]["total"] == 492
-    assert payload["counts"]["executable"] == 492
+    assert payload["counts"]["total"] == 502
+    assert payload["counts"]["executable"] == 502
     assert payload["counts"]["recognized_not_executable"] == 0
     assert len(payload["builtin_templates"]) >= 20
     assert any(item["key"] == "time_window" for item in payload["items"])
@@ -535,7 +535,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
 
     page = await test_context["client"].get("/dashboard/lifecycles")
     assert page.status_code == 200
-    assert "One setup. A complete lifecycle." in page.text
+    assert "Follow every market journey." in page.text
     assert "SOL/USDT" in page.text
     assert "ETH/USDT" in page.text
     assert "Expired" in page.text
@@ -1037,7 +1037,7 @@ async def test_dashboard_support_ticket_api_creates_thread_message(test_context)
     assert len(outbox) == 1
     assert outbox[0]["purpose"] == "support_ticket"
     assert outbox[0]["recipient"] == "contact@trace-edge.com"
-    assert outbox[0]["subject"] == "TraceEdge support ticket: Missing SOL alert"
+    assert outbox[0]["subject"] == "HilalMarkets support ticket: Missing SOL alert"
     assert "dashboard-support@example.com" in outbox[0]["body"]
     assert "Please investigate the 15m candle." in outbox[0]["body"]
     assert outbox[0]["attachments"][0]["filename"] == "screenshot-1.png"
@@ -1083,7 +1083,7 @@ async def test_advanced_dashboard_pages_render(test_context):
         ("/dashboard/strategies/new", "Proof &amp; Review"),
         ("/dashboard/strategies/new", "Six-Month High Breakout"),
         ("/dashboard/integrations", "Integrations"),
-        ("/dashboard/lifecycles", "One setup. A complete lifecycle."),
+        ("/dashboard/lifecycles", "Follow every market journey."),
         ("/dashboard/settings", "America/New_York"),
         ("/dashboard/settings", "modern-listbox"),
     ]:
@@ -1096,13 +1096,15 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "Latest Setups" not in dashboard.text
     assert "Strategy Cockpit" not in dashboard.text
     assert "Coverage score" in dashboard.text
-    assert "data-sidebar-toggle" in dashboard.text
+    assert "data-open-sidebar" in dashboard.text
+    assert "data-close-sidebar" in dashboard.text
     assert "sidebar-create-quick" in dashboard.text
-    assert "sidebar-logout" in dashboard.text
+    assert 'action="/logout"' in dashboard.text
     assert "data-theme-toggle" not in dashboard.text
-    assert "Activity snapshot" in dashboard.text
-    assert "Lifecycle States" in dashboard.text
-    assert "Top Symbols" in dashboard.text
+    assert "What is forming now" in dashboard.text
+    assert "Latest alert proof" in dashboard.text
+    assert "Notification channels" in dashboard.text
+    assert "Screening policy" in dashboard.text
     assert "analytics-coverage-panel" not in dashboard.text
     assert "Import or clone" not in dashboard.text
     assert "Open Setup Replay" not in dashboard.text
@@ -1114,8 +1116,8 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert removed_cockpit.status_code == 404
 
     landing = await test_context["client"].get("/")
-    assert "data-theme-toggle" in landing.text
-    assert "theme.js" in landing.text
+    assert "data-theme-toggle" not in landing.text
+    assert "theme.js" not in landing.text
 
 
 async def test_strategy_cockpit_validation_forecast_suggestion_and_preferences(test_context):
@@ -1485,7 +1487,7 @@ async def test_verified_strategy_workspace_tests_history_and_contract(test_conte
         f"/dashboard/strategies/{strategy_id}/verify"
     )
     assert page.status_code == 200
-    assert "What TraceEdge understood" in page.text
+    assert "What HilalMarkets understood" in page.text
     workspace = await test_context["client"].get(
         f"/api/v1/dashboard/strategies/{strategy_id}/verification",
         params={"version_id": version["id"]},

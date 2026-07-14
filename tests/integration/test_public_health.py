@@ -20,7 +20,7 @@ async def test_public_health_returns_service_metadata(test_context):
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "service": "traceedge",
+        "service": "hilalmarkets",
         "environment": "test",
     }
 
@@ -34,7 +34,7 @@ async def test_public_deep_health_checks_database_and_redis(test_context, monkey
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "service": "traceedge",
+        "service": "hilalmarkets",
         "environment": "test",
         "checks": {"database": "ok", "redis": "ok"},
     }

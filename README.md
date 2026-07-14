@@ -1,10 +1,10 @@
-# TraceEdge
+# HilalMarkets
 
-TraceEdge is a subscription monitoring and decision-support platform for crypto spot
-traders. Users describe a setup, approve its structured interpretation, preview it against recent
-market data, and receive explainable Telegram or Discord alerts. Version one never places trades.
+HilalMarkets is a screened-market intelligence and monitoring platform for crypto spot
+traders. Users describe a Watch Plan, approve its structured interpretation, preview it against
+recent market data, and receive evidence-backed Telegram or Discord alerts. Version one never places trades.
 
-The web Strategy Builder starts with AI Setup Chat. The server-side interviewer keeps a durable
+The web Watch Plan Builder starts with AI Setup Chat. The server-side interviewer keeps a durable
 conversation, asks for measurable definitions, compiles only into the validated strategy DSL, shows
 confidence/lint/assumption evidence, and creates an immutable approved strategy version only after
 explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
@@ -17,7 +17,7 @@ compiler, provider, scanner, ownership, entitlement, hash, approval, and activat
 in application services; the model never receives approval or activation tools. See
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
-TraceEdge also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
+HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
 persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
 and universe resolver. Missing or non-executable governance data excludes the asset; AI cannot set
 a religious status. The included development methodology is non-executable and contains no asset
@@ -25,7 +25,7 @@ conclusions. See
 [docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md)
 for architecture, deployment order, tests, and the qualified-human-review requirements.
 
-If a user confirms a candle-computable mechanic that is not in the registry, TraceEdge can create a
+If a user confirms a candle-computable mechanic that is not in the registry, HilalMarkets can create a
 user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
 tests it against the configured spot provider, independently reviews it, and requires the normal
 strategy approval flow before activation. It never executes AI-generated Python or fabricates
@@ -63,6 +63,9 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
 [docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md).
+The production page map, exact prototype asset mapping, and UI verification commands are in
+[docs/HILALMARKETS_UI_MIGRATION.md](docs/HILALMARKETS_UI_MIGRATION.md); the supplied design,
+component, UX, and QA references are preserved under [docs/hilalmarkets-ui](docs/hilalmarkets-ui/README.md).
 
 Current beta infrastructure includes idempotent scheduled scans, shared CCXT REST clients,
 deterministic proof persistence, setup lifecycle records, Telegram webhook delivery, Discord HTTP

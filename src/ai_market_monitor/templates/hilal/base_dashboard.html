@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="HilalMarkets - Sharia-screened crypto spot intelligence and guided monitoring.">
+  <title>{{ title }} · HilalMarkets</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260714-runtime">
+  <link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260714-runtime">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-prototype-final">
+  {% block page_styles %}{% endblock %}
+</head>
+<body class="dashboard-body hilal-dashboard theme-light app-body" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-testid="dashboard-root">
+  <div class="app-shell">
+    <aside class="sidebar" data-sidebar data-hilal-sidebar>
+      <div class="sidebar-head">
+        <a class="logo" href="/dashboard" aria-label="HilalMarkets home">
+          <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
+          <span>HilalMarkets<small>Screened market intelligence</small></span>
+        </a>
+        <button class="btn btn-secondary btn-icon sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close menu"><span data-icon="close" data-icon-class="icon"></span></button>
+      </div>
+
+      <nav data-testid="dashboard-nav" aria-label="Dashboard navigation">
+      <div class="nav-group">
+        <div class="nav-label">Discover</div>
+        <a class="nav-item {{ 'is-active' if page == 'home' else '' }}" href="/dashboard"><span data-icon="home" data-icon-class="icon"></span><span>Home</span></a>
+        <a class="nav-item {{ 'is-active' if page in ['screened_market', 'asset_passport'] else '' }}" href="/dashboard/market"><span data-icon="market" data-icon-class="icon"></span><span>Sharia-Screened Market</span></a>
+        <a class="nav-item {{ 'is-active' if page == 'watchlist' else '' }}" href="/dashboard/watchlist"><span data-icon="watchlist" data-icon-class="icon"></span><span>My Watchlist</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Watch</div>
+        <a class="nav-item {{ 'is-active' if page in ['watch_plans', 'strategy_builder', 'strategy_detail', 'strategy_verify', 'strategy_versions'] else '' }}" href="/dashboard/strategies"><span data-icon="radar" data-icon-class="icon"></span><span>Watch Plans</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Review</div>
+        <a class="nav-item {{ 'is-active' if page in ['activity', 'lifecycles', 'alert_proof'] else '' }}" href="/dashboard/activity"><span data-icon="activity" data-icon-class="icon"></span><span>Opportunities &amp; Evidence</span></a>
+        <a class="nav-item {{ 'is-active' if page == 'compliance' else '' }}" href="/dashboard/compliance"><span data-icon="compliance" data-icon-class="icon"></span><span>Compliance Changes</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Trust</div>
+        <a class="nav-item {{ 'is-active' if page == 'methodology' else '' }}" href="/dashboard/methodology"><span data-icon="methodology" data-icon-class="icon"></span><span>How We Screen</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Account</div>
+        <a class="nav-item {{ 'is-active' if page == 'integrations' else '' }}" href="/dashboard/integrations"><span data-icon="integrations" data-icon-class="icon"></span><span>Integrations</span></a>
+        <a class="nav-item {{ 'is-active' if page == 'billing' else '' }}" href="/dashboard/billing"><span data-icon="billing" data-icon-class="icon"></span><span>Plan &amp; Billing</span></a>
+        <a class="nav-item {{ 'is-active' if page == 'settings' else '' }}" href="/dashboard/settings"><span data-icon="settings" data-icon-class="icon"></span><span>Settings</span></a>
+        <a class="nav-item {{ 'is-active' if page == 'support' else '' }}" href="/dashboard/support"><span data-icon="support" data-icon-class="icon"></span><span>Support</span></a>
+      </div>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-profile">
+        <div class="avatar">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</div>
+        <div class="meta"><strong>{{ (user.display_name or 'HilalMarkets user') if user else 'HilalMarkets' }}</strong><small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member · ' ~ user.timezone if user else 'Screened market intelligence') }}</small></div>
+        {% if user %}<form method="post" action="/logout"><button class="btn btn-ghost btn-icon" type="submit" aria-label="Sign out"><span data-icon="logout" data-icon-class="icon"></span></button></form>{% else %}<a class="btn btn-ghost btn-icon" href="/signin" aria-label="Sign in"><span data-icon="user" data-icon-class="icon"></span></a>{% endif %}
+      </div>
+    </aside>
+    <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
+
+    <main class="app-main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="btn btn-secondary btn-icon topbar-menu" type="button" data-open-sidebar data-hilal-open-sidebar aria-label="Open menu"><span data-icon="menu" data-icon-class="icon"></span></button>
+          <form class="topbar-search" action="/dashboard/market" method="get" role="search">
+            <span data-icon="search"></span>
+            <input class="input" name="search" value="{{ request.query_params.get('search', '') }}" placeholder="Search screened assets…" aria-label="Search screened assets">
+          </form>
+        </div>
+        <div class="topbar-right">
+          {% if active_methodology is defined and active_methodology %}<span class="badge badge-eligible">{{ active_methodology.name }} · v{{ active_methodology.version }}</span>{% endif %}
+          <a class="btn btn-secondary btn-icon" href="/dashboard/activity" aria-label="Open recent activity"><span data-icon="bell" data-icon-class="icon"></span></a>
+          <a class="btn btn-primary btn-sm sidebar-create-quick" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon"></span> New Watch Plan</a>
+        </div>
+      </header>
+
+      <div class="app-content">
+        {% if message %}<div class="notice notice-success" role="status"><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ message.replace('_', ' ').title() }}</p></div></div>{% endif %}
+        {% if error %}<div class="notice notice-error" role="alert"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ error.replace('_', ' ').title() }}</p></div></div>{% endif %}
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260714-prototype"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-production"></script>
+  {% block page_scripts %}{% endblock %}
+</body>
+</html>

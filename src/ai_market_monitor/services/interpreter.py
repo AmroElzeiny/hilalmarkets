@@ -280,10 +280,11 @@ class RuleBasedStrategyInterpreter:
         if risk.minimum_reward_to_risk is not None:
             assumptions.append(f"Reward-to-risk must be at least {risk.minimum_reward_to_risk:g}R.")
 
+        root_children: list[ConditionRule | ConditionGroup] = list(conditions)
         root = ConditionGroup(
             key="entry_conditions",
             operator=LogicalOperator.AND,
-            children=conditions,
+            children=root_children,
         )
         definition = StrategyDefinition(
             name=self._strategy_name(text),
@@ -1625,8 +1626,8 @@ class RuleBasedStrategyInterpreter:
                     {"offset": 1},
                 )
             )
-        for match in self._consecutive_candle_matches(text, timeframe):
-            count, color, candle_timeframe = match
+        for candle_match in self._consecutive_candle_matches(text, timeframe):
+            count, color, candle_timeframe = candle_match
             component = (
                 "consecutive_bullish" if color in {"green", "bullish"} else "consecutive_bearish"
             )
@@ -1654,8 +1655,8 @@ class RuleBasedStrategyInterpreter:
                 text,
             )
         )
-        for match in color_matches:
-            color = match.group(3)
+        for color_match in color_matches:
+            color = color_match.group(3)
             name = (
                 "bullish_candle"
                 if color == "bullish"
@@ -1666,9 +1667,9 @@ class RuleBasedStrategyInterpreter:
                 else "red_candle"
             )
             candle_timeframe = self._normalize_timeframe(
-                match.group(2) or match.group(4) or timeframe
+                color_match.group(2) or color_match.group(4) or timeframe
             )
-            offset = 1 if match.group(1) else 0
+            offset = 1 if color_match.group(1) else 0
             parameters = self._event_search_parameters(text, candle_timeframe)
             if offset:
                 parameters["offset"] = offset
@@ -1698,7 +1699,7 @@ class RuleBasedStrategyInterpreter:
                 word in text for word in ("red", "bearish", "decrease", "decreased", "down", "drop")
             ):
                 direction = "down"
-            parameters = {
+            move_parameters: dict[str, int | float | str] = {
                 "threshold_percent": float(candle_move.group(2)),
                 "direction": direction,
                 **self._event_search_parameters(text, candle_timeframe),
@@ -1712,7 +1713,7 @@ class RuleBasedStrategyInterpreter:
                     ),
                     candle_timeframe,
                     "candle_change_percent",
-                    parameters,
+                    move_parameters,
                 )
             )
 
@@ -2058,6 +2059,17 @@ class RuleBasedStrategyInterpreter:
             "support",
             "resistance",
             "breakout",
+            "head and shoulders",
+            "head & shoulders",
+            "head and sholders",
+            "head & sholders",
+            "neckline",
+            "double top",
+            "double bottom",
+            "ascending triangle",
+            "descending triangle",
+            "symmetrical triangle",
+            "symmetric triangle",
             "all time high",
             "all-time high",
             "ath",

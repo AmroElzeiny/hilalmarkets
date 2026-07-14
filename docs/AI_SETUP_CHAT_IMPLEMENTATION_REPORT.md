@@ -505,7 +505,7 @@ language remains blocked rather than guessed.
 
 ### Broader concept coverage
 
-The registry now contains 492 executable capabilities. The new parameterized
+The registry now contains 502 executable capabilities. The new parameterized
 `reference_period_sweep` primitive covers previous day, week, or month high/low sweeps with UTC
 period boundaries and deterministic breach-and-reclaim proof. This fixes the reported request about
 the current candle sweeping the previous weekly candle: the assistant asks only whether the user
@@ -827,3 +827,69 @@ Verification completed on 2026-07-14:
 No live OpenAI or exchange API was used by the bounded-agent tests. Function calls, provider
 results, failures, usage, and sequential Responses turns were exercised through deterministic
 fakes.
+
+## Clarification Provenance and Technical Pattern Patch
+
+Implemented on 2026-07-14 after reproducing two user-visible failures from persisted chat state.
+
+### Root cause and flow correction
+
+- Server-authored records such as `Clarification answer for rsi_timeframe: Use the trigger
+  timeframe` were retained as compiler context but incorrectly audited as new user instructions.
+  They are now explicitly marked as non-meaningful provenance and cannot create an unsupported
+  instruction warning.
+- Hybrid retrieval was appending an older user message to every unresolved current fragment. That
+  polluted phrases such as `forming head & sholders` with stale breakout language and allowed a
+  wrong capability shortlist to preempt the AI interviewer. Retrieval now ranks the exact current
+  fragment. Conversation history is still supplied to AI reranking, while only explicit correction
+  wording can augment deterministic retrieval context.
+- Bare clarification answers such as `0`, `0%`, `none`, `yes`, and `no` are context, never new
+  capabilities. Normal routing text such as `alert me on the 1m chart` supplies timing and does not
+  become a separate market rule.
+- Unknown rules that can be expressed with available closed OHLCV data now offer `Build and test
+  this rule`. AI may draft the bounded mechanic, but schema validation, deterministic evaluation,
+  market tests, approval, and activation gates remain authoritative. Requests that require an
+  unavailable external provider still fail closed and are not replaced with invented data.
+
+### Added technical pattern capabilities
+
+The live registry now contains 502 capabilities. Ten new versioned, executable chart-pattern
+capabilities use confirmed pivots and closed OHLCV data:
+
+- Head and shoulders formed and neckline break.
+- Inverse head and shoulders formed and neckline break.
+- Double-top and double-bottom neckline breaks.
+- Ascending-triangle breakout and descending-triangle breakdown.
+- Symmetrical-triangle breakout and breakdown.
+
+Each capability has aliases, including common `head and sholders` wording, bounded parameters,
+direction support, temporal behavior, composition metadata, and a proof template. Forming structure
+and neckline confirmation remain separate rules, so the prompt `forming head & sholders ... once
+the neckline is broken ... on the 1m chart` compiles both intended stages on `1m` without a generic
+meaning question.
+
+### Review presentation
+
+- The assistant now places its concise paragraph summary in the chat and directs the user to the
+  Translation Sheet.
+- The Translation Sheet renders named fields for mode, monitor name, market, watchlist, timeframes,
+  direction, trigger, filters, confirmations, optional ideas, logic, alert timing, delivery, and
+  invalidation.
+- `What needs attention` uses numbered cards with a plain title, explanation, and next step. Raw
+  lint codes and repeated compiler wording are not used as the primary user-facing explanation.
+
+### Verification
+
+- Full repository suite: **1,865 passed in 603.64 seconds**.
+- Browser suite: **15 passed in 104.17 seconds**; JUnit evidence is at
+  `reports/playwright/playwright-results.xml`.
+- Focused resolver, hybrid reranker, pattern evaluator, Setup Chat, Setup Chat API, and
+  prompt-to-strategy suites passed.
+- Ruff passed all changed Python modules and tests.
+- Mypy passed all 7 changed source modules.
+- `src/ai_market_monitor/static/ai-setup-chat.js` passed `node --check`.
+- Docker API, worker, and scheduler images rebuilt successfully. API, worker, database, and Redis
+  reported healthy, and the scheduler reported running.
+- The exact reported head-and-shoulders prompt was executed inside the rebuilt API container. It
+  selected `head_and_shoulders_formed` and `head_and_shoulders_neckline_break`, excluded routing
+  text from rule fragments, and required no capability clarification.

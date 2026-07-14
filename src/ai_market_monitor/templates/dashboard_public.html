@@ -2,40 +2,47 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TraceEdge | {{ title }}</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
-  <script>document.documentElement.dataset.theme="light";localStorage.setItem("amm-theme","light");</script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-purple">
-  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260625-purple-shell">
-  <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
-  <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-purple"></script>
-  <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{{ title }} from HilalMarkets screened market intelligence.">
+  <title>{{ title }} · HilalMarkets</title>
+  <link rel="icon" href="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-prototype">
 </head>
-<body class="theme-light">
-  <header class="site-header">
-    <a class="brand" href="/"><span class="brand-mark">AM</span><span>TraceEdge</span></a>
-    <nav><a href="/how-it-works">How It Works</a><a href="/pricing">Pricing</a><a href="/about">About</a><a href="/faq">FAQ</a><a href="/risk">Risk</a></nav>
-    <div class="hero-actions">
-      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true"><span class="theme-toggle-track"><i></i></span></button>
-      <a class="button button-small button-ghost" href="/signup">Sign Up</a>
-    </div>
-  </header>
-  <main class="section-shell section-block">
-    <p class="eyebrow">TraceEdge</p>
-    <h1>{{ title }}</h1>
+<body>
+  <nav class="public-nav"><div class="public-nav-inner">
+    <a class="logo" href="/"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt=""><span>HilalMarkets<small>Screened market intelligence</small></span></a>
+    <div class="public-links"><a href="/dashboard/market">Screened market</a><a href="/how-it-works">How it works</a><a href="/about">About</a><a href="/pricing">Pricing</a><a href="/faq">FAQ</a></div>
+    <div class="nav-actions"><a class="btn btn-secondary" href="/signin"><span data-icon="user" data-icon-class="icon"></span>Sign in</a><a class="btn btn-primary" href="/signup"><span data-icon="market" data-icon-class="icon"></span>Get started</a><button class="btn btn-secondary btn-icon mobile-menu" type="button" data-public-menu aria-label="Open navigation" aria-expanded="false"><span data-icon="menu" data-icon-class="icon"></span></button></div>
+  </div></nav>
+  <header class="page-hero"><div class="container"><span class="eyebrow">HilalMarkets</span><h1>{{ title }}</h1>
+    {% if page == 'pricing' %}<p>Choose monitoring capacity without changing the evidence-first workflow.</p>
+    {% elif page == 'risk' %}<p>Understand the boundary between screened research, monitoring, and decisions you retain.</p>
+    {% elif page == 'faq' %}<p>Plain answers about screening, monitoring, AI, and data.</p>
+    {% elif page == 'about' %}<p>Screened market intelligence built around evidence and user control.</p>
+    {% else %}<p>From a screened market to a user-approved Watch Plan and an evidence-backed alert.</p>{% endif %}
+  </div></header>
+  <main class="section"><div class="container">
     {% if page == 'pricing' %}
-      <div class="plan-grid">{% for code, plan in plans.items() if code != 'pro_trial' %}<article class="plan-card"><h3>{{ plan.name }}</h3><strong>${{ plan.monthly_price }} / month</strong><p>{{ plan.description or 'Configurable monitoring plan.' }}</p><a class="button button-primary" href="/signup">Start</a></article>{% endfor %}</div>
+      <div class="pricing-grid">
+      {% for code in ['demo', 'trader', 'pro'] %}{% set plan = plans[code] %}
+        <article class="price-card {{ 'is-featured' if code == 'trader' else '' }}">{% if code == 'trader' %}<span class="badge badge-dark">Most suitable</span>{% endif %}<span class="kicker">{{ plan.name }}</span><div class="price"><strong>${{ plan.monthly_price | int }}</strong><span>/month</span></div><p>{{ plan.description or 'Configurable screened monitoring.' }}</p><ul class="feature-list"><li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.active_strategies }} active Watch Plans</li><li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.symbols_per_strategy }} symbols per plan</li><li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram included' if plan.features.telegram else 'Dashboard delivery' }}</li></ul><a class="btn {{ 'btn-gold' if code == 'trader' else 'btn-secondary' }}" href="/signup?plan={{ code }}">{{ 'Start free' if code == 'demo' else 'Choose ' ~ plan.name }}</a></article>
+      {% endfor %}
+      </div>
     {% elif page == 'risk' %}
-      <p class="hero-lead">TraceEdge is market-monitoring and decision support. It does not guarantee profits, predict the future, act as a broker, or place trades. Alerts can be delayed, incomplete or incorrect. You make every trading decision.</p>
+      <div class="grid grid-3"><article class="card"><div class="icon-box"><span data-icon="shield" data-icon-class="icon"></span></div><h3>Research and monitoring</h3><p>HilalMarkets does not execute trades, hold funds, or guarantee outcomes.</p></article><article class="card"><div class="icon-box is-gold"><span data-icon="methodology" data-icon-class="icon"></span></div><h3>Methodology disclosed</h3><p>Screening statuses reflect a named, versioned methodology and evidence record, not an undisclosed AI ruling.</p></article><article class="card"><div class="icon-box is-amber"><span data-icon="user" data-icon-class="icon"></span></div><h3>You decide</h3><p>You review every strategy interpretation and retain every market and investment decision.</p></article></div>
     {% elif page == 'faq' %}
-      <div class="faq-list"><details open><summary>Does it trade for me?</summary><p>No. Version one does not request exchange trading keys or execute orders.</p></details><details><summary>Does AI detect every candle?</summary><p>No. AI interprets strategy text; deterministic services calculate indicators and rule outcomes.</p></details></div>
+      <div class="accordion"><div class="accordion-item is-open"><button class="accordion-button" data-accordion-button aria-expanded="true">Does HilalMarkets trade for me?<span data-icon="chevron" data-icon-class="icon"></span></button><div class="accordion-content"><p>No. It monitors user-approved spot-market rules and explains the evidence.</p></div></div><div class="accordion-item"><button class="accordion-button" data-accordion-button aria-expanded="false">Does AI calculate market conditions?<span data-icon="chevron" data-icon-class="icon"></span></button><div class="accordion-content"><p>No. AI helps interpret language; deterministic services validate rules and evaluate market data.</p></div></div><div class="accordion-item"><button class="accordion-button" data-accordion-button aria-expanded="false">Can a screening status change?<span data-icon="chevron" data-icon-class="icon"></span></button><div class="accordion-content"><p>Yes. Compliance Watch preserves status history and explains material changes under the selected methodology.</p></div></div></div>
     {% elif page == 'about' %}
-      <p class="hero-lead">TraceEdge tracks approved crypto spot-market setups, ranks near-misses, explains proof receipts, and helps investigate why an alert did or did not fire.</p>
+      <div class="feature-bento"><article class="bento-card large"><div class="icon-box is-gold"><span data-icon="market" data-icon-class="icon"></span></div><h2>Screened first</h2><p>Discovery starts inside the selected screening methodology.</p></article><article class="bento-card"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div><h3>Watched continuously</h3><p>Watch Plans follow approved deterministic mechanics.</p></article><article class="bento-card"><div class="icon-box is-amber"><span data-icon="passport" data-icon-class="icon"></span></div><h3>Explained completely</h3><p>Lifecycle evidence and immutable proof show why each result happened.</p></article></div>
     {% else %}
-      <p class="hero-lead">Describe a setup, approve the structured interpretation, preview recent data, then let the deterministic scanner monitor markets while you decide what to do.</p>
+      <div class="flow-line"><div class="flow-step"><div class="flow-number">01</div><div><h3>Discover</h3><p>Browse screened assets.</p></div></div><div class="flow-step"><div class="flow-number">02</div><div><h3>Describe</h3><p>Explain what to watch.</p></div></div><div class="flow-step"><div class="flow-number">03</div><div><h3>Review</h3><p>Approve exact mechanics.</p></div></div><div class="flow-step"><div class="flow-number">04</div><div><h3>Monitor</h3><p>Follow the lifecycle.</p></div></div><div class="flow-step"><div class="flow-number">05</div><div><h3>Understand</h3><p>Inspect every result.</p></div></div></div>
     {% endif %}
-  </main>
+  </div></main>
+  <section class="section-sm"><div class="container"><div class="cta-panel"><span class="eyebrow">Start with evidence</span><h2>Explore the screened market and create your first Watch Plan.</h2><div class="hero-actions"><a class="btn btn-gold" href="/signup">Create an account</a><a class="btn btn-secondary" href="{{ dashboard_entry_url if dashboard_entry_url is defined else '/dashboard-entry' }}">Open dashboard</a></div></div></div></section>
+  <footer class="site-footer"><div class="container"><div class="footer-bottom"><span>© 2026 HilalMarkets. Research and monitoring only.</span><span>No automatic trading. Users keep control of every decision.</span></div></div></footer>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260714-prototype"></script><script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-production"></script>
 </body>
 </html>

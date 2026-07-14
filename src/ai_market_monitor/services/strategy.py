@@ -563,7 +563,7 @@ class StrategyService:
             if match is None:
                 raise StrategyGateError(
                     "dynamic_artifact_unregistered",
-                    f"Generated mechanic {rule.label} has not passed TraceEdge certification",
+                    f"Generated mechanic {rule.label} has not passed HilalMarkets certification",
                 )
             extension, snapshot = match
             if extension.status != "approved_global" and extension.user_id != user_id:

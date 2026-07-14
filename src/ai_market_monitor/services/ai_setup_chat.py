@@ -290,7 +290,7 @@ class AISetupChatService:
             role="assistant",
             message_type="welcome",
             content=(
-                "Hi, I’m your TraceEdge setup assistant. Choose Scanner for a one-time market "
+                "Hi, I’m your HilalMarkets setup assistant. Choose Scanner for a one-time market "
                 "search or Monitor for persistent alerts. I’ll make every rule clear before "
                 "anything is created."
             ),
@@ -681,6 +681,7 @@ class AISetupChatService:
                         selected_option=selected_option,
                         option_value=option_value,
                         option_label=option_label,
+                        setup_context="\n".join(fragments),
                     )
                 )
         elif cleaned and awaiting_key:
@@ -695,7 +696,9 @@ class AISetupChatService:
             }:
                 fragments.append(
                     _canonical_clarification_answer(
-                        _pending_clarification_model(pending_clarification), cleaned
+                        _pending_clarification_model(pending_clarification),
+                        cleaned,
+                        setup_context="\n".join(fragments),
                     )
                 )
         elif routed_technical_fragments:
@@ -1229,7 +1232,7 @@ class AISetupChatService:
         clarification = _with_other_option(
             SetupChatClarification(
                 key="screened_universe_mode",
-                question="Which screened assets should TraceEdge watch?",
+                question="Which screened assets should HilalMarkets watch?",
                 reason=(
                     f"The selected methodology is {methodology.name}, version "
                     f"{methodology.version}. Assets without a current eligible assessment "
@@ -1335,7 +1338,7 @@ class AISetupChatService:
                     return
                 clarification = SetupChatClarification(
                     key="screened_watchlist",
-                    question="Which approved watchlist should TraceEdge use?",
+                    question="Which approved watchlist should HilalMarkets use?",
                     reason=(
                         "Every asset is rechecked against the selected methodology before "
                         "scanning."
@@ -1364,7 +1367,7 @@ class AISetupChatService:
             if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
                 clarification = SetupChatClarification(
                     key="screened_explicit_assets",
-                    question="Which eligible spot assets should TraceEdge watch?",
+                    question="Which eligible spot assets should HilalMarkets watch?",
                     reason="Type symbols such as BTC, ETH, SOL or BTC/USDT, ETH/USDT.",
                 )
                 _set_awaiting_clarification(context, clarification)
@@ -1555,18 +1558,21 @@ class AISetupChatService:
             chat.translation_sheet.get("unsupported_conditions") or [],
         )
         blocking_reason_count = sum(item["blocking"] for item in refusal_reasons)
+        summary = str(chat.translation_sheet.get("summary_paragraph") or "").strip()
         assistant_message = (
             (
-                "Approval is paused. The review panel lists the exact "
-                f"{blocking_reason_count} item"
-                f"{'s' if blocking_reason_count != 1 else ''} to resolve."
+                f"{summary} I found {blocking_reason_count} detail"
+                f"{'s' if blocking_reason_count != 1 else ''} that need your input before "
+                "this can continue. Open the Translation Sheet to review the fields and the "
+                "plain-language fixes under What needs attention."
             )
             if blocking_reason_count
             else (
-                "Scanner is ready. Review the exact rules, then run the one-time scan."
+                f"{summary} Review the Translation Sheet, then run the one-time scan if every "
+                "field matches what you meant."
                 if _setup_mode(chat) == "scanner"
-                else "Monitor is ready to review. Check every required rule, then approve only if "
-                "it matches your idea."
+                else f"{summary} Review the Translation Sheet beside this chat, especially each "
+                "required rule, then approve only if it matches your idea."
             )
         )
         await self._assistant(
@@ -1586,7 +1592,6 @@ class AISetupChatService:
                 "can_approve": chat.status == "ready_for_approval",
                 "can_scan": chat.status == "ready_to_scan",
                 "setup_mode": _setup_mode(chat),
-                "understanding_summary": chat.translation_sheet.get("summary_paragraph"),
                 "jargon": _beginner_explanations(accumulated),
             },
         )
@@ -2006,6 +2011,10 @@ class AISetupChatService:
         chat.draft_schema_json = definition.model_dump(mode="json")
         sheet = dict(chat.translation_sheet or {})
         sheet["monitor_name"] = name
+        sheet["fields"] = [
+            {**field, "value": name} if field.get("label") == "Monitor name" else field
+            for field in list(sheet.get("fields") or [])
+        ]
         chat.translation_sheet = sheet
         chat.title = name
         context["confirmed_monitor_name"] = name
@@ -2026,8 +2035,8 @@ class AISetupChatService:
             session,
             chat,
             (
-                f'Named "{name}". Review the translated rules, then approve only if they '
-                "match your idea."
+                f'I named this monitor "{name}". Review its fields and rules in the Translation '
+                "Sheet, then approve only if they match your idea."
             ),
             message_type="translation",
             payload={
@@ -2653,10 +2662,10 @@ def _active_clarification_for_ai(
 def _capability_query_text(value: str) -> str:
     cleaned = " ".join(value.split()).strip(" ?.!:")
     patterns = (
-        r"^(?:do|does)\s+(?:you|traceedge|the\s+system)\s+(?:have|support|recognize|understand|identify)\s+",
-        r"^(?:can|could)\s+(?:you|traceedge|the\s+system)\s+(?:support|recognize|identify|detect|explain)\s+",
-        r"^(?:is|are)\s+(.+?)\s+(?:supported|available|registered|identified)(?:\s+in\s+(?:traceedge|the\s+system))?$",
-        r"^(?:what|how)\s+(?:does|do)\s+(?:traceedge|the\s+system)\s+(?:call|detect|measure)\s+",
+        r"^(?:do|does)\s+(?:you|hilalmarkets|traceedge|the\s+system)\s+(?:have|support|recognize|understand|identify)\s+",
+        r"^(?:can|could)\s+(?:you|hilalmarkets|traceedge|the\s+system)\s+(?:support|recognize|identify|detect|explain)\s+",
+        r"^(?:is|are)\s+(.+?)\s+(?:supported|available|registered|identified)(?:\s+in\s+(?:hilalmarkets|traceedge|the\s+system))?$",
+        r"^(?:what|how)\s+(?:does|do)\s+(?:hilalmarkets|traceedge|the\s+system)\s+(?:call|detect|measure)\s+",
     )
     for pattern in patterns:
         match = re.match(pattern, cleaned, flags=re.IGNORECASE)
@@ -2667,7 +2676,7 @@ def _capability_query_text(value: str) -> str:
         cleaned = cleaned[match.end() :]
         break
     cleaned = re.sub(
-        r"\b(?:in\s+the\s+system|in\s+traceedge|as\s+a\s+feature)\b",
+        r"\b(?:in\s+the\s+system|in\s+hilalmarkets|in\s+traceedge|as\s+a\s+feature)\b",
         " ",
         cleaned,
         flags=re.IGNORECASE,
@@ -2718,7 +2727,7 @@ def _looks_like_product_question(value: str) -> bool:
     has_product_context = bool(
         AISetupChatService._classify(value) == "setup"
         or re.search(
-            r"\b(?:traceedge|the system|feature|capability|indicator|condition|"
+            r"\b(?:hilalmarkets|traceedge|the system|feature|capability|indicator|condition|"
             r"option|choice|mechanic)\b",
             normalized,
         )
@@ -2729,7 +2738,7 @@ def _looks_like_product_question(value: str) -> bool:
     return bool(
         re.search(
             r"\b(?:do|does|can|could|is|are|have|has)\s+"
-            r"(?:you|traceedge|the system)\b.*\b"
+            r"(?:you|hilalmarkets|traceedge|the system)\b.*\b"
             r"(?:have|support|recognize|understand|identify|available|registered|work)\b",
             normalized,
         )
@@ -2828,8 +2837,8 @@ def _fallback_turn_classification(
         intent = "out_of_scope"
         category = "out_of_scope"
         assistant_message = (
-            "I’m focused on TraceEdge crypto spot monitoring and product help. Tell me a setup "
-            "condition or ask how a TraceEdge feature works."
+            "I’m focused on HilalMarkets crypto spot monitoring and product help. Tell me a setup "
+            "condition or ask how a HilalMarkets feature works."
         )
         technical_fragments = []
     return SetupChatTurnClassification(
@@ -2983,7 +2992,7 @@ def _turn_response_fallback(
         if candidates:
             labels = ", ".join(dict.fromkeys(item["label"] for item in candidates[:3]))
             return (
-                f"TraceEdge has registered mechanics related to {labels}. I haven’t added "
+                f"HilalMarkets has registered mechanics related to {labels}. I haven’t added "
                 "anything to your setup; ask me to compare them or tell me which meaning you want."
             )
         return (
@@ -3004,7 +3013,7 @@ def _turn_response_fallback(
         )
     if classification.intent == "out_of_scope":
         return (
-            "I’m focused on TraceEdge crypto spot monitoring and product help. Ask me about a "
+            "I’m focused on HilalMarkets crypto spot monitoring and product help. Ask me about a "
             "feature or describe what market behavior you want to monitor."
         )
     return "Tell me what you would like to monitor."
@@ -3016,15 +3025,34 @@ def _option_strategy_fragment(
     selected_option: SetupChatOption | None,
     option_value: str,
     option_label: str | None,
+    setup_context: str,
 ) -> str:
-    if re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+", option_value):
-        visible_answer = (
+    # Option values are transport data owned by the assistant's active question, not
+    # independent user-authored market mechanics. Always bind the value back to that
+    # question before it enters accumulated setup text. Opaque values such as `0` or
+    # `all_supported_spot_pairs` use the visible label so the interviewer keeps the
+    # meaning it originally offered to the user.
+    answer = option_value
+    if _is_opaque_option_value(option_value):
+        answer = (
             option_label
             or (selected_option.label if selected_option is not None else None)
             or option_value.replace("_", " ")
         )
-        return _canonical_clarification_answer(clarification, visible_answer)
-    return option_value
+    return _canonical_clarification_answer(
+        clarification,
+        answer,
+        setup_context=setup_context,
+    )
+
+
+def _is_opaque_option_value(value: str) -> bool:
+    normalized = value.casefold().strip()
+    return bool(
+        re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+", normalized)
+        or re.fullmatch(r"[-+]?\d+(?:\.\d+)?(?:%|x)?", normalized)
+        or normalized in {"yes", "no", "none", "true", "false"}
+    )
 
 
 def _guided_setup(
@@ -3333,8 +3361,17 @@ def translation_sheet(
     required_filters = sum(1 for role in roles.values() if role == "required_filter")
     required_confirmations = sum(1 for role in roles.values() if role == "required_confirmation")
     optional_count = sum(1 for role in roles.values() if role == "optional_suggestion")
+    required_filter_rules = [
+        rule.label for rule in rules if roles.get(rule.key) == "required_filter"
+    ]
+    required_confirmation_rules = [
+        rule.label for rule in rules if roles.get(rule.key) == "required_confirmation"
+    ]
+    optional_rules = [
+        rule.label for rule in rules if roles.get(rule.key) == "optional_suggestion"
+    ]
     summary = (
-        f"TraceEdge will watch {definition.universe.exchange.title()} spot markets on "
+        f"HilalMarkets will watch {definition.universe.exchange.title()} spot markets on "
         f"{definition.base_timeframe}. The trigger is "
         f"{trigger.label if trigger else 'not yet defined'}"
         f" with {required_filters} required filter{'s' if required_filters != 1 else ''} and "
@@ -3342,6 +3379,56 @@ def translation_sheet(
         f"{'s' if required_confirmations != 1 else ''}. "
         f"{optional_count} rule{'s are' if optional_count != 1 else ' is'} optional suggestions."
     )
+    watchlist = (
+        ", ".join(definition.universe.include_symbols)
+        if definition.universe.include_symbols
+        else f"All eligible {', '.join(definition.universe.quote_currencies)} spot pairs"
+    )
+    timeframes = [definition.base_timeframe, *definition.supporting_timeframes]
+    invalidation = (
+        f"{definition.risk.stop_method} (maximum {definition.risk.maximum_stop_percent}%)"
+        if definition.risk.enabled and definition.risk.maximum_stop_percent is not None
+        else definition.risk.stop_method
+        if definition.risk.enabled
+        else "Not provided; research monitoring only"
+    )
+    fields = [
+        {"label": "Mode", "value": "One-time Scanner" if setup_mode == "scanner" else "Monitor"},
+        {"label": "Monitor name", "value": definition.name},
+        {
+            "label": "Market",
+            "value": (
+                f"{definition.universe.exchange.title()} "
+                f"{definition.universe.market_type.value}"
+            ),
+        },
+        {"label": "Watchlist", "value": watchlist},
+        {"label": "Timeframes", "value": ", ".join(timeframes)},
+        {"label": "Direction", "value": definition.direction.value.replace("_", " ").title()},
+        {"label": "Primary trigger", "value": trigger.label if trigger else "Not defined"},
+        {
+            "label": "Required filters",
+            "value": ", ".join(required_filter_rules) or "None",
+        },
+        {
+            "label": "Required confirmations",
+            "value": ", ".join(required_confirmation_rules) or "None",
+        },
+        {"label": "Optional ideas", "value": ", ".join(optional_rules) or "None"},
+        {
+            "label": "Rule logic",
+            "value": definition.conditions.operator.value.upper(),
+        },
+        {
+            "label": "Alert timing",
+            "value": definition.trigger_mode.value.replace("_", " ").title(),
+        },
+        {
+            "label": "Delivery",
+            "value": ", ".join(definition.alerts.channels) or "Choose before activation",
+        },
+        {"label": "Invalidation", "value": invalidation},
+    ]
     return {
         "original_idea": original_idea,
         "setup_mode": setup_mode,
@@ -3352,7 +3439,7 @@ def translation_sheet(
         "exchange": definition.universe.exchange,
         "symbols_watchlist": definition.universe.include_symbols,
         "quote_currencies": definition.universe.quote_currencies,
-        "timeframes": [definition.base_timeframe, *definition.supporting_timeframes],
+        "timeframes": timeframes,
         "logic_operator": definition.conditions.operator.value,
         "conditions": [
             {
@@ -3374,6 +3461,7 @@ def translation_sheet(
             "forming_alerts": definition.alerts.forming_alerts,
         },
         "delivery_channels": definition.alerts.channels,
+        "fields": fields,
         "assumptions": preview.assumptions,
         "unsupported_conditions": [
             issue.model_dump(mode="json") for issue in preview.unsupported_conditions
@@ -3395,7 +3483,7 @@ def _improvement_suggestions(definition: StrategyDefinition) -> list[str]:
         )
     if not definition.risk.enabled:
         suggestions.append(
-            "Optionally define an invalidation rule so TraceEdge can explain when the idea "
+            "Optionally define an invalidation rule so HilalMarkets can explain when the idea "
             "is no longer valid."
         )
     if not definition.supporting_timeframes:
@@ -3516,7 +3604,7 @@ def _unresolved_ambiguities(text: str, resolved: dict[str, str]) -> list[SetupCh
             ],
         ),
         "confirmation": (
-            "What specific confirmation should TraceEdge wait for?",
+            "What specific confirmation should HilalMarkets wait for?",
             "Confirmation must name a candle, indicator, volume, or close condition.",
             [
                 ("Candle close", "Wait for the trigger candle to close"),
@@ -3604,6 +3692,7 @@ def _clarification_identity(clarification: SetupChatClarification) -> str:
         "clean_retest": ("clean retest", "retest"),
         "fakeout": ("fakeout", "fake out"),
         "confirmation": ("confirmation", "candle close"),
+        "tolerance": ("tolerance", "allowed margin", "price margin"),
         "reference_sweep_side": ("which side", "previous period", "previous candle"),
         "persistence": ("persist", "consecutive candles", "how many candles"),
         "alert_timing": ("alert timing", "when should", "candle close or intrabar"),
@@ -3691,16 +3780,108 @@ def _refusal_reasons(*sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
             seen.add(identity)
             severity = str(item.get("severity") or "critical").casefold()
             blocking = bool(item.get("blocking")) or severity == "critical"
+            title, plain_message, next_step, category = _plain_attention_item(
+                code,
+                message,
+            )
             reasons.append(
                 {
                     "code": code,
-                    "message": message,
+                    "title": title,
+                    "message": plain_message,
+                    "next_step": next_step,
+                    "category": category,
                     "severity": severity,
                     "blocking": blocking,
-                    "label": "Blocking rule" if blocking else "Review note",
+                    "label": "Fix before approval" if blocking else "Review note",
                 }
             )
     return reasons
+
+
+def _plain_attention_item(code: str, message: str) -> tuple[str, str, str, str]:
+    normalized = code.casefold()
+    quoted = re.search(r"['\"]([^'\"]{2,300})['\"]", message)
+    instruction = quoted.group(1) if quoted else "one part of your request"
+    if normalized in {"prompt_fragment_unclassified", "instruction_not_converted"}:
+        return (
+            "One instruction was not translated",
+            f'I could not turn "{instruction}" into a monitor rule yet.',
+            "Explain that market condition in your own words, or choose Build and test this rule.",
+            "Rule meaning",
+        )
+    if normalized in {"no_supported_monitor_condition", "no_required_condition"}:
+        return (
+            "A measurable trigger is still missing",
+            "The monitor does not yet know the exact market event that should start a match.",
+            "Describe one event with a timeframe, such as RSI above 50 on 15m.",
+            "Trigger",
+        )
+    if "timeframe" in normalized or "timeframe" in message.casefold():
+        return (
+            "The timeframe needs your choice",
+            "One rule does not yet have a timeframe the monitor can use.",
+            "Choose the candle timeframe for that rule.",
+            "Timing",
+        )
+    if "contradict" in normalized or "incompatible" in message.casefold():
+        return (
+            "Two rules conflict",
+            "The current rules cannot all be true at the same time.",
+            "Tell me which rule should take priority or remove one of them.",
+            "Rule logic",
+        )
+    if any(term in normalized for term in ("provider", "external_data", "data_unavailable")):
+        return (
+            "The required data is not available",
+            "The connected market source cannot provide the information needed for this rule.",
+            (
+                "Remove that rule or replace it with one based on available spot price and "
+                "volume data."
+            ),
+            "Data",
+        )
+    if "ambig" in normalized or "clarification" in normalized:
+        return (
+            "One rule has more than one meaning",
+            "I need one more choice before I can translate this part safely.",
+            "Answer the open question in the chat.",
+            "Rule meaning",
+        )
+    if any(term in normalized for term in ("unsupported", "not_executable", "binding_invalid")):
+        return (
+            "One rule is not ready to run",
+            "This idea is understood, but it is not yet connected to a verified monitor rule.",
+            "Choose a matching rule or ask HilalMarkets to build and test a candle-based version.",
+            "Rule availability",
+        )
+    return (
+        "One detail needs review",
+        _plain_validation_message(message),
+        "Answer or revise this detail in the chat, then review the Translation Sheet again.",
+        "Review",
+    )
+
+
+def _plain_validation_message(message: str) -> str:
+    replacements = {
+        "capability": "rule",
+        "executable": "usable",
+        "deterministic": "measurable",
+        "schema": "rule format",
+        "provider": "data source",
+        "prompt fragment": "instruction",
+        "canonical hash": "approved version",
+    }
+    result = message
+    for technical, plain in replacements.items():
+        result = re.sub(technical, plain, result, flags=re.IGNORECASE)
+    result = re.sub(
+        r"\b[a-z]+(?:_[a-z0-9]+)+\b",
+        lambda match: match.group(0).replace("_", " "),
+        result,
+    )
+    return result
 
 
 def _resolver_clarifications(
@@ -3748,29 +3929,48 @@ def _resolver_clarifications(
             for candidate in fragment.candidates[:3]
         ]
         if allow_mechanic_creation and fragment.status in {"unknown", "ambiguous"}:
-            options.append(
-                SetupChatOption(
-                    key=key,
-                    label=(
-                        "None match - create mechanic"
-                        if fragment.candidates
-                        else "Create this mechanic"
-                    ),
-                    value="__build_mechanic__",
-                    description="Build and certify a user-scoped deterministic mechanic.",
-                    action="build_mechanic",
-                )
+            create_option = SetupChatOption(
+                key=key,
+                label=(
+                    "None match - build this rule"
+                    if fragment.candidates
+                    else "Build and test this rule"
+                ),
+                value="__build_mechanic__",
+                description=(
+                    "AI drafts the candle logic; deterministic checks and market tests must "
+                    "certify it before review."
+                ),
+                action="build_mechanic",
             )
+            options = (
+                [create_option, *options]
+                if not fragment.candidates
+                else [*options, create_option]
+            )
+        unknown_creatable = (
+            fragment.status == "unknown" and allow_mechanic_creation and not fragment.candidates
+        )
         clarifications.append(
             _with_other_option(
                 SetupChatClarification(
                     key=key,
                     question=(
-                        fragment.clarification_question
-                        or f"How should TraceEdge measure '{fragment.fragment}'?"
+                        (
+                            "I do not have a verified candle-data rule for "
+                            f"'{fragment.fragment}' yet. Should I build and test that exact rule?"
+                        )
+                        if unknown_creatable
+                        else fragment.clarification_question
+                        or f"How should HilalMarkets measure '{fragment.fragment}'?"
                     ),
                     reason=(
-                        "I found more than one plausible registered mechanic, so I need "
+                        (
+                            "This can be proposed from closed price and volume history, but it "
+                            "must pass deterministic validation before it can become a rule."
+                        )
+                        if unknown_creatable
+                        else "I found more than one plausible registered mechanic, so I need "
                         "your meaning."
                         if fragment.status == "ambiguous"
                         else "This wording is not linked to a verified capability yet, "
@@ -3989,16 +4189,37 @@ def _contains_quantity(value: str) -> bool:
 def _canonical_clarification_answer(
     clarification: SetupChatClarification | None,
     answer: str,
+    *,
+    setup_context: str = "",
 ) -> str:
     if clarification is None:
         return answer
     lowered = answer.casefold()
     if clarification.key == "reference_sweep_side":
         side = "high" if re.search(r"\b(?:high|bearish)\b", lowered) else "low"
-        return f"Sweep the previous period {side}"
+        period = _reference_period_word(setup_context)
+        return f"Sweep the previous {period or 'period'} {side}"
     if clarification.key.startswith("capability_meaning_"):
         return answer
     return f"Clarification answer for {clarification.key}: {answer}"
+
+
+def _reference_period_word(value: str) -> str | None:
+    match = re.search(
+        r"\b(?:previous|prior|last)\s+"
+        r"(day|daily|week|weekly|month|monthly)(?:\s+candle)?\b",
+        value.casefold(),
+    )
+    if match is None:
+        return None
+    return {
+        "day": "daily",
+        "daily": "daily",
+        "week": "weekly",
+        "weekly": "weekly",
+        "month": "monthly",
+        "monthly": "monthly",
+    }[match.group(1)]
 
 
 def _selected_capability_key(option_value: str) -> str | None:
@@ -4072,10 +4293,11 @@ def _extract_responses_output_text(payload: dict[str, Any]) -> str:
 
 def _turn_router_prompt() -> str:
     return (
-        "You are the context-aware turn router for TraceEdge AI Setup Chat. Classify only the "
+        "You are the context-aware turn router for HilalMarkets AI Setup Chat. Classify only the "
         "user's current message after reading the curated conversation, accumulated setup, and "
         "active clarification. Users may greet you, think aloud, correct themselves, ask whether "
-        "TraceEdge supports a concept, or ask about an option before answering. Those turns must "
+        "HilalMarkets supports a concept, or ask about an option before answering. Those turns "
+        "must "
         "not mutate the strategy. A question such as 'Do you have FVG in the system?' is a "
         "product_question, not a technical instruction. A question about wording or choices you "
         "offered is option_question; answer it briefly and keep the active question open. If the "
@@ -4161,9 +4383,9 @@ def _turn_classification_schema() -> dict[str, Any]:
 
 def _system_prompt() -> str:
     return (
-        "You are TraceEdge AI Setup Chat, a beginner-safe interviewer for crypto spot market "
+        "You are HilalMarkets AI Setup Chat, a beginner-safe interviewer for crypto spot market "
         "monitoring. Stay inside setup clarification, deterministic monitoring-rule design, "
-        "market-monitor explanations, and TraceEdge product help. Never give financial advice, "
+        "market-monitor explanations, and HilalMarkets product help. Never give financial advice, "
         "trade signals, buy/sell instructions, profit promises, automatic execution guidance, "
         "or request exchange keys. Be friendly, humble, concise, and use simple trader language. "
         "Do not hide assumptions. Keep replies short and direct. Ask necessary measurable "
@@ -4176,6 +4398,9 @@ def _system_prompt() -> str:
         "the user to define ordinary conversational words, corrections, pronouns, numbers, or "
         "wording that you supplied in your own question or options. Use the full conversation "
         "to understand follow-up answers. Do not quote old messages or re-ask a resolved subject. "
+        "A `Clarification answer for ...` record is an authoritative answer to a question you "
+        "already asked. Treat its label and value in that question's context; never turn a "
+        "numeric value, option label, or `none` answer into a new mechanic. "
         "The current turn has already been classified, so never reinterpret human conversation "
         "or product questions as strategy mechanics. If you offer an option that asks to explain, "
         "compare, "

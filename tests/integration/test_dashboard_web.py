@@ -1,22 +1,32 @@
+from datetime import UTC, datetime
+
 from pydantic import SecretStr
 from sqlalchemy import select
 
 from ai_market_monitor.core.security import hash_password
 from ai_market_monitor.db.models import (
+    ApprovedWatchlist,
+    ApprovedWatchlistAsset,
+    ComplianceDriftNotification,
     DashboardPreference,
     DisclaimerAcceptance,
+    PendingEmailSignup,
     TelegramConnection,
     TelegramConversationState,
     TelegramDashboardLink,
-    PendingEmailSignup,
     Trial,
     User,
     UserIdentity,
     WebSession,
 )
-from ai_market_monitor.db.models.enums import ConnectionStatus, IdentityProvider
-from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
+from ai_market_monitor.db.models.enums import (
+    ComplianceChangeBehavior,
+    ConnectionStatus,
+    IdentityProvider,
+    ShariaAssetStatus,
+)
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
+from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
 
 
@@ -86,7 +96,7 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
     assert dashboard.status_code == 200
     assert "Active monitors" in dashboard.text
     assert "Coverage score" in dashboard.text
-    assert 'class="dashboard-body theme-' in dashboard.text
+    assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
 
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))
@@ -157,6 +167,53 @@ async def test_signup_does_not_require_disclaimer_acceptance(test_context):
     )
     assert response.status_code == 303
     assert response.headers["location"].startswith("/dashboard")
+
+
+async def test_hilal_watchlist_and_compliance_pages_use_only_persisted_user_records(test_context):
+    email = "hilal-pages@example.com"
+    _, verified = await _signup_and_verify(test_context, email=email)
+    assert verified.status_code == 303
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User).where(User.display_name == "hilal-pages"))
+        assert user is not None
+        watchlist = ApprovedWatchlist(
+            user_id=user.id,
+            name="My screened assets",
+            is_default=True,
+        )
+        session.add(watchlist)
+        await session.flush()
+        session.add(
+            ApprovedWatchlistAsset(
+                watchlist_id=watchlist.id,
+                canonical_asset="SOL",
+                added_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            ComplianceDriftNotification(
+                user_id=user.id,
+                canonical_asset="SOL",
+                previous_status=ShariaAssetStatus.ELIGIBLE,
+                new_status=ShariaAssetStatus.UNDER_REVIEW,
+                behavior=ComplianceChangeBehavior.NOTIFY_ONLY,
+                impact={"reason": "source_updated"},
+                idempotency_key="hilal-pages-sol-change",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+    watchlist_page = await test_context["client"].get("/dashboard/watchlist")
+    assert watchlist_page.status_code == 200
+    assert "My screened assets" in watchlist_page.text
+    assert "SOL" in watchlist_page.text
+    assert "Your saved asset passports will appear here." not in watchlist_page.text
+
+    compliance_page = await test_context["client"].get("/dashboard/compliance")
+    assert compliance_page.status_code == 200
+    assert "Compliance Changes" in compliance_page.text
+    assert "eligible → under review" in compliance_page.text
 
 
 async def test_signin_success_and_failure(test_context):
@@ -317,8 +374,8 @@ async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
     await _signup_and_verify(test_context, email="trial@example.com")
     first = await test_context["client"].post("/dashboard/trial/claim", follow_redirects=False)
     second = await test_context["client"].post("/dashboard/trial/claim", follow_redirects=False)
-    assert first.headers["location"] == "/dashboard/trial?message=trial_claimed"
-    assert second.headers["location"] == "/dashboard/trial?message=trial_claimed"
+    assert first.headers["location"] == "/dashboard/billing?message=trial_claimed"
+    assert second.headers["location"] == "/dashboard/billing?message=trial_claimed"
     async with test_context["session_factory"]() as session:
         trials = (await session.scalars(select(Trial))).all()
         assert len(trials) == 1

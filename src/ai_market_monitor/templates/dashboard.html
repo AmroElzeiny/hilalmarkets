@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TraceEdge | {{ title }}</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
+  <title>HilalMarkets | {{ title }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script>document.documentElement.dataset.theme=localStorage.getItem("amm-theme")||"{{ 'light' if dashboard_theme == 'light' else 'dark' }}";</script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-launch-polish">
   <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260627-sidebar-rail">
   <link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260714-foundation">
@@ -86,6 +86,10 @@
     @media(max-width:980px){.lifecycle-chart-layout,.cockpit-workbench-grid{grid-template-columns:1fr!important}.lifecycle-card-head{grid-template-columns:1fr!important}.lifecycle-card-actions{justify-content:flex-start}}
   </style>
   <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260627-sidebar-cockpit">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-hilalmarkets">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-bridge.css') }}?v=20260714-hilalmarkets">
+  <script defer src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260714-hilalmarkets"></script>
+  <script defer src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-hilalmarkets"></script>
   <style>
     .sidebar-note{display:none!important}
     .dash-sidebar,.dash-nav{scrollbar-width:none!important}
@@ -101,7 +105,7 @@
     .lifecycle-stage.current i{background:#8b5cf6!important}
     .cockpit-hero-copy h2,.cockpit-monitor-head strong,.inbox-item strong{font-weight:590!important}
 
-    /* TraceEdge final dashboard polish: sidebar geometry, contrast, cards and adaptive controls. */
+    /* HilalMarkets dashboard polish: sidebar geometry, contrast, cards and adaptive controls. */
     body:not(.sidebar-collapsed) .sidebar-head{
       grid-template-columns:minmax(0,1fr) auto auto!important;
       align-items:center!important;
@@ -2364,55 +2368,47 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-bridge.css') }}?v=20260714-hilalmarkets-polish">
 </head>
-<body class="dashboard-body theme-{{ dashboard_theme }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-testid="dashboard-root">
-  <button class="sidebar-scrim" type="button" data-sidebar-close aria-label="Close navigation"></button>
-  <aside class="dash-sidebar" data-dashboard-sidebar>
+<body class="app-body dashboard-body hilal-dashboard theme-{{ dashboard_theme }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-testid="dashboard-root">
+<div class="app-shell">
+  <aside class="sidebar dash-sidebar" data-sidebar data-dashboard-sidebar data-hilal-sidebar>
     <div class="sidebar-head">
-      <a class="brand dash-brand" href="/dashboard" aria-label="TraceEdge dashboard">
-        <span class="brand-mark favicon-brand-mark" aria-hidden="true"><img src="{{ url_for('static', path='/favicon.png') }}" alt=""></span>
-        <img class="sidebar-logo-full" src="{{ url_for('static', path='/logo_purple.svg') }}" alt="TraceEdge">
-        <span class="brand-name">TraceEdge</span>
+      <a class="logo brand dash-brand hilal-sidebar-brand hilal-logo" href="/dashboard" aria-label="HilalMarkets dashboard">
+        <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
+        <span>HilalMarkets<small>Screened market intelligence</small></span>
       </a>
-      <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-label="Expand or collapse navigation">
-        <img src="https://api.iconify.design/lucide:panel-left.svg?color=%23c4b5fd" alt="" aria-hidden="true">
+      <button class="btn btn-secondary btn-icon sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close navigation">
+        <span data-icon="close" data-icon-class="icon"></span>
       </button>
-    </div>
-    <div class="sidebar-rail-controls" aria-label="Quick dashboard controls">
-      <a class="sidebar-create-quick {{ 'active' if page == 'strategy_builder' else '' }}" href="/dashboard/strategies/new" aria-label="Monitors">
-        <img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23ffffff" alt="" aria-hidden="true">
-        <span>Monitors</span>
-      </a>
     </div>
     <nav class="dash-nav" data-testid="dashboard-nav">
-      <a class="{{ 'active' if page == 'home' else '' }}" href="/dashboard"><img src="https://api.iconify.design/lucide:layout-dashboard.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Overview</span></a>
-      <a class="{{ 'active' if page in ['screened_market', 'asset_passport'] else '' }}" href="/dashboard/market"><img src="https://api.iconify.design/lucide:scan-search.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Screened Market</span></a>
-      <a class="{{ 'active' if page == 'strategy_builder' else '' }}" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Monitors</span></a>
-      <a class="{{ 'active' if page in ['lifecycles', 'activity'] else '' }}" href="/dashboard/activity"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Activity</span></a>
-      <span class="dash-nav-coming" aria-disabled="true" title="Portfolio is coming later"><img src="https://api.iconify.design/lucide:wallet-cards.svg?color=%238d849f" alt="" aria-hidden="true"><span>Portfolio <small>Later</small></span></span>
-      <span class="dash-nav-section">Account &amp; policy</span>
-      <a class="{{ 'active' if page == 'methodology' else '' }}" href="/dashboard/methodology"><img src="https://api.iconify.design/lucide:book-open-check.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Methodology</span></a>
-      <a class="{{ 'active' if page == 'billing' else '' }}" href="/dashboard/billing"><img src="https://api.iconify.design/lucide:credit-card.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Billing</span></a>
-      <a class="{{ 'active' if page == 'integrations' else '' }}" href="/dashboard/integrations"><img src="https://api.iconify.design/lucide:plug.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Integrations</span></a>
-      <a class="{{ 'active' if page == 'settings' else '' }}" href="/dashboard/settings"><img src="https://api.iconify.design/lucide:sliders-horizontal.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Settings</span></a>
-      <a class="{{ 'active' if page == 'support' else '' }}" href="/dashboard/support"><img src="https://api.iconify.design/lucide:life-buoy.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Support</span></a>
-      <a class="{{ 'active' if page == 'referrals' else '' }}" href="/dashboard/referrals"><img src="https://api.iconify.design/lucide:gift.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Referrals</span></a>
-      {% if user and user.role.value == 'admin' %}
-        <a class="{{ 'active' if page == 'admin' else '' }}" href="/dashboard/admin"><img src="https://api.iconify.design/lucide:shield-check.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Admin</span></a>
-      {% endif %}
+      <div class="nav-group"><span class="nav-label dash-nav-section">Discover</span>
+      <a class="nav-item {{ 'is-active active' if page == 'home' else '' }}" href="/dashboard"><span data-icon="home" data-icon-class="icon"></span><span>Home</span></a>
+      <a class="nav-item {{ 'is-active active' if page in ['screened_market', 'asset_passport'] else '' }}" href="/dashboard/market"><span data-icon="market" data-icon-class="icon"></span><span>Sharia-Screened Market</span></a>
+      <a class="nav-item {{ 'is-active active' if page == 'watchlist' else '' }}" href="/dashboard/watchlist"><span data-icon="watchlist" data-icon-class="icon"></span><span>My Watchlist</span></a></div>
+      <div class="nav-group"><span class="nav-label dash-nav-section">Watch</span>
+      <a class="nav-item {{ 'is-active active' if page in ['strategy_builder', 'strategy_detail', 'strategy_verify', 'strategy_versions'] else '' }}" href="/dashboard/strategies"><span data-icon="radar" data-icon-class="icon"></span><span>Watch Plans</span></a></div>
+      <div class="nav-group"><span class="nav-label dash-nav-section">Review</span>
+      <a class="nav-item {{ 'is-active active' if page in ['lifecycles', 'activity', 'alert_proof'] else '' }}" href="/dashboard/activity"><span data-icon="activity" data-icon-class="icon"></span><span>Opportunities &amp; Evidence</span></a>
+      <a class="nav-item {{ 'is-active active' if page == 'compliance' else '' }}" href="/dashboard/compliance"><span data-icon="compliance" data-icon-class="icon"></span><span>Compliance Changes</span></a></div>
+      <div class="nav-group"><span class="nav-label dash-nav-section">Trust</span>
+      <a class="nav-item {{ 'is-active active' if page == 'methodology' else '' }}" href="/dashboard/methodology"><span data-icon="methodology" data-icon-class="icon"></span><span>How We Screen</span></a></div>
+      <div class="nav-group"><span class="nav-label dash-nav-section">Account</span>
+      <a class="nav-item {{ 'is-active active' if page == 'integrations' else '' }}" href="/dashboard/integrations"><span data-icon="integrations" data-icon-class="icon"></span><span>Integrations</span></a>
+      <a class="nav-item {{ 'is-active active' if page == 'billing' else '' }}" href="/dashboard/billing"><span data-icon="billing" data-icon-class="icon"></span><span>Plan &amp; Billing</span></a>
+      <a class="nav-item {{ 'is-active active' if page == 'settings' else '' }}" href="/dashboard/settings"><span data-icon="settings" data-icon-class="icon"></span><span>Settings</span></a>
+      <a class="nav-item {{ 'is-active active' if page == 'support' else '' }}" href="/dashboard/support"><span data-icon="support" data-icon-class="icon"></span><span>Support</span></a></div>
     </nav>
-    <form class="sidebar-logout-form" method="post" action="/logout">
-      <button class="sidebar-logout" type="submit" aria-label="Logout">
-        <img src="https://api.iconify.design/lucide:door-open.svg?color=%23c4b5fd" alt="" aria-hidden="true">
-        <span>Logout</span>
-      </button>
-    </form>
+    <div class="sidebar-spacer"></div><div class="sidebar-profile"><div class="avatar">{{ (user.display_name or 'HM')[:2]|upper }}</div><div class="meta"><strong>{{ user.display_name or 'HilalMarkets user' }}</strong><small>{{ user.timezone }}</small></div><form method="post" action="/logout"><button class="btn btn-ghost btn-icon" type="submit" aria-label="Sign out"><span data-icon="logout" data-icon-class="icon"></span></button></form></div>
   </aside>
-
-  <main class="dash-main">
+  <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
+  <main class="app-main dash-main">
+    <header class="topbar"><div class="topbar-left"><button class="btn btn-secondary btn-icon topbar-menu" type="button" data-open-sidebar data-hilal-open-sidebar aria-label="Open menu"><span data-icon="menu" data-icon-class="icon"></span></button><form class="topbar-search" method="get" action="/dashboard/market"><span data-icon="search"></span><input class="input" name="search" placeholder="Search screened assets…"></form></div><div class="topbar-right"><a class="btn btn-secondary btn-icon" href="/dashboard/activity" aria-label="Open recent activity"><span data-icon="bell" data-icon-class="icon"></span></a><a class="btn btn-primary btn-sm sidebar-create-quick" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon"></span>New Watch Plan</a></div></header>
+    <div class="app-content">
     <div id="dash-toast" class="dash-toast" hidden></div>
     {% if message == 'notification_channel_required' %}
-      <div class="dash-flash error">This monitor needs at least one notification channel. Link Telegram or Discord, then TraceEdge will activate it automatically.</div>
+      <div class="dash-flash error">This Watch Plan needs at least one notification channel. Link Telegram or Discord, then HilalMarkets will activate it automatically.</div>
     {% elif message == 'quick_scan_channel_required' %}
       <div class="dash-flash error">Scanner needs at least one notification channel first. Link Telegram or Discord, then try again.</div>
     {% elif message %}
@@ -2534,7 +2530,7 @@
       <section class="dash-panel analytics-hero-panel">
         <div>
           <p class="eyebrow">Activity snapshot</p>
-          <h2>TraceEdge activity summary.</h2>
+          <h2>HilalMarkets activity summary.</h2>
           <p>These summaries describe lifecycle volume, alert proof, and symbol activity. They are not trading-performance guarantees.</p>
         </div>
         <div class="analytics-stat-grid">
@@ -2608,7 +2604,7 @@
           <p>Explore spot assets reviewed under your selected Sharia methodology, then scan or monitor the market changes you care about.</p>
           <div class="button-row">
             <a class="button button-primary" href="/dashboard/strategies/new?mode=monitor"><img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23ffffff" alt="" aria-hidden="true">Create a Watch Plan</a>
-            <a class="button button-secondary" href="/dashboard/strategies/new?mode=scanner"><img src="https://api.iconify.design/lucide:scan-line.svg?color=%233A3A46" alt="" aria-hidden="true">Check the market now</a>
+            <a class="button button-secondary" href="/dashboard/strategies/new?mode=scanner"><span data-icon="scan" data-icon-class="icon"></span>Open Scanner</a>
           </div>
         </div>
         <div class="screening-method-card">
@@ -2652,7 +2648,7 @@
           {% endfor %}
         </section>
       {% else %}
-        <div class="dash-empty screened-empty"><img src="https://api.iconify.design/lucide:shield-question.svg?color=%238b5cf6" alt=""><h2>{{ 'No current opportunities to show' if selected_view == 'opportunities' else 'No screened assets to show' }}</h2><p>{% if screened.methodology and selected_view == 'opportunities' %}No active Watch Plan has a forming opportunity on this page. Switch to All screened assets to browse the approved market without inventing an opportunity state.{% elif screened.methodology %}No current assessment matches these filters. TraceEdge did not include unverified assets.{% else %}A real approved methodology and evidence-backed assessments must be configured by qualified reviewers first.{% endif %}</p></div>
+        <div class="dash-empty screened-empty"><img src="https://api.iconify.design/lucide:shield-question.svg?color=%230f5c4d" alt=""><h2>{{ 'No current opportunities to show' if selected_view == 'opportunities' else 'No screened assets to show' }}</h2><p>{% if screened.methodology and selected_view == 'opportunities' %}No active Watch Plan has a forming opportunity on this page. Switch to All screened assets to browse the approved market without inventing an opportunity state.{% elif screened.methodology %}No current assessment matches these filters. HilalMarkets did not include unverified assets.{% else %}A real approved methodology and evidence-backed assessments must be configured by qualified reviewers first.{% endif %}</p></div>
       {% endif %}
       {% if market_previous_url or market_next_url %}<nav class="screened-pagination" aria-label="Screened market pages"><a class="button button-secondary {{ 'disabled' if not market_previous_url else '' }}" href="{{ market_previous_url or '#' }}" {% if not market_previous_url %}aria-disabled="true"{% endif %}>Previous</a><span>Page {{ screened.page }} of {{ market_maximum_page }}</span><a class="button button-secondary {{ 'disabled' if not market_next_url else '' }}" href="{{ market_next_url or '#' }}" {% if not market_next_url %}aria-disabled="true"{% endif %}>Next</a></nav>{% endif %}
 
@@ -2670,13 +2666,13 @@
         <article class="dash-panel passport-section span-two"><p class="eyebrow">WHY IT HAS THIS STATUS</p><h2>A plain-language conclusion</h2><p class="passport-lead">{{ passport.why_this_status }}</p><div class="passport-notice">{{ passport.notice }}</div></article>
         <article class="dash-panel passport-section"><p class="eyebrow">WHAT WAS REVIEWED</p><h2>Evidence dimensions</h2>{% if passport.reviewed_dimensions %}<div class="evidence-dimension-list">{% for dimension in passport.reviewed_dimensions %}<div><img src="https://api.iconify.design/lucide:check-circle-2.svg?color=%238b5cf6" alt=""><span><strong>{{ dimension.get('label', dimension.get('name', 'Reviewed dimension')) }}</strong><small>{{ dimension.get('summary', dimension.get('result', 'Recorded in the approved evidence snapshot.')) }}</small></span></div>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">No structured review dimensions were stored for this assessment.</div>{% endif %}</article>
         <article class="dash-panel passport-section"><p class="eyebrow">METHODOLOGY RESULT</p><h2>Rule outcomes</h2>{% if passport.methodology_result %}<div class="method-result-list">{% for key, value in passport.methodology_result.items() %}<div><span>{{ key.replace('_', ' ').title() }}</span><strong>{{ value }}</strong></div>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">No structured rule result was stored. The written assessment remains available above.</div>{% endif %}</article>
-        <article class="dash-panel passport-section span-two"><p class="eyebrow">EVIDENCE SOURCES</p><h2>Dated source record</h2>{% if passport.evidence_sources %}<div class="passport-evidence-list">{% for source in passport.evidence_sources %}<a href="{{ source.source_url }}" rel="noopener noreferrer" target="_blank"><img src="https://api.iconify.design/lucide:external-link.svg?color=%238b5cf6" alt=""><span><strong>{{ source.title }}</strong><small>{{ source.publisher }} · retrieved {{ source.retrieved_at.strftime('%d %b %Y') }} · {{ source.evidence_category.replace('_', ' ') }}</small><p>{{ source.evidence_summary }}</p></span></a>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">Exact historical evidence is unavailable. TraceEdge does not invent or substitute sources.</div>{% endif %}</article>
+        <article class="dash-panel passport-section span-two"><p class="eyebrow">EVIDENCE SOURCES</p><h2>Dated source record</h2>{% if passport.evidence_sources %}<div class="passport-evidence-list">{% for source in passport.evidence_sources %}<a href="{{ source.source_url }}" rel="noopener noreferrer" target="_blank"><img src="https://api.iconify.design/lucide:external-link.svg?color=%230f5c4d" alt=""><span><strong>{{ source.title }}</strong><small>{{ source.publisher }} · retrieved {{ source.retrieved_at.strftime('%d %b %Y') }} · {{ source.evidence_category.replace('_', ' ') }}</small><p>{{ source.evidence_summary }}</p></span></a>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">Exact historical evidence is unavailable. HilalMarkets does not invent or substitute sources.</div>{% endif %}</article>
         <article class="dash-panel passport-section"><p class="eyebrow">STATUS HISTORY</p><h2>Assessment timeline</h2>{% if passport.status_history %}<div class="passport-timeline">{% for event in passport.status_history %}<div><i></i><span><strong>{{ event.new_status.value.replace('_', ' ').title() }}</strong><small>{{ event.changed_at.strftime('%d %b %Y') }} · {{ event.approved_by }}</small><p>{{ event.reason_summary }}</p></span></div>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">No prior status changes are recorded.</div>{% endif %}</article>
         <article class="dash-panel passport-section"><p class="eyebrow">METHODOLOGY COMPARISON</p><h2>Conclusions stay separate</h2><p>{{ methodology_comparison.notice }}</p><div class="method-comparison-list">{% for result in methodology_comparison.results %}<div><span><strong>{{ result.methodology.name }}</strong><small>v{{ result.methodology.version }}</small></span><span class="sharia-status-chip status-{{ result.status.value if result.status else 'insufficient_information' }}">{{ result.status.value.replace('_', ' ').title() if result.status else 'No assessment' }}</span>{% if result.qualifications %}<p>{{ result.qualifications|join(' · ') }}</p>{% endif %}</div>{% else %}<div class="passport-empty-evidence">No other approved methodology is available for comparison.</div>{% endfor %}</div></article>
       </section>
 
     {% elif page == 'methodology' %}
-      <section class="methodology-hero dash-panel"><div><p class="eyebrow">METHODOLOGY</p><h1>Know how every screening result was reached.</h1><p>TraceEdge stores each approved methodology by version and shows conclusions separately. AI can organize evidence, but it cannot issue a religious ruling or silently change a status.</p></div><img src="https://api.iconify.design/lucide:book-open-check.svg?color=%238b5cf6" alt=""></section>
+      <section class="methodology-hero dash-panel"><div><p class="eyebrow">METHODOLOGY</p><h1>Know how every screening result was reached.</h1><p>HilalMarkets stores each approved methodology by version and shows conclusions separately. AI can organize evidence, but it cannot issue a religious ruling or silently change a status.</p></div><img src="https://api.iconify.design/lucide:book-open-check.svg?color=%230f5c4d" alt=""></section>
       {% if selected_methodology %}<section class="methodology-current"><header><div><span>Current platform methodology</span><h2>{{ selected_methodology.name }} · v{{ selected_methodology.version }}</h2></div><span class="sharia-status-chip status-eligible">Active</span></header><p>{{ selected_methodology.description }}</p><dl><div><dt>Governing body</dt><dd>{{ selected_methodology.governing_body }}</dd></div><div><dt>Reviewer group</dt><dd>{{ selected_methodology.reviewer_group }}</dd></div><div><dt>Effective from</dt><dd>{{ selected_methodology.effective_from.strftime('%d %b %Y') if selected_methodology.effective_from else 'Not recorded' }}</dd></div></dl><details><summary>View structured rules and evidence requirements</summary><div class="methodology-details"><section><h3>Rules</h3>{% for key, value in selected_methodology.rules.items() %}<div><span>{{ key.replace('_', ' ').title() }}</span><strong>{{ value }}</strong></div>{% endfor %}</section><section><h3>Evidence requirements</h3>{% for key, value in selected_methodology.evidence_requirements.items() %}<div><span>{{ key.replace('_', ' ').title() }}</span><strong>{{ value }}</strong></div>{% endfor %}</section></div></details></section>{% else %}<div class="dash-empty screened-empty"><h2>No real approved methodology is active</h2><p>The development/test seed is deliberately non-executable and is not presented as a religious ruling. A qualified governance process must publish a real methodology first.</p></div>{% endif %}
       <section class="dash-panel methodology-list"><div class="section-head"><div><p class="eyebrow">APPROVED VERSIONS</p><h2>Available methodology records</h2></div></div>{% for method in methodologies %}<article><div><strong>{{ method.name }}</strong><span>Version {{ method.version }}</span></div><p>{{ method.description }}</p><small>{{ method.governing_body or 'Governing body not recorded' }} · {{ method.reviewer_group or 'Reviewer group not recorded' }}</small></article>{% else %}<div class="dash-empty">No approved methodology versions are available.</div>{% endfor %}</section>
 
@@ -2686,7 +2682,7 @@
           <div>
             <p class="eyebrow">AI Setup Chat</p>
             <h1>Turn your idea into monitor rules.</h1>
-            <p>Describe what you watch. TraceEdge will clarify vague terms, translate every detail into measurable crypto spot rules, and wait for your approval.</p>
+            <p>Describe what you watch. HilalMarkets will clarify vague terms, translate every detail into measurable crypto spot rules, and wait for your approval.</p>
           </div>
           <div class="ai-chat-safety-badge" aria-label="Safety boundary">
             <img src="https://api.iconify.design/lucide:shield-check.svg?color=%23f7f3ff" alt="" aria-hidden="true">
@@ -2699,7 +2695,7 @@
             <div class="ai-chat-panel-head">
               <div class="ai-chat-agent">
                 <span><img src="https://api.iconify.design/lucide:sparkles.svg?color=%23ffffff" alt="" aria-hidden="true"></span>
-                <div><strong>TraceEdge Assistant</strong><small data-ai-chat-status>Ready to listen</small></div>
+                <div><strong>HilalMarkets Assistant</strong><small data-ai-chat-status>Ready to listen</small></div>
               </div>
               <button class="ai-chat-quiet-button" type="button" data-ai-chat-new>
                 <img src="https://api.iconify.design/lucide:plus.svg?color=%233a3a46" alt="" aria-hidden="true">
@@ -2736,7 +2732,7 @@
               <span class="ai-preview-status" data-ai-preview-status>Interviewing</span>
             </div>
             <div class="ai-preview-empty" data-ai-preview-empty>
-              <img src="https://api.iconify.design/lucide:scan-search.svg?color=%238b5cf6" alt="" aria-hidden="true">
+              <img src="https://api.iconify.design/lucide:scan-search.svg?color=%230f5c4d" alt="" aria-hidden="true">
               <h3>Rules will appear here</h3>
               <p>I’ll show the primary trigger, required rules, optional suggestions, assumptions, confidence, warnings, and alert behavior before anything is saved.</p>
             </div>
@@ -2795,7 +2791,7 @@
             <div class="builder-path-head">
               <div>
                 <p class="eyebrow">Describe strategy</p>
-                <h2>Teach TraceEdge what matters</h2>
+                <h2>Teach HilalMarkets what matters</h2>
                 <p>Describe the setup. You will review the interpreted mechanics before they enter the canvas.</p>
               </div>
               <button class="button button-secondary button-nowrap rechoose-path-button" type="button" data-builder-direction="choose">Rechoose path</button>
@@ -3089,7 +3085,7 @@
                         <button class="card-action" type="button" data-open-section-editor="risk">Edit risk context</button>
                       </div>
                       <div class="map-fact-grid" id="builder-risk-facts"></div>
-                      <p class="map-card-note">Context only. TraceEdge does not place trades.</p>
+                      <p class="map-card-note">Context only. HilalMarkets does not place trades.</p>
                     </div>
                   </article>
 
@@ -3286,7 +3282,7 @@
           </dialog>
         </form>
       </section>
-      <section id="monitors" class="dash-panel monitors-hub">
+      <section id="monitors" class="dash-panel monitors-hub" hidden aria-hidden="true">
         <div class="section-head">
           <div>
             <p class="eyebrow">Monitors</p>
@@ -3333,7 +3329,7 @@
                   {% if item.main_bottleneck %}
                     <small><strong>Top blocker:</strong> {{ item.main_bottleneck.condition_label }} - {{ item.main_bottleneck.blocking_rate|round|int }}% blocking impact</small>
                   {% else %}
-                    <small>More scan evidence is needed before TraceEdge can rank condition blockers.</small>
+                    <small>More scan evidence is needed before HilalMarkets can rank condition blockers.</small>
                   {% endif %}
                 </div>
                 <div class="row-actions monitor-card-actions">
@@ -3455,7 +3451,7 @@
         <section class="verified-hero dash-panel">
           <div>
             <p class="eyebrow">Verified strategy monitoring</p>
-            <h2>Confirm the system TraceEdge will monitor</h2>
+            <h2>Confirm the system HilalMarkets will monitor</h2>
             <p>Review the interpretation, test real historical moments, inspect expected behaviour, then approve this exact version.</p>
           </div>
           <div class="verified-hero-actions">
@@ -3483,7 +3479,7 @@
         <div class="verified-content" data-verified-content hidden>
           <section class="dash-panel verified-section" id="interpretation-review">
             <div class="section-head">
-              <div><p class="eyebrow">Phrase-to-rule audit</p><h2>What TraceEdge understood</h2><p>Every phrase remains attached to its deterministic mechanics and assumptions.</p></div>
+              <div><p class="eyebrow">Phrase-to-rule audit</p><h2>What HilalMarkets understood</h2><p>Every phrase remains attached to its deterministic mechanics and assumptions.</p></div>
               <span class="verified-state" data-interpretation-state>Needs review</span>
             </div>
             <div class="interpretation-review-grid">
@@ -3501,7 +3497,7 @@
 
           <section class="dash-panel verified-section" id="strategy-tests">
             <div class="section-head">
-              <div><p class="eyebrow">Your expected examples</p><h2>Strategy unit tests</h2><p>Choose a real historical moment and tell TraceEdge what should have happened.</p></div>
+              <div><p class="eyebrow">Your expected examples</p><h2>Strategy unit tests</h2><p>Choose a real historical moment and tell HilalMarkets what should have happened.</p></div>
               <button class="button button-primary" type="button" data-toggle-test-form>Add test case</button>
             </div>
             <form class="verified-form verified-test-form" data-test-form hidden>
@@ -3568,7 +3564,7 @@
 
           <section class="verified-two-column" id="outcome-review">
             <article class="dash-panel verified-section">
-              <div class="section-head"><div><p class="eyebrow">User-defined follow-up</p><h2>Outcome review</h2><p>Classify what happened at your chosen horizon. TraceEdge never invents a profit-quality label.</p></div><a class="button button-secondary" href="/dashboard/lifecycles">Open alert proofs</a></div>
+              <div class="section-head"><div><p class="eyebrow">User-defined follow-up</p><h2>Outcome review</h2><p>Classify what happened at your chosen horizon. HilalMarkets never invents a profit-quality label.</p></div><a class="button button-secondary" href="/dashboard/lifecycles">Open alert proofs</a></div>
               <div class="outcome-review-list" data-outcome-list></div>
             </article>
             <article class="dash-panel verified-section">
@@ -3584,7 +3580,7 @@
 
           <section class="verified-two-column">
             <article class="dash-panel verified-section">
-              <p class="eyebrow">Guided reconstruction</p><h2>Why wasn't I alerted?</h2><p>Select the market moment. TraceEdge separates market logic, data, monitor state, and delivery evidence.</p>
+              <p class="eyebrow">Guided reconstruction</p><h2>Why wasn't I alerted?</h2><p>Select the market moment. HilalMarkets separates market logic, data, monitor state, and delivery evidence.</p>
               <form class="verified-form compact" data-forensic-form>
                 <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
                 <label>Symbol<input name="symbol" required placeholder="SOL/USDT"></label>
@@ -3770,118 +3766,6 @@
           <div class="dash-empty">No versions yet.</div>
         {% endif %}
       </section>
-    {% elif false %}
-      <section class="dash-grid two">
-        <article class="dash-panel">
-          <h2>Quick Scan</h2>
-          <p>Run a deterministic scan against an approved strategy version, or describe a one-off trigger and approve the mechanics before scanning.</p>
-          <form id="scan-now-form" class="dash-form" data-testid="quick-scan-form">
-            <label>Scan mode
-              <select name="scan_mode">
-                <option value="strategy">Approved strategy version</option>
-                <option value="prompt">Free prompt, then approve mechanics</option>
-              </select>
-            </label>
-            <div id="scan-strategy-fields" class="stack-list">
-            <label>Strategy version
-              <select name="strategy_version_id">
-                <option value="">Choose a strategy version</option>
-                {% for strategy in strategies %}
-                  {% if strategy.active_version_id %}
-                    <option value="{{ strategy.active_version_id }}">{{ strategy.name }} · active version</option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            </label>
-            </div>
-            <div id="scan-prompt-fields" class="stack-list" hidden>
-              <div class="structured-prompt-grid quick-scan-prompt-grid">
-                <input name="prompt" type="hidden">
-                <label>What should I find?
-                  <textarea data-scan-prompt-part="goal" rows="3" placeholder="Example: symbols that grew 5% or more today" data-testid="quick-scan-goal"></textarea>
-                </label>
-                <label>Required condition
-                  <textarea data-scan-prompt-part="must" rows="3" placeholder="Example: price is above 1000, previous daily candle is green, or volume is above average" data-testid="quick-scan-must"></textarea>
-                </label>
-                <label>Optional filters
-                  <textarea data-scan-prompt-part="filters" rows="2" placeholder="Example: USDT spot only, exclude stablecoins, 15m timeframe"></textarea>
-                </label>
-                <label>Extra instructions
-                  <textarea data-scan-prompt-part="extra" rows="2" placeholder="Anything else to clarify the one-off finder request"></textarea>
-                </label>
-              </div>
-              <div class="form-grid">
-                <label>Data provider
-                  <select name="prompt_exchange">
-                    <option value="binance">Binance</option>
-                    <option value="bybit">Bybit</option>
-                  </select>
-                </label>
-                <label>Quote currency
-                  <select name="prompt_quote_currency">
-                    <option value="USDT">USDT</option>
-                    <option value="USDC">USDC</option>
-                  </select>
-                </label>
-                <label>Timeframe
-                  <select name="prompt_timeframe">
-                    <option value="1m">1m</option>
-                    <option value="3m">3m</option>
-                    <option value="5m">5m</option>
-                    <option value="15m" selected>15m</option>
-                    <option value="30m">30m</option>
-                    <option value="1h">1h</option>
-                    <option value="4h">4h</option>
-                    <option value="1d">1d</option>
-                  </select>
-                </label>
-                <label>Trigger mode
-                  <select name="prompt_trigger_mode">
-                    <option value="candle_close">Candle close</option>
-                    <option value="intrabar">Intrabar</option>
-                  </select>
-                </label>
-              </div>
-              <button class="button button-secondary" type="button" data-interpret-scan-prompt data-testid="quick-scan-interpret">Interpret Trigger</button>
-              <div id="scan-interpretation" class="summary-box" hidden data-testid="quick-scan-interpretation"></div>
-            </div>
-            <label>Symbols
-              <input name="symbols" placeholder="SOL/USDT,LINK/USDT">
-              <small>Leave blank to scan the whole allowed universe for your plan and strategy. You can describe symbols, direction, indicator, condition, timeframe, volume, liquidity, stop and target filters.</small>
-            </label>
-            <button class="button button-primary" type="submit" data-testid="quick-scan-submit">Scan Now</button>
-          </form>
-        </article>
-        <article class="dash-panel">
-          <h2>Scan Result</h2>
-          <div id="scan-result" class="summary-box scan-result-panel" data-testid="quick-scan-result">No scan has been run from this page yet.</div>
-        </article>
-      </section>
-    {% elif false %}
-      <section class="dash-panel latest-setups-panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Recent evidence</p>
-            <h2>Latest Setups</h2>
-            <p>Review the newest setup instances with lifecycle state, completion score, and chart evidence.</p>
-          </div>
-          <img src="https://api.iconify.design/lucide:list-checks.svg?color=%23c4b5fd" alt="" aria-hidden="true">
-        </div>
-        {% if setups %}
-          <div class="latest-setup-grid">
-            {% for setup in setups %}
-              <a class="latest-setup-card" href="/api/v1/dashboard/charts/setup/{{ setup.id }}">
-                <span class="latest-setup-icon"><img src="https://api.iconify.design/lucide:candlestick-chart.svg?color=%23ffffff" alt="" aria-hidden="true"></span>
-                <div><strong>{{ setup.symbol }}</strong><small>{{ setup.exchange }} · {{ setup.timeframe }}</small></div>
-                <span class="setup-state-pill">{{ setup.state.value.replace('_', ' ').title() }}</span>
-                <span class="setup-score-pill">{{ setup.completion_score|round|int }}%</span>
-              </a>
-            {% endfor %}
-          </div>
-        {% else %}
-          <div class="dash-empty">No setup lifecycle instances have been created yet.</div>
-        {% endif %}
-      </section>
     {% elif page in ['lifecycles', 'activity'] %}
       <section class="activity-workspace-head">
         <div><p class="eyebrow">EVIDENCE AND ACTIVITY</p><h1>Follow every opportunity and every status change.</h1><p>See what is forming, why an alert happened, what prevented one, and whether an asset's screening status changed.</p><span class="sr-only">One setup. A complete lifecycle.</span></div>
@@ -3902,7 +3786,7 @@
               <div class="activity-item-copy"><div><span class="activity-type">{{ item.item_type.replace('_', ' ').title() }}</span>{% if item.current_sharia_status %}<span class="sharia-status-chip status-{{ item.current_sharia_status.value }}">{{ item.current_sharia_status.value.replace('_', ' ').title() }}</span>{% endif %}</div><h2>{{ item.title }}</h2><p>{{ item.summary }}</p><small>{{ item.occurred_at|short_dt(user.timezone) }}{% if item.monitor_name %} · {{ item.monitor_name }}{% endif %}{% if item.methodology_version %} · methodology v{{ item.methodology_version }}{% endif %}</small></div>
               {% if item.evidence_reference %}<a class="button button-secondary" href="{{ item.evidence_reference }}">View evidence</a>{% endif %}
             </article>
-          {% else %}<div class="dash-empty">No activity records match this view. TraceEdge will keep evidence here when an opportunity, alert, investigation, or compliance change occurs.</div>{% endfor %}
+          {% else %}<div class="dash-empty">No activity records match this view. HilalMarkets will keep evidence here when an opportunity, alert, investigation, or compliance change occurs.</div>{% endfor %}
         </section>
       {% endif %}
       {% if activity_tab in ['forming', 'all'] %}
@@ -4112,7 +3996,7 @@
           <div>
             <p class="eyebrow">Forensic review</p>
             <h2>Missed Move Analyzer</h2>
-            <p>Pick a monitor, symbol, and time. TraceEdge reconstructs what was known then.</p>
+            <p>Pick a monitor, symbol, and time. HilalMarkets reconstructs what was known then.</p>
           </div>
         </div>
         {% if cockpit_monitors %}
@@ -4150,7 +4034,7 @@
         <div class="cockpit-quick-stack">
           <a class="button button-primary" href="/dashboard/lifecycles">Open Lifecycles</a>
           <a class="button button-secondary" href="/dashboard/strategies/new#monitors">Control Monitors</a>
-          <a class="button button-secondary" href="/dashboard/scan-now">Run Quick Scan</a>
+          <a class="button button-secondary" href="/dashboard/strategies/new?mode=scanner">Open Scanner</a>
         </div>
       </article>
       </section>
@@ -4308,7 +4192,7 @@
           </div>
         </div>
         {% if analytics.coverage.symbols_eligible == 0 %}
-          <div class="dash-empty">No scan coverage has been recorded yet. Activate a monitor or run Quick Scan to collect market coverage data.</div>
+          <div class="dash-empty">No scan coverage has been recorded yet. Activate a Watch Plan or use Scanner to collect market coverage data.</div>
         {% else %}
           <div class="dash-table analytics-factor-table">
             {% for factor in analytics.coverage.factors %}
@@ -4453,7 +4337,7 @@
           <div>
             <p class="eyebrow">Connected delivery</p>
             <h2>Integrations</h2>
-            <p>Choose where TraceEdge should send your monitor alerts. Link Telegram for quick personal updates, or Discord for team and community delivery.</p>
+            <p>Choose where HilalMarkets should send your Watch Plan alerts. Link Telegram for quick personal updates, or Discord for team and community delivery.</p>
           </div>
           <span class="integration-hero-icon" aria-hidden="true">
             <img src="https://api.iconify.design/lucide:plug-zap.svg?color=%23ffffff" alt="">
@@ -4664,11 +4548,87 @@
           <div>
             <p class="eyebrow">Product-specific memory</p>
             <h2>Personal Strategy Preferences</h2>
-            <p>TraceEdge can remember your usual timeframes, trigger style, exchange, and alert channels. It does not store wallet secrets or trading credentials.</p>
+            <p>HilalMarkets can remember your usual timeframes, trigger style, exchange, and alert channels. It does not store wallet secrets or trading credentials.</p>
           </div>
           <button class="button button-secondary danger-button" type="button" data-forget-strategy-preferences>Forget my preferences</button>
         </div>
         <div id="strategy-preferences" class="summary-box">Loading saved strategy preferences...</div>
+      </section>
+    {% elif page == 'watchlist' %}
+      <section class="dash-panel hilal-page-intro">
+        <p class="eyebrow">Saved research universe</p>
+        <h1>My Watchlist</h1>
+        <p>Assets you saved from the screened market. Open each passport to review the latest evidence before using it in a Watch Plan.</p>
+        <div class="row-actions">
+          <a class="button button-primary" href="/dashboard/market">Explore screened market</a>
+          <a class="button button-secondary" href="/dashboard/strategies/new">Create a Watch Plan</a>
+        </div>
+      </section>
+      <section class="dash-grid two hilal-watchlist-grid">
+        <article class="dash-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Lists</p>
+              <h2>Your saved lists</h2>
+            </div>
+            <span class="status-pill neutral">{{ watchlists|length }} list{{ '' if watchlists|length == 1 else 's' }}</span>
+          </div>
+          {% if watchlists %}
+            <div class="dash-table">
+              {% for watchlist in watchlists %}
+                <div class="dash-row"><strong>{{ watchlist.name }}</strong><span>{{ 'Default list' if watchlist.is_default else 'Saved list' }}</span><small>Created {{ watchlist.created_at|short_dt(user.timezone) }}</small></div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="dash-empty">No assets saved yet. Start in the screened market and add an eligible asset when you want to follow it.</div>
+          {% endif %}
+        </article>
+        <article class="dash-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Assets</p>
+              <h2>Saved market passports</h2>
+            </div>
+            <span class="status-pill neutral">{{ watchlist_assets|length }} asset{{ '' if watchlist_assets|length == 1 else 's' }}</span>
+          </div>
+          {% if watchlist_assets %}
+            <div class="dash-table">
+              {% for asset in watchlist_assets %}
+                <a class="dash-row hilal-watchlist-row" href="/dashboard/market/{{ asset.canonical_asset|lower }}">
+                  <strong>{{ asset.canonical_asset }}</strong><span>{{ asset.watchlist_name }}</span><small>Saved {{ asset.added_at|short_dt(user.timezone) }}</small>
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="dash-empty">Your saved asset passports will appear here.</div>
+          {% endif %}
+        </article>
+      </section>
+    {% elif page == 'compliance' %}
+      <section class="dash-panel hilal-page-intro">
+        <p class="eyebrow">Evidence updates</p>
+        <h1>Compliance Changes</h1>
+        <p>Screening-status changes that affected your saved assets, Watch Plans, or evidence-backed alerts.</p>
+        <div class="row-actions"><a class="button button-secondary" href="/dashboard/methodology">How we screen</a><a class="button button-primary" href="/dashboard/market">Review screened market</a></div>
+      </section>
+      <section class="dash-panel">
+        <div class="section-head">
+          <div><p class="eyebrow">Recent changes</p><h2>What changed</h2></div>
+          <span class="status-pill neutral">{{ compliance_changes|length }} recorded</span>
+        </div>
+        {% if compliance_changes %}
+          <div class="dash-table hilal-compliance-list">
+            {% for change in compliance_changes %}
+              <article class="dash-row">
+                <strong>{{ change.canonical_asset }}</strong>
+                <span>{{ change.previous_status.value.replace('_', ' ') if change.previous_status else 'No prior status' }} → {{ change.new_status.value.replace('_', ' ') }}</span>
+                <small>{{ change.created_at|short_dt(user.timezone) }} · {{ change.behavior.value.replace('_', ' ') }}</small>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="dash-empty">No screening-status changes have affected your account yet.</div>
+        {% endif %}
       </section>
     {% elif page == 'support' %}
       <section class="dash-grid two">
@@ -4761,7 +4721,9 @@
         {% if tickets %}<div class="dash-table">{% for ticket in tickets %}<div class="dash-row"><strong>{{ ticket.subject }}</strong><span>{{ ticket.status.value }}</span><small>{{ ticket.created_at|short_dt(user.timezone) }}</small></div>{% endfor %}</div>{% else %}<div class="dash-empty">No tickets yet.</div>{% endif %}
       </section>
     {% endif %}
+    </div>
   </main>
+</div>
   {% if settings.chart_library_cdn_url %}
     <script src="{{ settings.chart_library_cdn_url }}"></script>
   {% endif %}

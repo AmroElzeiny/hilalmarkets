@@ -1,0 +1,39 @@
+{
+  "project": "HilalMarkets UI Prototype",
+  "version": "1.0",
+  "generated": "2026-07-14",
+  "implementation": "Static HTML, CSS, JavaScript",
+  "pages": [
+    "admin-system-brain.html",
+    "auth-login.html",
+    "auth-signup.html",
+    "dashboard-activity.html",
+    "dashboard-billing.html",
+    "dashboard-check-market.html",
+    "dashboard-compliance.html",
+    "dashboard-home.html",
+    "dashboard-integrations.html",
+    "dashboard-market.html",
+    "dashboard-methodology.html",
+    "dashboard-opportunity.html",
+    "dashboard-passport.html",
+    "dashboard-portfolio.html",
+    "dashboard-referrals.html",
+    "dashboard-settings.html",
+    "dashboard-support.html",
+    "dashboard-watch-plan-builder.html",
+    "dashboard-watch-plans.html",
+    "dashboard-watchlist.html",
+    "index.html",
+    "onboarding.html",
+    "preview.html"
+  ],
+  "production_route_pattern": "#TODO_*",
+  "preview_route_attribute": "data-preview-href",
+  "notes": [
+    "All data is sample prototype data.",
+    "No page represents a live Sharia ruling or market feed.",
+    "System Brain is intentionally absent from customer navigation.",
+    "Portfolio and Referrals are deliberately deferred."
+  ]
+}

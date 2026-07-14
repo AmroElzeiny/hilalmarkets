@@ -7,7 +7,7 @@ def test_every_current_concept_has_an_e2e_status():
     rows = concept_e2e_rows()
     counts = matrix_status_counts(rows)
 
-    assert len(rows) == 492
+    assert len(rows) == 502
     assert sum(counts.values()) == len(rows)
     assert set(counts).issubset(
         {"GREEN", "YELLOW", "RED", "PROVIDER_REQUIRED", "PLANNED"}

@@ -1,1 +1,1 @@
-"""Discord integration services for TraceEdge."""
+"""Discord integration services for HilalMarkets."""

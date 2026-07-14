@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from ai_market_monitor.engine.builder_templates import condition_template
 from ai_market_monitor.engine.capabilities import all_capabilities, capability_by_key
 from ai_market_monitor.engine.capability_resolver import CapabilityResolver
+from ai_market_monitor.engine.prompt_audit import split_prompt_fragments
 from ai_market_monitor.schemas.strategy import ConditionRule
 from tests.factories import load_strategy
 
@@ -127,8 +128,48 @@ def test_wholly_unknown_mechanic_is_asked_as_a_phrase_not_an_english_word():
     assert fragment.status == "unknown"
     assert fragment.unknown_terms == ()
     assert fragment.clarification_question == (
-        "How should TraceEdge measure 'Explain the moon wobble candidates'?"
+        "How should HilalMarkets measure 'Explain the moon wobble candidates'?"
     )
+
+
+@pytest.mark.parametrize("answer", ["0", "0%", "none", "no", "yes"])
+def test_bare_clarification_answers_never_become_capabilities(answer):
+    report = CapabilityResolver().resolve_prompt(answer)
+    assert report.fragments == ()
+    assert report.needs_clarification is False
+
+
+def test_legacy_bare_answers_do_not_poison_a_supported_setup():
+    report = CapabilityResolver().resolve_prompt(
+        "Find coins that swept PDL on 1d\n0\nnone"
+    )
+    assert report.needs_clarification is False
+    assert report.candidate_keys == ("previous_daily_low_sweep",)
+
+
+def test_server_authored_clarification_answer_is_context_not_a_new_instruction():
+    fragments = split_prompt_fragments(
+        "RSI above 50 on 1d\n"
+        "Clarification answer for rsi_timeframe: Use the trigger timeframe"
+    )
+    assert fragments[0].meaningful is True
+    assert fragments[1].meaningful is False
+
+
+def test_head_and_shoulders_prompt_resolves_pattern_sequence_without_timing_noise():
+    report = CapabilityResolver().resolve_prompt(
+        "I want to monitor every forming head & sholders on halal coins then once the "
+        "neckline is broken, alert me on the 1m chart"
+    )
+    assert report.needs_clarification is False
+    assert report.candidate_keys == (
+        "head_and_shoulders_formed",
+        "head_and_shoulders_neckline_break",
+    )
+    assert [item.fragment for item in report.fragments] == [
+        "I want to monitor every forming head & sholders on halal coins",
+        "once the neckline is broken",
+    ]
 
 
 def test_registry_rejects_unknown_keys_parameters_and_invalid_thresholds():

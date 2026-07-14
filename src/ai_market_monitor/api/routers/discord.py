@@ -87,7 +87,7 @@ async def discord_interactions(
         return {
             "type": 4,
             "data": {
-                "content": "Connect Discord from your TraceEdge account first.",
+                "content": "Connect Discord from your HilalMarkets account first.",
                 "flags": 64,
             },
         }

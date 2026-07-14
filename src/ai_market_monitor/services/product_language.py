@@ -12,10 +12,10 @@ class LifecyclePresentation:
 
 _LIFECYCLE_PRESENTATION: dict[SetupLifecycleState, LifecyclePresentation] = {
     SetupLifecycleState.CANDIDATE_DETECTED: LifecyclePresentation(
-        "Detected", "TraceEdge found the first matching market check.", "information"
+        "Detected", "HilalMarkets found the first matching market check.", "information"
     ),
     SetupLifecycleState.DETECTED: LifecyclePresentation(
-        "Detected", "TraceEdge found the first matching market check.", "information"
+        "Detected", "HilalMarkets found the first matching market check.", "information"
     ),
     SetupLifecycleState.FORMING: LifecyclePresentation(
         "Forming", "Some required market checks are complete.", "information"
@@ -30,13 +30,13 @@ _LIFECYCLE_PRESENTATION: dict[SetupLifecycleState, LifecyclePresentation] = {
         "Ready for review", "The approved required checks are complete.", "success"
     ),
     SetupLifecycleState.ALERT_SENT: LifecyclePresentation(
-        "Alert sent", "TraceEdge delivered the evidence-backed alert.", "success"
+        "Alert sent", "HilalMarkets delivered the evidence-backed alert.", "success"
     ),
     SetupLifecycleState.BLOCKED: LifecyclePresentation(
         "Paused", "A policy or required-data check prevented progress.", "warning"
     ),
     SetupLifecycleState.DATA_UNAVAILABLE: LifecyclePresentation(
-        "Data unavailable", "TraceEdge could not verify a required market check.", "warning"
+        "Data unavailable", "HilalMarkets could not verify a required market check.", "warning"
     ),
     SetupLifecycleState.SUPPRESSED: LifecyclePresentation(
         "Ended", "The opportunity completed without a new notification.", "neutral"

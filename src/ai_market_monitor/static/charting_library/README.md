@@ -1,6 +1,6 @@
 # TradingView Charting Library Placeholder
 
-TraceEdge's lifecycle chart dialog is wired for the licensed TradingView Charting Library, not the public iframe widget.
+HilalMarkets' lifecycle chart dialog is wired for the licensed TradingView Charting Library, not the public iframe widget.
 
 Place the official TradingView Charting Library distribution in this folder so this file exists:
 

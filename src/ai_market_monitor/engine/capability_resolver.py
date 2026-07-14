@@ -280,7 +280,7 @@ class CapabilityResolver:
                 if not resolution.candidates and _is_context_only(part):
                     continue
                 resolutions.append(resolution)
-        return CapabilityResolutionReport(prompt=prompt, fragments=resolutions)
+        return CapabilityResolutionReport(prompt=prompt, fragments=tuple(resolutions))
 
     def _compound_parts(self, fragment: str, *, limit: int) -> tuple[str, ...]:
         parts = tuple(
@@ -312,7 +312,7 @@ class CapabilityResolver:
             question = (
                 f"What do you mean by '{unknown_terms[0]}' in this setup?"
                 if unknown_terms
-                else f"How should TraceEdge measure '{fragment.strip()}'?"
+                else f"How should HilalMarkets measure '{fragment.strip()}'?"
             )
             return FragmentResolution(
                 fragment=fragment,
@@ -635,7 +635,7 @@ class CapabilityResolver:
 
 
 def _selection_parameters(condition: ConditionRule) -> dict[str, Any]:
-    parameters = dict(condition.left.parameters)
+    parameters: dict[str, Any] = dict(condition.left.parameters)
     if condition.right is not None:
         parameters.update(condition.right.parameters)
         if condition.right.kind.value == "constant":
@@ -752,6 +752,14 @@ def _token_overlap(left: str, right: str) -> float:
 
 def _is_context_only(fragment: str) -> bool:
     normalized = _normalize(fragment)
+    # A scalar or ordinary confirmation can be an answer to a prior question, but it
+    # can never identify an executable market capability on its own. This also makes
+    # old sessions fail quiet instead of asking users to define `0`, `none`, or `yes`.
+    if re.fullmatch(
+        r"(?:[-+]?\d+(?:\.\d+)?(?:%|x)?|none|no|yes|exact(?: only)?)",
+        normalized,
+    ):
+        return True
     if normalized.startswith(("apply ", "use ")):
         return True
     # Alert timing and logical sequencing are strategy-tree context, not market-data
@@ -760,6 +768,35 @@ def _is_context_only(fragment: str) -> bool:
     if re.search(r"\b(?:alert|notify|notification)\b", normalized) and re.search(
         r"\b(?:after|before|when|once|then|within)\b|\b(?:candle|candles)\b",
         normalized,
+    ):
+        return True
+    alert_context = re.sub(
+        r"\b(?:alert|alerts|alerted|notify|notification|notifications|me|on|the|a|an|"
+        r"chart|timeframe|time frame|at|using|use)\b",
+        " ",
+        normalized,
+    )
+    alert_context_tokens = set(_tokens(alert_context))
+    if re.search(r"\b(?:alert|notify|notification)\b", normalized) and (
+        not alert_context_tokens
+        or alert_context_tokens.issubset(
+            {
+                "1m",
+                "3m",
+                "5m",
+                "15m",
+                "30m",
+                "1h",
+                "2h",
+                "4h",
+                "6h",
+                "8h",
+                "12h",
+                "1d",
+                "close",
+                "intrabar",
+            }
+        )
     ):
         return True
     normalized = re.sub(

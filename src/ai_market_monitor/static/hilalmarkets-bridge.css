@@ -1,0 +1,649 @@
+/* HilalMarkets production bridge. The existing pages retain their server-rendered data and
+   mutation forms; this layer applies the supplied product system consistently while the larger
+   page components migrate behind the same routes. */
+:root {
+  --hilal-emerald-950: #082f29;
+  --hilal-emerald-800: #0f5c4d;
+  --hilal-emerald-600: #1f8b74;
+  --hilal-ivory: #f7f4ec;
+  --hilal-ink: #15231f;
+  --hilal-muted: #63716c;
+  --hilal-line: #dfe7e3;
+  --hilal-gold: #d2af63;
+  --hilal-amber: #b87820;
+  --hilal-red: #b94a4a;
+  --hilal-shadow: 0 22px 60px rgba(8, 47, 41, .12);
+}
+
+.hilal-brand-font,
+.hilal-dashboard h1,
+.hilal-dashboard h2,
+.hilal-dashboard h3,
+.hilal-dashboard .dash-sidebar,
+.hilal-dashboard button,
+.hilal-dashboard .button,
+.hilal-public h1,
+.hilal-public h2,
+.hilal-public h3,
+.hilal-auth h1,
+.hilal-auth h2 {
+  font-family: Manrope, Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.hilal-public,
+.hilal-auth,
+.hilal-dashboard {
+  background: #fbfaf6 !important;
+  color: var(--hilal-ink) !important;
+}
+
+.hilal-public .site-header,
+.hilal-auth .auth-card,
+.hilal-auth .auth-side-panel,
+.hilal-dashboard .dash-sidebar,
+.hilal-dashboard .dash-main {
+  color: var(--hilal-ink) !important;
+}
+
+.hilal-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--hilal-ink) !important;
+  font: 800 .96rem/1 Manrope, Inter, sans-serif;
+  letter-spacing: -.035em;
+}
+
+.hilal-logo img {
+  width: 40px;
+  height: 40px;
+}
+
+.hilal-logo small {
+  display: block;
+  margin-top: 4px;
+  color: var(--hilal-muted);
+  font: 700 .52rem/1.1 "DM Sans", Inter, sans-serif;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.hilal-public .site-header {
+  width: min(1220px, calc(100% - 34px));
+  height: auto;
+  min-height: 66px;
+  margin-top: 14px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 18px;
+  background: rgba(251, 250, 246, .9);
+  box-shadow: 0 14px 40px rgba(8, 47, 41, .08);
+}
+
+.hilal-public .site-header nav a,
+.hilal-public .site-header nav a:visited {
+  color: #4d5a55 !important;
+  font: 650 .9rem/1 "DM Sans", Inter, sans-serif;
+}
+
+.hilal-public .fixed-button-primary,
+.hilal-dashboard .button.button-primary,
+.hilal-dashboard .ai-chat-send,
+.hilal-auth .auth-submit {
+  border-color: transparent !important;
+  background: var(--hilal-emerald-800) !important;
+  color: #fff !important;
+  box-shadow: 0 12px 26px rgba(15, 92, 77, .24) !important;
+}
+
+.hilal-public .fixed-button-subtle,
+.hilal-dashboard .button.button-secondary,
+.hilal-dashboard .button.muted-action,
+.hilal-auth .auth-alternative-actions a {
+  border-color: #cddbd6 !important;
+  background: #fff !important;
+  color: var(--hilal-emerald-950) !important;
+  box-shadow: none !important;
+}
+
+.hilal-public .fixed-main,
+.hilal-public .fixed-section,
+.hilal-public .feature-card,
+.hilal-public .plan-card,
+.hilal-public .final-cta,
+.hilal-public .risk-notice {
+  background-color: #fbfaf6 !important;
+  color: var(--hilal-ink) !important;
+}
+
+.hilal-public .fixed-section:nth-of-type(even),
+.hilal-public .feature-card,
+.hilal-public .plan-card,
+.hilal-public .final-cta,
+.hilal-public .risk-notice {
+  border-color: var(--hilal-line) !important;
+}
+
+.hilal-public .support-strip,
+.hilal-public .plan-card-featured {
+  background: var(--hilal-emerald-950) !important;
+  color: #fff !important;
+}
+
+.hilal-public .fixed-eyebrow,
+.hilal-public .number-badge,
+.hilal-public .scan-badge,
+.hilal-public .score,
+.hilal-public .proof-panel {
+  color: var(--hilal-emerald-700, #16705e) !important;
+}
+
+.hilal-dashboard .dash-sidebar {
+  width: 272px !important;
+  border-right: 1px solid var(--hilal-line) !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.hilal-dashboard .sidebar-head {
+  min-height: 86px;
+  padding: 18px 18px 12px !important;
+  border-bottom: 1px solid var(--hilal-line);
+}
+
+.hilal-dashboard .dash-brand .brand-mark,
+.hilal-dashboard .dash-brand .sidebar-logo-full,
+.hilal-dashboard .dash-brand .brand-name {
+  display: none !important;
+}
+
+.hilal-dashboard .hilal-sidebar-brand {
+  display: inline-flex !important;
+}
+
+.hilal-dashboard .sidebar-toggle,
+.hilal-dashboard .sidebar-logout,
+.hilal-dashboard .dash-nav a,
+.hilal-dashboard .sidebar-create-quick {
+  border-radius: 12px !important;
+  color: #53615c !important;
+}
+
+.hilal-dashboard .sidebar-toggle,
+.hilal-dashboard .sidebar-logout {
+  border: 1px solid #d3ded9 !important;
+  background: #fff !important;
+}
+
+.hilal-dashboard .sidebar-toggle img,
+.hilal-dashboard .sidebar-logout img,
+.hilal-dashboard .dash-nav a img {
+  filter: sepia(1) saturate(1.5) hue-rotate(105deg) brightness(.62) !important;
+}
+
+.hilal-dashboard .sidebar-create-quick {
+  margin: 12px 18px 10px !important;
+  background: var(--hilal-emerald-800) !important;
+  color: #fff !important;
+  box-shadow: 0 12px 26px rgba(15, 92, 77, .2) !important;
+}
+
+body.hilal-dashboard:not(.sidebar-collapsed) .sidebar-create-quick {
+  background: var(--hilal-emerald-800) !important;
+  box-shadow: 0 12px 26px rgba(15, 92, 77, .2) !important;
+}
+
+body.hilal-dashboard:not(.sidebar-collapsed) .hilal-sidebar-brand {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  display: inline-flex !important;
+}
+
+body.hilal-dashboard:not(.sidebar-collapsed) .hilal-sidebar-brand > span {
+  display: block !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  white-space: nowrap;
+}
+
+.hilal-dashboard .dash-nav {
+  gap: 2px !important;
+  padding: 4px 14px 18px !important;
+}
+
+.hilal-dashboard .dash-nav-section {
+  margin: 18px 0 6px !important;
+  padding: 0 10px !important;
+  color: #7a8883 !important;
+  font: 800 .66rem/1 Manrope, Inter, sans-serif !important;
+}
+
+.hilal-dashboard .dash-nav a {
+  min-height: 44px;
+  padding: 0 11px !important;
+  font: 700 .87rem/1 "DM Sans", Inter, sans-serif !important;
+}
+
+.hilal-dashboard:not(.sidebar-collapsed) .dash-nav a {
+  grid-template-columns: 26px minmax(0, 1fr) !important;
+  gap: 9px !important;
+}
+
+.hilal-dashboard .dash-nav a:hover,
+.hilal-dashboard .dash-nav a.active {
+  background: #eff8f5 !important;
+  color: var(--hilal-emerald-800) !important;
+  box-shadow: inset 0 0 0 1px #cde7de !important;
+}
+
+body.hilal-dashboard .button.button-secondary,
+body.hilal-dashboard .button.muted-action {
+  border-color: #cddbd6 !important;
+  background: #fff !important;
+  color: var(--hilal-emerald-950) !important;
+  box-shadow: none !important;
+}
+
+body.hilal-dashboard.theme-light .button.button-secondary,
+body.hilal-dashboard:not(.theme-light) .button.button-secondary {
+  border-color: #cddbd6 !important;
+  background: #fff !important;
+  color: var(--hilal-emerald-950) !important;
+  box-shadow: none !important;
+}
+
+.hilal-dashboard .dash-main {
+  margin-left: 272px !important;
+  min-height: 100vh;
+  padding: 34px clamp(20px, 4vw, 56px) 56px !important;
+  background: #fbfaf6 !important;
+}
+
+/* The legacy shell already persists a collapsed state. In HilalMarkets that
+   state is an intentional icon rail, never a partially clipped text menu. */
+.hilal-dashboard.sidebar-collapsed .dash-sidebar {
+  width: 84px !important;
+}
+
+.hilal-dashboard.sidebar-collapsed .dash-main {
+  margin-left: 84px !important;
+}
+
+.hilal-dashboard.sidebar-collapsed .sidebar-head {
+  min-height: 78px;
+  padding: 15px 12px !important;
+  justify-content: center;
+}
+
+.hilal-dashboard.sidebar-collapsed .hilal-sidebar-brand > span,
+.hilal-dashboard.sidebar-collapsed .sidebar-create-quick > span,
+.hilal-dashboard.sidebar-collapsed .dash-nav a > span,
+.hilal-dashboard.sidebar-collapsed .sidebar-logout > span {
+  display: none !important;
+}
+
+.hilal-dashboard.sidebar-collapsed .hilal-sidebar-brand {
+  display: grid !important;
+  place-items: center;
+}
+
+.hilal-dashboard.sidebar-collapsed .hilal-sidebar-brand img {
+  width: 42px;
+  height: 42px;
+}
+
+.hilal-dashboard.sidebar-collapsed .sidebar-rail-controls {
+  display: grid;
+  justify-items: center;
+}
+
+.hilal-dashboard.sidebar-collapsed .sidebar-create-quick,
+.hilal-dashboard.sidebar-collapsed .dash-nav a,
+.hilal-dashboard.sidebar-collapsed .sidebar-logout {
+  display: grid !important;
+  width: 48px !important;
+  min-width: 48px !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  margin: 7px auto !important;
+  padding: 0 !important;
+  place-items: center;
+}
+
+.hilal-dashboard.sidebar-collapsed .dash-nav {
+  padding: 6px 10px 18px !important;
+}
+
+.hilal-dashboard.sidebar-collapsed .dash-nav-section {
+  height: 1px;
+  margin: 10px 8px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  color: transparent !important;
+}
+
+.hilal-dashboard.sidebar-collapsed .dash-nav a img,
+.hilal-dashboard.sidebar-collapsed .sidebar-create-quick img,
+.hilal-dashboard.sidebar-collapsed .sidebar-logout img {
+  margin: 0 !important;
+}
+
+body.hilal-dashboard.sidebar-collapsed .sidebar-create-quick {
+  background: var(--hilal-emerald-800) !important;
+  box-shadow: 0 8px 18px rgba(15, 92, 77, .22) !important;
+}
+
+body.hilal-dashboard.sidebar-collapsed .dash-nav a > span,
+body.hilal-dashboard.sidebar-collapsed .sidebar-create-quick > span,
+body.hilal-dashboard.sidebar-collapsed .sidebar-logout > span,
+body.hilal-dashboard.sidebar-collapsed .hilal-sidebar-brand > span {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+body.hilal-dashboard.sidebar-collapsed .dash-nav-section {
+  display: block !important;
+  visibility: hidden !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  font-size: 0 !important;
+}
+
+.hilal-dashboard .dash-panel,
+.hilal-dashboard .overview-hero-panel,
+.hilal-dashboard .overview-orbit-card,
+.hilal-dashboard .monitor-card,
+.hilal-dashboard .lifecycle-card,
+.hilal-dashboard .builder-shell,
+.hilal-dashboard .ai-setup-chat,
+.hilal-dashboard .creation-card,
+.hilal-dashboard .setting-card,
+.hilal-dashboard .integration-card {
+  border-color: var(--hilal-line) !important;
+  border-radius: 20px !important;
+  background: #fff !important;
+  box-shadow: 0 8px 24px rgba(8, 47, 41, .07) !important;
+  color: var(--hilal-ink) !important;
+}
+
+.hilal-dashboard .dash-panel p,
+.hilal-dashboard .overview-hero-panel p,
+.hilal-dashboard .lifecycle-card p,
+.hilal-dashboard .lifecycle-card small,
+.hilal-dashboard .dash-empty,
+.hilal-dashboard .dash-flash {
+  color: var(--hilal-muted) !important;
+}
+
+.hilal-dashboard .eyebrow,
+.hilal-dashboard .overview-pill,
+.hilal-dashboard .section-head .eyebrow {
+  color: var(--hilal-emerald-800) !important;
+}
+
+.hilal-dashboard .overview-pill,
+.hilal-dashboard .monitor-status-pill,
+.hilal-dashboard .lifecycle-state-badge,
+.hilal-dashboard .lifecycle-score,
+.hilal-dashboard .status-pill {
+  background: #dff4eb !important;
+  color: #09664f !important;
+  border-color: #bde5d7 !important;
+}
+
+.hilal-dashboard .dash-flash {
+  border-color: var(--hilal-line) !important;
+  background: #eff8f5 !important;
+}
+
+.hilal-dashboard .dash-flash.error {
+  border-color: #f0c9c5 !important;
+  background: #fff0ef !important;
+  color: #963c3c !important;
+}
+
+.hilal-dashboard .ai-chat-message.is-user,
+.hilal-dashboard .ai-chat-bubble.is-user {
+  background: var(--hilal-emerald-800) !important;
+  color: #fff !important;
+}
+
+.hilal-dashboard .ai-chat-message.is-user :is(p, span, strong),
+.hilal-dashboard .ai-chat-bubble.is-user :is(p, span, strong) {
+  color: #fff !important;
+}
+
+.hilal-dashboard .ai-option-chip,
+.hilal-dashboard .choice-chip,
+.hilal-dashboard .template-meta span,
+.hilal-dashboard select,
+.hilal-dashboard input,
+.hilal-dashboard textarea {
+  border-color: #cfdad6 !important;
+  color: var(--hilal-ink) !important;
+}
+
+.hilal-dashboard .ai-option-chip:hover,
+.hilal-dashboard .choice-chip:hover,
+.hilal-dashboard .choice-chip.is-selected {
+  border-color: var(--hilal-emerald-600) !important;
+  background: #eff8f5 !important;
+}
+
+.hilal-dashboard .opportunity-card,
+.hilal-dashboard .screened-opportunity-card,
+.hilal-dashboard .passport-top-card,
+.hilal-dashboard .screened-market-hero,
+.hilal-dashboard .methodology-hero {
+  border-color: var(--hilal-line) !important;
+  background: #fff !important;
+  box-shadow: 0 8px 24px rgba(8, 47, 41, .07) !important;
+}
+
+@media (max-width: 900px) {
+  .hilal-dashboard .dash-sidebar {
+    width: min(300px, calc(100vw - 48px)) !important;
+    transform: translateX(-110%) !important;
+    transition: transform .22s ease !important;
+  }
+
+  .hilal-dashboard .dash-sidebar.is-open {
+    transform: translateX(0) !important;
+  }
+
+  .hilal-dashboard .dash-main {
+    margin-left: 0 !important;
+    padding: 24px 16px 40px !important;
+  }
+
+  .hilal-dashboard .hilal-sidebar-backdrop.is-open {
+    display: block !important;
+  }
+}
+
+/* The legacy builder and evidence detail routes share the exact prototype shell.
+   These rules neutralize the previous fixed-sidebar offsets without changing their
+   production data attributes or application services. */
+body.app-body.dashboard-body.hilal-dashboard {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.app-body.dashboard-body.hilal-dashboard > .app-shell {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+body.app-body .app-shell > .dash-sidebar.sidebar {
+  position: sticky !important;
+  inset: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 100vh !important;
+  transform: none !important;
+}
+
+body.app-body .app-shell > .dash-main.app-main {
+  width: auto !important;
+  min-width: 0 !important;
+  margin-left: 0 !important;
+  padding: 0 !important;
+  background: var(--hilal-ivory) !important;
+}
+
+body.app-body .app-shell > .dash-main .app-content {
+  width: 100%;
+  max-width: none;
+}
+
+body.app-body .app-shell > .dash-main .topbar {
+  background: var(--hilal-ivory) !important;
+  backdrop-filter: none !important;
+}
+
+body.app-body .dash-sidebar .sidebar-head {
+  display: flex !important;
+  grid-template-columns: none !important;
+  min-height: auto !important;
+  padding: 24px 24px 18px !important;
+}
+
+body.app-body .dash-sidebar .dash-nav {
+  display: block !important;
+  padding: 0 16px 22px !important;
+}
+
+body.app-body .dash-sidebar .nav-group {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+}
+
+body.app-body .dash-sidebar .nav-label {
+  margin: 0 0 6px !important;
+  padding: 0 12px !important;
+}
+
+body.app-body .dash-sidebar .nav-item {
+  display: flex !important;
+  grid-template-columns: none !important;
+  gap: 12px !important;
+  min-height: 43px;
+  padding: 0 12px !important;
+}
+
+body.app-body .dash-sidebar .nav-item.is-active {
+  background: var(--hilal-emerald-800) !important;
+  color: #fff !important;
+  box-shadow: 0 12px 26px rgba(15, 92, 77, .18) !important;
+}
+
+body.app-body .dash-sidebar .nav-item.is-active svg {
+  color: #fff;
+}
+
+body.app-body .dash-sidebar .nav-item.is-active > span {
+  color: #fff !important;
+}
+
+body.app-body .topbar .sidebar-create-quick {
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+  margin: 0 !important;
+  padding: 0 18px !important;
+  display: inline-flex !important;
+}
+
+body.app-body .ai-setup-chat-shell {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+body.app-body .ai-chat-hero {
+  border-color: var(--hilal-line) !important;
+  background: radial-gradient(circle at 82% 14%, rgba(210, 175, 99, .16), transparent 24rem), #fff !important;
+  box-shadow: 0 12px 36px rgba(8, 47, 41, .08) !important;
+}
+
+body.app-body .ai-chat-safety-badge {
+  border-color: rgba(255,255,255,.12) !important;
+  background: var(--hilal-emerald-950) !important;
+  color: #fff !important;
+}
+
+body.app-body .ai-chat-safety-badge small {
+  color: #b9cec8 !important;
+}
+
+body.app-body .ai-chat-panel,
+body.app-body .ai-preview-panel {
+  border-color: var(--hilal-line) !important;
+  background: #fff !important;
+  box-shadow: 0 14px 42px rgba(8, 47, 41, .08) !important;
+}
+
+body.app-body .ai-chat-agent > span,
+body.app-body .ai-chat-avatar,
+body.app-body .ai-chat-start-card > span,
+body.app-body .ai-chat-composer > button {
+  background: var(--hilal-emerald-800) !important;
+  box-shadow: 0 10px 24px rgba(15, 92, 77, .22) !important;
+}
+
+body.app-body .ai-chat-start-card > span {
+  color: #fff !important;
+}
+
+body.app-body .ai-chat-bubble,
+body.app-body .ai-understanding-card,
+body.app-body .ai-jargon-card,
+body.app-body .ai-snapshot-card,
+body.app-body .ai-chat-start-card,
+body.app-body .ai-chat-chip {
+  border-color: #cfe0da !important;
+  background: #f2f8f5 !important;
+}
+
+body.app-body .ai-chat-message.user .ai-chat-bubble {
+  background: var(--hilal-emerald-800) !important;
+}
+
+body.app-body .ai-preview-status,
+body.app-body .ai-understanding-card span,
+body.app-body .ai-jargon-card strong {
+  color: var(--hilal-emerald-800) !important;
+}
+
+body.app-body .ai-preview-status {
+  background: #dff4eb !important;
+}
+
+body.app-body .ai-chat-composer {
+  background: #f7faf8 !important;
+}
+
+body.app-body .ai-chat-composer textarea:focus,
+body.app-body .ai-chat-chip:hover,
+body.app-body .ai-chat-chip:focus-visible,
+body.app-body .ai-chat-start-card:hover,
+body.app-body .ai-chat-start-card:focus-visible {
+  border-color: var(--hilal-emerald-600) !important;
+  box-shadow: 0 0 0 3px rgba(31, 139, 116, .12) !important;
+}
+
+@media (max-width: 900px) {
+  body.app-body .app-shell > .dash-sidebar.sidebar {
+    position: fixed !important;
+    width: min(300px, calc(100vw - 48px)) !important;
+    transform: translateX(-110%) !important;
+  }
+
+  body.app-body .app-shell > .dash-sidebar.sidebar.is-open {
+    transform: translateX(0) !important;
+  }
+}

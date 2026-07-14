@@ -35,7 +35,7 @@ class DiscordHttpGateway:
         result = await self._request(
             "POST",
             f"/channels/{channel_id}/messages",
-            json={"content": "TraceEdge test notification. Permissions are working."},
+            json={"content": "HilalMarkets test notification. Permissions are working."},
         )
         return DiscordSendResult(provider_message_id=str(result["id"]))
 

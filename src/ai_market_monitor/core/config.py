@@ -13,7 +13,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "TraceEdge"
+    app_name: str = "HilalMarkets"
     app_env: Literal["development", "test", "staging", "production"] = "development"
     app_secret_key: SecretStr = SecretStr("development-only-change-me-32-characters")
     database_url: str = "sqlite+aiosqlite:///./ai_market_monitor.db"
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     ai_semantic_fallback_max_fragment_chars: int = Field(default=160, ge=20, le=1000)
     ai_capability_reranker_enabled: bool = True
     ai_capability_reranker_min_confidence: float = Field(default=0.86, ge=0.5, le=1)
-    ai_capability_reranker_candidate_limit: int = Field(default=16, ge=5, le=30)
+    ai_capability_reranker_candidate_limit: int = Field(default=24, ge=5, le=30)
     capability_embeddings_enabled: bool = True
     capability_embedding_model: str = "text-embedding-3-small"
     capability_embedding_dimensions: int = Field(default=256, ge=64, le=3072)

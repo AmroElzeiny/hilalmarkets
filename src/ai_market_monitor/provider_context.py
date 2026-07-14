@@ -125,7 +125,7 @@ class ProviderContextService:
                 "_metadata": {
                     "provider_category": "derivatives",
                     "status": "disabled",
-                    "reason": "TraceEdge spot mode does not evaluate derivatives context.",
+                    "reason": "HilalMarkets spot mode does not evaluate derivatives context.",
                 }
             }
         for category in EXTERNAL_CONTEXT_CATEGORIES & requests.keys():

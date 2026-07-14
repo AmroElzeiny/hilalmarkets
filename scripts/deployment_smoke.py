@@ -19,7 +19,7 @@ class Check:
 CHECKS = (
     Check("shallow health", "/health", json_status="ok"),
     Check("deep health", "/health/deep", json_status="ok"),
-    Check("landing page", "/", contains="TraceEdge"),
+    Check("landing page", "/", contains="HilalMarkets"),
     Check("dashboard route", "/dashboard", expected_statuses=(200, 302, 303, 401)),
     Check("main stylesheet", "/static/styles.css"),
     Check("dashboard script", "/static/app.js"),
@@ -32,7 +32,9 @@ def _compact_json_text(text: str) -> str:
 
 def run(base_url: str, timeout: float) -> int:
     failures: list[str] = []
-    with httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, follow_redirects=False) as client:
+    with httpx.Client(
+        base_url=base_url.rstrip("/"), timeout=timeout, follow_redirects=False
+    ) as client:
         for check in CHECKS:
             try:
                 response = client.get(check.path)
@@ -76,7 +78,7 @@ def run(base_url: str, timeout: float) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="TraceEdge deployment smoke test.")
+    parser = argparse.ArgumentParser(description="HilalMarkets deployment smoke test.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--timeout", type=float, default=10)
     args = parser.parse_args()

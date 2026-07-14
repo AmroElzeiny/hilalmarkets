@@ -34,6 +34,10 @@
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
+  // Persisted assistant records remain auditable. The current product name is
+  // adapted only when we render assistant content in the HilalMarkets UI.
+  const brandText = (value) => String(value ?? "").replace(/\bTraceEdge\b/gi, "HilalMarkets");
+
   async function request(path, options = {}) {
     const response = await fetch(`${apiBase}${path}`, {
       credentials: "same-origin",
@@ -97,8 +101,8 @@
       wrapper.setAttribute("role", "status");
       wrapper.dataset.processState = stage;
       wrapper.innerHTML = `
-        <img src="https://api.iconify.design/lucide:settings-2.svg?color=%238b5cf6" alt="" aria-hidden="true">
-        <span><strong>${clean(stage.replaceAll("_", " "))}</strong>${clean(item.content)}</span>`;
+        <img src="https://api.iconify.design/lucide:settings-2.svg?color=%230f5c4d" alt="" aria-hidden="true">
+        <span><strong>${clean(stage.replaceAll("_", " "))}</strong>${clean(brandText(item.content))}</span>`;
       return wrapper;
     }
     if (!user && item.message_type === "process_state") {
@@ -108,24 +112,24 @@
       wrapper.setAttribute("role", "status");
       wrapper.dataset.processState = state;
       wrapper.innerHTML = `
-        <img src="https://api.iconify.design/lucide:route.svg?color=%238b5cf6" alt="" aria-hidden="true">
-        <span><strong>Current step: ${clean(state.replaceAll("_", " "))}</strong>${clean(item.content)}</span>`;
+        <img src="https://api.iconify.design/lucide:route.svg?color=%230f5c4d" alt="" aria-hidden="true">
+        <span><strong>Current step: ${clean(state.replaceAll("_", " "))}</strong>${clean(brandText(item.content))}</span>`;
       return wrapper;
     }
     const wrapper = document.createElement("article");
     wrapper.className = `ai-chat-message ${user ? "user" : "assistant"}${item.pending ? " pending" : ""}${item.failed ? " failed" : ""}`;
     if (item.client_message_id) wrapper.dataset.clientMessageId = item.client_message_id;
     const icon = user ? "lucide:user-round" : "lucide:sparkles";
-    const color = user ? "%237c3aed" : "%23ffffff";
+    const color = user ? "%230f5c4d" : "%23ffffff";
     const timestamp = item.created_at
       ? new Intl.DateTimeFormat(undefined, {hour: "numeric", minute: "2-digit"}).format(new Date(item.created_at))
       : "";
     const payload = item.payload || {};
     const understanding = !user && payload.understanding_summary
-      ? `<section class="ai-understanding-card"><span>✨ What I understood</span><p>${clean(payload.understanding_summary)}</p></section>`
+      ? `<section class="ai-understanding-card"><span>What I understood</span><p>${clean(brandText(payload.understanding_summary))}</p></section>`
       : "";
     const jargon = !user && Array.isArray(payload.jargon) && payload.jargon.length
-      ? `<section class="ai-jargon-card">${payload.jargon.map((entry) => `<p><strong>${clean(entry.term)}</strong> ${clean(entry.explanation)}</p>`).join("")}</section>`
+      ? `<section class="ai-jargon-card">${payload.jargon.map((entry) => `<p><strong>${clean(entry.term)}</strong> ${clean(brandText(entry.explanation))}</p>`).join("")}</section>`
       : "";
     const snapshot = !user && item.message_type === "market_snapshot" && payload.status === "available"
       ? `<section class="ai-snapshot-card">
@@ -151,7 +155,7 @@
       : item.pending ? `<small class="ai-chat-delivery">Sending…</small>` : "";
     wrapper.innerHTML = `
       <span class="ai-chat-avatar"><img src="https://api.iconify.design/${icon}.svg?color=${color}" alt="" aria-hidden="true"></span>
-      <div class="ai-chat-bubble"><p>${clean(item.content)}</p>${understanding}${jargon}${snapshot}${scanner}${delivery}<small class="ai-chat-message-meta">${clean(timestamp)}</small></div>`;
+      <div class="ai-chat-bubble"><p>${clean(user ? item.content : brandText(item.content))}</p>${understanding}${jargon}${snapshot}${scanner}${delivery}<small class="ai-chat-message-meta">${clean(timestamp)}</small></div>`;
     return wrapper;
   }
 
@@ -164,8 +168,8 @@
   }
 
   function reportReasons(sheet) {
-    const sources = [
-      latestAssistantPayload().refusal_reasons || [],
+    const explained = latestAssistantPayload().refusal_reasons || [];
+    const sources = explained.length ? [explained] : [
       chat?.lint_warnings || [],
       chat?.ambiguities || [],
       chat?.unsupported_conditions || [],
@@ -184,6 +188,9 @@
       reasons.push({
         code,
         message,
+        title: item?.title || (blocking ? "One detail must be fixed" : "Review this detail"),
+        nextStep: item?.next_step || "Answer or revise this detail in the chat.",
+        category: item?.category || "Review",
         severity,
         blocking,
         label: item?.label || (blocking ? "Blocking rule" : "Review note"),
@@ -205,8 +212,9 @@
         button.type = "button";
         button.className = `ai-chat-start-card ${option.value}`;
         button.disabled = loading;
-        const iconName = option.value === "scanner" ? "scan-search" : "radar";
-        button.innerHTML = `<span><img src="https://api.iconify.design/lucide:${iconName}.svg?color=%23ffffff" alt="" aria-hidden="true"></span><strong>${clean(option.label)}</strong><small>${clean(option.description)}</small>`;
+        const iconName = option.value === "scanner" ? "scan" : "radar";
+        const modeIcon = window.icon ? window.icon(iconName, "icon-sm") : "";
+        button.innerHTML = `<span>${modeIcon}</span><strong>${clean(option.label)}</strong><small>${clean(option.description)}</small>`;
         button.addEventListener("click", () => sendMessage({
           message: "",
           option_key: option.key,
@@ -356,20 +364,23 @@
     const reasons = reportReasons(sheet);
     const improvements = latestAssistantPayload().suggestions || [];
     const lowRules = (chat.rule_confidence || []).filter((item) => item.requires_confirmation);
+    const fallbackFields = [
+      {label: "Original idea", value: sheet.original_idea || chat.original_idea},
+      {label: "Monitor name", value: sheet.monitor_name},
+      {label: "Market", value: `${sheet.exchange || "-"} ${sheet.market_type || "spot"}`},
+      {label: "Direction", value: sheet.direction || "both"},
+      {label: "Watchlist", value: (sheet.symbols_watchlist || []).join(", ") || `All eligible ${(sheet.quote_currencies || []).join(", ")} pairs`},
+      {label: "Timeframes", value: (sheet.timeframes || []).join(", ")},
+      {label: "Alert timing", value: (sheet.alert_timing?.trigger_mode || "candle_close").replaceAll("_", " ")},
+      {label: "Delivery", value: (sheet.delivery_channels || []).join(", ")},
+    ];
+    const fields = Array.isArray(sheet.fields) && sheet.fields.length ? sheet.fields : fallbackFields;
     previewContent.innerHTML = `
       <section class="ai-sheet-card">
         <h3>${icon("file-search")} Translation sheet</h3>
-        ${sheet.summary_paragraph ? `<p class="ai-sheet-summary">${clean(sheet.summary_paragraph)}</p>` : ""}
+        <p class="ai-sheet-lead">The chat gives the short explanation. These fields are the exact monitor definition to review.</p>
         <div class="ai-sheet-grid">
-          <div class="ai-sheet-field"><span>Original idea</span><strong>${clean(sheet.original_idea || chat.original_idea)}</strong></div>
-          <div class="ai-sheet-field"><span>Monitor</span><strong>${clean(sheet.monitor_name)}</strong></div>
-          <div class="ai-sheet-field"><span>Market</span><strong>${clean(`${sheet.exchange || "-"} ${sheet.market_type || "spot"}`)}</strong></div>
-          <div class="ai-sheet-field"><span>Direction</span><strong>${clean(sheet.direction || "both")}</strong></div>
-          <div class="ai-sheet-field"><span>Watchlist</span><strong>${clean((sheet.symbols_watchlist || []).join(", ") || `All eligible ${(sheet.quote_currencies || []).join(", ")} pairs`)}</strong></div>
-          <div class="ai-sheet-field"><span>Timeframes</span><strong>${clean((sheet.timeframes || []).join(", "))}</strong></div>
-          <div class="ai-sheet-field"><span>Alert timing</span><strong>${clean((sheet.alert_timing?.trigger_mode || "candle_close").replaceAll("_", " "))}</strong></div>
-          <div class="ai-sheet-field"><span>Delivery</span><strong>${clean((sheet.delivery_channels || []).join(", "))}</strong></div>
-          <div class="ai-sheet-field"><span>Invalidation</span><strong>${clean(sheet.invalidation ? `${sheet.invalidation.stop_method}${sheet.invalidation.maximum_stop_percent ? ` · max ${sheet.invalidation.maximum_stop_percent}%` : ""}` : "Not provided (research-only)")}</strong></div>
+          ${fields.map((field) => `<div class="ai-sheet-field"><span>${clean(field.label)}</span><strong>${clean(field.value ?? "Not provided")}</strong></div>`).join("")}
         </div>
       </section>
       <section class="ai-sheet-card">
@@ -390,7 +401,7 @@
         <h3>${icon("triangle-alert", "%23f59e0b")} What needs attention</h3>
         <p class="ai-refusal-intro">${reasons.some((item) => item.blocking) ? "Approval is paused until these exact items are resolved." : "These notes are shown once so the rule set stays consistent."}</p>
         <div class="ai-warning-list ai-refusal-reasons">
-          ${reasons.map((item) => `<article class="ai-warning ai-refusal-reason ${item.blocking ? "critical" : clean(item.severity)}">${icon(item.blocking ? "circle-x" : "info", item.blocking ? "%23ef4444" : "%23f59e0b")}<span><strong>${clean(item.label)}</strong><small>${clean(item.message)}</small></span></article>`).join("")}
+          ${reasons.map((item, index) => `<article class="ai-warning ai-refusal-reason ${item.blocking ? "critical" : clean(item.severity)}"><span class="ai-attention-number">${index + 1}</span><span class="ai-attention-copy"><small class="ai-attention-category">${clean(item.category)}</small><strong>${clean(item.title)}</strong><p>${clean(item.message)}</p><small><b>Next:</b> ${clean(item.nextStep)}</small></span></article>`).join("")}
         </div>
       </section>` : ""}
       <section class="ai-sheet-card">

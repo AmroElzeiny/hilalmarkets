@@ -6,21 +6,21 @@ async def test_landing_page_contains_product_flow_without_performance_claims(tes
     assert response.status_code == 200
     content = response.text
     for required in (
-        "A guided market-watching platform for Muslim crypto investors.",
-        "Sign up",
-        "TraceEdge",
-        "Lifecycle Watchlist",
-        "Explainable Condition Proof",
-        "Why didn't this alert happen?",
-        "Risk disclaimer",
+        "Know what fits your values.",
+        "Explore screened market",
+        "HilalMarkets",
+        "Screened Market",
+        "Evidence Passports",
+        "Compliance Watch",
+        "How we screen",
     ):
         assert required in content
     lowered = content.lower()
     for forbidden in ("guaranteed profits", "guaranteed returns", "fake win rate"):
         assert forbidden not in lowered
     assert "Entry zone" not in content
-    assert "Ready for review" in content
-    assert "Alert sent" in content
+    assert "Still missing" in content
+    assert "No material change" in content
 
 
 async def test_landing_page_strips_at_sign_from_telegram_username(test_context):
@@ -37,14 +37,14 @@ async def test_landing_page_links_to_primary_start_paths(test_context):
     assert response.status_code == 200
     assert "Open dashboard preview" not in response.text
     assert "/signup" in response.text
-    assert "Join the trace" in response.text
+    assert "Explore screened opportunities" in response.text
     assert 'href="/dashboard-entry"' in response.text
-    assert ">Dashboard</a>" in response.text
+    assert ">Open the dashboard</span></a>" in response.text
     assert "Start on Discord" not in response.text
     assert "Start on Telegram" not in response.text
-    assert "data-theme-toggle" in response.text
-    assert "theme.js" in response.text
-    assert "20260625-launch-polish" in response.text
+    assert "data-public-menu" in response.text
+    assert "hilalmarkets.js" in response.text
+    assert "TODO_" not in response.text
 
 
 async def test_dashboard_entry_uses_saved_session_or_signup(test_context):

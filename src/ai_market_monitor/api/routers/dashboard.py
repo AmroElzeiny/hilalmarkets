@@ -40,7 +40,6 @@ from ai_market_monitor.db.models import (
     SupportRequest,
     TelegramConnection,
     Trial,
-    TrialCycle,
     User,
     UserIdentity,
 )
@@ -55,7 +54,6 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.quality import alert_trust_score_from_proof
 from ai_market_monitor.services.activity import ActivityReadService
-from ai_market_monitor.services.admin_dashboard import AdminDashboardService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService
 from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
@@ -1183,7 +1181,7 @@ async def dashboard_home(
     }
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_home.html",
         await _context(
             request=request,
             session=session,
@@ -1400,7 +1398,7 @@ async def screened_market_page(
 
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_market.html",
         await _context(
             request=request,
             session=session,
@@ -1466,7 +1464,7 @@ async def screened_asset_passport_page(
     )
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_passport.html",
         await _context(
             request=request,
             session=session,
@@ -1537,6 +1535,98 @@ async def add_screened_asset_to_watchlist(
     return _redirect(f"/dashboard/market/{asset}?message=added_to_approved_watchlist")
 
 
+@router.get("/dashboard/watchlist", response_class=HTMLResponse, include_in_schema=False)
+async def approved_watchlist_page(
+    request: Request,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """Render the user's persisted screened-asset watchlists.
+
+    The page intentionally reads only user-owned saved assets. Eligibility is
+    shown from the linked evidence passport instead of being recreated from
+    display-only client data.
+    """
+    watchlists = list(
+        (
+            await session.scalars(
+                select(ApprovedWatchlist)
+                .where(ApprovedWatchlist.user_id == user.id)
+                .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name.asc())
+            )
+        ).all()
+    )
+    assets = list(
+        (
+            await session.execute(
+                select(ApprovedWatchlistAsset, ApprovedWatchlist.name)
+                .join(
+                    ApprovedWatchlist,
+                    ApprovedWatchlist.id == ApprovedWatchlistAsset.watchlist_id,
+                )
+                .where(ApprovedWatchlist.user_id == user.id)
+                .order_by(ApprovedWatchlistAsset.added_at.desc())
+            )
+        ).all()
+    )
+    watchlist_assets = [
+        {
+            "canonical_asset": asset.canonical_asset,
+            "added_at": asset.added_at,
+            "watchlist_name": watchlist_name,
+        }
+        for asset, watchlist_name in assets
+    ]
+    return templates.TemplateResponse(
+        request,
+        "hilal/dashboard_watchlist.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="watchlist",
+            title="My Watchlist",
+            watchlists=watchlists,
+            watchlist_assets=watchlist_assets,
+        ),
+    )
+
+
+@router.get("/dashboard/compliance", response_class=HTMLResponse, include_in_schema=False)
+async def compliance_changes_page(
+    request: Request,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """Show persisted, user-scoped screening status changes."""
+    changes = list(
+        (
+            await session.scalars(
+                select(ComplianceDriftNotification)
+                .where(ComplianceDriftNotification.user_id == user.id)
+                .order_by(ComplianceDriftNotification.created_at.desc())
+                .limit(100)
+            )
+        ).all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "hilal/dashboard_compliance.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="compliance",
+            title="Compliance Changes",
+            compliance_changes=changes,
+        ),
+    )
+
+
 @router.get("/dashboard/methodology", response_class=HTMLResponse, include_in_schema=False)
 async def methodology_page(
     request: Request,
@@ -1549,7 +1639,7 @@ async def methodology_page(
     selected = await service.default_methodology()
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_methodology.html",
         await _context(
             request=request,
             session=session,
@@ -1570,8 +1660,20 @@ async def monitors_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> RedirectResponse:
-    return _redirect("/dashboard/strategies/new?message=monitors_moved_to_create_monitor#monitors")
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "hilal/dashboard_watch_plans.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="watch_plans",
+            title="Watch Plans",
+            monitor_cards=await _monitor_cards_context(session, user),
+        ),
+    )
 
 
 @router.get("/dashboard/strategies/new", response_class=HTMLResponse, include_in_schema=False)
@@ -1995,7 +2097,7 @@ async def lifecycles_page(
     )
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_activity.html",
         await _context(
             request=request,
             session=session,
@@ -2175,29 +2277,8 @@ async def trial_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
-    cycle = None
-    if trial is not None:
-        cycle = await session.scalar(
-            select(TrialCycle)
-            .where(TrialCycle.trial_id == trial.id)
-            .order_by(TrialCycle.cycle_number.desc())
-        )
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="trial",
-            title="Trial Status",
-            trial=trial,
-            cycle=cycle,
-        ),
-    )
+) -> RedirectResponse:
+    return _redirect("/dashboard/billing")
 
 
 @router.post("/dashboard/trial/claim", include_in_schema=False)
@@ -2212,10 +2293,10 @@ async def claim_trial(
         await AdminNotificationService(settings).send(
             f"Trial claimed: {user.display_name or user.id}"
         )
-        return _redirect("/dashboard/trial?message=trial_claimed")
+        return _redirect("/dashboard/billing?message=trial_claimed")
     except TrialError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/trial?error={exc.code}")
+        return _redirect(f"/dashboard/billing?error={exc.code}")
 
 
 @router.get("/dashboard/billing", response_class=HTMLResponse, include_in_schema=False)
@@ -2232,7 +2313,7 @@ async def billing_page(
     await session.commit()
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_billing.html",
         await _context(
             request=request,
             session=session,
@@ -2408,7 +2489,7 @@ async def connections_page(
         await session.rollback()
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_integrations.html",
         await _context(
             request=request,
             session=session,
@@ -2448,7 +2529,7 @@ async def settings_page(
     sharia_preferences = dict((preference.notification_preferences or {}) if preference else {})
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_settings.html",
         await _context(
             request=request,
             session=session,
@@ -2633,7 +2714,7 @@ async def support_page(
     )
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_support.html",
         await _context(
             request=request,
             session=session,
@@ -2657,43 +2738,10 @@ async def dashboard_admin_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
+) -> RedirectResponse:
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Administrator role required")
-    admin_service = AdminDashboardService(session, settings)
-    overview = await admin_service.overview()
-    health = await admin_service.health_dashboard()
-    activity = await admin_service.recent_activity(limit=12)
-    users = await admin_service.user_search(limit=12)
-    counts = {
-        "users": await session.scalar(select(func.count(User.id))) or 0,
-        "strategies": await session.scalar(select(func.count(Strategy.id))) or 0,
-        "alerts": await session.scalar(select(func.count(Alert.id))) or 0,
-        "tickets": await session.scalar(select(func.count(SupportRequest.id))) or 0,
-    }
-    tickets = (
-        await session.scalars(
-            select(SupportRequest).order_by(SupportRequest.created_at.desc()).limit(20)
-        )
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="admin",
-            title="Admin",
-            counts=counts,
-            overview=overview,
-            health=health,
-            activity=activity,
-            users=users,
-            tickets=tickets,
-        ),
-    )
+    return _redirect("/system-brain")
 
 
 @router.get("/dashboard/referrals", response_class=HTMLResponse, include_in_schema=False)
@@ -2720,7 +2768,7 @@ async def referrals_page(
             continue
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard_referrals.html",
         await _context(
             request=request,
             session=session,
@@ -2730,5 +2778,6 @@ async def referrals_page(
             title="Referrals",
             referral_url=f"{settings.public_base_url}signup?ref={user.id}",
             reward_balance=reward_balance,
+            referral_count=len(relationships),
         ),
     )

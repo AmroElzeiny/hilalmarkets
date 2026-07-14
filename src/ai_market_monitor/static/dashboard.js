@@ -2428,7 +2428,7 @@
         risk: {
           title: "Edit risk context",
           content: `
-            <div class="drawer-callout">Risk context filters and explains setups. TraceEdge does not execute trades.</div>
+            <div class="drawer-callout">Risk context filters and explains setups. HilalMarkets does not execute trades.</div>
             <div class="drawer-field-grid">
               <label>Risk validation<select data-section-field="risk_enabled">${optionMarkup([{value: "false", label: "Disabled"}, {value: "true", label: "Enabled"}], String(schema.risk?.enabled === true))}</select></label>
               <label>Stop method<select data-section-field="stop_method">${optionMarkup(["structure", "fixed_percent", "atr", "swing_low", "swing_high"], schema.risk?.stop_method || schema.stop?.method)}</select></label>
@@ -4717,7 +4717,7 @@
       if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
       return String(value);
     };
-    const iconUrl = (name, color = "8b5cf6") => `https://api.iconify.design/lucide:${name}.svg?color=%23${color}`;
+    const iconUrl = (name, color = "0f5c4d") => `https://api.iconify.design/lucide:${name}.svg?color=%23${color}`;
 
     function updateObservabilityUrl() {
       const params = new URLSearchParams(window.location.search);
@@ -4748,7 +4748,7 @@
           : `<button type="button" class="candidate-open" data-candidate-detail="${escapeHtml(item.id)}">View conditions</button>`;
         return `<article class="readiness-candidate state-${escapeHtml(item.state)}" data-candidate-id="${escapeHtml(item.id)}">
           <div class="candidate-state-line"><span class="candidate-state"><i></i>${escapeHtml(pretty(item.state))}</span><span class="candidate-health ${escapeHtml(item.data_health)}"><img src="${iconUrl(item.data_health === "healthy" ? "database" : "triangle-alert")}" alt="">${escapeHtml(pretty(item.data_health))}</span></div>
-          <div class="candidate-identity"><div><strong>${escapeHtml(item.symbol)}</strong><span>${escapeHtml(item.exchange)} · ${escapeHtml(item.timeframe)}</span></div><span class="candidate-monitor-tag" title="${escapeHtml(item.monitor_name)}"><img src="${iconUrl("radar", "4c1d95")}" alt="">${escapeHtml(item.monitor_name)}</span></div>
+          <div class="candidate-identity"><div><strong>${escapeHtml(item.symbol)}</strong><span>${escapeHtml(item.exchange)} · ${escapeHtml(item.timeframe)}</span></div><span class="candidate-monitor-tag" title="${escapeHtml(item.monitor_name)}"><img src="${iconUrl("radar", "0f5c4d")}" alt="">${escapeHtml(item.monitor_name)}</span></div>
           <div class="candidate-readiness"><div><strong>${passed}/${total}</strong><span>required rules passed</span></div><div class="candidate-progress" role="progressbar" aria-valuenow="${completion}" aria-valuemin="0" aria-valuemax="100"><i style="--candidate-progress:${completion}%"></i></div><span>${safeNumber(item.optional?.passed)}/${safeNumber(item.optional?.total)} optional</span></div>
           <div class="candidate-blocker"><img src="${iconUrl(blocker.key ? "lock-keyhole" : "circle-check")}" alt=""><div><span>${blocker.key ? "Current blocker" : "Required rules complete"}</span><strong>${escapeHtml(blocker.label || "No required blocker")}</strong>${blocker.key ? `<small>Current: ${escapeHtml(valueText(blocker.actual))} · Required: ${escapeHtml(valueText(blocker.required))}${blocker.distance !== null && blocker.distance !== undefined ? ` · Distance: ${escapeHtml(valueText(blocker.distance))}` : ""}</small>` : ""}</div></div>
           <div class="candidate-meta"><span><img src="${iconUrl("activity")}" alt="">${escapeHtml(item.most_recent_change)}</span><span><img src="${iconUrl("clock-3")}" alt="">Evaluated ${escapeHtml(relativeTime(item.last_evaluated_at))}</span><span><img src="${iconUrl("timer")}" alt="">Next close ${escapeHtml(relativeTime(item.next_candle_close_at))}</span></div>
@@ -4784,7 +4784,7 @@
       const items = safeArray(payload.items);
       if (!items.length) { healthList.innerHTML = `<div class="observability-empty"><strong>No health history yet</strong><p>Health appears after the worker completes an active monitor cycle.</p></div>`; return; }
       healthList.innerHTML = items.map((item) => `<article class="monitor-health-card">
-        <div class="health-card-head"><span class="candidate-monitor-tag"><img src="${iconUrl("radar", "4c1d95")}" alt="">${escapeHtml(item.monitor_name)}</span><small>Version ${escapeHtml(item.strategy_version)}</small></div>
+        <div class="health-card-head"><span class="candidate-monitor-tag"><img src="${iconUrl("radar", "0f5c4d")}" alt="">${escapeHtml(item.monitor_name)}</span><small>Version ${escapeHtml(item.strategy_version)}</small></div>
         <div class="health-dimension"><span>Technical health</span><strong class="health-status ${escapeHtml(item.technical_status)}"><i></i>${escapeHtml(pretty(item.technical_status))}</strong>${safeArray(item.technical_causes).map((cause) => `<p>${escapeHtml(cause.message)}</p>`).join("")}</div>
         <div class="health-dimension"><span>Strategy health</span><strong class="health-status ${escapeHtml(item.strategy_status)}"><i></i>${escapeHtml(pretty(item.strategy_status))}</strong>${safeArray(item.strategy_causes).map((cause) => `<p>${escapeHtml(cause.message)}</p>`).join("")}</div>
         <div class="health-metrics"><span><strong>${safeNumber(item.metrics?.symbols_scanned)}/${safeNumber(item.metrics?.symbols_expected)}</strong> symbols</span><span><strong>${safeNumber(item.metrics?.provider_errors)}</strong> provider errors</span><span><strong>${safeNumber(item.metrics?.alerts_24h)}</strong> alerts/24h</span></div>
@@ -4814,7 +4814,7 @@
     function renderBottlenecks(payload) {
       if (!bottleneckList) return;
       const items = safeArray(payload.items);
-      if (!items.length) { bottleneckList.innerHTML = `<div class="observability-empty"><strong>Not enough condition history</strong><p>TraceEdge will rank blockers after retained lifecycle evidence is aggregated.</p></div>`; return; }
+      if (!items.length) { bottleneckList.innerHTML = `<div class="observability-empty"><strong>Not enough condition history</strong><p>HilalMarkets will rank blockers after retained lifecycle evidence is aggregated.</p></div>`; return; }
       bottleneckList.innerHTML = items.map((item, index) => `<article class="bottleneck-row ${item.sample_status === "low_sample" ? "low-sample" : ""}">
         <span class="bottleneck-rank">${index + 1}</span><div class="bottleneck-copy"><div><strong>${escapeHtml(item.condition_label)}</strong><span>${escapeHtml(pretty(item.rule_role))} · ${escapeHtml(item.timeframe || "Any timeframe")}</span></div><p>Final blocker for ${escapeHtml(valueText(item.final_blocker_share))}% of near-complete candidates · ${item.evaluation_count} evaluations</p>${item.median_actual_when_blocked !== null ? `<small>Median value when blocked: ${escapeHtml(valueText(item.median_actual_when_blocked))} · Required: ${escapeHtml(valueText(item.average_required))}</small>` : ""}<div class="bottleneck-bar"><i style="--blocker-share:${Math.min(100, safeNumber(item.final_blocker_share))}%"></i></div>${item.sample_status === "low_sample" ? `<span class="low-sample-label">Low sample · interpret cautiously</span>` : ""}${item.counterfactual ? `<div class="counterfactual-preview"><img src="${iconUrl("flask-conical")}" alt=""><p>${escapeHtml(item.counterfactual.message)}</p></div>` : ""}</div><div class="bottleneck-actions"><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}&condition=${escapeHtml(item.condition_key)}">Discuss</a><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Review rule</a></div>
       </article>`).join("");
@@ -5613,7 +5613,7 @@
           <div class="lifecycle-native-chart-frame">
             <canvas id="lifecycle-native-canvas" aria-label="Lifecycle candle evidence chart"></canvas>
           </div>
-          ${error ? `<p class="lifecycle-native-chart-note">Using the built-in TraceEdge chart for this session.</p>` : ""}
+          ${error ? `<p class="lifecycle-native-chart-note">Using the built-in HilalMarkets chart for this session.</p>` : ""}
         </div>
       `;
       const canvas = document.getElementById("lifecycle-native-canvas");
@@ -6450,7 +6450,7 @@
       });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `traceedge-alert-proof-${payload.alert_id}.json`;
+      link.download = `hilalmarkets-alert-proof-${payload.alert_id}.json`;
       link.click();
       URL.revokeObjectURL(link.href);
     });

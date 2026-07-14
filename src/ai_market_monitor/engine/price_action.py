@@ -12,6 +12,10 @@ from ai_market_monitor.engine.indicators import (
     rsi,
     vwap,
 )
+from ai_market_monitor.engine.technical_patterns import (
+    TECHNICAL_PATTERN_NAMES,
+    evaluate_technical_pattern,
+)
 from ai_market_monitor.services.interfaces import Candle
 
 PRICE_ACTION_NAMES = {
@@ -156,6 +160,7 @@ PRICE_ACTION_NAMES = {
     "trend_continuation_after_pullback",
     "rsi_divergence",
     "previous_session_high_low",
+    *TECHNICAL_PATTERN_NAMES,
 }
 
 
@@ -587,6 +592,8 @@ def evaluate_price_action(
             candles,
             str(parameters.get("parameters_json") or "{}"),
         )
+    if name in TECHNICAL_PATTERN_NAMES:
+        return evaluate_technical_pattern(name, candles, parameters)
     lookback = int(parameters.get("lookback", 20))
     tolerance = float(parameters.get("tolerance_percent", 0.25)) / 100
     current, prior = _prior(candles, lookback)
@@ -1140,10 +1147,12 @@ def evaluate_price_action(
     if name in {"range_compression", "tight_consolidation", "sideways_market"}:
         return range_percent <= float(parameters.get("maximum_range_percent", 5))
     if name == "range_expansion":
-        previous = candles[-lookback * 2 - 1 : -lookback - 1]
-        if len(previous) < lookback:
+        previous_window = candles[-lookback * 2 - 1 : -lookback - 1]
+        if len(previous_window) < lookback:
             raise IndicatorWarmupError(f"range expansion requires {lookback * 2 + 1} candles")
-        previous_range = max(item.high for item in previous) - min(item.low for item in previous)
+        previous_range = max(item.high for item in previous_window) - min(
+            item.low for item in previous_window
+        )
         return (prior_high - prior_low) > previous_range * float(
             parameters.get("expansion_multiplier", 1.25)
         )

@@ -4,17 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Describe your crypto setup once. Monitor spot markets, follow setup lifecycles, and receive explainable alerts.">
-  <title>TraceEdge | Screened crypto market watching</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon.png') }}">
+  <title>HilalMarkets | Sharia-screened market intelligence</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script>document.documentElement.dataset.theme="light";localStorage.setItem("amm-theme","light");</script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-launch-polish">
   <link rel="stylesheet" href="{{ url_for('static', path='/traceedge-polish.css') }}?v=20260626-guidebook-board">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-hilalmarkets">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-bridge.css') }}?v=20260714-hilalmarkets">
   <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-launch-polish"></script>
   <script defer src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
-  <script defer src="{{ url_for('static', path='/app.js') }}"></script>
+  <script defer src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260714-hilalmarkets"></script>
+  <script defer src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-hilalmarkets"></script>
   <style>
     @font-face{font-family:Geometria;src:local("Geometria"),local("geometrica"),local("Geometrica");font-weight:400 900;font-style:normal;font-display:swap}
     :root{--fixed-bg:#f7f7fa;--fixed-ink:#0b0b10;--fixed-text:#3a3a46;--fixed-muted:#656579;--fixed-purple:#8b5cf6;--fixed-purple-2:#9167f7;--fixed-purple-3:#a78bfa;--fixed-purple-4:#c4b5fd;--fixed-purple-5:#e0d8ff;--fixed-card:#fff;--fixed-dark:#17131f;--fixed-footer:#111114;--fixed-footer-text:#e6e6eb;--fixed-border:rgba(17,17,24,.1);--fixed-purple-border:rgba(196,181,253,.24)}
@@ -159,11 +162,11 @@
     @media(max-width:650px){.section-shell{width:min(100% - 26px,1180px)}.site-header{width:calc(100% - 20px);padding-inline:14px}.brand-logo{width:130px}.fixed-button{width:100%}.fixed-hero{padding:56px 0}.market-row{align-items:flex-start;gap:12px}.score{width:96px}.fixed-steps,.feature-grid,.pricing-grid,.channel-cards,.footer-grid{grid-template-columns:1fr}.feature-card{padding:26px}.lifecycle{grid-template-columns:1fr;gap:15px}.lifecycle div:after{width:2px;height:31px;left:8px;right:auto;top:17px}.lifecycle span{margin:-21px 0 0 32px}.risk-notice{grid-template-columns:1fr;gap:12px}.footer-bottom{flex-direction:column}.section-title{font-size:clamp(36px,12vw,48px)}}
   </style>
 </head>
-<body>
+<body class="hilal-public">
   <header class="site-header">
-    <a class="brand" href="#top" aria-label="TraceEdge home"><img class="brand-logo" src="{{ url_for('static', path='/logo_purple.svg') }}" alt="TraceEdge"></a>
+    <a class="hilal-logo" href="#top" aria-label="HilalMarkets home"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt=""><span>HilalMarkets<small>Screened market intelligence</small></span></a>
     <nav aria-label="Main navigation"><a href="#how">How it works</a><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></nav>
-    <div class="hero-actions"><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color mode" hidden aria-hidden="true"><span class="theme-toggle-track"><i></i></span></button><a class="fixed-button fixed-button-primary button-small" href="{{ dashboard_entry_url }}" target="_blank" rel="noopener">Dashboard</a></div>
+    <div class="hero-actions"><a class="fixed-button fixed-button-primary button-small" href="{{ dashboard_entry_url }}">Dashboard</a></div>
     <details class="mobile-menu">
       <summary aria-label="Open navigation menu"><span class="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></summary>
       <div class="mobile-menu-panel">
@@ -171,7 +174,7 @@
         <a href="#features">Features</a>
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
-        <a class="mobile-dashboard-link" href="{{ dashboard_entry_url }}" target="_blank" rel="noopener">Dashboard</a>
+        <a class="mobile-dashboard-link" href="{{ dashboard_entry_url }}">Dashboard</a>
       </div>
     </details>
   </header>
@@ -236,7 +239,7 @@
     </section>
 
     <section class="fixed-section section-shell">
-      <div class="channels-grid"><div><p class="fixed-eyebrow">Alerts where they belong</p><h2 class="section-title">Start quickly in Telegram. Go deeper on the web.</h2><p>Telegram is the fastest path to onboarding and immediate alerts. The web dashboard supports detailed strategy editing, proof tables, analytics and billing.</p><div style="margin-top:32px"><a class="fixed-button fixed-button-primary join-trace-button" href="{{ telegram_url }}">Join the trace <img class="button-arrow" src="https://api.iconify.design/lucide:arrow-right.svg?color=%23F7F3FF" alt="" aria-hidden="true"></a></div></div><div class="channel-cards"><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/telegram/26A5E4" alt=""></span><h3>Telegram</h3><p>Primary onboarding, alerts and quick setup status.</p></article><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/discord/5865F2" alt=""></span><h3>Discord</h3><p>Optional alert channels, community and role management.</p></article><article class="dark-card" style="grid-column:1/-1"><span class="dark-card-icon"><img src="{{ url_for('static', path='/favicon.png') }}" alt="" aria-hidden="true"></span><h3>Web dashboard</h3><p>Advanced rules, analytics, lifecycles and account controls.</p></article></div></div>
+      <div class="channels-grid"><div><p class="fixed-eyebrow">Alerts where they belong</p><h2 class="section-title">Start quickly in Telegram. Go deeper on the web.</h2><p>Telegram is the fastest path to onboarding and immediate alerts. The web dashboard supports detailed strategy editing, proof tables, analytics and billing.</p><div style="margin-top:32px"><a class="fixed-button fixed-button-primary join-trace-button" href="{{ telegram_url }}">Join HilalMarkets <img class="button-arrow" src="https://api.iconify.design/lucide:arrow-right.svg?color=%23F7F3FF" alt="" aria-hidden="true"></a></div></div><div class="channel-cards"><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/telegram/26A5E4" alt=""></span><h3>Telegram</h3><p>Primary onboarding, alerts and quick setup status.</p></article><article class="dark-card"><span class="dark-card-icon"><img src="https://cdn.simpleicons.org/discord/5865F2" alt=""></span><h3>Discord</h3><p>Optional alert channels, community and role management.</p></article><article class="dark-card" style="grid-column:1/-1"><span class="dark-card-icon"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="" aria-hidden="true"></span><h3>Web dashboard</h3><p>Advanced rules, analytics, lifecycles and account controls.</p></article></div></div>
     </section>
 
     <section class="fixed-section section-shell pricing" id="pricing">
@@ -244,24 +247,24 @@
       <h2 class="section-title">Choose the monitoring capacity you need.</h2>
       <p class="section-copy">Plans vary by active Watch Plans, screened market coverage, scan frequency and evidence history, not by promises of trading results.</p>
       <div class="pricing-grid">
-        <article class="plan-card"><h3>Demo / Free</h3><p class="plan-copy">A light way to understand a Watch Plan before upgrading.</p><div class="plan-price">$0 <span></span></div><a class="fixed-button fixed-button-subtle" href="{{ telegram_url }}">Start free</a><ul><li>One active Watch Plan</li><li>Up to 50 screened spot pairs</li><li>15-minute timeframe or higher</li><li>Telegram only</li></ul></article>
-        <article class="plan-card plan-card-featured"><h3>Pro</h3><p class="plan-copy">Full individual monitoring with Telegram, Discord and opportunity evidence.</p><div class="plan-price">$29 <span>/ month</span></div><a class="fixed-button fixed-button-primary" href="{{ telegram_url }}">Start Pro Trial</a><ul><li>Up to 10 active Watch Plans</li><li>Expanded screened-market coverage</li><li>Telegram and Discord alerts</li><li>Opportunity and investigation history</li></ul></article>
+        <article class="plan-card"><h3>Demo / Free</h3><p class="plan-copy">A light way to understand a Watch Plan before upgrading.</p><div class="plan-price">$0 <span></span></div><a class="fixed-button fixed-button-subtle" href="/signup">Start free</a><ul><li>One active Watch Plan</li><li>Up to 50 screened spot pairs</li><li>15-minute timeframe or higher</li><li>Telegram only</li></ul></article>
+        <article class="plan-card plan-card-featured"><h3>Pro</h3><p class="plan-copy">Full individual monitoring with Telegram, Discord and opportunity evidence.</p><div class="plan-price">$29 <span>/ month</span></div><a class="fixed-button fixed-button-primary" href="/signup">Start Pro Trial</a><ul><li>Up to 10 active Watch Plans</li><li>Expanded screened-market coverage</li><li>Telegram and Discord alerts</li><li>Opportunity and investigation history</li></ul></article>
         <article class="plan-card"><h3>Creator / Community</h3><p class="plan-copy">Shared strategy workflows for creators and private communities.</p><div class="plan-price">$79+ <span>/ month</span></div><a class="fixed-button fixed-button-subtle" href="mailto:support@example.com">Contact us</a><ul><li>Shared templates and channels</li><li>Discord role integration</li><li>Community delivery</li><li>White-label options by plan</li></ul></article>
       </div>
     </section>
 
     <section class="fixed-section section-shell" id="faq">
-      <div class="faq-grid"><div><p class="fixed-eyebrow">Questions, answered plainly</p><h2 class="section-title">What TraceEdge does and does not do.</h2></div><div class="faq-list"><details><summary>Does it place trades for me?</summary><p>No. Version one does not connect to exchange trading APIs or execute orders. It monitors, explains and alerts; every trading decision remains yours.</p></details><details><summary>Does AI decide whether a setup passed?</summary><p>No. AI can translate your description and explain deterministic results. Indicator calculations and rule outcomes come from the rule engine, and you must approve the structured interpretation.</p></details><details><summary>Can I use more than one timeframe?</summary><p>Yes. A 15-minute entry can depend on a four-hour trend filter or other declared supporting timeframes.</p></details><details><summary>What if my setup is subjective?</summary><p>The interpretation identifies ambiguous or unsupported terms and asks you to define them. A strategy cannot activate while those issues remain unresolved.</p></details><details><summary>Are alerts guaranteed to be accurate or immediate?</summary><p>No. Exchange outages, network delay, incomplete data and software failures can affect results. Each receipt exposes candle timing and data freshness so you can verify it.</p></details></div></div>
+      <div class="faq-grid"><div><p class="fixed-eyebrow">Questions, answered plainly</p><h2 class="section-title">What HilalMarkets does and does not do.</h2></div><div class="faq-list"><details><summary>Does it place trades for me?</summary><p>No. HilalMarkets does not connect to exchange trading APIs or execute orders. It monitors, explains and alerts; every trading decision remains yours.</p></details><details><summary>Does AI decide whether a setup passed?</summary><p>No. AI can translate your description and explain deterministic results. Indicator calculations and rule outcomes come from the rule engine, and you must approve the structured interpretation.</p></details><details><summary>Can I use more than one timeframe?</summary><p>Yes. A 15-minute market check can depend on a four-hour trend filter or other declared supporting timeframes.</p></details><details><summary>What if my setup is subjective?</summary><p>The interpretation identifies ambiguous or unsupported terms and asks you to define them. A Watch Plan cannot activate while those issues remain unresolved.</p></details><details><summary>Are alerts guaranteed to be accurate or immediate?</summary><p>No. Exchange outages, network delay, incomplete data and software failures can affect results. Each receipt exposes candle timing and data freshness so you can verify it.</p></details></div></div>
     </section>
 
     <section class="fixed-section section-shell">
       <div class="final-cta"><p class="fixed-eyebrow">Start inside a screened market</p><h2>Teach a Watch Plan what matters to you.</h2><p>Review the screening methodology, build measurable market checks, and approve every rule before monitoring begins.</p><div style="margin-top:28px"><a class="fixed-button fixed-button-primary" href="/signup">Join us <img class="button-arrow" src="https://api.iconify.design/lucide:arrow-right.svg?color=%23F7F3FF" alt="" aria-hidden="true"></a></div></div>
-      <div class="risk-notice" id="risk"><strong>Risk disclaimer</strong><p>TraceEdge is a market-monitoring and decision-support product, not a broker, exchange, fiduciary or source of guaranteed financial advice. Alerts may be delayed, incomplete or incorrect. Crypto assets are volatile and trading can result in substantial loss. Verify all data independently and make your own decisions. The platform does not execute trades in version one.</p></div>
+      <div class="risk-notice" id="risk"><strong>Risk disclaimer</strong><p>HilalMarkets is a market-monitoring and decision-support product, not a broker, exchange, fiduciary, or source of guaranteed financial advice. Alerts may be delayed, incomplete, or incorrect. Crypto assets are volatile and trading can result in substantial loss. Verify all data independently and make your own decisions. The platform does not execute trades.</p></div>
     </section>
 
     <footer>
-      <div class="section-shell footer-grid"><div><a class="brand" href="#top"><img class="brand-logo" src="{{ url_for('static', path='/logo_white.svg') }}" alt="TraceEdge"></a><p>Guided, evidence-backed crypto spot market watching for Muslim investors.</p></div><div><strong>Product</strong><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></div><div><strong>Legal</strong><a href="#risk">Risk disclosure</a><a href="#risk">Terms</a><a href="#risk">Privacy</a></div><div><strong>Support</strong><a href="mailto:support@example.com">Contact support</a><a href="#faq">Help center</a></div></div>
-      <div class="section-shell footer-bottom"><span>&copy; 2026 TraceEdge</span><span>Monitoring, not automatic trading.</span></div>
+      <div class="section-shell footer-grid"><div><a class="hilal-logo" href="#top"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt=""><span>HilalMarkets<small>Screened market intelligence</small></span></a><p>Guided, evidence-backed crypto spot market monitoring for Muslim investors.</p></div><div><strong>Product</strong><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></div><div><strong>Legal</strong><a href="#risk">Risk disclosure</a><a href="/about">About</a><a href="/how-it-works">How it works</a></div><div><strong>Support</strong><a href="mailto:{{ support_email }}">Contact support</a><a href="/dashboard/support">Help center</a></div></div>
+      <div class="section-shell footer-bottom"><span>&copy; 2026 HilalMarkets</span><span>Research and monitoring only. No execution.</span></div>
     </footer>
   </main>
 </body>

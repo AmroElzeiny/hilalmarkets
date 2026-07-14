@@ -126,7 +126,7 @@ async def test_telegram_start_records_attribution_and_persistent_menu(test_conte
         service = make_service(test_context, db)
         response = await service.handle_start(start_message())
         assert "does not guarantee outcomes" in response.text
-        assert "Welcome to TraceEdge" in response.text
+        assert "Welcome to HilalMarkets" in response.text
         assert "Choose what you want to do next." not in response.text
         assert any(button.text == "Sign up / sign in" for button in response.buttons)
         assert not any("Create Monitor" in item for item in response.menu)
@@ -417,7 +417,7 @@ async def test_telegram_back_returns_main_menu(test_context):
                 data="back:previous",
             )
         )
-        assert "Welcome to TraceEdge" in previous.text
+        assert "Welcome to HilalMarkets" in previous.text
         assert "Choose what you want to do next." not in previous.text
 
 

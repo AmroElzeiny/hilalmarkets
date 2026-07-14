@@ -1,17 +1,17 @@
 # Playwright E2E Report
 
-Generated: 2026-07-14T04:51:28.864774+00:00
+Generated: 2026-07-14T21:47:36.525574+00:00
 
-Base URL tested: http://127.0.0.1:18624
+Base URL tested: http://127.0.0.1:30855
 Browser: chromium
 App auto-started: True
-Command: `.venv\Scripts\python.exe -m pytest --junitxml=reports/pytest-full-results.xml`
-App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 18624`
+Command: `.venv\Scripts\python.exe -m pytest tests\browser\test_dashboard_e2e.py --junitxml=reports\hilalmarkets-ui-final.xml -q`
+App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 30855`
 
 ## Result
 
-- Tests run: 15
-- Passed: 15
+- Tests run: 16
+- Passed: 16
 - Failed: 0
 - Skipped: 0
 - Screenshots/traces/videos: `test-results/browser`
@@ -23,21 +23,22 @@ App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout` | passed | 1.885 |
-| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection` | passed | 4.164 |
-| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states` | passed | 6.082 |
-| `tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor` | passed | 6.477 |
-| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 2.624 |
-| `tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner` | passed | 1.798 |
-| `tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke` | passed | 1.951 |
-| `tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation` | passed | 2.618 |
-| `tests/browser/test_dashboard_e2e.py::test_screened_market_passport_and_mobile_visual_qa` | passed | 2.916 |
-| `tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims` | passed | 1.879 |
-| `tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa` | passed | 6.313 |
-| `tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload` | passed | 4.653 |
-| `tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board` | passed | 3.121 |
-| `tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke` | passed | 1.551 |
-| `tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat` | passed | 1.943 |
+| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout` | passed | 2.151 |
+| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection` | passed | 4.353 |
+| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states` | passed | 5.542 |
+| `tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor` | passed | 5.834 |
+| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 7.65 |
+| `tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa` | passed | 4.56 |
+| `tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner` | passed | 2.102 |
+| `tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke` | passed | 1.684 |
+| `tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation` | passed | 2.719 |
+| `tests/browser/test_dashboard_e2e.py::test_screened_market_passport_and_mobile_visual_qa` | passed | 2.381 |
+| `tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims` | passed | 1.982 |
+| `tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa` | passed | 5.244 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload` | passed | 5.099 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board` | passed | 3.512 |
+| `tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke` | passed | 1.609 |
+| `tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat` | passed | 3.166 |
 
 ## Runtime Checks
 

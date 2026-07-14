@@ -141,7 +141,7 @@ class CapabilityExtensionService:
         await self._status(
             session,
             extension,
-            "Your mechanic isn't in TraceEdge yet, so I'm creating a safe, testable version.",
+            "Your mechanic isn't in HilalMarkets yet, so I'm creating a safe, testable version.",
             stage="drafting",
         )
         await self._status(
@@ -1294,7 +1294,7 @@ class CapabilityExtensionService:
             await TelegramHttpAdapter(self.settings).deliver(
                 TelegramOutboundMessage(
                     chat_id=connection.chat_id,
-                    text=f"TraceEdge mechanic update\n\n{message}",
+                    text=f"HilalMarkets mechanic update\n\n{message}",
                     buttons=(
                         [
                             TelegramButton(

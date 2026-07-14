@@ -37,7 +37,7 @@ def _visual_chat_payload(status: str, *, can_approve: bool) -> dict:
         }
     ]
     summary = (
-        "TraceEdge will watch Binance USDT spot pairs on 15m. A close above the prior "
+        "HilalMarkets will watch Binance USDT spot pairs on 15m. A close above the prior "
         "20-candle high is the primary trigger; volume is a required confirmation."
     )
     return {
@@ -130,6 +130,49 @@ def _visual_chat_payload(status: str, *, can_approve: bool) -> dict:
     }
 
 
+def test_hilalmarkets_landing_and_auth_visual_qa(
+    page: Page,
+    base_url: str,
+    repo_root: Path,
+) -> None:
+    output = repo_root / "reports" / "playwright" / "visual-qa"
+    output.mkdir(parents=True, exist_ok=True)
+
+    page.goto(base_url, wait_until="domcontentloaded")
+    expect(page.locator(".public-nav .logo")).to_contain_text("HilalMarkets")
+    expect(page.locator(".hero h1")).to_contain_text("Know what fits your values")
+    expect(page.locator(".feature-bento")).to_contain_text("Evidence Passports")
+    assert "TODO_" not in page.content()
+    page.evaluate(
+        """async () => {
+            document.documentElement.style.scrollBehavior = 'auto';
+            for (const element of document.querySelectorAll('.reveal')) {
+                element.scrollIntoView({block: 'center', behavior: 'instant'});
+                await new Promise((resolve) => setTimeout(resolve, 70));
+            }
+            window.scrollTo(0, 0);
+            document.documentElement.style.removeProperty('scroll-behavior');
+        }"""
+    )
+    expect(page.locator(".reveal:not(.is-visible)")).to_have_count(0)
+    page.screenshot(path=str(output / "hilalmarkets-landing-desktop.png"), full_page=True)
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("[data-public-menu]").click()
+    expect(page.locator(".public-links")).to_be_visible()
+    page.screenshot(path=str(output / "hilalmarkets-landing-mobile-390.png"), full_page=True)
+
+    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
+    expect(page.locator(".auth-shell")).to_be_visible()
+    expect(page.locator(".auth-form-wrap")).to_be_visible()
+    expect(page.get_by_test_id("signup-form")).to_be_visible()
+    assert "placeholder-note" not in page.content()
+    page.screenshot(path=str(output / "hilalmarkets-auth-mobile-390.png"), full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.screenshot(path=str(output / "hilalmarkets-auth-desktop.png"), full_page=True)
+    assert_no_raw_traceback(page)
+
+
 def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("dashboard-load"))
 
@@ -172,7 +215,7 @@ def test_screened_market_passport_and_mobile_visual_qa(
     card.get_by_role("link", name="See why").click()
     expect(page.get_by_text("SHARIA EVIDENCE PASSPORT")).to_be_visible()
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
-    expect(page.get_by_text("TraceEdge AI does not issue religious rulings.")).to_be_visible()
+    expect(page.get_by_text("HilalMarkets AI does not issue religious rulings.")).to_be_visible()
     page.screenshot(
         path=str(visual_dir / "sharia-evidence-passport-desktop.png"),
         full_page=True,
@@ -296,6 +339,15 @@ def test_ai_setup_chat_visual_qa_states(
     _open_builder(page, base_url)
     output = repo_root / "reports" / "playwright" / "visual-qa"
     output.mkdir(parents=True, exist_ok=True)
+    sidebar_box = page.locator("[data-hilal-sidebar]").bounding_box()
+    notification_box = page.locator(".topbar-right > .btn").first.bounding_box()
+    create_plan_box = page.locator(".topbar-right > .sidebar-create-quick").bounding_box()
+    assert sidebar_box is not None and sidebar_box["x"] <= 1
+    assert notification_box is not None and notification_box["width"] <= 60
+    assert create_plan_box is not None and create_plan_box["width"] <= 220
+    expect(page.locator(".topbar-right > .sidebar-create-quick")).to_contain_text(
+        "New Watch Plan"
+    )
     page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
 
     prompt = "Find a breakout with strong volume on 15m Binance spot."
@@ -385,7 +437,7 @@ def test_provider_required_prompt_blocks_activation(page: Page, base_url: str, b
         )
     assert "/dashboard/monitors" not in page.url
 
-    page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
     statuses = [
         text.strip().lower() for text in page.get_by_test_id("monitor-status").all_inner_texts()
     ]
@@ -484,13 +536,17 @@ def test_approve_and_publish_executable_monitor(
     page.locator("[data-activate-version]").click()
     page.wait_for_url(re.compile(r".*/dashboard/lifecycles.*"), timeout=30_000)
 
-    page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
     row = page.get_by_test_id("monitor-row").first
     expect(row).to_be_visible()
-    expect(row.get_by_test_id("monitor-status")).to_contain_text("active")
+    expect(row.get_by_test_id("monitor-status")).to_contain_text(re.compile("active", re.I))
     expect(
         row.get_by_role("button", name=re.compile(r"^(Pause|Resume)$", re.I))
     ).to_be_visible()
+    page.screenshot(
+        path=str(output / "hilalmarkets-watch-plans-desktop.png"),
+        full_page=True,
+    )
     assert_no_raw_traceback(page)
 
 
@@ -539,11 +595,11 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
 
 def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("monitor-lifecycle-smoke"))
-    page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("My Monitors")
+    page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
+    expect(page.locator("body")).to_contain_text("Watch Plans")
     expect(page.locator("body")).not_to_contain_text("Alert Quality Inbox")
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("One setup. A complete lifecycle.")
+    expect(page.locator("body")).to_contain_text("Follow every market journey.")
     expect(page.locator("body")).not_to_contain_text("Traceback")
     assert_no_raw_traceback(page)
 

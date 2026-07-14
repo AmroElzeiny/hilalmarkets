@@ -68,7 +68,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--browser-base-url",
         action="store",
         default=None,
-        help="Run browser E2E tests against an existing TraceEdge server.",
+        help="Run browser E2E tests against an existing HilalMarkets server.",
     )
     parser.addoption(
         "--browser-headed",
@@ -955,7 +955,7 @@ def _wait_for_health(
     while time.time() < deadline:
         if process is not None and process.poll() is not None:
             output = process.stdout.read() if process.stdout else ""
-            raise RuntimeError(f"TraceEdge server exited before health check.\n{output}")
+            raise RuntimeError(f"HilalMarkets server exited before health check.\n{output}")
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 if 200 <= response.status < 300:
@@ -1108,7 +1108,7 @@ def _html_report(summary: dict[str, Any]) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>TraceEdge Playwright E2E Report</title>
+  <title>HilalMarkets Playwright E2E Report</title>
   <style>
     body {{ font-family: Inter, Segoe UI, sans-serif; margin: 2rem; background: #0a0a0a; color: #f5f5f5; }}
     .card {{ border: 1px solid #3b2a5f; border-radius: 18px; padding: 1rem; margin-bottom: 1rem; background: #111114; }}
@@ -1118,7 +1118,7 @@ def _html_report(summary: dict[str, Any]) -> str:
   </style>
 </head>
 <body>
-  <h1>TraceEdge Playwright E2E Report</h1>
+  <h1>HilalMarkets Playwright E2E Report</h1>
   <section class="card">
     <p><strong>Generated:</strong> {html.escape(str(summary['generated_at']))}</p>
     <p><strong>Base URL:</strong> {html.escape(str(summary.get('base_url') or 'not recorded'))}</p>

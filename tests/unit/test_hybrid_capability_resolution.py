@@ -53,6 +53,13 @@ class InventingReranker:
         )
 
 
+class NoSelectionReranker:
+    last_usage = {}
+
+    async def rerank(self, payload):
+        return CapabilityRerankResponse(decisions=[])
+
+
 def _settings() -> Settings:
     return Settings(
         app_env="development",
@@ -86,6 +93,28 @@ async def test_ai_invented_capability_key_is_never_accepted():
     ).resolve(report, history=[], default_timeframe="15m")
     assert result.report.fragments[0].status != "matched"
     assert result.bindings == []
+
+
+async def test_candidate_retrieval_uses_current_fragment_without_old_chat_text(monkeypatch):
+    report = CapabilityResolver().resolve_prompt("moon wobble pattern")
+    service = HybridCapabilityResolutionService(
+        _settings().model_copy(update={"capability_embeddings_enabled": False}),
+        reranker=NoSelectionReranker(),
+    )
+    retrieved = []
+    original = service.resolver.broad_candidates
+
+    def record(fragment, *, limit=12):
+        retrieved.append(fragment)
+        return original(fragment, limit=limit)
+
+    monkeypatch.setattr(service.resolver, "broad_candidates", record)
+    await service.resolve(
+        report,
+        history=[{"role": "user", "content": "Use a range breakout like I said before."}],
+        default_timeframe="15m",
+    )
+    assert retrieved == ["moon wobble pattern"]
 
 
 async def test_verified_binding_compiles_unknown_wording_without_raw_ai_execution():

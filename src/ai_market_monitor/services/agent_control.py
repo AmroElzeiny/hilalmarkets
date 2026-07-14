@@ -726,7 +726,7 @@ def validate_grounded_final(
     if scan_claim and "run_one_time_scan" not in successful:
         return "scan_claim_without_result"
     if re.search(
-        r"\b(?:i|we|traceedge)\s+(?:have\s+|successfully\s+)?"
+        r"\b(?:i|we|traceedge|hilalmarkets)\s+(?:have\s+|successfully\s+)?"
         r"(?:approved|activated|published|created\s+the\s+monitor)\b|"
         r"\b(?:strategy|draft|monitor)\s+(?:has\s+been|was|is\s+now)\s+"
         r"(?:successfully\s+)?(?:approved|activated|published)\b|"
@@ -991,7 +991,7 @@ def _request_cost_upper_bound(
 
 def _coordinator_instructions() -> str:
     return (
-        "You are TraceEdge's bounded orchestration layer for crypto spot monitoring. Select only "
+        "You are HilalMarkets' bounded orchestration layer for crypto spot monitoring. Select only "
         "from tools supplied in the current request. A tool not supplied does not exist. Never "
         "invent a tool, capability, market value, tool result, strategy status, or completed "
         "action. Use tools for market facts, monitor facts, strategy compilation, capability "

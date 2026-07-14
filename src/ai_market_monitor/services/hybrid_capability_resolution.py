@@ -13,6 +13,7 @@ from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.capability_resolver import (
     CapabilityResolutionReport,
     FragmentResolution,
+    ResolutionStatus,
 )
 from ai_market_monitor.services.capability_registry import OpenAIEmbeddingClient
 
@@ -136,18 +137,15 @@ class HybridCapabilityResolutionService:
             or self.settings.app_env == "test"
         ):
             return HybridCapabilityResolution(report, bindings, {})
-        latest_user_context = next(
-            (
-                item["content"]
-                for item in reversed(history)
-                if item.get("role") == "user" and item.get("content")
-            ),
-            "",
-        )
+        # Candidate retrieval must be local to the exact current fragment. Conversation history
+        # is supplied separately to the AI reranker for corrections and pronouns; concatenating
+        # an older message here leaks stale words into lexical/embedding retrieval and can make
+        # unrelated fragments inherit an old capability candidate.
         candidate_texts = {
-            index: f"{fragments[index].fragment} {latest_user_context}".strip()
+            index: fragments[index].fragment.strip()
             for index in unresolved_indexes
         }
+        correction_context = _explicit_correction_context(history)
         query_embeddings: dict[int, list[float]] = {}
         if (
             self.settings.capability_embeddings_enabled
@@ -175,6 +173,16 @@ class HybridCapabilityResolutionService:
             )
             merged = {candidate.capability_key: candidate for candidate in semantic}
             merged.update({candidate.capability_key: candidate for candidate in lexical})
+            if correction_context:
+                # A direct correction may supply a missing side/reference (for example, "I mean
+                # last week's low"). Add its candidates to the shortlist, but never concatenate
+                # it into the current fragment or alter the source fragment being compiled.
+                contextual = self.resolver.broad_candidates(
+                    correction_context,
+                    limit=self.settings.ai_capability_reranker_candidate_limit,
+                )
+                for candidate in contextual:
+                    merged.setdefault(candidate.capability_key, candidate)
             candidate_map[index] = tuple(
                 sorted(merged.values(), key=lambda item: (-item.score, item.label))[
                     : self.settings.ai_capability_reranker_candidate_limit
@@ -223,7 +231,7 @@ class HybridCapabilityResolutionService:
             )
             source = fragments[decision.fragment_index]
             clarification = decision.clarification_question
-            status = "ambiguous"
+            status: ResolutionStatus = "ambiguous"
             if (
                 not decision.needs_clarification
                 and decision.confidence >= self.settings.ai_capability_reranker_min_confidence
@@ -259,7 +267,8 @@ class HybridCapabilityResolutionService:
                 candidates=reordered,
                 unknown_terms=() if status == "matched" else source.unknown_terms,
                 clarification_question=(
-                    clarification or f"How should TraceEdge measure '{source.fragment}' precisely?"
+                    clarification
+                    or f"How should HilalMarkets measure '{source.fragment}' precisely?"
                 ),
                 selected_capability_key=(selected.capability_key if status == "matched" else None),
                 selected_parameters=(decision.parameters if status == "matched" else None),
@@ -416,11 +425,34 @@ def _timeframe(fragment: str, default: str) -> str:
     return match.group(1) if match else default
 
 
+def _explicit_correction_context(history: list[dict[str, str]]) -> str:
+    latest = next(
+        (
+            str(item.get("content") or "").strip()
+            for item in reversed(history)
+            if item.get("role") == "user" and item.get("content")
+        ),
+        "",
+    )
+    if not latest:
+        return ""
+    return (
+        latest
+        if re.match(
+            r"^(?:no[, ]+|i mean\b|what i mean\b|to clarify\b|correction\b|"
+            r"by that i mean\b|not\b.+\binstead\b)",
+            latest,
+            flags=re.IGNORECASE,
+        )
+        else ""
+    )
+
+
 def _parameter_question(label: str, error: str) -> str:
     if "requires parameters" in error:
         names = error.rsplit(":", 1)[-1].strip().replace(",", " and")
         return f"For {label}, what should {names} be?"
-    return f"Which exact parameters should TraceEdge use for {label}?"
+    return f"Which exact parameters should HilalMarkets use for {label}?"
 
 
 def _output_text(payload: dict[str, Any]) -> str:
@@ -435,7 +467,7 @@ def _output_text(payload: dict[str, Any]) -> str:
 
 def _rerank_instructions() -> str:
     return (
-        "You resolve plain trader language to TraceEdge's existing crypto spot monitoring "
+        "You resolve plain trader language to HilalMarkets' existing crypto spot monitoring "
         "capabilities. Treat phrases such as I want, bring me, show me, check whether, and "
         "alert me as conversational framing, never as trading mechanics. Use conversation "
         "context to understand corrections and pronouns. For each fragment, choose only a "

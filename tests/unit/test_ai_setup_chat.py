@@ -133,7 +133,7 @@ class ExplanationChoiceInterviewer(ReadyInterviewer):
                 SetupChatClarification(
                     key="fvg_definition",
                     question=(
-                        "What exact definition should TraceEdge use to detect an FVG for "
+                        "What exact definition should HilalMarkets use to detect an FVG for "
                         "this monitor?"
                     ),
                     reason="FVG can refer to several measurable gap states.",
@@ -204,7 +204,7 @@ class UniverseOptionInterviewer(ReadyInterviewer):
             clarifications=[
                 SetupChatClarification(
                     key="universe_choice",
-                    question="Which market universe should TraceEdge scan?",
+                    question="Which market universe should HilalMarkets scan?",
                     reason="This limits the eligible spot symbols.",
                     options=[
                         SetupChatOption(
@@ -237,6 +237,40 @@ class QuantityQuestionInterviewer(ReadyInterviewer):
                     question="How many closed candles should the condition persist?",
                     reason="Persistence controls how long the rule must remain true.",
                     options=[],
+                )
+            ],
+        )
+
+
+class ToleranceOptionInterviewer(ReadyInterviewer):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def respond(self, **kwargs) -> SetupChatInterviewResult:
+        self.calls += 1
+        if self.calls > 1:
+            return await super().respond(**kwargs)
+        return SetupChatInterviewResult(
+            intent="setup",
+            assistant_message="I need the sweep tolerance.",
+            ready_to_compile=False,
+            clarifications=[
+                SetupChatClarification(
+                    key="tolerance_percent",
+                    question="What tolerance should count as swept (previous daily low)?",
+                    reason="The answer defines how exact the level touch must be.",
+                    options=[
+                        SetupChatOption(
+                            key="tol_0",
+                            label="Exact only (0%)",
+                            value="0",
+                        ),
+                        SetupChatOption(
+                            key="tol_01",
+                            label="Within 0.1%",
+                            value="0.1",
+                        ),
+                    ],
                 )
             ],
         )
@@ -542,7 +576,7 @@ async def test_capability_question_is_answered_without_becoming_setup_input(test
                 # Even a bad model route cannot turn an obvious product question into a rule.
                 intent="setup_instruction",
                 assistant_message=(
-                    "Yes. TraceEdge has registered bullish and bearish fair-value-gap "
+                    "Yes. HilalMarkets has registered bullish and bearish fair-value-gap "
                     "mechanics. I have not added either one to your setup."
                 ),
                 technical_fragments=[prompt],
@@ -655,6 +689,123 @@ async def test_internal_universe_option_value_never_becomes_a_capability(test_co
             "all_supported_spot_pairs" in item.content
             for item in await service.messages(session, chat.id)
             if item.role == "assistant"
+        )
+
+
+async def test_numeric_option_stays_bound_to_the_question_instead_of_becoming_a_mechanic(
+    test_context,
+):
+    user = await _user(test_context)
+    interviewer = ToleranceOptionInterviewer()
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), FixedInterpreter(), interviewer=interviewer
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(
+            session,
+            chat,
+            message="Find Binance USDT spot pairs that swept PDL on 1d.",
+        )
+        clarification = (await service.messages(session, chat.id))[-1].payload[
+            "clarifications"
+        ][0]
+        exact = clarification["options"][0]
+
+        await service.handle_message(
+            session,
+            chat,
+            message="",
+            option_key=exact["key"],
+            option_value=exact["value"],
+            option_label=exact["label"],
+        )
+
+        assert chat.status == "ready_for_approval"
+        assert "0" not in chat.context_json["setup_fragments"]
+        assert (
+            "Clarification answer for tolerance_percent: Exact only (0%)"
+            in chat.context_json["setup_fragments"]
+        )
+        assert chat.context_json["resolved_ambiguities"]["tolerance_percent"] == "0"
+        assert not any(
+            "How should HilalMarkets measure '0'" in item.content
+            for item in await service.messages(session, chat.id)
+        )
+
+
+async def test_daily_sweep_side_answer_preserves_daily_reference_period(test_context):
+    user = await _user(test_context)
+    service = AISetupChatService(
+        _settings(),
+        SnapshotProvider(),
+        RuleBasedStrategyInterpreter(),
+        interviewer=ReadyInterviewer(),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(
+            session,
+            chat,
+            message="Alert when the current daily candle sweeps the previous daily candle.",
+        )
+        clarification = (await service.messages(session, chat.id))[-1].payload[
+            "clarifications"
+        ][0]
+        previous_low = clarification["options"][0]
+        await service.handle_message(
+            session,
+            chat,
+            message="",
+            option_key=previous_low["key"],
+            option_value=previous_low["value"],
+            option_label=previous_low["label"],
+        )
+
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        rule = _first_rule(definition.conditions)
+        assert rule.capability_key == "previous_daily_low_sweep"
+        assert rule.left.name == "daily_low_swept"
+        assert "Sweep the previous daily low" in chat.context_json["setup_fragments"]
+
+
+async def test_misspelled_head_and_shoulders_flow_compiles_without_generic_questions(
+    test_context,
+):
+    user = await _user(test_context)
+    service = AISetupChatService(
+        _settings(),
+        SnapshotProvider(),
+        RuleBasedStrategyInterpreter(),
+        interviewer=ReadyInterviewer(),
+    )
+    prompt = (
+        "I want to monitor every forming head & sholders on halal coins then once the "
+        "neckline is broken, alert me on the 1m chart"
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(session, chat, message=prompt)
+
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        rules = _rules(definition.conditions)
+        assert {rule.capability_key for rule in rules} >= {
+            "head_and_shoulders_formed",
+            "head_and_shoulders_neckline_break",
+        }
+        assert all(
+            rule.timeframe == "1m"
+            for rule in rules
+            if rule.capability_key
+            in {"head_and_shoulders_formed", "head_and_shoulders_neckline_break"}
+        )
+        assert not any(
+            "How should HilalMarkets measure" in item.content
+            for item in await service.messages(session, chat.id)
+        )
+        assert not any(
+            item.get("code") == "prompt_fragment_unclassified"
+            for item in chat.lint_warnings
         )
 
 
@@ -1054,15 +1205,21 @@ async def test_ai_cannot_claim_ready_when_deterministic_lint_blocks(test_context
         )
         latest = (await service.messages(session, chat.id))[-1]
         assert chat.status == "needs_clarification"
-        assert latest.content.startswith("Approval is paused.")
+        assert "Open the Translation Sheet" in latest.content
         assert latest.payload["can_approve"] is False
         assert latest.payload["refusal_reasons"] == [
             {
                 "code": "missing_threshold",
+                "title": "One detail needs review",
                 "message": "The trigger still needs a measurable threshold.",
+                "next_step": (
+                    "Answer or revise this detail in the chat, then review the Translation "
+                    "Sheet again."
+                ),
+                "category": "Review",
                 "severity": "critical",
                 "blocking": True,
-                "label": "Blocking rule",
+                "label": "Fix before approval",
             }
         ]
 
@@ -1308,7 +1465,7 @@ async def test_openai_turn_classifier_uses_context_and_strict_schema():
                                     {
                                         "intent": "product_question",
                                         "assistant_message": (
-                                            "Yes. TraceEdge has registered FVG mechanics."
+                                            "Yes. HilalMarkets has registered FVG mechanics."
                                         ),
                                         "technical_fragments": [],
                                         "clarification_answer": None,

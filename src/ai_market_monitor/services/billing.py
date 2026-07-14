@@ -208,7 +208,7 @@ class NowPaymentsBillingProvider:
             "price_amount": float(plan.monthly_price),
             "price_currency": plan.currency.lower(),
             "order_id": order_id,
-            "order_description": f"TraceEdge {plan.name} monthly access",
+            "order_description": f"HilalMarkets {plan.name} monthly access",
             "ipn_callback_url": (
                 f"{str(self.settings.public_base_url).rstrip('/')}"
                 "/api/v1/billing/webhooks/nowpayments"
