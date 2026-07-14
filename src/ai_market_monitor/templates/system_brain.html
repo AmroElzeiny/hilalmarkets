@@ -7,6 +7,7 @@
   <title>Capability Coverage Console | TraceEdge</title>
   <link rel="icon" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/system-brain.css">
+  <link rel="stylesheet" href="/static/system-brain-compliance.css">
   <script src="/static/system-brain.js" defer></script>
 </head>
 <body>
@@ -15,6 +16,7 @@
     <p class="brain-nav-title">SYSTEM BRAIN</p>
     <nav>
       <a href="#overview">Overview</a>
+      <a href="#compliance-watch">Compliance Watch</a>
       <a href="#agent-control">Agent control</a>
       <a href="#language-gaps">Language gaps</a>
       <a href="#resolver-quality">Resolver quality</a>
@@ -43,6 +45,100 @@
         <article class="brain-cost-card"><span>Estimated OpenAI cost</span><strong>${{ '%.6f'|format(data.counts.ai_cost_usd) }}</strong><small>{{ data.counts.ai_calls }} recorded calls</small></article>
         <article><span>Created mechanics</span><strong>{{ data.counts.extension_total }}</strong><small>{{ data.counts.extension_certified }} certified · {{ data.counts.extension_failed }} failed</small></article>
       </div>
+    </section>
+
+    <section id="compliance-watch" class="brain-section">
+      <div class="brain-section-head">
+        <div><p class="brain-kicker">SCREENING GOVERNANCE</p><h2>Compliance Watch</h2></div>
+        <span class="brain-tag">Human decision required</span>
+      </div>
+      {% if compliance_error %}<p class="brain-flash error" role="alert">{{ compliance_error }}</p>{% endif %}
+      {% if compliance_success %}<p class="brain-flash success" role="status">{{ compliance_success }}</p>{% endif %}
+      <div class="brain-metric-grid">
+        <article><span>New changes</span><strong>{{ data.compliance_watch.awaiting_triage }}</strong><small>Awaiting triage</small></article>
+        <article><span>Reviews pending</span><strong>{{ data.compliance_watch.reviews_pending }}</strong><small>No status changes without review</small></article>
+        <article><span>Assets under review</span><strong>{{ data.compliance_watch.assets_under_review }}</strong><small>Across pending cases</small></article>
+        <article><span>Status changes</span><strong>{{ data.compliance_watch.status_changes_30d }}</strong><small>Approved in the last 30 days</small></article>
+        <article><span>Watch Plans affected</span><strong>{{ data.compliance_watch.monitors_affected }}</strong><small>Assets paused by policy</small></article>
+      </div>
+      <article class="brain-panel brain-compliance-panel">
+        <div class="brain-panel-heading">
+          <div><h3>Review queue</h3><p class="brain-panel-copy">Automated detection supplies evidence only. A qualified reviewer records every final methodology result.</p></div>
+          <span class="brain-tag">{{ data.compliance_watch.queue|length }} open</span>
+        </div>
+        <div class="brain-table-scroll extra-tall">
+          <table class="brain-compliance-table">
+            <thead><tr><th>Asset</th><th>Change</th><th>Severity</th><th>Detected</th><th>Current status</th><th>Impact</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for item in data.compliance_watch.queue %}
+              <tr>
+                <td><strong>{{ item.asset }}</strong><small>{{ item.confidence_label.replace('_', ' ') }}</small></td>
+                <td><strong>{{ item.title }}</strong><small>{{ item.change_type.replace('_', ' ') }}</small></td>
+                <td><span class="brain-status {{ 'fail' if item.severity == 'critical' else 'warning' }}">{{ item.severity.replace('_', ' ') }}</span></td>
+                <td>{{ item.detected_at.strftime('%Y-%m-%d %H:%M') if item.detected_at else '-' }}</td>
+                <td><span class="brain-status {{ 'pass' if item.current_status == 'eligible' else 'warning' }}">{{ item.current_status.replace('_', ' ') }}</span></td>
+                <td>{{ item.affected_watch_plans }} Watch Plan{{ 's' if item.affected_watch_plans != 1 else '' }}</td>
+                <td>
+                  <details class="brain-review-case">
+                    <summary>{{ item.suggested_action }}</summary>
+                    <span class="brain-review-backdrop" aria-hidden="true"></span>
+                    <div class="brain-review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title-{{ item.id }}">
+                      <button type="button" class="brain-review-close" data-close-review aria-label="Close review">Close</button>
+                      <p class="brain-kicker">COMPLIANCE REVIEW</p>
+                      <h3 id="review-title-{{ item.id }}">{{ item.asset }} · {{ item.title }}</h3>
+                      <p>{{ item.summary }}</p>
+                      <div class="brain-review-facts">
+                        <div><span>Current status</span><strong>{{ item.current_status.replace('_', ' ').title() }}</strong></div>
+                        <div><span>Severity</span><strong>{{ item.severity.replace('_', ' ').title() }}</strong></div>
+                        <div><span>Source</span><strong>{{ item.source or 'No source reference supplied' }}</strong></div>
+                        <div><span>Watch Plans affected</span><strong>{{ item.affected_watch_plans }}</strong></div>
+                      </div>
+                      <details class="brain-evidence-detail"><summary>Inspect normalized change</summary><pre>{{ item.structured_change | tojson(indent=2) }}</pre></details>
+                      <a class="brain-passport-link" href="{{ item.passport_path }}" target="_blank" rel="noopener">Open existing Evidence Passport</a>
+
+                      {% if data.compliance_watch.methodologies %}
+                      <form class="brain-review-form" action="/system-brain/compliance/{{ item.id }}/review" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="decision" value="approved">
+                        <h4>Approve a new assessment</h4>
+                        <label>Methodology<select name="methodology_id" required>{% for method in data.compliance_watch.methodologies %}<option value="{{ method.id }}" {{ 'selected' if method.is_default else '' }}>{{ method.name }} · v{{ method.version }}</option>{% endfor %}</select></label>
+                        <label>Final status<select name="proposed_status" required>{% for status in ['eligible', 'eligible_with_qualifications', 'under_review', 'disputed', 'excluded', 'insufficient_information'] %}<option value="{{ status }}">{{ status.replace('_', ' ').title() }}</option>{% endfor %}</select></label>
+                        <label>Assessment summary<textarea name="assessment_summary" minlength="20" maxlength="5000" required></textarea></label>
+                        <div class="brain-form-grid"><label>Qualifications, one per line<textarea name="qualifications"></textarea></label><label>Exclusion reasons, one per line<textarea name="exclusion_reasons"></textarea></label></div>
+                        <h4>New evidence</h4>
+                        <div class="brain-form-grid"><label>Source title<input name="source_title" required></label><label>Publisher<input name="source_publisher" required></label></div>
+                        <label>Source URL<input type="url" name="source_url" value="{{ item.source if item.source and item.source.startswith('http') else '' }}" required></label>
+                        <div class="brain-form-grid"><label>Source type<input name="source_type" value="official_update" required></label><label>Evidence category<input name="evidence_category" value="project_change" required></label></div>
+                        <label>Evidence summary<textarea name="evidence_summary" minlength="5" maxlength="5000" required></textarea></label>
+                        <label>Mandatory reviewer note<textarea name="reviewer_notes" minlength="10" maxlength="5000" required></textarea></label>
+                        <button type="submit">Approve and publish assessment</button>
+                      </form>
+                      <div class="brain-secondary-decisions">
+                        <form action="/system-brain/compliance/{{ item.id }}/review" method="post">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="more_evidence_required">
+                          <label>Reviewer note<input name="reviewer_notes" minlength="10" required placeholder="Describe the evidence still required"></label>
+                          <label class="sr-only">Methodology<select name="methodology_id">{% for method in data.compliance_watch.methodologies %}<option value="{{ method.id }}" {{ 'selected' if method.is_default else '' }}>{{ method.name }}</option>{% endfor %}</select></label>
+                          <button type="submit" class="secondary">Request more evidence</button>
+                        </form>
+                        <form action="/system-brain/compliance/{{ item.id }}/review" method="post">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="dismissed">
+                          <label>Reviewer note<input name="reviewer_notes" minlength="10" required placeholder="Explain why this change is dismissed"></label>
+                          <label class="sr-only">Methodology<select name="methodology_id">{% for method in data.compliance_watch.methodologies %}<option value="{{ method.id }}" {{ 'selected' if method.is_default else '' }}>{{ method.name }}</option>{% endfor %}</select></label>
+                          <button type="submit" class="danger">Dismiss change</button>
+                        </form>
+                      </div>
+                      {% else %}
+                      <p class="brain-flash error">No approved active methodology is configured. This case cannot change an asset status.</p>
+                      {% endif %}
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            {% else %}<tr><td colspan="7" class="brain-empty">No compliance changes require review.</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
     </section>
 
     <section id="agent-control" class="brain-section">

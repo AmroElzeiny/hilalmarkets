@@ -44,6 +44,25 @@ class RunningApp:
     command: str
 
 
+def _terminate_server_process(process: subprocess.Popen[str]) -> None:
+    if os.name == "nt":
+        # A Windows virtualenv launcher starts the base Python interpreter as a
+        # child. Terminating only the launcher leaves Uvicorn and SQLite alive.
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--browser-base-url",
@@ -221,12 +240,7 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
         pytestconfig._traceedge_e2e = app.__dict__
         yield app
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=10)
+        _terminate_server_process(process)
         server_log.close()
 
 
@@ -448,6 +462,169 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
         await engine.dispose()
 
     _run_async_in_thread(_seed)
+
+
+def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]:
+    if not database_url:
+        pytest.skip("Screened Market visual QA requires the auto-started browser database.")
+
+    async def _seed() -> dict[str, str]:
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from ai_market_monitor.db.models import (
+            AssetShariaAssessment,
+            AssetShariaStatusHistory,
+            SetupInstance,
+            ShariaEvidenceSource,
+            ShariaMethodology,
+            Strategy,
+            StrategyVersion,
+            UserIdentity,
+        )
+        from ai_market_monitor.db.models.enums import (
+            IdentityProvider,
+            SetupLifecycleState,
+            ShariaAssetStatus,
+            ShariaMethodologyStatus,
+            StrategyStatus,
+            StrategyVersionStatus,
+        )
+        from tests.factories import load_strategy
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test user identity found for {email}.")
+            now = datetime.now(UTC)
+            methodology = ShariaMethodology(
+                code=f"BROWSER_APPROVED_{uuid4().hex[:12].upper()}",
+                name="Browser QA approved methodology",
+                version="1.0-test",
+                description=(
+                    "Evidence-backed browser test methodology with explicit test governance."
+                ),
+                status=ShariaMethodologyStatus.ACTIVE,
+                governing_body="Qualified browser-test governance",
+                reviewer_group="Qualified browser-test reviewers",
+                published_at=now - timedelta(days=2),
+                effective_from=now - timedelta(days=2),
+                rules_json={"test_only": True, "versioned_rules": True},
+                evidence_requirements_json={"minimum_sources": 1},
+            )
+            session.add(methodology)
+            await session.flush()
+            assessment = AssetShariaAssessment(
+                canonical_asset="SOL",
+                asset_name="Solana",
+                methodology_id=methodology.id,
+                status=ShariaAssetStatus.ELIGIBLE,
+                summary=(
+                    "A qualified browser-test reviewer recorded this test conclusion from "
+                    "the retained evidence source."
+                ),
+                qualifications=[],
+                exclusion_reasons=[],
+                evidence_snapshot={
+                    "reviewed_dimensions": [
+                        {"name": "Primary activity", "result": "reviewed"}
+                    ],
+                    "methodology_result": {"passed": ["test rule"]},
+                },
+                reviewed_by="Qualified browser-test reviewer",
+                reviewed_at=now - timedelta(days=1),
+                valid_from=now - timedelta(days=1),
+            )
+            session.add(assessment)
+            await session.flush()
+            session.add_all(
+                [
+                    ShariaEvidenceSource(
+                        assessment_id=assessment.id,
+                        source_type="official_disclosure",
+                        title="Official browser-test disclosure",
+                        publisher="Project documentation",
+                        source_url="https://example.com/browser-screening-evidence",
+                        retrieved_at=now - timedelta(days=1),
+                        evidence_category="primary_activity",
+                        evidence_summary=(
+                            "Retained evidence used only for deterministic browser QA."
+                        ),
+                        source_hash=uuid4().hex + uuid4().hex,
+                    ),
+                    AssetShariaStatusHistory(
+                        canonical_asset="SOL",
+                        methodology_id=methodology.id,
+                        previous_status=None,
+                        new_status=ShariaAssetStatus.ELIGIBLE,
+                        reason_code="browser_test_review",
+                        reason_summary="Qualified browser-test evidence review completed.",
+                        assessment_id=assessment.id,
+                        changed_at=assessment.valid_from,
+                        approved_by="Qualified browser-test reviewer",
+                    ),
+                ]
+            )
+            strategy = Strategy(
+                user_id=identity.user_id,
+                name="SOL Browser Watch Plan",
+                status=StrategyStatus.ACTIVE,
+                activated_at=now,
+            )
+            session.add(strategy)
+            await session.flush()
+            definition = load_strategy().model_copy(update={"name": strategy.name})
+            version = StrategyVersion(
+                strategy_id=strategy.id,
+                version_number=1,
+                status=StrategyVersionStatus.ACTIVE,
+                source_type="browser_qa",
+                source_text="Watch screened SOL market checks",
+                schema_json=definition.model_dump(mode="json"),
+                schema_hash=definition.canonical_hash(),
+                approved_schema_hash=definition.canonical_hash(),
+                approved_at=now,
+                activated_at=now,
+            )
+            session.add(version)
+            await session.flush()
+            strategy.active_version_id = version.id
+            setup = SetupInstance(
+                user_id=identity.user_id,
+                strategy_version_id=version.id,
+                exchange="binance",
+                symbol="SOL/USDT",
+                timeframe="15m",
+                direction="long",
+                setup_key=f"screened-browser-{uuid4()}",
+                state=SetupLifecycleState.NEAR_CONFIRMATION,
+                completion_score=Decimal("80"),
+                first_detected_at=now - timedelta(minutes=15),
+                last_evaluated_at=now,
+                expires_at=now + timedelta(hours=2),
+                sharia_methodology_id=methodology.id,
+                sharia_methodology_version=methodology.version,
+                sharia_status_at_detection=ShariaAssetStatus.ELIGIBLE.value,
+                sharia_assessment_id=assessment.id,
+            )
+            session.add(setup)
+            await session.commit()
+            result = {
+                "methodology_id": str(methodology.id),
+                "assessment_id": str(assessment.id),
+                "setup_id": str(setup.id),
+            }
+        await engine.dispose()
+        return result
+
+    return _run_async_in_thread(_seed)
 
 
 def seed_setup_observability(database_url: str, email: str) -> dict[str, str]:

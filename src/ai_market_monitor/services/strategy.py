@@ -35,6 +35,14 @@ from ai_market_monitor.schemas.strategy import (
 )
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import RecentMarketPreviewer
+from ai_market_monitor.services.sharia_screening import (
+    ShariaScreeningError,
+    ShariaScreeningService,
+)
+from ai_market_monitor.services.sharia_universe import (
+    ShariaUniverseError,
+    ShariaUniverseResolver,
+)
 from ai_market_monitor.services.trials import TrialLifecycleService
 
 
@@ -259,7 +267,40 @@ class StrategyService:
         version.status = StrategyVersionStatus.PREVIEWING
         definition = StrategyDefinition.model_validate(version.schema_json)
         await self._assert_dynamic_capability_artifacts(definition, user_id=user_id)
-        result = await previewer.run(definition)
+        preview_definition = definition
+        settings = get_settings()
+        if settings.sharia_screening_enforced:
+            provider = getattr(previewer, "provider", None)
+            if provider is None:
+                raise StrategyGateError(
+                    "screened_preview_unavailable",
+                    "The preview service cannot verify the selected screened market.",
+                )
+            try:
+                resolution = await ShariaUniverseResolver(
+                    self.session,
+                    provider,
+                    settings,
+                ).resolve(
+                    definition,
+                    user_id=user_id,
+                    strategy_version_id=version.id,
+                )
+            except ShariaUniverseError as exc:
+                raise StrategyGateError(exc.code, str(exc)) from exc
+            if not resolution.included_symbols:
+                raise StrategyGateError(
+                    "screened_universe_empty",
+                    "No assets currently meet this Watch Plan's screening policy.",
+                )
+            preview_definition = definition.model_copy(
+                update={
+                    "universe": definition.universe.model_copy(
+                        update={"include_symbols": resolution.included_symbols}
+                    )
+                }
+            )
+        result = await previewer.run(preview_definition)
         version.preview_status = result.status
         version.previewed_at = datetime.now(UTC)
         version.preview_summary = result.model_dump(mode="json")
@@ -313,11 +354,36 @@ class StrategyService:
                 exc.code,
                 str(exc),
             ) from exc
-        universe_id = await self.session.scalar(
-            select(StrategyUniverse.id).where(StrategyUniverse.strategy_version_id == version.id)
+        universe = await self.session.scalar(
+            select(StrategyUniverse).where(StrategyUniverse.strategy_version_id == version.id)
         )
-        if universe_id is None:
+        if universe is None:
             raise StrategyGateError("universe_required", "Strategy universe is missing")
+        settings = get_settings()
+        if settings.sharia_screening_enforced:
+            policy = definition.universe.sharia_policy
+            if policy is None or policy.methodology_id is None:
+                raise StrategyGateError(
+                    "sharia_policy_required",
+                    "Choose an approved methodology and screened market before activation.",
+                )
+            try:
+                await ShariaScreeningService(self.session, settings).methodology(
+                    policy.methodology_id,
+                    require_active=True,
+                )
+            except ShariaScreeningError as exc:
+                raise StrategyGateError(exc.code, str(exc)) from exc
+            if (
+                not universe.sharia_policy_ready
+                or not universe.universe_snapshot_hash
+                or universe.methodology_id != policy.methodology_id
+            ):
+                raise StrategyGateError(
+                    "screened_preview_required",
+                    "Run a successful preview against the current screened market before "
+                    "activation.",
+                )
 
         now = datetime.now(UTC)
         active_version = (
@@ -580,6 +646,7 @@ class StrategyService:
         self.session.add(version)
         await self.session.flush()
         universe = definition.universe
+        sharia_policy = universe.sharia_policy
         self.session.add(
             StrategyUniverse(
                 strategy_version_id=version.id,
@@ -595,6 +662,32 @@ class StrategyService:
                 max_spread_bps=universe.max_spread_bps,
                 min_order_book_depth=universe.min_order_book_depth,
                 max_symbols=universe.max_symbols,
+                universe_mode=sharia_policy.universe_mode if sharia_policy else None,
+                methodology_id=sharia_policy.methodology_id if sharia_policy else None,
+                allowed_sharia_statuses=(
+                    [status.value for status in sharia_policy.allowed_statuses]
+                    if sharia_policy
+                    else []
+                ),
+                qualification_policy=(
+                    sharia_policy.qualification_policy if sharia_policy else None
+                ),
+                disputed_asset_policy=(
+                    sharia_policy.disputed_asset_policy if sharia_policy else None
+                ),
+                compliance_change_behavior=(
+                    sharia_policy.compliance_change_behavior if sharia_policy else None
+                ),
+                approved_watchlist_id=(
+                    sharia_policy.approved_watchlist_id if sharia_policy else None
+                ),
+                universe_snapshot_version=(
+                    sharia_policy.universe_snapshot_version if sharia_policy else None
+                ),
+                universe_last_resolved_at=(
+                    sharia_policy.universe_last_resolved_at if sharia_policy else None
+                ),
+                sharia_policy_ready=False,
             )
         )
         await self._persist_node(version.id, definition.conditions, parent_id=None, sequence=0)

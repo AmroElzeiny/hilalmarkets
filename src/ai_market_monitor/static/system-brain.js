@@ -18,3 +18,28 @@ if (sections.length && "IntersectionObserver" in window) {
   }, { rootMargin: "-20% 0px -65%", threshold: [0.05, 0.25] });
   sections.forEach((section) => observer.observe(section));
 }
+
+document.querySelectorAll(".brain-review-case").forEach((reviewCase) => {
+  reviewCase.addEventListener("toggle", () => {
+    if (reviewCase.open) {
+      reviewCase.querySelector(".brain-review-close")?.focus();
+    }
+  });
+  reviewCase.querySelector("[data-close-review]")?.addEventListener("click", () => {
+    reviewCase.open = false;
+    reviewCase.querySelector(":scope > summary")?.focus();
+  });
+  reviewCase.querySelector(".brain-review-backdrop")?.addEventListener("click", () => {
+    reviewCase.open = false;
+    reviewCase.querySelector(":scope > summary")?.focus();
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const openReview = document.querySelector(".brain-review-case[open]");
+  if (openReview) {
+    openReview.open = false;
+    openReview.querySelector(":scope > summary")?.focus();
+  }
+});

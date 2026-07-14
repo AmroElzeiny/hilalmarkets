@@ -6,12 +6,12 @@ async def test_landing_page_contains_product_flow_without_performance_claims(tes
     assert response.status_code == 200
     content = response.text
     for required in (
-        "See your setup forming",
+        "A guided market-watching platform for Muslim crypto investors.",
         "Sign up",
         "TraceEdge",
         "Lifecycle Watchlist",
         "Explainable Condition Proof",
-        "Why Wasn't I Alerted?",
+        "Why didn't this alert happen?",
         "Risk disclaimer",
     ):
         assert required in content
@@ -19,8 +19,8 @@ async def test_landing_page_contains_product_flow_without_performance_claims(tes
     for forbidden in ("guaranteed profits", "guaranteed returns", "fake win rate"):
         assert forbidden not in lowered
     assert "Entry zone" not in content
-    assert "Conditions complete" in content
-    assert "Alert delivered" in content
+    assert "Ready for review" in content
+    assert "Alert sent" in content
 
 
 async def test_landing_page_strips_at_sign_from_telegram_username(test_context):

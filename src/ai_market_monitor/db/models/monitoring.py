@@ -102,6 +102,19 @@ class ScanResult(UUIDPrimaryKeyMixin, Base):
     exclusion_reason: Mapped[str | None] = mapped_column(String(160))
     error_code: Mapped[str | None] = mapped_column(String(80))
     proof_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    sharia_methodology_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_methodologies.id", ondelete="SET NULL")
+    )
+    sharia_methodology_version: Mapped[str | None] = mapped_column(String(32))
+    sharia_status_at_scan: Mapped[str | None] = mapped_column(String(40))
+    sharia_assessment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("asset_sharia_assessments.id", ondelete="SET NULL")
+    )
+    sharia_universe_snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_universe_snapshots.id", ondelete="SET NULL")
+    )
+    sharia_policy_decision: Mapped[str | None] = mapped_column(String(60))
+    sharia_policy_reason: Mapped[str | None] = mapped_column(String(300))
 
 
 class ConditionRuntimeState(UUIDPrimaryKeyMixin, Base):
@@ -190,6 +203,14 @@ class SetupInstance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     close_reason: Mapped[str | None] = mapped_column(String(160))
+    sharia_methodology_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_methodologies.id", ondelete="SET NULL")
+    )
+    sharia_methodology_version: Mapped[str | None] = mapped_column(String(32))
+    sharia_status_at_detection: Mapped[str | None] = mapped_column(String(40))
+    sharia_assessment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("asset_sharia_assessments.id", ondelete="SET NULL")
+    )
 
     __mapper_args__ = {"version_id_col": lifecycle_version}
 

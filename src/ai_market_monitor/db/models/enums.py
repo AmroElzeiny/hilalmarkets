@@ -66,6 +66,71 @@ class StrategyVersionStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class ShariaMethodologyStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class ShariaAssetStatus(StrEnum):
+    ELIGIBLE = "eligible"
+    ELIGIBLE_WITH_QUALIFICATIONS = "eligible_with_qualifications"
+    DISPUTED = "disputed"
+    UNDER_REVIEW = "under_review"
+    EXCLUDED = "excluded"
+    INSUFFICIENT_INFORMATION = "insufficient_information"
+
+
+class ShariaUniverseMode(StrEnum):
+    ELIGIBLE_MARKET = "eligible_market"
+    APPROVED_WATCHLIST = "approved_watchlist"
+    EXPLICIT_ASSETS = "explicit_assets"
+
+
+class ComplianceChangeBehavior(StrEnum):
+    PAUSE_ASSET = "pause_asset"
+    REMOVE_ASSET = "remove_asset"
+    PAUSE_MONITOR_IF_ANY_ASSET_CHANGES = "pause_monitor_if_any_asset_changes"
+    NOTIFY_ONLY = "notify_only"
+
+
+class ComplianceChangeSeverity(StrEnum):
+    INFORMATIONAL = "informational"
+    REVIEW_REQUIRED = "review_required"
+    CRITICAL = "critical"
+
+
+class ComplianceChangeStatus(StrEnum):
+    DETECTED = "detected"
+    TRIAGED = "triaged"
+    AWAITING_REVIEW = "awaiting_review"
+    APPROVED = "approved"
+    DISMISSED = "dismissed"
+
+
+class ComplianceReviewDecision(StrEnum):
+    APPROVED = "approved"
+    MORE_EVIDENCE_REQUIRED = "more_evidence_required"
+    DISMISSED = "dismissed"
+
+
+class ShariaPolicyDecision(StrEnum):
+    INCLUDED = "included"
+    EXCLUDED_STATUS = "excluded_status"
+    MISSING_ASSESSMENT = "missing_assessment"
+    METHODOLOGY_UNAVAILABLE = "methodology_unavailable"
+    NOT_IN_WATCHLIST = "not_in_watchlist"
+    NOT_EXPLICITLY_SELECTED = "not_explicitly_selected"
+    EXCHANGE_FILTERED = "exchange_filtered"
+    PAUSED_FOR_COMPLIANCE = "paused_for_compliance"
+
+
+class MonitorShariaAssetStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    REMOVED = "removed"
+
+
 class MarketType(StrEnum):
     SPOT = "spot"
 
@@ -299,6 +364,7 @@ class AlertType(StrEnum):
     LIFECYCLE = "lifecycle"
     FAILURE = "failure"
     TRIAL = "trial"
+    COMPLIANCE = "compliance"
 
 
 class DeliveryChannel(StrEnum):

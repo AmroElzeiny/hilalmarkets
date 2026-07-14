@@ -448,6 +448,27 @@ class DiscordAlertService:
                 ),
             ),
         ]
+        if presentation.sharia_status:
+            fields.extend(
+                [
+                    DiscordField(
+                        "Screening status at evaluation",
+                        presentation.sharia_status.replace("_", " ").title(),
+                    ),
+                    DiscordField(
+                        "Screening methodology",
+                        presentation.sharia_methodology or "Recorded in proof",
+                    ),
+                    DiscordField(
+                        "Screening review",
+                        presentation.sharia_reviewed_at or "Not recorded",
+                    ),
+                    DiscordField(
+                        "Evidence Passport",
+                        presentation.sharia_passport_url or "Available in dashboard proof",
+                    ),
+                ]
+            )
         if presentation.has_trade_context:
             fields.extend(
                 [

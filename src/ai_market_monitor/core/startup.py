@@ -62,6 +62,17 @@ def validate_runtime_configuration(settings: Settings) -> None:
             )
         if settings.scanning_enabled and not settings.binance_market_data_enabled:
             errors.append("BINANCE_MARKET_DATA_ENABLED must be true for deployed live scanning")
+        if settings.scanning_enabled and not settings.sharia_screening_enforced:
+            errors.append(
+                "SHARIA_SCREENING_ENFORCED must be true for deployed live scanning"
+            )
+        if (
+            settings.sharia_screening_enforced
+            and settings.sharia_allow_legacy_unscreened_local
+        ):
+            errors.append(
+                "SHARIA_ALLOW_LEGACY_UNSCREENED_LOCAL must be false in staging and production"
+            )
         if settings.binance_derivatives_enabled and settings.derivatives_context_api_url is None:
             errors.append(
                 "DERIVATIVES_CONTEXT_API_URL or a tested derivatives adapter is required "

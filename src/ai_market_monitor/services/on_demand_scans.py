@@ -35,7 +35,10 @@ from ai_market_monitor.services.entitlements import (
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.market_preview import market_snapshot_from_candles
-from ai_market_monitor.services.scanner import UniverseResolver
+from ai_market_monitor.services.sharia_universe import (
+    ShariaUniverseError,
+    ShariaUniverseResolver,
+)
 from ai_market_monitor.services.strategy_hashes import ensure_current_approved_schema_hash
 
 
@@ -105,18 +108,43 @@ class OnDemandScanService:
         )
         # Release database locks before exchange and provider network work begins.
         await self.session.commit()
-        symbols = await UniverseResolver(self.provider).resolve(
-            definition,
-            maximum_symbols=maximum_symbols,
-        )
+        try:
+            screening = await ShariaUniverseResolver(
+                self.session,
+                self.provider,
+                self.settings,
+            ).resolve(
+                definition,
+                user_id=user_id,
+                strategy_version_id=version.id if version else None,
+                maximum_symbols=maximum_symbols,
+            )
+        except ShariaUniverseError as exc:
+            raise OnDemandScanError(exc.code, str(exc)) from exc
+        if screening.monitor_paused_for_compliance:
+            raise OnDemandScanError(
+                "monitor_paused_for_compliance",
+                "The Watch Plan was paused because a previously included asset left its "
+                "screened-market policy.",
+            )
+        symbols = screening.included_symbols
         if not symbols:
-            raise OnDemandScanError("empty_universe", "No symbols matched this scan request.")
+            raise OnDemandScanError(
+                "empty_screened_universe",
+                "No assets currently meet this scan's screened-market policy.",
+            )
 
         evaluated_at = datetime.now(UTC)
         symbols = await self.context.rank_symbols(definition, symbols, evaluated_at)
         results: list[OnDemandScanMarketResult] = []
         scanned_symbols: set[str] = set()
         warnings: list[str] = []
+        if screening.excluded_by_policy_count:
+            warnings.append(
+                f"{screening.excluded_by_policy_count} asset(s) were excluded by the "
+                "selected Sharia policy before technical evaluation."
+            )
+        screening_by_symbol = {item.symbol: item for item in screening.included}
 
         async def evaluate(symbol: str) -> tuple[str, list[OnDemandScanMarketResult], str | None]:
             try:
@@ -129,6 +157,23 @@ class OnDemandScanService:
                     light_scan=request.light_scan,
                     include_non_confirmed=request.include_non_confirmed,
                     account_balance=request.account_balance,
+                    screening_evidence=(
+                        screening_by_symbol[symbol].model_dump(mode="json")
+                        if symbol in screening_by_symbol
+                        else None
+                    ),
+                    screening_context={
+                        "methodology_id": str(screening.methodology_id)
+                        if screening.methodology_id
+                        else None,
+                        "methodology_code": screening.methodology_code,
+                        "methodology_version": screening.methodology_version,
+                        "universe_snapshot_id": str(screening.snapshot_id)
+                        if screening.snapshot_id
+                        else None,
+                        "universe_snapshot_hash": screening.snapshot_hash,
+                        "legacy_local_bypass": screening.legacy_local_bypass,
+                    },
                 )
                 return symbol, evaluated_results, None
             except Exception as exc:
@@ -178,6 +223,9 @@ class OnDemandScanService:
                 "symbols_scanned": len(scanned_symbols),
                 "status": status,
                 "scan_mode": "light_prompt" if request.light_scan else "on_demand",
+                "sharia_universe_snapshot_id": str(screening.snapshot_id)
+                if screening.snapshot_id
+                else None,
             },
         )
         self.session.add(
@@ -194,6 +242,9 @@ class OnDemandScanService:
                     "quota_limit": quota_limit,
                     "quota_used_before": quota_used,
                     "scan_mode": "light_prompt" if request.light_scan else "on_demand",
+                    "screened_assets_considered": screening.considered_count,
+                    "assets_excluded_by_sharia_policy": screening.excluded_by_policy_count,
+                    "eligible_assets_scanned": len(scanned_symbols),
                 },
                 created_at=evaluated_at,
             )
@@ -212,6 +263,15 @@ class OnDemandScanService:
             warnings=warnings,
             evaluated_at=evaluated_at,
             usage_record_id=usage.id,
+            screened_assets_considered=screening.considered_count,
+            assets_excluded_by_sharia_policy=screening.excluded_by_policy_count,
+            assets_with_insufficient_screening_data=screening.insufficient_information_count,
+            eligible_assets_scanned=len(scanned_symbols),
+            sharia_methodology_id=screening.methodology_id,
+            sharia_methodology_code=screening.methodology_code,
+            sharia_methodology_version=screening.methodology_version,
+            sharia_universe_snapshot_id=screening.snapshot_id,
+            sharia_universe_snapshot_hash=screening.snapshot_hash,
         )
 
     async def _load_definition(
@@ -348,6 +408,8 @@ class OnDemandScanService:
         light_scan: bool,
         include_non_confirmed: bool,
         account_balance: float | None,
+        screening_evidence: dict | None,
+        screening_context: dict,
     ) -> list[OnDemandScanMarketResult]:
         candle_sets = await self._fetch_candle_sets(definition, symbol)
         metadata_loader = getattr(self.provider, "fetch_universe_metadata", None)
@@ -448,6 +510,10 @@ class OnDemandScanService:
                         "light_scan": light_scan,
                         "scan_mode": "light_prompt" if light_scan else "on_demand",
                         "live_alert_created": False,
+                        "sharia_screening": {
+                            **screening_context,
+                            "asset": screening_evidence,
+                        },
                     },
                 )
             )

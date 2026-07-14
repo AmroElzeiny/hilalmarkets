@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from ai_market_monitor.api.routers import (
+    activity_router,
     admin_router,
     billing_router,
     dashboard_api_router,
@@ -15,6 +16,7 @@ from ai_market_monitor.api.routers import (
     on_demand_router,
     onboarding_router,
     public_router,
+    sharia_router,
     status_router,
     system_brain_router,
     telegram_router,
@@ -66,6 +68,7 @@ def create_app() -> FastAPI:
 
     application.include_router(public_router)
     application.include_router(dashboard_router)
+    application.include_router(activity_router, prefix="/api/v1")
     application.include_router(dashboard_api_router, prefix="/api/v1")
     application.include_router(onboarding_router, prefix="/api/v1")
     application.include_router(on_demand_router, prefix="/api/v1")
@@ -75,6 +78,7 @@ def create_app() -> FastAPI:
     application.include_router(status_router, prefix="/api/v1")
     application.include_router(telegram_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
+    application.include_router(sharia_router, prefix="/api/v1")
     application.include_router(system_brain_router)
     return application
 

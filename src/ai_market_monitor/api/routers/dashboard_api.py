@@ -3130,6 +3130,7 @@ async def dashboard_scan_now(
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    settings: Settings = Depends(get_settings),
 ) -> OnDemandScanResponse:
     if not await _has_active_notification_channel(session, principal.user_id):
         raise HTTPException(
@@ -3140,7 +3141,9 @@ async def dashboard_scan_now(
             },
         )
     try:
-        response = await OnDemandScanService(session, provider).run(principal.user_id, payload)
+        response = await OnDemandScanService(session, provider, settings=settings).run(
+            principal.user_id, payload
+        )
         await session.commit()
         return response
     except OnDemandScanError as exc:
@@ -3320,7 +3323,9 @@ async def dashboard_light_scan(
         light_scan=True,
     )
     try:
-        response = await OnDemandScanService(session, provider).run(principal.user_id, request)
+        response = await OnDemandScanService(session, provider, settings=settings).run(
+            principal.user_id, request
+        )
     except OnDemandScanError as exc:
         await session.rollback()
         raise HTTPException(

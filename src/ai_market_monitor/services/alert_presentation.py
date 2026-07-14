@@ -4,6 +4,7 @@ from typing import Any
 
 from ai_market_monitor.db.models import Alert
 from ai_market_monitor.db.models.enums import AlertType
+from ai_market_monitor.services.sharia_screening import sharia_evidence_from_proof
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,10 @@ class AlertPresentation:
     chart_reference: str | None
     proof_url: str | None
     dashboard_url: str | None
+    sharia_status: str | None = None
+    sharia_methodology: str | None = None
+    sharia_reviewed_at: str | None = None
+    sharia_passport_url: str | None = None
     actions: list[AlertActionPresentation] = field(default_factory=list)
 
     @property
@@ -122,6 +127,67 @@ class AlertPresentation:
                 if dashboard_url
                 else [],
             )
+        if alert.alert_type == AlertType.COMPLIANCE:
+            base = (public_base_url or "").rstrip("/")
+            asset = str(proof.get("canonical_asset") or "Asset")
+            passport_url = f"{base}/dashboard/market/{asset.lower()}" if base else None
+            activity_url = (
+                f"{base}/dashboard/activity?tab=compliance_changes" if base else None
+            )
+            return cls(
+                alert_id=str(alert.id),
+                strategy_id=str(proof.get("strategy_id")) if proof.get("strategy_id") else None,
+                strategy_version=str(proof.get("methodology_version") or "n/a"),
+                alert_type=alert.alert_type.value,
+                title=alert.title,
+                body=alert.body,
+                symbol=asset,
+                direction="screening status",
+                strategy=str(proof.get("strategy_name") or "Screened market"),
+                exchange="spot",
+                timeframe="status change",
+                setup_score=None,
+                passed_conditions=[],
+                missing_conditions=[],
+                entry_zone="n/a",
+                stop="n/a",
+                stop_distance="n/a",
+                targets=[],
+                reward_to_risk="n/a",
+                data_freshness=str(proof.get("reviewed_at") or "n/a"),
+                trust_score=None,
+                trust_grade="evidence-backed review",
+                trust_summary="Status comes from the recorded methodology review workflow.",
+                setup_age="n/a",
+                lifecycle_state=str(proof.get("new_status") or "updated"),
+                chart_reference=None,
+                proof_url=passport_url,
+                dashboard_url=activity_url,
+                actions=[
+                    *(
+                        [
+                            AlertActionPresentation(
+                                "View evidence",
+                                f"sharia_passport:{asset}",
+                                passport_url,
+                            )
+                        ]
+                        if passport_url
+                        else []
+                    ),
+                    *(
+                        [
+                            AlertActionPresentation(
+                                "View affected Watch Plans",
+                                f"compliance_activity:{alert.id}",
+                                activity_url,
+                            )
+                        ]
+                        if activity_url
+                        else []
+                    ),
+                ],
+            )
         conditions = [
             AlertConditionPresentation(
                 name=str(condition.get("name") or condition.get("condition_id") or "Condition"),
@@ -147,6 +213,25 @@ class AlertPresentation:
         base = (public_base_url or "").rstrip("/")
         proof_url = f"{base}/dashboard/lifecycles" if base else None
         dashboard_url = f"{base}/dashboard/lifecycles" if base else None
+        screening = sharia_evidence_from_proof(proof)
+        raw_screening_asset = screening.get("asset")
+        screening_asset = (
+            raw_screening_asset if isinstance(raw_screening_asset, dict) else {}
+        )
+        methodology_code = screening.get("methodology_code")
+        methodology_version = screening.get("methodology_version")
+        methodology_parts = [
+            str(value) for value in (methodology_code, methodology_version) if value
+        ]
+        sharia_methodology = " v".join(methodology_parts) if methodology_parts else None
+        sharia_status = screening_asset.get("status") or screening.get("status")
+        sharia_reviewed_at = screening_asset.get("reviewed_at")
+        screening_asset_code = screening_asset.get("canonical_asset") or proof.get("symbol")
+        sharia_passport_url = (
+            f"{base}/dashboard/market/{str(screening_asset_code).partition('/')[0].lower()}"
+            if base and screening_asset_code and sharia_status
+            else None
+        )
         score = proof.get("setup_completion_score")
         trust = proof.get("alert_trust_score")
         trust_payload: dict[str, Any] = trust if isinstance(trust, dict) else {}
@@ -207,11 +292,17 @@ class AlertPresentation:
             chart_reference=alert.chart_snapshot_url or proof.get("chart_reference"),
             proof_url=proof_url,
             dashboard_url=dashboard_url,
+            sharia_status=str(sharia_status) if sharia_status else None,
+            sharia_methodology=sharia_methodology,
+            sharia_reviewed_at=(
+                str(sharia_reviewed_at) if sharia_reviewed_at else None
+            ),
+            sharia_passport_url=sharia_passport_url,
             actions=actions,
         )
 
     def telegram_text(self) -> str:
-        if self.alert_type == AlertType.TRIAL.value:
+        if self.alert_type in {AlertType.TRIAL.value, AlertType.COMPLIANCE.value}:
             return f"{self.title}\n\n{self.body}"
         passed = "\n".join(condition.line() for condition in self.passed_conditions) or "None"
         missing = "\n".join(condition.line() for condition in self.missing_conditions) or "None"
@@ -228,6 +319,14 @@ class AlertPresentation:
             if self.has_trade_context
             else "Research-only monitor: no user-defined entry, stop, target, or R:R context.\n"
         )
+        screening_context = ""
+        if self.sharia_status:
+            screening_context = (
+                f"Screening status at evaluation: {self.sharia_status.replace('_', ' ')}\n"
+                f"Methodology: {self.sharia_methodology or 'recorded in proof'}\n"
+                f"Last reviewed: {self.sharia_reviewed_at or 'not recorded'}\n"
+                f"Evidence Passport: {self.sharia_passport_url or 'available in dashboard proof'}\n"
+            )
         return (
             f"Research match confirmed: {self.symbol}\n"
             f"Strategy: {self.strategy}\n"
@@ -235,6 +334,7 @@ class AlertPresentation:
             f"Exchange/timeframe: {self.exchange} {self.timeframe}\n"
             f"Required completion: {score}\n"
             f"{trade_context}"
+            f"{screening_context}"
             f"Data freshness: {self.data_freshness}\n"
             f"Alert trust: {self.trust_grade}"
             f"{f' ({self.trust_score:.0f}%)' if self.trust_score is not None else ''}\n"

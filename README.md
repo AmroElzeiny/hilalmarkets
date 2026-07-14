@@ -17,6 +17,14 @@ compiler, provider, scanner, ownership, entitlement, hash, approval, and activat
 in application services; the model never receives approval or activation tools. See
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
+TraceEdge also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
+persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
+and universe resolver. Missing or non-executable governance data excludes the asset; AI cannot set
+a religious status. The included development methodology is non-executable and contains no asset
+conclusions. See
+[docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md)
+for architecture, deployment order, tests, and the qualified-human-review requirements.
+
 If a user confirms a candle-computable mechanic that is not in the registry, TraceEdge can create a
 user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
 tests it against the configured spot provider, independently reviews it, and requires the normal
@@ -53,7 +61,8 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md),
 [docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md](docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md), and
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
-[docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
+[docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
+[docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md).
 
 Current beta infrastructure includes idempotent scheduled scans, shared CCXT REST clients,
 deterministic proof persistence, setup lifecycle records, Telegram webhook delivery, Discord HTTP

@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-launch-polish">
   <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260627-sidebar-rail">
+  <link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260714-foundation">
   <link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260710-ai-chat">
   <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-launch-polish"></script>
   <style>
@@ -2385,7 +2386,12 @@
     </div>
     <nav class="dash-nav" data-testid="dashboard-nav">
       <a class="{{ 'active' if page == 'home' else '' }}" href="/dashboard"><img src="https://api.iconify.design/lucide:layout-dashboard.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Overview</span></a>
-      <a class="{{ 'active' if page == 'lifecycles' else '' }}" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Lifecycles</span></a>
+      <a class="{{ 'active' if page in ['screened_market', 'asset_passport'] else '' }}" href="/dashboard/market"><img src="https://api.iconify.design/lucide:scan-search.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Screened Market</span></a>
+      <a class="{{ 'active' if page == 'strategy_builder' else '' }}" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Monitors</span></a>
+      <a class="{{ 'active' if page in ['lifecycles', 'activity'] else '' }}" href="/dashboard/activity"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Activity</span></a>
+      <span class="dash-nav-coming" aria-disabled="true" title="Portfolio is coming later"><img src="https://api.iconify.design/lucide:wallet-cards.svg?color=%238d849f" alt="" aria-hidden="true"><span>Portfolio <small>Later</small></span></span>
+      <span class="dash-nav-section">Account &amp; policy</span>
+      <a class="{{ 'active' if page == 'methodology' else '' }}" href="/dashboard/methodology"><img src="https://api.iconify.design/lucide:book-open-check.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Methodology</span></a>
       <a class="{{ 'active' if page == 'billing' else '' }}" href="/dashboard/billing"><img src="https://api.iconify.design/lucide:credit-card.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Billing</span></a>
       <a class="{{ 'active' if page == 'integrations' else '' }}" href="/dashboard/integrations"><img src="https://api.iconify.design/lucide:plug.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Integrations</span></a>
       <a class="{{ 'active' if page == 'settings' else '' }}" href="/dashboard/settings"><img src="https://api.iconify.design/lucide:sliders-horizontal.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Settings</span></a>
@@ -2424,14 +2430,15 @@
             <img class="icon-for-light" src="https://api.iconify.design/lucide:sparkles.svg?color=%23111322" alt="" aria-hidden="true">
             Command center
           </span>
-          <h2>Track the market without staring at every chart.</h2>
-          <p>Build approved monitors and inspect lifecycle evidence from one calmer screen.</p>
+          <h2>Start with a screened market, then watch what matters.</h2>
+          <p>Build approved Watch Plans and inspect opportunity evidence from one calmer screen.</p>
           <div class="button-row">
-            <a class="button button-primary" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="" aria-hidden="true"> Create a monitor</a>
-            <a class="button button-secondary" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%233A3A46" alt="" aria-hidden="true"> Open Lifecycles</a>
+            <a class="button button-primary" href="/dashboard/market"><img src="https://api.iconify.design/lucide:scan-search.svg?color=%23ffffff" alt="" aria-hidden="true"> Explore Screened Market</a>
+            <a class="button button-secondary" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:monitor-up.svg?color=%233A3A46" alt="" aria-hidden="true"> Create a Watch Plan</a>
           </div>
         </div>
         <div class="overview-orbit-card" aria-label="Monitoring summary visual">
+          <div class="sr-only"><span>Coverage score</span><strong>{{ overview.coverage.coverage_percentage|round|int }}%</strong></div>
           <div class="orbit-ring"></div>
           <div class="orbit-core">
             <strong>{{ overview.coverage.coverage_percentage|round|int }}%</strong>
@@ -2444,27 +2451,27 @@
 
       <section class="overview-kpi-grid">
         <article class="overview-kpi-card">
-          <img src="https://api.iconify.design/lucide:radar.svg?color=%23ffffff" alt="" aria-hidden="true">
-          <span>Active monitors</span>
-          <strong>{{ counts.active }}</strong>
-          <p>Approved scanners currently eligible to run.</p>
+          <img src="https://api.iconify.design/lucide:shield-check.svg?color=%23ffffff" alt="" aria-hidden="true">
+          <span>Eligible market</span>
+          <strong>{{ overview.eligible_market_count }}</strong>
+          <p>{% if overview.screening_methodology %}Screened under {{ overview.screening_methodology.name }} v{{ overview.screening_methodology.version }}.{% else %}Awaiting an approved methodology.{% endif %}</p>
         </article>
         <article class="overview-kpi-card">
-          <img src="https://api.iconify.design/lucide:bell.svg?color=%23ffffff" alt="" aria-hidden="true">
-          <span>Alerts today</span>
-          <strong>{{ overview.alerts_today }}</strong>
-          <p>Each alert links back to proof evidence.</p>
+          <img src="https://api.iconify.design/lucide:activity.svg?color=%23ffffff" alt="" aria-hidden="true">
+          <span>Forming opportunities</span>
+          <strong>{{ overview.forming_screened_count }}</strong>
+          <p>Current journeys detected across eligible assets.</p>
         </article>
         <article class="overview-kpi-card">
-          <img src="https://api.iconify.design/lucide:route.svg?color=%23ffffff" alt="" aria-hidden="true">
-          <span>Active lifecycles</span>
-          <strong>{{ overview.active_lifecycle_count }}</strong>
-          <p>Persistent setup cards still being monitored.</p>
+          <img src="https://api.iconify.design/lucide:shield-alert.svg?color=%23ffffff" alt="" aria-hidden="true">
+          <span>Compliance changes</span>
+          <strong>{{ overview.compliance_attention_count }}</strong>
+          <p>User-relevant under-review or excluded changes in 30 days.</p>
         </article>
         <article class="overview-kpi-card">
-          <img src="https://api.iconify.design/lucide:scan-line.svg?color=%23ffffff" alt="" aria-hidden="true">
-          <span>Coverage score</span><strong>{{ overview.coverage.coverage_percentage|round|int }}%</strong>
-          <p>{{ overview.coverage.symbols_scanned }} of {{ overview.coverage.symbols_eligible }} eligible symbols scanned.</p>
+          <img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23ffffff" alt="" aria-hidden="true">
+          <span>Active Watch Plans</span><strong>{{ counts.active }}</strong><span class="sr-only">Active monitors</span>
+          <p>Approved plans currently eligible to scan.</p>
         </article>
       </section>
 
@@ -2593,6 +2600,86 @@
           {% else %}<div class="dash-empty">No symbol activity yet.</div>{% endif %}
         </article>
       </section>
+    {% elif page == 'screened_market' %}
+      <section class="screened-market-hero">
+        <div>
+          <p class="eyebrow">SCREENED MARKET</p>
+          <h1>Find opportunities inside a screened market.</h1>
+          <p>Explore spot assets reviewed under your selected Sharia methodology, then scan or monitor the market changes you care about.</p>
+          <div class="button-row">
+            <a class="button button-primary" href="/dashboard/strategies/new?mode=monitor"><img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23ffffff" alt="" aria-hidden="true">Create a Watch Plan</a>
+            <a class="button button-secondary" href="/dashboard/strategies/new?mode=scanner"><img src="https://api.iconify.design/lucide:scan-line.svg?color=%233A3A46" alt="" aria-hidden="true">Check the market now</a>
+          </div>
+        </div>
+        <div class="screening-method-card">
+          <img src="https://api.iconify.design/lucide:shield-check.svg?color=%238b5cf6" alt="" aria-hidden="true">
+          <span>Selected methodology</span>
+          <strong>{{ screened.methodology.name if screened.methodology else 'Not configured' }}</strong>
+          <small>{% if screened.methodology %}Version {{ screened.methodology.version }} · outcomes are shown per stored methodology{% else %}A qualified reviewer must configure and activate a real methodology before eligible assets can appear.{% endif %}</small>
+        </div>
+      </section>
+
+      <form class="dash-panel screened-market-controls" method="get" action="/dashboard/market">
+        <label><span>Methodology</span><select name="methodology_id" class="modern-select"><option value="">Platform default</option>{% for method in methodologies %}<option value="{{ method.id }}" {% if screened.methodology and screened.methodology.id == method.id %}selected{% endif %}>{{ method.name }} · v{{ method.version }}</option>{% endfor %}</select></label>
+        <fieldset class="market-status-filter"><legend>Status</legend><label><input type="checkbox" name="status" value="eligible" {% if not selected_statuses or 'eligible' in selected_statuses %}checked{% endif %}><span>Eligible</span></label><label><input type="checkbox" name="status" value="eligible_with_qualifications" {% if not selected_statuses or 'eligible_with_qualifications' in selected_statuses %}checked{% endif %}><span>Eligible with qualifications</span></label><details><summary>Advanced statuses</summary><p>These assets are not included by the default screened-market policy.</p><label><input type="checkbox" name="status" value="under_review" {% if 'under_review' in selected_statuses %}checked{% endif %}><span>Under review</span></label><label><input type="checkbox" name="status" value="disputed" {% if 'disputed' in selected_statuses %}checked{% endif %}><span>Disputed</span></label><label><input type="checkbox" name="status" value="excluded" {% if 'excluded' in selected_statuses %}checked{% endif %}><span>Excluded</span></label><label><input type="checkbox" name="status" value="insufficient_information" {% if 'insufficient_information' in selected_statuses %}checked{% endif %}><span>Insufficient information</span></label></details></fieldset>
+        <label><span>Exchange</span><select name="exchange" class="modern-select"><option value="">All assessed assets</option><option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance spot</option><option value="bybit" {% if selected_exchange == 'bybit' %}selected{% endif %}>Bybit spot</option></select></label>
+        <label><span>Minimum 24h liquidity</span><input name="liquidity" type="number" min="0" step="1000" value="{{ selected_liquidity or '' }}" placeholder="No minimum"></label>
+        <label class="market-search-control"><span>Search</span><input name="search" value="{{ market_search }}" placeholder="BTC, Ethereum..."></label>
+        <button class="button button-primary" type="submit">Apply filters</button>
+      </form>
+
+      <section class="screened-summary-strip" aria-label="Screened market summary">
+        <article><img src="https://api.iconify.design/lucide:badge-check.svg?color=%23047857" alt=""><span>Eligible assets</span><strong>{{ screened.status_counts.get('eligible', 0) + screened.status_counts.get('eligible_with_qualifications', 0) }}</strong></article>
+        <article><img src="https://api.iconify.design/lucide:search-check.svg?color=%23b7791f" alt=""><span>Under review</span><strong>{{ screened.status_counts.get('under_review', 0) }}</strong></article>
+        <article><img src="https://api.iconify.design/lucide:history.svg?color=%238b5cf6" alt=""><span>Status changes this week</span><strong>{{ status_changes }}</strong></article>
+        <article><img src="https://api.iconify.design/lucide:monitor-up.svg?color=%238b5cf6" alt=""><span>Active Watch Plans</span><strong>{{ active_watch_plans }}</strong></article>
+      </section>
+
+      {% if screened.warning or market_data_warning %}<div class="screened-policy-notice" role="status"><img src="https://api.iconify.design/lucide:info.svg?color=%23b7791f" alt=""><p>{{ market_data_warning or screened.warning }}</p></div>{% endif %}
+      <div class="screened-view-row"><div><p class="eyebrow">DISCOVERY</p><h2>{{ 'Current opportunities' if selected_view == 'opportunities' else 'All screened assets' }}</h2></div><div class="screened-view-toggle"><a class="{{ 'active' if selected_view == 'opportunities' else '' }}" href="/dashboard/market?view=opportunities">Opportunities</a><a class="{{ 'active' if selected_view == 'assets' else '' }}" href="/dashboard/market?view=assets">All screened assets</a></div></div>
+      {% if opportunity_cards %}
+        <section class="opportunity-card-grid">
+          {% for card in opportunity_cards %}
+            <article class="opportunity-card" data-status="{{ card.assessment.status.value }}">
+              <header><div class="asset-title"><span class="asset-logo">{{ card.assessment.canonical_asset[:1] }}</span><div><h3>{{ card.assessment.asset_name or card.assessment.canonical_asset }}</h3><small>{{ card.assessment.canonical_asset }}/{{ selected_quote_asset }}</small></div></div><span class="sharia-status-chip status-{{ card.assessment.status.value }}">{{ card.assessment.status_label }}</span></header>
+              <div class="opportunity-reviewed"><span>Reviewed {{ card.assessment.reviewed_at.strftime('%d %b %Y') }}</span>{% if card.strategy_name %}<span>{{ card.strategy_name }}</span>{% endif %}</div>
+              <div class="opportunity-summary"><span>{{ card.summary }}</span><strong>{{ card.readiness }}% ready · {{ card.direction }}</strong></div>
+              <div class="readiness-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ card.readiness }}"><i style="--readiness:{{ card.readiness }}%"></i></div>
+              {% if card.assessment.qualifications %}<div class="qualification-note"><img src="https://api.iconify.design/lucide:triangle-alert.svg?color=%23b7791f" alt=""><span>{{ card.assessment.qualifications[0] }}</span></div>{% endif %}
+              <div class="opportunity-missing"><span>What is still missing</span><p>{{ card.still_missing }}</p></div>
+              <footer><div><span>Methodology</span><small>{{ card.assessment.methodology_name }} v{{ card.assessment.methodology_version }}</small></div><div class="opportunity-actions">{% if card.setup %}<a class="button button-primary" href="/dashboard/activity?setup={{ card.setup.id }}">View journey</a>{% else %}<a class="button button-primary" href="/dashboard/strategies/new?asset={{ card.assessment.canonical_asset }}">Watch this</a>{% endif %}<a class="button button-secondary" href="/dashboard/market/{{ card.assessment.canonical_asset }}?methodology_id={{ card.assessment.methodology_id }}">See why</a></div></footer>
+            </article>
+          {% endfor %}
+        </section>
+      {% else %}
+        <div class="dash-empty screened-empty"><img src="https://api.iconify.design/lucide:shield-question.svg?color=%238b5cf6" alt=""><h2>{{ 'No current opportunities to show' if selected_view == 'opportunities' else 'No screened assets to show' }}</h2><p>{% if screened.methodology and selected_view == 'opportunities' %}No active Watch Plan has a forming opportunity on this page. Switch to All screened assets to browse the approved market without inventing an opportunity state.{% elif screened.methodology %}No current assessment matches these filters. TraceEdge did not include unverified assets.{% else %}A real approved methodology and evidence-backed assessments must be configured by qualified reviewers first.{% endif %}</p></div>
+      {% endif %}
+      {% if market_previous_url or market_next_url %}<nav class="screened-pagination" aria-label="Screened market pages"><a class="button button-secondary {{ 'disabled' if not market_previous_url else '' }}" href="{{ market_previous_url or '#' }}" {% if not market_previous_url %}aria-disabled="true"{% endif %}>Previous</a><span>Page {{ screened.page }} of {{ market_maximum_page }}</span><a class="button button-secondary {{ 'disabled' if not market_next_url else '' }}" href="{{ market_next_url or '#' }}" {% if not market_next_url %}aria-disabled="true"{% endif %}>Next</a></nav>{% endif %}
+
+    {% elif page == 'asset_passport' %}
+      <section class="passport-hero">
+        <a class="passport-back" href="/dashboard/market">← Screened Market</a>
+        <div class="passport-top-card">
+          <div class="passport-identity"><span class="asset-logo large">{{ passport.assessment.canonical_asset[:1] }}</span><div><p class="eyebrow">SHARIA EVIDENCE PASSPORT</p><h1>{{ passport.assessment.asset_name or passport.assessment.canonical_asset }} <small>{{ passport.assessment.canonical_asset }}</small></h1><span class="sharia-status-chip status-{{ passport.assessment.status.value }}">{{ passport.assessment.status_label }}</span></div></div>
+          <dl><div><dt>Methodology</dt><dd>{{ passport.assessment.methodology_name }} · v{{ passport.assessment.methodology_version }}</dd></div><div><dt>Last reviewed</dt><dd>{{ passport.assessment.reviewed_at.strftime('%d %b %Y') }}</dd></div><div><dt>Review authority</dt><dd>{{ passport.assessment.reviewed_by }}</dd></div></dl>
+          {% if passport.assessment.qualifications %}<div class="qualification-note prominent"><img src="https://api.iconify.design/lucide:triangle-alert.svg?color=%23b7791f" alt=""><div><strong>Qualification</strong><p>{{ passport.assessment.qualifications|join(' · ') }}</p></div></div>{% endif %}
+          <div class="button-row"><a class="button button-primary" href="/dashboard/strategies/new?asset={{ passport.assessment.canonical_asset }}">Create Watch Plan</a><form method="post" action="/dashboard/market/{{ passport.assessment.canonical_asset }}/watchlist"><input type="hidden" name="methodology_id" value="{{ passport.assessment.methodology_id }}"><button class="button button-secondary" type="submit">Add to watchlist</button></form></div>
+        </div>
+      </section>
+      <section class="passport-grid">
+        <article class="dash-panel passport-section span-two"><p class="eyebrow">WHY IT HAS THIS STATUS</p><h2>A plain-language conclusion</h2><p class="passport-lead">{{ passport.why_this_status }}</p><div class="passport-notice">{{ passport.notice }}</div></article>
+        <article class="dash-panel passport-section"><p class="eyebrow">WHAT WAS REVIEWED</p><h2>Evidence dimensions</h2>{% if passport.reviewed_dimensions %}<div class="evidence-dimension-list">{% for dimension in passport.reviewed_dimensions %}<div><img src="https://api.iconify.design/lucide:check-circle-2.svg?color=%238b5cf6" alt=""><span><strong>{{ dimension.get('label', dimension.get('name', 'Reviewed dimension')) }}</strong><small>{{ dimension.get('summary', dimension.get('result', 'Recorded in the approved evidence snapshot.')) }}</small></span></div>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">No structured review dimensions were stored for this assessment.</div>{% endif %}</article>
+        <article class="dash-panel passport-section"><p class="eyebrow">METHODOLOGY RESULT</p><h2>Rule outcomes</h2>{% if passport.methodology_result %}<div class="method-result-list">{% for key, value in passport.methodology_result.items() %}<div><span>{{ key.replace('_', ' ').title() }}</span><strong>{{ value }}</strong></div>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">No structured rule result was stored. The written assessment remains available above.</div>{% endif %}</article>
+        <article class="dash-panel passport-section span-two"><p class="eyebrow">EVIDENCE SOURCES</p><h2>Dated source record</h2>{% if passport.evidence_sources %}<div class="passport-evidence-list">{% for source in passport.evidence_sources %}<a href="{{ source.source_url }}" rel="noopener noreferrer" target="_blank"><img src="https://api.iconify.design/lucide:external-link.svg?color=%238b5cf6" alt=""><span><strong>{{ source.title }}</strong><small>{{ source.publisher }} · retrieved {{ source.retrieved_at.strftime('%d %b %Y') }} · {{ source.evidence_category.replace('_', ' ') }}</small><p>{{ source.evidence_summary }}</p></span></a>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">Exact historical evidence is unavailable. TraceEdge does not invent or substitute sources.</div>{% endif %}</article>
+        <article class="dash-panel passport-section"><p class="eyebrow">STATUS HISTORY</p><h2>Assessment timeline</h2>{% if passport.status_history %}<div class="passport-timeline">{% for event in passport.status_history %}<div><i></i><span><strong>{{ event.new_status.value.replace('_', ' ').title() }}</strong><small>{{ event.changed_at.strftime('%d %b %Y') }} · {{ event.approved_by }}</small><p>{{ event.reason_summary }}</p></span></div>{% endfor %}</div>{% else %}<div class="passport-empty-evidence">No prior status changes are recorded.</div>{% endif %}</article>
+        <article class="dash-panel passport-section"><p class="eyebrow">METHODOLOGY COMPARISON</p><h2>Conclusions stay separate</h2><p>{{ methodology_comparison.notice }}</p><div class="method-comparison-list">{% for result in methodology_comparison.results %}<div><span><strong>{{ result.methodology.name }}</strong><small>v{{ result.methodology.version }}</small></span><span class="sharia-status-chip status-{{ result.status.value if result.status else 'insufficient_information' }}">{{ result.status.value.replace('_', ' ').title() if result.status else 'No assessment' }}</span>{% if result.qualifications %}<p>{{ result.qualifications|join(' · ') }}</p>{% endif %}</div>{% else %}<div class="passport-empty-evidence">No other approved methodology is available for comparison.</div>{% endfor %}</div></article>
+      </section>
+
+    {% elif page == 'methodology' %}
+      <section class="methodology-hero dash-panel"><div><p class="eyebrow">METHODOLOGY</p><h1>Know how every screening result was reached.</h1><p>TraceEdge stores each approved methodology by version and shows conclusions separately. AI can organize evidence, but it cannot issue a religious ruling or silently change a status.</p></div><img src="https://api.iconify.design/lucide:book-open-check.svg?color=%238b5cf6" alt=""></section>
+      {% if selected_methodology %}<section class="methodology-current"><header><div><span>Current platform methodology</span><h2>{{ selected_methodology.name }} · v{{ selected_methodology.version }}</h2></div><span class="sharia-status-chip status-eligible">Active</span></header><p>{{ selected_methodology.description }}</p><dl><div><dt>Governing body</dt><dd>{{ selected_methodology.governing_body }}</dd></div><div><dt>Reviewer group</dt><dd>{{ selected_methodology.reviewer_group }}</dd></div><div><dt>Effective from</dt><dd>{{ selected_methodology.effective_from.strftime('%d %b %Y') if selected_methodology.effective_from else 'Not recorded' }}</dd></div></dl><details><summary>View structured rules and evidence requirements</summary><div class="methodology-details"><section><h3>Rules</h3>{% for key, value in selected_methodology.rules.items() %}<div><span>{{ key.replace('_', ' ').title() }}</span><strong>{{ value }}</strong></div>{% endfor %}</section><section><h3>Evidence requirements</h3>{% for key, value in selected_methodology.evidence_requirements.items() %}<div><span>{{ key.replace('_', ' ').title() }}</span><strong>{{ value }}</strong></div>{% endfor %}</section></div></details></section>{% else %}<div class="dash-empty screened-empty"><h2>No real approved methodology is active</h2><p>The development/test seed is deliberately non-executable and is not presented as a religious ruling. A qualified governance process must publish a real methodology first.</p></div>{% endif %}
+      <section class="dash-panel methodology-list"><div class="section-head"><div><p class="eyebrow">APPROVED VERSIONS</p><h2>Available methodology records</h2></div></div>{% for method in methodologies %}<article><div><strong>{{ method.name }}</strong><span>Version {{ method.version }}</span></div><p>{{ method.description }}</p><small>{{ method.governing_body or 'Governing body not recorded' }} · {{ method.reviewer_group or 'Reviewer group not recorded' }}</small></article>{% else %}<div class="dash-empty">No approved methodology versions are available.</div>{% endfor %}</section>
+
     {% elif page == 'strategy_builder' %}
       <section class="ai-setup-chat-shell" data-ai-setup-chat data-testid="ai-setup-chat" {% if strategy %}hidden{% endif %}>
         <header class="ai-chat-hero">
@@ -2854,6 +2941,11 @@
             <div id="builder-action-status" class="builder-action-status" aria-live="polite" hidden data-testid="builder-action-status"></div>
             <div class="builder-validation-nudge" data-builder-validation-nudge>
               Validate the monitor before activation. Start monitoring will automatically run validation, but reviewing it first prevents blocked launches.
+            </div>
+            <div class="builder-screened-market-banner {{ 'ready' if builder_screening.configured else 'blocked' }}" role="status">
+              <img src="https://api.iconify.design/lucide:shield-check.svg?color=%238b5cf6" alt="" aria-hidden="true">
+              <div><span>Screened market</span><strong>{% if builder_screening.configured %}{{ builder_screening.methodology_name }} · v{{ builder_screening.methodology_version }}{% else %}Approved methodology required{% endif %}</strong><small>{% if builder_screening.configured %}Default scope: eligible assets and eligible assets with qualifications. Status changes pause the affected asset.{% else %}This draft can be edited, but validation and activation stay blocked until qualified governance activates a real methodology.{% endif %}</small></div>
+              <a href="/dashboard/methodology">View methodology</a>
             </div>
 
             <nav class="builder-mobile-stepper" aria-label="Mobile strategy steps">
@@ -3216,6 +3308,12 @@
                   </div>
                   <span class="monitor-status-pill" data-testid="monitor-status">{{ monitor_status.replace('_', ' ') }}</span>
                 </div>
+                <div class="monitor-screening-strip">
+                  <div><img src="https://api.iconify.design/lucide:shield-check.svg?color=%238b5cf6" alt=""><span>Methodology</span><strong>{{ item.methodology.name ~ ' v' ~ item.methodology.version if item.methodology else 'Policy migration required' }}</strong></div>
+                  <div><img src="https://api.iconify.design/lucide:list-filter.svg?color=%238b5cf6" alt=""><span>Allowed statuses</span><strong>{{ item.sharia_universe.allowed_sharia_statuses|map('replace', '_', ' ')|join(', ') if item.sharia_universe and item.sharia_universe.allowed_sharia_statuses else 'Not configured' }}</strong></div>
+                  <div><img src="https://api.iconify.design/lucide:scan-search.svg?color=%238b5cf6" alt=""><span>Eligible assets</span><strong>{{ item.eligible_asset_count }}</strong></div>
+                  <div><img src="https://api.iconify.design/lucide:shield-alert.svg?color=%238b5cf6" alt=""><span>Status change</span><strong>{{ item.sharia_universe.compliance_change_behavior.value.replace('_', ' ').title() if item.sharia_universe and item.sharia_universe.compliance_change_behavior else 'Pause affected asset' }}</strong></div>
+                </div>
                 <div class="monitor-health-strip">
                   <div>
                     <span>Health</span>
@@ -3261,6 +3359,7 @@
         {% endif %}
       </section>
       <script id="amm-builder-schema" type="application/json">{% if version and version.schema_json %}{{ version.schema_json | tojson }}{% else %}{}{% endif %}</script>
+      <script id="amm-builder-screening-context" type="application/json">{{ builder_screening | tojson }}</script>
       <script id="amm-builder-metadata" type="application/json">{% if version %}{{ {
         'interpreter': version.interpretation_provider or 'saved-strategy-version',
         'assumptions': version.assumptions or [],
@@ -3295,6 +3394,11 @@
           <article><img src="https://api.iconify.design/lucide:clock-3.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Timeframe</span><strong>{{ proof.timeframe or 'Not recorded' }}</strong></article>
           <article><img src="https://api.iconify.design/lucide:database.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Exchange</span><strong>{{ proof.exchange or 'Not recorded' }}</strong></article>
           <article><img src="https://api.iconify.design/lucide:activity.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Data freshness</span><strong>{% if proof.data_latency_ms is defined %}{{ proof.data_latency_ms }} ms{% else %}Not recorded{% endif %}</strong></article>
+          {% if sharia_proof %}
+            <article><img src="https://api.iconify.design/lucide:shield-check.svg?color=%23047857" alt="" aria-hidden="true"><span>Screening at evaluation</span><strong>{{ (sharia_asset.status or sharia_proof.status or 'Not recorded')|replace('_', ' ')|title }}</strong></article>
+            <article><img src="https://api.iconify.design/lucide:book-open-check.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Methodology</span><strong>{{ sharia_proof.methodology_code or 'Recorded methodology' }}{% if sharia_proof.methodology_version %} v{{ sharia_proof.methodology_version }}{% endif %}</strong></article>
+            <article><img src="https://api.iconify.design/lucide:calendar-check-2.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Assessment reviewed</span><strong>{{ sharia_asset.reviewed_at or 'Not recorded' }}</strong></article>
+          {% endif %}
         </section>
 
         <section class="dash-panel alert-proof-report">
@@ -3341,6 +3445,7 @@
           <button class="button button-secondary" type="button" data-export-alert-proof>Export</button>
           {% if strategy and version %}<a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/verify?version={{ version.id }}">View strategy version</a>{% endif %}
           {% if version_mismatch %}<a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/verify?version={{ current_version.id }}#version-control">Compare with current</a>{% endif %}
+          {% if sharia_passport_asset %}<a class="button button-secondary" href="/dashboard/market/{{ sharia_passport_asset|lower }}">View Evidence Passport</a>{% endif %}
           <a class="button button-secondary" href="/dashboard/lifecycles">Back to lifecycles</a>
         </div>
         <script type="application/json" data-alert-proof-json>{{ {'alert_id': alert.id|string, 'proof_hash': proof_hash, 'proof_schema_version': alert.proof_schema_version, 'proof': proof} | tojson }}</script>
@@ -3777,7 +3882,30 @@
           <div class="dash-empty">No setup lifecycle instances have been created yet.</div>
         {% endif %}
       </section>
-    {% elif page == 'lifecycles' %}
+    {% elif page in ['lifecycles', 'activity'] %}
+      <section class="activity-workspace-head">
+        <div><p class="eyebrow">EVIDENCE AND ACTIVITY</p><h1>Follow every opportunity and every status change.</h1><p>See what is forming, why an alert happened, what prevented one, and whether an asset's screening status changed.</p><span class="sr-only">One setup. A complete lifecycle.</span></div>
+        <a class="button button-primary" href="/dashboard/strategies/new">Create a Watch Plan</a>
+      </section>
+      <nav class="activity-tabs" aria-label="Activity categories">
+        <a class="{{ 'active' if activity_tab == 'forming' else '' }}" href="/dashboard/activity?tab=forming">Forming</a>
+        <a class="{{ 'active' if activity_tab == 'alerts' else '' }}" href="/dashboard/activity?tab=alerts">Alerts</a>
+        <a class="{{ 'active' if activity_tab == 'ended' else '' }}" href="/dashboard/activity?tab=ended">Ended</a>
+        <a class="{{ 'active' if activity_tab == 'compliance_changes' else '' }}" href="/dashboard/activity?tab=compliance_changes">Compliance changes</a>
+        <a class="{{ 'active' if activity_tab == 'investigations' else '' }}" href="/dashboard/activity?tab=investigations">Investigations</a>
+      </nav>
+      {% if activity_tab != 'forming' %}
+        <section class="activity-read-model" aria-live="polite">
+          {% for item in activity.items %}
+            <article class="activity-item {{ 'requires-attention' if item.requires_attention else '' }}">
+              <span class="activity-icon"><img src="https://api.iconify.design/lucide:{{ 'shield-alert' if item.item_type == 'compliance_change' else 'bell-ring' if item.item_type == 'alert' else 'search-check' if item.item_type == 'investigation' else 'route' }}.svg?color=%238b5cf6" alt=""></span>
+              <div class="activity-item-copy"><div><span class="activity-type">{{ item.item_type.replace('_', ' ').title() }}</span>{% if item.current_sharia_status %}<span class="sharia-status-chip status-{{ item.current_sharia_status.value }}">{{ item.current_sharia_status.value.replace('_', ' ').title() }}</span>{% endif %}</div><h2>{{ item.title }}</h2><p>{{ item.summary }}</p><small>{{ item.occurred_at|short_dt(user.timezone) }}{% if item.monitor_name %} · {{ item.monitor_name }}{% endif %}{% if item.methodology_version %} · methodology v{{ item.methodology_version }}{% endif %}</small></div>
+              {% if item.evidence_reference %}<a class="button button-secondary" href="{{ item.evidence_reference }}">View evidence</a>{% endif %}
+            </article>
+          {% else %}<div class="dash-empty">No activity records match this view. TraceEdge will keep evidence here when an opportunity, alert, investigation, or compliance change occurs.</div>{% endfor %}
+        </section>
+      {% endif %}
+      {% if activity_tab in ['forming', 'all'] %}
       <section class="dash-panel observability-command-center" data-observability-root data-poll-seconds="{{ observability_poll_seconds }}">
         <div class="section-head">
           <div>
@@ -3797,9 +3925,9 @@
             </button>
             <div class="monitor-filter-menu" role="listbox" hidden data-monitor-filter-menu>
               {% if lifecycle_monitors|length > 7 %}<label class="monitor-filter-search"><span class="sr-only">Search monitors</span><input type="search" placeholder="Search monitors" data-monitor-filter-search></label>{% endif %}
-              <a role="option" href="/dashboard/lifecycles" aria-selected="{{ 'true' if not selected_monitor_id else 'false' }}" data-monitor-option="">All Monitors</a>
+              <a role="option" href="/dashboard/activity?tab={{ activity_tab }}" aria-selected="{{ 'true' if not selected_monitor_id else 'false' }}" data-monitor-option="">All Watch Plans</a>
               {% for monitor_id, monitor_name in lifecycle_monitors %}
-                <a role="option" href="/dashboard/lifecycles?monitor={{ monitor_id }}" aria-selected="{{ 'true' if selected_monitor_id == monitor_id else 'false' }}" data-monitor-option="{{ monitor_id }}" data-monitor-name="{{ monitor_name|lower }}">{{ monitor_name }}</a>
+                <a role="option" href="/dashboard/activity?tab={{ activity_tab }}&monitor={{ monitor_id }}" aria-selected="{{ 'true' if selected_monitor_id == monitor_id else 'false' }}" data-monitor-option="{{ monitor_id }}" data-monitor-name="{{ monitor_name|lower }}">{{ monitor_name }}</a>
               {% endfor %}
             </div>
           </div>
@@ -3825,9 +3953,9 @@
       <section class="dash-panel lifecycle-page">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Persistent setup tracking</p>
-            <h2>Lifecycle records</h2><span class="sr-only">One setup. A complete lifecycle.</span>
-            <p>Open a setup for condition evidence, timeline, chart, or a deterministic no-alert investigation.</p>
+            <p class="eyebrow">Opportunity journeys</p>
+            <h2>Persistent market evidence</h2><span class="sr-only">One opportunity. A complete evidence journey.</span>
+            <p>Open an opportunity for market checks, history, chart evidence, or a deterministic no-alert investigation.</p>
           </div>
         </div>
         {% if lifecycle_cards %}
@@ -3844,10 +3972,11 @@
                       </button>
                     </span>
                     <small>Version {{ item.strategy_version_number }} · {{ item.exchange }} · {{ item.timeframe }} · {{ item.direction }}</small>
+                    {% if item.sharia_status_at_detection %}<span class="lifecycle-sharia-context"><span class="sharia-status-chip status-{{ item.sharia_status_at_detection }}">At detection: {{ item.sharia_status_at_detection.replace('_', ' ').title() }}</span>{% if item.current_sharia_status and item.current_sharia_status != item.sharia_status_at_detection %}<span class="sharia-status-chip status-{{ item.current_sharia_status }}">Now: {{ item.current_sharia_status.replace('_', ' ').title() }}</span>{% endif %}{% if item.sharia_methodology_version %}<small>Methodology v{{ item.sharia_methodology_version }}</small>{% endif %}</span>{% endif %}
                   </div>
                   <button class="lifecycle-card-toggle" type="button" data-lifecycle-toggle="{{ item.id }}" aria-expanded="false">
                     <span class="lifecycle-state-badge">{{ item.state_label }}</span>
-                    <span class="lifecycle-score">{{ item.completion_score|round|int }}%</span>
+                    <span class="lifecycle-score">{{ item.readiness_label }}</span>
                     <span class="lifecycle-chevron" aria-hidden="true">+</span>
                   </button>
                   <div class="lifecycle-card-actions">
@@ -3858,13 +3987,13 @@
                     {% if item.latest_alert_id %}
                       <a class="lifecycle-proof-button" href="/dashboard/alerts/{{ item.latest_alert_id }}/proof">
                         <img src="https://api.iconify.design/lucide:shield-check.svg?color=%234c1d95" alt="" aria-hidden="true">
-                        <span>View alert proof</span>
+                        <span>Why you received this alert</span>
                       </a>
                     {% endif %}
                     {% if item.show_why_no_alert %}
                       <button class="lifecycle-investigate-button" type="button" data-lifecycle-investigate="{{ item.id }}">
                         <img src="https://api.iconify.design/lucide:circle-help.svg?color=%234c1d95" alt="" aria-hidden="true">
-                        <span>Why Wasn’t I Alerted?</span>
+                        <span>Why didn't this alert happen?</span>
                       </button>
                     {% endif %}
                   </div>
@@ -3912,13 +4041,14 @@
             {% endfor %}
           </div>
         {% else %}
-          <div class="dash-empty">{% if selected_monitor_id %}No lifecycle records found for this monitor.{% else %}No persistent setup lifecycles exist yet. Activate a monitor and let the scanner create the first setup instance.{% endif %}</div>
+          <div class="dash-empty">{% if selected_monitor_id %}No lifecycle records found for this monitor. No opportunity journeys have been recorded for this Watch Plan yet.{% else %}No opportunity journeys exist yet. Activate a Watch Plan and let the scanner create the first evidence record.{% endif %}</div>
         {% endif %}
       </section>
+      {% endif %}
 
       <div class="observability-drawer-backdrop" data-observability-drawer-backdrop hidden></div>
       <aside class="observability-drawer" data-observability-drawer hidden aria-labelledby="observability-drawer-title" aria-modal="true" role="dialog" tabindex="-1">
-        <header><div><p class="eyebrow">Lifecycle investigation</p><h2 id="observability-drawer-title">Why wasn’t I alerted?</h2></div><button type="button" data-observability-drawer-close aria-label="Close investigation"><img src="https://api.iconify.design/lucide:x.svg?color=%238b5cf6" alt="" aria-hidden="true"></button></header>
+        <header><div><p class="eyebrow">Opportunity investigation</p><h2 id="observability-drawer-title">Why didn't this alert happen?</h2></div><button type="button" data-observability-drawer-close aria-label="Close investigation"><img src="https://api.iconify.design/lucide:x.svg?color=%238b5cf6" alt="" aria-hidden="true"></button></header>
         <div class="observability-drawer-content" data-observability-drawer-content></div>
       </aside>
 
@@ -4452,6 +4582,42 @@
                 {% endfor %}
               </div>
               <small>Both Binance and Bybit are enabled by default.</small>
+            </fieldset>
+            <fieldset class="choice-field sharia-settings-fieldset">
+              <legend>Default screening methodology</legend>
+              <select name="default_sharia_methodology_id" class="modern-select">
+                <option value="">Platform default</option>
+                {% for method in sharia_methodologies %}<option value="{{ method.id }}" {{ 'selected' if prefs.get('default_sharia_methodology_id') == method.id|string else '' }}>{{ method.name }} · v{{ method.version }}</option>{% endfor %}
+              </select>
+              <small>Only approved active methodologies appear. Each conclusion remains tied to its exact version.</small>
+            </fieldset>
+            <fieldset class="choice-field sharia-settings-fieldset">
+              <legend>Allowed Sharia statuses</legend>
+              {% set allowed_screening = prefs.get('allowed_sharia_statuses', ['eligible', 'eligible_with_qualifications']) %}
+              <div class="choice-chip-list">
+                {% for value, label in [('eligible', 'Eligible'), ('eligible_with_qualifications', 'Eligible with qualifications'), ('under_review', 'Under review'), ('disputed', 'Disputed'), ('excluded', 'Excluded'), ('insufficient_information', 'Insufficient information')] %}
+                  <label class="choice-chip screening-choice status-{{ value }}"><input type="checkbox" name="allowed_sharia_statuses" value="{{ value }}" {{ 'checked' if value in allowed_screening else '' }}><span>{{ label }}</span></label>
+                {% endfor %}
+              </div>
+              <label class="advanced-policy-ack"><input type="checkbox" name="advanced_sharia_override_acknowledged" value="true" {{ 'checked' if prefs.get('advanced_sharia_override_acknowledged', False) else '' }}><span>I understand that including Under review, Disputed, Excluded, or Insufficient information assets overrides the default screened-market policy.</span></label>
+              <small>Default: Eligible and Eligible with qualifications. Non-eligible statuses are never included silently.</small>
+            </fieldset>
+            <label>When an asset's status changes
+              <select name="compliance_change_behavior" class="modern-select">
+                {% for value, label in [('pause_asset', 'Pause the affected asset'), ('remove_asset', 'Remove the affected asset'), ('pause_monitor_if_any_asset_changes', 'Pause the whole Watch Plan'), ('notify_only', 'Notify only')] %}<option value="{{ value }}" {{ 'selected' if prefs.get('compliance_change_behavior', 'pause_asset') == value else '' }}>{{ label }}</option>{% endfor %}
+              </select>
+              <small>The default pauses only the affected asset and keeps other eligible assets active.</small>
+            </label>
+            <fieldset class="choice-field sharia-settings-fieldset">
+              <legend>Compliance Drift Alerts</legend>
+              <input type="hidden" name="compliance_alert_channels" value="web">
+              <div class="choice-chip-list">
+                <label class="choice-chip"><input type="checkbox" checked disabled><span>In-app (required)</span></label>
+                {% for channel in ['telegram', 'discord'] %}<label class="choice-chip"><input type="checkbox" name="compliance_alert_channels" value="{{ channel }}" {{ 'checked' if channel in prefs.get('compliance_alert_channels', ['web']) else '' }}><span>{{ channel.title() }}</span></label>{% endfor %}
+              </div>
+              <select name="compliance_alert_digest" class="modern-select"><option value="immediate" {{ 'selected' if prefs.get('compliance_alert_digest', 'immediate') == 'immediate' else '' }}>Immediate</option><option value="daily" {{ 'selected' if prefs.get('compliance_alert_digest') == 'daily' else '' }}>Daily summary for non-critical changes</option></select>
+              <div class="choice-chip-list"><label class="choice-chip"><input type="checkbox" name="qualification_change_alerts" value="true" {{ 'checked' if prefs.get('qualification_change_alerts', True) else '' }}><span>Qualification changes</span></label><label class="choice-chip"><input type="checkbox" name="under_review_alerts" value="true" checked disabled><span>Under review</span></label><label class="choice-chip"><input type="checkbox" name="exclusion_alerts" value="true" checked disabled><span>Exclusions</span></label></div>
+              <small>Under-review and exclusion events for active Watch Plans always remain visible in-app.</small>
             </fieldset>
             <div class="schedule-field">
               <div class="schedule-heading">

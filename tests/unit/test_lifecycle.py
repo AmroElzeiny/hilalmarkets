@@ -102,6 +102,6 @@ def test_default_lifecycle_stages_are_research_monitoring_first():
     labels = [label.lower() for _, label in LIFECYCLE_STAGES]
 
     assert "entry zone" not in labels
-    assert "conditions complete" in labels
+    assert "ready for review" in labels
     assert stage_index(SetupLifecycleState.CONFIRMED) == 2
     assert stage_index(SetupLifecycleState.ALERT_SENT) == 3

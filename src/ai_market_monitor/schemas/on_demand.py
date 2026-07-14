@@ -82,3 +82,12 @@ class OnDemandScanResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     evaluated_at: datetime
     usage_record_id: UUID | None = None
+    screened_assets_considered: int = 0
+    assets_excluded_by_sharia_policy: int = 0
+    assets_with_insufficient_screening_data: int = 0
+    eligible_assets_scanned: int = 0
+    sharia_methodology_id: UUID | None = None
+    sharia_methodology_code: str | None = None
+    sharia_methodology_version: str | None = None
+    sharia_universe_snapshot_id: UUID | None = None
+    sharia_universe_snapshot_hash: str | None = None

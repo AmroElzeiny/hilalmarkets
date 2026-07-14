@@ -19,9 +19,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ai_market_monitor.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, enum_type
 from ai_market_monitor.db.models.enums import (
+    ComplianceChangeBehavior,
     ConditionType,
     LogicalOperator,
     MarketType,
+    ShariaUniverseMode,
     StrategyStatus,
     StrategyVersionStatus,
     TriggerMode,
@@ -174,5 +176,30 @@ class StrategyUniverse(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     min_order_book_depth: Mapped[Decimal | None] = mapped_column(Numeric(30, 8))
     max_symbols: Mapped[int | None] = mapped_column(Integer)
     scan_interval_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    universe_mode: Mapped[ShariaUniverseMode | None] = mapped_column(
+        enum_type(ShariaUniverseMode, name="strategy_sharia_universe_mode")
+    )
+    methodology_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_methodologies.id", ondelete="RESTRICT")
+    )
+    allowed_sharia_statuses: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    qualification_policy: Mapped[str | None] = mapped_column(String(40))
+    disputed_asset_policy: Mapped[str | None] = mapped_column(String(40))
+    compliance_change_behavior: Mapped[ComplianceChangeBehavior | None] = mapped_column(
+        enum_type(ComplianceChangeBehavior, name="strategy_compliance_change_behavior")
+    )
+    approved_watchlist_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("approved_watchlists.id", ondelete="SET NULL")
+    )
+    universe_snapshot_version: Mapped[int | None] = mapped_column(Integer)
+    universe_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
+    universe_last_resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    sharia_policy_ready: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
 
     strategy_version: Mapped[StrategyVersion] = relationship(back_populates="universe")

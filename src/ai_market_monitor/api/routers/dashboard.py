@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
@@ -19,15 +20,22 @@ from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
+    ApprovedWatchlist,
+    ApprovedWatchlistAsset,
+    AssetShariaStatusHistory,
     CapabilityExtension,
+    ComplianceDriftNotification,
     DashboardPreference,
     DiscordConnection,
+    MonitorShariaAssetState,
     NearMissSnapshot,
     ReferralRelationship,
     ScanJob,
     SetupInstance,
+    ShariaMethodology,
     Strategy,
     StrategyTemplate,
+    StrategyUniverse,
     StrategyVersion,
     SupportRequest,
     TelegramConnection,
@@ -36,8 +44,17 @@ from ai_market_monitor.db.models import (
     User,
     UserIdentity,
 )
-from ai_market_monitor.db.models.enums import IdentityProvider, StrategyStatus, UserRole
+from ai_market_monitor.db.models.enums import (
+    ComplianceChangeBehavior,
+    IdentityProvider,
+    MonitorShariaAssetStatus,
+    SetupLifecycleState,
+    ShariaAssetStatus,
+    StrategyStatus,
+    UserRole,
+)
 from ai_market_monitor.engine.quality import alert_trust_score_from_proof
+from ai_market_monitor.services.activity import ActivityReadService
 from ai_market_monitor.services.admin_dashboard import AdminDashboardService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService
@@ -46,10 +63,18 @@ from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
 from ai_market_monitor.services.email_delivery import EmailDeliveryError
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
 from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
+)
+from ai_market_monitor.services.sharia_screening import (
+    DEFAULT_ALLOWED_STATUSES,
+    ShariaScreeningError,
+    ShariaScreeningService,
+    canonical_asset,
+    sharia_evidence_from_proof,
 )
 from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkError,
@@ -239,6 +264,36 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
                     CapabilityExtension.status == "repair_ready",
                 )
             )
+        sharia_universe = None
+        methodology = None
+        eligible_asset_count = 0
+        policy_version_id = strategy.active_version_id
+        if policy_version_id is None:
+            policy_version_id = await session.scalar(
+                select(StrategyVersion.id)
+                .where(StrategyVersion.strategy_id == strategy.id)
+                .order_by(StrategyVersion.version_number.desc())
+                .limit(1)
+            )
+        if policy_version_id:
+            sharia_universe = await session.scalar(
+                select(StrategyUniverse).where(
+                    StrategyUniverse.strategy_version_id == policy_version_id
+                )
+            )
+            if sharia_universe and sharia_universe.methodology_id:
+                methodology = await session.get(
+                    ShariaMethodology, sharia_universe.methodology_id
+                )
+                eligible_asset_count = int(
+                    await session.scalar(
+                        select(func.count(MonitorShariaAssetState.id)).where(
+                            MonitorShariaAssetState.strategy_version_id == policy_version_id,
+                            MonitorShariaAssetState.state == MonitorShariaAssetStatus.ACTIVE,
+                        )
+                    )
+                    or 0
+                )
         monitor_cards.append(
             {
                 "strategy": strategy,
@@ -247,6 +302,9 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
                 "latest_scan": latest_scan,
                 "latency_label": latency_label,
                 "pending_repair": pending_repair,
+                "sharia_universe": sharia_universe,
+                "methodology": methodology,
+                "eligible_asset_count": eligible_asset_count,
             }
         )
     return monitor_cards
@@ -402,6 +460,105 @@ async def _context(
         "dashboard_preference": dashboard_preference,
         "dashboard_theme": dashboard_theme,
         **extra,
+    }
+
+
+async def _builder_screening_context(
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
+) -> dict:
+    preference = await session.scalar(
+        select(DashboardPreference).where(DashboardPreference.user_id == user.id)
+    )
+    values = dict(preference.notification_preferences or {}) if preference else {}
+    stored_policy = values.get("sharia") if isinstance(values.get("sharia"), dict) else {}
+    screening = ShariaScreeningService(session, settings)
+    methodology = None
+    configured_id = stored_policy.get("default_methodology_id") or values.get(
+        "default_sharia_methodology_id"
+    )
+    if configured_id:
+        try:
+            methodology = await screening.methodology(
+                UUID(str(configured_id)),
+                require_active=True,
+            )
+        except (ValueError, ShariaScreeningError):
+            methodology = None
+    if methodology is None:
+        candidate = await screening.default_methodology()
+        if candidate is not None:
+            try:
+                methodology = await screening.methodology(
+                    candidate.id,
+                    require_active=True,
+                )
+            except ShariaScreeningError:
+                methodology = None
+    valid_statuses = {item.value for item in ShariaAssetStatus}
+    allowed_statuses = [
+        value
+        for value in stored_policy.get(
+            "allowed_statuses",
+            values.get(
+                "allowed_sharia_statuses",
+                [
+                    ShariaAssetStatus.ELIGIBLE.value,
+                    ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+                ],
+            ),
+        )
+        if value in valid_statuses
+    ]
+    advanced_ack = bool(
+        stored_policy.get(
+            "advanced_override_acknowledged",
+            values.get("advanced_sharia_override_acknowledged", False),
+        )
+    )
+    default_statuses = {
+        ShariaAssetStatus.ELIGIBLE.value,
+        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+    }
+    if not allowed_statuses or (
+        not set(allowed_statuses).issubset(default_statuses) and not advanced_ack
+    ):
+        allowed_statuses = sorted(default_statuses)
+        advanced_ack = False
+    try:
+        behavior = ComplianceChangeBehavior(
+            stored_policy.get(
+                "compliance_change_behavior",
+                values.get(
+                    "compliance_change_behavior",
+                    ComplianceChangeBehavior.PAUSE_ASSET.value,
+                ),
+            )
+        )
+    except ValueError:
+        behavior = ComplianceChangeBehavior.PAUSE_ASSET
+    return {
+        "enforced": settings.sharia_screening_enforced,
+        "configured": methodology is not None,
+        "methodology_name": methodology.name if methodology else None,
+        "methodology_version": methodology.version if methodology else None,
+        "policy": (
+            {
+                "universe_mode": "eligible_market",
+                "methodology_id": str(methodology.id) if methodology else None,
+                "allowed_statuses": allowed_statuses,
+                "qualification_policy": "include_with_warning",
+                "disputed_asset_policy": "exclude",
+                "compliance_change_behavior": behavior.value,
+                "approved_watchlist_id": None,
+                "universe_snapshot_version": None,
+                "universe_last_resolved_at": None,
+                "advanced_override_acknowledged": advanced_ack,
+            }
+            if settings.sharia_screening_enforced
+            else None
+        ),
     }
 
 
@@ -974,6 +1131,43 @@ async def dashboard_home(
     coverage = await market_coverage_for_user(session, user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
     entitlement = await EntitlementService(session).current(user.id)
+    screening = ShariaScreeningService(session, settings)
+    screened_home = await screening.list_screened_assets(
+        methodology_id=None,
+        statuses=DEFAULT_ALLOWED_STATUSES,
+        page=1,
+        limit=1,
+    )
+    forming_screened = int(
+        await session.scalar(
+            select(func.count(SetupInstance.id)).where(
+                SetupInstance.user_id == user.id,
+                SetupInstance.state.not_in(
+                    ["expired", "invalidated", "completed", "closed", "manually_closed"]
+                ),
+                SetupInstance.sharia_status_at_detection.in_(
+                    [
+                        ShariaAssetStatus.ELIGIBLE.value,
+                        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+                    ]
+                ),
+            )
+        )
+        or 0
+    )
+    compliance_attention = int(
+        await session.scalar(
+            select(func.count(ComplianceDriftNotification.id)).where(
+                ComplianceDriftNotification.user_id == user.id,
+                ComplianceDriftNotification.created_at
+                >= datetime.now(UTC) - timedelta(days=30),
+                ComplianceDriftNotification.new_status.in_(
+                    [ShariaAssetStatus.UNDER_REVIEW, ShariaAssetStatus.EXCLUDED]
+                ),
+            )
+        )
+        or 0
+    )
     overview = {
         "alerts_today": alerts_today,
         "active_lifecycle_count": active_lifecycle_count,
@@ -982,6 +1176,10 @@ async def dashboard_home(
         "coverage": coverage,
         "telegram_connected": telegram is not None,
         "discord_connected": discord is not None,
+        "eligible_market_count": screened_home.total,
+        "screening_methodology": screened_home.methodology,
+        "forming_screened_count": forming_screened,
+        "compliance_attention_count": compliance_attention,
     }
     return templates.TemplateResponse(
         request,
@@ -998,6 +1196,369 @@ async def dashboard_home(
             entitlement=entitlement,
             overview=overview,
             analytics=await _analytics_context(session, user),
+        ),
+    )
+
+
+@router.get("/dashboard/market", response_class=HTMLResponse, include_in_schema=False)
+async def screened_market_page(
+    request: Request,
+    methodology_id: UUID | None = Query(default=None),
+    status_filter: list[ShariaAssetStatus] | None = Query(default=None, alias="status"),
+    exchange: str | None = Query(default=None, max_length=40),
+    quote_asset: str = Query(default="USDT", max_length=12),
+    liquidity: float | None = Query(default=None, ge=0),
+    search: str | None = Query(default=None, max_length=120),
+    view: str = Query(default="opportunities", pattern="^(opportunities|assets)$"),
+    page_number: int = Query(default=1, ge=1, alias="page"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> HTMLResponse:
+    screening = ShariaScreeningService(session, settings)
+    methodologies = await screening.executable_methodologies()
+    preference = await session.scalar(
+        select(DashboardPreference).where(DashboardPreference.user_id == user.id)
+    )
+    preference_values = dict(preference.notification_preferences or {}) if preference else {}
+    stored_policy = (
+        preference_values.get("sharia")
+        if isinstance(preference_values.get("sharia"), dict)
+        else {}
+    )
+    preference_methodology = stored_policy.get(
+        "default_methodology_id"
+    ) or preference_values.get("default_sharia_methodology_id")
+    if methodology_id is None and preference_methodology:
+        try:
+            methodology_id = UUID(str(preference_methodology))
+        except ValueError:
+            methodology_id = None
+    asset_scope: set[str] | None = None
+    market_data_warning: str | None = None
+    if exchange:
+        try:
+            symbols = await provider.list_symbols(exchange, [quote_asset.upper()])
+            if liquidity is not None:
+                metadata_loader = getattr(provider, "fetch_universe_metadata", None)
+                if not callable(metadata_loader):
+                    market_data_warning = (
+                        "The configured provider cannot verify the selected liquidity filter."
+                    )
+                    symbols = []
+                else:
+                    metadata = await metadata_loader(exchange, symbols)
+                    symbols = [
+                        symbol
+                        for symbol in symbols
+                        if (
+                            metadata.get(symbol.upper(), {}).get("quote_volume_24h") or 0
+                        )
+                        >= liquidity
+                    ]
+            asset_scope = {canonical_asset(symbol) for symbol in symbols}
+        except Exception:
+            asset_scope = set()
+            market_data_warning = (
+                "Exchange market data is currently unavailable. No asset was guessed or "
+                "silently included."
+            )
+    if view == "opportunities":
+        opportunity_assets = {
+            canonical_asset(symbol)
+            for symbol in (
+                await session.scalars(
+                    select(SetupInstance.symbol)
+                    .where(
+                        SetupInstance.user_id == user.id,
+                        SetupInstance.state.in_(
+                            {
+                                SetupLifecycleState.CANDIDATE_DETECTED,
+                                SetupLifecycleState.DETECTED,
+                                SetupLifecycleState.FORMING,
+                                SetupLifecycleState.NEAR_CONFIRMATION,
+                                SetupLifecycleState.ARMED,
+                                SetupLifecycleState.CONFIRMED,
+                                SetupLifecycleState.ALERT_SENT,
+                            }
+                        ),
+                    )
+                    .distinct()
+                )
+            ).all()
+        }
+        asset_scope = (
+            opportunity_assets
+            if asset_scope is None
+            else asset_scope & opportunity_assets
+        )
+    screened = await screening.list_screened_assets(
+        methodology_id=methodology_id,
+        statuses=set(status_filter) if status_filter else DEFAULT_ALLOWED_STATUSES,
+        search=search,
+        asset_scope=asset_scope,
+        page=page_number,
+        limit=30,
+    )
+    visible_assets = {item.canonical_asset for item in screened.items}
+    latest_by_asset: dict[str, tuple[SetupInstance, UUID, str]] = {}
+    if visible_assets:
+        setup_rows = (
+            await session.execute(
+                select(SetupInstance, Strategy.id, Strategy.name)
+                .join(StrategyVersion, StrategyVersion.id == SetupInstance.strategy_version_id)
+                .join(Strategy, Strategy.id == StrategyVersion.strategy_id)
+                .where(SetupInstance.user_id == user.id)
+                .order_by(SetupInstance.last_evaluated_at.desc())
+                .limit(1000)
+            )
+        ).all()
+        for setup, strategy_id, strategy_name in setup_rows:
+            asset = canonical_asset(setup.symbol)
+            if asset in visible_assets:
+                latest_by_asset.setdefault(asset, (setup, strategy_id, strategy_name))
+    opportunity_cards = []
+    for assessment in screened.items:
+        latest = latest_by_asset.get(assessment.canonical_asset)
+        setup, strategy_id, strategy_name = latest if latest else (None, None, None)
+        readiness = round(float(setup.completion_score)) if setup else 0
+        opportunity_cards.append(
+            {
+                "assessment": assessment,
+                "setup": setup,
+                "strategy_id": strategy_id,
+                "strategy_name": strategy_name,
+                "readiness": max(0, min(100, readiness)),
+                "direction": (
+                    "Getting closer"
+                    if readiness >= 70
+                    else "Stable"
+                    if readiness > 0
+                    else "Not started"
+                ),
+                "summary": "Custom Watch Plan" if setup else "Screened asset",
+                "still_missing": (
+                    setup.close_reason
+                    if setup and setup.close_reason
+                    else "Open the journey to inspect the next required market check."
+                    if setup
+                    else "Create a Watch Plan to define what market change matters to you."
+                ),
+            }
+        )
+    if view == "opportunities":
+        opportunity_cards = [card for card in opportunity_cards if card["setup"] is not None]
+    active_watch_plans = int(
+        await session.scalar(
+            select(func.count(Strategy.id)).where(
+                Strategy.user_id == user.id,
+                Strategy.status == StrategyStatus.ACTIVE,
+                Strategy.archived_at.is_(None),
+            )
+        )
+        or 0
+    )
+    selected_methodology_id = screened.methodology.id if screened.methodology else methodology_id
+    status_changes = 0
+    if selected_methodology_id:
+        status_changes = int(
+            await session.scalar(
+                select(func.count(AssetShariaStatusHistory.id)).where(
+                    AssetShariaStatusHistory.methodology_id == selected_methodology_id,
+                    AssetShariaStatusHistory.changed_at >= datetime.now(UTC) - timedelta(days=7),
+                )
+            )
+            or 0
+        )
+    watchlists = list(
+        (
+            await session.scalars(
+                select(ApprovedWatchlist)
+                .where(ApprovedWatchlist.user_id == user.id)
+                .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name.asc())
+            )
+        ).all()
+    )
+    market_query: list[tuple[str, str]] = [("view", view), ("quote_asset", quote_asset)]
+    if methodology_id:
+        market_query.append(("methodology_id", str(methodology_id)))
+    for selected_status in status_filter or []:
+        market_query.append(("status", selected_status.value))
+    if exchange:
+        market_query.append(("exchange", exchange))
+    if liquidity is not None:
+        market_query.append(("liquidity", str(liquidity)))
+    if search:
+        market_query.append(("search", search))
+    maximum_page = max(1, (screened.total + screened.limit - 1) // screened.limit)
+
+    def market_page_url(target_page: int) -> str:
+        return "/dashboard/market?" + urlencode(
+            [*market_query, ("page", str(target_page))]
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="screened_market",
+            title="Screened Market",
+            screened=screened,
+            methodologies=methodologies,
+            opportunity_cards=opportunity_cards,
+            active_watch_plans=active_watch_plans,
+            status_changes=status_changes,
+            selected_statuses={
+                item.value for item in (status_filter or list(DEFAULT_ALLOWED_STATUSES))
+            },
+            selected_exchange=exchange or "",
+            selected_quote_asset=quote_asset,
+            selected_liquidity=liquidity,
+            selected_view=view,
+            market_search=search or "",
+            market_data_warning=market_data_warning,
+            watchlists=watchlists,
+            market_previous_url=(
+                market_page_url(screened.page - 1) if screened.page > 1 else None
+            ),
+            market_next_url=(
+                market_page_url(screened.page + 1)
+                if screened.page < maximum_page
+                else None
+            ),
+            market_maximum_page=maximum_page,
+        ),
+    )
+
+
+@router.get(
+    "/dashboard/market/{asset_slug}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def screened_asset_passport_page(
+    request: Request,
+    asset_slug: str,
+    methodology_id: UUID | None = Query(default=None),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    screening = ShariaScreeningService(session, settings)
+    try:
+        passport = await screening.passport(asset_slug, methodology_id=methodology_id)
+    except ShariaScreeningError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    comparison = await screening.methodology_comparison(asset_slug)
+    watchlists = list(
+        (
+            await session.scalars(
+                select(ApprovedWatchlist)
+                .where(ApprovedWatchlist.user_id == user.id)
+                .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name.asc())
+            )
+        ).all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="asset_passport",
+            title=f"{passport.assessment.canonical_asset} Evidence Passport",
+            passport=passport,
+            methodology_comparison=comparison,
+            watchlists=watchlists,
+        ),
+    )
+
+
+@router.post("/dashboard/market/{asset_slug}/watchlist", include_in_schema=False)
+async def add_screened_asset_to_watchlist(
+    asset_slug: str,
+    watchlist_id: UUID | None = Form(default=None),
+    methodology_id: UUID | None = Form(default=None),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    screening = ShariaScreeningService(session, settings)
+    try:
+        methodology = await screening.resolve_methodology(methodology_id)
+    except ShariaScreeningError:
+        return _redirect(f"/dashboard/market/{asset_slug}?error=approved_methodology_required")
+    assessment = await screening.effective_assessment(methodology.id, asset_slug)
+    if assessment is None or assessment.status not in DEFAULT_ALLOWED_STATUSES:
+        return _redirect(f"/dashboard/market/{asset_slug}?error=asset_not_eligible")
+    watchlist = await session.get(ApprovedWatchlist, watchlist_id) if watchlist_id else None
+    if watchlist is not None and watchlist.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Approved watchlist not found")
+    if watchlist is None:
+        watchlist = await session.scalar(
+            select(ApprovedWatchlist)
+            .where(
+                ApprovedWatchlist.user_id == user.id,
+                ApprovedWatchlist.is_default.is_(True),
+            )
+            .limit(1)
+        )
+    if watchlist is None:
+        watchlist = ApprovedWatchlist(
+            user_id=user.id,
+            name="My approved watchlist",
+            is_default=True,
+        )
+        session.add(watchlist)
+        await session.flush()
+    asset = canonical_asset(asset_slug)
+    existing = await session.scalar(
+        select(ApprovedWatchlistAsset.id).where(
+            ApprovedWatchlistAsset.watchlist_id == watchlist.id,
+            ApprovedWatchlistAsset.canonical_asset == asset,
+        )
+    )
+    if existing is None:
+        session.add(
+            ApprovedWatchlistAsset(
+                watchlist_id=watchlist.id,
+                canonical_asset=asset,
+                added_at=datetime.now(UTC),
+            )
+        )
+    await session.commit()
+    return _redirect(f"/dashboard/market/{asset}?message=added_to_approved_watchlist")
+
+
+@router.get("/dashboard/methodology", response_class=HTMLResponse, include_in_schema=False)
+async def methodology_page(
+    request: Request,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    service = ShariaScreeningService(session, settings)
+    rows = await service.executable_methodologies()
+    selected = await service.default_methodology()
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="methodology",
+            title="Methodology",
+            methodologies=[service.methodology_detail(row) for row in rows],
+            selected_methodology=service.methodology_detail(selected) if selected else None,
         ),
     )
 
@@ -1042,6 +1603,9 @@ async def new_strategy_builder_page(
             templates=templates_list,
             builtin_templates=builtin_template_payloads(),
             monitor_cards=await _monitor_cards_context(session, user),
+            builder_screening=await _builder_screening_context(
+                session, user, settings
+            ),
         ),
     )
 
@@ -1099,6 +1663,9 @@ async def strategy_detail_page(
             monitor_health=monitor_health,
             monitor_bottlenecks=monitor_bottlenecks,
             monitor_decay=monitor_decay,
+            builder_screening=await _builder_screening_context(
+                session, user, settings
+            ),
         ),
     )
 
@@ -1190,6 +1757,9 @@ async def strategy_builder_edit_page(
             templates=templates_list,
             builtin_templates=builtin_template_payloads(),
             monitor_cards=await _monitor_cards_context(session, user),
+            builder_screening=await _builder_screening_context(
+                session, user, settings
+            ),
         ),
     )
 
@@ -1361,6 +1931,7 @@ async def setups_page(
     raise HTTPException(status_code=404, detail="Latest Setups was removed. Use Lifecycles.")
 
 
+@router.get("/dashboard/activity", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/dashboard/lifecycles", response_class=HTMLResponse, include_in_schema=False)
 async def lifecycles_page(
     request: Request,
@@ -1368,6 +1939,21 @@ async def lifecycles_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
+    allowed_tabs = {
+        "all",
+        "forming",
+        "alerts",
+        "ended",
+        "compliance_changes",
+        "investigations",
+    }
+    activity_tab = request.query_params.get("tab", "forming")
+    if activity_tab not in allowed_tabs:
+        activity_tab = "forming"
+    try:
+        activity_page = max(1, int(request.query_params.get("page", "1") or 1))
+    except ValueError:
+        activity_page = 1
     selected_monitor_id: UUID | None = None
     raw_monitor_id = request.query_params.get("monitor")
     if raw_monitor_id:
@@ -1399,6 +1985,14 @@ async def lifecycles_page(
         if preference is not None
         else set()
     )
+    activity = await ActivityReadService(session, settings).list_items(
+        user.id,
+        tab=activity_tab,
+        monitor_id=selected_monitor_id,
+        symbol=request.query_params.get("symbol") or None,
+        page=activity_page,
+        limit=30,
+    )
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -1407,8 +2001,8 @@ async def lifecycles_page(
             session=session,
             settings=settings,
             user=user,
-            page="lifecycles",
-            title="Lifecycles",
+            page="activity",
+            title="Evidence and Activity",
             lifecycle_monitors=list(
                 (
                     await session.execute(
@@ -1423,6 +2017,8 @@ async def lifecycles_page(
             ),
             selected_monitor_id=selected_monitor_id,
             observability_poll_seconds=settings.observability_live_poll_seconds,
+            activity=activity,
+            activity_tab=activity_tab,
             lifecycle_cards=await lifecycle_cards(
                 session,
                 user.id,
@@ -1494,6 +2090,13 @@ async def alert_proof_page(
             )
         ).all()
     )
+    sharia_proof = sharia_evidence_from_proof(alert.proof_receipt or {})
+    raw_sharia_asset = sharia_proof.get("asset")
+    sharia_asset = raw_sharia_asset if isinstance(raw_sharia_asset, dict) else {}
+    proof_symbol = (alert.proof_receipt or {}).get("symbol")
+    sharia_passport_asset = sharia_asset.get("canonical_asset") or (
+        canonical_asset(str(proof_symbol)) if proof_symbol else None
+    )
     await session.commit()
     return _no_store(
         templates.TemplateResponse(
@@ -1516,6 +2119,9 @@ async def alert_proof_page(
                     version and current_version and version.id != current_version.id
                 ),
                 deliveries=deliveries,
+                sharia_proof=sharia_proof,
+                sharia_asset=sharia_asset,
+                sharia_passport_asset=sharia_passport_asset,
             ),
         )
     )
@@ -1838,6 +2444,8 @@ async def settings_page(
     preference = await session.scalar(
         select(DashboardPreference).where(DashboardPreference.user_id == user.id)
     )
+    screening = ShariaScreeningService(session, settings)
+    sharia_preferences = dict((preference.notification_preferences or {}) if preference else {})
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -1853,6 +2461,8 @@ async def settings_page(
             supported_themes=SUPPORTED_THEMES,
             alert_days=ALERT_DAYS,
             alert_hours=ALERT_HOURS,
+            sharia_methodologies=await screening.executable_methodologies(),
+            sharia_preferences=sharia_preferences,
         ),
     )
 
@@ -1868,8 +2478,25 @@ async def settings_submit(
     providers: list[str] = Form(default=["binance", "bybit"]),
     alert_days: list[str] = Form(default=["Every Day"]),
     alert_hours: list[str] = Form(default=ALERT_HOURS),
+    default_sharia_methodology_id: str = Form(default=""),
+    allowed_sharia_statuses: list[str] = Form(
+        default=[
+            ShariaAssetStatus.ELIGIBLE.value,
+            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+        ]
+    ),
+    compliance_change_behavior: str = Form(
+        default=ComplianceChangeBehavior.PAUSE_ASSET.value
+    ),
+    compliance_alert_channels: list[str] = Form(default=["web"]),
+    compliance_alert_digest: str = Form(default="immediate"),
+    qualification_change_alerts: str = Form(default="true"),
+    under_review_alerts: str = Form(default="true"),
+    exclusion_alerts: str = Form(default="true"),
+    advanced_sharia_override_acknowledged: str = Form(default="false"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     if timezone not in SUPPORTED_TIMEZONES:
         return _redirect("/dashboard/settings?error=unsupported_timezone")
@@ -1887,6 +2514,41 @@ async def settings_submit(
     if "Every Day" in days:
         days = ["Every Day"]
     hours = [hour for hour in alert_hours if hour in ALERT_HOURS]
+    screening = ShariaScreeningService(session, settings)
+    selected_methodology_id: UUID | None = None
+    if default_sharia_methodology_id:
+        try:
+            selected_methodology_id = UUID(default_sharia_methodology_id)
+            await screening.methodology(selected_methodology_id, require_active=True)
+        except (ValueError, ShariaScreeningError):
+            return _redirect("/dashboard/settings?error=invalid_sharia_methodology")
+    valid_statuses = {item.value for item in ShariaAssetStatus}
+    selected_statuses = list(
+        dict.fromkeys(item for item in allowed_sharia_statuses if item in valid_statuses)
+    )
+    if not selected_statuses:
+        selected_statuses = [
+            ShariaAssetStatus.ELIGIBLE.value,
+            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+        ]
+    default_statuses = {
+        ShariaAssetStatus.ELIGIBLE.value,
+        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+    }
+    advanced_ack = advanced_sharia_override_acknowledged == "true"
+    if not set(selected_statuses).issubset(default_statuses) and not advanced_ack:
+        return _redirect("/dashboard/settings?error=screening_override_ack_required")
+    try:
+        change_behavior = ComplianceChangeBehavior(compliance_change_behavior)
+    except ValueError:
+        change_behavior = ComplianceChangeBehavior.PAUSE_ASSET
+    selected_compliance_channels = [
+        channel
+        for channel in dict.fromkeys(compliance_alert_channels)
+        if channel in {"web", "telegram", "discord"}
+    ]
+    if "web" not in selected_compliance_channels:
+        selected_compliance_channels.insert(0, "web")
     user.timezone = timezone
     preference = await session.scalar(
         select(DashboardPreference).where(DashboardPreference.user_id == user.id)
@@ -1913,6 +2575,31 @@ async def settings_submit(
             "providers": selected_providers,
             "alert_days": days,
             "alert_hours": hours,
+            "default_sharia_methodology_id": (
+                str(selected_methodology_id) if selected_methodology_id else None
+            ),
+            "allowed_sharia_statuses": selected_statuses,
+            "compliance_change_behavior": change_behavior.value,
+            "compliance_alerts_enabled": True,
+            "compliance_alert_channels": selected_compliance_channels,
+            "compliance_alert_digest": (
+                compliance_alert_digest
+                if compliance_alert_digest in {"immediate", "daily"}
+                else "immediate"
+            ),
+            "qualification_change_alerts": qualification_change_alerts == "true",
+            # Active Watch Plans must retain at least in-app notices for these events.
+            "under_review_alerts": True,
+            "exclusion_alerts": True,
+            "advanced_sharia_override_acknowledged": advanced_ack,
+            "sharia": {
+                "default_methodology_id": (
+                    str(selected_methodology_id) if selected_methodology_id else None
+                ),
+                "allowed_statuses": selected_statuses,
+                "compliance_change_behavior": change_behavior.value,
+                "advanced_override_acknowledged": advanced_ack,
+            },
         }
     )
     preference.notification_preferences = prefs

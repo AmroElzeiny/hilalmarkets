@@ -1,0 +1,593 @@
+from datetime import UTC, datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_market_monitor.api.dependencies import UserPrincipal, get_market_data_provider
+from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
+from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.database import get_db_session
+from ai_market_monitor.db.models import (
+    ApprovedWatchlist,
+    ApprovedWatchlistAsset,
+    AssetShariaStatusHistory,
+    DashboardPreference,
+    SetupInstance,
+)
+from ai_market_monitor.db.models.enums import (
+    SetupLifecycleState,
+    ShariaAssetStatus,
+    UserRole,
+)
+from ai_market_monitor.schemas.sharia import (
+    AssessmentCreateRequest,
+    AssetAssessmentSummary,
+    AssetPassportResponse,
+    ComplianceChangeIngestRequest,
+    ComplianceReviewRequest,
+    MethodologyComparisonResponse,
+    MethodologyCreateRequest,
+    MethodologyDetail,
+    MethodologySummary,
+    ScreenedAssetListResponse,
+    ShariaPreferenceUpdateRequest,
+    StatusHistoryResponse,
+    WatchlistCreateRequest,
+    WatchlistResponse,
+)
+from ai_market_monitor.services.compliance_watch import (
+    ComplianceWatchError,
+    ComplianceWatchService,
+)
+from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.sharia_screening import (
+    DEFAULT_ALLOWED_STATUSES,
+    ShariaScreeningError,
+    ShariaScreeningService,
+    canonical_asset,
+    canonical_symbol,
+)
+
+router = APIRouter(prefix="/sharia", tags=["sharia-screening"])
+
+_OPPORTUNITY_STATES: dict[str, set[SetupLifecycleState]] = {
+    "forming": {
+        SetupLifecycleState.CANDIDATE_DETECTED,
+        SetupLifecycleState.DETECTED,
+        SetupLifecycleState.FORMING,
+    },
+    "getting_closer": {
+        SetupLifecycleState.NEAR_CONFIRMATION,
+        SetupLifecycleState.ARMED,
+    },
+    "ready_for_review": {
+        SetupLifecycleState.CONFIRMED,
+        SetupLifecycleState.ALERT_SENT,
+    },
+    "ended": {
+        SetupLifecycleState.SUPPRESSED,
+        SetupLifecycleState.INVALIDATED,
+        SetupLifecycleState.EXPIRED,
+        SetupLifecycleState.COMPLETED,
+        SetupLifecycleState.CLOSED,
+    },
+}
+
+
+def _admin(principal: UserPrincipal) -> None:
+    if principal.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Administrator role required.")
+
+
+def _screening_error(exc: ShariaScreeningError | ComplianceWatchError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": exc.code, "message": str(exc)},
+    )
+
+
+@router.get("/assets", response_model=ScreenedAssetListResponse)
+async def screened_assets(
+    methodology: UUID | None = None,
+    statuses: list[ShariaAssetStatus] | None = Query(default=None, alias="status"),
+    exchange: str | None = Query(default=None, min_length=2, max_length=40),
+    quote_asset: str = Query(default="USDT", min_length=2, max_length=12),
+    liquidity: float | None = Query(default=None, ge=0),
+    search: str | None = Query(default=None, max_length=120),
+    opportunity_type: str | None = Query(default=None, max_length=80),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+    settings: Settings = Depends(get_settings),
+) -> ScreenedAssetListResponse:
+    asset_scope: set[str] | None = None
+    if liquidity is not None and exchange is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "exchange_required_for_liquidity_filter",
+                "message": "Choose an exchange before applying a verified liquidity filter.",
+            },
+        )
+    if exchange:
+        try:
+            symbols = await provider.list_symbols(exchange, [quote_asset.upper()])
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "exchange_universe_unavailable",
+                    "message": "The exchange universe is unavailable; no assets were guessed.",
+                },
+            ) from exc
+        if liquidity is not None:
+            metadata_loader = getattr(provider, "fetch_universe_metadata", None)
+            if not callable(metadata_loader):
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "liquidity_filter_unavailable",
+                        "message": "The configured provider cannot verify 24h liquidity.",
+                    },
+                )
+            metadata = await metadata_loader(exchange, symbols)
+            symbols = [
+                symbol
+                for symbol in symbols
+                if (metadata.get(canonical_symbol(symbol), {}).get("quote_volume_24h") or 0)
+                >= liquidity
+            ]
+        asset_scope = {canonical_asset(symbol) for symbol in symbols}
+    if opportunity_type:
+        selected_states = _OPPORTUNITY_STATES.get(opportunity_type)
+        if selected_states is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "unsupported_opportunity_type",
+                    "message": (
+                        "Use forming, getting_closer, ready_for_review, or ended."
+                    ),
+                },
+            )
+        opportunity_assets = {
+            canonical_asset(symbol)
+            for symbol in (
+                await session.scalars(
+                    select(SetupInstance.symbol)
+                    .where(
+                        SetupInstance.user_id == principal.user_id,
+                        SetupInstance.state.in_(selected_states),
+                    )
+                    .distinct()
+                )
+            ).all()
+        }
+        asset_scope = (
+            opportunity_assets
+            if asset_scope is None
+            else asset_scope & opportunity_assets
+        )
+    service = ShariaScreeningService(session, settings)
+    result = await service.list_screened_assets(
+        methodology_id=methodology,
+        statuses=set(statuses) if statuses else DEFAULT_ALLOWED_STATUSES,
+        search=search,
+        asset_scope=asset_scope,
+        page=page,
+        limit=limit,
+    )
+    return result
+
+
+@router.get("/assets/{asset_id}", response_model=AssetAssessmentSummary)
+async def screened_asset(
+    asset_id: str,
+    methodology: UUID | None = None,
+    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> AssetAssessmentSummary:
+    service = ShariaScreeningService(session, settings)
+    try:
+        selected = await service.resolve_methodology(methodology)
+        assessment = await service.effective_assessment(selected.id, asset_id)
+        if assessment is None:
+            raise ShariaScreeningError(
+                "assessment_not_found", "No current assessment exists for this asset."
+            )
+        return service.assessment_summary(assessment, selected)
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+
+
+@router.get("/assets/{asset_id}/passport", response_model=AssetPassportResponse)
+async def asset_passport(
+    asset_id: str,
+    methodology: UUID | None = None,
+    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> AssetPassportResponse:
+    try:
+        return await ShariaScreeningService(session, settings).passport(
+            asset_id,
+            methodology_id=methodology,
+        )
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+
+
+@router.get("/assets/{asset_id}/history", response_model=list[StatusHistoryResponse])
+async def asset_status_history(
+    asset_id: str,
+    methodology: UUID | None = None,
+    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> list[StatusHistoryResponse]:
+    service = ShariaScreeningService(session, settings)
+    try:
+        selected = await service.resolve_methodology(methodology)
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+    rows = list(
+        (
+            await session.scalars(
+                select(AssetShariaStatusHistory)
+                .where(
+                    AssetShariaStatusHistory.canonical_asset == canonical_asset(asset_id),
+                    AssetShariaStatusHistory.methodology_id == selected.id,
+                )
+                .order_by(AssetShariaStatusHistory.changed_at.desc())
+            )
+        ).all()
+    )
+    return [service.history_response(row) for row in rows]
+
+
+@router.get(
+    "/assets/{asset_id}/methodology-comparison",
+    response_model=MethodologyComparisonResponse,
+)
+async def asset_methodology_comparison(
+    asset_id: str,
+    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> MethodologyComparisonResponse:
+    return await ShariaScreeningService(session, settings).methodology_comparison(asset_id)
+
+
+@router.get("/methodologies", response_model=list[MethodologySummary])
+async def methodologies(
+    include_non_active: bool = False,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> list[MethodologySummary]:
+    if include_non_active:
+        _admin(principal)
+    service = ShariaScreeningService(session, settings)
+    rows = (
+        await service.methodologies(include_non_active=True)
+        if include_non_active
+        else await service.executable_methodologies()
+    )
+    return [service.methodology_summary(row) for row in rows]
+
+
+@router.get("/methodologies/{methodology_id}", response_model=MethodologyDetail)
+async def methodology_detail(
+    methodology_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> MethodologyDetail:
+    service = ShariaScreeningService(session, settings)
+    try:
+        row = await service.methodology(
+            methodology_id,
+            require_active=principal.role != UserRole.ADMIN,
+        )
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+    return service.methodology_detail(row)
+
+
+@router.get("/watchlists", response_model=list[WatchlistResponse])
+async def watchlists(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[WatchlistResponse]:
+    rows = list(
+        (
+            await session.scalars(
+                select(ApprovedWatchlist)
+                .where(ApprovedWatchlist.user_id == principal.user_id)
+                .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name.asc())
+            )
+        ).all()
+    )
+    assets = list(
+        (
+            await session.execute(
+                select(ApprovedWatchlistAsset.watchlist_id, ApprovedWatchlistAsset.canonical_asset)
+                .join(
+                    ApprovedWatchlist,
+                    ApprovedWatchlist.id == ApprovedWatchlistAsset.watchlist_id,
+                )
+                .where(ApprovedWatchlist.user_id == principal.user_id)
+            )
+        ).all()
+    )
+    by_watchlist: dict[UUID, list[str]] = {}
+    for watchlist_id, asset in assets:
+        by_watchlist.setdefault(watchlist_id, []).append(asset)
+    return [
+        WatchlistResponse(
+            id=row.id,
+            name=row.name,
+            is_default=row.is_default,
+            assets=sorted(by_watchlist.get(row.id, [])),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/watchlists", response_model=WatchlistResponse, status_code=201)
+async def create_watchlist(
+    payload: WatchlistCreateRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> WatchlistResponse:
+    if await session.scalar(
+        select(ApprovedWatchlist.id).where(
+            ApprovedWatchlist.user_id == principal.user_id,
+            ApprovedWatchlist.name == payload.name,
+        )
+    ):
+        raise HTTPException(status_code=409, detail="A watchlist with this name already exists.")
+    service = ShariaScreeningService(session, settings)
+    try:
+        methodology = await service.resolve_methodology(None)
+    except ShariaScreeningError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="An approved active methodology is required before creating a watchlist.",
+        ) from exc
+    assessments = await service.effective_assessments(
+        methodology.id,
+        assets=set(payload.assets),
+    )
+    rejected = [
+        asset
+        for asset in payload.assets
+        if assessments.get(canonical_asset(asset)) is None
+        or assessments[canonical_asset(asset)].status not in DEFAULT_ALLOWED_STATUSES
+    ]
+    if rejected:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "watchlist_assets_not_eligible",
+                "message": "Every new watchlist asset must meet the default screening policy.",
+                "assets": rejected,
+            },
+        )
+    if payload.is_default:
+        existing_defaults = list(
+            (
+                await session.scalars(
+                    select(ApprovedWatchlist).where(
+                        ApprovedWatchlist.user_id == principal.user_id,
+                        ApprovedWatchlist.is_default.is_(True),
+                    )
+                )
+            ).all()
+        )
+        for row in existing_defaults:
+            row.is_default = False
+    row = ApprovedWatchlist(
+        user_id=principal.user_id,
+        name=payload.name,
+        is_default=payload.is_default,
+    )
+    session.add(row)
+    await session.flush()
+    now = datetime.now(UTC)
+    for asset in payload.assets:
+        session.add(
+            ApprovedWatchlistAsset(
+                watchlist_id=row.id,
+                canonical_asset=canonical_asset(asset),
+                added_at=now,
+            )
+        )
+    await session.commit()
+    return WatchlistResponse(
+        id=row.id,
+        name=row.name,
+        is_default=row.is_default,
+        assets=payload.assets,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.delete("/watchlists/{watchlist_id}/assets/{asset_id}", status_code=204)
+async def remove_watchlist_asset(
+    watchlist_id: UUID,
+    asset_id: str,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    watchlist = await session.get(ApprovedWatchlist, watchlist_id)
+    if watchlist is None or watchlist.user_id != principal.user_id:
+        raise HTTPException(status_code=404, detail="Watchlist not found.")
+    await session.execute(
+        delete(ApprovedWatchlistAsset).where(
+            ApprovedWatchlistAsset.watchlist_id == watchlist.id,
+            ApprovedWatchlistAsset.canonical_asset == canonical_asset(asset_id),
+        )
+    )
+    await session.commit()
+
+
+@router.put("/preferences")
+async def update_sharia_preferences(
+    payload: ShariaPreferenceUpdateRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    if payload.default_methodology_id is not None:
+        try:
+            await ShariaScreeningService(session, settings).methodology(
+                payload.default_methodology_id,
+                require_active=True,
+            )
+        except ShariaScreeningError as exc:
+            raise _screening_error(exc) from exc
+    preference = await session.scalar(
+        select(DashboardPreference).where(DashboardPreference.user_id == principal.user_id)
+    )
+    if preference is None:
+        preference = DashboardPreference(user_id=principal.user_id)
+        session.add(preference)
+    values = dict(preference.notification_preferences or {})
+    values["sharia"] = {
+        "default_methodology_id": str(payload.default_methodology_id)
+        if payload.default_methodology_id
+        else None,
+        "allowed_statuses": [item.value for item in payload.allowed_statuses],
+        "compliance_change_behavior": payload.compliance_change_behavior.value,
+        "advanced_override_acknowledged": payload.advanced_override_acknowledged,
+    }
+    values.update(
+        {
+            "default_sharia_methodology_id": (
+                str(payload.default_methodology_id)
+                if payload.default_methodology_id
+                else None
+            ),
+            "allowed_sharia_statuses": [item.value for item in payload.allowed_statuses],
+            "compliance_change_behavior": payload.compliance_change_behavior.value,
+            "advanced_sharia_override_acknowledged": (
+                payload.advanced_override_acknowledged
+            ),
+            "compliance_alerts_enabled": payload.compliance_alerts_enabled,
+            "compliance_alert_channels": payload.compliance_alert_channels,
+            "compliance_alert_digest": payload.compliance_alert_digest,
+            "qualification_change_alerts": payload.qualification_change_alerts,
+            "under_review_alerts": payload.under_review_alerts,
+            "exclusion_alerts": payload.exclusion_alerts,
+        }
+    )
+    preference.notification_preferences = values
+    await session.commit()
+    return {"status": "saved", "preferences": values["sharia"]}
+
+
+@router.post("/admin/methodologies", response_model=MethodologyDetail, status_code=201)
+async def create_methodology(
+    payload: MethodologyCreateRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> MethodologyDetail:
+    _admin(principal)
+    service = ShariaScreeningService(session, settings)
+    try:
+        row = await service.create_methodology(
+            payload,
+            actor_user_id=principal.user_id,
+            actor_identity="dashboard-admin",
+        )
+        await session.commit()
+    except ShariaScreeningError as exc:
+        await session.rollback()
+        raise _screening_error(exc) from exc
+    return service.methodology_detail(row)
+
+
+@router.post("/admin/assessments", response_model=AssetAssessmentSummary, status_code=201)
+async def create_assessment(
+    payload: AssessmentCreateRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> AssetAssessmentSummary:
+    _admin(principal)
+    service = ShariaScreeningService(session, settings)
+    try:
+        current = await service.effective_assessment(
+            payload.methodology_id,
+            payload.canonical_asset,
+            as_of=payload.valid_from,
+        )
+        if current is not None:
+            raise ShariaScreeningError(
+                "compliance_review_required",
+                "An existing assessment may only be superseded through Compliance Watch "
+                "so monitor impact, history, cache invalidation, and drift alerts are audited.",
+            )
+        row = await service.create_assessment(payload, actor_user_id=principal.user_id)
+        methodology = await service.methodology(row.methodology_id)
+        await session.commit()
+    except ShariaScreeningError as exc:
+        await session.rollback()
+        raise _screening_error(exc) from exc
+    return service.assessment_summary(row, methodology)
+
+
+@router.post("/admin/compliance-changes", status_code=201)
+async def ingest_compliance_change(
+    payload: ComplianceChangeIngestRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    _admin(principal)
+    row, created = await ComplianceWatchService(session, settings).ingest_change(
+        payload,
+        actor_user_id=principal.user_id,
+    )
+    await session.commit()
+    return {"id": str(row.id), "status": row.status.value, "created": created}
+
+
+@router.post("/admin/compliance-changes/{change_id}/review")
+async def review_compliance_change(
+    change_id: UUID,
+    payload: ComplianceReviewRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    _admin(principal)
+    try:
+        review, assessment_id, affected = await ComplianceWatchService(
+            session, settings
+        ).review_change(
+            change_id,
+            payload,
+            reviewer_user_id=principal.user_id,
+        )
+        await session.commit()
+    except ComplianceWatchError as exc:
+        await session.rollback()
+        raise _screening_error(exc) from exc
+    return {
+        "review_id": str(review.id),
+        "decision": review.decision.value,
+        "assessment_id": str(assessment_id) if assessment_id else None,
+        "affected_watch_plans": affected,
+    }

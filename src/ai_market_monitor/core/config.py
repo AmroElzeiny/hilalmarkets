@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     allow_mock_providers: bool = True
     scanning_enabled: bool = False
+    sharia_screening_enforced: bool = False
+    sharia_allow_legacy_unscreened_local: bool = True
+    sharia_default_methodology_code: str | None = None
+    sharia_universe_cache_ttl_seconds: int = Field(default=300, ge=30, le=86400)
+    sharia_compliance_safety_under_review: bool = True
+    sharia_compliance_digest_local_hour: int = Field(default=8, ge=0, le=23)
     tracedge_market_data_mode: Literal["ccxt", "fixture"] = "ccxt"
     tracedge_fixture_market_data_enabled: bool = False
     market_data_provider: Literal["ccxt", "memory"] = "ccxt"

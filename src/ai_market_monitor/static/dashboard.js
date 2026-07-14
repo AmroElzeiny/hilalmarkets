@@ -281,8 +281,23 @@
     element.textContent = `${message}\n\n${recovery}`;
   }
 
+  function loadBuilderScreeningContext() {
+    const script = document.getElementById("amm-builder-screening-context");
+    return script ? safeJson(script.textContent || "{}", {}) : {};
+  }
+
+  function applyBuilderScreeningPolicy(candidate) {
+    const schema = candidate && typeof candidate === "object" ? candidate : {};
+    const screening = loadBuilderScreeningContext();
+    if (!schema.universe) schema.universe = {};
+    if (!schema.universe.sharia_policy && screening.policy) {
+      schema.universe.sharia_policy = JSON.parse(JSON.stringify(screening.policy));
+    }
+    return schema;
+  }
+
   function defaultSchema() {
-    return {
+    return applyBuilderScreeningPolicy({
       schema_version: "1.0",
       name: "Liquidity Sweep Continuation",
       description: "Research monitor with deterministic trend, volume and price-action conditions.",
@@ -371,14 +386,16 @@
       expiry: { expire_after_candles: 3 },
       forward_test: { enabled: false, estimated_fee_bps: 10, estimated_slippage_bps: 5 },
       position_sizing: { enabled: false, store_account_balance: false },
-    };
+    });
   }
 
   function loadInitialSchema() {
     const script = document.getElementById("amm-builder-schema");
     if (!script) return defaultSchema();
     const parsed = safeJson(script.textContent || "{}", {});
-    return Object.keys(parsed).length ? parsed : defaultSchema();
+    return Object.keys(parsed).length
+      ? applyBuilderScreeningPolicy(parsed)
+      : defaultSchema();
   }
 
   function loadInitialInterpretationMetadata() {
@@ -1083,7 +1100,9 @@
     });
     document.querySelectorAll("[data-template-schema]").forEach((button) => {
       button.addEventListener("click", () => {
-        schema = safeJson(button.dataset.templateSchema || "{}", defaultSchema());
+        schema = applyBuilderScreeningPolicy(
+          safeJson(button.dataset.templateSchema || "{}", defaultSchema()),
+        );
         interpretationMetadata = {
           interpreter: "dashboard-template",
           assumptions: [],
@@ -1124,7 +1143,7 @@
             builder_mode: "legacy_prompt",
           }),
         });
-        translatedSchema = response.strategy;
+        translatedSchema = applyBuilderScreeningPolicy(response.strategy);
         interpretationMetadata = {
           interpreter: response.interpreter || "dashboard-builder-v1",
           assumptions: safeArray(response.assumptions),
@@ -1166,7 +1185,7 @@
     });
     applyInterpretationButton?.addEventListener("click", () => {
       if (!translatedSchema) return;
-      schema = translatedSchema;
+      schema = applyBuilderScreeningPolicy(translatedSchema);
       hydrateBuilderForm(schema);
       rerender(true);
       showToast("Translated mechanics applied. Review every rule before publishing.");
@@ -1302,6 +1321,12 @@
       if (!schema.name || schema.name.trim().length < 3) blocking.push("Give the monitor a clear name.");
       if (!schema.universe?.exchange) blocking.push("Choose an exchange.");
       if (!safeArray(schema.universe?.quote_currencies).length) blocking.push("Choose at least one quote asset.");
+      const screening = loadBuilderScreeningContext();
+      if (screening.enforced && !schema.universe?.sharia_policy?.methodology_id) {
+        blocking.push(
+          "An approved screening methodology is required before this Watch Plan can run.",
+        );
+      }
       if (!safeArray(schema.alerts?.channels).length) blocking.push("Choose at least one alert destination.");
       safeArray(interpretationMetadata.unsupported_conditions).forEach((item) => {
         blocking.push(item.message || String(item));
@@ -1346,10 +1371,23 @@
       const empty = document.getElementById("builder-universe-empty");
       const includes = safeArray(schema.universe?.include_symbols);
       const quotes = safeArray(schema.universe?.quote_currencies);
+      const screening = loadBuilderScreeningContext();
+      const policy = schema.universe?.sharia_policy;
       if (target) {
         target.innerHTML = [
           factMarkup("Exchange", titleize(schema.universe?.exchange || "Not selected")),
           factMarkup("Market", "Spot"),
+          factMarkup(
+            "Screened scope",
+            policy ? titleize(policy.universe_mode || "eligible_market") : "Not configured",
+          ),
+          factMarkup(
+            "Methodology",
+            policy?.methodology_id
+              ? `${screening.methodology_name || "Approved methodology"}${screening.methodology_version ? ` v${screening.methodology_version}` : ""}`
+              : "Approval required",
+            Boolean(policy?.methodology_id),
+          ),
           factMarkup("Quote", quotes.join(", ") || "Not selected"),
           factMarkup("Symbols", includes.length ? `${includes.length} selected` : "All eligible"),
           factMarkup("Exclusions", `${safeArray(schema.universe?.exclude_symbols).length} symbols`),
@@ -2697,7 +2735,7 @@
     }
 
     function applySchema(nextSchema, metadata, message, path = "Template") {
-      schema = nextSchema;
+      schema = applyBuilderScreeningPolicy(nextSchema);
       interpretationMetadata = metadata;
       creationPath = path;
       validationPassed = false;
@@ -2709,8 +2747,8 @@
 
     function applyChatDraft(detail) {
       if (!detail?.strategy?.conditions || !detail.strategy?.universe) return;
-      schema = detail.strategy;
-      translatedSchema = detail.strategy;
+      schema = applyBuilderScreeningPolicy(detail.strategy);
+      translatedSchema = schema;
       interpretationMetadata = {
         ...interpretationMetadata,
         interpreter: "ai-setup-chat",

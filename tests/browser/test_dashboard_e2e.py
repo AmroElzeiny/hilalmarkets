@@ -9,6 +9,7 @@ from conftest import (
     assert_no_raw_traceback,
     seed_alert_proof,
     seed_setup_observability,
+    seed_sharia_screened_market,
     seed_telegram_connection,
     signup,
     unique_email,
@@ -141,6 +142,50 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
     expect(page.locator(".ai-chat-start-card.scanner")).to_be_visible()
     expect(page.locator(".ai-chat-start-card.monitor")).to_be_visible()
     assert page.locator('a[href="/dashboard/scan-now"]').count() == 0
+    assert_no_raw_traceback(page)
+
+
+def test_screened_market_passport_and_mobile_visual_qa(
+    page: Page,
+    base_url: str,
+    browser_app,
+) -> None:
+    email = signup(page, base_url, unique_email("screened-market"))
+    seed_sharia_screened_market(browser_app.database_url, email)
+    visual_dir = Path("reports/visual-qa/sharia-first")
+    visual_dir.mkdir(parents=True, exist_ok=True)
+
+    page.goto(f"{base_url}/dashboard/market?view=opportunities")
+    expect(page.get_by_role("heading", name="Find opportunities inside a screened market."))\
+        .to_be_visible()
+    card = page.locator(".opportunity-card").first
+    expect(card).to_be_visible()
+    expect(card).to_contain_text("SOL/USDT")
+    expect(card).to_contain_text("Eligible")
+    expect(card).to_contain_text("80% ready")
+    expect(card).to_contain_text("SOL Browser Watch Plan")
+    page.screenshot(
+        path=str(visual_dir / "screened-market-desktop.png"),
+        full_page=True,
+    )
+
+    card.get_by_role("link", name="See why").click()
+    expect(page.get_by_text("SHARIA EVIDENCE PASSPORT")).to_be_visible()
+    expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
+    expect(page.get_by_text("TraceEdge AI does not issue religious rulings.")).to_be_visible()
+    page.screenshot(
+        path=str(visual_dir / "sharia-evidence-passport-desktop.png"),
+        full_page=True,
+    )
+
+    page.goto(f"{base_url}/dashboard/market?view=opportunities")
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(card).to_be_visible()
+    assert card.bounding_box()["width"] <= 390
+    page.screenshot(
+        path=str(visual_dir / "screened-market-mobile-390.png"),
+        full_page=True,
+    )
     assert_no_raw_traceback(page)
 
 
@@ -443,7 +488,9 @@ def test_approve_and_publish_executable_monitor(
     row = page.get_by_test_id("monitor-row").first
     expect(row).to_be_visible()
     expect(row.get_by_test_id("monitor-status")).to_contain_text("active")
-    expect(row.get_by_text(re.compile("Pause|Resume", re.I))).to_be_visible()
+    expect(
+        row.get_by_role("button", name=re.compile(r"^(Pause|Resume)$", re.I))
+    ).to_be_visible()
     assert_no_raw_traceback(page)
 
 
@@ -531,7 +578,11 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     page.locator("[data-monitor-filter-trigger]").click()
     expect(page.locator("[data-monitor-filter-menu]")).to_be_visible()
     page.locator(f'[data-monitor-option="{seeded["strategy_id"]}"]').click()
-    page.wait_for_url(re.compile(rf".*/dashboard/lifecycles\?monitor={seeded['strategy_id']}"))
+    page.wait_for_url(
+        re.compile(
+            rf".*/dashboard/activity\?tab=forming&monitor={seeded['strategy_id']}"
+        )
+    )
     expect(page.locator("[data-monitor-filter-label]")).to_contain_text(
         "SOL Readiness Monitor"
     )

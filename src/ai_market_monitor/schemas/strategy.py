@@ -1,14 +1,19 @@
 import hashlib
 import json
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ai_market_monitor.db.models.enums import (
+    ComplianceChangeBehavior,
     ConditionType,
     LogicalOperator,
     MarketType,
+    ShariaAssetStatus,
+    ShariaUniverseMode,
     TriggerMode,
 )
 
@@ -176,6 +181,52 @@ class ConditionGroup(BaseModel):
 ConditionGroup.model_rebuild()
 
 
+class ShariaPolicyDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    universe_mode: ShariaUniverseMode = ShariaUniverseMode.ELIGIBLE_MARKET
+    methodology_id: UUID | None = None
+    allowed_statuses: list[ShariaAssetStatus] = Field(
+        default_factory=lambda: [
+            ShariaAssetStatus.ELIGIBLE,
+            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS,
+        ],
+        min_length=1,
+        max_length=6,
+    )
+    qualification_policy: Literal[
+        "include_with_warning", "exclude", "require_acknowledgement"
+    ] = "include_with_warning"
+    disputed_asset_policy: Literal["exclude", "include_with_warning"] = "exclude"
+    compliance_change_behavior: ComplianceChangeBehavior = ComplianceChangeBehavior.PAUSE_ASSET
+    approved_watchlist_id: UUID | None = None
+    universe_snapshot_version: int | None = Field(default=None, ge=1)
+    universe_last_resolved_at: datetime | None = None
+    advanced_override_acknowledged: bool = False
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> "ShariaPolicyDefinition":
+        self.allowed_statuses = list(dict.fromkeys(self.allowed_statuses))
+        if (
+            self.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
+            and self.approved_watchlist_id is None
+        ):
+            raise ValueError("approved_watchlist mode requires approved_watchlist_id")
+        default_statuses = {
+            ShariaAssetStatus.ELIGIBLE,
+            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS,
+        }
+        if (
+            not set(self.allowed_statuses).issubset(default_statuses)
+            and not self.advanced_override_acknowledged
+        ):
+            raise ValueError(
+                "including under-review, disputed, excluded, or insufficient assets "
+                "requires an explicit advanced-policy acknowledgement"
+            )
+        return self
+
+
 class UniverseDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -194,6 +245,7 @@ class UniverseDefinition(BaseModel):
     exclude_leveraged_tokens: bool = True
     min_market_cap: float | None = Field(default=None, ge=0)
     max_symbols: int | None = Field(default=None, ge=1, le=100000)
+    sharia_policy: ShariaPolicyDefinition | None = None
 
 
 class EntryPolicy(BaseModel):
@@ -390,6 +442,7 @@ class StrategyDefinition(BaseModel):
                 "exclude_stablecoins": liquidity_rules.get("exclude_stablecoins", True),
                 "exclude_leveraged_tokens": liquidity_rules.get("exclude_leveraged_tokens", True),
                 "min_market_cap": liquidity_rules.get("min_market_cap"),
+                "sharia_policy": value.get("sharia_policy"),
             },
             "conditions": conditions,
             "entry": {
@@ -586,7 +639,10 @@ class StrategyDefinition(BaseModel):
                 return {
                     key: preserve_legacy_shape(item)
                     for key, item in value.items()
-                    if not (key == "capability_key" and item is None)
+                    if not (
+                        (key == "capability_key" and item is None)
+                        or (key == "sharia_policy" and item is None)
+                    )
                 }
             if isinstance(value, list):
                 return [preserve_legacy_shape(item) for item in value]

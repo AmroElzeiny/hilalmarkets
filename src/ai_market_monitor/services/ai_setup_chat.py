@@ -13,7 +13,18 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.db.models import AISetupChatMessage, AISetupChatSession, Strategy
+from ai_market_monitor.db.models import (
+    AISetupChatMessage,
+    AISetupChatSession,
+    ApprovedWatchlist,
+    ApprovedWatchlistAsset,
+    Strategy,
+)
+from ai_market_monitor.db.models.enums import (
+    ComplianceChangeBehavior,
+    ShariaAssetStatus,
+    ShariaUniverseMode,
+)
 from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.capability_resolver import (
     CapabilityResolutionReport,
@@ -35,6 +46,7 @@ from ai_market_monitor.schemas.strategy import (
     ConditionGroup,
     ConditionRule,
     InterpretationPreview,
+    ShariaPolicyDefinition,
     StrategyDefinition,
 )
 from ai_market_monitor.services.agent_control import (
@@ -48,6 +60,15 @@ from ai_market_monitor.services.hybrid_capability_resolution import (
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider, StrategyInterpreter
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
+from ai_market_monitor.services.sharia_screening import (
+    DEFAULT_ALLOWED_STATUSES,
+    ShariaScreeningService,
+    canonical_asset,
+)
+from ai_market_monitor.services.sharia_universe import (
+    ShariaUniverseError,
+    ShariaUniverseResolver,
+)
 from ai_market_monitor.services.system_brain import CapabilityCoverageService
 
 
@@ -647,7 +668,13 @@ class AISetupChatService:
                     selections = dict(context.get("capability_selections") or {})
                     selections[answer_key] = capability_key
                     context["capability_selections"] = selections
-            elif answer_key not in {"setup_mode", "monitor_name"}:
+            elif answer_key not in {
+                "setup_mode",
+                "monitor_name",
+                "screened_universe_mode",
+                "screened_watchlist",
+                "screened_explicit_assets",
+            }:
                 fragments.append(
                     _option_strategy_fragment(
                         pending_model,
@@ -660,7 +687,12 @@ class AISetupChatService:
             resolved[awaiting_key] = cleaned
             answered_keys.add(awaiting_key)
             answered_fingerprints.add(awaiting_fingerprint or f"key:{awaiting_key}")
-            if awaiting_key != "monitor_name":
+            if awaiting_key not in {
+                "monitor_name",
+                "screened_universe_mode",
+                "screened_watchlist",
+                "screened_explicit_assets",
+            }:
                 fragments.append(
                     _canonical_clarification_answer(
                         _pending_clarification_model(pending_clarification), cleaned
@@ -735,6 +767,25 @@ class AISetupChatService:
             await self._apply_monitor_name(session, chat, cleaned)
             return chat
 
+        screening_answer_key = awaiting_key or (
+            option_key
+            if option_key
+            in {"screened_universe_mode", "screened_watchlist", "screened_explicit_assets"}
+            else ""
+        )
+        if screening_answer_key in {
+            "screened_universe_mode",
+            "screened_watchlist",
+            "screened_explicit_assets",
+        }:
+            await self._apply_screened_universe_answer(
+                session,
+                chat,
+                key=screening_answer_key,
+                value=option_value or cleaned,
+            )
+            return chat
+
         if option_key == "setup_mode":
             mode = (option_value or "").casefold().strip()
             if mode not in {"scanner", "monitor"}:
@@ -749,6 +800,9 @@ class AISetupChatService:
             chat.rule_confidence = []
             chat.ambiguities = []
             chat.unsupported_conditions = []
+            if self.settings.sharia_screening_enforced:
+                await self._ask_screened_universe(session, chat)
+                return chat
             await self._assistant(
                 session,
                 chat,
@@ -1135,6 +1189,331 @@ class AISetupChatService:
 
         return chat
 
+    async def _ask_screened_universe(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+    ) -> None:
+        screening = ShariaScreeningService(session, self.settings)
+        methodology = await screening.default_methodology()
+        context = dict(chat.context_json or {})
+        if methodology is None:
+            context["sharia_configuration_blocked"] = True
+            chat.context_json = context
+            chat.status = "needs_clarification"
+            await self._assistant(
+                session,
+                chat,
+                (
+                    "Screened monitoring is not available yet because no real approved "
+                    "methodology is active. The development/test methodology is not a "
+                    "religious ruling and cannot be used for scans or Watch Plans."
+                ),
+                message_type="screening_unavailable",
+                payload={"can_approve": False, "can_scan": False},
+            )
+            return
+        context.update(
+            {
+                "sharia_methodology_id": str(methodology.id),
+                "sharia_methodology_code": methodology.code,
+                "sharia_methodology_name": methodology.name,
+                "sharia_methodology_version": methodology.version,
+                "allowed_sharia_statuses": sorted(
+                    status.value for status in DEFAULT_ALLOWED_STATUSES
+                ),
+                "compliance_change_behavior": ComplianceChangeBehavior.PAUSE_ASSET.value,
+                "sharia_configuration_blocked": False,
+            }
+        )
+        clarification = _with_other_option(
+            SetupChatClarification(
+                key="screened_universe_mode",
+                question="Which screened assets should TraceEdge watch?",
+                reason=(
+                    f"The selected methodology is {methodology.name}, version "
+                    f"{methodology.version}. Assets without a current eligible assessment "
+                    "will be excluded."
+                ),
+                options=[
+                    SetupChatOption(
+                        key="screened_universe_mode",
+                        label="All eligible spot assets",
+                        value=ShariaUniverseMode.ELIGIBLE_MARKET.value,
+                        description="Use every currently eligible asset that meets market filters.",
+                    ),
+                    SetupChatOption(
+                        key="screened_universe_mode",
+                        label="My approved watchlist",
+                        value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                        description="Use only eligible assets in one of your saved watchlists.",
+                    ),
+                    SetupChatOption(
+                        key="screened_universe_mode",
+                        label="Specific eligible assets",
+                        value=ShariaUniverseMode.EXPLICIT_ASSETS.value,
+                        description="Type the individual screened spot assets to watch.",
+                    ),
+                ],
+            )
+        )
+        _set_awaiting_clarification(context, clarification)
+        chat.context_json = context
+        chat.status = "needs_clarification"
+        await self._assistant(
+            session,
+            chat,
+            clarification.question,
+            message_type="screened_universe_required",
+            payload={
+                "clarifications": [clarification.model_dump(mode="json")],
+                "screening_methodology": {
+                    "id": str(methodology.id),
+                    "name": methodology.name,
+                    "version": methodology.version,
+                },
+                "can_approve": False,
+                "can_scan": False,
+            },
+        )
+
+    async def _apply_screened_universe_answer(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        key: str,
+        value: str,
+    ) -> None:
+        context = dict(chat.context_json or {})
+        if key == "screened_universe_mode":
+            normalized = value.casefold().strip().replace(" ", "_")
+            aliases = {
+                "all_eligible_spot_assets": ShariaUniverseMode.ELIGIBLE_MARKET.value,
+                "my_approved_watchlist": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                "specific_eligible_assets": ShariaUniverseMode.EXPLICIT_ASSETS.value,
+            }
+            normalized = aliases.get(normalized, normalized)
+            try:
+                mode = ShariaUniverseMode(normalized)
+            except ValueError:
+                await self._ask_screened_universe(session, chat)
+                return
+            context["screened_universe_mode"] = mode.value
+            if mode == ShariaUniverseMode.APPROVED_WATCHLIST:
+                watchlists = list(
+                    (
+                        await session.scalars(
+                            select(ApprovedWatchlist)
+                            .where(ApprovedWatchlist.user_id == chat.user_id)
+                            .order_by(
+                                ApprovedWatchlist.is_default.desc(),
+                                ApprovedWatchlist.name.asc(),
+                            )
+                        )
+                    ).all()
+                )
+                if not watchlists:
+                    chat.context_json = context
+                    chat.status = "needs_clarification"
+                    await self._assistant(
+                        session,
+                        chat,
+                        (
+                            "You do not have an approved watchlist yet. Add eligible assets "
+                            "from Screened Market, or choose all eligible or specific assets."
+                        ),
+                        message_type="screened_watchlist_missing",
+                        payload={"can_approve": False, "can_scan": False},
+                    )
+                    return
+                if len(watchlists) == 1:
+                    context["approved_watchlist_id"] = str(watchlists[0].id)
+                    context["approved_watchlist_name"] = watchlists[0].name
+                    chat.context_json = context
+                    await self._complete_screened_universe_selection(session, chat)
+                    return
+                clarification = SetupChatClarification(
+                    key="screened_watchlist",
+                    question="Which approved watchlist should TraceEdge use?",
+                    reason=(
+                        "Every asset is rechecked against the selected methodology before "
+                        "scanning."
+                    ),
+                    options=[
+                        SetupChatOption(
+                            key="screened_watchlist",
+                            label=row.name,
+                            value=str(row.id),
+                            description="Use this approved watchlist",
+                        )
+                        for row in watchlists[:8]
+                    ],
+                )
+                _set_awaiting_clarification(context, clarification)
+                chat.context_json = context
+                chat.status = "needs_clarification"
+                await self._assistant(
+                    session,
+                    chat,
+                    clarification.question,
+                    message_type="screened_watchlist_required",
+                    payload={"clarifications": [clarification.model_dump(mode="json")]},
+                )
+                return
+            if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
+                clarification = SetupChatClarification(
+                    key="screened_explicit_assets",
+                    question="Which eligible spot assets should TraceEdge watch?",
+                    reason="Type symbols such as BTC, ETH, SOL or BTC/USDT, ETH/USDT.",
+                )
+                _set_awaiting_clarification(context, clarification)
+                chat.context_json = context
+                chat.status = "needs_clarification"
+                await self._assistant(
+                    session,
+                    chat,
+                    clarification.question,
+                    message_type="screened_assets_required",
+                    payload={
+                        "clarifications": [clarification.model_dump(mode="json")],
+                        "awaiting_answer": True,
+                    },
+                )
+                return
+            chat.context_json = context
+            await self._complete_screened_universe_selection(session, chat)
+            return
+
+        if key == "screened_watchlist":
+            try:
+                watchlist_id = UUID(value)
+            except ValueError:
+                await self._ask_screened_universe(session, chat)
+                return
+            watchlist = await session.get(ApprovedWatchlist, watchlist_id)
+            if watchlist is None or watchlist.user_id != chat.user_id:
+                raise SetupChatError(
+                    "watchlist_not_found",
+                    "That approved watchlist is unavailable.",
+                    status_code=404,
+                )
+            context["approved_watchlist_id"] = str(watchlist.id)
+            context["approved_watchlist_name"] = watchlist.name
+            chat.context_json = context
+            await self._complete_screened_universe_selection(session, chat)
+            return
+
+        symbols = _parse_screened_symbols(value)
+        if not symbols:
+            clarification = SetupChatClarification(
+                key="screened_explicit_assets",
+                question="Type at least one asset symbol, for example BTC, ETH or SOL/USDT.",
+                reason="Only evidence-backed eligible assets can enter the scan.",
+            )
+            _set_awaiting_clarification(context, clarification)
+            chat.context_json = context
+            chat.status = "needs_clarification"
+            await self._assistant(
+                session,
+                chat,
+                clarification.question,
+                message_type="screened_assets_invalid",
+                payload={"clarifications": [clarification.model_dump(mode="json")]},
+            )
+            return
+        context["screened_explicit_symbols"] = symbols
+        chat.context_json = context
+        await self._complete_screened_universe_selection(session, chat)
+
+    async def _complete_screened_universe_selection(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+    ) -> None:
+        context = dict(chat.context_json or {})
+        methodology_id = UUID(str(context["sharia_methodology_id"]))
+        mode = ShariaUniverseMode(context["screened_universe_mode"])
+        screening = ShariaScreeningService(session, self.settings)
+        assessments = await screening.effective_assessments(methodology_id)
+        safety_holds = await screening.safety_hold_assets(assets=set(assessments))
+        eligible_assets = {
+            asset
+            for asset, assessment in assessments.items()
+            if assessment.status in DEFAULT_ALLOWED_STATUSES and asset not in safety_holds
+        }
+        scope_label = "all eligible spot assets"
+        if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
+            requested_symbols = list(context.get("screened_explicit_symbols") or [])
+            requested_assets = {canonical_asset(symbol) for symbol in requested_symbols}
+            excluded = sorted(requested_assets - eligible_assets)
+            included = sorted(requested_assets & eligible_assets)
+            if not included:
+                context["screened_explicit_excluded"] = excluded
+                chat.context_json = context
+                chat.status = "needs_clarification"
+                await self._assistant(
+                    session,
+                    chat,
+                    (
+                        "None of those assets currently has an eligible assessment under "
+                        "the selected methodology. Choose another eligible asset; nothing "
+                        "was silently included."
+                    ),
+                    message_type="screened_assets_not_eligible",
+                    payload={"excluded_assets": excluded, "can_approve": False},
+                )
+                return
+            context["screened_explicit_symbols"] = [f"{asset}/USDT" for asset in included]
+            context["screened_explicit_excluded"] = excluded
+            eligible_count = len(included)
+            scope_label = ", ".join(included)
+        elif mode == ShariaUniverseMode.APPROVED_WATCHLIST:
+            watchlist_id = UUID(str(context["approved_watchlist_id"]))
+            watchlist_assets = set(
+                (
+                    await session.scalars(
+                        select(ApprovedWatchlistAsset.canonical_asset).where(
+                            ApprovedWatchlistAsset.watchlist_id == watchlist_id
+                        )
+                    )
+                ).all()
+            )
+            eligible_count = len(watchlist_assets & eligible_assets)
+            scope_label = str(context.get("approved_watchlist_name") or "approved watchlist")
+        else:
+            eligible_count = len(eligible_assets)
+        context["screened_eligible_count"] = eligible_count
+        context.pop("awaiting_clarification", None)
+        context.pop("awaiting_clarification_key", None)
+        chat.context_json = context
+        chat.status = "interviewing"
+        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watch Plan"
+        await self._assistant(
+            session,
+            chat,
+            (
+                f"Screened market set: {scope_label}. {eligible_count} currently eligible "
+                f"asset{'s' if eligible_count != 1 else ''} match this screening scope. "
+                f"If a status changes, the affected asset will be paused. Now tell me the "
+                f"measurable market event this {mode_name} should find."
+            ),
+            message_type="screened_universe_selected",
+            payload={
+                "screened_market": {
+                    "mode": mode.value,
+                    "methodology_id": str(methodology_id),
+                    "methodology_name": context.get("sharia_methodology_name"),
+                    "methodology_version": context.get("sharia_methodology_version"),
+                    "allowed_statuses": context.get("allowed_sharia_statuses"),
+                    "eligible_count": eligible_count,
+                    "compliance_change_behavior": context.get(
+                        "compliance_change_behavior"
+                    ),
+                }
+            },
+        )
+
     async def _finalize_translation(
         self,
         session: AsyncSession,
@@ -1147,7 +1526,10 @@ class AISetupChatService:
         compile_text = accumulated
         await self._compile(session, chat, compile_text)
         context = dict(chat.context_json or {})
-        if context.get("requires_monitor_name"):
+        if (
+            context.get("requires_monitor_name")
+            and context.get("awaiting_clarification_key") == "monitor_name"
+        ):
             clarification = _pending_clarification_model(
                 dict(context.get("awaiting_clarification") or {})
             )
@@ -1375,6 +1757,68 @@ class AISetupChatService:
         )
         definition = StrategyDefinition.model_validate(preview.strategy.model_dump(mode="json"))
         context = dict(chat.context_json or {})
+        screening_resolution = None
+        screening_error: dict[str, str] | None = None
+        if self.settings.sharia_screening_enforced:
+            try:
+                mode = ShariaUniverseMode(str(context["screened_universe_mode"]))
+                methodology_id = UUID(str(context["sharia_methodology_id"]))
+                policy = ShariaPolicyDefinition(
+                    universe_mode=mode,
+                    methodology_id=methodology_id,
+                    allowed_statuses=[
+                        ShariaAssetStatus(value)
+                        for value in context.get("allowed_sharia_statuses")
+                        or [
+                            ShariaAssetStatus.ELIGIBLE.value,
+                            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+                        ]
+                    ],
+                    qualification_policy="include_with_warning",
+                    disputed_asset_policy="exclude",
+                    compliance_change_behavior=ComplianceChangeBehavior(
+                        context.get("compliance_change_behavior")
+                        or ComplianceChangeBehavior.PAUSE_ASSET.value
+                    ),
+                    approved_watchlist_id=(
+                        UUID(str(context["approved_watchlist_id"]))
+                        if context.get("approved_watchlist_id")
+                        else None
+                    ),
+                )
+                universe_update: dict[str, Any] = {"sharia_policy": policy}
+                if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
+                    universe_update["include_symbols"] = list(
+                        context.get("screened_explicit_symbols") or []
+                    )
+                definition = definition.model_copy(
+                    update={
+                        "universe": definition.universe.model_copy(update=universe_update)
+                    }
+                )
+                screening_resolution = await ShariaUniverseResolver(
+                    session,
+                    self.market_provider,
+                    self.settings,
+                ).resolve(
+                    definition,
+                    user_id=chat.user_id,
+                    persist_snapshot=False,
+                )
+                if not screening_resolution.included_symbols:
+                    screening_error = {
+                        "code": "empty_screened_universe",
+                        "message": (
+                            "No asset currently meets both the selected screening policy "
+                            "and the market filters."
+                        ),
+                    }
+            except (KeyError, ValueError, ShariaUniverseError) as exc:
+                screening_error = {
+                    "code": getattr(exc, "code", "screened_universe_required"),
+                    "message": str(exc)
+                    or "Choose and validate a screened market before approval.",
+                }
         requires_monitor_name = context.get("setup_mode") == "monitor" and not context.get(
             "confirmed_monitor_name"
         )
@@ -1385,6 +1829,14 @@ class AISetupChatService:
             context["interpreter_name_suggestion"] = definition.name
             definition = definition.model_copy(update={"name": "Untitled Monitor"})
         lint = lint_strategy(definition, preview)
+        if screening_error:
+            lint.append(
+                {
+                    "code": screening_error["code"],
+                    "severity": "critical",
+                    "message": screening_error["message"],
+                }
+            )
         confidence = rule_confidence(definition)
         chat.draft_schema_json = definition.model_dump(mode="json")
         chat.translation_sheet = translation_sheet(
@@ -1393,6 +1845,37 @@ class AISetupChatService:
             preview,
             setup_mode=_setup_mode(chat),
         )
+        if self.settings.sharia_screening_enforced:
+            chat.translation_sheet["screened_market"] = {
+                "universe_mode": context.get("screened_universe_mode"),
+                "methodology_id": context.get("sharia_methodology_id"),
+                "methodology_name": context.get("sharia_methodology_name"),
+                "methodology_version": context.get("sharia_methodology_version"),
+                "allowed_statuses": context.get("allowed_sharia_statuses") or [],
+                "eligible_assets": (
+                    screening_resolution.included_count if screening_resolution else 0
+                ),
+                "assets_excluded_by_policy": (
+                    screening_resolution.excluded_by_policy_count
+                    if screening_resolution
+                    else 0
+                ),
+                "insufficient_information": (
+                    screening_resolution.insufficient_information_count
+                    if screening_resolution
+                    else 0
+                ),
+                "compliance_change_behavior": context.get(
+                    "compliance_change_behavior",
+                    ComplianceChangeBehavior.PAUSE_ASSET.value,
+                ),
+                "policy_hash": (
+                    screening_resolution.policy_hash if screening_resolution else None
+                ),
+                "snapshot_hash": (
+                    screening_resolution.snapshot_hash if screening_resolution else None
+                ),
+            }
         chat.lint_warnings = lint
         chat.rule_confidence = confidence
         chat.assumptions = list(preview.assumptions)
@@ -2586,6 +3069,33 @@ def _condition_rules(node: ConditionRule | ConditionGroup) -> list[ConditionRule
 
 def _setup_mode(chat: AISetupChatSession) -> Literal["scanner", "monitor"]:
     return "scanner" if (chat.context_json or {}).get("setup_mode") == "scanner" else "monitor"
+
+
+def _parse_screened_symbols(value: str) -> list[str]:
+    ignored = {
+        "AND",
+        "OR",
+        "THE",
+        "ASSET",
+        "ASSETS",
+        "COIN",
+        "COINS",
+        "SPOT",
+        "PAIR",
+        "PAIRS",
+    }
+    tokens = re.findall(
+        r"\b[A-Za-z0-9]{2,15}(?:/[A-Za-z0-9]{2,12})?\b",
+        value.upper(),
+    )
+    symbols: list[str] = []
+    for token in tokens:
+        if token in ignored:
+            continue
+        symbol = token if "/" in token else f"{token}/USDT"
+        if symbol not in symbols:
+            symbols.append(symbol)
+    return symbols[:1000]
 
 
 def _rule_roles(definition: StrategyDefinition) -> dict[str, str]:

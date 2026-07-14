@@ -92,6 +92,10 @@ app.conf.update(
             "task": "ai_market_monitor.process_capability_extensions",
             "schedule": 30,
         },
+        "send-compliance-digests-every-hour": {
+            "task": "ai_market_monitor.send_compliance_digests",
+            "schedule": 60 * 60,
+        },
     },
 )
 
@@ -222,6 +226,11 @@ def cleanup_setup_observability() -> dict:
 @app.task(name="ai_market_monitor.process_capability_extensions")
 def process_capability_extensions() -> dict:
     return _run_async_task(_process_capability_extensions())
+
+
+@app.task(name="ai_market_monitor.send_compliance_digests")
+def send_compliance_digests() -> dict:
+    return _run_async_task(_send_compliance_digests())
 
 
 async def _evaluate_due_trial_cycles() -> dict:
@@ -530,6 +539,16 @@ async def _process_capability_extensions() -> dict:
         return {"processed": processed, "failed": failed}
     finally:
         await provider.close()
+
+
+async def _send_compliance_digests() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.compliance_watch import ComplianceDigestService
+
+    async with SessionFactory() as session:
+        result = await ComplianceDigestService(session, settings).process_due()
+        await session.commit()
+        return result
 
 
 async def _expire_setup_instances() -> dict:

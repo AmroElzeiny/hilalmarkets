@@ -123,6 +123,32 @@ class NotificationDispatcher:
                         f"chat:{connection.chat_id}",
                     )
                 )
+        if DeliveryChannel.DISCORD in requested:
+            destinations = (
+                await self.session.scalars(
+                    select(DiscordDeliveryDestination).where(
+                        DiscordDeliveryDestination.user_id == alert.user_id,
+                        DiscordDeliveryDestination.status == "active",
+                        DiscordDeliveryDestination.permissions_status.in_(["ok", "valid"]),
+                        DiscordDeliveryDestination.test_status == "sent",
+                    )
+                )
+            ).all()
+            for destination in destinations:
+                key = (
+                    f"dm:{destination.discord_user_id}"
+                    if destination.mode == "dm"
+                    else f"guild:{destination.guild_id}:channel:{destination.channel_id}"
+                )
+                deliveries.append(await self._enqueue_one(alert, DeliveryChannel.DISCORD, key))
+        if DeliveryChannel.WEB in requested:
+            deliveries.append(
+                await self._enqueue_one(
+                    alert,
+                    DeliveryChannel.WEB,
+                    f"dashboard:{alert.user_id}",
+                )
+            )
         await self.session.flush()
         return deliveries
 

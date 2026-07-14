@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +12,7 @@ from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
     AlertInboxItem,
+    AssetShariaAssessment,
     SetupConditionResult,
     SetupInstance,
     SetupLifecycleEvent,
@@ -24,13 +25,17 @@ from ai_market_monitor.db.models.enums import (
     DeliveryStatus,
     SetupLifecycleState,
 )
+from ai_market_monitor.services.product_language import (
+    lifecycle_presentation,
+    readiness_copy,
+)
 
 LIFECYCLE_STAGES = (
     ("detected", "Detected"),
-    ("partial_match", "Partial match"),
-    ("conditions_complete", "Conditions complete"),
-    ("alert_delivered", "Alert delivered"),
-    ("resolution", "No longer matching"),
+    ("forming", "Forming"),
+    ("conditions_complete", "Ready for review"),
+    ("alert_delivered", "Alert sent"),
+    ("resolution", "Ended"),
 )
 
 STAGE_BY_STATE = {
@@ -162,6 +167,36 @@ async def lifecycle_cards(
         if item.setup_instance_id is not None:
             latest_inbox_by_setup.setdefault(item.setup_instance_id, item)
 
+    methodology_ids = {
+        setup.sharia_methodology_id for setup, _, _ in setup_rows if setup.sharia_methodology_id
+    }
+    assets = {setup.symbol.partition("/")[0].upper() for setup, _, _ in setup_rows}
+    current_status: dict[tuple[UUID, str], str] = {}
+    if methodology_ids and assets:
+        now = datetime.now(UTC)
+        assessment_rows = list(
+            (
+                await session.scalars(
+                    select(AssetShariaAssessment)
+                    .where(
+                        AssetShariaAssessment.methodology_id.in_(methodology_ids),
+                        AssetShariaAssessment.canonical_asset.in_(assets),
+                        AssetShariaAssessment.valid_from <= now,
+                        (
+                            AssetShariaAssessment.valid_until.is_(None)
+                            | (AssetShariaAssessment.valid_until > now)
+                        ),
+                    )
+                    .order_by(AssetShariaAssessment.valid_from.desc())
+                )
+            ).all()
+        )
+        for assessment in assessment_rows:
+            current_status.setdefault(
+                (assessment.methodology_id, assessment.canonical_asset),
+                assessment.status.value,
+            )
+
     return [
         _lifecycle_card(
             setup,
@@ -174,6 +209,11 @@ async def lifecycle_cards(
             if setup.id in latest_alert_by_setup
             else [],
             latest_inbox_by_setup.get(setup.id),
+            current_status.get(
+                (setup.sharia_methodology_id, setup.symbol.partition("/")[0].upper())
+            )
+            if setup.sharia_methodology_id
+            else None,
         )
         for setup, strategy_name, version_number in setup_rows
     ]
@@ -184,8 +224,7 @@ def stage_index(state: SetupLifecycleState) -> int:
 
 
 def state_label(state: SetupLifecycleState | str) -> str:
-    value = state.value if isinstance(state, SetupLifecycleState) else state
-    return value.replace("_", " ").title()
+    return lifecycle_presentation(state).label
 
 
 def _lifecycle_card(
@@ -197,6 +236,7 @@ def _lifecycle_card(
     latest_alert: Alert | None = None,
     deliveries: list[AlertDelivery] | None = None,
     latest_inbox_item: AlertInboxItem | None = None,
+    current_sharia_status: str | None = None,
 ) -> dict[str, Any]:
     deliveries = deliveries or []
     current_index = stage_index(setup.state)
@@ -272,6 +312,7 @@ def _lifecycle_card(
         "state_label": state_label(setup.state),
         "stage_index": current_index,
         "completion_score": float(setup.completion_score),
+        "readiness_label": readiness_copy(float(setup.completion_score), setup.state),
         "first_detected_at": setup.first_detected_at,
         "last_evaluated_at": setup.last_evaluated_at,
         "stages": stages,
@@ -300,4 +341,8 @@ def _lifecycle_card(
         },
         "latest_inbox_item_id": latest_inbox_item.id if latest_inbox_item else None,
         "latest_inbox_state": latest_inbox_item.state if latest_inbox_item else None,
+        "sharia_methodology_id": setup.sharia_methodology_id,
+        "sharia_methodology_version": setup.sharia_methodology_version,
+        "sharia_status_at_detection": setup.sharia_status_at_detection,
+        "current_sharia_status": current_sharia_status,
     }

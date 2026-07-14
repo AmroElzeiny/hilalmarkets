@@ -114,3 +114,33 @@ delivery, and one deterministic staging strategy before opening registrations.
 
 Do not claim production readiness until chart storage, API-wide authentication/rate limiting,
 monitoring exports, backup drills, and provider sandbox tests are completed.
+
+## Sharia-first deployment gate
+
+Deployed live scanning must use the fail-closed screened-market boundary:
+
+```text
+SHARIA_SCREENING_ENFORCED=true
+SHARIA_ALLOW_LEGACY_UNSCREENED_LOCAL=false
+SHARIA_DEFAULT_METHODOLOGY_CODE=<qualified-approved-active-code>
+SHARIA_UNIVERSE_CACHE_TTL_SECONDS=300
+SHARIA_COMPLIANCE_SAFETY_UNDER_REVIEW=true
+SHARIA_COMPLIANCE_DIGEST_LOCAL_HOUR=8
+```
+
+Deploy this migration with scanning stopped. `alembic upgrade head` pauses every previously active
+monitor and records it in `sharia_monitor_migration_records`; this is intentional. Do not resume a
+monitor until qualified governance has published the named methodology, its assets have dated
+evidence-backed assessments, the Watch Plan has resolved a screened universe, and a human operator
+has reviewed its exclusions and explicitly resumed it.
+
+The `TRACEDGE_DEV_TEST_V1` migration seed is schema/test data only. It is non-executable, hidden
+from ordinary methodology selection, and must never be promoted or represented as a religious
+ruling. Verify the Compliance Watch review queue, cache invalidation, one provisional safety hold,
+one approved status transition, and in-app plus staging Telegram/Discord drift delivery before
+opening production scanning.
+
+This release is technically fail-closed; it is not religiously production-ready until a qualified
+body, reviewers, approved methodology content, evidence-source operations, review cadence, and
+incident SLAs are configured. The complete checklist and known limitations are in
+`docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md`.

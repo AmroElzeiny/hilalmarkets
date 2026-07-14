@@ -174,6 +174,7 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
         database_url="postgresql+asyncpg://user:password@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
+        scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=False,
         discord_enabled=False,

@@ -1644,6 +1644,7 @@ class TelegramBotService:
             response = await OnDemandScanService(
                 self.session,
                 self.market_data_provider,
+                settings=self.settings,
             ).run(user_id, request)
         except OnDemandScanError as exc:
             await self.session.rollback()

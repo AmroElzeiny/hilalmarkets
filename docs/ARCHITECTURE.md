@@ -269,3 +269,28 @@ line of defense against duplicate identities, versions, deliveries, and provider
 Capability extensions add attempt, scan, certification and repair audit records. The System Brain
 console reports retrieval, selection, parameter and evaluator quality separately, along with model,
 reasoning, service tier, usage, cost estimate, candidate rate and delivered-notification evidence.
+
+## Sharia-first screened-market boundary
+
+`ShariaScreeningService` is the authority for approved methodology versions, effective-dated asset
+assessments, evidence, history, passports, and comparison. `ShariaUniverseResolver` is the single
+fail-closed boundary used by one-time Scanner mode, persistent Watch Plans, preview/validation, and
+the worker. It intersects the technical spot universe with one approved methodology, selected
+statuses, exchange/quote filters, explicit symbols or an owner-scoped approved watchlist. Missing
+evidence is `insufficient_information` and never becomes an ordinary technical non-match.
+
+`ComplianceWatchService` ingests idempotent structured changes and routes final decisions to an
+authenticated reviewer. A configured provisional safety hold may pause an asset as `under_review`
+without replacing the last approved assessment. Approval creates a superseding assessment, status
+history, cache invalidation, monitor impact, immutable drift evidence, and notification deliveries
+in one flow. Non-critical external events can be grouped by `ComplianceDigestService`; in-app
+evidence is immediate.
+
+Historical scan/lifecycle/alert proof stores methodology ID/version, assessment ID, status at
+evaluation, universe snapshot, and policy decision. Current status is resolved separately, so later
+reviews cannot rewrite prior proof. `ActivityReadService` composes the user-owned read model without
+merging source tables. AI can explain these records but has no status mutation or review tool.
+
+The migration pauses legacy active monitors until a real approved methodology and resolved policy
+are attached. The seeded development methodology is draft, non-executable, and contains no asset
+conclusions. See `docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md`.

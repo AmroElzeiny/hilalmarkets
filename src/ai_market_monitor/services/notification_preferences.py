@@ -27,6 +27,12 @@ class NotificationPreference:
     muted_strategy_until: dict[str, str] | None = None
     muted_strategy_symbols: dict[str, set[str]] | None = None
     muted_setup_instance_ids: set[str] | None = None
+    compliance_alerts_enabled: bool = True
+    compliance_alert_channels: set[DeliveryChannel] | None = None
+    compliance_alert_digest: str = "immediate"
+    qualification_change_alerts: bool = True
+    under_review_alerts: bool = True
+    exclusion_alerts: bool = True
 
 
 class NotificationPreferenceService:
@@ -72,6 +78,17 @@ class NotificationPreferenceService:
                 for key, value in (data.get("muted_strategy_symbols", {}) or {}).items()
             },
             muted_setup_instance_ids=set(map(str, data.get("muted_setup_instance_ids", []))),
+            compliance_alerts_enabled=bool(data.get("compliance_alerts_enabled", True)),
+            compliance_alert_channels={
+                DeliveryChannel(value)
+                for value in data.get("compliance_alert_channels", ["web"])
+                if value in {channel.value for channel in DeliveryChannel}
+            }
+            or {DeliveryChannel.WEB},
+            compliance_alert_digest=str(data.get("compliance_alert_digest", "immediate")),
+            qualification_change_alerts=bool(data.get("qualification_change_alerts", True)),
+            under_review_alerts=bool(data.get("under_review_alerts", True)),
+            exclusion_alerts=bool(data.get("exclusion_alerts", True)),
         )
 
     async def allowed_channels(
@@ -82,6 +99,19 @@ class NotificationPreferenceService:
         alert: Alert,
     ) -> set[DeliveryChannel]:
         preference = await self.current(user_id)
+        mandatory_in_app = (
+            {DeliveryChannel.WEB}
+            if alert.alert_type == AlertType.COMPLIANCE
+            and DeliveryChannel.WEB in requested
+            else set()
+        )
+        if alert.alert_type == AlertType.COMPLIANCE:
+            if not preference.compliance_alerts_enabled:
+                return mandatory_in_app
+            return (
+                requested
+                & (preference.compliance_alert_channels or {DeliveryChannel.WEB})
+            ) | mandatory_in_app
         proof = alert.proof_receipt or {}
         setup_state = str(proof.get("setup_state") or "")
         incomplete_states = {"candidate_detected", "detected", "forming", "near_confirmation"}
@@ -151,7 +181,7 @@ class NotificationPreferenceService:
         )
         if (daily_count or 0) >= preference.maximum_alerts_per_day:
             return set()
-        return set(requested) & preference.channels
+        return (set(requested) & preference.channels) | mandatory_in_app
 
     @staticmethod
     def _inside_schedule(preference: NotificationPreference) -> bool:

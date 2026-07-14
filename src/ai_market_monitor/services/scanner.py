@@ -61,6 +61,10 @@ from ai_market_monitor.services.market_preview import (
 from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
 from ai_market_monitor.services.notifications import NotificationDispatcher
 from ai_market_monitor.services.reliability import ReliabilityService
+from ai_market_monitor.services.sharia_universe import (
+    ShariaUniverseError,
+    ShariaUniverseResolver,
+)
 from ai_market_monitor.services.strategy_hashes import ensure_current_approved_schema_hash
 from ai_market_monitor.services.trials import TrialLifecycleService
 
@@ -120,6 +124,16 @@ class UniverseResolver:
 
 def _canonical_symbol(symbol: str) -> str:
     return symbol.upper().replace("-", "/").strip().split(":", 1)[0]
+
+
+def _sharia_proof_from_scan_context(
+    scan_context: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Expose compact screening evidence at a stable proof-receipt key."""
+    screening = (scan_context or {}).get("sharia_screening")
+    if not isinstance(screening, dict):
+        return {}
+    return {"sharia_screening": dict(screening)}
 
 
 class ScanScheduler:
@@ -337,6 +351,8 @@ class ScanPersistenceService:
         proof_summary = result.proof_receipt()
         if scan_context:
             proof_summary["scan_context"] = scan_context
+        sharia_context = dict((scan_context or {}).get("sharia_screening") or {})
+        sharia_asset = dict(sharia_context.get("asset") or {})
         scan_result = ScanResult(
             scan_job_id=job.id,
             strategy_version_id=version.id,
@@ -360,6 +376,25 @@ class ScanPersistenceService:
                 else None
             ),
             proof_summary=proof_summary,
+            sharia_methodology_id=(
+                UUID(sharia_context["methodology_id"])
+                if sharia_context.get("methodology_id")
+                else None
+            ),
+            sharia_methodology_version=sharia_context.get("methodology_version"),
+            sharia_status_at_scan=sharia_asset.get("status"),
+            sharia_assessment_id=(
+                UUID(sharia_asset["assessment_id"])
+                if sharia_asset.get("assessment_id")
+                else None
+            ),
+            sharia_universe_snapshot_id=(
+                UUID(sharia_context["universe_snapshot_id"])
+                if sharia_context.get("universe_snapshot_id")
+                else None
+            ),
+            sharia_policy_decision=sharia_context.get("policy_decision"),
+            sharia_policy_reason=sharia_context.get("policy_reason"),
         )
         self.session.add(scan_result)
         await self.session.flush()
@@ -523,6 +558,10 @@ class ScanPersistenceService:
                 expires_at=result.evaluation_time
                 + timeframe_duration(definition.base_timeframe)
                 * definition.expiry.expire_after_candles,
+                sharia_methodology_id=scan_result.sharia_methodology_id,
+                sharia_methodology_version=scan_result.sharia_methodology_version,
+                sharia_status_at_detection=scan_result.sharia_status_at_scan,
+                sharia_assessment_id=scan_result.sharia_assessment_id,
             )
             self.session.add(setup)
             await self.session.flush()
@@ -535,6 +574,21 @@ class ScanPersistenceService:
                     evidence={
                         "scan_result_id": str(scan_result.id),
                         "score": result.near_miss.current_score,
+                        "sharia_screening": {
+                            "methodology_id": str(scan_result.sharia_methodology_id)
+                            if scan_result.sharia_methodology_id
+                            else None,
+                            "methodology_version": scan_result.sharia_methodology_version,
+                            "status": scan_result.sharia_status_at_scan,
+                            "assessment_id": str(scan_result.sharia_assessment_id)
+                            if scan_result.sharia_assessment_id
+                            else None,
+                            "universe_snapshot_id": str(
+                                scan_result.sharia_universe_snapshot_id
+                            )
+                            if scan_result.sharia_universe_snapshot_id
+                            else None,
+                        },
                     },
                     occurred_at=result.evaluation_time,
                 )
@@ -683,6 +737,7 @@ class ScanPersistenceService:
             alert_type = AlertType.FORMING
         if alert_type is None or setup is None:
             return None
+        sharia_proof = _sharia_proof_from_scan_context(scan_context)
         trial_service = (
             TrialLifecycleService(self.session, self.settings) if self.settings else None
         )
@@ -719,6 +774,7 @@ class ScanPersistenceService:
                     proof_receipt={
                         **result.proof_receipt(),
                         **({"scan_context": scan_context} if scan_context else {}),
+                        **sharia_proof,
                         "setup_instance_id": str(setup.id),
                         "universe_source": "approved_strategy_universe",
                         "cooldown_status": "not_evaluated_trial_limit",
@@ -789,6 +845,7 @@ class ScanPersistenceService:
             proof_receipt={
                 **result.proof_receipt(),
                 **({"scan_context": scan_context} if scan_context else {}),
+                **sharia_proof,
                 "setup_instance_id": str(setup.id),
                 "universe_source": "approved_strategy_universe",
                 "cooldown_status": "passed",
@@ -1014,15 +1071,56 @@ class ScanOrchestrator:
             await self._cancel_job(job, exc.code, str(exc))
             return self._summary(job, failures=0)
         maximum_symbols = int(entitlement.limit("symbols_per_strategy") or 0)
-        symbols = await UniverseResolver(self.provider).resolve(
-            definition, maximum_symbols=maximum_symbols
-        )
+        settings = self.settings or Settings()
+        try:
+            screening = await ShariaUniverseResolver(
+                self.session,
+                self.provider,
+                settings,
+            ).resolve(
+                definition,
+                user_id=strategy.user_id,
+                strategy_version_id=version.id,
+                maximum_symbols=maximum_symbols,
+            )
+        except ShariaUniverseError as exc:
+            await self._cancel_job(job, exc.code, str(exc))
+            return self._summary(job, failures=0)
+        if screening.monitor_paused_for_compliance:
+            await self._cancel_job(
+                job,
+                "monitor_paused_for_compliance",
+                "The Watch Plan was paused because a previously included asset left its "
+                "screened-market policy.",
+            )
+            return self._summary(job, failures=0)
+        symbols = screening.included_symbols
         symbols = await self.context.rank_symbols(
             definition,
             symbols,
             job.scheduled_for,
         )
         job.symbols_planned = len(symbols)
+        job.metrics = {
+            **(job.metrics or {}),
+            "sharia_screening": {
+                "methodology_id": str(screening.methodology_id)
+                if screening.methodology_id
+                else None,
+                "methodology_code": screening.methodology_code,
+                "methodology_version": screening.methodology_version,
+                "universe_snapshot_id": str(screening.snapshot_id)
+                if screening.snapshot_id
+                else None,
+                "universe_snapshot_hash": screening.snapshot_hash,
+                "assets_considered": screening.considered_count,
+                "assets_excluded_by_policy": screening.excluded_by_policy_count,
+                "insufficient_information": screening.insufficient_information_count,
+                "eligible_assets_planned": screening.included_count,
+                "legacy_local_bypass": screening.legacy_local_bypass,
+            },
+        }
+        screening_by_symbol = {item.symbol: item for item in screening.included}
         completed_symbols = set(
             (
                 await self.session.scalars(
@@ -1074,15 +1172,39 @@ class ScanOrchestrator:
                             is_candle_complete=is_complete,
                             plan_alert_budget=plan_alert_budget,
                             evidence_only=experiment_mode == "dry_run",
-                            scan_context=(
-                                {
+                            scan_context={
+                                **(
+                                    {
                                     "experiment_id": str(experiment.id),
                                     "mode": experiment_mode,
                                     "evidence_only": experiment_mode == "dry_run",
-                                }
-                                if experiment is not None
-                                else None
-                            ),
+                                    }
+                                    if experiment is not None
+                                    else {}
+                                ),
+                                "sharia_screening": {
+                                    "methodology_id": str(screening.methodology_id)
+                                    if screening.methodology_id
+                                    else None,
+                                    "methodology_code": screening.methodology_code,
+                                    "methodology_version": screening.methodology_version,
+                                    "universe_snapshot_id": str(screening.snapshot_id)
+                                    if screening.snapshot_id
+                                    else None,
+                                    "universe_snapshot_hash": screening.snapshot_hash,
+                                    "asset": (
+                                        screening_by_symbol[symbol].model_dump(mode="json")
+                                        if symbol in screening_by_symbol
+                                        else None
+                                    ),
+                                    "policy_decision": "included",
+                                    "policy_reason": (
+                                        "Asset met the approved screened-market policy at "
+                                        "evaluation time."
+                                    ),
+                                    "legacy_local_bypass": screening.legacy_local_bypass,
+                                },
+                            },
                         )
                         if alert is not None:
                             notifications_created += int(

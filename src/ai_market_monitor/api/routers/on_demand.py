@@ -6,6 +6,7 @@ from ai_market_monitor.api.dependencies import (
     get_market_data_provider,
     get_user_principal,
 )
+from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest, OnDemandScanResponse
 from ai_market_monitor.services.interfaces import MarketDataProvider
@@ -20,9 +21,12 @@ async def scan_market_now(
     principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    settings: Settings = Depends(get_settings),
 ) -> OnDemandScanResponse:
     try:
-        response = await OnDemandScanService(session, provider).run(principal.user_id, request)
+        response = await OnDemandScanService(session, provider, settings=settings).run(
+            principal.user_id, request
+        )
         await session.commit()
         return response
     except OnDemandScanError as exc:
