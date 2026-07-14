@@ -34,6 +34,15 @@
     if (detail === "notification_channel_required") {
       return "Connect Telegram or Discord before starting monitoring.";
     }
+    const verifiedMessages = {
+      interpretation_approval_required: "Review and approve the interpretation first.",
+      interpretation_unresolved: "Resolve every ambiguous or unsupported interpretation item.",
+      strategy_examples_regressed: "A saved example fails on this version. Review it before approval.",
+      approved_version_immutable: "This approved version is immutable. Create a new draft to edit it.",
+      strategy_conflict_detected: "The rules contain a critical contradiction that must be resolved.",
+      proof_integrity_violation: "The stored proof failed its integrity check.",
+    };
+    if (typeof detail === "string" && verifiedMessages[detail]) return verifiedMessages[detail];
     if (typeof detail === "string") return detail;
     if (Array.isArray(detail)) {
       const strategyVersionIssue = detail.find((item) => {
@@ -370,6 +379,11 @@
     if (!script) return defaultSchema();
     const parsed = safeJson(script.textContent || "{}", {});
     return Object.keys(parsed).length ? parsed : defaultSchema();
+  }
+
+  function loadInitialInterpretationMetadata() {
+    const script = document.getElementById("amm-builder-metadata");
+    return script ? safeJson(script.textContent || "{}", {}) : {};
   }
 
   function createCondition(index) {
@@ -1250,6 +1264,7 @@
       confidence_score: null,
       mapping_table: [],
       visual_diff: null,
+      ...loadInitialInterpretationMetadata(),
     };
     hydrateBuilderForm(schema);
 
@@ -2692,6 +2707,27 @@
       showToast(message);
     }
 
+    function applyChatDraft(detail) {
+      if (!detail?.strategy?.conditions || !detail.strategy?.universe) return;
+      schema = detail.strategy;
+      translatedSchema = detail.strategy;
+      interpretationMetadata = {
+        ...interpretationMetadata,
+        interpreter: "ai-setup-chat",
+        assumptions: safeArray(detail.translation?.assumptions),
+        ambiguities: safeArray(detail.ambiguity),
+        unsupported_conditions: safeArray(detail.translation?.unsupported_conditions),
+        source_text: detail.translation?.original_idea || null,
+      };
+      validationPassed = false;
+      validationFindings = safeArray(detail.lint);
+      hydrateBuilderForm(schema);
+      renderStrategyCanvas(true);
+    }
+
+    window.addEventListener("traceedge:chat-draft", (event) => applyChatDraft(event.detail));
+    applyChatDraft(window.__traceEdgeChatDraft);
+
     function previewTemplate(templateSchema) {
       const preview = templateSchema || defaultSchema();
       const leaves = collectConditionLeaves(preview.conditions);
@@ -3129,6 +3165,7 @@
         showMode(mode);
       });
     });
+    if (shell?.dataset.openCanvas === "true") showMode("canvas", "Visual");
     document.querySelectorAll("[data-clarification-template]").forEach((button) => {
       button.addEventListener("click", () => {
         const prompt = ensurePromptSection("extra") || field(form, "builder_prompt");
@@ -4607,6 +4644,226 @@
 
   function initLifecycles() {
     const dialog = document.getElementById("lifecycle-chart-dialog");
+    const observabilityRoot = document.querySelector("[data-observability-root]");
+    const radarList = document.querySelector("[data-radar-list]");
+    const radarSummary = document.querySelector("[data-radar-summary]");
+    const radarPagination = document.querySelector("[data-radar-pagination]");
+    const radarState = document.querySelector("[data-radar-state]");
+    const radarSort = document.querySelector("[data-radar-sort]");
+    const radarView = document.querySelector("[data-radar-view]");
+    const healthList = document.querySelector("[data-health-list]");
+    const bottleneckList = document.querySelector("[data-bottleneck-list]");
+    const bottleneckRequired = document.querySelector("[data-bottleneck-required]");
+    const drawer = document.querySelector("[data-observability-drawer]");
+    const drawerBackdrop = document.querySelector("[data-observability-drawer-backdrop]");
+    const drawerContent = document.querySelector("[data-observability-drawer-content]");
+    let previousFocus = null;
+    let radarPage = 1;
+
+    const selectedMonitorId = () => new URLSearchParams(window.location.search).get("monitor") || "";
+    const pretty = (value) => String(value || "unknown").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+    const dateText = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Not available";
+    const relativeTime = (value) => {
+      if (!value) return "Not available";
+      const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
+      const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+      if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
+      const minutes = Math.round(seconds / 60);
+      if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
+      const hours = Math.round(minutes / 60);
+      if (Math.abs(hours) < 48) return formatter.format(hours, "hour");
+      return formatter.format(Math.round(hours / 24), "day");
+    };
+    const valueText = (value) => {
+      if (value === null || value === undefined || value === "") return "Unavailable";
+      if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+      return String(value);
+    };
+    const iconUrl = (name, color = "8b5cf6") => `https://api.iconify.design/lucide:${name}.svg?color=%23${color}`;
+
+    function updateObservabilityUrl() {
+      const params = new URLSearchParams(window.location.search);
+      if (radarState?.value) params.set("state", radarState.value); else params.delete("state");
+      if (radarSort?.value && radarSort.value !== "readiness") params.set("sort", radarSort.value); else params.delete("sort");
+      window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
+    }
+
+    function renderRadar(payload) {
+      if (!radarList) return;
+      const items = safeArray(payload.items);
+      radarList.setAttribute("aria-busy", "false");
+      radarSummary.innerHTML = items.length
+        ? `<strong>${payload.total}</strong><span>candidates in this view</span><span>${items.filter((item) => item.state === "confirmation_pending" || item.state === "near_miss").length} close now</span>`
+        : "";
+      if (!items.length) {
+        radarList.innerHTML = `<div class="observability-empty"><img src="${iconUrl("radar")}" alt=""><strong>No readiness evidence yet</strong><p>The next completed worker evaluation will add candidates here.</p></div>`;
+        radarPagination.replaceChildren();
+        return;
+      }
+      radarList.innerHTML = items.map((item) => {
+        const passed = safeNumber(item.required?.passed);
+        const total = safeNumber(item.required?.total);
+        const completion = total ? Math.round(passed / total * 100) : 0;
+        const blocker = item.blocker || {};
+        const detailButton = item.setup_id
+          ? `<button type="button" class="candidate-open" data-candidate-investigate="${escapeHtml(item.setup_id)}">Inspect evidence</button>`
+          : `<button type="button" class="candidate-open" data-candidate-detail="${escapeHtml(item.id)}">View conditions</button>`;
+        return `<article class="readiness-candidate state-${escapeHtml(item.state)}" data-candidate-id="${escapeHtml(item.id)}">
+          <div class="candidate-state-line"><span class="candidate-state"><i></i>${escapeHtml(pretty(item.state))}</span><span class="candidate-health ${escapeHtml(item.data_health)}"><img src="${iconUrl(item.data_health === "healthy" ? "database" : "triangle-alert")}" alt="">${escapeHtml(pretty(item.data_health))}</span></div>
+          <div class="candidate-identity"><div><strong>${escapeHtml(item.symbol)}</strong><span>${escapeHtml(item.exchange)} · ${escapeHtml(item.timeframe)}</span></div><span class="candidate-monitor-tag" title="${escapeHtml(item.monitor_name)}"><img src="${iconUrl("radar", "4c1d95")}" alt="">${escapeHtml(item.monitor_name)}</span></div>
+          <div class="candidate-readiness"><div><strong>${passed}/${total}</strong><span>required rules passed</span></div><div class="candidate-progress" role="progressbar" aria-valuenow="${completion}" aria-valuemin="0" aria-valuemax="100"><i style="--candidate-progress:${completion}%"></i></div><span>${safeNumber(item.optional?.passed)}/${safeNumber(item.optional?.total)} optional</span></div>
+          <div class="candidate-blocker"><img src="${iconUrl(blocker.key ? "lock-keyhole" : "circle-check")}" alt=""><div><span>${blocker.key ? "Current blocker" : "Required rules complete"}</span><strong>${escapeHtml(blocker.label || "No required blocker")}</strong>${blocker.key ? `<small>Current: ${escapeHtml(valueText(blocker.actual))} · Required: ${escapeHtml(valueText(blocker.required))}${blocker.distance !== null && blocker.distance !== undefined ? ` · Distance: ${escapeHtml(valueText(blocker.distance))}` : ""}</small>` : ""}</div></div>
+          <div class="candidate-meta"><span><img src="${iconUrl("activity")}" alt="">${escapeHtml(item.most_recent_change)}</span><span><img src="${iconUrl("clock-3")}" alt="">Evaluated ${escapeHtml(relativeTime(item.last_evaluated_at))}</span><span><img src="${iconUrl("timer")}" alt="">Next close ${escapeHtml(relativeTime(item.next_candle_close_at))}</span></div>
+          <div class="candidate-actions">${detailButton}<a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Edit in Canvas</a></div>
+        </article>`;
+      }).join("");
+      radarPagination.innerHTML = payload.pages > 1
+        ? `<button type="button" data-radar-page="${Math.max(1, payload.page - 1)}" ${payload.page <= 1 ? "disabled" : ""}>Previous</button><span>Page ${payload.page} of ${payload.pages}</span><button type="button" data-radar-page="${Math.min(payload.pages, payload.page + 1)}" ${payload.page >= payload.pages ? "disabled" : ""}>Next</button>`
+        : "";
+      radarList.querySelectorAll("[data-candidate-detail]").forEach((button) => {
+        button.addEventListener("click", () => openCandidateDetail(items.find((item) => item.id === button.dataset.candidateDetail), button));
+      });
+      radarList.querySelectorAll("[data-candidate-investigate]").forEach((button) => {
+        button.addEventListener("click", () => openInvestigation(button.dataset.candidateInvestigate, button));
+      });
+      radarPagination.querySelectorAll("[data-radar-page]").forEach((button) => {
+        button.addEventListener("click", () => { radarPage = Number(button.dataset.radarPage); loadRadar(); });
+      });
+    }
+
+    async function loadRadar({ quiet = false } = {}) {
+      if (!radarList) return;
+      if (!quiet) radarList.setAttribute("aria-busy", "true");
+      const params = new URLSearchParams({ page: String(radarPage), page_size: "50", sort: radarSort?.value || "readiness" });
+      if (selectedMonitorId()) params.set("monitor_id", selectedMonitorId());
+      if (radarState?.value) params.set("lifecycle_state", radarState.value);
+      try { renderRadar(await api(`/observability/radar?${params}`)); }
+      catch (error) { radarList.innerHTML = `<div class="observability-error"><strong>Readiness evidence is unavailable</strong><p>${escapeHtml(error.message)}</p><button type="button" data-radar-retry>Retry</button></div>`; radarList.querySelector("[data-radar-retry]")?.addEventListener("click", loadRadar); }
+    }
+
+    function renderHealth(payload) {
+      if (!healthList) return;
+      const items = safeArray(payload.items);
+      if (!items.length) { healthList.innerHTML = `<div class="observability-empty"><strong>No health history yet</strong><p>Health appears after the worker completes an active monitor cycle.</p></div>`; return; }
+      healthList.innerHTML = items.map((item) => `<article class="monitor-health-card">
+        <div class="health-card-head"><span class="candidate-monitor-tag"><img src="${iconUrl("radar", "4c1d95")}" alt="">${escapeHtml(item.monitor_name)}</span><small>Version ${escapeHtml(item.strategy_version)}</small></div>
+        <div class="health-dimension"><span>Technical health</span><strong class="health-status ${escapeHtml(item.technical_status)}"><i></i>${escapeHtml(pretty(item.technical_status))}</strong>${safeArray(item.technical_causes).map((cause) => `<p>${escapeHtml(cause.message)}</p>`).join("")}</div>
+        <div class="health-dimension"><span>Strategy health</span><strong class="health-status ${escapeHtml(item.strategy_status)}"><i></i>${escapeHtml(pretty(item.strategy_status))}</strong>${safeArray(item.strategy_causes).map((cause) => `<p>${escapeHtml(cause.message)}</p>`).join("")}</div>
+        <div class="health-metrics"><span><strong>${safeNumber(item.metrics?.symbols_scanned)}/${safeNumber(item.metrics?.symbols_expected)}</strong> symbols</span><span><strong>${safeNumber(item.metrics?.provider_errors)}</strong> provider errors</span><span><strong>${safeNumber(item.metrics?.alerts_24h)}</strong> alerts/24h</span></div>
+        <div class="health-actions"><a href="/dashboard/lifecycles?monitor=${escapeHtml(item.monitor_id)}">Open candidates</a><a href="#condition-bottlenecks">Inspect top blocker</a><button type="button" data-health-explain="${escapeHtml(item.monitor_id)}">Ask AI to explain</button><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}">Refine in Chat</a><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Edit in Canvas</a></div>
+      </article>`).join("");
+      healthList.querySelectorAll("[data-health-explain]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          if (!drawerContent) return;
+          drawerContent.innerHTML = `<div class="investigation-loading"><div class="observability-skeleton"></div></div>`;
+          openDrawer(button);
+          try {
+            const result = await api(`/observability/health/${button.dataset.healthExplain}/explain`, { method: "POST", body: JSON.stringify({ explanation_type: "monitor_health" }) });
+            drawerContent.innerHTML = `<section class="investigation-ai"><strong>Grounded health explanation</strong><p>${escapeHtml(result.explanation)}</p></section><section class="investigation-actions"><button type="button" data-observability-drawer-close>Close</button></section>`;
+            drawerContent.querySelector("[data-observability-drawer-close]")?.addEventListener("click", closeDrawer);
+          } catch (error) { drawerContent.innerHTML = `<div class="observability-error"><strong>Explanation unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
+        });
+      });
+    }
+
+    async function loadHealth() {
+      if (!healthList) return;
+      const suffix = selectedMonitorId() ? `?monitor_id=${encodeURIComponent(selectedMonitorId())}` : "";
+      try { renderHealth(await api(`/observability/health${suffix}`)); }
+      catch (error) { healthList.innerHTML = `<div class="observability-error"><strong>Health summary unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
+    }
+
+    function renderBottlenecks(payload) {
+      if (!bottleneckList) return;
+      const items = safeArray(payload.items);
+      if (!items.length) { bottleneckList.innerHTML = `<div class="observability-empty"><strong>Not enough condition history</strong><p>TraceEdge will rank blockers after retained lifecycle evidence is aggregated.</p></div>`; return; }
+      bottleneckList.innerHTML = items.map((item, index) => `<article class="bottleneck-row ${item.sample_status === "low_sample" ? "low-sample" : ""}">
+        <span class="bottleneck-rank">${index + 1}</span><div class="bottleneck-copy"><div><strong>${escapeHtml(item.condition_label)}</strong><span>${escapeHtml(pretty(item.rule_role))} · ${escapeHtml(item.timeframe || "Any timeframe")}</span></div><p>Final blocker for ${escapeHtml(valueText(item.final_blocker_share))}% of near-complete candidates · ${item.evaluation_count} evaluations</p>${item.median_actual_when_blocked !== null ? `<small>Median value when blocked: ${escapeHtml(valueText(item.median_actual_when_blocked))} · Required: ${escapeHtml(valueText(item.average_required))}</small>` : ""}<div class="bottleneck-bar"><i style="--blocker-share:${Math.min(100, safeNumber(item.final_blocker_share))}%"></i></div>${item.sample_status === "low_sample" ? `<span class="low-sample-label">Low sample · interpret cautiously</span>` : ""}${item.counterfactual ? `<div class="counterfactual-preview"><img src="${iconUrl("flask-conical")}" alt=""><p>${escapeHtml(item.counterfactual.message)}</p></div>` : ""}</div><div class="bottleneck-actions"><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}&condition=${escapeHtml(item.condition_key)}">Discuss</a><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Review rule</a></div>
+      </article>`).join("");
+    }
+
+    async function loadBottlenecks() {
+      if (!bottleneckList) return;
+      const params = new URLSearchParams();
+      if (selectedMonitorId()) params.set("monitor_id", selectedMonitorId());
+      if (bottleneckRequired?.checked) params.set("required", "true");
+      try { renderBottlenecks(await api(`/observability/bottlenecks?${params}`)); }
+      catch (error) { bottleneckList.innerHTML = `<div class="observability-error"><strong>Bottleneck history unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
+    }
+
+    function openDrawer(trigger) {
+      if (!drawer || !drawerBackdrop) return;
+      previousFocus = trigger || document.activeElement;
+      drawer.hidden = false; drawerBackdrop.hidden = false;
+      document.body.classList.add("observability-drawer-open");
+      window.requestAnimationFrame(() => drawer.classList.add("open"));
+      drawer.focus();
+    }
+
+    function closeDrawer() {
+      if (!drawer || !drawerBackdrop) return;
+      drawer.classList.remove("open");
+      document.body.classList.remove("observability-drawer-open");
+      window.setTimeout(() => { drawer.hidden = true; drawerBackdrop.hidden = true; previousFocus?.focus?.(); }, 180);
+    }
+
+    function conditionRows(conditions) {
+      return safeArray(conditions).map((condition) => `<details class="investigation-condition status-${escapeHtml(condition.status || condition.outcome)}"><summary><span><i></i><strong>${escapeHtml(condition.label)}</strong></span><b>${escapeHtml(pretty(condition.status || condition.outcome))}</b></summary><div><span>Current: <strong>${escapeHtml(valueText(condition.actual))}</strong></span><span>Required: <strong>${escapeHtml(valueText(condition.required_value ?? condition.required))}</strong></span><span>Timeframe: <strong>${escapeHtml(condition.timeframe || "Configured")}</strong></span>${condition.explanation ? `<p>${escapeHtml(condition.explanation)}</p>` : ""}</div></details>`).join("");
+    }
+
+    function openCandidateDetail(item, trigger) {
+      if (!item || !drawerContent) return;
+      drawerContent.innerHTML = `<section class="investigation-hero"><span class="candidate-state"><i></i>${escapeHtml(pretty(item.state))}</span><h3>${escapeHtml(item.symbol)} · ${escapeHtml(item.monitor_name)}</h3><p>${escapeHtml(item.most_recent_change)}</p></section><section class="investigation-section"><h3>Latest condition tree</h3>${conditionRows(item.latest_values)}</section><section class="investigation-actions"><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Open Strategy Canvas</a><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}">Refine in AI Chat</a><button type="button" data-observability-drawer-close>Close</button></section>`;
+      drawerContent.querySelector("[data-observability-drawer-close]")?.addEventListener("click", closeDrawer);
+      openDrawer(trigger);
+    }
+
+    function renderInvestigation(payload) {
+      if (!drawerContent) return;
+      const retry = payload.actions?.retry_delivery_id ? `<button type="button" data-retry-delivery="${escapeHtml(payload.actions.retry_delivery_id)}">Retry Notification</button>` : "";
+      drawerContent.innerHTML = `<section class="investigation-hero category-${escapeHtml(payload.primary_category)}"><span class="investigation-evidence">${escapeHtml(pretty(payload.evidence_availability))} evidence</span><h3>${escapeHtml(payload.symbol)} · ${escapeHtml(payload.monitor_name)}</h3><p>${escapeHtml(payload.primary_reason)}</p><div><span>Version ${escapeHtml(payload.strategy_version)}</span><span>${escapeHtml(payload.exchange)} · ${escapeHtml(payload.timeframe)}</span><span>${escapeHtml(dateText(payload.evaluated_window?.to))}</span></div></section><section class="investigation-summary"><article><strong>${safeNumber(payload.condition_summary?.passed)}</strong><span>checks passed</span></article><article><strong>${safeNumber(payload.condition_summary?.failed_required)}</strong><span>required failed</span></article><article><strong>${escapeHtml(pretty(payload.provider_health?.status))}</strong><span>provider health</span></article></section><section class="investigation-section"><h3>Condition evidence</h3>${conditionRows(payload.conditions) || `<p>Exact condition snapshots are unavailable for this historical lifecycle.</p>`}</section><section class="investigation-section"><h3>Lifecycle timeline</h3><div class="investigation-timeline">${safeArray(payload.events).map((event) => `<div><i></i><p><strong>${escapeHtml(pretty(event.to))}</strong><span>${escapeHtml(pretty(event.reason))} · ${escapeHtml(dateText(event.occurred_at))}</span></p></div>`).join("") || `<p>No state-change events were retained.</p>`}</div></section><section class="investigation-section"><h3>Notification path</h3>${safeArray(payload.notification_deliveries).length ? safeArray(payload.notification_deliveries).map((delivery) => `<div class="delivery-evidence"><img src="${iconUrl(delivery.status === "sent" || delivery.status === "delivered" ? "circle-check" : "circle-x")}" alt=""><div><strong>${escapeHtml(pretty(delivery.channel))} · ${escapeHtml(pretty(delivery.status))}</strong><span>${delivery.last_error_detail ? escapeHtml(delivery.last_error_detail) : `Attempts: ${safeNumber(delivery.attempt_count)}`}</span></div></div>`).join("") : `<p>Delivery was not attempted because the setup did not reach a deliverable confirmed state.</p>`}</section><section class="investigation-ai" data-investigation-ai hidden></section><section class="investigation-actions"><button type="button" data-ask-investigation-ai="${escapeHtml(payload.setup_id)}">Ask AI to Explain</button><a href="${escapeHtml(payload.actions.view_full_lifecycle)}">View Full Lifecycle</a><a href="${escapeHtml(payload.actions.open_canvas)}">Open Strategy Canvas</a><a href="${escapeHtml(payload.actions.refine_chat)}">Refine in AI Chat</a><a href="${escapeHtml(payload.actions.view_monitor_health)}">View Monitor Health</a>${retry}<button type="button" data-observability-drawer-close>Close</button></section>`;
+      drawerContent.querySelector("[data-observability-drawer-close]")?.addEventListener("click", closeDrawer);
+      drawerContent.querySelector("[data-ask-investigation-ai]")?.addEventListener("click", async (event) => {
+        const target = drawerContent.querySelector("[data-investigation-ai]"); target.hidden = false; target.textContent = "Explaining the retained evidence...";
+        try { const result = await api(`/lifecycles/${event.currentTarget.dataset.askInvestigationAi}/investigation/explain`, { method: "POST", body: JSON.stringify({ explanation_type: "why_no_alert" }) }); target.innerHTML = `<strong>Grounded explanation</strong><p>${escapeHtml(result.explanation)}</p>`; }
+        catch (error) { target.innerHTML = `<strong>Explanation unavailable</strong><p>${escapeHtml(error.message)}</p>`; }
+      });
+      drawerContent.querySelector("[data-retry-delivery]")?.addEventListener("click", async (event) => {
+        try { await api(`/notification-deliveries/${event.currentTarget.dataset.retryDelivery}/retry`, { method: "POST" }); event.currentTarget.disabled = true; event.currentTarget.textContent = "Retry queued"; showToast("Notification retry queued."); }
+        catch (error) { showToast(error.message, "error"); }
+      });
+    }
+
+    async function openInvestigation(setupId, trigger) {
+      if (!drawerContent) return;
+      drawerContent.innerHTML = `<div class="investigation-loading"><div class="observability-skeleton"></div><div class="observability-skeleton"></div></div>`;
+      openDrawer(trigger);
+      try { renderInvestigation(await api(`/lifecycles/${setupId}/investigation`)); }
+      catch (error) { drawerContent.innerHTML = `<div class="observability-error"><strong>Investigation unavailable</strong><p>${escapeHtml(error.message)}</p><button type="button" data-investigation-retry>Retry</button></div>`; drawerContent.querySelector("[data-investigation-retry]")?.addEventListener("click", () => openInvestigation(setupId, trigger)); }
+    }
+
+    if (observabilityRoot) {
+      const params = new URLSearchParams(window.location.search);
+      if (radarState) radarState.value = params.get("state") || "";
+      if (radarSort) radarSort.value = params.get("sort") || "readiness";
+      radarState?.addEventListener("change", () => { radarPage = 1; updateObservabilityUrl(); loadRadar(); });
+      radarSort?.addEventListener("change", () => { radarPage = 1; updateObservabilityUrl(); loadRadar(); });
+      radarView?.addEventListener("click", () => { const compact = radarList.classList.toggle("compact"); radarView.setAttribute("aria-pressed", String(compact)); radarView.querySelector("span").textContent = compact ? "Expanded" : "Compact"; });
+      bottleneckRequired?.addEventListener("change", loadBottlenecks);
+      Promise.all([loadRadar(), loadHealth(), loadBottlenecks()]);
+      const interval = Math.max(5, safeNumber(observabilityRoot.dataset.pollSeconds, 15)) * 1000;
+      window.setInterval(() => { if (!document.hidden) Promise.all([loadRadar({ quiet: true }), loadHealth()]); }, interval);
+    }
+
+    const filterTrigger = document.querySelector("[data-monitor-filter-trigger]");
+    const filterMenu = document.querySelector("[data-monitor-filter-menu]");
+    filterTrigger?.addEventListener("click", () => { const open = filterTrigger.getAttribute("aria-expanded") === "true"; filterTrigger.setAttribute("aria-expanded", String(!open)); filterMenu.hidden = open; if (!open) filterMenu.querySelector("input")?.focus(); });
+    document.querySelector("[data-monitor-filter-search]")?.addEventListener("input", (event) => { const term = event.target.value.toLowerCase(); filterMenu.querySelectorAll("[data-monitor-name]").forEach((option) => { option.hidden = !option.dataset.monitorName.includes(term); }); });
+    document.addEventListener("click", (event) => { if (filterMenu && !event.target.closest("[data-monitor-filter]")) { filterMenu.hidden = true; filterTrigger?.setAttribute("aria-expanded", "false"); } });
+    drawerBackdrop?.addEventListener("click", closeDrawer);
+    document.querySelectorAll("[data-observability-drawer-close]").forEach((button) => button.addEventListener("click", closeDrawer));
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && drawer && !drawer.hidden) { event.preventDefault(); closeDrawer(); } });
+    document.querySelectorAll("[data-lifecycle-investigate]").forEach((button) => button.addEventListener("click", () => openInvestigation(button.dataset.lifecycleInvestigate, button)));
     document.querySelectorAll("[data-lifecycle-toggle]").forEach((button) => {
       button.addEventListener("click", () => {
         const details = document.querySelector(
@@ -5637,6 +5894,530 @@
     });
   }
 
+  function initVerifiedStrategyWorkspace() {
+    const workspace = document.querySelector("[data-verified-workspace]");
+    if (!workspace) return;
+    const strategyId = workspace.dataset.strategyId;
+    let versionId = workspace.dataset.versionId;
+    const content = workspace.querySelector("[data-verified-content]");
+    const loading = workspace.querySelector("[data-verified-loading]");
+    const notice = workspace.querySelector("[data-verified-notice]");
+    let state = null;
+    let contractCache = null;
+    let historyTab = "matches";
+
+    const setNotice = (message, tone = "") => {
+      if (!notice) return;
+      notice.textContent = message;
+      notice.className = `verified-notice ${tone}`.trim();
+    };
+
+    const setBusy = (button, busy, label = "Working...") => {
+      if (!button) return;
+      if (busy) {
+        button.dataset.originalLabel = button.textContent;
+        button.textContent = label;
+        button.disabled = true;
+      } else {
+        button.textContent = button.dataset.originalLabel || button.textContent;
+        button.disabled = false;
+      }
+    };
+
+    const readable = (value) => String(value || "unknown").replaceAll("_", " ");
+    const dateValue = (value) => {
+      if (!value) return "Not recorded";
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+    };
+    const toIso = (value) => {
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) throw new Error("Choose a valid date and time.");
+      return parsed.toISOString();
+    };
+
+    function renderInterpretation(items, verification) {
+      const list = workspace.querySelector("[data-interpretation-list]");
+      const status = workspace.querySelector("[data-interpretation-state]");
+      if (status) status.textContent = readable(verification.interpretation_status);
+      if (!list) return;
+      if (!items.length) {
+        list.innerHTML = '<div class="verified-empty">No phrase-to-rule mapping is available.</div>';
+        return;
+      }
+      list.innerHTML = items.map((item) => {
+        const mechanics = safeArray(item.mechanics?.rules).map((rule) => `
+          <div><span>Rule</span><strong>${escapeHtml(rule.interpretation)}</strong></div>
+          <div><span>Timeframe</span><strong>${escapeHtml(rule.timeframe || "Inherited")}</strong></div>
+          <div><span>Operator</span><strong>${escapeHtml(readable(rule.operator))}</strong></div>
+          <div><span>Threshold</span><strong>${escapeHtml(rule.threshold ?? "Rule-defined")}</strong></div>
+          <div><span>Data source</span><strong>${escapeHtml(rule.data_source)}</strong></div>
+          <div><span>Candle close</span><strong>${rule.candle_close_required ? "Required" : "Intrabar allowed"}</strong></div>
+        `).join("");
+        const assumptions = safeArray(item.assumptions).length
+          ? `<p><strong>Assumption:</strong> ${safeArray(item.assumptions).map(escapeHtml).join("; ")}</p>`
+          : "";
+        let action = "";
+        if (item.resolution_status === "unresolved" && item.status === "assumed") {
+          action = `<button class="button button-secondary" type="button" data-accept-statement="${escapeHtml(item.id)}">Accept assumption</button>`;
+        } else if (item.resolution_status === "unresolved" && item.status === "ambiguous") {
+          action = `<label>Clarification<input data-statement-answer="${escapeHtml(item.id)}" placeholder="Explain what this phrase means"></label><button class="button button-secondary" type="button" data-answer-statement="${escapeHtml(item.id)}">Answer</button>`;
+        } else if (["unsupported", "contradictory"].includes(item.status)) {
+          action = `<a class="button button-secondary" href="/dashboard/strategies/${strategyId}/builder">Edit or remove instruction</a>`;
+        }
+        return `<article class="interpretation-rule-card" data-status="${escapeHtml(item.status)}">
+          <div class="interpretation-card-head"><span class="interpretation-status">${escapeHtml(readable(item.status))}</span><small>${escapeHtml(readable(item.resolution_status))}</small></div>
+          <p class="interpretation-phrase">“${escapeHtml(item.original_phrase)}”</p>
+          <p>${escapeHtml(item.structured_interpretation)}</p>
+          ${assumptions}<div class="mechanic-grid">${mechanics}</div><div class="button-row">${action}</div>
+        </article>`;
+      }).join("");
+    }
+
+    function renderTests(items) {
+      const list = workspace.querySelector("[data-test-list]");
+      if (!list) return;
+      if (!items.length) {
+        list.innerHTML = '<div class="verified-empty">No saved examples yet. Add one moment that should trigger and one that should not.</div>';
+        return;
+      }
+      list.innerHTML = items.map((item) => {
+        const run = item.latest_run;
+        const conditions = safeArray(run?.condition_results).map((condition) => `
+          <div><span>${escapeHtml(condition.name || condition.condition_id || "Condition")}</span><strong>${escapeHtml(readable(condition.state))}</strong><small>Actual: ${escapeHtml(condition.actual_value ?? "Unavailable")} · Required: ${escapeHtml(condition.required_value ?? "Rule-defined")}</small></div>
+        `).join("");
+        return `<article class="verified-test-card">
+          <div class="verified-test-head"><strong>${escapeHtml(item.title)}</strong><span class="test-result-badge">${escapeHtml(readable(run?.status || "not_run"))}</span></div>
+          <small>${escapeHtml(item.symbol)} · ${escapeHtml(item.timeframe)} · ${dateValue(item.evaluation_time)} · ${escapeHtml(readable(item.expected_result))}</small>
+          ${run?.mismatch_reason ? `<p>${escapeHtml(run.mismatch_reason)}</p>` : ""}
+          <details><summary>Condition QA report</summary><div class="verified-metric-row">${conditions || "No retained condition values."}</div></details>
+          <button class="button button-secondary" type="button" data-rerun-test="${escapeHtml(item.id)}">Rerun</button>
+        </article>`;
+      }).join("");
+    }
+
+    function renderHistory(summary) {
+      const metrics = workspace.querySelector("[data-history-summary]");
+      if (!metrics) return;
+      if (!summary || !summary.evaluations) {
+        metrics.innerHTML = '<div class="verified-empty">Historical validation has not run for this version.</div>';
+      } else {
+        metrics.innerHTML = [
+          ["Evaluations", summary.evaluations], ["Matches", summary.matches],
+          ["Near matches", summary.near_matches], ["Invalidated", summary.invalidated],
+          ["Non-matches", summary.non_matches], ["Breadth", readable(summary.breadth)],
+          ["Main blocker", summary.most_common_failed_condition || "No repeated blocker"],
+          ["Estimated weekly alerts", summary.estimated_frequency?.per_week ?? "Insufficient sample"],
+        ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+      }
+      renderHistoryChart(summary);
+      renderHistoryExamples(summary);
+    }
+
+    function renderHistoryChart(summary) {
+      const target = workspace.querySelector("[data-history-chart]");
+      if (!target) return;
+      const candles = safeArray(summary?.chart?.candles).slice(-140);
+      const closes = candles.map((item) => Number(item.close)).filter(Number.isFinite);
+      if (closes.length < 2) {
+        target.innerHTML = '<div class="verified-empty">A chart will appear after historical candle evidence is available.</div>';
+        return;
+      }
+      const low = Math.min(...closes);
+      const high = Math.max(...closes);
+      const spread = high - low || 1;
+      const points = closes.map((value, index) => {
+        const x = (index / Math.max(1, closes.length - 1)) * 100;
+        const y = 38 - ((value - low) / spread) * 34;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      }).join(" ");
+      const markers = safeArray(summary?.chart?.markers).slice(-8);
+      target.innerHTML = `<div class="historical-chart-head"><strong>${escapeHtml(summary.chart.symbol || "Historical market")}</strong><span>${escapeHtml(summary.chart.timeframe || "")}</span></div><svg viewBox="0 0 100 42" role="img" aria-label="Historical close-price path for retained validation candles"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"></polyline></svg><div class="historical-chart-markers">${markers.map((item) => `<span>${escapeHtml(readable(item.outcome))} · ${escapeHtml(item.score)}% · ${dateValue(item.time)}</span>`).join("") || "<span>No match markers in the selected window.</span>"}</div>`;
+    }
+
+    function renderHistoryExamples(summary) {
+      const target = workspace.querySelector("[data-history-examples]");
+      if (!target) return;
+      const examples = safeArray(summary?.examples_by_outcome?.[historyTab]);
+      target.innerHTML = examples.length ? examples.map((item) => `
+        <article class="historical-example"><div class="verified-test-head"><strong>${escapeHtml(item.symbol)}</strong><span class="test-result-badge">${escapeHtml(readable(item.outcome))}</span></div><small>${dateValue(item.timestamp)} · ${escapeHtml(item.score)}% condition completion</small><p>${item.primary_blocker ? `Blocked by ${escapeHtml(item.primary_blocker)}.` : "All required monitored conditions passed."}</p><details><summary>Rule values</summary><div class="verified-metric-row">${safeArray(item.conditions).map((condition) => `<div><span>${escapeHtml(condition.name)}</span><strong>${escapeHtml(readable(condition.state))}</strong><small>${escapeHtml(condition.actual_value ?? "Unavailable")} / ${escapeHtml(condition.required_value ?? "Rule-defined")}</small></div>`).join("")}</div></details></article>
+      `).join("") : `<div class="verified-empty">No retained ${escapeHtml(readable(historyTab))} examples in this preview.</div>`;
+    }
+
+    function renderQuality(report) {
+      const target = workspace.querySelector("[data-quality-dimensions]");
+      const compatible = workspace.querySelector("[data-monitor-compatible]");
+      if (compatible) compatible.textContent = report?.monitor_compatible ? "Ready for monitoring" : "Review required";
+      if (target) {
+        target.innerHTML = Object.entries(report?.dimensions || {}).map(([key, item]) => `
+          <article class="quality-dimension" data-status="${escapeHtml(item.status)}"><strong>${escapeHtml(readable(key))}</strong><span>${escapeHtml(readable(item.status))}</span><p>${escapeHtml(item.explanation)}</p></article>
+        `).join("") || '<div class="verified-empty">Quality dimensions are not available.</div>';
+      }
+      const findings = workspace.querySelector("[data-quality-findings]");
+      if (findings) {
+        const influence = report?.condition_influence || {};
+        const influenceCopy = influence.evidence_available
+          ? `<div class="quality-influence"><p><span>Most influential blocker</span><strong>${escapeHtml(influence.most?.condition || "Unavailable")}</strong><small>${escapeHtml(influence.most?.failures ?? 0)} failures across ${escapeHtml(influence.most?.evaluations ?? 0)} evaluations</small></p><p><span>Least influential in this sample</span><strong>${escapeHtml(influence.least?.condition || "Unavailable")}</strong><small>${escapeHtml(influence.least?.failures ?? 0)} failures across ${escapeHtml(influence.least?.evaluations ?? 0)} evaluations</small></p><small>${escapeHtml(influence.method)}</small></div>`
+          : `<p>${escapeHtml(influence.method || "Run historical validation to measure condition influence.")}</p>`;
+        const risks = safeArray(report?.remaining_risks);
+        findings.innerHTML = `${influenceCopy}<h3>Remaining risks</h3>${risks.length ? risks.map((item) => `<p>${escapeHtml(item)}</p>`).join("") : "<p>No deterministic validation risks are currently recorded.</p>"}`;
+      }
+    }
+
+    function renderVersions(items, current, diff) {
+      const target = workspace.querySelector("[data-version-list]");
+      if (target) {
+        target.innerHTML = safeArray(items).map((item) => `
+          <article class="verified-version-card ${item.id === current.id ? "current" : ""}"><div class="verified-version-row"><strong>Version ${escapeHtml(item.number)}</strong><span class="verified-state">${escapeHtml(readable(item.status))}</span>${item.active ? '<span class="verified-state">Active</span>' : ""}</div><p>${escapeHtml(item.change_summary || "Initial strategy version.")}</p><small>${dateValue(item.created_at)} · ${escapeHtml(String(item.schema_hash || "").slice(0, 12))}</small>${item.id !== current.id ? `<button class="button button-secondary" type="button" data-restore-version="${escapeHtml(item.id)}">Restore as new draft</button>` : ""}</article>
+        `).join("");
+      }
+      const diffTarget = workspace.querySelector("[data-semantic-diff]");
+      if (diffTarget) {
+        diffTarget.innerHTML = safeArray(diff).length
+          ? `<h3>Changes in Version ${escapeHtml(current.number)}</h3>${safeArray(diff).map((item) => `<p><strong>${escapeHtml(readable(item.path))}</strong>: ${escapeHtml(item.before ?? "not present")} → ${escapeHtml(item.after ?? "removed")}</p>`).join("")}`
+          : "<p>This is the first version, or its mechanics match the parent version.</p>";
+      }
+    }
+
+    function renderHealth(health) {
+      const target = workspace.querySelector("[data-verified-health]");
+      if (!target) return;
+      target.innerHTML = `<div class="verified-metric-row"><div><span>Technical health</span><strong>${escapeHtml(readable(health?.technical))}</strong></div><div><span>Strategy health</span><strong>${escapeHtml(readable(health?.strategy))}</strong></div></div>${safeArray(health?.causes).map((cause) => `<p>${escapeHtml(cause.message || cause)}</p>`).join("") || "<p>More scan history may be needed for a detailed health cause.</p>"}`;
+    }
+
+    function outcomePath(points) {
+      const closes = safeArray(points).map((item) => Number(item.close)).filter(Number.isFinite);
+      if (closes.length < 2) return "";
+      const low = Math.min(...closes);
+      const high = Math.max(...closes);
+      const spread = high - low || 1;
+      const coordinates = closes.map((value, index) => {
+        const x = (index / Math.max(1, closes.length - 1)) * 100;
+        const y = 28 - ((value - low) / spread) * 24;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      }).join(" ");
+      return `<svg class="outcome-price-path" viewBox="0 0 100 32" role="img" aria-label="Retained price path over the selected review horizon"><polyline points="${coordinates}" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline></svg>`;
+    }
+
+    function renderOutcomes(items) {
+      const target = workspace.querySelector("[data-outcome-list]");
+      if (!target) return;
+      if (!items.length) {
+        target.innerHTML = '<div class="verified-empty">No confirmed alerts are ready for outcome review. Historical preview results are not treated as live outcomes.</div>';
+        return;
+      }
+      target.innerHTML = items.map((item) => {
+        const latest = safeArray(item.reviews)[0];
+        const metrics = latest?.outcome_metrics || {};
+        const path = latest ? outcomePath(latest.price_path) : "";
+        const reviewSummary = latest
+          ? `<p>User result: <strong>${escapeHtml(readable(latest.classification))}</strong> after ${escapeHtml(latest.horizon_minutes)} minutes.</p><div class="verified-metric-row"><div><span>Market path</span><strong>${metrics.evidence_available ? `${escapeHtml(metrics.change_percent)}%` : "Unavailable"}</strong></div><div><span>Classification source</span><strong>User</strong></div></div>${path}${safeArray(latest.tags).length ? `<p class="outcome-tags">${safeArray(latest.tags).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</p>` : ""}`
+          : "<p>This alert has not been reviewed at an outcome horizon.</p>";
+        return `<article class="outcome-review-card"><div class="verified-test-head"><strong>${escapeHtml(item.symbol || item.title)}</strong><span class="verified-state">Version ${escapeHtml(item.strategy_version)}</span></div><small>${escapeHtml(item.exchange || "unknown")} &middot; ${escapeHtml(item.timeframe || "unknown")} &middot; ${dateValue(item.confirmed_at)}</small>${reviewSummary}<form class="verified-form compact" data-outcome-form="${escapeHtml(item.alert_id)}"><label>Horizon<select name="horizon_minutes" data-outcome-horizon><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">24 hours</option><option value="10080">7 days</option><option value="custom">Custom</option></select></label><label data-custom-horizon hidden>Custom minutes<input name="custom_horizon_minutes" type="number" min="1" max="525600" inputmode="numeric"></label><label>Your result<select name="classification"><option value="positive">Positive</option><option value="negative">Negative</option><option value="neutral">Neutral</option><option value="invalid">Invalid or irrelevant</option></select></label><label class="verified-form-wide">Your definition or notes<textarea name="notes" rows="2" placeholder="Explain what this outcome means to you"></textarea></label><label class="verified-form-wide">Tags<input name="tags" maxlength="300" placeholder="reviewed, trend, unusual data"></label><button class="button button-primary verified-form-wide" type="submit">Review outcome</button></form><a href="${escapeHtml(item.proof_url)}" target="_blank" rel="noopener">View immutable alert proof</a></article>`;
+      }).join("");
+    }
+
+    function renderSuggestion(suggestion) {
+      const target = workspace.querySelector("[data-improvement-result]");
+      if (!target) return;
+      const effect = suggestion.historical_effect || {};
+      target.innerHTML = `<article class="improvement-card"><span class="verified-state">${escapeHtml(readable(suggestion.confidence))} evidence confidence</span><h3>${escapeHtml(readable(suggestion.action))}</h3><p>${escapeHtml(suggestion.reason)}</p><div class="verified-metric-row"><div><span>Reviewed outcomes</span><strong>${escapeHtml(suggestion.outcome_evidence?.sample_count ?? 0)}</strong></div><div><span>Historical effect</span><strong>${escapeHtml(readable(effect.status))}</strong></div><div><span>Alerts retained</span><strong>${escapeHtml(effect.alerts_retained ?? "Run preview first")}</strong></div><div><span>Alerts removed</span><strong>${escapeHtml(effect.alerts_removed ?? "Run preview first")}</strong></div><div><span>Strong outcomes lost</span><strong>${escapeHtml(effect.strong_outcomes_lost ?? "Insufficient linked evidence")}</strong></div><div><span>Weak outcomes removed</span><strong>${escapeHtml(effect.weak_outcomes_removed ?? "Insufficient linked evidence")}</strong></div></div>${safeArray(suggestion.limitations).map((item) => `<p>${escapeHtml(item)}</p>`).join("")}<div class="button-row"><button class="button button-primary" type="button" data-apply-suggestion="${escapeHtml(suggestion.id)}">Test this change as a draft</button><button class="button button-secondary" type="button" data-dismiss-suggestion>Dismiss</button></div></article>`;
+    }
+
+    function renderWorkspace(payload) {
+      state = payload;
+      versionId = payload.version.id;
+      renderInterpretation(safeArray(payload.interpretation), payload.verification || {});
+      renderTests(safeArray(payload.test_cases));
+      renderHistory(payload.verification?.historical_summary || {});
+      renderQuality(payload.verification?.quality_report || {});
+      renderVersions(payload.versions, payload.version, payload.verification?.semantic_diff);
+      renderHealth(payload.health || {});
+      const blockers = safeArray(payload.activation_blockers);
+      const approve = workspace.querySelector("[data-approve-version]");
+      const activate = workspace.querySelector("[data-activate-version]");
+      if (approve) approve.disabled = blockers.length > 0;
+      if (activate) activate.disabled = blockers.length > 0;
+      setNotice(
+        blockers.length
+          ? blockers.map((item) => item.message).join(" ")
+          : "This version has no verification blocker. You remain in control of approval and activation.",
+        blockers.length ? "warning" : "success",
+      );
+    }
+
+    async function loadWorkspace() {
+      try {
+        const payload = await api(`/strategies/${strategyId}/verification?version_id=${versionId}`);
+        renderWorkspace(payload);
+        const outcomes = await api(`/strategies/${strategyId}/outcomes`);
+        renderOutcomes(safeArray(outcomes.items));
+        if (loading) loading.hidden = true;
+        if (content) content.hidden = false;
+      } catch (error) {
+        if (loading) loading.hidden = true;
+        setNotice(error.message, "error");
+      }
+    }
+
+    workspace.addEventListener("click", async (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      try {
+        if (button.matches("[data-toggle-test-form]")) {
+          workspace.querySelector("[data-test-form]").hidden = false;
+          workspace.querySelector("[data-test-form] input")?.focus();
+        } else if (button.matches("[data-cancel-test]")) {
+          workspace.querySelector("[data-test-form]").hidden = true;
+        } else if (button.matches("[data-toggle-history-form]")) {
+          workspace.querySelector("[data-history-form]").hidden = false;
+        } else if (button.matches("[data-accept-statement]")) {
+          setBusy(button, true, "Accepting...");
+          await api(`/strategies/${strategyId}/interpretation/${button.dataset.acceptStatement}/resolve`, { method: "POST", body: JSON.stringify({ action: "accept" }) });
+          await loadWorkspace();
+        } else if (button.matches("[data-answer-statement]")) {
+          const id = button.dataset.answerStatement;
+          const input = workspace.querySelector(`[data-statement-answer="${CSS.escape(id)}"]`);
+          if (!input?.value.trim()) throw new Error("Enter your clarification first.");
+          setBusy(button, true, "Saving...");
+          await api(`/strategies/${strategyId}/interpretation/${id}/resolve`, { method: "POST", body: JSON.stringify({ action: "answer", resolution_text: input.value.trim() }) });
+          await loadWorkspace();
+        } else if (button.matches("[data-approve-interpretation]")) {
+          setBusy(button, true, "Approving...");
+          await api(`/strategies/${strategyId}/versions/${versionId}/interpretation/approve`, { method: "POST", body: "{}" });
+          showToast("Interpretation approved. The exact reviewed version is recorded.");
+          await loadWorkspace();
+        } else if (button.matches("[data-rerun-test]")) {
+          setBusy(button, true, "Running...");
+          await api(`/strategies/${strategyId}/tests/${button.dataset.rerunTest}/run?version_id=${versionId}`, { method: "POST", body: "{}" });
+          await loadWorkspace();
+        } else if (button.matches("[data-history-tab]")) {
+          historyTab = button.dataset.historyTab;
+          workspace.querySelectorAll("[data-history-tab]").forEach((item) => item.setAttribute("aria-selected", String(item === button)));
+          renderHistoryExamples(state?.verification?.historical_summary || {});
+        } else if (button.matches("[data-restore-version]")) {
+          if (!window.confirm("Restore this version as a new editable draft? The live version will not change.")) return;
+          setBusy(button, true, "Restoring...");
+          const result = await api(`/strategies/${strategyId}/versions/${button.dataset.restoreVersion}/restore`, { method: "POST", body: "{}" });
+          window.location.assign(`/dashboard/strategies/${strategyId}/verify?version=${result.version.id}`);
+        } else if (button.matches("[data-compare-versions]")) {
+          const versions = safeArray(state?.versions);
+          if (versions.length < 2) throw new Error("Create a second version before comparing behavior.");
+          setBusy(button, true, "Comparing...");
+          const comparison = await api("/strategies/compare", { method: "POST", body: JSON.stringify({ left_version_id: versions[1].id, right_version_id: versions[0].id }) });
+          const leftBehavior = comparison.behavior?.left || {};
+          const rightBehavior = comparison.behavior?.right || {};
+          const leftVerification = comparison.verification_effects?.left || {};
+          const rightVerification = comparison.verification_effects?.right || {};
+          const behaviorSummary = `<div class="verified-metric-row"><div><span>Confirmed matches</span><strong>${escapeHtml(leftBehavior.confirmed_matches ?? 0)} → ${escapeHtml(rightBehavior.confirmed_matches ?? 0)}</strong></div><div><span>Historical matches</span><strong>${escapeHtml(leftVerification.historical_matches ?? 0)} → ${escapeHtml(rightVerification.historical_matches ?? 0)}</strong></div><div><span>Saved-test status</span><strong>${escapeHtml(readable(leftVerification.test_status))} → ${escapeHtml(readable(rightVerification.test_status))}</strong></div><div><span>Changed test results</span><strong>${escapeHtml(safeArray(rightVerification.changed_test_results).length)}</strong></div></div>${safeArray(comparison.behavior?.comparison_notes).map((item) => `<p>${escapeHtml(item)}</p>`).join("")}`;
+          workspace.querySelector("[data-semantic-diff]").innerHTML = `<h3>Version ${escapeHtml(comparison.left.version_number || versions[1].number)} to Version ${escapeHtml(comparison.right.version_number || versions[0].number)}</h3>${safeArray(comparison.diff).map((item) => `<p>${escapeHtml(item.label || item.field || "Rule change")}: ${escapeHtml(item.before ?? "not present")} → ${escapeHtml(item.after ?? "removed")}</p>`).join("") || "<p>No structured rule difference was found.</p>"}${behaviorSummary}`;
+          setBusy(button, false);
+        } else if (button.matches("[data-save-draft]")) {
+          setBusy(button, true, "Saving...");
+          await api(`/strategies/${strategyId}/versions/${versionId}/save-draft`, {
+            method: "POST",
+            body: "{}",
+          });
+          showToast("Draft saved and recorded in the strategy audit trail.");
+          setBusy(button, false);
+        } else if (button.matches("[data-approve-version]")) {
+          setBusy(button, true, "Approving...");
+          await api(`/strategies/${strategyId}/approve`, { method: "POST", body: JSON.stringify({ strategy_version_id: versionId, expected_schema_hash: state.version.schema_hash }) });
+          showToast("Version approved. No active strategy was silently replaced.");
+          await loadWorkspace();
+        } else if (button.matches("[data-activate-version]")) {
+          if (!window.confirm("Activate this exact approved strategy version for continuous monitoring?")) return;
+          setBusy(button, true, "Activating...");
+          try {
+            await publishStrategyVersion(strategyId, state.version);
+            showToast("Monitor activated with the reviewed strategy version.");
+            window.setTimeout(() => window.location.assign("/dashboard/lifecycles"), 500);
+          } catch (error) {
+            if (error.message.includes("Connect Telegram")) {
+              savePendingMonitorPublish(strategyId, state.version);
+              window.location.assign(pendingMonitorPublishUrl());
+              return;
+            }
+            throw error;
+          }
+        } else if (button.matches("[data-improvement]")) {
+          setBusy(button, true, "Analysing evidence...");
+          const suggestion = await api(`/cockpit/strategies/${strategyId}/suggestions`, {
+            method: "POST",
+            body: JSON.stringify({ action: button.dataset.improvement }),
+          });
+          renderSuggestion(suggestion);
+          setBusy(button, false);
+        } else if (button.matches("[data-apply-suggestion]")) {
+          if (!window.confirm("Create and test this as a new draft version? The active monitor will not change.")) return;
+          setBusy(button, true, "Creating and testing draft...");
+          const result = await api(`/cockpit/suggestions/${button.dataset.applySuggestion}/apply`, {
+            method: "POST",
+            body: "{}",
+          });
+          showToast("Suggested change was tested and saved as a draft. Review it before approval.");
+          window.location.assign(`/dashboard/strategies/${strategyId}/verify?version=${result.draft_version.id}`);
+        } else if (button.matches("[data-dismiss-suggestion]")) {
+          workspace.querySelector("[data-improvement-result]").innerHTML = "";
+        } else if (button.matches("[data-export-contract], [data-copy-contract]")) {
+          contractCache = contractCache || await api(`/strategies/${strategyId}/versions/${versionId}/contract`);
+          if (button.matches("[data-copy-contract]")) {
+            const text = `${contractCache.strategy.name} · Version ${contractCache.version.number}\n${contractCache.notice}\nIntegrity: ${contractCache.integrity_hash}`;
+            await navigator.clipboard.writeText(text);
+            showToast("Strategy contract summary copied.");
+          } else {
+            const blob = new Blob([JSON.stringify(contractCache, null, 2)], { type: "application/json" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `${contractCache.strategy.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-v${contractCache.version.number}-contract.json`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+          }
+          workspace.querySelector("[data-contract-summary]").innerHTML = `<div class="verified-metric-row"><div><span>Version</span><strong>${escapeHtml(contractCache.version.number)}</strong></div><div><span>Integrity hash</span><strong>${escapeHtml(contractCache.integrity_hash.slice(0, 16))}...</strong></div><div><span>Saved examples</span><strong>${escapeHtml(contractCache.unit_tests.length)}</strong></div></div>`;
+        }
+      } catch (error) {
+        setBusy(button, false);
+        setNotice(error.message, "error");
+      }
+    });
+
+    workspace.querySelector("[data-test-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submit = form.querySelector("button[type='submit']");
+      const values = Object.fromEntries(new FormData(form));
+      try {
+        setBusy(submit, true, "Running example...");
+        values.evaluation_time = toIso(values.evaluation_time);
+        await api(`/strategies/${strategyId}/tests?version_id=${versionId}`, { method: "POST", body: JSON.stringify(values) });
+        form.reset(); form.hidden = true;
+        showToast("Test case saved and run against the selected historical moment.");
+        await loadWorkspace();
+      } catch (error) { setNotice(error.message, "error"); setBusy(submit, false); }
+    });
+
+    workspace.querySelector("[data-history-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submit = form.querySelector("button[type='submit']");
+      const values = Object.fromEntries(new FormData(form));
+      try {
+        setBusy(submit, true, "Evaluating history...");
+        values.symbols = values.symbols.split(",").map((item) => item.trim()).filter(Boolean);
+        values.started_at = toIso(values.started_at); values.ended_at = toIso(values.ended_at);
+        const result = await api(`/strategies/${strategyId}/versions/${versionId}/historical-validation`, { method: "POST", body: JSON.stringify(values) });
+        form.hidden = true;
+        showToast("Historical preview completed with deterministic evaluator results.");
+        await loadWorkspace();
+        renderHistory(result.summary);
+      } catch (error) { setNotice(error.message, "error"); setBusy(submit, false); }
+    });
+
+    workspace.querySelector("[data-forensic-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submit = form.querySelector("button[type='submit']");
+      const values = Object.fromEntries(new FormData(form));
+      try {
+        setBusy(submit, true, "Reconstructing...");
+        values.strategy_id = strategyId; values.requested_time = toIso(values.requested_time);
+        const result = await api("/forensic-investigations", { method: "POST", body: JSON.stringify(values) });
+        workspace.querySelector("[data-forensic-result]").innerHTML = `<article class="forensic-conclusion"><span class="verified-state">${escapeHtml(readable(result.primary_category))}</span><h3>${escapeHtml(result.conclusion)}</h3><p>Evidence: ${escapeHtml(readable(result.evidence_availability))}</p><div class="verified-metric-row">${safeArray(result.rule_results).map((item) => `<div><span>${escapeHtml(item.condition_key)}</span><strong>${escapeHtml(readable(item.status))}</strong><small>Actual: ${escapeHtml(item.actual ?? "Unavailable")} · Required: ${escapeHtml(item.required ?? "Rule-defined")}</small></div>`).join("") || "No retained condition snapshot was available."}</div></article>`;
+        setBusy(submit, false);
+      } catch (error) { setNotice(error.message, "error"); setBusy(submit, false); }
+    });
+
+    workspace.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-outcome-horizon]");
+      if (!select) return;
+      const custom = select.closest("form")?.querySelector("[data-custom-horizon]");
+      if (!custom) return;
+      custom.hidden = select.value !== "custom";
+      const input = custom.querySelector("input");
+      if (input) input.required = select.value === "custom";
+    });
+
+    workspace.addEventListener("submit", async (event) => {
+      const form = event.target.closest("[data-outcome-form]");
+      if (!form) return;
+      event.preventDefault();
+      const submit = form.querySelector("button[type='submit']");
+      const values = Object.fromEntries(new FormData(form));
+      values.horizon_minutes = Number(
+        values.horizon_minutes === "custom"
+          ? values.custom_horizon_minutes
+          : values.horizon_minutes,
+      );
+      if (!Number.isInteger(values.horizon_minutes) || values.horizon_minutes < 1) {
+        setNotice("Enter a valid custom review horizon in minutes.", "error");
+        return;
+      }
+      delete values.custom_horizon_minutes;
+      values.classification_rules = {
+        definition: values.notes || "Classification selected by the user.",
+      };
+      values.tags = String(values.tags || "").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 20);
+      try {
+        setBusy(submit, true, "Saving review...");
+        await api(`/alerts/${form.dataset.outcomeForm}/outcomes`, {
+          method: "POST",
+          body: JSON.stringify(values),
+        });
+        showToast("Outcome saved with its real market path and user-defined label.");
+        const outcomes = await api(`/strategies/${strategyId}/outcomes`);
+        renderOutcomes(safeArray(outcomes.items));
+      } catch (error) {
+        setNotice(error.message, "error");
+        setBusy(submit, false);
+      }
+    });
+
+    const now = new Date();
+    const monthAgo = new Date(now.getTime() - 30 * 86400000);
+    const localInput = (date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const historyForm = workspace.querySelector("[data-history-form]");
+    if (historyForm) { historyForm.elements.started_at.value = localInput(monthAgo); historyForm.elements.ended_at.value = localInput(now); }
+    const forensicForm = workspace.querySelector("[data-forensic-form]");
+    if (forensicForm) forensicForm.elements.requested_time.value = localInput(now);
+    void loadWorkspace();
+  }
+
+  function initAlertProofReceipt() {
+    const root = document.querySelector("[data-alert-proof]");
+    const source = root?.querySelector("[data-alert-proof-json]");
+    if (!root || !source) return;
+    let payload = null;
+    try {
+      payload = JSON.parse(source.textContent || "{}");
+    } catch (_error) {
+      return;
+    }
+    root.querySelector("[data-copy-alert-proof]")?.addEventListener("click", async () => {
+      const proof = payload.proof || {};
+      const conditions = safeArray(proof.conditions)
+        .map((item) => `${item.name || item.condition_id || "Condition"}: ${item.state || "unknown"}`)
+        .join("\n");
+      const summary = [
+        `${proof.strategy_name || "Monitor"} - Version ${proof.strategy_version || "n/a"}`,
+        `${proof.symbol || "Market"} ${proof.timeframe || ""}`.trim(),
+        conditions,
+        `Proof integrity: ${payload.proof_hash}`,
+      ].filter(Boolean).join("\n");
+      await navigator.clipboard.writeText(summary);
+      showToast("Immutable proof summary copied.");
+    });
+    root.querySelector("[data-export-alert-proof]")?.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `traceedge-alert-proof-${payload.alert_id}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
+  }
+
   function initWebNotifications() {
     let stack = document.getElementById("web-notification-stack");
     if (!stack) {
@@ -5707,7 +6488,14 @@
     }
 
     const stored = window.localStorage.getItem(storageKey);
-    setCollapsed(stored === null ? mobile.matches : stored === "true", false);
+    setCollapsed(mobile.matches ? true : stored === "true", false);
+    mobile.addEventListener("change", (event) => {
+      if (event.matches) {
+        setCollapsed(true, false);
+      } else {
+        setCollapsed(window.localStorage.getItem(storageKey) === "true", false);
+      }
+    });
     document.querySelector("[data-sidebar-toggle]")?.addEventListener("click", () => {
       setCollapsed(!root.classList.contains("sidebar-collapsed"));
     });
@@ -5740,6 +6528,8 @@
     initIntegrations();
     initOverviewChannelStatus();
     initInboxFilter();
+    initVerifiedStrategyWorkspace();
+    initAlertProofReceipt();
     initWebNotifications();
   });
 })();

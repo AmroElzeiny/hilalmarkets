@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import (
     OnboardingPrincipal,
+    get_market_data_provider,
     get_market_previewer,
     get_onboarding_principal,
 )
@@ -27,10 +28,14 @@ from ai_market_monitor.schemas.onboarding import (
     StrategyEditRequest,
 )
 from ai_market_monitor.schemas.strategy import InterpretationPreview
-from ai_market_monitor.services.interfaces import RecentMarketPreviewer
+from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.onboarding import OnboardingError, OnboardingService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
+from ai_market_monitor.services.verified_strategy import (
+    VerifiedStrategyError,
+    VerifiedStrategyService,
+)
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
@@ -141,6 +146,11 @@ async def interpret_strategy(
         strategy, version = await StrategyService(
             session, settings.disclaimer_version
         ).create_from_interpretation(principal.user_id, preview, source_text=guided.setup_text)
+        await VerifiedStrategyService(session, settings).prepare_version(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+        )
         await onboarding_service.mark_interpreted(
             onboarding, strategy.id, version.id, preview.activation_blocked
         )
@@ -160,6 +170,7 @@ async def edit_strategy(
     principal: OnboardingPrincipal = Depends(get_onboarding_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> InterpretationResponse:
     require_matching_session(session_id, principal)
     try:
@@ -171,6 +182,23 @@ async def edit_strategy(
             raise StrategyGateError("strategy_missing", "Strategy not found")
         version = await StrategyService(session, settings.disclaimer_version).revise(
             strategy, request.strategy, user_id=principal.user_id
+        )
+        parent = (
+            await session.get(StrategyVersion, version.parent_version_id)
+            if version.parent_version_id
+            else None
+        )
+        verification_service = VerifiedStrategyService(session, settings)
+        await verification_service.prepare_version(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+            parent=parent,
+        )
+        await verification_service.run_saved_tests(
+            user_id=principal.user_id,
+            version=version,
+            provider=provider,
         )
         state = dict(onboarding.state_data)
         state["strategy_version_id"] = str(version.id)
@@ -207,7 +235,43 @@ async def approve_strategy(
         )
         if version is None:
             raise StrategyGateError("version_missing", "Strategy version not found")
-        await StrategyService(session, settings.disclaimer_version).approve(
+        strategy = await session.get(Strategy, version.strategy_id)
+        if strategy is None or strategy.user_id != principal.user_id:
+            raise StrategyGateError("strategy_missing", "Strategy not found")
+        strategy_service = StrategyService(session, settings.disclaimer_version)
+        await strategy_service.validate_approval(
+            version,
+            user_id=principal.user_id,
+            expected_schema_hash=request.expected_schema_hash,
+        )
+        verification_service = VerifiedStrategyService(session, settings)
+        await verification_service.prepare_version(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+        )
+        statements = await verification_service.sync_interpretation(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+        )
+        for statement in statements:
+            if statement.status == "assumed" and statement.resolution_status == "unresolved":
+                await verification_service.resolve_statement(
+                    user_id=principal.user_id,
+                    statement_id=statement.id,
+                    action="accept",
+                    resolution_text="Accepted through onboarding approval.",
+                )
+        await verification_service.approve_interpretation(
+            user_id=principal.user_id,
+            version=version,
+        )
+        await verification_service.approval_gate(
+            user_id=principal.user_id,
+            version=version,
+        )
+        await strategy_service.approve(
             version,
             user_id=principal.user_id,
             expected_schema_hash=request.expected_schema_hash,
@@ -215,7 +279,13 @@ async def approve_strategy(
         await onboarding_service.mark_approved(onboarding)
         await session.commit()
         return onboarding_service.response(onboarding)
-    except (KeyError, ValueError, OnboardingError, StrategyGateError) as exc:
+    except (
+        KeyError,
+        ValueError,
+        OnboardingError,
+        StrategyGateError,
+        VerifiedStrategyError,
+    ) as exc:
         await session.rollback()
         if not hasattr(exc, "code"):
             exc = OnboardingError("invalid_state", "Strategy onboarding state is incomplete")

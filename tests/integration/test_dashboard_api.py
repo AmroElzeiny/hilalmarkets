@@ -3,10 +3,11 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import StatementError
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
-from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -15,7 +16,6 @@ from ai_market_monitor.db.models import (
     ChartSnapshot,
     DashboardPreference,
     EdgeHealthSnapshot,
-    MissedMoveAnalysis,
     ReferralRelationship,
     ScanJob,
     ScanResult,
@@ -50,7 +50,6 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
     StrategyVersionStatus,
 )
-from ai_market_monitor.services.dashboard_jobs import DashboardJobService
 from tests.factories import candles, load_strategy
 
 
@@ -94,6 +93,11 @@ class DashboardFakeMarketProvider:
 
     async def close(self) -> None:
         return None
+
+
+class DashboardUnavailableRangeProvider(DashboardFakeMarketProvider):
+    async def fetch_ohlcv_range(self, exchange, symbol, timeframe, start, end, limit):
+        return []
 
 
 async def _signup(test_context, email: str = "dashboard-api@example.com") -> None:
@@ -140,6 +144,33 @@ async def _connect_telegram(test_context, username: str = "traceuser") -> None:
         await session.commit()
 
 
+async def _approve_verified_interpretation(
+    test_context,
+    strategy_id: str,
+    version_id: str,
+) -> None:
+    workspace = await test_context["client"].get(
+        f"/api/v1/dashboard/strategies/{strategy_id}/verification",
+        params={"version_id": version_id},
+    )
+    assert workspace.status_code == 200
+    for statement in workspace.json()["interpretation"]:
+        if statement["resolution_status"] != "unresolved":
+            continue
+        resolved = await test_context["client"].post(
+            f"/api/v1/dashboard/strategies/{strategy_id}/interpretation/"
+            f"{statement['id']}/resolve",
+            json={"action": "accept"},
+        )
+        assert resolved.status_code == 200
+    approved = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/"
+        f"{version_id}/interpretation/approve",
+        json={},
+    )
+    assert approved.status_code == 200
+
+
 async def test_dashboard_api_uses_session_cookie_for_current_user(test_context):
     await _signup(test_context)
 
@@ -158,8 +189,8 @@ async def test_dashboard_capabilities_endpoint_exposes_registry_and_templates(te
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["counts"]["total"] == 473
-    assert payload["counts"]["executable"] == 473
+    assert payload["counts"]["total"] == 492
+    assert payload["counts"]["executable"] == 492
     assert payload["counts"]["recognized_not_executable"] == 0
     assert len(payload["builtin_templates"]) >= 20
     assert any(item["key"] == "time_window" for item in payload["items"])
@@ -776,6 +807,21 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
     )
     assert created.status_code == 201
     payload = created.json()
+
+    blocked = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
+        json={
+            "strategy_version_id": payload["version"]["id"],
+            "expected_schema_hash": payload["version"]["schema_hash"],
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "interpretation_approval_required"
+    await _approve_verified_interpretation(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+    )
 
     published = await test_context["client"].post(
         f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
@@ -1413,3 +1459,395 @@ async def test_publish_blocks_critical_strategy_conflicts(test_context):
 
     assert published.status_code == 409
     assert published.json()["detail"] == "strategy_conflict_detected"
+
+
+async def test_verified_strategy_workspace_tests_history_and_contract(test_context):
+    await _signup(test_context, "verified-workflow@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={
+            "definition": definition,
+            "source_text": (
+                "Watch a bullish liquidity sweep on 15m and require price above "
+                "the 4h trend with strong volume."
+            ),
+        },
+    )
+    assert created.status_code == 201
+    strategy_id = created.json()["strategy"]["id"]
+    version = created.json()["version"]
+
+    page = await test_context["client"].get(
+        f"/dashboard/strategies/{strategy_id}/verify"
+    )
+    assert page.status_code == 200
+    assert "What TraceEdge understood" in page.text
+    workspace = await test_context["client"].get(
+        f"/api/v1/dashboard/strategies/{strategy_id}/verification",
+        params={"version_id": version["id"]},
+    )
+    assert workspace.status_code == 200
+    assert workspace.json()["interpretation"]
+    assert all(item["rule_keys"] for item in workspace.json()["interpretation"])
+    assert workspace.json()["activation_blockers"]
+
+    saved = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/{version['id']}/save-draft",
+        json={},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["saved"] is True
+    async with test_context["session_factory"]() as session:
+        draft_audit = await session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "strategy.draft_saved",
+                AuditEvent.target_id == version["id"],
+            )
+        )
+        assert draft_audit is not None
+
+    await _approve_verified_interpretation(
+        test_context,
+        strategy_id,
+        version["id"],
+    )
+    test_case = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/tests",
+        params={"version_id": version["id"]},
+        json={
+            "title": "Flat SOL market should not confirm",
+            "case_type": "negative",
+            "expected_result": "should_not_trigger",
+            "exchange": "binance",
+            "symbol": "SOL/USDT",
+            "timeframe": "15m",
+            "evaluation_time": "2026-06-20T04:00:00Z",
+            "notes": "A user-defined negative example.",
+        },
+    )
+    assert test_case.status_code == 201
+    assert test_case.json()["status"] in {"passed", "failed", "needs_review"}
+    assert "condition_results" in test_case.json()
+
+    historical = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/"
+        f"{version['id']}/historical-validation",
+        json={
+            "exchange": "binance",
+            "symbols": ["SOL/USDT"],
+            "timeframe": "15m",
+            "started_at": "2026-06-20T00:00:00Z",
+            "ended_at": "2026-06-20T03:00:00Z",
+        },
+    )
+    assert historical.status_code == 200
+    summary = historical.json()["summary"]
+    assert summary["evaluations"] > 0
+    assert set(summary["examples_by_outcome"]) == {
+        "matches",
+        "near_matches",
+        "invalidated",
+        "non_matches",
+    }
+    assert summary["condition_statistics"]
+    assert summary["chart"]["candles"]
+    assert "not a future-performance estimate" in summary["notice"]
+
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardUnavailableRangeProvider()
+    )
+    unavailable_history = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/"
+        f"{version['id']}/historical-validation",
+        json={
+            "exchange": "binance",
+            "symbols": ["SOL/USDT"],
+            "timeframe": "15m",
+            "started_at": "2025-01-01T00:00:00Z",
+            "ended_at": "2025-01-01T03:00:00Z",
+        },
+    )
+    assert unavailable_history.status_code == 200
+    unavailable_summary = unavailable_history.json()["summary"]
+    assert unavailable_summary["evaluations"] == 0, unavailable_history.json()
+    assert unavailable_summary["unavailable_symbols"] == [
+        {"symbol": "SOL/USDT", "reason": "no_candles_in_requested_window"}
+    ]
+    assert unavailable_summary["chart"]["candles"] == []
+
+    approved = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/approve",
+        json={
+            "strategy_version_id": version["id"],
+            "expected_schema_hash": version["schema_hash"],
+        },
+    )
+    assert approved.status_code == 200
+    approved_at = approved.json()["version"]["approved_at"]
+    approved_again = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/approve",
+        json={
+            "strategy_version_id": version["id"],
+            "expected_schema_hash": version["schema_hash"],
+        },
+    )
+    assert approved_again.status_code == 200
+    assert approved_again.json()["version"]["approved_at"].removesuffix("Z") == (
+        approved_at.removesuffix("Z")
+    )
+    immutable_draft = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/{version['id']}/save-draft",
+        json={},
+    )
+    assert immutable_draft.status_code == 409
+    assert immutable_draft.json()["detail"] == "approved_version_immutable"
+
+    contract = await test_context["client"].get(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/{version['id']}/contract"
+    )
+    assert contract.status_code == 200
+    assert contract.json()["original_prompt"]
+    assert contract.json()["structured_rules"]
+    assert len(contract.json()["integrity_hash"]) == 64
+    assert contract.json()["notice"].startswith("Monitoring contract only")
+
+
+async def test_verified_version_diff_restore_and_saved_test_rerun(test_context):
+    await _signup(test_context, "verified-versioning@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "Sweep plus volume confirmation"},
+    )
+    strategy_id = created.json()["strategy"]["id"]
+    first = created.json()["version"]
+    await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/tests",
+        params={"version_id": first["id"]},
+        json={
+            "title": "Saved non-match",
+            "case_type": "negative",
+            "expected_result": "should_not_trigger",
+            "exchange": "binance",
+            "symbol": "SOL/USDT",
+            "timeframe": "15m",
+            "evaluation_time": "2026-06-20T04:00:00Z",
+        },
+    )
+    updated = load_strategy().model_dump(mode="json")
+    updated["conditions"]["children"][2]["right"]["value"] = 1.8
+    revision = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions",
+        json={
+            "definition": updated,
+            "source_text": "Sweep plus volume confirmation at 1.8x",
+        },
+    )
+    assert revision.status_code == 201
+    second = revision.json()["version"]
+    workspace = await test_context["client"].get(
+        f"/api/v1/dashboard/strategies/{strategy_id}/verification",
+        params={"version_id": second["id"]},
+    )
+    assert workspace.status_code == 200
+    assert workspace.json()["version"]["parent_version_id"] == first["id"]
+    assert any(
+        item["path"].endswith("threshold")
+        for item in workspace.json()["verification"]["semantic_diff"]
+    )
+    assert workspace.json()["test_cases"][0]["latest_run"] is not None
+
+    comparison = await test_context["client"].post(
+        "/api/v1/dashboard/strategies/compare",
+        json={"left_version_id": first["id"], "right_version_id": second["id"]},
+    )
+    assert comparison.status_code == 200
+    assert comparison.json()["diff"]
+    assert "verification_effects" in comparison.json()
+    assert comparison.json()["verification_effects"]["right"]["test_status"] in {
+        "passed",
+        "failed",
+        "needs_review",
+    }
+
+    restored = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/{first['id']}/restore",
+        json={},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["version"]["version_number"] == 3
+    async with test_context["session_factory"]() as session:
+        restored_row = await session.get(
+            StrategyVersion,
+            UUID(restored.json()["version"]["id"]),
+        )
+        assert restored_row.restored_from_version_id == UUID(first["id"])
+        assert restored_row.approved_at is None
+
+
+async def test_alert_proof_is_sealed_versioned_and_outcome_is_user_defined(test_context):
+    await _signup(test_context, "verified-proof@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
+        DashboardFakeMarketProvider()
+    )
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "Proof test strategy"},
+    )
+    strategy_id = created.json()["strategy"]["id"]
+    version_id = UUID(created.json()["version"]["id"])
+    async with test_context["session_factory"]() as session:
+        user_id = await session.scalar(
+            select(UserIdentity.user_id).where(UserIdentity.provider == IdentityProvider.EMAIL)
+        )
+        alert = Alert(
+            user_id=user_id,
+            strategy_version_id=version_id,
+            alert_type=AlertType.CONFIRMED,
+            deduplication_key=f"verified-proof-{uuid4()}",
+            title="Research match confirmed",
+            body="All required conditions passed.",
+            proof_receipt={
+                "strategy_version_id": str(version_id),
+                "symbol": "SOL/USDT",
+                "conditions": [{"name": "Volume", "state": "passed"}],
+            },
+            candle_timestamp=datetime(2026, 6, 20, tzinfo=UTC),
+        )
+        session.add(alert)
+        await session.commit()
+        alert_id = alert.id
+        assert alert.proof_hash and len(alert.proof_hash) == 64
+        assert alert.proof_sealed_at is not None
+
+    proof = await test_context["client"].get(
+        f"/api/v1/dashboard/cockpit/alerts/{alert_id}/proof"
+    )
+    assert proof.status_code == 200
+    assert proof.json()["proof_integrity"]["verified"] is True
+    assert proof.json()["strategy_version"]["id"] == str(version_id)
+
+    proof_page = await test_context["client"].get(
+        f"/dashboard/alerts/{alert_id}/proof"
+    )
+    assert proof_page.status_code == 200
+    assert "Immutable monitoring receipt" in proof_page.text
+    assert "Rule-by-rule evidence" in proof_page.text
+    assert "Integrity verified" in proof_page.text
+    assert "View strategy version" in proof_page.text
+
+    outcome = await test_context["client"].post(
+        f"/api/v1/dashboard/alerts/{alert_id}/outcomes",
+        json={
+            "horizon_minutes": 240,
+            "classification": "neutral",
+            "classification_rules": {"definition": "User marked neutral"},
+            "notes": "No automatic profit label.",
+            "tags": ["reviewed"],
+        },
+    )
+    assert outcome.status_code == 200
+    assert outcome.json()["classification"] == "neutral"
+
+    custom_outcome = await test_context["client"].post(
+        f"/api/v1/dashboard/alerts/{alert_id}/outcomes",
+        json={
+            "horizon_minutes": 90,
+            "classification": "positive",
+            "classification_rules": {"definition": "User-defined 90-minute review"},
+            "notes": "Custom horizon, not an automatic profit label.",
+            "tags": ["custom-horizon", "reviewed"],
+        },
+    )
+    assert custom_outcome.status_code == 200
+    assert custom_outcome.json()["horizon_minutes"] == 90
+    assert custom_outcome.json()["tags"] == ["custom-horizon", "reviewed"]
+    assert custom_outcome.json()["price_path"]
+
+    async with test_context["session_factory"]() as session:
+        alert = await session.get(Alert, alert_id)
+        alert.proof_receipt = {"tampered": True}
+        with pytest.raises((StatementError, ValueError)):
+            await session.commit()
+
+    investigation = await test_context["client"].post(
+        "/api/v1/dashboard/forensic-investigations",
+        json={
+            "strategy_id": strategy_id,
+            "exchange": "binance",
+            "symbol": "SOL/USDT",
+            "timeframe": "15m",
+            "requested_time": "2026-06-20T00:00:00Z",
+        },
+    )
+    assert investigation.status_code == 201
+    assert investigation.json()["evidence_availability"] == "system_evidence_only"
+    assert investigation.json()["primary_category"] == "monitor_configuration"
+    assert "No approved strategy version was active" in investigation.json()["conclusion"]
+    assert investigation.json()["system_diagnostics"]["scan_found"] is False
+
+
+async def test_verified_workspace_enforces_user_isolation(test_context):
+    await _signup(test_context, "verified-owner@example.com")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={
+            "definition": load_strategy().model_dump(mode="json"),
+            "source_text": "Owner-only strategy",
+        },
+    )
+    strategy_id = created.json()["strategy"]["id"]
+    version_id = created.json()["version"]["id"]
+    await _signup(test_context, "verified-other@example.com")
+    denied = await test_context["client"].get(
+        f"/api/v1/dashboard/strategies/{strategy_id}/verification"
+    )
+    assert denied.status_code == 404
+    page = await test_context["client"].get(f"/dashboard/strategies/{strategy_id}/verify")
+    assert page.status_code == 404
+    denied_save = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/{version_id}/save-draft",
+        json={},
+    )
+    assert denied_save.status_code == 404
+
+
+async def test_forensic_investigation_uses_historical_monitor_state(test_context):
+    await _signup(test_context, "verified-forensic-state@example.com")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={
+            "definition": load_strategy().model_dump(mode="json"),
+            "source_text": "Monitor state forensic test",
+        },
+    )
+    strategy_id = created.json()["strategy"]["id"]
+    paused = await test_context["client"].post(
+        f"/dashboard/monitors/{strategy_id}/pause",
+        follow_redirects=False,
+    )
+    assert paused.status_code == 303
+
+    investigation = await test_context["client"].post(
+        "/api/v1/dashboard/forensic-investigations",
+        json={
+            "strategy_id": strategy_id,
+            "exchange": "binance",
+            "symbol": "SOL/USDT",
+            "timeframe": "15m",
+            "requested_time": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    assert investigation.status_code == 201
+    assert investigation.json()["primary_category"] == "monitor_configuration"
+    assert "paused" in investigation.json()["conclusion"].lower()
+    assert investigation.json()["system_diagnostics"]["monitor_state"] == "paused"

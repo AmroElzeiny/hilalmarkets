@@ -281,9 +281,7 @@ class ConditionCapabilityRegistry:
             if capability.condition_type == "candle_pattern":
                 known = {parameter["name"] for parameter in item["parameters"]}
                 item["parameters"].extend(
-                    parameter
-                    for parameter in candle_parameters
-                    if parameter["name"] not in known
+                    parameter for parameter in candle_parameters if parameter["name"] not in known
                 )
                 item["default_parameters"] = {
                     "min_body_percent": 25,
@@ -298,8 +296,7 @@ class ConditionCapabilityRegistry:
             item["condition_template"] = builder_template_payload(capability)
             item["condition_template"]["availability"] = item["availability"]
             item["condition_template"]["provider_required"] = bool(
-                item.get("provider_required")
-                or item["availability"] == "provider_required"
+                item.get("provider_required") or item["availability"] == "provider_required"
             )
             hidden_entry = {
                 "key": item["key"],

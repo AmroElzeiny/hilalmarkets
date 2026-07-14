@@ -286,6 +286,7 @@ async def test_discord_alert_embed_delivery_reuses_setup_thread_and_suppresses_d
         assert embed.title == "SOL/USDT - Research Match Confirmed"
         field_names = {field.name for field in embed.fields}
         assert "Required completion" in field_names
+        assert "Strategy version" in field_names
         assert "User-defined trade context" in field_names
         assert embed.metadata["proof"]["conditions"][0]["state"] == "passed"
         action_labels = {action.label for action in embed.actions}

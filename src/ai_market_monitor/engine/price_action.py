@@ -15,6 +15,7 @@ from ai_market_monitor.engine.indicators import (
 from ai_market_monitor.services.interfaces import Candle
 
 PRICE_ACTION_NAMES = {
+    "certified_dynamic",
     "breaks_n_candle_high",
     "breaks_n_candle_low",
     "closes_above_n_candle_high",
@@ -79,6 +80,12 @@ PRICE_ACTION_NAMES = {
     "protected_low",
     "buy_side_liquidity_sweep",
     "sell_side_liquidity_sweep",
+    "po3_dealing_range_sweep_bullish",
+    "po3_dealing_range_sweep_bearish",
+    "po3_sweep_displacement_bullish",
+    "po3_sweep_displacement_bearish",
+    "po3_sweep_displacement_structure_bullish",
+    "po3_sweep_displacement_structure_bearish",
     "equal_highs_liquidity_pool",
     "equal_lows_liquidity_pool",
     "sweep_and_reclaim",
@@ -92,6 +99,7 @@ PRICE_ACTION_NAMES = {
     "session_low_swept",
     "daily_high_swept",
     "daily_low_swept",
+    "reference_period_sweep",
     "weekly_high_swept",
     "weekly_low_swept",
     "bullish_fair_value_gap",
@@ -100,6 +108,13 @@ PRICE_ACTION_NAMES = {
     "price_fills_fvg",
     "price_rejects_fvg",
     "fvg_still_open",
+    "fvg_still_open_bullish",
+    "fvg_still_open_bearish",
+    "fvg_virgin",
+    "fvg_touched",
+    "fvg_mid_mitigated",
+    "fvg_fully_mitigated",
+    "fvg_structure_invalidated",
     "fvg_midpoint_touched",
     "displacement_candle_bullish",
     "displacement_candle_bearish",
@@ -184,6 +199,17 @@ def _period_reference(
             for candle in candles[:-1]
             if prior_start <= candle.timestamp.astimezone(zone).date() < current_week_start
         ]
+    elif unit == "month":
+        current_month_start = current.replace(day=1).date()
+        previous_month = current_month_start - timedelta(days=1)
+        result = [
+            candle
+            for candle in candles[:-1]
+            if (
+                candle.timestamp.astimezone(zone).year == previous_month.year
+                and candle.timestamp.astimezone(zone).month == previous_month.month
+            )
+        ]
     else:
         raise ValueError(f"Unsupported period reference: {unit}")
     if not result:
@@ -230,14 +256,321 @@ def _swings(candles: list[Candle], pivot: int = 2) -> tuple[list[int], list[int]
     return highs, lows
 
 
-def _latest_fvg(candles: list[Candle], direction: str) -> tuple[float, float] | None:
-    for index in range(len(candles) - 1, 1, -1):
+def _latest_fvg_detail(
+    candles: list[Candle],
+    direction: str,
+    *,
+    newest_index_max: int | None = None,
+    search_start: int = 0,
+) -> dict[str, Any] | None:
+    if len(candles) < 3:
+        return None
+    newest_index_max = len(candles) - 1 if newest_index_max is None else newest_index_max
+    newest_index_max = min(newest_index_max, len(candles) - 1)
+    for index in range(newest_index_max, max(1, search_start), -1):
         first, _, third = candles[index - 2 : index + 1]
         if direction == "bullish" and third.low > first.high:
-            return first.high, third.low
+            return {
+                "index": index,
+                "direction": "bullish",
+                "lower": first.high,
+                "upper": third.low,
+            }
         if direction == "bearish" and third.high < first.low:
-            return third.high, first.low
+            return {
+                "index": index,
+                "direction": "bearish",
+                "lower": third.high,
+                "upper": first.low,
+            }
     return None
+
+
+def _latest_fvg(candles: list[Candle], direction: str) -> tuple[float, float] | None:
+    detail = _latest_fvg_detail(candles, direction)
+    if detail is not None:
+        return float(detail["lower"]), float(detail["upper"])
+    return None
+
+
+def _fvg_mitigation_state(
+    candles: list[Candle],
+    direction: str,
+    *,
+    lookback: int,
+) -> str:
+    search_start = max(0, len(candles) - lookback - 1)
+    # State checks use the latest completed FVG before the current signal candle.
+    detail = _latest_fvg_detail(
+        candles,
+        direction,
+        newest_index_max=len(candles) - 2,
+        search_start=search_start,
+    )
+    if detail is None:
+        return "missing"
+    index = int(detail["index"])
+    lower = float(detail["lower"])
+    upper = float(detail["upper"])
+    width = max(upper - lower, 1e-12)
+    eps = max(width * 0.04, 1e-12)
+    midpoint = (lower + upper) / 2
+    touched = False
+    mid_mitigated = False
+    fully_filled = False
+    structure_invalidated = False
+
+    for candle in candles[index + 1 :]:
+        overlaps = candle.low <= upper and candle.high >= lower
+        if overlaps:
+            touched = True
+        if candle.low <= midpoint <= candle.high:
+            mid_mitigated = True
+        if direction == "bullish":
+            if candle.low < lower - eps:
+                structure_invalidated = True
+                break
+            if candle.low <= lower + eps:
+                fully_filled = True
+        else:
+            if candle.high > upper + eps:
+                structure_invalidated = True
+                break
+            if candle.high >= upper - eps:
+                fully_filled = True
+
+    if structure_invalidated:
+        return "structure_invalidated"
+    if fully_filled:
+        return "fully_mitigated"
+    if mid_mitigated:
+        return "mid_mitigated"
+    if touched:
+        return "touched"
+    return "virgin"
+
+
+def _candle_body_fraction(candle: Candle) -> float:
+    candle_range = candle.high - candle.low
+    if candle_range <= 0:
+        return 0.0
+    return abs(candle.close - candle.open) / candle_range
+
+
+def _close_near_extreme_fraction(candle: Candle, want_long: bool) -> float:
+    candle_range = candle.high - candle.low
+    if candle_range <= 0:
+        return 1.0
+    if want_long:
+        return (candle.high - candle.close) / candle_range
+    return (candle.close - candle.low) / candle_range
+
+
+def _average_prior_range(candles: list[Candle], index: int, count: int) -> float:
+    start = max(0, index - count)
+    prior = candles[start:index]
+    if not prior:
+        return 0.0
+    return sum(candle.high - candle.low for candle in prior) / len(prior)
+
+
+def _average_prior_volume(candles: list[Candle], index: int, count: int) -> float:
+    start = max(0, index - count)
+    prior = candles[start:index]
+    if not prior:
+        return 0.0
+    return sum(max(candle.volume, 1.0) for candle in prior) / len(prior)
+
+
+def _body_close_through_level(
+    candle: Candle,
+    level: float,
+    want_long: bool,
+    *,
+    min_fraction: float,
+) -> bool:
+    body_hi = max(candle.open, candle.close)
+    body_lo = min(candle.open, candle.close)
+    body = body_hi - body_lo
+    if body <= 0:
+        return False
+    if want_long:
+        if candle.close <= level:
+            return False
+        beyond = body_hi - max(level, body_lo)
+    else:
+        if candle.close >= level:
+            return False
+        beyond = min(level, body_hi) - body_lo
+    return beyond > 0 and beyond / body >= min_fraction
+
+
+def _matches_po3_displacement(
+    candles: list[Candle],
+    index: int,
+    want_long: bool,
+    parameters: dict[str, Any],
+) -> bool:
+    if index <= 1 or index >= len(candles):
+        return False
+    history = candles[: index + 1]
+    atr_period = min(int(parameters.get("atr_period", 14)), len(history) - 1)
+    if atr_period < 2:
+        return False
+    atr_value = atr(history, period=atr_period)
+    if atr_value <= 0:
+        return False
+
+    candle = candles[index]
+    bullish = candle.close > candle.open
+    direction_ok = bullish if want_long else not bullish
+    if not direction_ok:
+        return False
+
+    body = abs(candle.close - candle.open)
+    candle_range = candle.high - candle.low
+    body_fraction = _candle_body_fraction(candle)
+    recent_range = _average_prior_range(candles, index, int(parameters.get("recent_range_bars", 4)))
+    recent_volume = _average_prior_volume(
+        candles,
+        index,
+        int(parameters.get("recent_volume_bars", 6)),
+    )
+    range_vs_recent = candle_range / recent_range if recent_range > 0 else candle_range / atr_value
+    volume_ratio = max(candle.volume, 1.0) / recent_volume if recent_volume > 0 else 1.0
+    near_extreme = _close_near_extreme_fraction(candle, want_long)
+
+    return (
+        body >= atr_value * float(parameters.get("body_atr_min", 0.14))
+        and candle_range >= atr_value * float(parameters.get("range_atr_min", 0.24))
+        and body_fraction >= float(parameters.get("body_fraction_min", 0.14))
+        and range_vs_recent >= float(parameters.get("range_vs_recent_min", 0.65))
+        and near_extreme <= float(parameters.get("close_near_extreme_max", 0.65))
+        and volume_ratio >= float(parameters.get("volume_ratio_min", 0.6))
+    )
+
+
+def _dealing_range_for_index(
+    candles: list[Candle],
+    index: int,
+    lookback: int,
+) -> tuple[float, float]:
+    if index < lookback:
+        raise IndicatorWarmupError(f"PO3 dealing range requires {lookback + 1} candles")
+    prior = candles[index - lookback : index]
+    return max(candle.high for candle in prior), min(candle.low for candle in prior)
+
+
+def _po3_closed_sweep_at(
+    candles: list[Candle],
+    index: int,
+    want_long: bool,
+    parameters: dict[str, Any],
+) -> bool:
+    lookback = int(parameters.get("dealing_range_lookback", 5))
+    dr_high, dr_low = _dealing_range_for_index(candles, index, lookback)
+    candle = candles[index]
+    midpoint = (dr_high + dr_low) / 2
+    if midpoint <= 0:
+        raise IndicatorWarmupError("PO3 dealing range midpoint is zero")
+    max_range_percent = float(parameters.get("max_dealing_range_percent", 3.0))
+    if max_range_percent > 0 and ((dr_high - dr_low) / midpoint) * 100 > max_range_percent:
+        return False
+    min_penetration_percent = float(parameters.get("min_penetration_percent", 0.0))
+    if want_long:
+        penetration = max(0.0, dr_low - candle.low)
+        return (
+            candle.low < dr_low
+            and candle.close > dr_low
+            and (
+                min_penetration_percent <= 0
+                or (penetration / max(dr_low, 1e-12)) * 100 >= min_penetration_percent
+            )
+        )
+    penetration = max(0.0, candle.high - dr_high)
+    return (
+        candle.high > dr_high
+        and candle.close < dr_high
+        and (
+            min_penetration_percent <= 0
+            or (penetration / max(dr_high, 1e-12)) * 100 >= min_penetration_percent
+        )
+    )
+
+
+def _po3_structure_shift_after(
+    candles: list[Candle],
+    anchor_index: int,
+    want_long: bool,
+    parameters: dict[str, Any],
+) -> bool:
+    span = int(parameters.get("structure_swing_span", 1))
+    if anchor_index <= span * 2 + 1:
+        return False
+    prior = candles[:anchor_index]
+    highs, lows = _swings(prior, pivot=span)
+    swing_indexes = highs if want_long else lows
+    if not swing_indexes:
+        return False
+    break_level = prior[swing_indexes[-1]].high if want_long else prior[swing_indexes[-1]].low
+    min_fraction = float(parameters.get("structure_body_break_min_fraction", 0.03))
+    require_follow = bool(parameters.get("require_structure_follow_through", False))
+    for index in range(anchor_index + 1, len(candles)):
+        if not _body_close_through_level(
+            candles[index],
+            break_level,
+            want_long,
+            min_fraction=min_fraction,
+        ):
+            continue
+        if not require_follow:
+            return True
+        if index + 1 >= len(candles):
+            return False
+        follow = candles[index + 1]
+        follows = (
+            follow.close > follow.open
+            and follow.close > break_level
+            and follow.close >= candles[index].close
+            if want_long
+            else follow.close < follow.open
+            and follow.close < break_level
+            and follow.close <= candles[index].close
+        )
+        if follows and _candle_body_fraction(follow) >= 0.30:
+            return True
+    return False
+
+
+def _po3_sequence_detected(
+    candles: list[Candle],
+    want_long: bool,
+    parameters: dict[str, Any],
+    *,
+    require_displacement: bool,
+    require_structure: bool,
+) -> bool:
+    lookback = int(parameters.get("dealing_range_lookback", 5))
+    max_context_age = int(parameters.get("max_context_age_bars", 24))
+    displacement_search_bars = int(parameters.get("displacement_search_bars", 60))
+    start = max(lookback, len(candles) - max_context_age - displacement_search_bars - 2)
+    for sweep_index in range(start, len(candles)):
+        if not _po3_closed_sweep_at(candles, sweep_index, want_long, parameters):
+            continue
+        if not require_displacement:
+            return True
+        max_displacement_index = min(len(candles) - 1, sweep_index + displacement_search_bars)
+        for displacement_index in range(sweep_index + 1, max_displacement_index + 1):
+            if not _matches_po3_displacement(candles, displacement_index, want_long, parameters):
+                continue
+            if not require_structure or _po3_structure_shift_after(
+                candles,
+                displacement_index,
+                want_long,
+                parameters,
+            ):
+                return True
+    return False
 
 
 def evaluate_price_action(
@@ -246,6 +579,14 @@ def evaluate_price_action(
     parameters: dict[str, Any] | None = None,
 ) -> bool | float:
     parameters = parameters or {}
+    if name == "certified_dynamic":
+        from ai_market_monitor.engine.dynamic_mechanics import evaluate_serialized_expression
+
+        return evaluate_serialized_expression(
+            str(parameters.get("expression_json") or ""),
+            candles,
+            str(parameters.get("parameters_json") or "{}"),
+        )
     lookback = int(parameters.get("lookback", 20))
     tolerance = float(parameters.get("tolerance_percent", 0.25)) / 100
     current, prior = _prior(candles, lookback)
@@ -267,14 +608,8 @@ def evaluate_price_action(
         first_rsi = rsi(candles[: first_index + 1], period=period)
         second_rsi = rsi(candles[: second_index + 1], period=period)
         if direction == "bearish":
-            return (
-                candles[second_index].high > candles[first_index].high
-                and second_rsi < first_rsi
-            )
-        return (
-            candles[second_index].low < candles[first_index].low
-            and second_rsi > first_rsi
-        )
+            return candles[second_index].high > candles[first_index].high and second_rsi < first_rsi
+        return candles[second_index].low < candles[first_index].low and second_rsi > first_rsi
     if name == "previous_session_high_low":
         timezone = str(parameters.get("timezone", "UTC"))
         zone = ZoneInfo(timezone)
@@ -344,6 +679,22 @@ def evaluate_price_action(
         return broke and current.high >= prior_low * (1 - tolerance) and current.close < prior_low
 
     timezone = str(parameters.get("timezone", "UTC"))
+    if name == "reference_period_sweep":
+        unit = str(parameters.get("reference_period", "week")).casefold()
+        side = str(parameters.get("side", "")).casefold()
+        if unit not in {"day", "week", "month"} or side not in {"high", "low"}:
+            raise ValueError("reference_period_sweep requires day/week/month and high/low")
+        reference = _period_reference(candles, unit=unit, timezone=timezone)
+        level = (
+            max(candle.high for candle in reference)
+            if side == "high"
+            else min(candle.low for candle in reference)
+        )
+        return (
+            current.high > level and current.close < level
+            if side == "high"
+            else current.low < level and current.close > level
+        )
     if "previous_day" in name or name.startswith("daily_"):
         reference = _period_reference(candles, unit="day", timezone=timezone)
         high = max(candle.high for candle in reference)
@@ -566,6 +917,13 @@ def evaluate_price_action(
         "stop_hunt_below_range",
     }:
         return current.low < prior_low and current.close > prior_low
+    if name in {"po3_dealing_range_sweep_bullish", "po3_dealing_range_sweep_bearish"}:
+        return _po3_closed_sweep_at(
+            candles,
+            len(candles) - 1,
+            name.endswith("bullish"),
+            parameters,
+        )
     if name == "equal_highs_liquidity_pool":
         touches = sum(abs(candle.high - prior_high) / prior_high <= tolerance for candle in prior)
         return touches >= int(parameters.get("minimum_touches", 2))
@@ -583,13 +941,32 @@ def evaluate_price_action(
         )
     if name == "sweep_and_displacement":
         direction = str(parameters.get("direction", "bullish"))
-        swept = (
-            current.low < prior_low and current.close > prior_low
-            if direction == "bullish"
-            else current.high > prior_high and current.close < prior_high
+        return _po3_sequence_detected(
+            candles,
+            direction == "bullish",
+            parameters,
+            require_displacement=True,
+            require_structure=False,
         )
-        body = abs(current.close - current.open)
-        return swept and body >= atr(candles, period=int(parameters.get("atr_period", 14)))
+    if name in {"po3_sweep_displacement_bullish", "po3_sweep_displacement_bearish"}:
+        return _po3_sequence_detected(
+            candles,
+            name.endswith("bullish"),
+            parameters,
+            require_displacement=True,
+            require_structure=False,
+        )
+    if name in {
+        "po3_sweep_displacement_structure_bullish",
+        "po3_sweep_displacement_structure_bearish",
+    }:
+        return _po3_sequence_detected(
+            candles,
+            name.endswith("bullish"),
+            parameters,
+            require_displacement=True,
+            require_structure=True,
+        )
     if name in {"session_high_swept", "session_low_swept"}:
         zone = ZoneInfo(timezone)
         local = current.timestamp.astimezone(zone)
@@ -612,7 +989,34 @@ def evaluate_price_action(
         direction = "bullish" if name.startswith("bullish") else "bearish"
         return _latest_fvg(candles[-3:], direction) is not None
     if "fvg" in name:
-        direction = str(parameters.get("direction", "bullish"))
+        direction = (
+            "bullish"
+            if name.endswith("_bullish")
+            else "bearish"
+            if name.endswith("_bearish")
+            else str(parameters.get("direction", "bullish"))
+        )
+        if name in {
+            "fvg_still_open",
+            "fvg_still_open_bullish",
+            "fvg_still_open_bearish",
+            "fvg_virgin",
+            "fvg_touched",
+            "fvg_mid_mitigated",
+            "fvg_fully_mitigated",
+            "fvg_structure_invalidated",
+        }:
+            state = _fvg_mitigation_state(candles, direction, lookback=lookback)
+            expected_state = {
+                "fvg_virgin": "virgin",
+                "fvg_touched": "touched",
+                "fvg_mid_mitigated": "mid_mitigated",
+                "fvg_fully_mitigated": "fully_mitigated",
+                "fvg_structure_invalidated": "structure_invalidated",
+            }.get(name)
+            if expected_state:
+                return state == expected_state
+            return state in {"virgin", "touched", "mid_mitigated"}
         gap = _latest_fvg(candles[:-1], direction)
         if gap is None:
             return False
@@ -696,12 +1100,9 @@ def evaluate_price_action(
                 if displacement_name.endswith("bullish")
                 else displacement.close < displacement.open
             )
-            displaced = (
-                displacement_direction
-                and displacement_body
-                >= atr(future, period=atr_period)
-                * float(parameters.get("atr_multiplier", 1.5))
-            )
+            displaced = displacement_direction and displacement_body >= atr(
+                future, period=atr_period
+            ) * float(parameters.get("atr_multiplier", 1.5))
             if opposite and displaced:
                 found = candidate
                 break

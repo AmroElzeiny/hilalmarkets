@@ -4,6 +4,26 @@ TraceEdge is a subscription monitoring and decision-support platform for crypto 
 traders. Users describe a setup, approve its structured interpretation, preview it against recent
 market data, and receive explainable Telegram or Discord alerts. Version one never places trades.
 
+The web Strategy Builder starts with AI Setup Chat. The server-side interviewer keeps a durable
+conversation, asks for measurable definitions, compiles only into the validated strategy DSL, shows
+confidence/lint/assumption evidence, and creates an immutable approved strategy version only after
+explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
+to `gpt-5.4-nano` with low reasoning.
+
+An optional Bounded Agent Control coordinator can select among a small server-offered tool set for
+messy, multi-intent chat turns. It is off by default, has a no-execution shadow mode, and uses a
+stable percentage cohort for gradual live rollout. Registry,
+compiler, provider, scanner, ownership, entitlement, hash, approval, and activation authority remain
+in application services; the model never receives approval or activation tools. See
+[docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
+
+If a user confirms a candle-computable mechanic that is not in the registry, TraceEdge can create a
+user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
+tests it against the configured spot provider, independently reviews it, and requires the normal
+strategy approval flow before activation. It never executes AI-generated Python or fabricates
+provider data. See
+[docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md).
+
 ## Local development
 
 Python 3.12+ is required.
@@ -18,6 +38,9 @@ uvicorn ai_market_monitor.main:app --reload
 ```
 
 For the complete service stack, install Docker and run `docker compose up --build`.
+Capability creation and five-scan reviews are asynchronous, so local non-Docker operation also
+requires Redis, the Celery worker and the Celery beat scheduler described in
+[docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md).
 
 ## Safety boundary
 
@@ -27,7 +50,10 @@ services only. Strategy activation requires explicit user approval and a recent-
 
 See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/ROADMAP.md](docs/ROADMAP.md),
-[docs/OPERATIONS.md](docs/OPERATIONS.md), and [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md).
+[docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md),
+[docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md](docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md), and
+[docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
+[docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
 Current beta infrastructure includes idempotent scheduled scans, shared CCXT REST clients,
 deterministic proof persistence, setup lifecycle records, Telegram webhook delivery, Discord HTTP

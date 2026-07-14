@@ -235,7 +235,7 @@ class WebSession(UUIDPrimaryKeyMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     session_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -292,7 +292,7 @@ class DashboardPreference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("user_id", name="uq_dashboard_preference_user"),)
 
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     theme: Mapped[str] = mapped_column(String(24), default="dark", nullable=False)
     default_timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
@@ -312,7 +312,7 @@ class DashboardNotification(UUIDPrimaryKeyMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     level: Mapped[str] = mapped_column(String(24), default="info", nullable=False)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -331,7 +331,7 @@ class TelegramDashboardLink(UUIDPrimaryKeyMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     telegram_user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     token_digest: Mapped[str] = mapped_column(String(64), nullable=False)

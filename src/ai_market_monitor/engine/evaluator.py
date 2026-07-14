@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -832,6 +833,7 @@ class StrategyRuleEngine:
                 cap_score_on_fail=condition.cap_score_on_fail,
                 previous_actual_value=previous_actual,
                 previous_required_value=previous_required,
+                mechanic_evidence=self._mechanic_evidence(condition),
             )
         except IndicatorWarmupError as exc:
             return self._pending(condition, evaluation_time, str(exc), market_timestamp, latency)
@@ -1393,7 +1395,27 @@ class StrategyRuleEngine:
             proximity_score=0,
             cap_score_on_fail=condition.cap_score_on_fail,
             error_code=code,
+            mechanic_evidence=StrategyRuleEngine._mechanic_evidence(condition),
         )
+
+    @staticmethod
+    def _mechanic_evidence(condition: ConditionRule) -> dict[str, Any] | None:
+        if condition.left.name != "certified_dynamic":
+            return None
+        parameters = condition.left.parameters
+        try:
+            expression = json.loads(str(parameters.get("expression_json") or "{}"))
+            resolved = json.loads(str(parameters.get("parameters_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            expression = {}
+            resolved = {}
+        return {
+            "capability_key": condition.capability_key,
+            "capability_version": condition.capability_version,
+            "artifact_hash": condition.capability_artifact_hash,
+            "expression": expression,
+            "resolved_parameters": resolved,
+        }
 
     def _evaluate_risk(
         self,
@@ -1452,17 +1474,13 @@ class StrategyRuleEngine:
                     "passed"
                     if calculation.position_size is not None
                     else (
-                        "pending_balance"
-                        if strategy.position_sizing.enabled
-                        else "not_requested"
+                        "pending_balance" if strategy.position_sizing.enabled else "not_requested"
                     )
                 ),
             }
             for check, _code in failed_checks:
                 checks[check] = "failed"
-            validation_state = (
-                EvaluationState.FAILED if failed_checks else EvaluationState.PASSED
-            )
+            validation_state = EvaluationState.FAILED if failed_checks else EvaluationState.PASSED
             validation = ConditionEvaluation(
                 condition_id="risk_policy_validation",
                 name="Risk policy validation",
@@ -1551,12 +1569,7 @@ class StrategyRuleEngine:
             **dict(condition_context.get("risk_context", {})),
             "maximum_data_latency": max(
                 0,
-                int(
-                    (
-                        evaluation_time - ensure_aware(current.timestamp)
-                    ).total_seconds()
-                    * 1000
-                ),
+                int((evaluation_time - ensure_aware(current.timestamp)).total_seconds() * 1000),
             ),
             "minimum_candle_liquidity": (
                 current.quote_volume
@@ -1584,15 +1597,12 @@ class StrategyRuleEngine:
         stop_distance = abs(calculation.entry_price - calculation.stop_price)
         values.update(
             {
-                "stop_distance_atr_units": (
-                    stop_distance / atr_value if atr_value > 0 else None
-                ),
+                "stop_distance_atr_units": (stop_distance / atr_value if atr_value > 0 else None),
                 "stop_distance_too_tight": calculation.stop_distance_percent
                 < float(condition_context.get("minimum_stop_percent", 0.1)),
                 "stop_distance_too_wide": (
                     strategy.risk.maximum_stop_percent is not None
-                    and calculation.stop_distance_percent
-                    > strategy.risk.maximum_stop_percent
+                    and calculation.stop_distance_percent > strategy.risk.maximum_stop_percent
                 ),
                 "reward_to_risk_after_fees": _net_reward_to_risk(
                     calculation,
@@ -1600,8 +1610,7 @@ class StrategyRuleEngine:
                 ),
                 "reward_to_risk_after_slippage": _net_reward_to_risk(
                     calculation,
-                    calculation.estimated_fee_bps
-                    + calculation.estimated_slippage_bps,
+                    calculation.estimated_fee_bps + calculation.estimated_slippage_bps,
                 ),
                 "fibonacci_extension_targets": _target_matches_fibonacci_extension(
                     candles,
@@ -1625,14 +1634,10 @@ class StrategyRuleEngine:
             values.update(
                 {
                     "target_distance_next_resistance": (
-                        distance
-                        if strategy.direction != StrategyDirection.SHORT
-                        else None
+                        distance if strategy.direction != StrategyDirection.SHORT else None
                     ),
                     "target_distance_next_support": (
-                        distance
-                        if strategy.direction == StrategyDirection.SHORT
-                        else None
+                        distance if strategy.direction == StrategyDirection.SHORT else None
                     ),
                     "r_multiple_before_obstacle": distance / stop_distance,
                     "liquidity_obstacle_before_target": bool(
@@ -1658,9 +1663,7 @@ class StrategyRuleEngine:
             else None
         )
         candle_range = current.high - current.low
-        values["candle_overextended"] = (
-            candle_range / atr_value if atr_value > 0 else None
-        )
+        values["candle_overextended"] = candle_range / atr_value if atr_value > 0 else None
         setup_first = condition_context.get("setup_first_detected_at")
         if setup_first is not None:
             parsed = (
@@ -1668,9 +1671,7 @@ class StrategyRuleEngine:
                 if isinstance(setup_first, str)
                 else ensure_aware(setup_first)
             )
-            values["setup_age_too_old"] = (
-                evaluation_time - parsed
-            ).total_seconds() / 60
+            values["setup_age_too_old"] = (evaluation_time - parsed).total_seconds() / 60
         values["maximum_alert_lateness"] = values["maximum_data_latency"]
         values["volatility_too_high"] = values.get("volatility_atr_percent")
         values["volatility_too_low"] = values.get("volatility_atr_percent")
@@ -1731,11 +1732,6 @@ def _target_matches_fibonacci_extension(
     swing = max(candle.high for candle in recent) - min(candle.low for candle in recent)
     if swing <= 0:
         return False
-    target_distance = abs(
-        float(calculation.targets[0]["price"]) - calculation.entry_price
-    )
+    target_distance = abs(float(calculation.targets[0]["price"]) - calculation.entry_price)
     ratio = target_distance / swing
-    return any(
-        abs(ratio - extension) <= 0.08
-        for extension in (0.618, 1.0, 1.272, 1.618, 2.0)
-    )
+    return any(abs(ratio - extension) <= 0.08 for extension in (0.618, 1.0, 1.272, 1.618, 2.0))

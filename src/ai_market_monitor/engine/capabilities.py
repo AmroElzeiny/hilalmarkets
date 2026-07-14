@@ -106,6 +106,18 @@ class CapabilitySpec:
     phase: int = 1
     approximation: bool = False
     approximation_note: str = ""
+    semantic_tags: tuple[str, ...] = ()
+    intent_examples: tuple[str, ...] = ()
+    negative_examples: tuple[str, ...] = ()
+    direction_support: tuple[str, ...] = ("bullish", "bearish", "neutral")
+    temporal_behavior: str = "current_candle"
+    parameter_schema: dict[str, Any] = field(default_factory=dict)
+    conflicts_with: tuple[str, ...] = ()
+    composes_with: tuple[str, ...] = ()
+    provider_requirements: tuple[str, ...] = ()
+    capability_version: str = "1.0"
+    proof_template: str = ""
+    resource_cost: str = "low"
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -138,6 +150,126 @@ class SynonymSpec:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _semantic_tags(
+    key: str,
+    label: str,
+    category: str,
+    description: str,
+    aliases: tuple[str, ...],
+    explicit: tuple[str, ...],
+) -> tuple[str, ...]:
+    text = " ".join((key.replace("_", " "), label, category, description, *aliases)).casefold()
+    tags = [category, *explicit]
+    tag_terms = {
+        "sweep": ("sweep", "stop hunt", "liquidity"),
+        "momentum": ("momentum", "rsi", "stochastic", "macd", "oscillator"),
+        "volatility": ("volatility", "atr", "bollinger", "keltner", "range expansion"),
+        "reversal": ("reversal", "reclaim", "rejection", "engulf", "hammer", "fakeout"),
+        "trend": ("trend", "moving average", "ema", "sma", "supertrend", "ichimoku"),
+        "session": ("session", "timezone", "midnight", "killzone", "time window"),
+    }
+    for tag, terms in tag_terms.items():
+        if any(term in text for term in terms):
+            tags.append(tag)
+    return tuple(dict.fromkeys(tag.strip().casefold() for tag in tags if tag.strip()))
+
+
+def _direction_support(text: str, explicit: tuple[str, ...]) -> tuple[str, ...]:
+    if explicit:
+        return explicit
+    lowered = text.casefold()
+    bullish = any(
+        term in lowered
+        for term in ("bullish", "upside", "sweep low", "sweep lows", "above", "reclaim")
+    )
+    bearish = any(
+        term in lowered
+        for term in ("bearish", "downside", "sweep high", "sweep highs", "below", "breakdown")
+    )
+    if bullish and not bearish:
+        return ("bullish",)
+    if bearish and not bullish:
+        return ("bearish",)
+    return ("bullish", "bearish", "neutral")
+
+
+def _temporal_behavior(text: str, explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    lowered = text.casefold()
+    if "previous candle" in lowered or "prior candle" in lowered:
+        return "previous_candle"
+    if any(term in lowered for term in ("within", "lookback", "sequence", "persist", "count")):
+        return "within_n_candles"
+    return "current_candle"
+
+
+def _json_type(parameter_type: str) -> str:
+    return {
+        "integer": "integer",
+        "number": "number",
+        "boolean": "boolean",
+        "choice": "string",
+        "timeframe": "string",
+    }.get(parameter_type, "string")
+
+
+def _parameter_schema(
+    parameters: tuple[CapabilityParameter, ...],
+    defaults: dict[str, Any],
+    default_threshold: Any,
+) -> dict[str, Any]:
+    properties: dict[str, dict[str, Any]] = {}
+    required: list[str] = []
+    for parameter in parameters:
+        item: dict[str, Any] = {
+            "type": _json_type(parameter.type),
+            "description": parameter.description,
+        }
+        if parameter.default is not None:
+            item["default"] = parameter.default
+        if parameter.options:
+            item["enum"] = list(parameter.options)
+        properties[parameter.name] = item
+        if parameter.required:
+            required.append(parameter.name)
+    for name, value in defaults.items():
+        properties.setdefault(
+            name,
+            {
+                "type": (
+                    "boolean"
+                    if isinstance(value, bool)
+                    else "integer"
+                    if isinstance(value, int)
+                    else "number"
+                    if isinstance(value, float)
+                    else "string"
+                ),
+                "default": value,
+            },
+        )
+    if default_threshold is not None and not isinstance(default_threshold, bool):
+        properties.setdefault(
+            "threshold",
+            {"type": "number", "default": default_threshold},
+        )
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _resource_cost(warmup_candles: int, provider_required: str | None) -> str:
+    if provider_required or warmup_candles > 500:
+        return "high"
+    if warmup_candles > 100:
+        return "medium"
+    return "low"
 
 
 def _cap(
@@ -200,7 +332,20 @@ def _cap(
     phase: int = 1,
     approximation: bool = False,
     approximation_note: str = "",
+    semantic_tags: tuple[str, ...] = (),
+    intent_examples: tuple[str, ...] = (),
+    negative_examples: tuple[str, ...] = (),
+    direction_support: tuple[str, ...] = (),
+    temporal_behavior: str | None = None,
+    parameter_schema: dict[str, Any] | None = None,
+    conflicts_with: tuple[str, ...] = (),
+    composes_with: tuple[str, ...] = (),
+    provider_requirements: tuple[str, ...] = (),
+    capability_version: str = "1.0",
+    proof_template: str | None = None,
+    resource_cost: str | None = None,
 ) -> CapabilitySpec:
+    searchable_text = " ".join((key, label, category, description, *aliases, *examples))
     return CapabilitySpec(
         key=key,
         label=label,
@@ -239,6 +384,23 @@ def _cap(
         phase=phase,
         approximation=approximation,
         approximation_note=approximation_note,
+        semantic_tags=_semantic_tags(key, label, category, description, aliases, semantic_tags),
+        intent_examples=(intent_examples or examples or aliases[:3] or (description,)),
+        negative_examples=negative_examples,
+        direction_support=_direction_support(searchable_text, direction_support),
+        temporal_behavior=_temporal_behavior(searchable_text, temporal_behavior),
+        parameter_schema=(
+            parameter_schema
+            or _parameter_schema(parameters, default_parameters or {}, default_threshold)
+        ),
+        conflicts_with=conflicts_with,
+        composes_with=composes_with,
+        provider_requirements=(
+            provider_requirements or ((provider_required,) if provider_required else ())
+        ),
+        capability_version=capability_version,
+        proof_template=(proof_template or visual_card_sentence or description),
+        resource_cost=(resource_cost or _resource_cost(warmup_candles, provider_required)),
     )
 
 
@@ -721,11 +883,21 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "volume_liquidity",
         "indicator",
         "Volume is above or below its average.",
-        aliases=("relative volume", "volume multiplier", "times average"),
+        aliases=(
+            "relative volume",
+            "volume multiplier",
+            "times average",
+            "volume above average",
+            "volume x average",
+        ),
         operand_kind="indicator",
         operand_name="volume_ratio",
         default_comparator="gte",
         default_threshold=1.5,
+        intent_examples=(
+            "Volume is at least 1.5x its average.",
+            "Find symbols with volume above the recent candle average.",
+        ),
     ),
     _cap(
         "relative_volume_rising",
@@ -1217,6 +1389,68 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         operand_name="higher_high",
     ),
     _cap(
+        "previous_daily_low_sweep",
+        "Previous daily low sweep",
+        "price_action",
+        "price_action",
+        "Price trades below the previous UTC daily low and closes back above it.",
+        aliases=(
+            "pdl sweep",
+            "sweep pdl",
+            "sweep previous daily low",
+            "sweep the previous daily low",
+            "swept pdl",
+            "sweeped pdl",
+            "swept through pdl",
+            "previous daily low sweep",
+            "previous day low sweep",
+        ),
+        operand_kind="price_action",
+        operand_name="daily_low_swept",
+        default_parameters={"timezone": "UTC"},
+        parameters=(CapabilityParameter("timezone", "timezone", "UTC"), TIMEFRAME),
+        semantic_tags=("sweep", "liquidity", "reversal"),
+        direction_support=("bullish",),
+        temporal_behavior="current_candle",
+        composes_with=("bullish_engulfing", "volume_spike", "price_above_ema"),
+        intent_examples=(
+            "Find coins that swept PDL.",
+            "Alert when price sweeps the previous daily low and reclaims it.",
+        ),
+        negative_examples=("Price closes below PDL without reclaiming it.",),
+    ),
+    _cap(
+        "previous_daily_high_sweep",
+        "Previous daily high sweep",
+        "price_action",
+        "price_action",
+        "Price trades above the previous UTC daily high and closes back below it.",
+        aliases=(
+            "pdh sweep",
+            "sweep pdh",
+            "sweep previous daily high",
+            "sweep the previous daily high",
+            "swept pdh",
+            "sweeped pdh",
+            "swept through pdh",
+            "previous daily high sweep",
+            "previous day high sweep",
+        ),
+        operand_kind="price_action",
+        operand_name="daily_high_swept",
+        default_parameters={"timezone": "UTC"},
+        parameters=(CapabilityParameter("timezone", "timezone", "UTC"), TIMEFRAME),
+        semantic_tags=("sweep", "liquidity", "reversal"),
+        direction_support=("bearish",),
+        temporal_behavior="current_candle",
+        composes_with=("bearish_engulfing", "volume_spike", "price_below_ema"),
+        intent_examples=(
+            "Find coins that swept PDH.",
+            "Alert when price sweeps the previous daily high and rejects it.",
+        ),
+        negative_examples=("Price closes above PDH without rejecting it.",),
+    ),
+    _cap(
         "weekly_high_low",
         "Weekly high/low",
         "price_action",
@@ -1225,6 +1459,70 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("weekly high", "weekly low"),
         operand_kind="price_action",
         operand_name="higher_high",
+    ),
+    _cap(
+        "reference_period_sweep",
+        "Previous period high/low sweep",
+        "price_action",
+        "price_action",
+        (
+            "The current candle trades beyond a completed previous day, week, or month "
+            "high/low and closes back through that level."
+        ),
+        aliases=(
+            "previous weekly candle sweep",
+            "sweep previous weekly candle",
+            "sweep the previous week",
+            "previous week sweep",
+            "prior week sweep",
+            "previous week low sweep",
+            "previous week high sweep",
+            "swept the previous week's low",
+            "swept the previous week's high",
+            "previous monthly candle sweep",
+            "previous month low sweep",
+            "previous month high sweep",
+            "previous period sweep",
+        ),
+        operand_kind="price_action",
+        operand_name="reference_period_sweep",
+        default_parameters={"reference_period": "week", "side": "low", "timezone": "UTC"},
+        parameters=(
+            CapabilityParameter(
+                "reference_period",
+                "choice",
+                "week",
+                False,
+                "Completed reference period.",
+                options=("day", "week", "month"),
+            ),
+            CapabilityParameter(
+                "side",
+                "choice",
+                None,
+                True,
+                "High for a bearish rejection or low for a bullish reclaim.",
+                options=("high", "low"),
+            ),
+            CapabilityParameter("timezone", "timezone", "UTC"),
+            TIMEFRAME,
+        ),
+        semantic_tags=("sweep", "liquidity", "reversal"),
+        direction_support=("bullish", "bearish"),
+        temporal_behavior="current_candle",
+        intent_examples=(
+            "Find coins whose current candle swept the previous week's low.",
+            "Alert when this week's candle sweeps last week's high and closes below it.",
+            "Show a sweep of the previous monthly candle's low.",
+        ),
+        negative_examples=(
+            "The current candle remains inside the previous period range.",
+            "Price breaks the previous period level without closing back through it.",
+        ),
+        proof_template=(
+            "Current candle swept the previous {reference_period} {side} and reclaimed it."
+        ),
+        capability_version="1.1",
     ),
     _cap(
         "monthly_high_low",
@@ -1282,9 +1580,30 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "price_action",
         "price_action",
         "Price increases or decreases by X percent over lookback.",
-        aliases=("pump", "dump", "increasing by", "decreasing by"),
+        aliases=(
+            "pump",
+            "dump",
+            "increasing by",
+            "decreasing by",
+            "price up percent",
+            "price down percent",
+            "gained percent",
+            "dropped percent",
+        ),
         operand_kind="price_action",
         operand_name="percent_change_up",
+        default_parameters={"direction": "up", "threshold_percent": 5, "lookback": 1},
+        parameters=(
+            CapabilityParameter("direction", "choice", "up", options=("up", "down")),
+            CapabilityParameter("threshold_percent", "number", 5),
+            CapabilityParameter("lookback", "integer", 1),
+            TIMEFRAME,
+        ),
+        intent_examples=(
+            "Find coins up 5% today.",
+            "Find coins down 4% this week.",
+        ),
+        direction_support=("bullish", "bearish"),
     ),
     _cap(
         "new_n_day_high",
@@ -2041,6 +2360,28 @@ def _extended_indicator_capabilities() -> list[CapabilitySpec]:
             "volatility_squeeze",
         ),
         (
+            "trend_strength",
+            "Trend Strength",
+            "trend_strength",
+            {"period": 50},
+            "gte",
+            0.55,
+            ("trend strength", "clean trend", "efficient trend", "directional trend"),
+            51,
+            "trend",
+        ),
+        (
+            "atr_expansion_ratio",
+            "ATR Expansion Ratio",
+            "expansion_ratio",
+            {"short_period": 14, "long_period": 50},
+            "gte",
+            1.2,
+            ("atr expansion ratio", "volatility expansion ratio", "atr expanding"),
+            51,
+            "volatility_squeeze",
+        ),
+        (
             "ulcer_index",
             "Ulcer Index",
             "ulcer_index",
@@ -2137,6 +2478,17 @@ def _extended_indicator_capabilities() -> list[CapabilitySpec]:
             1.5,
             ("same time relative volume", "session rvol", "top volume same time"),
             30,
+            "volume_flow",
+        ),
+        (
+            "anchored_vwap",
+            "Anchored VWAP",
+            "anchored_vwap",
+            {"anchor_bars": 100},
+            "gt",
+            0,
+            ("anchored vwap", "avwap", "vwap from anchor", "vwap from sweep"),
+            100,
             "volume_flow",
         ),
         (
@@ -2357,6 +2709,43 @@ def _price_action_capabilities() -> list[CapabilitySpec]:
         "previous_high_swept": ("takes previous high", "previous high taken"),
         "previous_low_swept": ("takes previous low", "previous low taken"),
         "sweep_and_reclaim": ("reclaims level", "sweep reclaim"),
+        "po3_dealing_range_sweep_bullish": (
+            "po3 bullish dealing range sweep",
+            "bullish dealing range sweep",
+            "sell side dealing range sweep",
+        ),
+        "po3_dealing_range_sweep_bearish": (
+            "po3 bearish dealing range sweep",
+            "bearish dealing range sweep",
+            "buy side dealing range sweep",
+        ),
+        "po3_sweep_displacement_bullish": (
+            "bullish sweep and displacement",
+            "sell side sweep with displacement",
+        ),
+        "po3_sweep_displacement_bearish": (
+            "bearish sweep and displacement",
+            "buy side sweep with displacement",
+        ),
+        "po3_sweep_displacement_structure_bullish": (
+            "bullish po3",
+            "bullish sweep displacement bos",
+            "sell side sweep displacement bos",
+            "bullish sweep displacement structure",
+        ),
+        "po3_sweep_displacement_structure_bearish": (
+            "bearish po3",
+            "bearish sweep displacement bos",
+            "buy side sweep displacement bos",
+            "bearish sweep displacement structure",
+        ),
+        "fvg_virgin": ("virgin fvg", "unmitigated fvg"),
+        "fvg_touched": ("touched fvg", "fvg touched"),
+        "fvg_mid_mitigated": ("mid mitigated fvg", "fvg midpoint mitigated"),
+        "fvg_fully_mitigated": ("fully mitigated fvg", "fvg filled"),
+        "fvg_structure_invalidated": ("invalidated fvg", "fvg structure invalidated"),
+        "fvg_still_open_bullish": ("bullish fvg still open", "bullish open fvg"),
+        "fvg_still_open_bearish": ("bearish fvg still open", "bearish open fvg"),
         "displacement_candle_bullish": ("strong bullish candle", "bullish displacement"),
         "displacement_candle_bearish": ("strong bearish candle", "bearish displacement"),
         "session_high_swept": ("session high swept", "takes session high"),
@@ -2366,7 +2755,7 @@ def _price_action_capabilities() -> list[CapabilitySpec]:
     }
     specs: list[CapabilitySpec] = []
     for name in sorted(PRICE_ACTION_NAMES):
-        if name in existing:
+        if name in existing or name == "certified_dynamic":
             continue
         if any(term in name for term in ("structure", "swing", "protected", "weak_")):
             builder_category = "market_structure"

@@ -54,9 +54,7 @@ def concept_e2e_rows() -> list[dict[str, Any]]:
         condition_status, condition_error = _condition_template_status(template)
         strategy_status, strategy_error = _strategy_schema_status(template)
         availability = item.get("availability", "unknown")
-        evaluator_supported = bool(
-            compatibility_row and compatibility_row.evaluator_supported
-        )
+        evaluator_supported = bool(compatibility_row and compatibility_row.evaluator_supported)
         prompt_aliases = item.get("prompt_aliases") or []
         provider_required = bool(
             item.get("provider_required") or availability == "provider_required"

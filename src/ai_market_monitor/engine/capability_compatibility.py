@@ -83,9 +83,7 @@ def _check_capability(
     template_valid = True
     evaluator_supported = True
     try:
-        condition = ConditionRule.model_validate(
-            condition_template(capability, timeframe="15m")
-        )
+        condition = ConditionRule.model_validate(condition_template(capability, timeframe="15m"))
     except (ValidationError, ValueError, KeyError) as exc:
         template_valid = False
         evaluator_supported = False

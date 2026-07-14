@@ -15,9 +15,7 @@ class AdminNotificationService:
         email: str,
         source: str,
     ) -> None:
-        await self.send(
-            f"New signup: {email} user:{user_id} source:{source}"
-        )
+        await self.send(f"New signup: {email} user:{user_id} source:{source}")
 
     async def send_payment_received(
         self,
@@ -30,9 +28,7 @@ class AdminNotificationService:
     ) -> None:
         identity = email or f"user:{user_id}"
         plan = plan_code or "unknown-plan"
-        await self.send(
-            f"Payment received: {identity} {plan} via {provider} ({event_type})"
-        )
+        await self.send(f"Payment received: {identity} {plan} via {provider} ({event_type})")
 
     async def send(self, text: str) -> None:
         destination = self.settings.admin_notify_telegram_user_id

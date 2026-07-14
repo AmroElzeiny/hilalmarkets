@@ -182,9 +182,7 @@ def evaluate_time_condition(
         value = context.get(key)
         if name == "time_since_condition_true":
             condition_key = str(
-                parameters.get("condition_key")
-                or context.get("current_condition_key")
-                or ""
+                parameters.get("condition_key") or context.get("current_condition_key") or ""
             )
             first_true_by_condition = context.get("condition_first_true_at_by_key", {})
             if condition_key and isinstance(first_true_by_condition, dict):

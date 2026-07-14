@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.engine.builder_templates import condition_template
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
+from ai_market_monitor.engine.capability_resolver import CapabilityResolver
 from ai_market_monitor.engine.prompt_audit import audit_prompt_coverage
 from ai_market_monitor.engine.prompt_semantics import normalize_prompt_text
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
@@ -46,15 +46,18 @@ class AISemanticClassification(BaseModel):
     canonical_intent: str
     candidate_capability_keys: list[str] = Field(default_factory=list)
     direction: Literal["bullish", "bearish", "up", "down", "neutral"] | None = None
-    comparator: Literal[
-        "gt",
-        "gte",
-        "lt",
-        "lte",
-        "eq",
-        "crosses_above",
-        "crosses_below",
-    ] | None = None
+    comparator: (
+        Literal[
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "eq",
+            "crosses_above",
+            "crosses_below",
+        ]
+        | None
+    ) = None
     threshold: float | None = None
     timeframe: str | None = None
     required: bool = True
@@ -143,6 +146,7 @@ class AISemanticFallbackService:
         self._now = now or time.monotonic
         self._cache: dict[str, tuple[float, AISemanticFallbackOutcome]] = {}
         self._capabilities = {capability.key: capability for capability in all_capabilities()}
+        self._resolver = CapabilityResolver()
 
     async def resolve_fragment(
         self,
@@ -169,6 +173,24 @@ class AISemanticFallbackService:
         ]
         if not fragment:
             return AISemanticFallbackOutcome(status="not_called")
+        resolution = self._resolver.resolve_fragment(fragment)
+        candidate_keys = tuple(candidate.capability_key for candidate in resolution.candidates)
+        if not candidate_keys:
+            return AISemanticFallbackOutcome(
+                status="needs_clarification",
+                issue=_issue(
+                    "ai_semantic_clarification_required",
+                    fragment,
+                    resolution.clarification_question
+                    or "This phrase needs a measurable definition before activation.",
+                    blocking=True,
+                    reason=(
+                        f"Unknown terms: {', '.join(resolution.unknown_terms)}"
+                        if resolution.unknown_terms
+                        else None
+                    ),
+                ),
+            )
         cache_key = self._cache_key(fragment)
         cached = self._cache.get(cache_key)
         now = self._now()
@@ -194,8 +216,13 @@ class AISemanticFallbackService:
                 }
                 for condition in parsed_conditions
             ],
-            "available_capabilities": self._capability_summary(provider_required=False),
-            "provider_required_capabilities": self._capability_summary(provider_required=True),
+            "capability_resolution": resolution.to_dict(),
+            "available_capabilities": self._capability_summary(
+                candidate_keys, provider_required=False
+            ),
+            "provider_required_capabilities": self._capability_summary(
+                candidate_keys, provider_required=True
+            ),
             "default_timeframe": default_timeframe,
         }
         try:
@@ -205,6 +232,7 @@ class AISemanticFallbackService:
                 classification,
                 source_fragment=fragment,
                 default_timeframe=default_timeframe,
+                allowed_candidate_keys=set(candidate_keys),
             )
         except (httpx.HTTPError, ValueError, TypeError, ValidationError, KeyError) as exc:
             outcome = AISemanticFallbackOutcome(
@@ -229,6 +257,7 @@ class AISemanticFallbackService:
         *,
         source_fragment: str,
         default_timeframe: str,
+        allowed_candidate_keys: set[str],
     ) -> AISemanticFallbackOutcome:
         if classification.provider_required or classification.semantic_type == "provider_required":
             return AISemanticFallbackOutcome(
@@ -237,11 +266,15 @@ class AISemanticFallbackService:
                 issue=_issue(
                     "provider_required",
                     source_fragment,
-                    f"'{source_fragment}' requires provider data and cannot be made executable by AI.",
+                    f"'{source_fragment}' requires provider data and cannot be made "
+                    "executable by AI.",
                     blocking=classification.required,
                 ),
             )
-        if classification.semantic_type in {"vague", "unsupported"} or classification.needs_clarification:
+        if (
+            classification.semantic_type in {"vague", "unsupported"}
+            or classification.needs_clarification
+        ):
             return AISemanticFallbackOutcome(
                 status="needs_clarification"
                 if classification.needs_clarification
@@ -276,7 +309,8 @@ class AISemanticFallbackService:
                 issue=_issue(
                     "ai_semantic_review_required",
                     source_fragment,
-                    "AI suggested an interpretation, but it needs user confirmation before activation.",
+                    "AI suggested an interpretation, but it needs user confirmation "
+                    "before activation.",
                     blocking=classification.required,
                 ),
             )
@@ -287,7 +321,8 @@ class AISemanticFallbackService:
                 issue=_issue(
                     "ai_semantic_not_safe_to_convert",
                     source_fragment,
-                    "AI did not mark this phrase as safe to convert into a deterministic condition.",
+                    "AI did not mark this phrase as safe to convert into a deterministic "
+                    "condition.",
                     blocking=classification.required,
                 ),
             )
@@ -302,7 +337,19 @@ class AISemanticFallbackService:
                     blocking=classification.required,
                 ),
             )
-        capability = self._capabilities.get(classification.candidate_capability_keys[0])
+        selected_key = classification.candidate_capability_keys[0]
+        if selected_key not in allowed_candidate_keys:
+            return AISemanticFallbackOutcome(
+                status="rejected",
+                classification=classification,
+                issue=_issue(
+                    "ai_semantic_candidate_outside_shortlist",
+                    source_fragment,
+                    "AI selected a capability outside the registry resolver shortlist.",
+                    blocking=classification.required,
+                ),
+            )
+        capability = self._capabilities.get(selected_key)
         if capability is None:
             return AISemanticFallbackOutcome(
                 status="rejected",
@@ -319,7 +366,11 @@ class AISemanticFallbackService:
                 status="provider_required" if capability.provider_required else "unsupported",
                 classification=classification,
                 issue=_issue(
-                    "provider_required" if capability.provider_required else "ai_semantic_unsupported",
+                    (
+                        "provider_required"
+                        if capability.provider_required
+                        else "ai_semantic_unsupported"
+                    ),
                     source_fragment,
                     f"{capability.label} is not executable in the current beta scanner.",
                     blocking=classification.required,
@@ -345,19 +396,28 @@ class AISemanticFallbackService:
         source_fragment: str,
         default_timeframe: str,
     ) -> ConditionRule:
-        payload = condition_template(
-            capability,
+        parameters: dict[str, Any] = {}
+        if classification.threshold is not None:
+            parameters["threshold"] = classification.threshold
+        condition = self._resolver.validate_selection(
+            capability_key=capability.key,
+            parameters=parameters,
             timeframe=classification.timeframe or default_timeframe,
+            required=classification.required,
+            source_fragment=source_fragment,
+            comparator=classification.comparator,
+            confidence=classification.confidence,
         )
-        payload["source_fragment"] = source_fragment
-        payload["confidence"] = classification.confidence
-        payload["ai_interpreted"] = True
-        payload["required"] = classification.required
         if capability.condition_type == "candle_pattern" and classification.negated:
-            payload["comparator"] = "is_false"
-        return ConditionRule.model_validate(payload)
+            condition = condition.model_copy(update={"comparator": "is_false"})
+        return condition
 
-    def _capability_summary(self, *, provider_required: bool) -> list[dict[str, Any]]:
+    def _capability_summary(
+        self,
+        keys: tuple[str, ...],
+        *,
+        provider_required: bool,
+    ) -> list[dict[str, Any]]:
         return [
             {
                 "key": capability.key,
@@ -365,15 +425,23 @@ class AISemanticFallbackService:
                 "category": capability.category,
                 "condition_type": capability.condition_type,
                 "aliases": list(capability.aliases[:8]),
+                "semantic_tags": list(capability.semantic_tags),
+                "intent_examples": list(capability.intent_examples[:4]),
+                "negative_examples": list(capability.negative_examples[:4]),
+                "direction_support": list(capability.direction_support),
+                "temporal_behavior": capability.temporal_behavior,
+                "parameter_schema": capability.parameter_schema,
                 "provider_required": capability.provider_required,
             }
-            for capability in self._capabilities.values()
+            for key in keys
+            if (capability := self._capabilities.get(key)) is not None
             if bool(capability.provider_required) is provider_required
             and (provider_required or capability.executable)
-        ][:180]
+        ]
 
     def _cache_key(self, fragment: str) -> str:
-        registry_version = f"{len(self._capabilities)}:{sum(len(item.aliases) for item in self._capabilities.values())}"
+        alias_count = sum(len(item.aliases) for item in self._capabilities.values())
+        registry_version = f"{len(self._capabilities)}:{alias_count}"
         return "|".join(
             (
                 normalize_prompt_text(fragment),
@@ -409,8 +477,7 @@ class AISemanticFallbackStrategyInterpreter:
             condition
             for condition in strategy.conditions.children
             if not (
-                isinstance(condition, ConditionRule)
-                and condition.key == "clarification_required"
+                isinstance(condition, ConditionRule) and condition.key == "clarification_required"
             )
         ]
         assumptions = list(preview.assumptions)
@@ -499,11 +566,15 @@ class AISemanticFallbackStrategyInterpreter:
             if row.get("bucket") == "unclassified" and row.get("fragment"):
                 fragments.append(str(row["fragment"]))
         for issue in preview.unsupported_conditions:
-            if issue.code in {
-                "no_supported_monitor_condition",
-                "prompt_fragment_unclassified",
-                "instruction_not_converted",
-            } and issue.source_fragment:
+            if (
+                issue.code
+                in {
+                    "no_supported_monitor_condition",
+                    "prompt_fragment_unclassified",
+                    "instruction_not_converted",
+                }
+                and issue.source_fragment
+            ):
                 fragments.append(issue.source_fragment)
         deduped: list[str] = []
         for fragment in fragments:

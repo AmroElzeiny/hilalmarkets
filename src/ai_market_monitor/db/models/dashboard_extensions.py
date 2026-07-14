@@ -2,7 +2,17 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ai_market_monitor.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -196,3 +206,56 @@ class IntegrationTestResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error_code: Mapped[str | None] = mapped_column(String(80))
     error_detail: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class AISetupChatSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ai_setup_chat_sessions"
+    __table_args__ = (
+        Index("ix_ai_setup_chat_user_status_updated", "user_id", "status", "updated_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="interviewing", nullable=False)
+    title: Mapped[str] = mapped_column(String(160), default="New monitor", nullable=False)
+    original_idea: Mapped[str | None] = mapped_column(Text)
+    context_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    draft_schema_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    translation_sheet: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    lint_warnings: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    rule_confidence: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    assumptions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    ambiguities: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    unsupported_conditions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    approved_strategy_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("strategies.id", ondelete="SET NULL")
+    )
+    approved_strategy_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("strategy_versions.id", ondelete="SET NULL")
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AISetupChatMessage(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "ai_setup_chat_messages"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence", name="uq_ai_setup_chat_message_sequence"),
+        UniqueConstraint("session_id", "client_message_id", name="uq_ai_setup_chat_client_message"),
+        Index("ix_ai_setup_chat_message_session_created", "session_id", "created_at"),
+    )
+
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ai_setup_chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    message_type: Mapped[str] = mapped_column(String(40), default="text", nullable=False)
+    client_message_id: Mapped[str | None] = mapped_column(String(80))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -36,10 +37,16 @@ from ai_market_monitor.db.models.enums import (
     StrategyVersionStatus,
 )
 from ai_market_monitor.engine.dedup import AlertFatigueGuard, stable_event_hash
+from ai_market_monitor.engine.dynamic_mechanics import required_history_candles
 from ai_market_monitor.engine.evaluator import StrategyRuleEngine
 from ai_market_monitor.engine.models import EvaluationResult, ensure_aware
 from ai_market_monitor.provider_context import ProviderContextService
-from ai_market_monitor.schemas.strategy import StrategyDefinition, StrategyDirection
+from ai_market_monitor.schemas.strategy import (
+    ConditionGroup,
+    ConditionRule,
+    StrategyDefinition,
+    StrategyDirection,
+)
 from ai_market_monitor.services.entitlements import (
     EntitlementError,
     EntitlementService,
@@ -65,6 +72,7 @@ class ScanRunSummary:
     symbols_planned: int
     symbols_scanned: int
     matches_found: int
+    notifications_created: int
     failures: int
 
 
@@ -213,9 +221,7 @@ class ScanScheduler:
                 bucket_epoch = int(scheduled_for.timestamp()) // interval * interval
                 bucket = datetime.fromtimestamp(bucket_epoch, tz=UTC)
                 job_type = (
-                    "experiment_live"
-                    if experiment.mode == "live_monitor"
-                    else "experiment_dry_run"
+                    "experiment_live" if experiment.mode == "live_monitor" else "experiment_dry_run"
                 )
                 key = stable_event_hash(
                     {
@@ -379,12 +385,29 @@ class ScanPersistenceService:
             result=result,
             plan_alert_budget=plan_alert_budget,
             definition=definition,
+            scan_context=scan_context,
         )
-        if alert is not None and scan_context:
-            alert.proof_receipt = {
-                **(alert.proof_receipt or {}),
-                "scan_context": scan_context,
-            }
+        if self.settings is not None:
+            from ai_market_monitor.services.setup_observability import (
+                SetupObservabilityService,
+            )
+
+            readiness = await SetupObservabilityService(
+                self.session, self.settings
+            ).record_candidate(
+                strategy=strategy,
+                version=version,
+                definition=definition,
+                scan_result=scan_result,
+                setup=setup,
+                result=result,
+            )
+            if alert is not None:
+                readiness.notification_status = (
+                    "pending"
+                    if int(getattr(alert, "_enqueued_delivery_count", 0)) > 0
+                    else "not_attempted"
+                )
         return scan_result, setup, alert
 
     async def _persist_runtime_states(
@@ -427,13 +450,9 @@ class ScanPersistenceService:
             state.last_evaluated_at = result.evaluation_time
             state.actual_value = {"value": condition.actual_value}
             if passed:
-                state.first_true_at = (
-                    state.first_true_at if was_passed else result.evaluation_time
-                )
+                state.first_true_at = state.first_true_at if was_passed else result.evaluation_time
                 state.last_true_at = result.evaluation_time
-                state.consecutive_true_count = (
-                    state.consecutive_true_count + 1 if was_passed else 1
-                )
+                state.consecutive_true_count = state.consecutive_true_count + 1 if was_passed else 1
             else:
                 state.first_true_at = None
                 state.consecutive_true_count = 0
@@ -450,7 +469,12 @@ class ScanPersistenceService:
     ) -> SetupInstance | None:
         if result.setup_state is None:
             return None
-        should_persist = result.outcome in {ScanOutcome.CONFIRMED, ScanOutcome.FORMING} or (
+        should_persist = result.outcome in {
+            ScanOutcome.CONFIRMED,
+            ScanOutcome.FORMING,
+            ScanOutcome.INVALID,
+            ScanOutcome.EXPIRED,
+        } or (
             result.outcome in {ScanOutcome.NEAR_MISS, ScanOutcome.SKIPPED}
             and self._near_miss_storage_allowed(result, definition)
         )
@@ -648,6 +672,7 @@ class ScanPersistenceService:
         result: EvaluationResult,
         plan_alert_budget: int | None,
         definition: StrategyDefinition,
+        scan_context: dict[str, Any] | None,
     ) -> Alert | None:
         alert_type: AlertType | None = None
         if result.outcome == ScanOutcome.CONFIRMED:
@@ -693,6 +718,7 @@ class ScanPersistenceService:
                     body="Trial alert limit reached for this 14-day cycle.",
                     proof_receipt={
                         **result.proof_receipt(),
+                        **({"scan_context": scan_context} if scan_context else {}),
                         "setup_instance_id": str(setup.id),
                         "universe_source": "approved_strategy_universe",
                         "cooldown_status": "not_evaluated_trial_limit",
@@ -762,6 +788,7 @@ class ScanPersistenceService:
             ),
             proof_receipt={
                 **result.proof_receipt(),
+                **({"scan_context": scan_context} if scan_context else {}),
                 "setup_instance_id": str(setup.id),
                 "universe_source": "approved_strategy_universe",
                 "cooldown_status": "passed",
@@ -794,7 +821,8 @@ class ScanPersistenceService:
             )
         if trial_service is not None:
             await trial_service.record_alert_generated(alert)
-        await NotificationDispatcher(self.session).enqueue(alert, definition)
+        deliveries = await NotificationDispatcher(self.session).enqueue(alert, definition)
+        alert._enqueued_delivery_count = len(deliveries)
         return alert
 
     async def _create_trial_limit_notice(
@@ -968,9 +996,7 @@ class ScanOrchestrator:
                 "Strategy schema hash no longer matches the approved version.",
             )
             return self._summary(job, failures=0)
-        preferences = await NotificationPreferenceService(self.session).current(
-            strategy.user_id
-        )
+        preferences = await NotificationPreferenceService(self.session).current(strategy.user_id)
         if definition.universe.exchange.lower() not in (preferences.providers or set()):
             await self._cancel_job(
                 job,
@@ -1005,11 +1031,23 @@ class ScanOrchestrator:
             ).all()
         )
         job.symbols_scanned = len(completed_symbols)
+        if self.settings is not None:
+            from ai_market_monitor.services.setup_observability import (
+                SetupObservabilityService,
+            )
+
+            await SetupObservabilityService(self.session, self.settings).sync_cycle(
+                job=job,
+                strategy=strategy,
+                version=version,
+                provider=definition.universe.exchange,
+            )
         await self.session.flush()
         await self.session.commit()
 
         failures: list[dict[str, object]] = []
         matches = job.matches_found
+        notifications_created = int((job.metrics or {}).get("notifications_created") or 0)
         for symbol in symbols:
             if symbol in completed_symbols:
                 continue
@@ -1021,7 +1059,6 @@ class ScanOrchestrator:
                     is_complete = self._base_candle_complete(
                         definition, result["candle_sets"], job.scheduled_for
                     )
-                    alerts_created = 0
                     confirmed_evaluations = 0
                     plan_budget_value = entitlement.limit("alerts_per_day")
                     plan_alert_budget = (
@@ -1047,10 +1084,11 @@ class ScanOrchestrator:
                                 else None
                             ),
                         )
-                        alerts_created += int(alert is not None)
-                        confirmed_evaluations += int(
-                            evaluation.outcome == ScanOutcome.CONFIRMED
-                        )
+                        if alert is not None:
+                            notifications_created += int(
+                                getattr(alert, "_enqueued_delivery_count", 0)
+                            )
+                        confirmed_evaluations += int(evaluation.outcome == ScanOutcome.CONFIRMED)
                     job.symbols_scanned += 1
                     matches += confirmed_evaluations
                     job.matches_found = matches
@@ -1074,7 +1112,11 @@ class ScanOrchestrator:
         job.matches_found = matches
         completed_at = datetime.now(UTC)
         job.completed_at = completed_at
-        job.metrics = {**(job.metrics or {}), "failures": failures}
+        job.metrics = {
+            **(job.metrics or {}),
+            "failures": failures,
+            "notifications_created": notifications_created,
+        }
         if failures and job.symbols_scanned:
             job.status = ScanJobStatus.PARTIAL
             job.error_code = "partial_symbol_failures"
@@ -1119,6 +1161,17 @@ class ScanOrchestrator:
                     "experiment_id": (job.metrics or {}).get("experiment_id"),
                 },
             )
+        if self.settings is not None:
+            from ai_market_monitor.services.setup_observability import (
+                SetupObservabilityService,
+            )
+
+            await SetupObservabilityService(self.session, self.settings).sync_cycle(
+                job=job,
+                strategy=strategy,
+                version=version,
+                provider=definition.universe.exchange,
+            )
         await self.session.flush()
         return self._summary(job, failures=len(failures))
 
@@ -1136,7 +1189,7 @@ class ScanOrchestrator:
                 definition.universe.exchange,
                 symbol,
                 timeframe,
-                max(300, definition.universe.min_historical_candles),
+                self._history_limit(definition, timeframe),
             )
             for timeframe in timeframes
         }
@@ -1347,6 +1400,30 @@ class ScanOrchestrator:
         ]
         return {"evaluations": evaluations, "candle_sets": candle_sets}
 
+    def _history_limit(self, definition: StrategyDefinition, timeframe: str) -> int:
+        limit = max(300, definition.universe.min_historical_candles)
+        maximum = (
+            self.settings.capability_extension_max_history_candles
+            if self.settings is not None
+            else 25_000
+        )
+        for rule in _condition_rules(definition.conditions):
+            if rule.timeframe != timeframe or rule.left.name != "certified_dynamic":
+                continue
+            try:
+                expression = json.loads(str(rule.left.parameters.get("expression_json") or "{}"))
+                limit = max(
+                    limit,
+                    required_history_candles(
+                        expression,
+                        timeframe,
+                        minimum=limit,
+                    ),
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return min(limit, maximum)
+
     @staticmethod
     def _base_candle_complete(
         definition: StrategyDefinition,
@@ -1389,5 +1466,15 @@ class ScanOrchestrator:
             symbols_planned=job.symbols_planned,
             symbols_scanned=job.symbols_scanned,
             matches_found=job.matches_found,
+            notifications_created=int((job.metrics or {}).get("notifications_created") or 0),
             failures=failures,
         )
+
+
+def _condition_rules(node: ConditionRule | ConditionGroup) -> list[ConditionRule]:
+    if isinstance(node, ConditionRule):
+        return [node]
+    rules: list[ConditionRule] = []
+    for child in node.children:
+        rules.extend(_condition_rules(child))
+    return rules

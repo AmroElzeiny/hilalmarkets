@@ -41,8 +41,7 @@ class RiskCalculator:
         stop_distance_percent = (stop_distance / entry_price) * 100
         if (
             enforce_limits
-            and
-            strategy.risk.maximum_stop_percent is not None
+            and strategy.risk.maximum_stop_percent is not None
             and stop_distance_percent > strategy.risk.maximum_stop_percent
         ):
             raise RiskCalculationError("stop_distance_exceeded: stop distance exceeds maximum")
@@ -85,8 +84,7 @@ class RiskCalculator:
         reward_to_risk = abs(first_target_price - entry_price) / stop_distance
         if (
             enforce_limits
-            and
-            strategy.risk.minimum_reward_to_risk is not None
+            and strategy.risk.minimum_reward_to_risk is not None
             and reward_to_risk < strategy.risk.minimum_reward_to_risk
         ):
             raise RiskCalculationError("reward_to_risk_below_minimum: reward-to-risk below minimum")

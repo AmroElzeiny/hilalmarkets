@@ -85,7 +85,7 @@ class AlertPresentation:
             dashboard_url = f"{base}/dashboard/subscription" if base else None
             return cls(
                 alert_id=str(alert.id),
-                strategy_id=str(alert.strategy_version_id) if alert.strategy_version_id else None,
+                strategy_id=str(proof.get("strategy_id")) if proof.get("strategy_id") else None,
                 strategy_version=str(proof.get("strategy_version") or "n/a"),
                 alert_type=alert.alert_type.value,
                 title=alert.title,
@@ -168,13 +168,15 @@ class AlertPresentation:
         if market_data_timestamp is not None:
             setup_age = _duration(created_at - market_data_timestamp)
         actions = [
-            AlertActionPresentation("🔄 View lifecycle", f"dashboard_lifecycle:{alert.id}", dashboard_url),
+            AlertActionPresentation(
+                "🔄 View lifecycle", f"dashboard_lifecycle:{alert.id}", dashboard_url
+            ),
             AlertActionPresentation("📊 Dashboard", f"dashboard:{alert.id}", dashboard_url),
             AlertActionPresentation("🔕 Mute symbol", f"mute_symbol:{alert.id}"),
         ]
         return cls(
             alert_id=str(alert.id),
-            strategy_id=str(alert.strategy_version_id) if alert.strategy_version_id else None,
+            strategy_id=str(proof.get("strategy_id")) if proof.get("strategy_id") else None,
             strategy_version=str(proof.get("strategy_version") or "n/a"),
             alert_type=alert.alert_type.value,
             title=alert.title,
@@ -229,6 +231,7 @@ class AlertPresentation:
         return (
             f"Research match confirmed: {self.symbol}\n"
             f"Strategy: {self.strategy}\n"
+            f"Strategy version: {self.strategy_version}\n"
             f"Exchange/timeframe: {self.exchange} {self.timeframe}\n"
             f"Required completion: {score}\n"
             f"{trade_context}"

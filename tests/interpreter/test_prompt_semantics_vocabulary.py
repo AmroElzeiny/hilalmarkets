@@ -165,11 +165,11 @@ def _settings() -> Settings:
 async def test_ai_semantic_fallback_validates_registry_and_caches_results():
     client = CountingAIClient(
         {
-            "fragment": "bright candle",
+            "fragment": "liquidity sweeps",
             "semantic_type": "condition",
-            "plain_english_meaning": "bullish candle",
-            "canonical_intent": "candle close above open",
-            "candidate_capability_keys": ["green_candle"],
+            "plain_english_meaning": "bullish liquidity sweep",
+            "canonical_intent": "sweep a prior low and reclaim it",
+            "candidate_capability_keys": ["bullish_liquidity_sweep"],
             "direction": "bullish",
             "comparator": None,
             "threshold": None,
@@ -180,29 +180,30 @@ async def test_ai_semantic_fallback_validates_registry_and_caches_results():
             "provider_required": False,
             "needs_clarification": False,
             "clarification_question": None,
-            "reason": "User described a candle color concept.",
+            "reason": "The registry shortlist contains both sweep directions.",
             "safe_to_convert": True,
         }
     )
     service = AISemanticFallbackService(_settings(), client=client)
 
     first = await service.resolve_fragment(
-        original_prompt="bright candle",
-        unresolved_fragment="bright candle",
+        original_prompt="liquidity sweeps",
+        unresolved_fragment="liquidity sweeps",
         parsed_conditions=[],
         default_timeframe="15m",
     )
     second = await service.resolve_fragment(
-        original_prompt="bright candle",
-        unresolved_fragment="bright candle",
+        original_prompt="liquidity sweeps",
+        unresolved_fragment="liquidity sweeps",
         parsed_conditions=[],
         default_timeframe="15m",
     )
 
     assert first.status == "converted"
     assert first.condition is not None
-    assert first.condition.left.name == "green_candle"
-    assert first.condition.source_fragment == "bright candle"
+    assert first.condition.capability_key == "bullish_liquidity_sweep"
+    assert first.condition.left.name == "sell_side_liquidity_sweep"
+    assert first.condition.source_fragment == "liquidity sweeps"
     assert second.from_cache is True
     assert client.calls == 1
 
@@ -212,7 +213,7 @@ async def test_ai_semantic_fallback_rejects_unsafe_and_provider_candidates():
         _settings(),
         client=CountingAIClient(
             {
-                "fragment": "positive news",
+                "fragment": "high impact market news",
                 "semantic_type": "provider_required",
                 "plain_english_meaning": "news context",
                 "canonical_intent": "news event",
@@ -233,8 +234,8 @@ async def test_ai_semantic_fallback_rejects_unsafe_and_provider_candidates():
         ),
     )
     provider = await unsafe.resolve_fragment(
-        original_prompt="positive news",
-        unresolved_fragment="positive news",
+        original_prompt="high impact market news",
+        unresolved_fragment="high impact market news",
         parsed_conditions=[],
         default_timeframe="15m",
     )
@@ -242,29 +243,30 @@ async def test_ai_semantic_fallback_rejects_unsafe_and_provider_candidates():
     assert provider.issue is not None
     assert provider.issue.blocking is True
 
+    unknown_client = CountingAIClient(
+        {
+            "fragment": "magic alpha",
+            "semantic_type": "condition",
+            "plain_english_meaning": "unknown",
+            "canonical_intent": "unsupported",
+            "candidate_capability_keys": ["magic_alpha"],
+            "direction": None,
+            "comparator": None,
+            "threshold": None,
+            "timeframe": None,
+            "required": True,
+            "negated": False,
+            "confidence": 0.99,
+            "provider_required": False,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "reason": "Not in registry.",
+            "safe_to_convert": True,
+        }
+    )
     unknown = AISemanticFallbackService(
         _settings(),
-        client=CountingAIClient(
-            {
-                "fragment": "magic alpha",
-                "semantic_type": "condition",
-                "plain_english_meaning": "unknown",
-                "canonical_intent": "unsupported",
-                "candidate_capability_keys": ["magic_alpha"],
-                "direction": None,
-                "comparator": None,
-                "threshold": None,
-                "timeframe": None,
-                "required": True,
-                "negated": False,
-                "confidence": 0.99,
-                "provider_required": False,
-                "needs_clarification": False,
-                "clarification_question": None,
-                "reason": "Not in registry.",
-                "safe_to_convert": True,
-            }
-        ),
+        client=unknown_client,
     )
     rejected = await unknown.resolve_fragment(
         original_prompt="magic alpha",
@@ -272,9 +274,10 @@ async def test_ai_semantic_fallback_rejects_unsafe_and_provider_candidates():
         parsed_conditions=[],
         default_timeframe="15m",
     )
-    assert rejected.status == "rejected"
+    assert rejected.status == "needs_clarification"
     assert rejected.issue is not None
-    assert rejected.issue.code == "ai_semantic_unknown_capability"
+    assert rejected.issue.code == "ai_semantic_clarification_required"
+    assert unknown_client.calls == 0
 
 
 async def test_ai_semantic_strategy_interpreter_uses_deterministic_parser_first():

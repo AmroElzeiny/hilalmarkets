@@ -53,7 +53,9 @@ def validate_runtime_configuration(settings: Settings) -> None:
         if settings.scanning_enabled and settings.market_data_provider == "memory":
             errors.append("in-memory market data is forbidden for deployed live scanning")
         if settings.tracedge_market_data_mode == "fixture":
-            errors.append("TRACEDGE_MARKET_DATA_MODE=fixture is forbidden in staging and production")
+            errors.append(
+                "TRACEDGE_MARKET_DATA_MODE=fixture is forbidden in staging and production"
+            )
         if settings.tracedge_fixture_market_data_enabled:
             errors.append(
                 "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED must be false in staging and production"

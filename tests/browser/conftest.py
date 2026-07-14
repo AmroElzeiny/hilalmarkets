@@ -5,7 +5,6 @@ import html
 import json
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -24,7 +23,6 @@ import pytest
 from playwright.sync_api import Page, sync_playwright
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 TEST_PASSWORD = "TraceEdge1!"
@@ -450,6 +448,291 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
         await engine.dispose()
 
     _run_async_in_thread(_seed)
+
+
+def seed_setup_observability(database_url: str, email: str) -> dict[str, str]:
+    if not database_url:
+        pytest.skip("Observability visual QA requires the auto-started browser database URL.")
+
+    async def _seed() -> dict[str, str]:
+        from decimal import Decimal
+
+        from ai_market_monitor.db.models import (
+            CandidateReadinessSnapshot,
+            ConditionObservabilityAggregate,
+            MonitorHealthSummary,
+            ScanJob,
+            ScanResult,
+            SetupConditionResult,
+            SetupInstance,
+            SetupLifecycleEvent,
+            Strategy,
+            StrategyCondition,
+            StrategyVersion,
+            UserIdentity,
+        )
+        from ai_market_monitor.db.models.enums import (
+            ConditionOutcome,
+            ConditionType,
+            IdentityProvider,
+            ScanJobStatus,
+            ScanOutcome,
+            SetupLifecycleState,
+            StrategyStatus,
+            StrategyVersionStatus,
+        )
+        from tests.factories import load_strategy
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test user identity found for {email}.")
+            now = datetime.now(UTC)
+            definition = load_strategy().model_copy(update={"name": "SOL Readiness Monitor"})
+            strategy = Strategy(
+                user_id=identity.user_id,
+                name="SOL Readiness Monitor",
+                status=StrategyStatus.ACTIVE,
+                activated_at=now,
+            )
+            session.add(strategy)
+            await session.flush()
+            version = StrategyVersion(
+                strategy_id=strategy.id,
+                version_number=3,
+                status=StrategyVersionStatus.ACTIVE,
+                source_type="browser_qa",
+                schema_json=definition.model_dump(mode="json"),
+                schema_hash=definition.canonical_hash(),
+                approved_schema_hash=definition.canonical_hash(),
+                approved_at=now,
+                activated_at=now,
+            )
+            session.add(version)
+            await session.flush()
+            strategy.active_version_id = version.id
+            condition = StrategyCondition(
+                strategy_version_id=version.id,
+                condition_key="volume_ratio",
+                label="RVOL above 1.50x",
+                node_type="condition",
+                condition_type=ConditionType.INDICATOR,
+                timeframe="15m",
+                comparator="gte",
+                left_operand={"kind": "indicator", "name": "volume_ratio"},
+                right_operand={"kind": "constant", "value": 1.5},
+                required_value=Decimal("1.5"),
+                weight=Decimal("1"),
+                sequence=0,
+                is_required=True,
+            )
+            session.add(condition)
+            job = ScanJob(
+                strategy_version_id=version.id,
+                idempotency_key=f"browser-observability-{uuid4()}",
+                status=ScanJobStatus.PARTIAL,
+                scheduled_for=now,
+                started_at=now,
+                completed_at=now,
+                symbols_planned=86,
+                symbols_scanned=84,
+                matches_found=0,
+            )
+            session.add(job)
+            await session.flush()
+            scan = ScanResult(
+                scan_job_id=job.id,
+                strategy_version_id=version.id,
+                exchange="binance",
+                symbol="SOL/USDT",
+                timeframe="15m",
+                direction="long",
+                outcome=ScanOutcome.NEAR_MISS,
+                completion_score=Decimal("80"),
+                candle_closed_at=now,
+                evaluated_at=now,
+                data_freshness_ms=850,
+                is_candle_complete=True,
+                proof_summary={},
+            )
+            session.add(scan)
+            await session.flush()
+            setup = SetupInstance(
+                user_id=identity.user_id,
+                strategy_version_id=version.id,
+                latest_scan_result_id=scan.id,
+                exchange="binance",
+                symbol="SOL/USDT",
+                timeframe="15m",
+                direction="long",
+                setup_key=f"browser-setup-{uuid4()}",
+                state=SetupLifecycleState.NEAR_CONFIRMATION,
+                completion_score=Decimal("80"),
+                first_detected_at=now,
+                last_evaluated_at=now,
+                expires_at=now.replace(hour=23, minute=59),
+            )
+            session.add(setup)
+            await session.flush()
+            session.add_all(
+                [
+                    SetupConditionResult(
+                        setup_instance_id=setup.id,
+                        scan_result_id=scan.id,
+                        strategy_condition_id=condition.id,
+                        condition_key=condition.condition_key,
+                        outcome=ConditionOutcome.FAILED,
+                        required_value={"value": 1.5},
+                        actual_value={"value": 1.27},
+                        distance_to_pass=Decimal("0.23"),
+                        contribution_score=Decimal("84.7"),
+                        candle_timestamp=now,
+                        evaluated_at=now,
+                        data_freshness_ms=850,
+                    ),
+                    SetupLifecycleEvent(
+                        setup_instance_id=setup.id,
+                        from_state=SetupLifecycleState.FORMING,
+                        to_state=SetupLifecycleState.NEAR_CONFIRMATION,
+                        reason_code="one_required_condition_remaining",
+                        evidence={"scan_result_id": str(scan.id)},
+                        occurred_at=now,
+                    ),
+                ]
+            )
+            states = [
+                ("SOL/USDT", "confirmation_pending", 3, 4, 5, "RVOL above 1.50x", "healthy"),
+                ("ETH/USDT", "forming", 1, 2, 5, "15m candle close", "healthy"),
+                ("LINK/USDT", "near_miss", 2, 3, 5, "Price above EMA 200", "healthy"),
+                ("AVAX/USDT", "provider_data_error", -3, 0, 5, "Candle data unavailable", "error"),
+            ]
+            for index, (symbol, state, rank, passed, total, blocker, health) in enumerate(states):
+                candidate_scan = scan
+                candidate_setup_id = setup.id if index == 0 else None
+                if index:
+                    candidate_scan = ScanResult(
+                        scan_job_id=job.id,
+                        strategy_version_id=version.id,
+                        exchange="binance",
+                        symbol=symbol,
+                        timeframe="15m",
+                        direction="long",
+                        outcome=ScanOutcome.ERROR if health == "error" else ScanOutcome.FORMING,
+                        completion_score=Decimal(str(passed / total * 100)),
+                        candle_closed_at=now,
+                        evaluated_at=now,
+                        data_freshness_ms=950 if health == "healthy" else 900000,
+                        is_candle_complete=True,
+                        proof_summary={},
+                    )
+                    session.add(candidate_scan)
+                    await session.flush()
+                session.add(
+                    CandidateReadinessSnapshot(
+                        user_id=identity.user_id,
+                        strategy_id=strategy.id,
+                        strategy_version_id=version.id,
+                        setup_instance_id=candidate_setup_id,
+                        scan_result_id=candidate_scan.id,
+                        exchange="binance",
+                        symbol=symbol,
+                        timeframe="15m",
+                        direction="long",
+                        lifecycle_state=state,
+                        stage_rank=rank,
+                        required_total=total,
+                        required_passed=passed,
+                        optional_total=1,
+                        optional_passed=1 if passed else 0,
+                        blocker_key=f"blocker_{index}",
+                        blocker_label=blocker,
+                        blocker_outcome="unavailable" if health == "error" else "failed",
+                        blocker_actual={"value": None if health == "error" else 1.27},
+                        blocker_required={"value": 1.5},
+                        blocker_distance=Decimal("0.23") if health == "healthy" else None,
+                        blocker_unit="absolute" if health == "healthy" else None,
+                        most_recent_change=f"{blocker} became the current blocker.",
+                        last_changed_at=now,
+                        last_evaluated_at=now,
+                        data_freshness_ms=950 if health == "healthy" else 900000,
+                        data_health=health,
+                        next_candle_close_at=now,
+                        notification_status="not_attempted",
+                        condition_tree={},
+                        latest_values=[
+                            {
+                                "key": f"blocker_{index}",
+                                "label": blocker,
+                                "role": "required_confirmation",
+                                "required": True,
+                                "outcome": "unavailable" if health == "error" else "failed",
+                                "actual": None if health == "error" else 1.27,
+                                "required_value": 1.5,
+                                "timeframe": "15m",
+                            }
+                        ],
+                    )
+                )
+            session.add(
+                MonitorHealthSummary(
+                    user_id=identity.user_id,
+                    strategy_id=strategy.id,
+                    strategy_version_id=version.id,
+                    technical_status="degraded",
+                    strategy_status="too_strict",
+                    technical_causes=[{"code": "cycle_incomplete", "message": "84/86 symbols were evaluated in the latest cycle."}],
+                    strategy_causes=[{"code": "no_confirmations", "message": "No confirmations in 14 days; RVOL blocked most near-misses."}],
+                    actions=[],
+                    metrics={"symbols_scanned": 84, "symbols_expected": 86, "provider_errors": 2, "alerts_24h": 0},
+                    calculated_at=now,
+                )
+            )
+            session.add(
+                ConditionObservabilityAggregate(
+                    user_id=identity.user_id,
+                    strategy_id=strategy.id,
+                    strategy_version_id=version.id,
+                    strategy_condition_id=condition.id,
+                    condition_key="volume_ratio",
+                    condition_label="RVOL above 1.50x",
+                    rule_role="required_confirmation",
+                    is_required=True,
+                    timeframe="15m",
+                    evaluation_count=120,
+                    pass_count=31,
+                    fail_count=89,
+                    pending_count=0,
+                    unavailable_count=0,
+                    error_count=0,
+                    final_blocker_count=61,
+                    near_miss_blocker_count=61,
+                    invalidation_count=8,
+                    average_actual=Decimal("1.31"),
+                    median_actual_when_blocked=Decimal("1.27"),
+                    average_required=Decimal("1.50"),
+                    average_distance=Decimal("0.23"),
+                    co_occurrence={},
+                    previous_version_delta={"pass_rate_points": -4.2, "previous_version": 2},
+                    counterfactual_preview={"preview_only": True, "current_threshold": 1.5, "proposed_threshold": 1.27, "additional_historical_completions": 31, "sample_count": 120},
+                    sample_status="sufficient",
+                    window_started_at=now.replace(day=1),
+                    window_ended_at=now,
+                    calculated_at=now,
+                )
+            )
+            await session.commit()
+            result = {"strategy_id": str(strategy.id), "setup_id": str(setup.id)}
+        await engine.dispose()
+        return result
+
+    return _run_async_in_thread(_seed)
 
 
 def _run_async_in_thread(factory):

@@ -1,26 +1,104 @@
 {
-  "generated_at": "2026-07-09T17:33:19.287088+00:00",
-  "started_at": "2026-07-09T17:33:03.891483+00:00",
-  "base_url": "http://127.0.0.1:53160",
+  "generated_at": "2026-07-14T01:03:48.786126+00:00",
+  "started_at": "2026-07-14T01:02:30.440122+00:00",
+  "base_url": "http://127.0.0.1:24831",
   "browser": "chromium",
   "auto_started": true,
-  "command": ".venv\\Scripts\\python.exe -m pytest tests\\unit\\test_dashboard_static_assets.py tests\\integration\\test_dashboard_api.py::test_dashboard_settings_persist_alert_schedule_without_theme_field tests\\integration\\test_dashboard_api.py::test_dashboard_publish_marks_monitor_active tests\\integration\\test_dashboard_api.py::test_dashboard_publish_requires_notification_channel tests\\integration\\test_dashboard_api.py::test_publish_blocks_critical_strategy_conflicts tests\\integration\\test_dashboard_api.py::test_advanced_dashboard_pages_render tests\\browser\\test_dashboard_e2e.py::test_approve_and_publish_executable_monitor -q",
-  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 53160",
+  "command": ".venv\\Scripts\\python.exe -m pytest tests\\browser --junitxml=reports\\playwright\\playwright-results.xml",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 24831",
   "exitstatus": 0,
-  "tests_run": 1,
-  "passed": 1,
+  "tests_run": 14,
+  "passed": 14,
   "failed": 0,
   "skipped": 0,
   "console_errors": [],
   "failed_network_calls": [],
   "page_errors": [],
   "artifacts": {
-    "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {}
+    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {},
+    "tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board": {},
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout": {},
+    "tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat": {},
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection": {},
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states": {},
+    "tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation": {},
+    "tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload": {},
+    "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {},
+    "tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner": {},
+    "tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims": {},
+    "tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke": {},
+    "tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa": {},
+    "tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke": {}
   },
   "tests": {
+    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {
+      "outcome": "passed",
+      "duration_seconds": 2.696,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board": {
+      "outcome": "passed",
+      "duration_seconds": 3.514,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout": {
+      "outcome": "passed",
+      "duration_seconds": 2.244,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat": {
+      "outcome": "passed",
+      "duration_seconds": 2.208,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection": {
+      "outcome": "passed",
+      "duration_seconds": 4.545,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states": {
+      "outcome": "passed",
+      "duration_seconds": 7.192,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation": {
+      "outcome": "passed",
+      "duration_seconds": 3.149,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload": {
+      "outcome": "passed",
+      "duration_seconds": 6.783,
+      "longrepr": ""
+    },
     "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {
       "outcome": "passed",
-      "duration_seconds": 5.62,
+      "duration_seconds": 7.976,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner": {
+      "outcome": "passed",
+      "duration_seconds": 2.208,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims": {
+      "outcome": "passed",
+      "duration_seconds": 2.191,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke": {
+      "outcome": "passed",
+      "duration_seconds": 2.306,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 6.683,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke": {
+      "outcome": "passed",
+      "duration_seconds": 1.706,
       "longrepr": ""
     }
   },

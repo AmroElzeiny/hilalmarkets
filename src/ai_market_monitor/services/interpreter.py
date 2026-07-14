@@ -11,12 +11,13 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.builder_templates import condition_template
 from ai_market_monitor.engine.candle_patterns import pattern_names
+from ai_market_monitor.engine.capabilities import capability_prompt_categories
 from ai_market_monitor.engine.capability_compatibility import (
     compatibility_by_key,
     prompt_blocked_capabilities,
     prompt_executable_capabilities,
 )
-from ai_market_monitor.engine.capabilities import capability_prompt_categories
+from ai_market_monitor.engine.capability_resolver import CapabilityResolver
 from ai_market_monitor.engine.context_conditions import TIME_CONDITION_NAMES
 from ai_market_monitor.engine.price_action import PRICE_ACTION_NAMES
 from ai_market_monitor.engine.prompt_aliases import (
@@ -154,10 +155,13 @@ class RuleBasedStrategyInterpreter:
         assumptions: list[str] = []
         unsupported: list[InterpretationIssue] = []
         supporting_timeframes: set[str] = set()
+        resolver = CapabilityResolver()
+        capability_resolution = resolver.resolve_prompt(original_text)
 
         def add(condition: ConditionRule | None) -> None:
             if condition is None:
                 return
+            condition = resolver.bind_known_condition(condition)
             if condition.timeframe != base_timeframe:
                 supporting_timeframes.add(condition.timeframe)
             self._append_unique(conditions, condition)
@@ -188,6 +192,30 @@ class RuleBasedStrategyInterpreter:
         for condition, note in self._time_window_conditions(text, base_timeframe):
             add(condition)
             assumptions.append(note)
+
+        for binding in guided_setup.capability_bindings:
+            try:
+                bound = resolver.validate_selection(
+                    capability_key=str(binding.get("capability_key") or ""),
+                    parameters=dict(binding.get("parameters") or {}),
+                    timeframe=str(binding.get("timeframe") or base_timeframe),
+                    required=bool(binding.get("required", True)),
+                    source_fragment=str(binding.get("source_fragment") or original_text),
+                    confidence=float(binding.get("confidence") or 0.9),
+                )
+            except (TypeError, ValueError) as exc:
+                unsupported.append(
+                    InterpretationIssue(
+                        code="capability_binding_invalid",
+                        field="setup_text",
+                        message=str(exc),
+                        blocking=True,
+                        source_fragment=str(binding.get("source_fragment") or original_text),
+                    )
+                )
+            else:
+                if not any(self._conditions_equivalent(existing, bound) for existing in conditions):
+                    add(bound)
 
         for issue in self._recognized_unsupported(text, conditions):
             if not any(
@@ -248,13 +276,9 @@ class RuleBasedStrategyInterpreter:
         if "one condition" in text and "missing" in text:
             assumptions.append("Near-Miss one-condition-remaining alerts are enabled.")
         if risk.maximum_stop_percent is not None:
-            assumptions.append(
-                f"Stop distance must be under {risk.maximum_stop_percent:g}%."
-            )
+            assumptions.append(f"Stop distance must be under {risk.maximum_stop_percent:g}%.")
         if risk.minimum_reward_to_risk is not None:
-            assumptions.append(
-                f"Reward-to-risk must be at least {risk.minimum_reward_to_risk:g}R."
-            )
+            assumptions.append(f"Reward-to-risk must be at least {risk.minimum_reward_to_risk:g}R.")
 
         root = ConditionGroup(
             key="entry_conditions",
@@ -333,8 +357,7 @@ class RuleBasedStrategyInterpreter:
                 continue
             lowered_fragment = fragment.casefold()
             if "retest" in lowered_fragment and any(
-                condition.left.name == "break_and_retest_confirmed"
-                for condition in conditions
+                condition.left.name == "break_and_retest_confirmed" for condition in conditions
             ):
                 for condition in conditions:
                     if condition.left.name == "break_and_retest_confirmed":
@@ -373,6 +396,7 @@ class RuleBasedStrategyInterpreter:
                 "deterministic_evaluation_required": True,
                 "prompt_coverage_report": coverage.model_dump(mode="json"),
                 "prompt_semantics": semantic_result.metadata(),
+                "capability_resolution": capability_resolution.to_dict(),
             },
         )
 
@@ -416,9 +440,9 @@ class RuleBasedStrategyInterpreter:
                 "buy_sell_pressure_proxy",
                 "pivot_points",
                 "candle_anatomy",
-                    "distance_to_reference",
-                    "impulse_candle",
-                    "volume_spike",
+                "distance_to_reference",
+                "impulse_candle",
+                "volume_spike",
             }
         )
         for match in find_capability_matches(text):
@@ -526,7 +550,11 @@ class RuleBasedStrategyInterpreter:
         ]
         left_edges.extend(
             match.end()
-            for match in re.finditer(r"\s+\band\b\s+|\s+\bthen\b\s+|\s+\balso\b\s+", text[:start], re.I)
+            for match in re.finditer(
+                r"\s+\band\b\s+|\s+\bthen\b\s+|\s+\balso\b\s+",
+                text[:start],
+                re.I,
+            )
         )
         left = max(left_edges, default=0)
         right_candidates = [
@@ -536,7 +564,11 @@ class RuleBasedStrategyInterpreter:
         ]
         right_candidates.extend(
             end + match.start()
-            for match in re.finditer(r"\s+\band\b\s+|\s+\bthen\b\s+|\s+\balso\b\s+", text[end:], re.I)
+            for match in re.finditer(
+                r"\s+\band\b\s+|\s+\bthen\b\s+|\s+\balso\b\s+",
+                text[end:],
+                re.I,
+            )
         )
         right = min(right_candidates, default=len(text))
         clause = " ".join(text[left:right].strip(" -:\t").split())
@@ -574,6 +606,76 @@ class RuleBasedStrategyInterpreter:
         add,
         assumptions: list[str],
     ) -> None:
+        # PDL/PDH are common shorthand for the previous UTC daily low/high. Handle them
+        # before the generic 20-candle sweep parser so their reference level stays exact.
+        previous_daily_low = re.search(
+            r"\b(?:pdl|previous\s+(?:day|daily)\s+low|prior\s+(?:day|daily)\s+low)\b",
+            text,
+        )
+        previous_daily_high = re.search(
+            r"\b(?:pdh|previous\s+(?:day|daily)\s+high|prior\s+(?:day|daily)\s+high)\b",
+            text,
+        )
+        sweep_verb = re.search(r"\b(?:swept|sweep(?:ed|s|ing)?)\b", text)
+        if sweep_verb and (previous_daily_low or previous_daily_high):
+            is_low = previous_daily_low is not None
+            add(
+                self._price_action(
+                    "previous_daily_low_sweep" if is_low else "previous_daily_high_sweep",
+                    (
+                        "Previous daily low swept and reclaimed"
+                        if is_low
+                        else "Previous daily high swept and reclaimed"
+                    ),
+                    timeframe,
+                    "daily_low_swept" if is_low else "daily_high_swept",
+                    parameters={"timezone": "UTC"},
+                    weight=2,
+                    forming_tolerance_percent=15,
+                    required=not self._term_optional(text, "sweep"),
+                )
+            )
+            assumptions.append(
+                "PDL is interpreted as the previous UTC daily low; the candle must trade "
+                "below it and close back above it."
+                if is_low
+                else "PDH is interpreted as the previous UTC daily high; the candle must trade "
+                "above it and close back below it."
+            )
+            return
+        reference_period = re.search(
+            r"\b(?:previous|prior|last)\s+(day|daily|week|weekly|month|monthly)(?:\s+candle)?\b",
+            text,
+        )
+        period_side = re.search(r"\b(high|low)\b", text)
+        if sweep_verb and reference_period and period_side:
+            period = {
+                "daily": "day",
+                "weekly": "week",
+                "monthly": "month",
+            }.get(reference_period.group(1), reference_period.group(1))
+            side = period_side.group(1)
+            add(
+                self._price_action(
+                    "reference_period_sweep",
+                    f"Previous {period} {side} swept and reclaimed",
+                    timeframe,
+                    "reference_period_sweep",
+                    parameters={
+                        "reference_period": period,
+                        "side": side,
+                        "timezone": "UTC",
+                    },
+                    weight=2,
+                    forming_tolerance_percent=15,
+                    required=not self._term_optional(text, "sweep"),
+                ).model_copy(update={"capability_key": "reference_period_sweep"})
+            )
+            assumptions.append(
+                f"The previous completed UTC {period} {side} is the reference; price must "
+                "trade beyond it and close back through it."
+            )
+            return
         if not any(
             term in text
             for term in (
@@ -594,9 +696,7 @@ class RuleBasedStrategyInterpreter:
         )
         direction = "bearish" if bearish else "bullish"
         operand_name = (
-            "buy_side_liquidity_sweep"
-            if direction == "bearish"
-            else "sell_side_liquidity_sweep"
+            "buy_side_liquidity_sweep" if direction == "bearish" else "sell_side_liquidity_sweep"
         )
         add(
             self._price_action(
@@ -1236,8 +1336,7 @@ class RuleBasedStrategyInterpreter:
                 if "%" in segment:
                     continue
                 if any(
-                    term in segment
-                    or term in context
+                    term in segment or term in context
                     for term in (
                         "ema",
                         "sma",
@@ -1529,9 +1628,7 @@ class RuleBasedStrategyInterpreter:
         for match in self._consecutive_candle_matches(text, timeframe):
             count, color, candle_timeframe = match
             component = (
-                "consecutive_bullish"
-                if color in {"green", "bullish"}
-                else "consecutive_bearish"
+                "consecutive_bullish" if color in {"green", "bullish"} else "consecutive_bearish"
             )
             add(
                 self._indicator_constant(
@@ -1779,9 +1876,7 @@ class RuleBasedStrategyInterpreter:
                 )
             elif capability.key in {"market_cap_minimum", "meme_coin_exclusion"}:
                 code = "external_data_required"
-                reason = (
-                    f"{capability.label} requires external market metadata before activation."
-                )
+                reason = f"{capability.label} requires external market metadata before activation."
             else:
                 code = "recognized_not_executable"
                 reason = (
@@ -1821,8 +1916,16 @@ class RuleBasedStrategyInterpreter:
         if capability_key == "percent_change_lookback":
             return any("percent_change_" in value for value in haystacks)
         if capability_key in {"time_window", "killzone_filter"}:
-            return any("time_window" in value or "session" in value or "midnight" in value for value in haystacks)
-        if capability_key in {"range_breakout", "range_breakdown", "new_n_day_high", "new_n_day_low"}:
+            return any(
+                "time_window" in value or "session" in value or "midnight" in value
+                for value in haystacks
+            )
+        if capability_key in {
+            "range_breakout",
+            "range_breakdown",
+            "new_n_day_high",
+            "new_n_day_low",
+        }:
             return any(
                 term in value
                 for value in haystacks
@@ -2691,8 +2794,7 @@ class RuleBasedStrategyInterpreter:
         if candle_match:
             lookback = max(1, min(5000, int(candle_match.group(1))))
         elif any(
-            term in text
-            for term in ("past day", "last day", "last 24 hours", "24h", "24 hours")
+            term in text for term in ("past day", "last day", "last 24 hours", "24h", "24 hours")
         ):
             lookback = max(1, int((24 * 60) / minutes))
         elif any(term in text for term in ("past week", "last week", "7 days", "seven days")):

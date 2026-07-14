@@ -84,9 +84,7 @@ def market_snapshot_from_candles(
         spread_bps=provider_metadata.get("spread_bps"),
         listed_at=provider_metadata.get("listed_at") or (min(timestamps) if timestamps else None),
         market_cap=provider_metadata.get("market_cap"),
-        data_quality_ok=(
-            ordered and unique and provider_metadata.get("data_quality_ok", True)
-        ),
+        data_quality_ok=(ordered and unique and provider_metadata.get("data_quality_ok", True)),
         exchange_available=provider_metadata.get("exchange_available", True),
         metadata={
             "snapshot_source": "historical_candles_and_provider_metadata",
@@ -222,9 +220,7 @@ class CcxtMarketDataProvider:
 
         benchmark_percentages: dict[str, float] = {}
         for quote in {
-            symbol.partition("/")[2].upper()
-            for symbol in normalized_symbols
-            if "/" in symbol
+            symbol.partition("/")[2].upper() for symbol in normalized_symbols if "/" in symbol
         }:
             benchmark = tickers.get(f"BTC/{quote}") or {}
             percentage = _number(benchmark.get("percentage"))
@@ -241,9 +237,7 @@ class CcxtMarketDataProvider:
             ask = _number(ticker.get("ask"))
             midpoint = ((bid + ask) / 2) if bid and ask and bid > 0 and ask > 0 else None
             spread_bps = (
-                ((ask - bid) / midpoint) * 10_000
-                if midpoint is not None and ask >= bid
-                else None
+                ((ask - bid) / midpoint) * 10_000 if midpoint is not None and ask >= bid else None
             )
             quote = symbol.partition("/")[2].upper()
             percentage = _number(ticker.get("percentage"))
@@ -315,9 +309,7 @@ class CcxtMarketDataProvider:
                         if key in {"category", "market_cap"} and value is not None
                     }
                 )
-                metadata[symbol]["metadata_source"] = (
-                    "ccxt+configured_market_metadata"
-                )
+                metadata[symbol]["metadata_source"] = "ccxt+configured_market_metadata"
         return metadata
 
     async def fetch_order_book_context(
@@ -379,9 +371,7 @@ class CcxtMarketDataProvider:
             default=int(datetime.now(UTC).timestamp() * 1000),
         )
         recent_trade_volume = sum(
-            item["quote"]
-            for item in trade_values
-            if latest_timestamp - item["timestamp"] <= 60_000
+            item["quote"] for item in trade_values if latest_timestamp - item["timestamp"] <= 60_000
         )
         key = (exchange.lower(), _canonical_symbol(symbol))
         previous = self._order_book_snapshots.get(key, {})
@@ -401,12 +391,10 @@ class CcxtMarketDataProvider:
             "largest_wall_quote": current_wall_quote,
             "approaching_liquidity_wall": wall_distance <= 0.5,
             "liquidity_wall_added": (
-                previous_wall_quote is not None
-                and current_wall_quote >= previous_wall_quote * 1.5
+                previous_wall_quote is not None and current_wall_quote >= previous_wall_quote * 1.5
             ),
             "liquidity_wall_pulled": (
-                previous_wall_quote is not None
-                and current_wall_quote <= previous_wall_quote * 0.5
+                previous_wall_quote is not None and current_wall_quote <= previous_wall_quote * 0.5
             ),
             "slippage_bps": _estimated_slippage_bps(asks, midpoint, 10_000),
             "trade_count": len(trade_values),
@@ -420,9 +408,7 @@ class CcxtMarketDataProvider:
             ),
             "buy_volume_ratio": buy_volume / trade_volume if trade_volume else 0,
             "sell_volume_ratio": sell_volume / trade_volume if trade_volume else 0,
-            "trade_imbalance": (
-                (buy_volume - sell_volume) / trade_volume if trade_volume else 0
-            ),
+            "trade_imbalance": ((buy_volume - sell_volume) / trade_volume if trade_volume else 0),
             "recent_trade_volume": recent_trade_volume,
             "captured_at": datetime.now(UTC).isoformat(),
         }

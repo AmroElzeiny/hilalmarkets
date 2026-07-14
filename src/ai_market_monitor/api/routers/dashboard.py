@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -18,6 +18,8 @@ from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 from ai_market_monitor.db.models import (
     Alert,
+    AlertDelivery,
+    CapabilityExtension,
     DashboardPreference,
     DiscordConnection,
     NearMissSnapshot,
@@ -39,6 +41,7 @@ from ai_market_monitor.engine.quality import alert_trust_score_from_proof
 from ai_market_monitor.services.admin_dashboard import AdminDashboardService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService
+from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
 from ai_market_monitor.services.email_delivery import EmailDeliveryError
@@ -54,6 +57,7 @@ from ai_market_monitor.services.telegram_account_links import (
 )
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
 from ai_market_monitor.services.trials import TrialError, TrialLifecycleService
+from ai_market_monitor.services.verified_strategy import seal_alert_proof
 from ai_market_monitor.services.web_auth import (
     SESSION_COOKIE_NAME,
     WebAuthError,
@@ -227,6 +231,14 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
             latency_label = f"{seconds}s scan latency"
         elif latest_scan:
             latency_label = latest_scan.status.value.replace("_", " ").title()
+        pending_repair = None
+        if strategy.active_version_id:
+            pending_repair = await session.scalar(
+                select(CapabilityExtension).where(
+                    CapabilityExtension.strategy_version_id == strategy.active_version_id,
+                    CapabilityExtension.status == "repair_ready",
+                )
+            )
         monitor_cards.append(
             {
                 "strategy": strategy,
@@ -234,6 +246,7 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
                 "main_bottleneck": bottlenecks.get("main_bottleneck"),
                 "latest_scan": latest_scan,
                 "latency_label": latency_label,
+                "pending_repair": pending_repair,
             }
         )
     return monitor_cards
@@ -331,7 +344,15 @@ async def _send_telegram_connected_notification(
                     TelegramButton("Lifecycles", "menu:latest_setups"),
                     TelegramButton("Pricing", "pricing"),
                 ],
-                menu=["My Monitors", "Lifecycles", "Trial", "Pricing", "Settings", "Support", "About"],
+                menu=[
+                    "My Monitors",
+                    "Lifecycles",
+                    "Trial",
+                    "Pricing",
+                    "Settings",
+                    "Support",
+                    "About",
+                ],
             )
         )
     except TelegramDeliveryError:
@@ -492,18 +513,20 @@ async def signup_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return _no_store(templates.TemplateResponse(
-        request,
-        "auth.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="signup",
-            title="Sign Up",
-        ),
-    ))
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "auth.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=await _current_user(request, session, settings),
+                page="signup",
+                title="Sign Up",
+            ),
+        )
+    )
 
 
 @router.post("/signup", include_in_schema=False)
@@ -552,18 +575,20 @@ async def signup_verify_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return _no_store(templates.TemplateResponse(
-        request,
-        "auth.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="signup_verify",
-            title="Verify Your Email",
-        ),
-    ))
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "auth.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=await _current_user(request, session, settings),
+                page="signup_verify",
+                title="Verify Your Email",
+            ),
+        )
+    )
 
 
 @router.post("/signup/verify", include_in_schema=False)
@@ -661,18 +686,20 @@ async def signin_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return _no_store(templates.TemplateResponse(
-        request,
-        "auth.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="signin",
-            title="Sign In",
-        ),
-    ))
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "auth.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=await _current_user(request, session, settings),
+                page="signin",
+                title="Sign In",
+            ),
+        )
+    )
 
 
 @router.get("/signin/code", response_class=HTMLResponse, include_in_schema=False)
@@ -681,18 +708,20 @@ async def signin_code_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return _no_store(templates.TemplateResponse(
-        request,
-        "auth.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="signin_code",
-            title="Login With One-Time Code",
-        ),
-    ))
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "auth.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=await _current_user(request, session, settings),
+                page="signin_code",
+                title="Login With One-Time Code",
+            ),
+        )
+    )
 
 
 @router.post("/signin/code/request", include_in_schema=False)
@@ -747,9 +776,7 @@ async def signin_code_verify(
             "error": getattr(exc, "code", "invalid_code"),
             "email": email,
         }
-        return _redirect(
-            f"/signin/code?{urlencode(query)}"
-        )
+        return _redirect(f"/signin/code?{urlencode(query)}")
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response = _redirect(
         "/dashboard?message=telegram_connected"
@@ -773,18 +800,20 @@ async def reset_password_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return _no_store(templates.TemplateResponse(
-        request,
-        "auth.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="reset_password",
-            title="Reset Password",
-        ),
-    ))
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "auth.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=await _current_user(request, session, settings),
+                page="reset_password",
+                title="Reset Password",
+            ),
+        )
+    )
 
 
 @router.post("/reset-password/request", include_in_schema=False)
@@ -834,9 +863,7 @@ async def reset_password_verify(
         await session.commit()
     except WebAuthError as exc:
         await session.rollback()
-        return _redirect(
-            f"/reset-password?{urlencode({'error': exc.code, 'email': email})}"
-        )
+        return _redirect(f"/reset-password?{urlencode({'error': exc.code, 'email': email})}")
     return _redirect("/signin?message=password_reset_successful")
 
 
@@ -1077,6 +1104,50 @@ async def strategy_detail_page(
 
 
 @router.get(
+    "/dashboard/strategies/{strategy_id}/verify",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def verified_strategy_page(
+    request: Request,
+    strategy_id: UUID,
+    version_id: UUID | None = Query(default=None, alias="version"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    strategy = await session.get(Strategy, strategy_id)
+    if strategy is None or strategy.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    version = (
+        await session.get(StrategyVersion, version_id)
+        if version_id
+        else await session.scalar(
+            select(StrategyVersion)
+            .where(StrategyVersion.strategy_id == strategy.id)
+            .order_by(StrategyVersion.version_number.desc())
+            .limit(1)
+        )
+    )
+    if version is None or version.strategy_id != strategy.id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="strategy_verify",
+            title=f"Verify {strategy.name}",
+            strategy=strategy,
+            version=version,
+        ),
+    )
+
+
+@router.get(
     "/dashboard/strategies/{strategy_id}/builder",
     response_class=HTMLResponse,
     include_in_schema=False,
@@ -1218,6 +1289,38 @@ async def delete_monitor(
         return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
 
 
+@router.post(
+    "/dashboard/capability-extensions/{extension_id}/prepare-repair",
+    include_in_schema=False,
+)
+async def prepare_capability_repair(
+    extension_id: UUID,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    extension = await session.get(CapabilityExtension, extension_id)
+    if extension is None or extension.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Certified repair not found")
+    try:
+        strategy, _version = await CapabilityExtensionService(
+            settings
+        ).materialize_pending_revision(
+            session,
+            extension=extension,
+            user_id=user.id,
+        )
+        await session.commit()
+    except ValueError:
+        await session.rollback()
+        return _redirect(
+            "/dashboard/strategies/new?error=repair_revision_unavailable#monitors"
+        )
+    return _redirect(
+        f"/dashboard/strategies/{strategy.id}/builder?message=repair_revision_ready"
+    )
+
+
 @router.get("/dashboard/create-monitor", response_class=HTMLResponse, include_in_schema=False)
 async def create_monitor_page(
     request: Request,
@@ -1228,39 +1331,15 @@ async def create_monitor_page(
     return await new_strategy_builder_page(request, user, session, settings)
 
 
-@router.get("/dashboard/scan-now", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/dashboard/scan-now", response_class=RedirectResponse, include_in_schema=False)
 async def scan_now_page(
     request: Request,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    strategies = (
-        await session.scalars(
-            select(Strategy).where(Strategy.user_id == user.id).order_by(Strategy.created_at.desc())
-        )
-    ).all()
-    templates_list = (
-        await session.scalars(
-            select(StrategyTemplate)
-            .where(StrategyTemplate.user_id == user.id, StrategyTemplate.archived_at.is_(None))
-            .order_by(StrategyTemplate.category.asc(), StrategyTemplate.name.asc())
-        )
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="scan",
-            title="Quick Scan",
-            strategies=strategies,
-            templates=templates_list,
-        ),
-    )
+) -> RedirectResponse:
+    del request, user, session, settings
+    return _redirect("/dashboard/strategies/new?mode=scanner")
 
 
 async def near_miss_page(
@@ -1289,14 +1368,37 @@ async def lifecycles_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
+    selected_monitor_id: UUID | None = None
+    raw_monitor_id = request.query_params.get("monitor")
+    if raw_monitor_id:
+        try:
+            selected_monitor_id = UUID(raw_monitor_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid monitor filter") from exc
+        owned_monitor = await session.scalar(
+            select(Strategy.id).where(
+                Strategy.id == selected_monitor_id,
+                Strategy.user_id == user.id,
+                Strategy.archived_at.is_(None),
+            )
+        )
+        if owned_monitor is None:
+            raise HTTPException(status_code=404, detail="Monitor not found")
     await StrategyCockpitService(session).sync_inbox(user.id)
     await session.commit()
     preference = await session.scalar(
         select(DashboardPreference).where(DashboardPreference.user_id == user.id)
     )
-    muted_setup_ids = set(
-        map(str, ((preference.notification_preferences or {}).get("muted_setup_instance_ids", [])))
-    ) if preference is not None else set()
+    muted_setup_ids = (
+        set(
+            map(
+                str,
+                ((preference.notification_preferences or {}).get("muted_setup_instance_ids", [])),
+            )
+        )
+        if preference is not None
+        else set()
+    )
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -1307,9 +1409,24 @@ async def lifecycles_page(
             user=user,
             page="lifecycles",
             title="Lifecycles",
+            lifecycle_monitors=list(
+                (
+                    await session.execute(
+                        select(Strategy.id, Strategy.name)
+                        .where(
+                            Strategy.user_id == user.id,
+                            Strategy.archived_at.is_(None),
+                        )
+                        .order_by(Strategy.name.asc())
+                    )
+                ).all()
+            ),
+            selected_monitor_id=selected_monitor_id,
+            observability_poll_seconds=settings.observability_live_poll_seconds,
             lifecycle_cards=await lifecycle_cards(
                 session,
                 user.id,
+                monitor_id=selected_monitor_id,
                 muted_setup_ids=muted_setup_ids,
             ),
         ),
@@ -1341,15 +1458,67 @@ async def alert_detail_page(
 
 @router.get(
     "/dashboard/alerts/{alert_id}/proof",
-    response_class=RedirectResponse,
+    response_class=HTMLResponse,
     include_in_schema=False,
 )
 async def alert_proof_page(
+    request: Request,
     alert_id: UUID,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
-) -> RedirectResponse:
-    return await alert_detail_page(alert_id, user, session)
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    alert = await session.scalar(
+        select(Alert).where(Alert.id == alert_id, Alert.user_id == user.id)
+    )
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    proof_hash = seal_alert_proof(alert)
+    version = (
+        await session.get(StrategyVersion, alert.strategy_version_id)
+        if alert.strategy_version_id
+        else None
+    )
+    strategy = await session.get(Strategy, version.strategy_id) if version else None
+    current_version = (
+        await session.get(StrategyVersion, strategy.active_version_id)
+        if strategy and strategy.active_version_id
+        else None
+    )
+    deliveries = list(
+        (
+            await session.scalars(
+                select(AlertDelivery)
+                .where(AlertDelivery.alert_id == alert.id)
+                .order_by(AlertDelivery.created_at)
+            )
+        ).all()
+    )
+    await session.commit()
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "dashboard.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=user,
+                page="alert_proof",
+                title="Alert proof",
+                alert=alert,
+                proof=alert.proof_receipt or {},
+                proof_hash=proof_hash,
+                version=version,
+                strategy=strategy,
+                current_version=current_version,
+                version_mismatch=bool(
+                    version and current_version and version.id != current_version.id
+                ),
+                deliveries=deliveries,
+            ),
+        )
+    )
 
 
 @router.get("/dashboard/why-no-alert", response_class=HTMLResponse, include_in_schema=False)
@@ -1379,7 +1548,9 @@ async def strategy_cockpit_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    raise HTTPException(status_code=404, detail="Strategy Cockpit was removed. Use Monitors and Lifecycles.")
+    raise HTTPException(
+        status_code=404, detail="Strategy Cockpit was removed. Use Monitors and Lifecycles."
+    )
 
 
 @router.get("/dashboard/analytics", response_class=HTMLResponse, include_in_schema=False)
@@ -1707,9 +1878,7 @@ async def settings_submit(
     if not channels:
         channels = ["telegram"]
     allowed_providers = {"binance", "bybit"}
-    selected_providers = [
-        provider for provider in providers if provider in allowed_providers
-    ]
+    selected_providers = [provider for provider in providers if provider in allowed_providers]
     if not selected_providers:
         selected_providers = ["binance", "bybit"]
     days = [day for day in alert_days if day in ALERT_DAYS]
@@ -1787,8 +1956,7 @@ async def support_page(
             title="Support",
             tickets=tickets,
             support_email=(
-                email_identity.display_identifier
-                or email_identity.normalized_identifier
+                email_identity.display_identifier or email_identity.normalized_identifier
                 if email_identity
                 else ""
             ),

@@ -861,3 +861,87 @@ Manual deployment remains:
 - Run `bash deploy/deploy.sh` from the VPS repository root.
 - Verify Telegram, Discord, NOWPayments, SMTP, and real market-data behavior before inviting beta
   users.
+
+## 2026-07-13 Certified Capability Extensions
+
+Implemented a production backend for user-approved, non-existing OHLCV mechanics. The feature uses
+AI for constrained drafting, contextual diagnosis and implementation review while deterministic
+code owns AST validation, parameter bounds, market evaluation, proof, certification, immutable
+hashing and strategy activation.
+
+Key behavior:
+
+- `gpt-5.4-nano` with low reasoning is the default draft/implementation model.
+- Bybit spot preflight runs before a custom mechanic is offered for strategy approval.
+- Imbalanced initial tests escalate through nano-high review, nano-low repair and mini-medium
+  review; repair/review calls use Flex.
+- Five empty live scans trigger mini-low review. Five scans with candidates but no queued
+  notifications trigger mini-high review.
+- Repairs cannot alter user logic merely to produce matches and cannot replace an active revision
+  without user approval.
+- Telegram and chat show creation, market-test, review, repair and strict-strategy states.
+- `/system-brain` exposes build logs, certification, live results, AI usage/cost and stage-separated
+  quality metrics.
+- Registry retrieval is initialized once and cached by deterministic hash; embeddings are secondary
+  retrieval only; approved aliases are versioned; clarifications remain review evidence.
+
+Primary implementation files:
+
+- `src/ai_market_monitor/engine/dynamic_mechanics.py`
+- `src/ai_market_monitor/engine/capability_index.py`
+- `src/ai_market_monitor/services/capability_extension_ai.py`
+- `src/ai_market_monitor/services/capability_extensions.py`
+- `src/ai_market_monitor/services/capability_registry.py`
+- `src/ai_market_monitor/services/hybrid_capability_resolution.py`
+- `src/ai_market_monitor/db/models/capability_extensions.py`
+- `src/ai_market_monitor/schemas/capability_extensions.py`
+- `alembic/versions/ad1e2f3a4b5c_add_capability_extension_pipeline.py`
+- `alembic/versions/be2f3a4b5c6d_add_capability_stage_metrics.py`
+- `alembic/versions/cf3a4b5c6d7e_add_pending_mechanic_revision.py`
+
+Validation:
+
+- Feature-focused suite: 55 passed.
+- Full repository suite: 1,748 passed in 408.9 seconds.
+- Browser suite: 13 passed in 58.4 seconds.
+- Supported prompt shortlist audit: 2,643/2,643 (100%).
+- Fresh migration from an empty SQLite database to `cf3a4b5c6d7e`: passed.
+- Feature-local Ruff checks: passed.
+
+Operational documentation and the honest reliability boundary are in
+`docs/CAPABILITY_EXTENSION_PIPELINE.md` and the “Certified Non-Existing Mechanics” section of
+`docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md`. A real staging OpenAI Flex plus Bybit public-data
+run remains required before enabling this beta feature for users.
+
+## 2026-07-13 Verified Strategy Monitoring
+
+Implemented the complete user-controlled verification workflow from phrase-to-rule audit through
+saved strategy examples, Historical Preview, immutable version approval, monitor activation,
+condition lifecycle evidence, sealed alert proof, missed-alert reconstruction, health review,
+user-defined outcome review, controlled draft improvements, and portable strategy contracts.
+
+Key safeguards:
+
+- Critical ambiguity, unsupported mechanics, contradictions, and regressed saved examples block
+  approval or activation.
+- Approved versions and alert proof are immutable; proof receipts carry a deterministic integrity
+  hash and exact strategy-version reference.
+- Restores and improvement suggestions create new drafts, rerun saved tests/history where evidence
+  exists, invalidate previous approval, and never mutate a live version.
+- Missing historical evidence is reported as unavailable or closest retained evidence, never
+  invented.
+- Outcome classifications remain user-defined and historical completion differences are not
+  presented as performance predictions.
+
+Validation:
+
+- Full backend suite: `1765 passed in 452.53s`.
+- Full browser suite: `14 passed in 70.47s`.
+- Fresh migration through `a3b4c5d6e7f8`: passed; Alembic reports no schema drift.
+- All static JavaScript files pass `node --check`.
+- Verified-workflow source files pass Ruff and focused mypy.
+- Repository-wide Ruff (93 findings) and mypy (122 findings in 26 files) still expose older static
+  debt; these are documented rather than hidden.
+
+Architecture, endpoints, files, visual QA artifacts, limitations, and manual checks are documented
+in `docs/VERIFIED_STRATEGY_MONITORING_IMPLEMENTATION_REPORT.md`.

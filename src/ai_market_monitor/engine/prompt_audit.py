@@ -245,9 +245,7 @@ def audit_prompt_coverage(
         else 0.0
     )
     coverage_score = 100.0 if meaningful_total == 0 else (covered_total / meaningful_total) * 100
-    unclassified = [
-        row.fragment for row in mapping_table if row.bucket == "unclassified"
-    ]
+    unclassified = [row.fragment for row in mapping_table if row.bucket == "unclassified"]
     critical_missing_fields: list[str] = []
     if not [condition for condition in conditions if condition.key != "clarification_required"]:
         critical_missing_fields.append("executable_condition")
@@ -445,8 +443,7 @@ def _condition_tokens(condition: ConditionRule) -> set[str]:
         str(condition.condition_type.value),
     }
     values.update(
-        str(value).casefold().replace("_", " ")
-        for value in condition.left.parameters.values()
+        str(value).casefold().replace("_", " ") for value in condition.left.parameters.values()
     )
     if condition.right is not None:
         values.add(str(condition.right.name or ""))

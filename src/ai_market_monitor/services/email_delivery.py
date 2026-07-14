@@ -24,11 +24,13 @@ class AuthEmailService:
             "login": "Your TraceEdge login code",
             "password_reset": "Your TraceEdge password reset code",
             "signup": "Verify your TraceEdge email",
+            "system_brain": "Your TraceEdge System Brain access code",
         }
         subject = subjects.get(purpose, "Your TraceEdge verification code")
         body = (
             f"Your TraceEdge verification code is {code}.\n\n"
-            f"It expires in {self.settings.auth_code_ttl_minutes} minutes. "
+            f"It expires in "
+            f"{self.settings.system_brain_otp_ttl_minutes if purpose == 'system_brain' else self.settings.auth_code_ttl_minutes} minutes. "
             "If you did not request this code, you can ignore this email."
         )
         if self.settings.email_adapter == "memory":

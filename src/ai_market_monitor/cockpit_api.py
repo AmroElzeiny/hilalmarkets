@@ -19,14 +19,22 @@ from ai_market_monitor.db.models import (
     Alert,
     AlertInboxItem,
     AuditEvent,
+    BacktestJob,
     SetupInstance,
     Strategy,
     StrategyExperiment,
     StrategySuggestion,
     StrategyVersion,
+    StrategyVersionVerification,
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.services.dashboard_jobs import DashboardJobService
 from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.verified_strategy import (
+    VerifiedStrategyError,
+    VerifiedStrategyService,
+    seal_alert_proof,
+)
 
 router = APIRouter(prefix="/cockpit", tags=["strategy-cockpit"])
 
@@ -260,12 +268,55 @@ async def alert_proof(
     alert = await session.get(Alert, alert_id)
     if alert is None or alert.user_id != principal.user_id:
         raise HTTPException(status_code=404, detail="Alert not found")
+    try:
+        proof_hash = seal_alert_proof(alert)
+    except VerifiedStrategyError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    version = (
+        await session.get(StrategyVersion, alert.strategy_version_id)
+        if alert.strategy_version_id
+        else None
+    )
+    strategy = await session.get(Strategy, version.strategy_id) if version else None
+    current_version = (
+        await session.get(StrategyVersion, strategy.active_version_id)
+        if strategy and strategy.active_version_id
+        else None
+    )
+    await session.commit()
     return {
         "alert_id": str(alert.id),
         "title": alert.title,
         "proof_receipt": alert.proof_receipt,
         "chart_snapshot_url": alert.chart_snapshot_url,
         "suppressed_reason": alert.suppressed_reason,
+        "proof_integrity": {
+            "verified": True,
+            "hash": proof_hash,
+            "schema_version": alert.proof_schema_version,
+            "sealed_at": alert.proof_sealed_at,
+        },
+        "strategy_version": (
+            {
+                "id": str(version.id),
+                "number": version.version_number,
+                "schema_hash": version.schema_hash,
+            }
+            if version
+            else None
+        ),
+        "current_strategy_version": (
+            {
+                "id": str(current_version.id),
+                "number": current_version.version_number,
+                "schema_hash": current_version.schema_hash,
+            }
+            if current_version
+            else None
+        ),
+        "version_mismatch": bool(
+            version and current_version and version.id != current_version.id
+        ),
         "exportable": True,
     }
 
@@ -306,15 +357,85 @@ async def apply_suggestion(
     suggestion_id: UUID,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> dict[str, Any]:
     suggestion = await session.get(StrategySuggestion, suggestion_id)
     if suggestion is None or suggestion.user_id != principal.user_id:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     try:
+        parent = (
+            await session.get(StrategyVersion, suggestion.strategy_version_id)
+            if suggestion.strategy_version_id
+            else None
+        )
         version = await StrategyCockpitService(session).apply_suggestion(
             suggestion=suggestion,
             user_id=principal.user_id,
         )
+        strategy = await session.get(Strategy, suggestion.strategy_id)
+        if strategy is None or strategy.user_id != principal.user_id:
+            raise ValueError("Strategy not found")
+        verification_service = VerifiedStrategyService(session, settings)
+        await verification_service.prepare_version(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+            parent=parent,
+        )
+        await verification_service.run_saved_tests(
+            user_id=principal.user_id,
+            version=version,
+            provider=provider,
+        )
+        parent_verification = (
+            await session.scalar(
+                select(StrategyVersionVerification).where(
+                    StrategyVersionVerification.strategy_version_id == parent.id
+                )
+            )
+            if parent
+            else None
+        )
+        source_job = (
+            await session.get(BacktestJob, parent_verification.historical_job_id)
+            if parent_verification and parent_verification.historical_job_id
+            else None
+        )
+        if source_job and parent_verification:
+            job = await verification_service.queue_historical_validation(
+                user_id=principal.user_id,
+                strategy=strategy,
+                version=version,
+                exchange=source_job.exchange,
+                symbols=list(source_job.symbols),
+                timeframe=source_job.timeframe,
+                started_at=source_job.started_at_range,
+                ended_at=source_job.ended_at_range,
+            )
+            result = await DashboardJobService(session, provider, settings).run_backtest_job(
+                job.id
+            )
+            new_verification = await verification_service.sync_historical_result(
+                user_id=principal.user_id,
+                job=job,
+                result=result,
+            )
+            previous_matches = _historical_match_keys(
+                parent_verification.historical_summary
+            )
+            proposed_matches = _historical_match_keys(
+                new_verification.historical_summary
+            )
+            suggestion.historical_effect = {
+                "status": "deterministic_preview_complete",
+                "alerts_removed": len(previous_matches - proposed_matches),
+                "alerts_retained": len(previous_matches & proposed_matches),
+                "additional_completions": len(proposed_matches - previous_matches),
+                "strong_outcomes_lost": None,
+                "weak_outcomes_removed": None,
+                "notice": "Historical completions are not predictions of performance.",
+            }
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.add(
@@ -602,9 +723,7 @@ def _suggestion_payload(suggestion: StrategySuggestion) -> dict[str, Any]:
         "id": str(suggestion.id),
         "strategy_id": str(suggestion.strategy_id),
         "strategy_version_id": (
-            str(suggestion.strategy_version_id)
-            if suggestion.strategy_version_id
-            else None
+            str(suggestion.strategy_version_id) if suggestion.strategy_version_id else None
         ),
         "action": suggestion.action,
         "status": suggestion.status,
@@ -612,9 +731,22 @@ def _suggestion_payload(suggestion: StrategySuggestion) -> dict[str, Any]:
         "source": suggestion.source,
         "diff": suggestion.diff,
         "proposed_schema": suggestion.proposed_schema,
+        "outcome_evidence": suggestion.outcome_evidence,
+        "historical_effect": suggestion.historical_effect,
+        "confidence": suggestion.confidence,
+        "limitations": suggestion.limitations,
         "applied_version_id": (
             str(suggestion.applied_version_id) if suggestion.applied_version_id else None
         ),
+    }
+
+
+def _historical_match_keys(summary: dict[str, Any] | None) -> set[tuple[str, str]]:
+    examples = ((summary or {}).get("examples_by_outcome") or {}).get("matches") or []
+    return {
+        (str(item.get("symbol") or ""), str(item.get("timestamp") or ""))
+        for item in examples
+        if item.get("symbol") and item.get("timestamp")
     }
 
 
@@ -645,9 +777,7 @@ def _inbox_payload(item: AlertInboxItem) -> dict[str, Any]:
         "strategy_version_id": (
             str(item.strategy_version_id) if item.strategy_version_id else None
         ),
-        "setup_instance_id": (
-            str(item.setup_instance_id) if item.setup_instance_id else None
-        ),
+        "setup_instance_id": (str(item.setup_instance_id) if item.setup_instance_id else None),
         "alert_id": str(item.alert_id) if item.alert_id else None,
         "symbol": item.symbol,
         "timeframe": item.timeframe,

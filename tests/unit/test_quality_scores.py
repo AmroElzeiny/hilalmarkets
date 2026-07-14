@@ -230,6 +230,7 @@ def test_research_only_alert_copy_does_not_show_entry_or_rr_context():
     text = AlertPresentation.from_alert(alert).telegram_text()
 
     assert "Research match confirmed" in text
+    assert "Strategy version: 1" in text
     assert "Research-only monitor" in text
     assert "Entry zone:" not in text
     assert "R:R:" not in text

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Capability Coverage Console | TraceEdge</title>
+  <link rel="icon" href="/static/favicon.png">
+  <link rel="stylesheet" href="/static/system-brain.css">
+  <script src="/static/system-brain.js" defer></script>
+</head>
+<body>
+  <aside class="brain-sidebar">
+    <img src="/static/logo_white.svg" class="brain-logo" alt="TraceEdge">
+    <p class="brain-nav-title">SYSTEM BRAIN</p>
+    <nav>
+      <a href="#overview">Overview</a>
+      <a href="#agent-control">Agent control</a>
+      <a href="#language-gaps">Language gaps</a>
+      <a href="#resolver-quality">Resolver quality</a>
+      <a href="#alias-proposals">Alias proposals</a>
+      <a href="#capability-health">Capability health</a>
+      <a href="#mechanic-extensions">Created mechanics</a>
+      <a href="#users">Registered users</a>
+      <a href="#ai-usage">AI usage</a>
+    </nav>
+    <form action="/system-brain/logout" method="post"><button class="brain-logout">Sign out</button></form>
+  </aside>
+  <main class="brain-main">
+    <header class="brain-topbar">
+      <div><p class="brain-kicker">CAPABILITY COVERAGE CONSOLE</p><h1>How the system understands users.</h1></div>
+      <div class="brain-admin-pill"><span></span>{{ admin_email }}</div>
+    </header>
+
+    <section id="overview" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">LIVE PRODUCT PULSE</p><h2>Coverage at a glance</h2></div><time>{{ data.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</time></div>
+      <div class="brain-metric-grid">
+        <article><span>Chat messages</span><strong>{{ data.counts.chat_messages }}</strong><small>{{ data.counts.chat_sessions }} sessions</small></article>
+        <article><span>Resolution events</span><strong>{{ data.counts.resolution_events }}</strong><small>{{ data.counts.unmatched }} unmatched</small></article>
+        <article><span>Provider blocked</span><strong>{{ data.counts.provider_blocked }}</strong><small>Real data requirements</small></article>
+        <article><span>Pending aliases</span><strong>{{ data.counts.pending_aliases }}</strong><small>Awaiting review</small></article>
+        <article><span>Active monitors</span><strong>{{ data.counts.active_monitors }}</strong><small>{{ data.counts.scan_jobs }} scan jobs</small></article>
+        <article class="brain-cost-card"><span>Estimated OpenAI cost</span><strong>${{ '%.6f'|format(data.counts.ai_cost_usd) }}</strong><small>{{ data.counts.ai_calls }} recorded calls</small></article>
+        <article><span>Created mechanics</span><strong>{{ data.counts.extension_total }}</strong><small>{{ data.counts.extension_certified }} certified · {{ data.counts.extension_failed }} failed</small></article>
+      </div>
+    </section>
+
+    <section id="agent-control" class="brain-section">
+      <div class="brain-section-head">
+        <div><p class="brain-kicker">BOUNDED ORCHESTRATION</p><h2>Agent safety and rollout</h2></div>
+        <span class="brain-tag">{{ 'Shadow mode' if data.agent_control.shadow_enabled else ((data.agent_control.rollout_percent ~ '% live') if data.agent_control.configured_enabled else 'Kill switch off') }}</span>
+      </div>
+      <div class="brain-metric-grid">
+        <article><span>Recorded runs</span><strong>{{ data.agent_control.recorded_runs }}</strong><small>{{ data.counts.agent_shadow_runs }} shadow runs</small></article>
+        <article><span>Tool selection</span><strong>{{ (data.agent_control.correct_tool_selection_rate ~ '%') if data.agent_control.correct_tool_selection_rate is not none else 'N/A' }}</strong><small>{{ data.agent_control.labeled_shadow_turns }} labeled shadow turns</small></article>
+        <article><span>Completed</span><strong>{{ (data.agent_control.completion_rate ~ '%') if data.agent_control.completion_rate is not none else 'N/A' }}</strong><small>{{ data.counts.agent_completed }} grounded completions</small></article>
+        <article><span>Safe fallback</span><strong>{{ (data.agent_control.fallback_rate ~ '%') if data.agent_control.fallback_rate is not none else 'N/A' }}</strong><small>{{ data.counts.agent_fallbacks }} legacy fallbacks</small></article>
+        <article><span>Contained</span><strong>{{ data.agent_control.ungrounded_claims_contained }}</strong><small>Ungrounded final claims blocked</small></article>
+        <article><span>Forbidden executed</span><strong>{{ data.agent_control.forbidden_executed }}</strong><small>{{ data.agent_control.forbidden_attempts }} rejected attempts</small></article>
+        <article><span>Invalid tool calls</span><strong>{{ (data.agent_control.invalid_call_rate ~ '%') if data.agent_control.invalid_call_rate is not none else 'N/A' }}</strong><small>Rejected before domain execution</small></article>
+        <article><span>Draft compilation</span><strong>{{ (data.agent_control.draft_compilation_success_rate ~ '%') if data.agent_control.draft_compilation_success_rate is not none else 'N/A' }}</strong><small>Deterministic compiler calls completed</small></article>
+        <article><span>Unsupported leakage</span><strong>{{ data.agent_control.unsupported_condition_leakage }}</strong><small>Approval-eligible drafts with unsupported rules</small></article>
+        <article><span>Clarification turns</span><strong>{{ data.agent_control.clarification_turns }}</strong><small>Resolver found missing or ambiguous details</small></article>
+        <article><span>Average latency</span><strong>{{ data.agent_control.average_latency_ms }} ms</strong><small>P95 {{ data.agent_control.p95_latency_ms }} ms</small></article>
+        <article><span>Calls per run</span><strong>{{ data.agent_control.average_calls_per_run }}</strong><small>Limit {{ data.agent_control.max_tool_calls }}</small></article>
+        <article class="brain-cost-card"><span>Agent estimated cost</span><strong>${{ '%.6f'|format(data.agent_control.estimated_cost_usd) }}</strong><small>{{ data.agent_control.input_tokens }} input &middot; {{ data.agent_control.output_tokens }} output tokens &middot; per-turn cap ${{ '%.4f'|format(data.agent_control.cost_limit) }}</small></article>
+      </div>
+      <div class="brain-grid-two">
+        <article class="brain-panel"><h3>Application-managed tools</h3><div class="brain-table-scroll compact"><table><thead><tr><th>Tool</th><th>Calls</th><th>Success</th><th>Blocked</th><th>Average</th></tr></thead><tbody>{% for row in data.agent_control.tool_breakdown %}<tr><td><code>{{ row.tool_name }}</code></td><td>{{ row.calls }}</td><td>{{ (row.success_rate ~ '%') if row.success_rate is not none else 'N/A' }}</td><td>{{ row.blocked }}</td><td>{{ row.average_duration_ms }} ms</td></tr>{% else %}<tr><td colspan="5" class="brain-empty">No agent tool calls have been recorded.</td></tr>{% endfor %}</tbody></table></div></article>
+        <article class="brain-panel"><h3>Recent bounded turns</h3><div class="brain-table-scroll compact"><table><thead><tr><th>Started</th><th>Status</th><th>Intent</th><th>Steps</th><th>Calls</th><th>Boundary result</th></tr></thead><tbody>{% for row in data.agent_control.recent_runs %}<tr><td>{{ row.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td><span class="brain-status {{ 'pass' if row.status == 'completed' else 'warning' if row.status in ['contained', 'shadow_completed', 'shadow_compared'] else 'fail' }}">{{ row.status }}</span></td><td>{{ row.final_intent or '-' }}</td><td>{{ row.steps }}</td><td>{{ row.tool_calls }}</td><td>{{ row.error_type or ('legacy compared' if row.shadow else 'grounded') }}</td></tr>{% else %}<tr><td colspan="6" class="brain-empty">Enable shadow mode to collect comparison evidence without executing tools.</td></tr>{% endfor %}</tbody></table></div></article>
+      </div>
+      <article class="brain-panel"><p class="brain-panel-copy">Current rollout: {{ data.agent_control.rollout_percent }}% deterministic live cohort. Limits: {{ data.agent_control.max_steps }} model steps, {{ data.agent_control.max_tool_calls }} tool calls, and no parallel calls. Prompt text and hidden reasoning are not shown here; tool arguments are stored only in redacted form.</p></article>
+    </section>
+
+    <section id="language-gaps" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">LANGUAGE GAPS</p><h2>What users say that the registry misses</h2></div><span class="brain-tag">Evidence, not guesses</span></div>
+      <div class="brain-grid-two">
+        <article class="brain-panel"><h3>Most common unmatched fragments</h3><div class="brain-table-scroll"><table><thead><tr><th>Fragment</th><th>Count</th></tr></thead><tbody>{% for row in data.unmatched %}<tr><td>{{ row.fragment }}</td><td><b>{{ row.count }}</b></td></tr>{% else %}<tr><td colspan="2" class="brain-empty">No unmatched fragments recorded yet.</td></tr>{% endfor %}</tbody></table></div></article>
+        <article class="brain-panel"><h3>Unsupported feature keywords</h3><div class="brain-keyword-cloud">{% for row in data.unsupported_keywords %}<span>{{ row.keyword }} <b>{{ row.count }}</b></span>{% else %}<p class="brain-empty">No unsupported keywords recorded yet.</p>{% endfor %}</div></article>
+      </div>
+      <article class="brain-panel"><h3>Provider-blocked requests</h3><div class="brain-table-scroll compact"><table><thead><tr><th>Request fragment</th><th>Top candidate</th><th>Provider state</th><th>Count</th></tr></thead><tbody>{% for row in data.provider_blocked %}<tr><td>{{ row.fragment }}</td><td>{{ row.top_candidate }}</td><td><span class="brain-status blocked">{{ row.provider or 'provider required' }}</span></td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No provider blocks recorded yet.</td></tr>{% endfor %}</tbody></table></div></article>
+    </section>
+
+    <section id="resolver-quality" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">RESOLVER QUALITY</p><h2>Confidence, choices and ranking mistakes</h2></div></div>
+      <div class="brain-metric-grid">
+        <article><span>Retrieval recall</span><strong>{{ (data.quality_metrics.retrieval.percent ~ '%') if data.quality_metrics.retrieval.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.retrieval.passed }}/{{ data.quality_metrics.retrieval.total }} supported prompt variants shortlisted</small></article>
+        <article><span>AI selection accuracy</span><strong>{{ (data.quality_metrics.ai_selection.percent ~ '%') if data.quality_metrics.ai_selection.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.ai_selection.passed }}/{{ data.quality_metrics.ai_selection.total }} user-labeled rerank decisions</small></article>
+        <article><span>Parameter validation</span><strong>{{ (data.quality_metrics.parameter.percent ~ '%') if data.quality_metrics.parameter.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.parameter.passed }}/{{ data.quality_metrics.parameter.total }} AI selections passed registry schemas</small></article>
+        <article><span>Evaluator correctness</span><strong>{{ (data.quality_metrics.evaluator.percent ~ '%') if data.quality_metrics.evaluator.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.evaluator.passed }}/{{ data.quality_metrics.evaluator.total }} executable capabilities aligned</small></article>
+      </div>
+      <div class="brain-grid-two">
+        <article class="brain-panel"><h3>Supported prompts with low confidence</h3><div class="brain-table-scroll"><table><thead><tr><th>Fragment</th><th>Candidate</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>{% for row in data.low_confidence %}<tr><td>{{ row.fragment }}</td><td>{{ row.top_candidate }}</td><td>{{ row.confidence }}%</td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No low-confidence matches recorded.</td></tr>{% endfor %}</tbody></table></div></article>
+        <article class="brain-panel"><h3>Clarifications users choose</h3><div class="brain-table-scroll"><table><thead><tr><th>User wording</th><th>Selected capability</th><th>Count</th></tr></thead><tbody>{% for row in data.clarification_choices %}<tr><td>{{ row.fragment }}</td><td><code>{{ row.capability_key }}</code></td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="3" class="brain-empty">No resolver clarification choices yet.</td></tr>{% endfor %}</tbody></table></div></article>
+      </div>
+      <article class="brain-panel"><h3>False candidate rankings</h3><p class="brain-panel-copy">The user selected a different capability than the resolver’s first candidate.</p><div class="brain-table-scroll compact"><table><thead><tr><th>Fragment</th><th>Ranked first</th><th>User chose</th><th>Count</th></tr></thead><tbody>{% for row in data.false_rankings %}<tr><td>{{ row.fragment }}</td><td><code>{{ row.ranked }}</code></td><td><code>{{ row.chosen }}</code></td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No false top rankings recorded yet.</td></tr>{% endfor %}</tbody></table></div></article>
+    </section>
+
+    <section id="alias-proposals" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">REGISTRY IMPROVEMENT</p><h2>Proposed aliases awaiting approval</h2></div><span class="brain-tag">Approval requires reviewed release</span></div>
+      <div class="brain-grid-two">
+        <article class="brain-panel"><h3>Pending proposals</h3><div class="brain-table-scroll tall">{% for proposal in data.alias_proposals if proposal.status == 'pending' %}<form class="brain-alias-card" action="/system-brain/aliases/{{ proposal.id }}/approve" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div><strong>{{ proposal.alias }}</strong><code>{{ proposal.capability_key }}</code><small>{{ proposal.evidence_count }} evidence event{{ 's' if proposal.evidence_count != 1 else '' }}</small></div><input name="review_note" placeholder="Optional review note" aria-label="Review note for {{ proposal.alias }}"><div class="brain-alias-actions"><button type="submit">Approve</button><button type="submit" class="danger" formaction="/system-brain/aliases/{{ proposal.id }}/reject">Reject</button></div></form>{% else %}<p class="brain-empty">No aliases await review.</p>{% endfor %}</div></article>
+        <article class="brain-panel"><h3>Capabilities with poor alias coverage</h3><div class="brain-table-scroll tall"><table><thead><tr><th>Capability</th><th>Aliases</th><th>Gap</th></tr></thead><tbody>{% for row in data.poor_aliases %}<tr><td><strong>{{ row.label }}</strong><code>{{ row.key }}</code></td><td>{{ row.aliases }}</td><td><span class="brain-status warning">{{ row.status }}</span></td></tr>{% endfor %}</tbody></table></div></article>
+      </div>
+    </section>
+
+    <section id="capability-health" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">REGRESSION MATRIX</p><h2>Status per capability</h2></div><input class="brain-search" data-filter-target="capability-table" placeholder="Filter capability or status" aria-label="Filter capabilities"></div>
+      <article class="brain-panel"><div class="brain-table-scroll extra-tall"><table id="capability-table"><thead><tr><th>Capability</th><th>Version</th><th>Regression</th><th>Availability</th><th>Template</th><th>Evaluator</th><th>Notes</th></tr></thead><tbody>{% for row in data.regressions %}<tr><td><strong>{{ row.label }}</strong><code>{{ row.key }}</code></td><td>{{ row.version }}</td><td><span class="brain-status {{ row.status }}">{{ row.status }}</span></td><td>{{ row.availability }}</td><td>{{ 'Pass' if row.template else 'Fail' }}</td><td>{{ 'Pass' if row.evaluator else 'Fail' }}</td><td>{{ row.notes }}</td></tr>{% endfor %}</tbody></table></div></article>
+    </section>
+
+    <section id="mechanic-extensions" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">CERTIFIED EXTENSIBILITY</p><h2>Created mechanic status and quality</h2></div><div class="brain-head-actions"><span class="brain-tag">{{ data.counts.extension_repair_ready }} repairs need approval</span><input class="brain-search" data-filter-target="extension-table" placeholder="Filter mechanic or status" aria-label="Filter created mechanics"></div></div>
+      <article class="brain-panel"><p class="brain-panel-copy">AI drafts and reviews bounded JSON mechanics. Deterministic validation and Bybit market tests decide certification; repairs never mutate an approved monitor silently.</p><div class="brain-table-scroll extra-tall"><table id="extension-table"><thead><tr><th>Mechanic</th><th>Status</th><th>Score</th><th>Live scans</th><th>Candidate rate</th><th>Notifications</th><th>AI attempts</th><th>Last model</th><th>Updated</th></tr></thead><tbody>{% for row in data.capability_extensions %}<tr><td><strong>{{ row.capability_key }}</strong><small>{{ row.source_prompt }}</small><code>v{{ row.version }}</code><details class="brain-mechanic-detail"><summary>Inspect code and build log</summary><h4>Certified JSON mechanic</h4><pre>{{ row.generated_code or 'No certified artifact yet.' }}</pre><h4>Build log</h4><ol>{% for event in row.build_log %}<li><time>{{ event.timestamp }}</time><b>{{ event.stage }}</b><span>{{ event.message }}</span></li>{% else %}<li>No build events yet.</li>{% endfor %}</ol>{% if row.last_error %}<p class="brain-error">{{ row.last_error }}</p>{% endif %}</details></td><td><span class="brain-status {{ 'pass' if row.status in ['certified_user', 'approved_global'] else 'warning' if row.status in ['queued', 'building', 'repair_queued', 'repair_ready', 'needs_user_clarification'] else 'fail' }}">{{ row.status }}</span><small>{{ row.stage }}</small></td><td>{{ row.validation_score }}%</td><td>{{ row.scan_count }}<small>{{ row.symbols_scanned }} symbols</small></td><td>{{ row.candidate_rate }}%<small>{{ row.candidates }} candidates</small></td><td>{{ row.notifications }}</td><td>{{ row.attempts }}<small>repair generation {{ row.repair_generation }}</small></td><td><code>{{ row.last_model or '-' }}</code><small>{{ row.last_effort or '' }}</small></td><td>{{ row.updated_at.strftime('%Y-%m-%d %H:%M') if row.updated_at else '-' }}</td></tr>{% else %}<tr><td colspan="9" class="brain-empty">No custom mechanics have entered the certification pipeline yet.</td></tr>{% endfor %}</tbody></table></div></article>
+    </section>
+
+    <section id="users" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">REGISTERED USERS</p><h2>Customer directory</h2></div><div class="brain-head-actions"><span class="brain-tag">{{ data.counts.visible_users }} shown</span><input class="brain-search" data-filter-target="user-table" placeholder="Search name or email" aria-label="Search users"></div></div>
+      <article class="brain-panel"><div class="brain-table-scroll tall"><table id="user-table"><thead><tr><th>First name</th><th>Email</th><th>Status</th><th>Joined</th><th>Last seen</th></tr></thead><tbody>{% for user in data.users %}<tr><td><strong>{{ user.first_name }}</strong></td><td>{{ user.email }}</td><td><span class="brain-status pass">{{ user.status }}</span></td><td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td><td>{{ user.last_seen_at.strftime('%Y-%m-%d %H:%M') if user.last_seen_at else '-' }}</td></tr>{% else %}<tr><td colspan="5" class="brain-empty">No non-excluded email users found.</td></tr>{% endfor %}</tbody></table></div></article>
+    </section>
+
+    <section id="ai-usage" class="brain-section">
+      <div class="brain-section-head"><div><p class="brain-kicker">OPENAI USAGE</p><h2>Tokens and estimated cost</h2></div><span class="brain-tag">Configured model pricing</span></div>
+      <article class="brain-panel"><p class="brain-panel-copy">Reasoning tokens are shown separately for diagnosis but are already included in output tokens, so they are not charged twice. Flex estimates use Batch-rate pricing.</p><div class="brain-table-scroll compact"><table><thead><tr><th>Model</th><th>Reasoning effort</th><th>Tier</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Reasoning tokens</th><th>Estimated cost</th></tr></thead><tbody>{% for row in data.usage_breakdown %}<tr><td><code>{{ row.model }}</code></td><td>{{ row.reasoning_effort }}</td><td>{{ row.service_tier }}</td><td>{{ row.calls }}</td><td>{{ row.input_tokens }}</td><td>{{ row.output_tokens }}</td><td>{{ row.reasoning_tokens }}</td><td><strong>${{ '%.6f'|format(row.cost) }}</strong></td></tr>{% else %}<tr><td colspan="8" class="brain-empty">No OpenAI usage has been recorded since telemetry was enabled.</td></tr>{% endfor %}</tbody></table></div></article>
+    </section>
+  </main>
+</body>
+</html>

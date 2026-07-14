@@ -42,8 +42,11 @@ BYBIT_REST_BASE_URL=https://api.bybit.com
 BYBIT_WS_BASE_URL=wss://stream.bybit.com/v5/public/spot
 ```
 
-- Placeholder for public spot-market support.
+- Source for Bybit spot candles, tickers, 24h volume/change, breadth, rankings, and
+  spot order-book context.
 - Do not enable private keys unless a read-only data adapter explicitly needs them.
+- Do not copy Bybit credentials into `CRYPTO_INDEX_API_KEY` or
+  `TOKEN_CATEGORY_API_KEY`; those represent non-exchange global/category providers.
 
 ## CoinGecko
 
@@ -98,3 +101,12 @@ CONTEXT_FETCH_CONCURRENCY=8
 ```
 
 These are strict condition-context providers. They must return deterministic scalar values and `as_of` timestamps. Missing or late provider data becomes unavailable proof, never a guessed pass.
+
+For the spot-only beta, keep `DERIVATIVES_CONTEXT_API_URL` and
+`DERIVATIVES_CONTEXT_API_KEY` empty. Derivatives conditions are treated as disabled
+unless the product explicitly enables a tested derivatives adapter later.
+
+Bybit can replace many exchange-derived context needs through `BYBIT_*`, but it does
+not provide total crypto market cap, BTC dominance, TOTAL2/TOTAL3, or token-category
+classification. Keep `CRYPTO_INDEX_*` and `TOKEN_CATEGORY_*` empty in Bybit-only mode
+unless a real index/category provider is configured.

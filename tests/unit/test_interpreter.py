@@ -78,6 +78,19 @@ async def test_interpreter_supports_six_month_high_breakout_language():
     assert "6-month" in child.label
 
 
+async def test_interpreter_supports_pdl_sweep_shorthand_and_common_sweep_spelling():
+    preview = await RuleBasedStrategyInterpreter().interpret(
+        _guided("bring coins which sweeped the PDL through")
+    )
+
+    assert preview.activation_blocked is False
+    condition = preview.strategy.conditions.children[0]
+    assert condition.left.name == "daily_low_swept"
+    assert condition.left.parameters["timezone"] == "UTC"
+    assert condition.required is True
+    assert any("PDL is interpreted" in assumption for assumption in preview.assumptions)
+
+
 async def test_interpreter_treats_plain_price_threshold_as_quick_scan_condition():
     guided = GuidedSetupRequest(
         exchange="binance",

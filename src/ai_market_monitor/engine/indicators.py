@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from math import log, sqrt
+from math import exp, log, sqrt
 from zoneinfo import ZoneInfo
 
 from ai_market_monitor.services.interfaces import Candle
@@ -325,6 +325,30 @@ def vwap(candles: list[Candle], *, period: int = 20) -> float:
     )
 
 
+def anchored_vwap(
+    candles: list[Candle],
+    *,
+    anchor_bars: int = 100,
+    anchor_timestamp: str | None = None,
+) -> float:
+    if not candles:
+        raise IndicatorWarmupError("anchored_vwap requires candles")
+    if anchor_timestamp:
+        anchor = candles[-1].timestamp.__class__.fromisoformat(anchor_timestamp)
+        recent = [candle for candle in candles if candle.timestamp >= anchor]
+    else:
+        if len(candles) < anchor_bars:
+            raise IndicatorWarmupError(f"anchored_vwap requires {anchor_bars} candles")
+        recent = candles[-anchor_bars:]
+    volume = sum(candle.volume for candle in recent)
+    if volume == 0:
+        raise IndicatorWarmupError("anchored_vwap volume is zero")
+    return (
+        sum(((candle.high + candle.low + candle.close) / 3) * candle.volume for candle in recent)
+        / volume
+    )
+
+
 def vwap_deviation_percent(candles: list[Candle], *, period: int = 20) -> float:
     value = vwap(candles, period=period)
     if value == 0:
@@ -340,6 +364,61 @@ def range_ratio(candles: list[Candle], *, period: int = 20) -> float:
         raise IndicatorWarmupError("average candle range is zero")
     current_range = candles[-1].high - candles[-1].low
     return current_range / average_range
+
+
+def expansion_ratio(
+    candles: list[Candle],
+    *,
+    short_period: int = 14,
+    long_period: int = 50,
+) -> float:
+    required = max(short_period, long_period) + 1
+    if len(candles) < required:
+        raise IndicatorWarmupError(f"expansion_ratio requires {required} candles")
+    short_atr = atr(candles, period=short_period)
+    long_atr = atr(candles, period=long_period)
+    if long_atr == 0:
+        raise IndicatorWarmupError("expansion_ratio long ATR is zero")
+    return short_atr / long_atr
+
+
+def trend_strength(candles: list[Candle], *, period: int = 50) -> float:
+    if len(candles) < period + 1:
+        raise IndicatorWarmupError(f"trend_strength({period}) requires {period + 1} candles")
+    recent = candles[-period:]
+    atr_period = min(14, len(candles) - 1)
+    atr_value = atr(candles, period=atr_period)
+    close = recent[-1].close
+    if atr_value <= 0 or close <= 0:
+        raise IndicatorWarmupError("trend_strength requires non-zero ATR and close")
+
+    values = [candle.close for candle in recent]
+    count = len(values)
+    x_mean = (count - 1) / 2
+    y_mean = sum(values) / count
+    denominator = sum((index - x_mean) ** 2 for index in range(count))
+    slope = (
+        sum((index - x_mean) * (value - y_mean) for index, value in enumerate(values)) / denominator
+        if denominator
+        else 0.0
+    )
+    intercept = y_mean - slope * x_mean
+    ss_res = sum((value - (intercept + slope * index)) ** 2 for index, value in enumerate(values))
+    ss_tot = sum((value - y_mean) ** 2 for value in values)
+    fit = 0.0 if ss_tot <= 1e-12 else max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
+    net_move = abs(values[-1] - values[0])
+    path = sum(abs(right - left) for left, right in zip(values[:-1], values[1:], strict=True))
+    efficiency = 0.0 if path <= 0 else max(0.0, min(1.0, net_move / path))
+    direction = 1 if values[-1] >= values[0] else -1
+    directional_moves = [
+        1
+        for left, right in zip(values[:-1], values[1:], strict=True)
+        if (right - left) * direction > 0
+    ]
+    directional_fraction = len(directional_moves) / max(1, count - 1)
+    travel_atr = max(net_move, abs(slope) * (count - 1)) / atr_value
+    move_component = 1.0 - exp(-0.55 * travel_atr)
+    return move_component * 0.45 + efficiency * 0.25 + directional_fraction * 0.15 + fit * 0.15
 
 
 def pullback_depth_percent(
@@ -1755,8 +1834,11 @@ class IndicatorRegistry:
             "bollinger_bandwidth_delta": bollinger_bandwidth_delta,
             "stochastic": stochastic,
             "vwap": vwap,
+            "anchored_vwap": anchored_vwap,
             "vwap_deviation_percent": vwap_deviation_percent,
             "range_ratio": range_ratio,
+            "expansion_ratio": expansion_ratio,
+            "trend_strength": trend_strength,
             "pullback_depth_percent": pullback_depth_percent,
             "adx": adx,
             "stochastic_rsi": stochastic_rsi,

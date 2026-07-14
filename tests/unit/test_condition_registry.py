@@ -32,6 +32,18 @@ def test_condition_registry_has_unique_rich_builder_ready_entries():
         "warmup_candles",
         "test_cases",
         "condition_template",
+        "semantic_tags",
+        "intent_examples",
+        "negative_examples",
+        "direction_support",
+        "temporal_behavior",
+        "parameter_schema",
+        "conflicts_with",
+        "composes_with",
+        "provider_requirements",
+        "capability_version",
+        "proof_template",
+        "resource_cost",
     }
     assert len(keys) == len(set(keys))
     assert payload["schema_version"] == "2.0"
@@ -47,6 +59,7 @@ def test_condition_registry_has_unique_rich_builder_ready_entries():
     }.issubset({category["key"] for category in payload["guidebook_categories"]})
     assert payload["counts"]["logic_operators"] == 12
     assert required_fields.issubset(payload["items"][0])
+    assert payload["items"][0]["condition_template"]["capability_key"] == payload["items"][0]["key"]
     assert {
         "stochastic_rsi",
         "money_flow_index",

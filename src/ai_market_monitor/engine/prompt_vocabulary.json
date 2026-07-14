@@ -368,6 +368,191 @@
       ]
     },
     {
+      "key": "po3_bullish_dealing_range_sweep",
+      "semantic_type": "condition",
+      "canonical_intent": "po3_bullish_dealing_range_sweep",
+      "capability_key": "po3_dealing_range_sweep_bullish",
+      "condition_type": "price_action",
+      "operand_name": "po3_dealing_range_sweep_bullish",
+      "default_label": "Bullish dealing-range sweep",
+      "default_parameters": {"dealing_range_lookback": 5, "max_dealing_range_percent": 3.0},
+      "phrases": [
+        "bullish dealing range sweep",
+        "sell side dealing range sweep",
+        "sweep the dealing range low",
+        "po3 bullish sweep",
+        "power of three bullish sweep"
+      ]
+    },
+    {
+      "key": "po3_bearish_dealing_range_sweep",
+      "semantic_type": "condition",
+      "canonical_intent": "po3_bearish_dealing_range_sweep",
+      "capability_key": "po3_dealing_range_sweep_bearish",
+      "condition_type": "price_action",
+      "operand_name": "po3_dealing_range_sweep_bearish",
+      "default_label": "Bearish dealing-range sweep",
+      "default_parameters": {"dealing_range_lookback": 5, "max_dealing_range_percent": 3.0},
+      "phrases": [
+        "bearish dealing range sweep",
+        "buy side dealing range sweep",
+        "sweep the dealing range high",
+        "po3 bearish sweep",
+        "power of three bearish sweep"
+      ]
+    },
+    {
+      "key": "po3_bullish_sweep_displacement",
+      "semantic_type": "condition",
+      "canonical_intent": "po3_bullish_sweep_displacement",
+      "capability_key": "po3_sweep_displacement_bullish",
+      "condition_type": "price_action",
+      "operand_name": "po3_sweep_displacement_bullish",
+      "default_label": "Bullish sweep followed by displacement",
+      "default_parameters": {"dealing_range_lookback": 5, "displacement_search_bars": 60},
+      "phrases": [
+        "bullish sweep and displacement",
+        "sell side sweep with displacement",
+        "sweep lows then displacement",
+        "bullish po3 displacement"
+      ]
+    },
+    {
+      "key": "po3_bearish_sweep_displacement",
+      "semantic_type": "condition",
+      "canonical_intent": "po3_bearish_sweep_displacement",
+      "capability_key": "po3_sweep_displacement_bearish",
+      "condition_type": "price_action",
+      "operand_name": "po3_sweep_displacement_bearish",
+      "default_label": "Bearish sweep followed by displacement",
+      "default_parameters": {"dealing_range_lookback": 5, "displacement_search_bars": 60},
+      "phrases": [
+        "bearish sweep and displacement",
+        "buy side sweep with displacement",
+        "sweep highs then displacement",
+        "bearish po3 displacement"
+      ]
+    },
+    {
+      "key": "po3_bullish_full_context",
+      "semantic_type": "condition",
+      "canonical_intent": "po3_bullish_sweep_displacement_structure",
+      "capability_key": "po3_sweep_displacement_structure_bullish",
+      "condition_type": "price_action",
+      "operand_name": "po3_sweep_displacement_structure_bullish",
+      "default_label": "Bullish PO3 sweep, displacement and structure break",
+      "default_parameters": {"dealing_range_lookback": 5, "displacement_search_bars": 60, "structure_swing_span": 1},
+      "phrases": [
+        "bullish po3",
+        "bullish sweep displacement bos",
+        "sell side sweep displacement bos",
+        "bullish sweep displacement structure"
+      ]
+    },
+    {
+      "key": "po3_bearish_full_context",
+      "semantic_type": "condition",
+      "canonical_intent": "po3_bearish_sweep_displacement_structure",
+      "capability_key": "po3_sweep_displacement_structure_bearish",
+      "condition_type": "price_action",
+      "operand_name": "po3_sweep_displacement_structure_bearish",
+      "default_label": "Bearish PO3 sweep, displacement and structure break",
+      "default_parameters": {"dealing_range_lookback": 5, "displacement_search_bars": 60, "structure_swing_span": 1},
+      "phrases": [
+        "bearish po3",
+        "bearish sweep displacement bos",
+        "buy side sweep displacement bos",
+        "bearish sweep displacement structure"
+      ]
+    },
+    {
+      "key": "fvg_still_open",
+      "semantic_type": "condition",
+      "canonical_intent": "fvg_still_open",
+      "capability_key": "fvg_still_open",
+      "condition_type": "price_action",
+      "operand_name": "fvg_still_open",
+      "default_label": "FVG is still open",
+      "default_parameters": {"lookback": 40, "direction": "bullish"},
+      "phrases": [
+        "fvg still open",
+        "open fvg",
+        "unfilled fvg",
+        "fair value gap still open",
+        "unmitigated fvg"
+      ]
+    },
+    {
+      "key": "fvg_mid_mitigated",
+      "semantic_type": "condition",
+      "canonical_intent": "fvg_mid_mitigated",
+      "capability_key": "fvg_mid_mitigated",
+      "condition_type": "price_action",
+      "operand_name": "fvg_mid_mitigated",
+      "default_label": "FVG midpoint has been mitigated",
+      "default_parameters": {"lookback": 40, "direction": "bullish"},
+      "phrases": [
+        "fvg midpoint mitigated",
+        "mid mitigated fvg",
+        "fvg touched midpoint",
+        "fvg half filled"
+      ]
+    },
+    {
+      "key": "trend_strength",
+      "semantic_type": "condition",
+      "canonical_intent": "trend_strength_filter",
+      "capability_key": "trend_strength",
+      "condition_type": "indicator",
+      "operand_name": "trend_strength",
+      "default_label": "Trend strength is high",
+      "default_comparator": "gte",
+      "default_threshold": 0.55,
+      "default_parameters": {"period": 50},
+      "phrases": [
+        "trend strength",
+        "clean trend",
+        "efficient trend",
+        "directional trend"
+      ]
+    },
+    {
+      "key": "atr_expansion_ratio",
+      "semantic_type": "condition",
+      "canonical_intent": "atr_expansion_ratio",
+      "capability_key": "atr_expansion_ratio",
+      "condition_type": "indicator",
+      "operand_name": "expansion_ratio",
+      "default_label": "ATR expansion ratio",
+      "default_comparator": "gte",
+      "default_threshold": 1.2,
+      "default_parameters": {"short_period": 14, "long_period": 50},
+      "phrases": [
+        "atr expansion ratio",
+        "volatility expansion ratio",
+        "atr expanding",
+        "short atr above long atr"
+      ]
+    },
+    {
+      "key": "anchored_vwap",
+      "semantic_type": "condition",
+      "canonical_intent": "anchored_vwap_filter",
+      "capability_key": "anchored_vwap",
+      "condition_type": "indicator",
+      "operand_name": "anchored_vwap",
+      "default_label": "Anchored VWAP level",
+      "default_comparator": "gt",
+      "default_threshold": 0,
+      "default_parameters": {"anchor_bars": 100},
+      "phrases": [
+        "anchored vwap",
+        "avwap",
+        "vwap from anchor",
+        "vwap from sweep"
+      ]
+    },
+    {
       "key": "provider_news",
       "semantic_type": "provider_required",
       "canonical_intent": "news_or_event_context",

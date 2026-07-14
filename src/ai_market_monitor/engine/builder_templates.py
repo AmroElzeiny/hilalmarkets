@@ -138,6 +138,10 @@ def condition_template(
         condition_type = "market_filter"
     return {
         "node_type": "condition",
+        "capability_key": capability.key,
+        "capability_version": capability.capability_version,
+        "capability_artifact_hash": None,
+        "resolved_parameters": deepcopy(parameters),
         "key": key or capability.key,
         "label": capability.label,
         "condition_type": condition_type,

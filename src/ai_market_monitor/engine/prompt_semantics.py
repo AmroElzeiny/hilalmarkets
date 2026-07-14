@@ -95,9 +95,11 @@ class PromptSemanticResult:
 
 @lru_cache(maxsize=1)
 def prompt_vocabulary() -> dict[str, Any]:
-    with resources.files("ai_market_monitor.engine").joinpath(
-        "prompt_vocabulary.json"
-    ).open(encoding="utf-8") as handle:
+    with (
+        resources.files("ai_market_monitor.engine")
+        .joinpath("prompt_vocabulary.json")
+        .open(encoding="utf-8") as handle
+    ):
         payload = json.load(handle)
     _validate_vocabulary(payload)
     return payload
@@ -170,6 +172,9 @@ def analyze_prompt_semantics(prompt: str, default_timeframe: str = "15m") -> Pro
                     )
                     if condition is None:
                         continue
+                    capability_key = str(group.get("capability_key") or "")
+                    if capability_key:
+                        condition = condition.model_copy(update={"capability_key": capability_key})
                     condition_key = (
                         condition.key,
                         condition.timeframe,
@@ -241,7 +246,14 @@ def _context_gate_passes(normalized: str, start: int, end: int, group: dict[str,
         return False
     if "close_open" in required_context and not any(
         term in phrase_window
-        for term in ("candle", "close above open", "close below open", "closed", "finished", "ended")
+        for term in (
+            "candle",
+            "close above open",
+            "close below open",
+            "closed",
+            "finished",
+            "ended",
+        )
     ):
         return False
     if "price_move" in required_context:
@@ -277,9 +289,7 @@ def _normalize_timeframe(value: str) -> str:
 
 def _required_near(prompt: str, start: int, end: int, vocabulary: dict[str, Any]) -> bool:
     window = prompt[max(0, start - 96) : min(len(prompt), end + 48)].casefold()
-    if any(phrase in window for phrase in vocabulary.get("optional_phrases", [])):
-        return False
-    return True
+    return not any(phrase in window for phrase in vocabulary.get("optional_phrases", []))
 
 
 def _negated_near(prompt: str, start: int, end: int, vocabulary: dict[str, Any]) -> bool:
@@ -405,7 +415,11 @@ def _condition_from_group(
         if negated:
             comparator = _invert_comparator(comparator)
         return _price_vs_indicator(
-            key="price_reclaims_vwap" if comparator == Comparator.CROSSES_ABOVE else "price_above_vwap",
+            key=(
+                "price_reclaims_vwap"
+                if comparator == Comparator.CROSSES_ABOVE
+                else "price_above_vwap"
+            ),
             label=str(group.get("default_label") or "Price above VWAP"),
             timeframe=timeframe,
             indicator="vwap",
@@ -463,6 +477,36 @@ def _condition_from_group(
             required_data=["time"],
             source_fragment=source_fragment,
             confidence=0.9,
+        )
+    condition_type = str(group.get("condition_type") or "")
+    operand_name = str(group.get("operand_name") or "")
+    if condition_type == "price_action" and operand_name:
+        return _price_action_condition(
+            key=str(group.get("key") or operand_name),
+            label=str(group.get("default_label") or source_fragment),
+            timeframe=timeframe,
+            name=operand_name,
+            source_fragment=source_fragment,
+            required=required,
+            parameters=dict(group.get("default_parameters") or {}),
+            confidence=float(group.get("confidence", 0.86)),
+        )
+    if condition_type == "indicator" and operand_name:
+        comparator = Comparator(str(group.get("default_comparator") or "gte"))
+        threshold = float(group.get("default_threshold", 0))
+        if negated:
+            comparator = _invert_comparator(comparator)
+        return _indicator_constant(
+            key=str(group.get("key") or operand_name),
+            label=str(group.get("default_label") or source_fragment),
+            timeframe=timeframe,
+            indicator=operand_name,
+            comparator=comparator,
+            threshold=threshold,
+            source_fragment=source_fragment,
+            required=required,
+            parameters=dict(group.get("default_parameters") or {}),
+            confidence=float(group.get("confidence", 0.86)),
         )
     return None
 
@@ -677,16 +721,26 @@ def _lookback_candles(prompt: str, timeframe: str) -> int:
     )
     if hour_match:
         return max(1, min(50_000, int((int(hour_match.group(1)) * 60) / minutes)))
-    day_match = re.search(r"(?:last|past|previous|over the last|over the past)\s+(\d+)[ -]?days?", lowered)
+    day_match = re.search(
+        r"(?:last|past|previous|over the last|over the past)\s+(\d+)[ -]?days?",
+        lowered,
+    )
     if day_match:
         return max(1, min(50_000, int((int(day_match.group(1)) * 24 * 60) / minutes)))
     if any(term in lowered for term in ("today", "since midnight", "daily move", "this day")):
         return max(1, int((24 * 60) / minutes))
-    if any(term in lowered for term in ("past day", "last day", "last 24 hours", "24h", "24 hours")):
+    if any(
+        term in lowered for term in ("past day", "last day", "last 24 hours", "24h", "24 hours")
+    ):
         return max(1, int((24 * 60) / minutes))
-    if any(term in lowered for term in ("past week", "last week", "7 days", "seven days", "this week")):
+    if any(
+        term in lowered for term in ("past week", "last week", "7 days", "seven days", "this week")
+    ):
         return max(1, int((7 * 24 * 60) / minutes))
-    if any(term in lowered for term in ("past month", "last month", "30 days", "thirty days", "this month")):
+    if any(
+        term in lowered
+        for term in ("past month", "last month", "30 days", "thirty days", "this month")
+    ):
         return max(1, int((30 * 24 * 60) / minutes))
     return 1
 

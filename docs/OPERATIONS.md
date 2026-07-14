@@ -40,8 +40,26 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `BINANCE_WS_BASE_URL` | Binance WebSocket base URL, default `wss://stream.binance.com:9443`. |
 | `AI_INTERPRETER_PROVIDER` | `openai` for AI strategy interpretation or `rules` for deterministic fallback only. |
 | `OPENAI_API_KEY` | OpenAI API key used only to convert user text into structured draft rules. |
-| `OPENAI_MODEL` | Low-cost OpenAI model for interpretation. Default: `gpt-5-nano`. |
+| `OPENAI_MODEL` | Default interpretation model. Default: `gpt-5.4-nano`. |
+| `OPENAI_REASONING_EFFORT` | Default interpretation reasoning effort. Default: `low`. |
 | `OPENAI_BASE_URL` | OpenAI API base URL, default `https://api.openai.com/v1`. |
+| `AI_AGENT_CONTROL_ENABLED` | Bounded Setup Chat coordinator kill switch. Default: `false`. |
+| `AI_AGENT_SHADOW_MODE` | Records proposed agent tool selection but executes no agent tools. Default: `false`. |
+| `AI_AGENT_ROLLOUT_PERCENT` | Stable authenticated-user cohort allowed to execute agent tools outside shadow mode. Default: `0`. |
+| `AI_AGENT_MAX_STEPS` | Maximum Responses loop steps per turn. Default: `4`. |
+| `AI_AGENT_MAX_TOOL_CALLS_PER_TURN` | Maximum validated function calls per turn. Default: `4`. |
+| `AI_AGENT_MAX_REPEATED_CALLS` | Retry allowance for retryable unavailable/validation results. Default: `1`. |
+| `AI_AGENT_TIMEOUT_SECONDS` | Whole bounded-turn timeout. Default: `45`. |
+| `AI_AGENT_TOOL_TIMEOUT_SECONDS` | Per-tool timeout. Default: `30`. |
+| `AI_AGENT_MAX_OUTPUT_TOKENS` | Cumulative model output-token limit per turn. Default: `1800`. |
+| `AI_AGENT_MAX_ESTIMATED_COST_USD_PER_TURN` | Estimated per-turn cost stop. Default: `0.02`. |
+| `AI_AGENT_PARALLEL_TOOL_CALLS` | Must remain `false` for the bounded coordinator. |
+| `CAPABILITY_EXTENSION_ENABLED` | Enables user-approved certification of missing OHLCV mechanics. |
+| `CAPABILITY_EXTENSION_DRAFT_MODEL` | Initial mechanic draft/review model. Default: `gpt-5.4-nano`. |
+| `CAPABILITY_EXTENSION_IMPLEMENTATION_MODEL` | Implementation-only repair model. Default: `gpt-5.4-nano`. |
+| `CAPABILITY_EXTENSION_REVIEW_MODEL` | Independent escalation model. Default: `gpt-5.4-mini`. |
+| `CAPABILITY_EXTENSION_REPAIR_SERVICE_TIER` | `flex` for review/repair work or `default`. |
+| `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Default: `bybit`. |
 | `TELEGRAM_ENABLED` | Enables Telegram webhooks and delivery workers. |
 | `TELEGRAM_ADAPTER` | Must be `http` when Telegram is enabled in a deployed environment. |
 | `DISCORD_ENABLED` | Enables Discord OAuth, interactions, delivery and role sync. |
@@ -71,6 +89,9 @@ Check for model/migration drift:
 
 Never run destructive schema changes without a tested backup and rollback plan.
 
+Migration `b4c5d6e7f8a9` adds redacted bounded-agent run and tool-call traces. Apply it before enabling
+shadow mode.
+
 ## Local Development
 
 ```powershell
@@ -89,6 +110,32 @@ python -m ruff check src tests
 python -m mypy src/ai_market_monitor
 python -m pytest
 ```
+
+### Bounded-agent rollout
+
+Deploy with `AI_AGENT_CONTROL_ENABLED=false`. For staging comparison, set:
+
+```dotenv
+AI_AGENT_CONTROL_ENABLED=true
+AI_AGENT_SHADOW_MODE=true
+AI_AGENT_ROLLOUT_PERCENT=0
+```
+
+Shadow mode does not execute agent-selected tools. The existing legacy chat flow still answers the
+user, and `/system-brain#agent-control` compares the proposed first tool with the resulting legacy
+action. Review tool-selection agreement, invalid/forbidden attempts, contained ungrounded claims,
+fallback rate, latency, calls, tokens, cost, compiler success, and clarification evidence. Do not
+enable execution until forbidden executions and unsupported-condition leakage remain zero and the
+messy-request corpus shows no safety regression.
+
+For live rollout, turn shadow mode off and begin with `AI_AGENT_ROLLOUT_PERCENT=1`. Cohort assignment
+is deterministic by authenticated user ID, so the same users remain in the cohort across restarts.
+Increase gradually while monitoring System Brain; set the percentage back to `0` to halt live
+execution without disabling ongoing shadow evaluation.
+
+To roll back, set `AI_AGENT_CONTROL_ENABLED=false` and restart the API. No schema rollback is needed.
+The full catalog, policy, limits, and safe tool-addition checklist are documented in
+`docs/BOUNDED_AGENT_CONTROL.md`.
 
 ## Production Deployment
 
@@ -137,11 +184,15 @@ Scheduled tasks currently wired:
 - Telegram delivery retries.
 - Discord delivery retries.
 - Discord role-sync retries.
+- Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
 
 The live scanner currently uses shared CCXT REST clients. Jobs are claimed atomically from
 `queued` to `running`, store worker id/claim/heartbeat timestamps, and are not rerun after terminal
 states. WebSocket ingestion and a durable candle store remain future production-hardening work.
+Capability extension jobs additionally require a configured server-side OpenAI key. The generated
+artifact remains a bounded deterministic expression and must pass normal user approval. See
+`docs/CAPABILITY_EXTENSION_PIPELINE.md` for the escalation and failure behavior.
 
 ## Telegram Setup
 

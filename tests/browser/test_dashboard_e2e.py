@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import json
 import re
-
-from playwright.sync_api import Page, expect
+import time
+from pathlib import Path
 
 from conftest import (
     assert_no_raw_traceback,
     seed_alert_proof,
+    seed_setup_observability,
     seed_telegram_connection,
     signup,
     unique_email,
 )
+from playwright.sync_api import Page, expect
 
+from tests.factories import load_strategy
 
 EXECUTABLE_PROMPT = {
     "goal": "Find coins where RSI crosses back above 30 on 15m.",
@@ -22,6 +25,110 @@ EXECUTABLE_PROMPT = {
 }
 
 
+def _visual_chat_payload(status: str, *, can_approve: bool) -> dict:
+    draft_strategy = load_strategy().model_dump(mode="json")
+    draft_strategy["name"] = "15m breakout monitor"
+    lint = [] if can_approve else [
+        {
+            "code": "missing_threshold",
+            "severity": "critical",
+            "message": "Define the breakout lookback before approval.",
+        }
+    ]
+    summary = (
+        "TraceEdge will watch Binance USDT spot pairs on 15m. A close above the prior "
+        "20-candle high is the primary trigger; volume is a required confirmation."
+    )
+    return {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "status": status,
+        "title": "15m breakout monitor",
+        "original_idea": "Find a breakout with strong volume on 15m Binance spot.",
+        "messages": [
+            {
+                "id": "22222222-2222-4222-8222-222222222222",
+                "role": "assistant",
+                "message_type": "welcome",
+                "content": "Tell me what you want to monitor.",
+                "payload": {},
+                "client_message_id": None,
+                "created_at": "2026-07-10T10:00:00Z",
+            },
+            {
+                "id": "33333333-3333-4333-8333-333333333333",
+                "role": "user",
+                "message_type": "text",
+                "content": "Find a breakout with strong volume on 15m Binance spot.",
+                "payload": {},
+                "client_message_id": "visual-user-message",
+                "created_at": "2026-07-10T10:00:01Z",
+            },
+            {
+                "id": "44444444-4444-4444-8444-444444444444",
+                "role": "assistant",
+                "message_type": "translation",
+                "content": (
+                    "Ready to review." if can_approve
+                    else "I can’t approve this yet. Define the breakout lookback."
+                ),
+                "payload": {
+                    "understanding_summary": summary,
+                    "suggestions": ["Add candle-close confirmation"],
+                },
+                "client_message_id": None,
+                "created_at": "2026-07-10T10:00:02Z",
+            },
+        ],
+        "draft_strategy": draft_strategy,
+        "schema_hash": "a" * 64,
+        "translation_sheet": {
+            "summary_paragraph": summary,
+            "original_idea": "Find a breakout with strong volume on 15m Binance spot.",
+            "monitor_name": "15m breakout monitor",
+            "exchange": "binance",
+            "market_type": "spot",
+            "direction": "both",
+            "symbols_watchlist": [],
+            "quote_currencies": ["USDT"],
+            "timeframes": ["15m"],
+            "alert_timing": {"trigger_mode": "candle_close"},
+            "delivery_channels": ["telegram"],
+            "conditions": [
+                {
+                    "key": "breakout_trigger",
+                    "name": "Close above previous 20-candle high",
+                    "required": True,
+                    "role": "primary_trigger",
+                    "timeframe": "15m",
+                    "operator": "is_true",
+                },
+                {
+                    "key": "volume_suggestion",
+                    "name": "Volume at least 1.5x average",
+                    "required": True,
+                    "role": "required_confirmation",
+                    "timeframe": "15m",
+                    "operator": "gte",
+                },
+            ],
+            "assumptions": ["All eligible Binance USDT spot pairs."],
+            "unsupported_conditions": [],
+            "approval_required": True,
+            "execution": "No automatic trade execution. Deterministic monitoring only.",
+        },
+        "lint_warnings": lint,
+        "rule_confidence": [],
+        "assumptions": ["All eligible Binance USDT spot pairs."],
+        "ambiguities": [],
+        "unsupported_conditions": [],
+        "can_approve": can_approve,
+        "approved_strategy_id": None,
+        "approved_strategy_version_id": None,
+        "next_url": None,
+        "updated_at": "2026-07-10T10:00:02Z",
+    }
+
+
 def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("dashboard-load"))
 
@@ -29,70 +136,214 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
     expect(page.get_by_test_id("dashboard-nav")).to_be_visible()
     page.locator(".sidebar-create-quick").click()
     page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=10_000)
-    expect(page.get_by_test_id("strategy-builder-entry")).to_be_visible()
+    expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
+    expect(page.locator("[data-ai-chat-input]")).to_be_visible()
+    expect(page.locator(".ai-chat-start-card.scanner")).to_be_visible()
+    expect(page.locator(".ai-chat-start-card.monitor")).to_be_visible()
+    assert page.locator('a[href="/dashboard/scan-now"]').count() == 0
     assert_no_raw_traceback(page)
 
 
 def test_strategy_prompt_to_coverage_preview_opens_board(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("prompt-coverage"))
     _open_builder(page, base_url)
-    _submit_executable_prompt(page)
-
-    panel = page.get_by_test_id("prompt-coverage-panel")
-    expect(panel).to_be_visible()
-    expect(panel).to_contain_text(re.compile("RSI", re.I))
-    expect(panel).to_contain_text(re.compile("volume", re.I))
-    expect(panel).to_contain_text(re.compile("EMA", re.I))
-    expect(page.get_by_test_id("prompt-coverage-score")).to_be_visible()
-    expect(page.get_by_test_id("interpreted-rule-card").first).to_be_visible()
-    expect(panel).not_to_contain_text("No executable rule recognized")
-    expect(panel).not_to_contain_text("Needs clarification")
-
-    open_button = page.get_by_test_id("open-strategy-board")
-    expect(open_button).to_be_enabled()
-    open_button.click()
-    expect(page.get_by_test_id("strategy-canvas-panel")).to_be_visible()
-    expect(page.get_by_test_id("strategy-board")).to_be_visible()
-    expect(_first_condition_board_node(page)).to_be_visible()
+    input_box = page.locator("[data-ai-chat-input]")
+    input_box.fill("Find bullish breakouts with strong volume on 15m Binance spot.")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.locator("[data-ai-chat-suggestions] .ai-chat-chip").first).to_be_visible(
+        timeout=20_000
+    )
+    expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
+        re.compile("measurable definition|breakout", re.I)
+    )
+    expect(page.locator("[data-ai-preview-empty]")).to_be_visible()
     assert_no_raw_traceback(page)
 
 
-def test_provider_required_prompt_blocks_activation(page: Page, base_url: str) -> None:
-    signup(page, base_url, unique_email("provider-required"))
+def test_ai_setup_chat_mobile_layout(page: Page, base_url: str) -> None:
+    signup(page, base_url, unique_email("ai-chat-mobile"))
+    page.set_viewport_size({"width": 390, "height": 844})
     _open_builder(page, base_url)
-    _choose_describe_path(page)
-    page.get_by_test_id("strategy-prompt-goal").fill(
-        "Only alert if BTC is above EMA 200 on 1h."
+    chat_panel = page.locator(".ai-chat-panel")
+    preview_panel = page.locator(".ai-preview-panel")
+    expect(chat_panel).to_be_visible()
+    expect(preview_panel).to_be_hidden()
+    expect(page.locator("[data-ai-chat-input]")).to_be_visible()
+    page.locator("[data-ai-open-canvas]").click()
+    expect(page.locator("[data-ai-setup-chat]")).to_have_class(re.compile("canvas-open"))
+    expect(page.get_by_test_id("strategy-builder-root")).to_be_visible()
+    page.locator("[data-ai-return-chat]").click()
+    expect(page.locator("[data-ai-setup-chat]")).not_to_have_class(re.compile("canvas-open"))
+    assert_no_raw_traceback(page)
+
+
+def test_visual_canvas_is_secondary_to_ai_chat(page: Page, base_url: str) -> None:
+    signup(page, base_url, unique_email("chat-canvas"))
+    _open_builder(page, base_url)
+    page.locator("[data-ai-open-canvas]").click()
+    expect(page.locator("[data-ai-setup-chat]")).to_have_class(re.compile("canvas-open"))
+    expect(page.get_by_test_id("strategy-builder-root")).to_be_visible()
+    expect(page.get_by_test_id("strategy-canvas-panel")).to_be_visible(timeout=10_000)
+    page.locator("[data-ai-return-chat]").click()
+    expect(page.locator("[data-ai-setup-chat]")).not_to_have_class(re.compile("canvas-open"))
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_optimistic_retry_and_option_selection(page: Page, base_url: str) -> None:
+    signup(page, base_url, unique_email("ai-chat-optimistic"))
+    _open_builder(page, base_url)
+    request_ids: list[str] = []
+    held_routes = []
+    attempts = 0
+
+    def intercept(route) -> None:
+        nonlocal attempts
+        attempts += 1
+        request_ids.append(json.loads(route.request.post_data)["client_message_id"])
+        if attempts == 1:
+            route.fulfill(
+                status=200,
+                content_type="text/plain",
+                body="temporary malformed response",
+            )
+            return
+        if attempts == 3:
+            held_routes.append(route)
+            return
+        time.sleep(0.45)
+        route.continue_()
+
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", intercept)
+    text = "Find bullish breakouts with strong volume on 15m Binance spot."
+    page.locator("[data-ai-chat-input]").fill(text)
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.locator(".ai-chat-message.user.failed")).to_contain_text(
+        text, timeout=10_000
     )
-    _add_prompt_section(page, "must")
-    page.get_by_test_id("strategy-prompt-must").fill("Open interest is rising.")
-    _add_prompt_section(page, "universe")
-    page.get_by_test_id("strategy-prompt-universe").fill("BTC/USDT on Binance spot.")
-    _add_prompt_section(page, "timeframe")
-    page.get_by_test_id("strategy-prompt-timeframe").fill("1h.")
-    page.get_by_test_id("strategy-interpret-submit").click()
+    expect(page.locator(".ai-chat-message.user.failed .ai-chat-bubble")).to_have_css(
+        "color", "rgb(255, 255, 255)"
+    )
+    expect(page.locator("[data-ai-chat-input]")).to_have_value("")
+    page.locator("[data-ai-chat-retry]").click()
+    expect(page.locator("[data-ai-chat-suggestions] .ai-chat-chip").first).to_be_visible(
+        timeout=20_000
+    )
+    assert request_ids[0] == request_ids[1]
+    assert page.locator(".ai-chat-message.user", has_text=text).count() == 1
 
-    panel = page.get_by_test_id("prompt-coverage-panel")
-    expect(panel).to_be_visible(timeout=20_000)
-    expect(panel).to_contain_text(re.compile("open interest", re.I))
-    expect(panel).to_contain_text(re.compile("provider|unsupported|clarification", re.I))
+    chip = page.locator("[data-ai-chat-suggestions] .ai-chat-chip").first
+    label = chip.locator("strong").inner_text()
+    chip.click()
+    expect(page.locator(".ai-chat-message.user", has_text=label)).to_be_visible()
+    expect(chip).to_be_disabled()
+    expect(chip).to_have_class(re.compile("selected"))
+    expect(page.locator("[data-ai-chat-input]")).to_have_value("")
+    held_routes[0].continue_()
+    assert_no_raw_traceback(page)
 
-    open_button = page.get_by_test_id("open-strategy-board")
-    if open_button.is_enabled():
-        open_button.click()
-        expect(page.get_by_test_id("strategy-canvas-panel")).to_be_visible()
-        expect(page.get_by_text(re.compile("Provider required|provider", re.I)).first).to_be_visible()
-        page.get_by_test_id("strategy-publish").click()
+
+def test_ai_setup_chat_visual_qa_states(
+    page: Page,
+    base_url: str,
+    repo_root: Path,
+) -> None:
+    signup(page, base_url, unique_email("ai-chat-visual-qa"))
+    _open_builder(page, base_url)
+    output = repo_root / "reports" / "playwright" / "visual-qa"
+    output.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
+
+    prompt = "Find a breakout with strong volume on 15m Binance spot."
+    page.locator("[data-ai-chat-input]").fill(prompt)
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.locator(".ai-chat-chip").first).to_be_visible(timeout=20_000)
+    page.screenshot(path=str(output / "ai-setup-chat-option-chips.png"), full_page=True)
+
+    blocked = _visual_chat_payload("needs_clarification", can_approve=False)
+    ready = _visual_chat_payload("ready_for_approval", can_approve=True)
+    replies = iter((blocked, ready))
+
+    def visual_response(route) -> None:
+        try:
+            payload = next(replies)
+        except StopIteration:
+            payload = ready
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+
+    page.unroute("**/api/v1/dashboard/setup-chat/sessions/*/messages")
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", visual_response)
+    page.locator("[data-ai-chat-input]").fill("Use measurable rules.")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.locator(".ai-warning.critical")).to_be_visible(timeout=10_000)
+    expect(page.locator(".ai-refusal-reason")).to_have_count(1)
+    expect(page.locator(".ai-refusal-reason")).to_contain_text(
+        "Define the breakout lookback before approval."
+    )
+    expect(page.locator("[data-ai-chat-approve]")).to_be_disabled()
+    page.screenshot(
+        path=str(output / "ai-setup-chat-lint-approval-disabled.png"), full_page=True
+    )
+
+    page.locator("[data-ai-chat-input]").fill("Apply: Add candle-close confirmation")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.locator(".ai-improvement-list button").first).to_be_visible(timeout=10_000)
+    expect(page.locator("[data-ai-chat-approve]")).to_be_enabled()
+    page.screenshot(
+        path=str(output / "ai-setup-chat-translation-suggestions-ready.png"),
+        full_page=True,
+    )
+
+    page.locator("[data-ai-open-canvas]").click()
+    expect(page.locator("[data-ai-setup-chat]")).to_have_class(re.compile("canvas-open"))
+    expect(page.get_by_test_id("strategy-canvas-panel")).to_be_visible(timeout=10_000)
+    expect(page.locator("#builder-monitor-node-name")).to_contain_text(
+        "15m breakout monitor"
+    )
+    page.screenshot(
+        path=str(output / "ai-setup-chat-expanded-canvas-minimized-chat.png"),
+        full_page=True,
+    )
+    page.locator("[data-ai-return-chat]").click()
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    if not page.locator("body").evaluate("node => node.classList.contains('sidebar-collapsed')"):
+        page.locator("[data-sidebar-toggle]").click()
+    page.screenshot(path=str(output / "ai-setup-chat-mobile-390.png"), full_page=True)
+    assert_no_raw_traceback(page)
+
+
+def test_provider_required_prompt_blocks_activation(page: Page, base_url: str, browser_app) -> None:
+    email = signup(page, base_url, unique_email("provider-required"))
+    seed_telegram_connection(browser_app.database_url, email)
+    _create_strategy_from_prompt(
+        page,
+        base_url,
+        {
+            "goal": "Only alert if BTC is above EMA 200 on 1h.",
+            "must": "Open interest is rising.",
+            "universe": "BTC/USDT on Binance spot.",
+            "timeframe": "1h.",
+        },
+    )
+    expect(page.get_by_test_id("strategy-canvas-panel")).to_be_visible(timeout=20_000)
+    page.get_by_test_id("strategy-validate").click()
+    expect(page.locator("#builder-validation-status")).to_contain_text(
+        re.compile("blocked|provider|fix|critical|condition", re.I),
+        timeout=20_000,
+    )
+    publish = page.get_by_test_id("strategy-publish")
+    if publish.is_enabled():
+        publish.click()
         expect(page.get_by_test_id("builder-action-status")).to_contain_text(
-            re.compile("blocked|provider|fix|validation", re.I),
+            re.compile("blocked|provider|unsupported|fix|validation", re.I),
             timeout=20_000,
         )
-        assert "/dashboard/monitors" not in page.url
-    else:
-        expect(page.get_by_test_id("critical-activation-blocker")).to_be_visible()
+    assert "/dashboard/monitors" not in page.url
 
     page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
-    statuses = [text.strip().lower() for text in page.get_by_test_id("monitor-status").all_inner_texts()]
+    statuses = [
+        text.strip().lower() for text in page.get_by_test_id("monitor-status").all_inner_texts()
+    ]
     assert "active" not in statuses
     assert_no_raw_traceback(page)
 
@@ -143,18 +394,52 @@ def test_strategy_board_preserves_metadata_after_edit_save_reload(
     assert_no_raw_traceback(page)
 
 
-def test_approve_and_publish_executable_monitor(page: Page, base_url: str, browser_app) -> None:
+def test_approve_and_publish_executable_monitor(
+    page: Page,
+    base_url: str,
+    browser_app,
+    repo_root,
+) -> None:
     email = signup(page, base_url, unique_email("publish-monitor"))
     seed_telegram_connection(browser_app.database_url, email)
     page.reload(wait_until="domcontentloaded")
-    _create_executable_board(page, base_url)
+    strategy_id = _create_executable_board(page, base_url)
     page.get_by_test_id("strategy-validate").click()
     expect(page.locator("#builder-validation-status")).to_contain_text(
         re.compile("ready|passed|conditions", re.I),
         timeout=25_000,
     )
-    page.get_by_test_id("strategy-publish").click()
-    page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=30_000)
+    page.goto(
+        f"{base_url}/dashboard/strategies/{strategy_id}/verify",
+        wait_until="domcontentloaded",
+    )
+    expect(page.locator("[data-verified-content]")).to_be_visible(timeout=20_000)
+    output = repo_root / "reports" / "playwright" / "visual-qa"
+    output.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(output / "verified-strategy-workflow-desktop.png"), full_page=True)
+
+    while page.locator("[data-accept-statement]").count():
+        count = page.locator("[data-accept-statement]").count()
+        page.locator("[data-accept-statement]").first.click()
+        expect(page.locator("[data-accept-statement]")).to_have_count(count - 1, timeout=15_000)
+    page.locator("[data-approve-interpretation]").click()
+    expect(page.locator("[data-interpretation-state]")).to_contain_text(
+        "approved", timeout=15_000
+    )
+    expect(page.locator("[data-approve-version]")).to_be_enabled()
+    page.locator("[data-approve-version]").click()
+    expect(page.locator("[data-verified-notice]")).to_contain_text(
+        re.compile("no verification blocker", re.I), timeout=15_000
+    )
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.screenshot(path=str(output / "verified-strategy-workflow-mobile-390.png"), full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("[data-activate-version]").click()
+    page.wait_for_url(re.compile(r".*/dashboard/lifecycles.*"), timeout=30_000)
+
+    page.goto(f"{base_url}/dashboard/strategies/new#monitors", wait_until="domcontentloaded")
     row = page.get_by_test_id("monitor-row").first
     expect(row).to_be_visible()
     expect(row.get_by_test_id("monitor-status")).to_contain_text("active")
@@ -162,56 +447,14 @@ def test_approve_and_publish_executable_monitor(page: Page, base_url: str, brows
     assert_no_raw_traceback(page)
 
 
-def test_quick_scan_finder_prompt_flow(page: Page, base_url: str) -> None:
-    signup(page, base_url, unique_email("quick-scan"))
+def test_legacy_scan_route_redirects_into_chat_scanner(page: Page, base_url: str) -> None:
+    signup(page, base_url, unique_email("scanner-route"))
     page.goto(f"{base_url}/dashboard/scan-now", wait_until="domcontentloaded")
-    page.locator('select[name="scan_mode"]').select_option("prompt")
-    page.route(
-        "**/api/v1/dashboard/scan-now/interpret",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "activation_blocked": False,
-                    "approved_schema_hash": "browser-e2e-scan-hash",
-                    "strategy": {"strategy_name": "Daily percentage change finder"},
-                    "understanding": {
-                        "direction": "long",
-                        "exchange": "binance",
-                        "market_type": "spot",
-                        "pair_universe": "USDT quotes",
-                        "timeframes": ["1d"],
-                        "trigger_mode": "candle_close",
-                        "entry_conditions": ["Daily percentage change is at least 5%"],
-                        "risk": {"enabled": False},
-                    },
-                    "required_rules": [{"name": "Daily percentage change >= 5%"}],
-                    "optional_rules": [],
-                    "ignored_optional_rules": [],
-                    "blocking_unsupported_rules": [],
-                    "warnings": [],
-                    "ambiguities": [],
-                    "scan_safety_level": "strict",
-                    "light_mode_compatible": True,
-                }
-            ),
-        ),
+    page.wait_for_url(re.compile(r".*/dashboard/strategies/new\?mode=scanner"), timeout=10_000)
+    expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
+    expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
+        "Scanner is ready", timeout=10_000
     )
-    page.get_by_test_id("quick-scan-goal").fill("Find coins up 5% today.")
-    page.get_by_test_id("quick-scan-must").fill("Daily percentage change is at least 5%.")
-    page.get_by_test_id("quick-scan-interpret").click()
-    expect(page.get_by_test_id("quick-scan-interpretation")).to_be_visible(timeout=20_000)
-    expect(page.get_by_test_id("quick-scan-interpretation")).to_contain_text(
-        re.compile("5|percent|today|change", re.I)
-    )
-
-    page.get_by_test_id("quick-scan-submit").click()
-    result = page.get_by_test_id("quick-scan-result")
-    expect(result).to_be_visible()
-    expect(result).to_contain_text("PUMP5/USDT", timeout=20_000)
-    expect(result).to_contain_text("100%", timeout=20_000)
-    expect(result).not_to_contain_text("Traceback")
     assert_no_raw_traceback(page)
 
 
@@ -219,6 +462,7 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
     page: Page,
     base_url: str,
     browser_app,
+    repo_root,
 ) -> None:
     email = signup(page, base_url, unique_email("proof-receipt"))
     alert_id = seed_alert_proof(browser_app.database_url, email)
@@ -230,6 +474,13 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
     text = page.locator("body").inner_text(timeout=10_000)
     assert "Browser E2E Proof Strategy" in text
     assert "SOL/USDT" in text
+    page.goto(f"{base_url}/dashboard/alerts/{alert_id}/proof", wait_until="domcontentloaded")
+    expect(page.get_by_text("Immutable monitoring receipt")).to_be_visible(timeout=10_000)
+    expect(page.get_by_text("Integrity verified")).to_be_visible()
+    output = repo_root / "reports" / "playwright" / "visual-qa"
+    output.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(output / "immutable-alert-proof-desktop.png"), full_page=True)
+    assert_no_raw_traceback(page)
     assert "15m" in text
     assert "rsi_recovery" in text
     assert "passed" in text
@@ -250,6 +501,73 @@ def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     assert_no_raw_traceback(page)
 
 
+def test_setup_observability_desktop_mobile_and_visual_qa(
+    page: Page,
+    base_url: str,
+    browser_app,
+    repo_root: Path,
+) -> None:
+    email = signup(page, base_url, unique_email("setup-observability"))
+    seeded = seed_setup_observability(browser_app.database_url, email)
+    visual_dir = repo_root / "reports" / "playwright" / "visual-qa"
+    visual_dir.mkdir(parents=True, exist_ok=True)
+
+    page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
+    expect(page.get_by_text("Live Setup Readiness Radar")).to_be_visible()
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4, timeout=15_000)
+    expect(page.locator("[data-health-list]")).to_contain_text("Degraded")
+    expect(page.locator("[data-health-list]")).to_contain_text("Too Strict")
+    expect(page.locator("[data-bottleneck-list]")).to_contain_text("RVOL above 1.50x")
+    page.screenshot(path=str(visual_dir / "setup-observability-desktop.png"), full_page=True)
+    page.locator(".state-forming").screenshot(path=str(visual_dir / "forming-candidate.png"))
+    page.locator(".state-near_miss").screenshot(path=str(visual_dir / "near-miss-candidate.png"))
+    page.locator(".monitor-health-card").screenshot(
+        path=str(visual_dir / "degraded-too-strict-monitor.png")
+    )
+    page.locator(".bottleneck-intelligence").screenshot(
+        path=str(visual_dir / "bottleneck-intelligence.png")
+    )
+
+    page.locator("[data-monitor-filter-trigger]").click()
+    expect(page.locator("[data-monitor-filter-menu]")).to_be_visible()
+    page.locator(f'[data-monitor-option="{seeded["strategy_id"]}"]').click()
+    page.wait_for_url(re.compile(rf".*/dashboard/lifecycles\?monitor={seeded['strategy_id']}"))
+    expect(page.locator("[data-monitor-filter-label]")).to_contain_text(
+        "SOL Readiness Monitor"
+    )
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4)
+
+    page.locator(f'[data-candidate-investigate="{seeded["setup_id"]}"]').click()
+    expect(page.locator("[data-observability-drawer]")).to_have_class(
+        re.compile("open"), timeout=10_000
+    )
+    expect(page.locator("[data-observability-drawer-content]")).to_contain_text(
+        "RVOL above 1.50x"
+    )
+    page.locator("[data-observability-drawer]").screenshot(
+        path=str(visual_dir / "candidate-detail-timeline.png")
+    )
+    page.locator("[data-observability-drawer-close]").first.click()
+
+    page.locator("[data-radar-state]").select_option("provider_data_error")
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(1)
+    page.locator("[data-radar-list]").screenshot(path=str(visual_dir / "provider-error-state.png"))
+    page.locator("[data-radar-state]").select_option("invalidated")
+    expect(page.locator("[data-radar-list]")).to_contain_text("No readiness evidence yet")
+    page.locator("[data-radar-list]").screenshot(path=str(visual_dir / "empty-radar-state.png"))
+
+    page.locator("[data-radar-state]").select_option("")
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4)
+    page.screenshot(path=str(visual_dir / "setup-observability-mobile-390.png"), full_page=True)
+    page.emulate_media(reduced_motion="reduce")
+    animation_name = page.locator(".observability-live i").evaluate(
+        "node => getComputedStyle(node).animationName"
+    )
+    assert animation_name == "none"
+    assert_no_raw_traceback(page)
+
+
 def test_telegram_discord_handoff_links_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("integrations-smoke"))
     page.goto(f"{base_url}/dashboard/integrations", wait_until="domcontentloaded")
@@ -265,7 +583,7 @@ def test_telegram_discord_handoff_links_smoke(page: Page, base_url: str) -> None
 
 def _open_builder(page: Page, base_url: str) -> None:
     page.goto(f"{base_url}/dashboard/strategies/new", wait_until="domcontentloaded")
-    expect(page.get_by_test_id("strategy-builder-entry")).to_be_visible(timeout=10_000)
+    expect(page.get_by_test_id("ai-setup-chat")).to_be_visible(timeout=10_000)
 
 
 def _submit_executable_prompt(page: Page) -> None:
@@ -301,14 +619,48 @@ def _add_prompt_section(page: Page, key: str) -> None:
     button.click()
 
 
-def _create_executable_board(page: Page, base_url: str) -> None:
-    _open_builder(page, base_url)
-    _submit_executable_prompt(page)
-    open_button = page.get_by_test_id("open-strategy-board")
-    expect(open_button).to_be_enabled()
-    open_button.click()
+def _create_executable_board(page: Page, base_url: str) -> str:
+    strategy_id = _create_strategy_from_prompt(page, base_url, EXECUTABLE_PROMPT)
     expect(page.get_by_test_id("strategy-canvas-panel")).to_be_visible(timeout=10_000)
     expect(_first_condition_board_node(page)).to_be_visible(timeout=10_000)
+    return strategy_id
+
+
+def _create_strategy_from_prompt(
+    page: Page,
+    base_url: str,
+    prompt_parts: dict[str, str],
+) -> str:
+    interpreted = page.request.post(
+        f"{base_url}/api/v1/dashboard/strategies/interpret",
+        data={
+            "prompt_parts": prompt_parts,
+            "exchange": "binance",
+            "quote_currency": "USDT",
+            "timeframe": "15m",
+            "trigger_mode": "candle_close",
+        },
+    )
+    assert interpreted.ok, interpreted.text()
+    preview = interpreted.json()
+    created = page.request.post(
+        f"{base_url}/api/v1/dashboard/strategies",
+        data={
+            "definition": preview["strategy"],
+            "source_text": "\n".join(prompt_parts.values()),
+            "interpreter": preview["interpreter"],
+            "assumptions": preview["assumptions"],
+            "ambiguities": preview["ambiguities"],
+            "unsupported_conditions": preview["unsupported_conditions"],
+        },
+    )
+    assert created.ok, created.text()
+    strategy_id = created.json()["strategy"]["id"]
+    page.goto(
+        f"{base_url}/dashboard/strategies/{strategy_id}/builder",
+        wait_until="domcontentloaded",
+    )
+    return strategy_id
 
 
 def _open_first_condition_drawer(page: Page) -> None:

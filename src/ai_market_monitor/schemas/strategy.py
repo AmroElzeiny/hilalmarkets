@@ -68,6 +68,31 @@ class ConditionRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node_type: Literal["condition"] = "condition"
+    capability_key: str | None = Field(
+        default=None,
+        frozen=True,
+        min_length=1,
+        max_length=120,
+        pattern=r"^[a-z][a-z0-9_]*$",
+    )
+    capability_version: str | None = Field(
+        default=None,
+        frozen=True,
+        min_length=1,
+        max_length=32,
+        pattern=r"^[0-9]+(?:\.[0-9]+){0,2}(?:[-+][a-zA-Z0-9.-]+)?$",
+    )
+    capability_artifact_hash: str | None = Field(
+        default=None,
+        frozen=True,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+    resolved_parameters: dict[
+        str,
+        int | float | str | bool | list[int | float | str | bool],
+    ] = Field(default_factory=dict)
     key: str = Field(min_length=1, max_length=100, pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1, max_length=240)
     condition_type: ConditionType
@@ -495,6 +520,7 @@ class StrategyDefinition(BaseModel):
             children.append(
                 {
                     "node_type": "condition",
+                    "capability_key": raw.get("capability_key"),
                     "key": condition_id,
                     "label": name,
                     "condition_type": condition_type,
@@ -553,8 +579,21 @@ class StrategyDefinition(BaseModel):
         return self
 
     def canonical_hash(self) -> str:
+        payload_data = self.model_dump(mode="json", exclude_none=False, by_alias=True)
+
+        def preserve_legacy_shape(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    key: preserve_legacy_shape(item)
+                    for key, item in value.items()
+                    if not (key == "capability_key" and item is None)
+                }
+            if isinstance(value, list):
+                return [preserve_legacy_shape(item) for item in value]
+            return value
+
         payload = json.dumps(
-            self.model_dump(mode="json", exclude_none=False, by_alias=True),
+            preserve_legacy_shape(payload_data),
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=True,

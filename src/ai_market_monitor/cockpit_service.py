@@ -17,6 +17,7 @@ from ai_market_monitor.db.models import (
     DashboardNotification,
     EdgeHealthSnapshot,
     MissedMoveAnalysis,
+    OutcomeReview,
     ScanJob,
     ScanResult,
     SetupConditionResult,
@@ -126,11 +127,7 @@ class StrategyCockpitService:
         ).all()
         labels = {
             row.condition_key: row.label
-            for row in (
-                await self.session.scalars(
-                    select_strategy_conditions(strategy.id)
-                )
-            ).all()
+            for row in (await self.session.scalars(select_strategy_conditions(strategy.id))).all()
         }
         grouped: dict[str, list[tuple[SetupConditionResult, Decimal]]] = defaultdict(list)
         for result, completion_score in rows:
@@ -154,9 +151,9 @@ class StrategyCockpitService:
             )
             pass_rate = outcomes["passed"] / sample_count * 100 if sample_count else 0
             blocking_rate = blocking_count / sample_count * 100 if sample_count else 0
-            average_proximity = sum(
-                float(result.contribution_score or 0) for result, _ in values
-            ) / sample_count
+            average_proximity = (
+                sum(float(result.contribution_score or 0) for result, _ in values) / sample_count
+            )
             payload = {
                 "condition_key": key,
                 "condition_label": labels.get(key, key.replace("_", " ").title()),
@@ -398,8 +395,7 @@ class StrategyCockpitService:
             _canonical_symbol(item) for item in [*universe.exclude_symbols, *(manual_exclude or [])]
         }
         allowlist = {
-            _canonical_symbol(item)
-            for item in (manual_include or universe.include_symbols)
+            _canonical_symbol(item) for item in (manual_include or universe.include_symbols)
         }
         included: list[str] = []
         excluded: list[dict[str, str]] = []
@@ -518,8 +514,7 @@ class StrategyCockpitService:
             overflow = included[effective_limit:]
             included = included[:effective_limit]
             excluded.extend(
-                {"symbol": symbol, "reason": "plan_or_rule_limit"}
-                for symbol in overflow
+                {"symbol": symbol, "reason": "plan_or_rule_limit"} for symbol in overflow
             )
         reason_counts = Counter(item["reason"] for item in excluded)
         unavailable_reasons = {
@@ -560,9 +555,7 @@ class StrategyCockpitService:
             "id": str(snapshot.id),
             "rules": snapshot.rules,
             "included_symbols": included,
-            "included_metadata": {
-                symbol: metadata.get(symbol, {}) for symbol in included
-            },
+            "included_metadata": {symbol: metadata.get(symbol, {}) for symbol in included},
             "excluded_symbols": excluded,
             "summary": summary,
         }
@@ -657,9 +650,7 @@ class StrategyCockpitService:
                     or version.approved_at is None
                     or version.approved_schema_hash != version.schema_hash
                 ):
-                    raise ValueError(
-                        "Every live experiment version must be explicitly approved"
-                    )
+                    raise ValueError("Every live experiment version must be explicitly approved")
         experiment = StrategyExperiment(
             user_id=user_id,
             strategy_id=strategy.id,
@@ -684,9 +675,7 @@ class StrategyCockpitService:
                 select(StrategyVersion)
                 .where(
                     StrategyVersion.strategy_id == experiment.strategy_id,
-                    StrategyVersion.id.in_(
-                        [UUID(value) for value in experiment.version_ids]
-                    ),
+                    StrategyVersion.id.in_([UUID(value) for value in experiment.version_ids]),
                 )
                 .order_by(StrategyVersion.version_number.asc())
             )
@@ -774,6 +763,34 @@ class StrategyCockpitService:
             bottleneck_key=main.get("condition_key"),
         )
         diff = schema_diff(before, proposed)
+        outcome_rows = list(
+            (
+                await self.session.scalars(
+                    select(OutcomeReview).where(
+                        OutcomeReview.user_id == user_id,
+                        OutcomeReview.strategy_id == strategy.id,
+                        OutcomeReview.status.in_(["reviewed", "reviewed_without_market_path"]),
+                    )
+                )
+            ).all()
+        )
+        classifications = Counter(
+            item.classification for item in outcome_rows if item.classification
+        )
+        sample_count = len(outcome_rows)
+        outcome_evidence = {
+            "sample_count": sample_count,
+            "classifications": dict(classifications),
+            "source": "user_defined_outcome_reviews",
+            "automatic_profit_labels": False,
+        }
+        confidence = "medium" if sample_count >= 20 else "low"
+        limitations = [
+            "A proposed rule has not been approved or applied to live monitoring.",
+            "Outcome labels are user-defined and do not establish future performance.",
+        ]
+        if sample_count < 20:
+            limitations.append("Fewer than 20 user-reviewed outcomes are available.")
         source = "deterministic"
         if narrator is not None:
             narrated = await narrator.narrate(
@@ -796,6 +813,16 @@ class StrategyCockpitService:
             before_schema=before.model_dump(mode="json"),
             proposed_schema=proposed.model_dump(mode="json"),
             diff=diff,
+            outcome_evidence=outcome_evidence,
+            historical_effect={
+                "status": "requires_deterministic_preview",
+                "alerts_removed": None,
+                "alerts_retained": None,
+                "strong_outcomes_lost": None,
+                "weak_outcomes_removed": None,
+            },
+            confidence=confidence,
+            limitations=limitations,
         )
         self.session.add(suggestion)
         await self.session.flush()
@@ -812,29 +839,20 @@ class StrategyCockpitService:
         strategy = await self.session.get(Strategy, suggestion.strategy_id)
         if strategy is None or strategy.user_id != user_id:
             raise ValueError("Strategy not found")
-        highest = await self.session.scalar(
-            select(func.max(StrategyVersion.version_number)).where(
-                StrategyVersion.strategy_id == strategy.id
-            )
-        )
         definition = StrategyDefinition.model_validate(suggestion.proposed_schema)
-        version = StrategyVersion(
-            strategy_id=strategy.id,
-            version_number=int(highest or 0) + 1,
-            status=StrategyVersionStatus.DRAFT,
-            source_type="cockpit_suggestion",
+        from ai_market_monitor.services.strategy import StrategyService
+
+        version = await StrategyService(self.session, "suggestion-draft").revise(
+            strategy,
+            definition,
+            user_id=user_id,
             source_text=suggestion.reason,
-            schema_version=definition.schema_version,
-            schema_json=definition.model_dump(mode="json"),
-            schema_hash=definition.canonical_hash(),
-            interpretation_provider="strategy_cockpit",
-            interpretation_model="deterministic-safe-diff",
             assumptions=["User confirmation is required before activation."],
             ambiguities=[],
-            unsupported_conditions=[],
+            unsupported=[],
+            interpreter="strategy_cockpit",
         )
-        self.session.add(version)
-        await self.session.flush()
+        version.source_type = "cockpit_suggestion"
         suggestion.status = "applied_as_draft"
         suggestion.applied_version_id = version.id
         suggestion.applied_at = datetime.now(UTC)
@@ -889,9 +907,7 @@ class StrategyCockpitService:
             "preferred_entry_timeframe": _most_common(timeframes),
             "preferred_trigger_mode": _most_common(trigger_modes),
             "preferred_exchange": _most_common(exchanges),
-            "preferred_alert_channels": [
-                name for name, _ in channels.most_common()
-            ],
+            "preferred_alert_channels": [name for name, _ in channels.most_common()],
             "typical_max_alerts_per_hour": (
                 round(sum(max_alerts) / len(max_alerts)) if max_alerts else None
             ),
@@ -918,20 +934,22 @@ class StrategyCockpitService:
             )
         ).all()
         version_ids = {
-            alert.strategy_version_id
-            for alert in alerts
-            if alert.strategy_version_id is not None
+            alert.strategy_version_id for alert in alerts if alert.strategy_version_id is not None
         }
-        version_to_strategy = {
-            version_id: strategy_id
-            for version_id, strategy_id in (
-                await self.session.execute(
-                    select(StrategyVersion.id, StrategyVersion.strategy_id).where(
-                        StrategyVersion.id.in_(version_ids)
+        version_to_strategy = (
+            {
+                version_id: strategy_id
+                for version_id, strategy_id in (
+                    await self.session.execute(
+                        select(StrategyVersion.id, StrategyVersion.strategy_id).where(
+                            StrategyVersion.id.in_(version_ids)
+                        )
                     )
-                )
-            ).all()
-        } if version_ids else {}
+                ).all()
+            }
+            if version_ids
+            else {}
+        )
         for alert in alerts:
             proof = alert.proof_receipt or {}
             item_type = _alert_inbox_type(alert)
@@ -1040,9 +1058,7 @@ class StrategyCockpitService:
         replay_job_id: UUID,
     ) -> MissedMoveAnalysis | None:
         analysis = await self.session.scalar(
-            select(MissedMoveAnalysis).where(
-                MissedMoveAnalysis.replay_job_id == replay_job_id
-            )
+            select(MissedMoveAnalysis).where(MissedMoveAnalysis.replay_job_id == replay_job_id)
         )
         if analysis is None:
             return None
@@ -1063,9 +1079,7 @@ class StrategyCockpitService:
             await self.session.flush()
             return analysis
         replay_result = await self.session.scalar(
-            select(SetupReplayResult).where(
-                SetupReplayResult.replay_job_id == replay_job_id
-            )
+            select(SetupReplayResult).where(SetupReplayResult.replay_job_id == replay_job_id)
         )
         if replay_job.status != "succeeded" or replay_result is None:
             analysis.status = "failed"
@@ -1122,9 +1136,7 @@ class StrategyCockpitService:
         passed = [item for item in conditions if item.get("state") == "passed"]
         failed = [item for item in conditions if item.get("state") == "failed"]
         pending = [item for item in conditions if item.get("state") == "pending"]
-        unavailable = [
-            item for item in conditions if item.get("state") in {"unavailable", "error"}
-        ]
+        unavailable = [item for item in conditions if item.get("state") in {"unavailable", "error"}]
         setup = await self.session.scalar(
             select(SetupInstance)
             .where(
@@ -1137,12 +1149,8 @@ class StrategyCockpitService:
             .limit(1)
         )
         definition = StrategyDefinition.model_validate(version.schema_json)
-        included = {
-            _canonical_symbol(item) for item in definition.universe.include_symbols
-        }
-        excluded = {
-            _canonical_symbol(item) for item in definition.universe.exclude_symbols
-        }
+        included = {_canonical_symbol(item) for item in definition.universe.include_symbols}
+        excluded = {_canonical_symbol(item) for item in definition.universe.exclude_symbols}
         symbol_selected = (
             not included or analysis.symbol in included
         ) and analysis.symbol not in excluded
@@ -1255,10 +1263,7 @@ class StrategyCockpitService:
             user_id=strategy.user_id,
             level="warning" if health["score"] < 70 else "info",
             title=f"{strategy.name} weekly health",
-            body=(
-                f"Edge Health: {health['score']:.0f}/100. "
-                f"Main issue: {health['main_issue']}"
-            ),
+            body=(f"Edge Health: {health['score']:.0f}/100. Main issue: {health['main_issue']}"),
             action_label="Open monitor review",
             action_url=action_url,
             created_at=datetime.now(UTC),
@@ -1383,9 +1388,7 @@ class StrategyCockpitService:
         )
         confirmed = sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED)
         forming = sum(
-            1
-            for scan in scans
-            if scan.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
+            1 for scan in scans if scan.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
         )
         frequency_ratio = _frequency_health_ratio(confirmed, scan_count)
         frequency = _component(
@@ -1477,17 +1480,12 @@ class StrategyCockpitService:
             regime_ratio * 12,
             12,
             str(regime.get("status") or _ratio_status(regime_ratio)),
-            str(
-                regime.get("explanation")
-                or "Cross-market regime evidence is not available yet."
-            ),
+            str(regime.get("explanation") or "Cross-market regime evidence is not available yet."),
         )
         regime_component["details"] = regime
         latest_alert_at = max((alert.created_at for alert in alerts), default=None)
         silent_days = (
-            (now - _aware(latest_alert_at)).total_seconds() / 86_400
-            if latest_alert_at
-            else 30
+            (now - _aware(latest_alert_at)).total_seconds() / 86_400 if latest_alert_at else 30
         )
         silence_ratio = 1 if silent_days <= 14 else 0.6 if silent_days <= 21 else 0.2
         silent = _component(
@@ -1557,9 +1555,7 @@ class StrategyCockpitService:
             "classification": "not_evaluated",
             "fit_score": 50,
             "status": "partial",
-            "explanation": (
-                "Market-regime fit will be calculated by the scheduled health worker."
-            ),
+            "explanation": ("Market-regime fit will be calculated by the scheduled health worker."),
         }
 
     async def _condition_version_id(self, condition_id: UUID) -> UUID | None:
@@ -1597,9 +1593,7 @@ class StrategyCockpitService:
             .join(Alert, Alert.id == UserFeedback.alert_id)
             .where(
                 Alert.strategy_version_id.in_(
-                    select(StrategyVersion.id).where(
-                        StrategyVersion.strategy_id == strategy.id
-                    )
+                    select(StrategyVersion.id).where(StrategyVersion.strategy_id == strategy.id)
                 ),
                 UserFeedback.feedback_type == feedback_type,
             )
@@ -1647,9 +1641,7 @@ class StrategyCockpitService:
                 == str(experiment_id)
             ]
         alerts = (
-            await self.session.scalars(
-                select(Alert).where(Alert.strategy_version_id == version_id)
-            )
+            await self.session.scalars(select(Alert).where(Alert.strategy_version_id == version_id))
         ).all()
         if experiment_id is not None:
             alerts = [
@@ -1667,14 +1659,10 @@ class StrategyCockpitService:
         ).all()
         if experiment_id is not None:
             experiment_alert_ids = {alert.id for alert in alerts}
-            feedback = [
-                item for item in feedback if item.alert_id in experiment_alert_ids
-            ]
+            feedback = [item for item in feedback if item.alert_id in experiment_alert_ids]
         confirmed = sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED)
         forming = sum(
-            1
-            for scan in scans
-            if scan.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
+            1 for scan in scans if scan.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
         )
         false_feedback = sum(
             1
@@ -1698,9 +1686,7 @@ class StrategyCockpitService:
             "false_alert_feedback": false_feedback,
             "feedback_count": len(feedback),
             "average_evaluation_interval_minutes": (
-                round(average_lead_minutes, 2)
-                if average_lead_minutes is not None
-                else None
+                round(average_lead_minutes, 2) if average_lead_minutes is not None else None
             ),
             "strictness": (
                 "high"
@@ -1746,9 +1732,7 @@ class StrategyCockpitService:
         ).all()
         return {
             "scan_count": len(scans),
-            "confirmed_count": sum(
-                1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED
-            ),
+            "confirmed_count": sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED),
             "error_count": sum(1 for scan in scans if scan.outcome == ScanOutcome.ERROR),
             "alert_count": len(alerts),
             "invalidation_count": sum(

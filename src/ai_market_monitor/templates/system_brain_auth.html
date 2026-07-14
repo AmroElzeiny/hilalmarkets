@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>System Brain | TraceEdge</title>
+  <link rel="icon" href="/static/favicon.png">
+  <link rel="stylesheet" href="/static/system-brain.css">
+</head>
+<body class="brain-auth-body">
+  <main class="brain-auth-shell">
+    <section class="brain-auth-visual" aria-label="TraceEdge capability intelligence">
+      <img src="/static/logo_white.svg" class="brain-logo" alt="TraceEdge">
+      <div class="brain-orbit" aria-hidden="true"><i></i><i></i><i></i><span>TE</span></div>
+      <p class="brain-kicker">CAPABILITY INTELLIGENCE</p>
+      <h1>See how TraceEdge understands.</h1>
+      <p>Review unmatched language, registry confidence, provider blocks and capability health from one protected console.</p>
+      <div class="brain-auth-points">
+        <span>Resolver evidence</span><span>Alias review</span><span>Regression status</span>
+      </div>
+    </section>
+    <section class="brain-auth-card">
+      <p class="brain-kicker">ADMIN ACCESS</p>
+      {% if step == "verify" %}
+        <h2>Check your email</h2>
+        <p class="brain-muted">Enter the six-digit code sent to the configured administrator email.</p>
+        {% if error %}<div class="brain-error" role="alert">{{ error }}</div>{% endif %}
+        <form action="/system-brain/verify" method="post" class="brain-form">
+          <label for="code">One-time code</label>
+          <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
+          <button type="submit">Verify and continue</button>
+        </form>
+        <a class="brain-text-link" href="/system-brain">Back to sign in</a>
+      {% else %}
+        <h2>System Brain</h2>
+        <p class="brain-muted">Sign in with the administrator credentials. A one-time code is required next.</p>
+        {% if error %}<div class="brain-error" role="alert">{{ error }}</div>{% endif %}
+        <form action="/system-brain/login" method="post" class="brain-form">
+          <label for="username">Administrator email</label>
+          <input id="username" name="username" type="email" autocomplete="username" required autofocus>
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button type="submit">Continue securely</button>
+        </form>
+      {% endif %}
+      <p class="brain-security-note">Password verification and OTP delivery happen server-side. Access attempts are rate-limited and audited.</p>
+    </section>
+  </main>
+</body>
+</html>

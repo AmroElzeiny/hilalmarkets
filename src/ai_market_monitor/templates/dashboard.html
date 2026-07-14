@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260625-launch-polish">
   <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260627-sidebar-rail">
+  <link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260710-ai-chat">
   <script defer src="{{ url_for('static', path='/theme.js') }}?v=20260625-launch-polish"></script>
   <style>
     .health-score-badge{display:grid;place-items:center;min-width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,#8b5cf6,#c4b5fd);color:#0a0a0a;font-size:1.25rem;font-weight:800}
@@ -1891,7 +1892,6 @@
     body.dashboard-body.theme-light .overview-hero-panel .button.button-secondary,
     body.dashboard-body.theme-light .overview-workbench .button.button-secondary,
     body.dashboard-body.theme-light .builder-shell .button.button-secondary,
-    body.dashboard-body.theme-light .overview-hero-panel .button[href="/dashboard/scan-now"],
     body.dashboard-body.theme-light .monitor-card-actions .button.button-secondary,
     body.dashboard-body.theme-light .builder-header-actions .button.button-secondary {
       background: transparent !important;
@@ -1903,7 +1903,6 @@
     body.dashboard-body.theme-light .overview-hero-panel .button.button-secondary:hover,
     body.dashboard-body.theme-light .overview-workbench .button.button-secondary:hover,
     body.dashboard-body.theme-light .builder-shell .button.button-secondary:hover,
-    body.dashboard-body.theme-light .overview-hero-panel .button[href="/dashboard/scan-now"]:hover,
     body.dashboard-body.theme-light .monitor-card-actions .button.button-secondary:hover,
     body.dashboard-body.theme-light .builder-header-actions .button.button-secondary:hover {
       background: rgba(167,139,250,.10) !important;
@@ -2379,14 +2378,13 @@
       </button>
     </div>
     <div class="sidebar-rail-controls" aria-label="Quick dashboard controls">
-      <a class="sidebar-create-quick {{ 'active' if page == 'strategy_builder' else '' }}" href="/dashboard/strategies/new" aria-label="Create monitor">
-        <img src="https://api.iconify.design/lucide:plus.svg?color=%23ffffff" alt="" aria-hidden="true">
-        <span>Create monitor</span>
+      <a class="sidebar-create-quick {{ 'active' if page == 'strategy_builder' else '' }}" href="/dashboard/strategies/new" aria-label="Monitors">
+        <img src="https://api.iconify.design/lucide:monitor-up.svg?color=%23ffffff" alt="" aria-hidden="true">
+        <span>Monitors</span>
       </a>
     </div>
     <nav class="dash-nav" data-testid="dashboard-nav">
       <a class="{{ 'active' if page == 'home' else '' }}" href="/dashboard"><img src="https://api.iconify.design/lucide:layout-dashboard.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Overview</span></a>
-      <a class="{{ 'active' if page == 'scan' else '' }}" href="/dashboard/scan-now"><img src="https://api.iconify.design/lucide:search.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Quick Scan</span></a>
       <a class="{{ 'active' if page == 'lifecycles' else '' }}" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Lifecycles</span></a>
       <a class="{{ 'active' if page == 'billing' else '' }}" href="/dashboard/billing"><img src="https://api.iconify.design/lucide:credit-card.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Billing</span></a>
       <a class="{{ 'active' if page == 'integrations' else '' }}" href="/dashboard/integrations"><img src="https://api.iconify.design/lucide:plug.svg?color=%23c4b5fd" alt="" aria-hidden="true"><span>Integrations</span></a>
@@ -2410,7 +2408,7 @@
     {% if message == 'notification_channel_required' %}
       <div class="dash-flash error">This monitor needs at least one notification channel. Link Telegram or Discord, then TraceEdge will activate it automatically.</div>
     {% elif message == 'quick_scan_channel_required' %}
-      <div class="dash-flash error">Quick Scan needs at least one notification channel first. Link Telegram or Discord, then run the scan again.</div>
+      <div class="dash-flash error">Scanner needs at least one notification channel first. Link Telegram or Discord, then try again.</div>
     {% elif message %}
       <div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>
     {% endif %}
@@ -2427,9 +2425,8 @@
             Command center
           </span>
           <h2>Track the market without staring at every chart.</h2>
-          <p>Run Quick Scan, build approved monitors, and inspect lifecycle evidence from one calmer screen.</p>
+          <p>Build approved monitors and inspect lifecycle evidence from one calmer screen.</p>
           <div class="button-row">
-            <a class="button button-primary overview-quick-scan-button" href="/dashboard/scan-now"><img src="https://api.iconify.design/lucide:search.svg?color=%233A3A46" alt="" aria-hidden="true"> Run Quick Scan</a>
             <a class="button button-primary" href="/dashboard/strategies/new"><img src="https://api.iconify.design/lucide:workflow.svg?color=%23ffffff" alt="" aria-hidden="true"> Create a monitor</a>
             <a class="button button-secondary" href="/dashboard/lifecycles"><img src="https://api.iconify.design/lucide:route.svg?color=%233A3A46" alt="" aria-hidden="true"> Open Lifecycles</a>
           </div>
@@ -2505,7 +2502,7 @@
             </div>
             <a class="button button-secondary" href="/dashboard/lifecycles">Open lifecycle</a>
           {% else %}
-            <div class="dash-empty">No setup lifecycle instances yet. Run Quick Scan or activate a monitor to start collecting evidence.</div>
+            <div class="dash-empty">No setup lifecycle instances yet. Activate a monitor to start collecting evidence.</div>
           {% endif %}
         </article>
 
@@ -2597,7 +2594,77 @@
         </article>
       </section>
     {% elif page == 'strategy_builder' %}
-      <section class="builder-shell" data-builder-shell data-testid="strategy-builder-root">
+      <section class="ai-setup-chat-shell" data-ai-setup-chat data-testid="ai-setup-chat" {% if strategy %}hidden{% endif %}>
+        <header class="ai-chat-hero">
+          <div>
+            <p class="eyebrow">AI Setup Chat</p>
+            <h1>Turn your idea into monitor rules.</h1>
+            <p>Describe what you watch. TraceEdge will clarify vague terms, translate every detail into measurable crypto spot rules, and wait for your approval.</p>
+          </div>
+          <div class="ai-chat-safety-badge" aria-label="Safety boundary">
+            <img src="https://api.iconify.design/lucide:shield-check.svg?color=%23f7f3ff" alt="" aria-hidden="true">
+            <span><strong>You stay in control</strong><small>No trade execution or financial advice</small></span>
+          </div>
+        </header>
+
+        <div class="ai-chat-layout">
+          <section class="ai-chat-panel" aria-label="Setup conversation">
+            <div class="ai-chat-panel-head">
+              <div class="ai-chat-agent">
+                <span><img src="https://api.iconify.design/lucide:sparkles.svg?color=%23ffffff" alt="" aria-hidden="true"></span>
+                <div><strong>TraceEdge Assistant</strong><small data-ai-chat-status>Ready to listen</small></div>
+              </div>
+              <button class="ai-chat-quiet-button" type="button" data-ai-chat-new>
+                <img src="https://api.iconify.design/lucide:plus.svg?color=%233a3a46" alt="" aria-hidden="true">
+                New setup
+              </button>
+              <button class="ai-chat-quiet-button" type="button" data-ai-open-canvas>
+                <img src="https://api.iconify.design/lucide:workflow.svg?color=%233a3a46" alt="" aria-hidden="true">
+                Open Visual Canvas
+              </button>
+              <button class="ai-chat-quiet-button" type="button" data-ai-return-chat hidden>
+                <img src="https://api.iconify.design/lucide:message-square.svg?color=%233a3a46" alt="" aria-hidden="true">
+                Return to chat
+              </button>
+            </div>
+            <div class="ai-chat-messages" data-ai-chat-messages role="log" aria-live="polite" aria-label="AI setup conversation"></div>
+            <div class="ai-chat-suggestions" data-ai-chat-suggestions aria-label="Suggested replies"></div>
+            <div class="ai-chat-error" data-ai-chat-error role="alert" hidden>
+              <span data-ai-chat-error-text></span>
+              <button type="button" data-ai-chat-retry>Retry</button>
+            </div>
+            <form class="ai-chat-composer" data-ai-chat-form>
+              <label class="sr-only" for="ai-setup-chat-input">Describe your crypto spot monitoring setup</label>
+              <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Example: Watch Binance USDT pairs for a 15m bullish breakout with strong volume..."></textarea>
+              <button type="submit" data-ai-chat-send disabled aria-label="Send message">
+                <img src="https://api.iconify.design/lucide:arrow-up.svg?color=%23ffffff" alt="" aria-hidden="true">
+              </button>
+              <small>Enter to send · Shift+Enter for a new line</small>
+            </form>
+          </section>
+
+          <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live strategy translation">
+            <div class="ai-preview-head">
+              <div><p class="eyebrow">Live translation</p><h2>Your monitor sheet</h2></div>
+              <span class="ai-preview-status" data-ai-preview-status>Interviewing</span>
+            </div>
+            <div class="ai-preview-empty" data-ai-preview-empty>
+              <img src="https://api.iconify.design/lucide:scan-search.svg?color=%238b5cf6" alt="" aria-hidden="true">
+              <h3>Rules will appear here</h3>
+              <p>I’ll show the primary trigger, required rules, optional suggestions, assumptions, confidence, warnings, and alert behavior before anything is saved.</p>
+            </div>
+            <div class="ai-preview-content" data-ai-preview-content hidden></div>
+            <div class="ai-preview-actions" data-ai-preview-actions hidden>
+              <p data-ai-approval-note>Review every rule before approval.</p>
+              <button class="button button-primary" type="button" data-ai-chat-approve disabled>Approve setup</button>
+              <button class="button button-primary" type="button" data-ai-chat-scan hidden>Run Scanner</button>
+              <button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="builder-shell" data-builder-shell data-testid="strategy-builder-root" {% if not strategy %}hidden{% endif %}>
         <section class="dash-panel builder-start-screen" data-builder-intro data-testid="strategy-builder-entry">
           <p class="eyebrow">Strategy Builder</p>
           <h2>How do you want to create your monitor?</h2>
@@ -3172,6 +3239,11 @@
                   {% endif %}
                 </div>
                 <div class="row-actions monitor-card-actions">
+                  {% if item.pending_repair %}
+                    <form method="post" action="/dashboard/capability-extensions/{{ item.pending_repair.id }}/prepare-repair">
+                      <button class="button button-primary" type="submit">Review certified repair</button>
+                    </form>
+                  {% endif %}
                   <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}">View</a>
                   <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit</a>
                   <form method="post" action="/dashboard/monitors/{{ strategy.id }}/{{ 'resume' if strategy.status.value == 'paused' else 'pause' }}">
@@ -3189,6 +3261,243 @@
         {% endif %}
       </section>
       <script id="amm-builder-schema" type="application/json">{% if version and version.schema_json %}{{ version.schema_json | tojson }}{% else %}{}{% endif %}</script>
+      <script id="amm-builder-metadata" type="application/json">{% if version %}{{ {
+        'interpreter': version.interpretation_provider or 'saved-strategy-version',
+        'assumptions': version.assumptions or [],
+        'ambiguities': version.ambiguities or [],
+        'unsupported_conditions': version.unsupported_conditions or [],
+        'source_text': version.source_text,
+      } | tojson }}{% else %}{}{% endif %}</script>
+    {% elif page == 'alert_proof' %}
+      <main class="alert-proof-workspace" data-alert-proof>
+        <section class="dash-panel alert-proof-hero">
+          <div>
+            <p class="eyebrow">Immutable monitoring receipt</p>
+            <h2>{{ alert.title }}</h2>
+            <p>{{ alert.body }}</p>
+          </div>
+          <div class="alert-proof-hero-meta">
+            <span class="proof-integrity-badge"><img src="https://api.iconify.design/lucide:shield-check.svg?color=%234c1d95" alt="" aria-hidden="true">Integrity verified</span>
+            <small>Sealed {{ alert.proof_sealed_at|short_dt(user.timezone) }}</small>
+          </div>
+        </section>
+
+        {% if version_mismatch %}
+          <div class="verified-notice warning" role="status">
+            This alert was generated by Version {{ version.version_number }}. The current strategy is Version {{ current_version.version_number }}.
+          </div>
+        {% endif %}
+
+        <section class="alert-proof-summary">
+          <article><img src="https://api.iconify.design/lucide:radar.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Monitor</span><strong>{{ proof.strategy_name or (strategy.name if strategy else 'Historical monitor') }}</strong></article>
+          <article><img src="https://api.iconify.design/lucide:git-commit-horizontal.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Strategy version</span><strong>{% if version %}Version {{ version.version_number }}{% else %}Legacy reference{% endif %}</strong></article>
+          <article><img src="https://api.iconify.design/lucide:coins.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Market</span><strong>{{ proof.symbol or 'Not recorded' }}</strong></article>
+          <article><img src="https://api.iconify.design/lucide:clock-3.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Timeframe</span><strong>{{ proof.timeframe or 'Not recorded' }}</strong></article>
+          <article><img src="https://api.iconify.design/lucide:database.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Exchange</span><strong>{{ proof.exchange or 'Not recorded' }}</strong></article>
+          <article><img src="https://api.iconify.design/lucide:activity.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Data freshness</span><strong>{% if proof.data_latency_ms is defined %}{{ proof.data_latency_ms }} ms{% else %}Not recorded{% endif %}</strong></article>
+        </section>
+
+        <section class="dash-panel alert-proof-report">
+          <div class="section-head">
+            <div><p class="eyebrow">Rule-by-rule evidence</p><h2>Why this alert was created</h2><p>These values were frozen when the alert was generated and do not recalculate.</p></div>
+            <span class="verified-version-badge">{{ proof.setup_completion_score or proof.required_completion_percent or 100 }}% required completion</span>
+          </div>
+          {% if proof.conditions %}
+            <div class="alert-proof-table" role="table" aria-label="Alert condition proof">
+              <div class="alert-proof-row alert-proof-table-head" role="row"><span>Condition</span><span>Result</span><span>Actual</span><span>Required</span></div>
+              {% for item in proof.conditions %}
+                <div class="alert-proof-row" role="row">
+                  <strong>{{ item.name or item.condition_id or 'Condition' }}</strong>
+                  <span class="proof-condition-state state-{{ item.state or 'unknown' }}">{{ (item.state or 'unknown')|replace('_', ' ')|title }}</span>
+                  <code>{{ item.actual_value|default(none)|tojson }}</code>
+                  <code>{{ item.required_value|default(none)|tojson }}</code>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="verified-empty">This legacy alert did not retain condition-level values. The proof remains sealed with the evidence that was available.</div>
+          {% endif %}
+        </section>
+
+        <section class="verified-two-column">
+          <article class="dash-panel verified-section">
+            <p class="eyebrow">Delivery trail</p><h2>Notification result</h2>
+            {% if deliveries %}
+              <div class="proof-delivery-list">
+                {% for delivery in deliveries %}<p><strong>{{ delivery.channel.value|title }}</strong><span>{{ delivery.status.value|replace('_', ' ')|title }}{% if delivery.delivered_at %} · {{ delivery.delivered_at|short_dt(user.timezone) }}{% endif %}</span></p>{% endfor %}
+              </div>
+            {% else %}
+              <div class="verified-empty">No external delivery attempt was retained for this alert.</div>
+            {% endif %}
+          </article>
+          <article class="dash-panel verified-section">
+            <p class="eyebrow">Integrity reference</p><h2>Frozen proof identity</h2>
+            <dl class="proof-integrity-list"><div><dt>Proof hash</dt><dd>{{ proof_hash }}</dd></div><div><dt>Schema</dt><dd>{{ alert.proof_schema_version }}</dd></div><div><dt>Candle time</dt><dd>{{ alert.candle_timestamp|short_dt(user.timezone) }}</dd></div></dl>
+          </article>
+        </section>
+
+        <div class="button-row alert-proof-actions">
+          <button class="button button-primary" type="button" data-copy-alert-proof>Copy proof</button>
+          <button class="button button-secondary" type="button" data-export-alert-proof>Export</button>
+          {% if strategy and version %}<a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/verify?version={{ version.id }}">View strategy version</a>{% endif %}
+          {% if version_mismatch %}<a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/verify?version={{ current_version.id }}#version-control">Compare with current</a>{% endif %}
+          <a class="button button-secondary" href="/dashboard/lifecycles">Back to lifecycles</a>
+        </div>
+        <script type="application/json" data-alert-proof-json>{{ {'alert_id': alert.id|string, 'proof_hash': proof_hash, 'proof_schema_version': alert.proof_schema_version, 'proof': proof} | tojson }}</script>
+      </main>
+    {% elif page == 'strategy_verify' %}
+      <main class="verified-workspace" data-verified-workspace data-strategy-id="{{ strategy.id }}" data-version-id="{{ version.id }}">
+        <section class="verified-hero dash-panel">
+          <div>
+            <p class="eyebrow">Verified strategy monitoring</p>
+            <h2>Confirm the system TraceEdge will monitor</h2>
+            <p>Review the interpretation, test real historical moments, inspect expected behaviour, then approve this exact version.</p>
+          </div>
+          <div class="verified-hero-actions">
+            <span class="verified-version-badge">Version {{ version.version_number }}</span>
+            <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit in Canvas</a>
+            <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}">Monitor details</a>
+          </div>
+        </section>
+
+        <nav class="verified-stage-nav" aria-label="Verification stages">
+          <a href="#interpretation-review"><span>1</span>Interpretation</a>
+          <a href="#strategy-tests"><span>2</span>Examples</a>
+          <a href="#historical-validation"><span>3</span>History</a>
+          <a href="#strategy-quality"><span>4</span>Readiness</a>
+          <a href="#version-control"><span>5</span>Approve</a>
+        </nav>
+
+        <div class="verified-notice" data-verified-notice role="status" aria-live="polite">
+          Loading the immutable strategy record...
+        </div>
+        <div class="verified-skeleton-grid" data-verified-loading aria-hidden="true">
+          <div class="verified-skeleton"></div><div class="verified-skeleton"></div>
+        </div>
+
+        <div class="verified-content" data-verified-content hidden>
+          <section class="dash-panel verified-section" id="interpretation-review">
+            <div class="section-head">
+              <div><p class="eyebrow">Phrase-to-rule audit</p><h2>What TraceEdge understood</h2><p>Every phrase remains attached to its deterministic mechanics and assumptions.</p></div>
+              <span class="verified-state" data-interpretation-state>Needs review</span>
+            </div>
+            <div class="interpretation-review-grid">
+              <article class="original-language-card">
+                <span>Your original language</span>
+                <blockquote data-original-prompt>{{ version.source_text or 'Created from structured rules.' }}</blockquote>
+              </article>
+              <div class="interpretation-rule-list" data-interpretation-list></div>
+            </div>
+            <div class="button-row verified-actions">
+              <button class="button button-primary" type="button" data-approve-interpretation>Approve interpretation</button>
+              <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Resolve in Chat or Canvas</a>
+            </div>
+          </section>
+
+          <section class="dash-panel verified-section" id="strategy-tests">
+            <div class="section-head">
+              <div><p class="eyebrow">Your expected examples</p><h2>Strategy unit tests</h2><p>Choose a real historical moment and tell TraceEdge what should have happened.</p></div>
+              <button class="button button-primary" type="button" data-toggle-test-form>Add test case</button>
+            </div>
+            <form class="verified-form verified-test-form" data-test-form hidden>
+              <label>Test name<input name="title" required maxlength="160" placeholder="SOL breakout should trigger"></label>
+              <label>Example type<select name="case_type"><option value="positive">Positive example</option><option value="negative">Negative example</option><option value="near_match">Near-match example</option></select></label>
+              <label>Expected result<select name="expected_result"><option value="should_trigger">Should trigger</option><option value="should_not_trigger">Should not trigger</option><option value="near_match">Should be near match</option></select></label>
+              <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
+              <label>Symbol<input name="symbol" required placeholder="SOL/USDT"></label>
+              <label>Timeframe<select name="timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select></label>
+              <label>Historical time<input name="evaluation_time" type="datetime-local" required></label>
+              <label class="verified-form-wide">Notes<textarea name="notes" rows="2" placeholder="Why this example matters"></textarea></label>
+              <div class="button-row verified-form-wide"><button class="button button-primary" type="submit">Save and run test</button><button class="button button-secondary" type="button" data-cancel-test>Cancel</button></div>
+            </form>
+            <div class="verified-test-list" data-test-list></div>
+          </section>
+
+          <section class="dash-panel verified-section" id="historical-validation">
+            <div class="section-head">
+              <div><p class="eyebrow">Historical preview</p><h2>How these rules behaved</h2><p>Deterministic historical evaluations, not a prediction of future results.</p></div>
+              <button class="button button-primary" type="button" data-toggle-history-form>Test on historical data</button>
+            </div>
+            <form class="verified-form" data-history-form hidden>
+              <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
+              <label>Symbols<input name="symbols" required placeholder="BTC/USDT, SOL/USDT"></label>
+              <label>Timeframe<select name="timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select></label>
+              <label>From<input name="started_at" type="datetime-local" required></label>
+              <label>To<input name="ended_at" type="datetime-local" required></label>
+              <div class="button-row verified-form-wide"><button class="button button-primary" type="submit">Run historical preview</button></div>
+            </form>
+            <div class="historical-summary" data-history-summary></div>
+            <div class="historical-chart-preview" data-history-chart></div>
+            <div class="verified-tabs" role="tablist" aria-label="Historical results" data-history-tabs>
+              <button type="button" role="tab" data-history-tab="matches" aria-selected="true">Matches</button>
+              <button type="button" role="tab" data-history-tab="near_matches">Near matches</button>
+              <button type="button" role="tab" data-history-tab="invalidated">Invalidated</button>
+              <button type="button" role="tab" data-history-tab="non_matches">Non-matches</button>
+            </div>
+            <div class="historical-examples" data-history-examples></div>
+          </section>
+
+          <section class="verified-two-column" id="strategy-quality">
+            <article class="dash-panel verified-section">
+              <div class="section-head"><div><p class="eyebrow">Separate dimensions</p><h2>Strategy quality report</h2></div><span class="verified-state" data-monitor-compatible></span></div>
+              <div class="quality-dimensions" data-quality-dimensions></div>
+              <div class="verified-findings" data-quality-findings></div>
+            </article>
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Operational evidence</p><h2>Monitor health</h2>
+              <div class="health-explanation" data-verified-health></div>
+              <div class="button-row"><a class="button button-secondary" href="/dashboard/lifecycles#monitor-health">View health</a><a class="button button-secondary" href="/dashboard/integrations">Test delivery</a></div>
+            </article>
+          </section>
+
+          <section class="dash-panel verified-section" id="version-control">
+            <div class="section-head"><div><p class="eyebrow">Immutable change control</p><h2>Versions and approval</h2><p>Live logic is never overwritten. Restoring creates a new draft.</p></div><button class="button button-secondary" type="button" data-compare-versions>Compare versions</button></div>
+            <div class="version-timeline" data-version-list></div>
+            <div class="semantic-diff" data-semantic-diff></div>
+            <div class="button-row verified-actions">
+              <button class="button button-secondary" type="button" data-save-draft>Save draft</button>
+              <button class="button button-primary" type="button" data-approve-version>Approve version</button>
+              <button class="button button-primary" type="button" data-activate-version>Activate monitor</button>
+            </div>
+          </section>
+
+          <section class="verified-two-column" id="outcome-review">
+            <article class="dash-panel verified-section">
+              <div class="section-head"><div><p class="eyebrow">User-defined follow-up</p><h2>Outcome review</h2><p>Classify what happened at your chosen horizon. TraceEdge never invents a profit-quality label.</p></div><a class="button button-secondary" href="/dashboard/lifecycles">Open alert proofs</a></div>
+              <div class="outcome-review-list" data-outcome-list></div>
+            </article>
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Controlled analysis</p><h2>Possible improvements</h2><p>Suggestions cite stored evidence, create a draft, rerun saved examples, and never alter the active version.</p>
+              <div class="button-row">
+                <button class="button button-secondary" type="button" data-improvement="add_volume_confirmation">Review volume confirmation</button>
+                <button class="button button-secondary" type="button" data-improvement="add_market_context_filter">Review market regime filter</button>
+                <button class="button button-secondary" type="button" data-improvement="make_less_noisy">Review a less noisy version</button>
+              </div>
+              <div class="improvement-result" data-improvement-result></div>
+            </article>
+          </section>
+
+          <section class="verified-two-column">
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Guided reconstruction</p><h2>Why wasn't I alerted?</h2><p>Select the market moment. TraceEdge separates market logic, data, monitor state, and delivery evidence.</p>
+              <form class="verified-form compact" data-forensic-form>
+                <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
+                <label>Symbol<input name="symbol" required placeholder="SOL/USDT"></label>
+                <label>Timeframe<select name="timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select></label>
+                <label>Expected time<input name="requested_time" type="datetime-local" required></label>
+                <button class="button button-primary verified-form-wide" type="submit">Investigate</button>
+              </form>
+              <div class="forensic-result" data-forensic-result></div>
+            </article>
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Portable strategy contract</p><h2>A complete record</h2><p>Export the prompt, approved mechanics, assumptions, tests, history, activation, delivery settings, and integrity hash.</p>
+              <div class="contract-summary" data-contract-summary></div>
+              <div class="button-row"><button class="button button-primary" type="button" data-export-contract>Export contract</button><button class="button button-secondary" type="button" data-copy-contract>Copy summary</button></div>
+              <p><a href="/dashboard/lifecycles">Open lifecycles, alert proofs, and outcome reviews</a></p>
+            </article>
+          </section>
+        </div>
+      </main>
     {% elif page == 'strategy_detail' %}
       <section class="dash-grid two">
         <article class="dash-panel">
@@ -3200,6 +3509,7 @@
             <div><span>Setups</span><strong>{{ setups_count }}</strong></div>
           </div>
           <div class="button-row">
+            <a class="button button-primary" href="/dashboard/strategies/{{ strategy.id }}/verify">Verify strategy</a>
             <a class="button button-primary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit Builder</a>
           </div>
         </article>
@@ -3355,7 +3665,7 @@
           <div class="dash-empty">No versions yet.</div>
         {% endif %}
       </section>
-    {% elif page == 'scan' %}
+    {% elif false %}
       <section class="dash-grid two">
         <article class="dash-panel">
           <h2>Quick Scan</h2>
@@ -3468,12 +3778,56 @@
         {% endif %}
       </section>
     {% elif page == 'lifecycles' %}
+      <section class="dash-panel observability-command-center" data-observability-root data-poll-seconds="{{ observability_poll_seconds }}">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Setup observability</p>
+            <h2>Live Setup Readiness Radar</h2>
+            <p>See what is forming, what is closest, and the exact rule holding each setup back.</p>
+          </div>
+          <div class="observability-live" aria-live="polite"><i></i><span>Live worker evidence</span></div>
+        </div>
+        <div class="observability-filter-row" aria-label="Readiness filters">
+          <div class="monitor-filter" data-monitor-filter>
+            <span class="filter-label">Filter by Monitor</span>
+            <button type="button" class="monitor-filter-trigger" aria-haspopup="listbox" aria-expanded="false" data-monitor-filter-trigger>
+              <img src="https://api.iconify.design/lucide:radar.svg?color=%238b5cf6" alt="" aria-hidden="true">
+              <span data-monitor-filter-label>{% if selected_monitor_id %}{% for id, name in lifecycle_monitors %}{% if id == selected_monitor_id %}{{ name }}{% endif %}{% endfor %}{% else %}All Monitors{% endif %}</span>
+              <img src="https://api.iconify.design/lucide:chevron-down.svg?color=%238b5cf6" alt="" aria-hidden="true">
+            </button>
+            <div class="monitor-filter-menu" role="listbox" hidden data-monitor-filter-menu>
+              {% if lifecycle_monitors|length > 7 %}<label class="monitor-filter-search"><span class="sr-only">Search monitors</span><input type="search" placeholder="Search monitors" data-monitor-filter-search></label>{% endif %}
+              <a role="option" href="/dashboard/lifecycles" aria-selected="{{ 'true' if not selected_monitor_id else 'false' }}" data-monitor-option="">All Monitors</a>
+              {% for monitor_id, monitor_name in lifecycle_monitors %}
+                <a role="option" href="/dashboard/lifecycles?monitor={{ monitor_id }}" aria-selected="{{ 'true' if selected_monitor_id == monitor_id else 'false' }}" data-monitor-option="{{ monitor_id }}" data-monitor-name="{{ monitor_name|lower }}">{{ monitor_name }}</a>
+              {% endfor %}
+            </div>
+          </div>
+          <label class="observability-control"><span>State</span><select data-radar-state><option value="">All states</option><option value="forming">Forming</option><option value="confirmation_pending">Confirmation Pending</option><option value="near_miss">Near Miss</option><option value="confirmed">Confirmed</option><option value="invalidated">Invalidated</option><option value="expired">Expired</option><option value="provider_data_error">Provider/Data Error</option></select></label>
+          <label class="observability-control"><span>Sort</span><select data-radar-sort><option value="readiness">Readiness</option><option value="newest_change">Newest change</option><option value="symbol">Symbol</option><option value="timeframe">Timeframe</option><option value="blocker">Blocker</option><option value="data_health">Data health</option></select></label>
+          <button class="observability-view-toggle" type="button" data-radar-view aria-pressed="false"><img src="https://api.iconify.design/lucide:rows-3.svg?color=%238b5cf6" alt="" aria-hidden="true"><span>Compact</span></button>
+        </div>
+        <div class="readiness-summary" data-radar-summary aria-live="polite"></div>
+        <div class="readiness-radar" data-radar-list aria-live="polite" aria-busy="true">{% for _ in range(4) %}<div class="observability-skeleton"></div>{% endfor %}</div>
+        <div class="observability-pagination" data-radar-pagination></div>
+      </section>
+
+      <section class="observability-health-section" id="monitor-health">
+        <div class="observability-section-heading"><div><p class="eyebrow">Two dimensions, clear causes</p><h2>Monitor and Strategy Health</h2></div><a class="button button-secondary" href="/dashboard/integrations">Test notification</a></div>
+        <div class="observability-health-grid" data-health-list><div class="observability-skeleton"></div><div class="observability-skeleton"></div></div>
+      </section>
+
+      <section class="dash-panel bottleneck-intelligence" id="condition-bottlenecks">
+        <div class="observability-section-heading"><div><p class="eyebrow">Deterministic history</p><h2>Condition Bottleneck Intelligence</h2><p>Ranked from stored rule outcomes. Preview comparisons do not predict performance.</p></div><label class="observability-required-toggle"><input type="checkbox" checked data-bottleneck-required><span>Required rules only</span></label></div>
+        <div class="bottleneck-list" data-bottleneck-list><div class="observability-skeleton"></div></div>
+      </section>
+
       <section class="dash-panel lifecycle-page">
         <div class="section-head">
           <div>
             <p class="eyebrow">Persistent setup tracking</p>
-            <h2>One setup. A complete lifecycle.</h2>
-            <p>Each card follows one market occurrence from detection through confirmation, entry availability, invalidation, expiration or outcome.</p>
+            <h2>Lifecycle records</h2><span class="sr-only">One setup. A complete lifecycle.</span>
+            <p>Open a setup for condition evidence, timeline, chart, or a deterministic no-alert investigation.</p>
           </div>
         </div>
         {% if lifecycle_cards %}
@@ -3484,11 +3838,12 @@
                   <div class="lifecycle-card-main">
                     <span class="lifecycle-card-title-row">
                       <strong>{{ item.symbol }}</strong>
+                      <span class="lifecycle-monitor-tag" title="{{ item.strategy_name }}"><img src="https://api.iconify.design/lucide:radar.svg?color=%234c1d95" alt="" aria-hidden="true"><span>{{ item.strategy_name }}</span></span>
                       <button class="lifecycle-chart-button muted-action" type="button" data-lifecycle-mute="{{ item.id }}" aria-label="Mute {{ item.symbol }} lifecycle">
                         <span>Mute</span>
                       </button>
                     </span>
-                    <small>{{ item.strategy_name }} · {{ item.exchange }} · {{ item.timeframe }} · {{ item.direction }}</small>
+                    <small>Version {{ item.strategy_version_number }} · {{ item.exchange }} · {{ item.timeframe }} · {{ item.direction }}</small>
                   </div>
                   <button class="lifecycle-card-toggle" type="button" data-lifecycle-toggle="{{ item.id }}" aria-expanded="false">
                     <span class="lifecycle-state-badge">{{ item.state_label }}</span>
@@ -3500,6 +3855,18 @@
                       <img src="https://api.iconify.design/lucide:chart-candlestick.svg?color=%23ffffff" alt="" aria-hidden="true">
                       <span>Chart</span>
                     </button>
+                    {% if item.latest_alert_id %}
+                      <a class="lifecycle-proof-button" href="/dashboard/alerts/{{ item.latest_alert_id }}/proof">
+                        <img src="https://api.iconify.design/lucide:shield-check.svg?color=%234c1d95" alt="" aria-hidden="true">
+                        <span>View alert proof</span>
+                      </a>
+                    {% endif %}
+                    {% if item.show_why_no_alert %}
+                      <button class="lifecycle-investigate-button" type="button" data-lifecycle-investigate="{{ item.id }}">
+                        <img src="https://api.iconify.design/lucide:circle-help.svg?color=%234c1d95" alt="" aria-hidden="true">
+                        <span>Why Wasn’t I Alerted?</span>
+                      </button>
+                    {% endif %}
                   </div>
                 </div>
                 <div class="lifecycle-track" aria-label="{{ item.symbol }} lifecycle">
@@ -3545,9 +3912,15 @@
             {% endfor %}
           </div>
         {% else %}
-          <div class="dash-empty">No persistent setup lifecycles exist yet. Activate a monitor and let the scanner create the first setup instance.</div>
+          <div class="dash-empty">{% if selected_monitor_id %}No lifecycle records found for this monitor.{% else %}No persistent setup lifecycles exist yet. Activate a monitor and let the scanner create the first setup instance.{% endif %}</div>
         {% endif %}
       </section>
+
+      <div class="observability-drawer-backdrop" data-observability-drawer-backdrop hidden></div>
+      <aside class="observability-drawer" data-observability-drawer hidden aria-labelledby="observability-drawer-title" aria-modal="true" role="dialog" tabindex="-1">
+        <header><div><p class="eyebrow">Lifecycle investigation</p><h2 id="observability-drawer-title">Why wasn’t I alerted?</h2></div><button type="button" data-observability-drawer-close aria-label="Close investigation"><img src="https://api.iconify.design/lucide:x.svg?color=%238b5cf6" alt="" aria-hidden="true"></button></header>
+        <div class="observability-drawer-content" data-observability-drawer-content></div>
+      </aside>
 
       <dialog id="lifecycle-chart-dialog" class="lifecycle-chart-dialog">
         <div class="lifecycle-dialog-shell">
@@ -4228,6 +4601,7 @@
   {% endif %}
   <script src="{{ url_for('static', path='/smooth-scroll.js') }}?v=20260627-native-scroll"></script>
   <script src="{{ url_for('static', path='/dashboard.js') }}?v=20260627-sidebar-tv"></script>
+  <script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260710-ai-chat"></script>
   <script>
     (() => {
       const base = "/api/v1/dashboard/cockpit";

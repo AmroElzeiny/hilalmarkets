@@ -166,9 +166,7 @@ class AlertFrequencyForecast(UUIDPrimaryKeyMixin, Base):
 
 class UniverseOptimizationSnapshot(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "universe_optimization_snapshots"
-    __table_args__ = (
-        Index("ix_universe_snapshot_strategy_created", "strategy_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_universe_snapshot_strategy_created", "strategy_id", "created_at"),)
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -237,6 +235,10 @@ class StrategySuggestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     before_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     proposed_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     diff: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    outcome_evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    historical_effect: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    confidence: Mapped[str] = mapped_column(String(20), default="low", nullable=False)
+    limitations: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     applied_version_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("strategy_versions.id", ondelete="SET NULL")
     )
@@ -245,9 +247,7 @@ class StrategySuggestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class UserStrategyPreference(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "user_strategy_preferences"
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uq_user_strategy_preference"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_strategy_preference"),)
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -288,9 +288,7 @@ class AlertInboxItem(UUIDPrimaryKeyMixin, Base):
     setup_instance_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("setup_instances.id", ondelete="SET NULL")
     )
-    alert_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("alerts.id", ondelete="SET NULL")
-    )
+    alert_id: Mapped[UUID | None] = mapped_column(ForeignKey("alerts.id", ondelete="SET NULL"))
     symbol: Mapped[str | None] = mapped_column(String(40))
     timeframe: Mapped[str | None] = mapped_column(String(16))
     state: Mapped[str] = mapped_column(String(40), nullable=False)

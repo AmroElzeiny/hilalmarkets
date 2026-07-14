@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.db.models import (
     Alert,
+    AlertDelivery,
     AlertInboxItem,
     SetupConditionResult,
     SetupInstance,
@@ -18,7 +19,11 @@ from ai_market_monitor.db.models import (
     StrategyCondition,
     StrategyVersion,
 )
-from ai_market_monitor.db.models.enums import ConditionOutcome, SetupLifecycleState
+from ai_market_monitor.db.models.enums import (
+    ConditionOutcome,
+    DeliveryStatus,
+    SetupLifecycleState,
+)
 
 LIFECYCLE_STAGES = (
     ("detected", "Detected"),
@@ -62,30 +67,32 @@ async def lifecycle_cards(
     user_id: UUID,
     *,
     limit: int = 100,
+    monitor_id: UUID | None = None,
     muted_setup_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     muted_setup_ids = muted_setup_ids or set()
+    query = (
+        select(SetupInstance, Strategy.name, StrategyVersion.version_number)
+        .join(StrategyVersion, StrategyVersion.id == SetupInstance.strategy_version_id)
+        .join(Strategy, Strategy.id == StrategyVersion.strategy_id)
+        .where(SetupInstance.user_id == user_id)
+    )
+    if monitor_id is not None:
+        query = query.where(Strategy.id == monitor_id)
     setup_rows = (
         await session.execute(
-            select(SetupInstance, Strategy.name)
-            .join(StrategyVersion, StrategyVersion.id == SetupInstance.strategy_version_id)
-            .join(Strategy, Strategy.id == StrategyVersion.strategy_id)
-            .where(
-                SetupInstance.user_id == user_id,
-            )
-            .order_by(SetupInstance.last_evaluated_at.desc())
-            .limit(limit)
+            query.order_by(SetupInstance.last_evaluated_at.desc()).limit(limit)
         )
     ).all()
     setup_rows = [
-        (setup, strategy_name)
-        for setup, strategy_name in setup_rows
+        (setup, strategy_name, version_number)
+        for setup, strategy_name, version_number in setup_rows
         if str(setup.id) not in muted_setup_ids
     ]
     if not setup_rows:
         return []
 
-    setup_ids = [setup.id for setup, _ in setup_rows]
+    setup_ids = [setup.id for setup, _, _ in setup_rows]
     events = (
         await session.scalars(
             select(SetupLifecycleEvent)
@@ -111,6 +118,12 @@ async def lifecycle_cards(
             .order_by(Alert.created_at.desc())
         )
     ).all()
+    alert_ids = [alert.id for alert in alert_rows]
+    delivery_rows = (
+        await session.scalars(
+            select(AlertDelivery).where(AlertDelivery.alert_id.in_(alert_ids))
+        )
+    ).all() if alert_ids else []
     inbox_rows = (
         await session.scalars(
             select(AlertInboxItem)
@@ -140,6 +153,10 @@ async def lifecycle_cards(
         if alert.setup_instance_id is not None:
             latest_alert_by_setup.setdefault(alert.setup_instance_id, alert)
 
+    deliveries_by_alert: dict[UUID, list[AlertDelivery]] = defaultdict(list)
+    for delivery in delivery_rows:
+        deliveries_by_alert[delivery.alert_id].append(delivery)
+
     latest_inbox_by_setup: dict[UUID, AlertInboxItem] = {}
     for item in inbox_rows:
         if item.setup_instance_id is not None:
@@ -149,12 +166,16 @@ async def lifecycle_cards(
         _lifecycle_card(
             setup,
             strategy_name,
+            version_number,
             events_by_setup.get(setup.id, []),
             latest_conditions.get(setup.id, {}),
             latest_alert_by_setup.get(setup.id),
+            deliveries_by_alert.get(latest_alert_by_setup[setup.id].id, [])
+            if setup.id in latest_alert_by_setup
+            else [],
             latest_inbox_by_setup.get(setup.id),
         )
-        for setup, strategy_name in setup_rows
+        for setup, strategy_name, version_number in setup_rows
     ]
 
 
@@ -170,11 +191,14 @@ def state_label(state: SetupLifecycleState | str) -> str:
 def _lifecycle_card(
     setup: SetupInstance,
     strategy_name: str,
+    strategy_version_number: int,
     events: list[SetupLifecycleEvent],
     conditions: dict[str, tuple[SetupConditionResult, StrategyCondition]],
     latest_alert: Alert | None = None,
+    deliveries: list[AlertDelivery] | None = None,
     latest_inbox_item: AlertInboxItem | None = None,
 ) -> dict[str, Any]:
+    deliveries = deliveries or []
     current_index = stage_index(setup.state)
     stage_times: dict[int, datetime] = {0: setup.first_detected_at}
     for event in events:
@@ -243,6 +267,7 @@ def _lifecycle_card(
         "timeframe": setup.timeframe,
         "direction": setup.direction,
         "strategy_name": strategy_name,
+        "strategy_version_number": strategy_version_number,
         "state": setup.state.value,
         "state_label": state_label(setup.state),
         "stage_index": current_index,
@@ -255,6 +280,24 @@ def _lifecycle_card(
         "monitoring_conditions": monitoring,
         "latest_alert_id": latest_alert.id if latest_alert else None,
         "latest_alert_title": latest_alert.title if latest_alert else None,
+        "notification_delivered": any(
+            item.status in {DeliveryStatus.SENT, DeliveryStatus.DELIVERED}
+            for item in deliveries
+        ),
+        "show_why_no_alert": not any(
+            item.status in {DeliveryStatus.SENT, DeliveryStatus.DELIVERED}
+            for item in deliveries
+        )
+        and setup.state
+        in {
+            SetupLifecycleState.NEAR_CONFIRMATION,
+            SetupLifecycleState.INVALIDATED,
+            SetupLifecycleState.EXPIRED,
+            SetupLifecycleState.BLOCKED,
+            SetupLifecycleState.DATA_UNAVAILABLE,
+            SetupLifecycleState.SUPPRESSED,
+            SetupLifecycleState.COMPLETED,
+        },
         "latest_inbox_item_id": latest_inbox_item.id if latest_inbox_item else None,
         "latest_inbox_state": latest_inbox_item.state if latest_inbox_item else None,
     }

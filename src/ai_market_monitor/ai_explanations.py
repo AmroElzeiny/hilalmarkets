@@ -81,9 +81,7 @@ class OpenAISuggestionNarrator:
             ),
         }
         headers = {
-            "Authorization": (
-                f"Bearer {self.settings.openai_api_key.get_secret_value()}"
-            ),
+            "Authorization": (f"Bearer {self.settings.openai_api_key.get_secret_value()}"),
             "Content-Type": "application/json",
         }
         try:
@@ -94,9 +92,7 @@ class OpenAISuggestionNarrator:
             ) as client:
                 response = await client.post("/responses", headers=headers, json=payload)
             response.raise_for_status()
-            message = str(
-                json.loads(_output_text(response.json())).get("message") or ""
-            ).strip()
+            message = str(json.loads(_output_text(response.json())).get("message") or "").strip()
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return None
         lowered = message.lower()

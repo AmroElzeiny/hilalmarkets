@@ -8,6 +8,7 @@ from ai_market_monitor.api.routers.on_demand import router as on_demand_router
 from ai_market_monitor.api.routers.onboarding import router as onboarding_router
 from ai_market_monitor.api.routers.public import router as public_router
 from ai_market_monitor.api.routers.status import router as status_router
+from ai_market_monitor.api.routers.system_brain import router as system_brain_router
 from ai_market_monitor.api.routers.telegram import router as telegram_router
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "onboarding_router",
     "public_router",
     "status_router",
+    "system_brain_router",
     "telegram_router",
 ]

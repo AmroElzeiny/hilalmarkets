@@ -68,6 +68,15 @@ class StrategyVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     strategy_id: Mapped[UUID] = mapped_column(
         ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False
     )
+    parent_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("strategy_versions.id", ondelete="SET NULL")
+    )
+    restored_from_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("strategy_versions.id", ondelete="SET NULL")
+    )
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[StrategyVersionStatus] = mapped_column(
         enum_type(StrategyVersionStatus, name="strategy_version_status"),
@@ -94,6 +103,8 @@ class StrategyVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     preview_status: Mapped[str] = mapped_column(String(32), default="not_run", nullable=False)
     previewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     preview_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    semantic_diff: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    change_summary: Mapped[str | None] = mapped_column(Text)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     strategy: Mapped[Strategy] = relationship(back_populates="versions", foreign_keys=[strategy_id])

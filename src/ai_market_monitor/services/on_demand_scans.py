@@ -74,18 +74,18 @@ class OnDemandScanService:
                 else "on_demand_not_available"
             )
             message = (
-                "Your current plan does not include Quick Scan."
+                "Your current plan does not include Scanner."
                 if request.light_scan
-                else "Your current plan does not include Quick Scan."
+                else "Your current plan does not include one-time scanning."
             )
             raise OnDemandScanError(code, message)
         if request.light_scan and not context.feature_enabled("light_prompt_scan"):
             raise OnDemandScanError(
                 "light_prompt_scan_not_available",
-                "Your current plan does not include Quick Scan.",
+                "Your current plan does not include Scanner.",
             )
         if quota_used >= quota_limit:
-            label = "Quick Scan"
+            label = "Scanner" if request.light_scan else "one-time scan"
             quota_code = (
                 "light_prompt_scans_quota_exceeded"
                 if request.light_scan
@@ -103,6 +103,8 @@ class OnDemandScanService:
             int(context.limit(symbol_limit_key) or 0),
             int(request.max_symbols),
         )
+        # Release database locks before exchange and provider network work begins.
+        await self.session.commit()
         symbols = await UniverseResolver(self.provider).resolve(
             definition,
             maximum_symbols=maximum_symbols,
@@ -115,6 +117,7 @@ class OnDemandScanService:
         results: list[OnDemandScanMarketResult] = []
         scanned_symbols: set[str] = set()
         warnings: list[str] = []
+
         async def evaluate(symbol: str) -> tuple[str, list[OnDemandScanMarketResult], str | None]:
             try:
                 evaluated_results = await self._evaluate_symbol(
@@ -124,6 +127,7 @@ class OnDemandScanService:
                     strategy=strategy,
                     version=version,
                     light_scan=request.light_scan,
+                    include_non_confirmed=request.include_non_confirmed,
                     account_balance=request.account_balance,
                 )
                 return symbol, evaluated_results, None
@@ -342,6 +346,7 @@ class OnDemandScanService:
         strategy: Strategy | None,
         version: StrategyVersion | None,
         light_scan: bool,
+        include_non_confirmed: bool,
         account_balance: float | None,
     ) -> list[OnDemandScanMarketResult]:
         candle_sets = await self._fetch_candle_sets(definition, symbol)
@@ -408,7 +413,7 @@ class OnDemandScanService:
                 account_balance=account_balance,
                 condition_context=condition_context,
             )
-            if evaluation.outcome != ScanOutcome.CONFIRMED:
+            if evaluation.outcome != ScanOutcome.CONFIRMED and not include_non_confirmed:
                 continue
             results.append(
                 OnDemandScanMarketResult(
@@ -418,7 +423,11 @@ class OnDemandScanService:
                     direction=evaluation.direction,
                     outcome=evaluation.outcome.value,
                     completion_score=round(evaluation.near_miss.current_score, 3),
-                    match_percentage=100,
+                    match_percentage=(
+                        100
+                        if evaluation.outcome == ScanOutcome.CONFIRMED
+                        else round(evaluation.near_miss.current_score, 3)
+                    ),
                     trend=evaluation.near_miss.trend.value,
                     passed_conditions=[
                         self._condition_summary(condition)

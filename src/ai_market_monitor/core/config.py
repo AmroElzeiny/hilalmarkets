@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -78,17 +78,63 @@ class Settings(BaseSettings):
     ai_interpreter_provider: Literal["rules", "openai"] = "openai"
     openai_api_key: SecretStr | None = None
     openai_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
-    openai_model: str = "gpt-5-nano"
-    openai_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "minimal"
+    openai_model: str = "gpt-5.4-nano"
+    openai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "low"
     openai_timeout_seconds: int = Field(default=20, ge=1, le=120)
     openai_explanation_enabled: bool = True
+    ai_agent_control_enabled: bool = False
+    ai_agent_shadow_mode: bool = False
+    ai_agent_rollout_percent: int = Field(default=0, ge=0, le=100)
+    ai_agent_max_steps: int = Field(default=4, ge=1, le=12)
+    ai_agent_max_tool_calls_per_turn: int = Field(default=4, ge=1, le=20)
+    ai_agent_max_repeated_calls: int = Field(default=1, ge=0, le=3)
+    ai_agent_timeout_seconds: int = Field(default=45, ge=5, le=180)
+    ai_agent_tool_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    ai_agent_max_output_tokens: int = Field(default=1800, ge=128, le=8000)
+    ai_agent_max_estimated_cost_usd_per_turn: float = Field(default=0.02, gt=0, le=5)
+    ai_agent_parallel_tool_calls: bool = False
     ai_semantic_fallback_enabled: bool = False
-    ai_semantic_fallback_model: str = "gpt-5-nano"
+    ai_semantic_fallback_model: str = "gpt-5.4-nano"
     ai_semantic_fallback_min_confidence: float = Field(default=0.85, ge=0, le=1)
     ai_semantic_fallback_review_confidence: float = Field(default=0.65, ge=0, le=1)
     ai_semantic_fallback_cache_ttl_seconds: int = Field(default=86400, ge=60, le=604800)
     ai_semantic_fallback_max_calls_per_prompt: int = Field(default=2, ge=0, le=10)
     ai_semantic_fallback_max_fragment_chars: int = Field(default=160, ge=20, le=1000)
+    ai_capability_reranker_enabled: bool = True
+    ai_capability_reranker_min_confidence: float = Field(default=0.86, ge=0.5, le=1)
+    ai_capability_reranker_candidate_limit: int = Field(default=16, ge=5, le=30)
+    capability_embeddings_enabled: bool = True
+    capability_embedding_model: str = "text-embedding-3-small"
+    capability_embedding_dimensions: int = Field(default=256, ge=64, le=3072)
+    capability_extension_enabled: bool = True
+    capability_extension_draft_model: str = "gpt-5.4-nano"
+    capability_extension_draft_reasoning_effort: Literal[
+        "none", "low", "medium", "high", "xhigh"
+    ] = "low"
+    capability_extension_implementation_model: str = "gpt-5.4-nano"
+    capability_extension_review_model: str = "gpt-5.4-mini"
+    capability_extension_repair_service_tier: Literal["default", "flex"] = "flex"
+    capability_extension_ai_max_attempts: int = Field(default=3, ge=1, le=6)
+    capability_extension_flex_timeout_seconds: int = Field(default=900, ge=120, le=1800)
+    capability_extension_preflight_exchange: Literal["bybit", "binance"] = "bybit"
+    capability_extension_preflight_max_symbols: int = Field(default=200, ge=10, le=5000)
+    capability_extension_preflight_concurrency: int = Field(default=8, ge=1, le=30)
+    capability_extension_candle_limit: int = Field(default=500, ge=100, le=2000)
+    capability_extension_max_history_candles: int = Field(default=25_000, ge=500, le=50_000)
+    capability_extension_market_test_candle_budget: int = Field(
+        default=300_000,
+        ge=50_000,
+        le=5_000_000,
+    )
+    capability_extension_empty_scan_threshold: int = Field(default=5, ge=1, le=20)
+    capability_extension_no_notification_threshold: int = Field(default=5, ge=1, le=20)
+    capability_extension_min_candidate_rate: float = Field(default=0.0005, ge=0, le=0.1)
+    capability_extension_max_candidate_rate: float = Field(default=0.35, ge=0.01, le=1)
+    capability_extension_certification_score: float = Field(default=85, ge=0, le=100)
+    capability_extension_max_expression_nodes: int = Field(default=80, ge=5, le=500)
+    capability_extension_max_expression_depth: int = Field(default=12, ge=2, le=30)
     market_metadata_api_url: AnyHttpUrl | None = None
     market_metadata_api_key: SecretStr | None = None
     market_metadata_timeout_seconds: int = Field(default=15, ge=1, le=120)
@@ -123,6 +169,31 @@ class Settings(BaseSettings):
     auth_code_max_attempts: int = Field(default=5, ge=1, le=10)
     auth_test_fixed_code: str | None = None
     email_test_outbox: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
+    system_brain_admin_username: str | None = None
+    system_brain_admin_password_hash: SecretStr | None = None
+    system_brain_otp_ttl_minutes: int = Field(default=10, ge=2, le=30)
+    system_brain_otp_max_attempts: int = Field(default=5, ge=1, le=10)
+    system_brain_session_hours: int = Field(default=8, ge=1, le=72)
+    system_brain_login_attempts_per_15_minutes: int = Field(default=5, ge=1, le=20)
+    openai_model_pricing_usd_per_million: dict[str, dict[str, float]] = Field(
+        default_factory=lambda: {
+            "gpt-5.4-nano": {
+                "input": 0.20,
+                "cached_input": 0.02,
+                "output": 1.25,
+            },
+            "gpt-5.4-mini": {
+                "input": 0.75,
+                "cached_input": 0.075,
+                "output": 4.50,
+            },
+            "gpt-5-nano": {
+                "input": 0.05,
+                "cached_input": 0.005,
+                "output": 0.40,
+            }
+        }
+    )
     dashboard_export_directory: str = "./exports"
     chart_library_cdn_url: str | None = "/static/vendor/lightweight-charts.standalone.production.js"
 
@@ -136,6 +207,13 @@ class Settings(BaseSettings):
     preview_candle_limit: int = Field(default=300, ge=100, le=1000)
     default_near_miss_threshold: int = Field(default=70, ge=1, le=100)
     default_alert_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
+    observability_detail_retention_days: int = Field(default=14, ge=1, le=365)
+    observability_lifecycle_retention_days: int = Field(default=730, ge=30, le=3650)
+    observability_aggregate_window_days: int = Field(default=30, ge=1, le=365)
+    observability_minimum_sample_size: int = Field(default=20, ge=1, le=10000)
+    observability_candidate_stale_seconds: int = Field(default=300, ge=30, le=86400)
+    observability_live_poll_seconds: int = Field(default=15, ge=5, le=300)
+    observability_max_candidates_per_user: int = Field(default=5000, ge=100, le=100000)
 
     @field_validator("app_secret_key")
     @classmethod
@@ -143,6 +221,30 @@ class Settings(BaseSettings):
         if len(value.get_secret_value()) < 32:
             raise ValueError("APP_SECRET_KEY must contain at least 32 characters")
         return value
+
+    @model_validator(mode="after")
+    def validate_capability_extension_bounds(self) -> "Settings":
+        if self.ai_agent_parallel_tool_calls:
+            raise ValueError("AI_AGENT_PARALLEL_TOOL_CALLS must remain false for bounded control")
+        if self.ai_agent_tool_timeout_seconds > self.ai_agent_timeout_seconds:
+            raise ValueError(
+                "AI_AGENT_TOOL_TIMEOUT_SECONDS cannot exceed AI_AGENT_TIMEOUT_SECONDS"
+            )
+        if (
+            self.capability_extension_min_candidate_rate
+            >= self.capability_extension_max_candidate_rate
+        ):
+            raise ValueError(
+                "CAPABILITY_EXTENSION_MIN_CANDIDATE_RATE must be below the maximum"
+            )
+        if (
+            self.capability_extension_candle_limit
+            > self.capability_extension_max_history_candles
+        ):
+            raise ValueError(
+                "CAPABILITY_EXTENSION_CANDLE_LIMIT cannot exceed the history cap"
+            )
+        return self
 
     @field_validator(
         "market_metadata_api_url",
@@ -169,6 +271,11 @@ class Settings(BaseSettings):
     @property
     def support_inbox_email(self) -> str:
         return (self.support_email or "contact@trace-edge.com").strip()
+
+    @property
+    def system_brain_username(self) -> str | None:
+        value = (self.system_brain_admin_username or "").strip().casefold()
+        return value or None
 
 
 @lru_cache

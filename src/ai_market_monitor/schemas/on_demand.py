@@ -18,6 +18,7 @@ class OnDemandScanRequest(BaseModel):
     account_balance: float | None = Field(default=None, gt=0)
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
     light_scan: bool = False
+    include_non_confirmed: bool = False
 
     @model_validator(mode="after")
     def validate_strategy_source(self) -> "OnDemandScanRequest":

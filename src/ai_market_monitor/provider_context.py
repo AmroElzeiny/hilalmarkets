@@ -111,7 +111,7 @@ class ProviderContextService:
                 symbol,
                 requests["order_book"],
             )
-        if "derivatives" in requests:
+        if "derivatives" in requests and self.settings.binance_derivatives_enabled:
             context["derivatives"] = await self._derivatives(
                 exchange,
                 symbol,
@@ -120,6 +120,14 @@ class ProviderContextService:
                 evaluated_at,
                 requests["derivatives"],
             )
+        elif "derivatives" in requests:
+            context["derivatives"] = {
+                "_metadata": {
+                    "provider_category": "derivatives",
+                    "status": "disabled",
+                    "reason": "TraceEdge spot mode does not evaluate derivatives context.",
+                }
+            }
         for category in EXTERNAL_CONTEXT_CATEGORIES & requests.keys():
             context[category] = await self._external(
                 category,
@@ -218,9 +226,7 @@ class ProviderContextService:
             correlation = _correlation(pair_sample, btc_sample)
             beta = _beta(pair_sample, btc_sample)
             btc_volatility = pstdev(btc_sample)
-            volatility_ratio = (
-                pstdev(pair_sample) / btc_volatility if btc_volatility else None
-            )
+            volatility_ratio = pstdev(pair_sample) / btc_volatility if btc_volatility else None
             values["pair_correlation_btc"] = abs(correlation) >= float(
                 requests.get("pair_correlation_btc", {}).get("threshold", 0.7)
             )
@@ -241,9 +247,7 @@ class ProviderContextService:
                 "eth_return_percent": eth_return,
             }
         result = {
-            key: value
-            for key, value in values.items()
-            if key in requests or key == "_metrics"
+            key: value for key, value in values.items() if key in requests or key == "_metrics"
         }
         self._cache[cache_key] = result
         return result
@@ -332,9 +336,9 @@ class ProviderContextService:
         ema200 = percentages["universe_above_ema200_percent"]
         positive = percentages["universe_positive_24h_percent"]
         if "breadth_thrust" in requests:
-            result["breadth_thrust"] = positive >= float(
-                requests["breadth_thrust"].get("threshold", 65)
-            ) and ema50 >= 60
+            result["breadth_thrust"] = (
+                positive >= float(requests["breadth_thrust"].get("threshold", 65)) and ema50 >= 60
+            )
         if "market_breadth_improving" in requests:
             result["market_breadth_improving"] = ema50 >= ema200 and positive >= 50
         if "market_breadth_deteriorating" in requests:
@@ -425,9 +429,7 @@ class ProviderContextService:
         for key, parameters in requests.items():
             direct = raw.get(key)
             result[key] = (
-                direct
-                if isinstance(direct, bool)
-                else _derivatives_condition(key, raw, parameters)
+                direct if isinstance(direct, bool) else _derivatives_condition(key, raw, parameters)
             )
         result["_metrics"] = raw
         return {key: value for key, value in result.items() if value is not None}
@@ -601,9 +603,7 @@ def _ranking_metrics(
         trend_strength = abs(ema50 - ema200) / close * 100 if close else 0
     return {
         "quote_volume_24h": _float(metadata.get("quote_volume_24h")) or 0,
-        "volume_change_1h": (
-            volumes[-1] / average_volume if average_volume else 0
-        ),
+        "volume_change_1h": (volumes[-1] / average_volume if average_volume else 0),
         "relative_volume": volumes[-1] / average_volume if average_volume else 0,
         "momentum_24h": _return_percent(candles, 24) or 0,
         "volatility": pstdev(returns[-48:]) if len(returns) >= 2 else 0,
@@ -612,17 +612,13 @@ def _ranking_metrics(
         "near_24h_high": float(close >= high24 * 0.98),
         "near_24h_low": float(close <= low24 * 1.02),
         "volume_expansion": volumes[-1] / average_volume if average_volume else 0,
-        "compression_score": (
-            average_range / recent_range if recent_range else float("inf")
-        ),
+        "compression_score": (average_range / recent_range if recent_range else float("inf")),
         "breakout_score": (
             (close - max(candle.high for candle in candles[-21:-1])) / average_range
             if average_range
             else 0
         ),
-        "pullback_score": (
-            max(0, 100 - abs(close - ema50) / ema50 * 100) if ema50 else 0
-        ),
+        "pullback_score": (max(0, 100 - abs(close - ema50) / ema50 * 100) if ema50 else 0),
         "btc_relative_strength": _float(metadata.get("relative_strength_btc")) or 0,
         "above_ema50": float(close > ema50),
         "above_ema200": float(close > ema200),
@@ -738,10 +734,7 @@ def _return_percent(candles: list[Candle], periods: int) -> float | None:
 def _correlation(left: list[float], right: list[float]) -> float:
     left_mean = fmean(left)
     right_mean = fmean(right)
-    numerator = sum(
-        (a - left_mean) * (b - right_mean)
-        for a, b in zip(left, right, strict=True)
-    )
+    numerator = sum((a - left_mean) * (b - right_mean) for a, b in zip(left, right, strict=True))
     denominator = math.sqrt(
         sum((value - left_mean) ** 2 for value in left)
         * sum((value - right_mean) ** 2 for value in right)

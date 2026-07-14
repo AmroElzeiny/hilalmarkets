@@ -73,6 +73,44 @@ def _trend_history(count: int = 160) -> list[Candle]:
     ]
 
 
+def test_reference_period_sweep_uses_completed_previous_week_levels():
+    start = datetime(2026, 6, 1, tzinfo=UTC)  # Monday
+    candles = [
+        Candle(
+            timestamp=start + timedelta(hours=index),
+            open=100,
+            high=110,
+            low=90,
+            close=100,
+            volume=1000,
+            is_closed=True,
+        )
+        for index in range(168)
+    ]
+    candles.append(
+        Candle(
+            timestamp=start + timedelta(days=7),
+            open=100,
+            high=111,
+            low=89,
+            close=100,
+            volume=1200,
+            is_closed=True,
+        )
+    )
+
+    assert evaluate_price_action(
+        "reference_period_sweep",
+        candles,
+        {"lookback": 20, "reference_period": "week", "side": "low", "timezone": "UTC"},
+    )
+    assert evaluate_price_action(
+        "reference_period_sweep",
+        candles,
+        {"lookback": 20, "reference_period": "week", "side": "high", "timezone": "UTC"},
+    )
+
+
 @pytest.mark.parametrize(
     "name",
     [
@@ -119,22 +157,16 @@ def test_price_action_breakout_and_fvg_are_deterministic():
         close=prior_high + 0.5,
         volume=2000,
     )
-    assert evaluate_price_action(
-        "breaks_n_candle_high", history, {"lookback": 20}
-    ) is True
+    assert evaluate_price_action("breaks_n_candle_high", history, {"lookback": 20}) is True
     history[-1] = last
-    assert evaluate_price_action(
-        "breaks_n_candle_high", history, {"lookback": 20}
-    ) is False
+    assert evaluate_price_action("breaks_n_candle_high", history, {"lookback": 20}) is False
 
     gap = [
         _candle(0, open_price=9.5, high=10, low=9, close=9.8),
         _candle(1, open_price=10.2, high=11, low=10, close=10.8),
         _candle(2, open_price=11.2, high=12, low=11, close=11.8),
     ]
-    assert evaluate_price_action(
-        "bullish_fair_value_gap", gap, {"lookback": 2}
-    ) is True
+    assert evaluate_price_action("bullish_fair_value_gap", gap, {"lookback": 2}) is True
 
 
 def test_time_conditions_use_timezone_aware_calendar_rules():
@@ -150,18 +182,24 @@ def test_time_conditions_use_timezone_aware_calendar_rules():
             is_closed=True,
         )
     ]
-    assert evaluate_time_condition(
-        "weekend_filter",
-        candles,
-        {"timezone": "Asia/Tokyo"},
-        {},
-    ) is True
-    assert evaluate_time_condition(
-        "weekday_only",
-        candles,
-        {"timezone": "UTC"},
-        {},
-    ) is True
+    assert (
+        evaluate_time_condition(
+            "weekend_filter",
+            candles,
+            {"timezone": "Asia/Tokyo"},
+            {},
+        )
+        is True
+    )
+    assert (
+        evaluate_time_condition(
+            "weekday_only",
+            candles,
+            {"timezone": "UTC"},
+            {},
+        )
+        is True
+    )
 
 
 async def test_new_prompt_aliases_map_to_visual_condition_keys():
@@ -172,8 +210,7 @@ async def test_new_prompt_aliases_map_to_visual_condition_keys():
             timeframe="15m",
             setup_mode="free_text",
             setup_text=(
-                "OBV rising and CMF above zero with a bullish fair value gap, "
-                "weekdays only"
+                "OBV rising and CMF above zero with a bullish fair value gap, weekdays only"
             ),
             trigger_mode="candle_close",
             delivery_channels=["web"],
@@ -426,6 +463,7 @@ async def test_public_provider_context_executes_all_local_families():
         Settings(
             app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
             market_breadth_max_symbols=10,
+            binance_derivatives_enabled=True,
         ),
     ).build(
         definition,
@@ -440,6 +478,33 @@ async def test_public_provider_context_executes_all_local_families():
     assert context["universe_ranking"]["top_percent_24h_volume"] is True
     assert context["order_book"]["spread_below_threshold"] is True
     assert context["derivatives"]["funding_rate_positive"] is True
+
+
+async def test_derivatives_context_is_disabled_by_default_for_spot_mode():
+    definition = load_strategy().model_copy(deep=True)
+    definition.base_timeframe = "1h"
+    definition.supporting_timeframes = []
+    definition.risk.enabled = False
+    definition.conditions = ConditionGroup(
+        key="derivatives_disabled",
+        operator=LogicalOperator.AND,
+        children=[_provider_condition("funding_rate_positive", "derivatives")],
+    )
+    provider = _ContextProvider()
+    evaluated_at = datetime(2026, 6, 1, tzinfo=UTC)
+    symbol_candles = await provider.fetch_ohlcv("binance", "SOL/USDT", "1h", 220)
+    context = await ProviderContextService(
+        provider,
+        Settings(app_secret_key="test-secret-key-with-at-least-thirty-two-characters"),
+    ).build(
+        definition,
+        "SOL/USDT",
+        {"1h": symbol_candles},
+        evaluated_at,
+    )
+
+    assert context["derivatives"]["_metadata"]["status"] == "disabled"
+    assert "funding_rate_positive" not in context["derivatives"]
 
 
 async def test_external_context_contract_supplies_only_requested_values():
@@ -540,8 +605,8 @@ def test_risk_and_persisted_runtime_conditions_execute_inside_same_tree():
 
 
 def test_all_registered_capabilities_are_executable_and_schema_valid():
-    assert len(all_capabilities()) == 473
-    assert len(executable_capabilities()) == 473
+    assert len(all_capabilities()) == 492
+    assert len(executable_capabilities()) == 492
     assert unsupported_capabilities() == ()
     for capability in executable_capabilities():
         ConditionRule.model_validate(condition_template(capability))
@@ -551,9 +616,7 @@ def test_every_executable_capability_reaches_a_non_error_engine_state():
     history = candle_sets(volume_multiplier=1.6)
     evaluated_at = history["15m"][-1].timestamp
     for capability in executable_capabilities():
-        rule = ConditionRule.model_validate(
-            condition_template(capability, timeframe="15m")
-        )
+        rule = ConditionRule.model_validate(condition_template(capability, timeframe="15m"))
         definition = load_strategy().model_copy(deep=True)
         definition.universe.min_historical_candles = 1
         definition.conditions = ConditionGroup(
@@ -608,9 +671,7 @@ def test_every_provider_condition_has_pass_fail_and_unavailable_proof_states():
     for capability in executable_capabilities():
         if capability.provider_required not in provider_categories:
             continue
-        rule = ConditionRule.model_validate(
-            condition_template(capability, timeframe="15m")
-        )
+        rule = ConditionRule.model_validate(condition_template(capability, timeframe="15m"))
         definition = load_strategy().model_copy(deep=True)
         definition.risk.enabled = False
         definition.universe.min_historical_candles = 1

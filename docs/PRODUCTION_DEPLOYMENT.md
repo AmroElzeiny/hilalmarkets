@@ -79,15 +79,23 @@ MARKET_BREADTH_MAX_SYMBOLS=100
 ON_DEMAND_SCAN_CONCURRENCY=8
 ```
 
+For Bybit-backed spot data, use `BYBIT_REST_BASE_URL`, `BYBIT_WS_BASE_URL`,
+`BYBIT_API_KEY`, and `BYBIT_API_SECRET`. Do not put Bybit credentials into
+`CRYPTO_INDEX_API_KEY` or `TOKEN_CATEGORY_API_KEY`. Bybit can supply exchange-derived
+spot data such as candles, tickers, 24h volume/change, breadth, rankings, and spot
+order-book context. It does not provide global crypto-index concepts such as total
+market cap, BTC dominance, TOTAL2/TOTAL3, or token categories, so those provider
+families remain blocked unless a real index/category provider is configured.
+
 These feeds are optional globally but required by strategies that reference their capability
 family. Each context endpoint receives the category, requested condition keys, exchange, symbol,
 timeframe, quote assets, and evaluation timestamp. It must return a `values` object and an
 optional `as_of` timestamp. Unreachable or incomplete providers produce condition-level
 `unavailable` proof and never a guessed pass.
 
-Binance and Bybit public data supply cross-market candles, breadth, rankings, order-book
-microstructure, funding, and open-interest values where the exchange supports them. API keys are
-not required for those public endpoints.
+Binance and Bybit public spot data supply cross-market candles, breadth, rankings, and order-book
+microstructure where the exchange supports them. Derivatives context is disabled for this
+spot-only build and should remain blank.
 
 Deploy:
 

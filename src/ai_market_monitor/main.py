@@ -16,6 +16,7 @@ from ai_market_monitor.api.routers import (
     onboarding_router,
     public_router,
     status_router,
+    system_brain_router,
     telegram_router,
 )
 from ai_market_monitor.core.config import get_settings
@@ -30,6 +31,9 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     validate_runtime_configuration(settings)
     configure_logging(settings.log_level)
+    from ai_market_monitor.services.capability_registry import initialize_capability_registry
+
+    await initialize_capability_registry(settings)
     try:
         yield
     finally:
@@ -71,6 +75,7 @@ def create_app() -> FastAPI:
     application.include_router(status_router, prefix="/api/v1")
     application.include_router(telegram_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
+    application.include_router(system_brain_router)
     return application
 
 

@@ -7,6 +7,7 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
+    CandidateReadinessSnapshot,
     DiscordDeliveryDestination,
     TelegramConnection,
 )
@@ -237,6 +238,15 @@ class TelegramDeliveryService:
                 await TrialLifecycleService(self.session, self.settings).record_successful_delivery(
                     delivery
                 )
+                if alert.setup_instance_id is not None:
+                    readiness = await self.session.scalar(
+                        select(CandidateReadinessSnapshot).where(
+                            CandidateReadinessSnapshot.setup_instance_id
+                            == alert.setup_instance_id
+                        )
+                    )
+                    if readiness is not None:
+                        readiness.notification_status = "delivered"
             except TelegramDeliveryError as exc:
                 permanent = not exc.retryable or delivery.attempt_count >= 5
                 delivery.status = (
@@ -252,6 +262,15 @@ class TelegramDeliveryService:
                 )
                 if connection:
                     connection.last_error_code = exc.code
+                if alert.setup_instance_id is not None:
+                    readiness = await self.session.scalar(
+                        select(CandidateReadinessSnapshot).where(
+                            CandidateReadinessSnapshot.setup_instance_id
+                            == alert.setup_instance_id
+                        )
+                    )
+                    if readiness is not None:
+                        readiness.notification_status = "failed"
                 if not permanent:
                     delay = exc.retry_after_seconds or min(
                         3600, 30 * (2 ** (delivery.attempt_count - 1))

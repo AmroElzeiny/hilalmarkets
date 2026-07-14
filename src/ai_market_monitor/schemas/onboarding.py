@@ -81,6 +81,7 @@ class GuidedSetupRequest(BaseModel):
     near_miss_threshold: float = Field(default=70, ge=1, le=100)
     delivery_channels: list[Literal["telegram", "discord", "web"]] = Field(min_length=1)
     maximum_alerts_per_hour: int = Field(default=50, ge=1, le=1000)
+    capability_bindings: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def validate_setup_source(self) -> "GuidedSetupRequest":

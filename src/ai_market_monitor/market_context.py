@@ -75,9 +75,7 @@ class MarketRegimeAnalyzer:
             ema_slow = _ema(closes, 200 if len(closes) >= 200 else len(closes))
             return_24h = ((closes[-1] / closes[-25]) - 1) * 100 if len(closes) >= 25 else 0
             realized_volatility = (
-                pstdev(returns[-48:]) * math.sqrt(24 * 365) * 100
-                if len(returns) >= 2
-                else 0
+                pstdev(returns[-48:]) * math.sqrt(24 * 365) * 100 if len(returns) >= 2 else 0
             )
             trend_vote = 1 if ema_fast > ema_slow else -1 if ema_fast < ema_slow else 0
             trend_votes.append(trend_vote)

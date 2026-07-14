@@ -188,6 +188,47 @@ class WebSessionTokenService:
             raise InvalidContinuationToken("Dashboard session is invalid or expired") from exc
 
 
+class SystemBrainTokenService:
+    pending_salt = "system-brain-pending-v1"
+    session_salt = "system-brain-session-v1"
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.serializer = URLSafeTimedSerializer(settings.app_secret_key.get_secret_value())
+
+    def issue_pending(self, challenge_id: UUID) -> str:
+        return self.serializer.dumps(
+            {"challenge_id": str(challenge_id)},
+            salt=self.pending_salt,
+        )
+
+    def decode_pending(self, token: str) -> dict[str, str]:
+        try:
+            return self.serializer.loads(
+                token,
+                salt=self.pending_salt,
+                max_age=self.settings.system_brain_otp_ttl_minutes * 60,
+            )
+        except (BadSignature, SignatureExpired) as exc:
+            raise InvalidContinuationToken("Verification request is invalid or expired") from exc
+
+    def issue_session(self, session_id: UUID, raw_token: str) -> str:
+        return self.serializer.dumps(
+            {"session_id": str(session_id), "token": raw_token},
+            salt=self.session_salt,
+        )
+
+    def decode_session(self, token: str) -> dict[str, str]:
+        try:
+            return self.serializer.loads(
+                token,
+                salt=self.session_salt,
+                max_age=self.settings.system_brain_session_hours * 60 * 60,
+            )
+        except (BadSignature, SignatureExpired) as exc:
+            raise InvalidContinuationToken("System Brain session is invalid or expired") from exc
+
+
 class DashboardLinkTokenService:
     salt = "telegram-dashboard-link-v1"
     max_age_seconds = 15 * 60

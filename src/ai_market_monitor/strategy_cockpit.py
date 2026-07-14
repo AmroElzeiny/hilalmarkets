@@ -129,9 +129,8 @@ def validate_strategy_conflicts(definition: StrategyDefinition) -> list[Diagnost
                 ignorable=False,
             )
         )
-    if (
-        definition.trigger_mode.value == "intrabar"
-        and any("candle close" in (rule.explanation_template or "").casefold() for rule in rules)
+    if definition.trigger_mode.value == "intrabar" and any(
+        "candle close" in (rule.explanation_template or "").casefold() for rule in rules
     ):
         findings.append(
             DiagnosticFinding(
@@ -321,9 +320,7 @@ def suggest_schema_adjustment(
                 "required": True,
                 "weight": 1,
                 "required_data": ["ohlcv"],
-                "explanation_template": (
-                    "Volume must be at least 1.5 times its recent average."
-                ),
+                "explanation_template": ("Volume must be at least 1.5 times its recent average."),
                 "forming_tolerance_percent": 10,
             },
         )

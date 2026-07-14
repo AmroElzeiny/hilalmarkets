@@ -173,9 +173,7 @@ async def _handle_component_interaction(
         if strategy is None or strategy.user_id != connection.user_id:
             return "This monitor is unavailable for your account."
         preference = await session.scalar(
-            select(DashboardPreference).where(
-                DashboardPreference.user_id == connection.user_id
-            )
+            select(DashboardPreference).where(DashboardPreference.user_id == connection.user_id)
         )
         if preference is None:
             preference = DashboardPreference(
@@ -186,14 +184,11 @@ async def _handle_component_interaction(
             session.add(preference)
         values = dict(preference.notification_preferences or {})
         muted_until = dict(values.get("muted_strategy_until", {}) or {})
-        muted_until[str(version_id)] = (
-            datetime.now(UTC) + timedelta(hours=24)
-        ).isoformat()
+        muted_until[str(version_id)] = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
         values["muted_strategy_until"] = muted_until
         preference.notification_preferences = values
         return (
-            f"{strategy.name} notifications are muted for 24 hours. "
-            "Stored evidence is unchanged."
+            f"{strategy.name} notifications are muted for 24 hours. Stored evidence is unchanged."
         )
     return "This alert action is no longer available."
 

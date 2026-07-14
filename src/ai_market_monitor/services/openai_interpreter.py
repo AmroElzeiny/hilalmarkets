@@ -5,10 +5,7 @@ import httpx
 from pydantic import ValidationError
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.engine.capability_compatibility import (
-    prompt_blocked_capabilities,
-    prompt_executable_capabilities,
-)
+from ai_market_monitor.engine.capability_resolver import CapabilityResolver
 from ai_market_monitor.engine.prompt_audit import audit_prompt_coverage
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
 from ai_market_monitor.schemas.strategy import (
@@ -38,11 +35,19 @@ class OpenAIResponsesInterpretationClient:
     ) -> None:
         self.settings = settings
         self.transport = transport
+        self.last_usage: dict[str, Any] = {}
 
     async def create_draft(self, guided_setup: GuidedSetupRequest) -> dict[str, Any]:
         api_key = self.settings.openai_api_key
         if api_key is None:
             raise ValueError("OPENAI_API_KEY is not configured")
+        resolution = CapabilityResolver().resolve_prompt(guided_setup.setup_text or "")
+        binding_keys = [
+            str(item.get("capability_key") or "")
+            for item in guided_setup.capability_bindings
+            if item.get("capability_key")
+        ]
+        candidate_keys = list(dict.fromkeys([*resolution.candidate_keys, *binding_keys]))
         payload = {
             "model": self.settings.openai_model,
             "store": False,
@@ -53,11 +58,18 @@ class OpenAIResponsesInterpretationClient:
                     "type": "json_schema",
                     "name": "market_monitor_strategy_draft",
                     "strict": False,
-                    "schema": _strategy_draft_schema(),
+                    "schema": _strategy_draft_schema(candidate_keys),
                 }
             },
             "instructions": _instructions(),
-            "input": json.dumps(guided_setup.model_dump(mode="json"), sort_keys=True),
+            "input": json.dumps(
+                {
+                    "guided_setup": guided_setup.model_dump(mode="json"),
+                    "capability_resolution": resolution.ai_context(),
+                    "verified_capability_bindings": guided_setup.capability_bindings,
+                },
+                sort_keys=True,
+            ),
         }
         headers = {
             "Authorization": f"Bearer {api_key.get_secret_value()}",
@@ -70,7 +82,9 @@ class OpenAIResponsesInterpretationClient:
         ) as client:
             response = await client.post("/responses", headers=headers, json=payload)
         response.raise_for_status()
-        output_text = _extract_output_text(response.json())
+        response_payload = response.json()
+        self.last_usage = dict(response_payload.get("usage") or {})
+        output_text = _extract_output_text(response_payload)
         try:
             return _loads_json_object(output_text)
         except (json.JSONDecodeError, ValueError) as exc:
@@ -102,6 +116,7 @@ class OpenAIStrategyInterpreter:
             return await self.fallback.interpret(guided_setup)
         try:
             draft = await self.client.create_draft(guided_setup)
+            openai_usage = dict(getattr(self.client, "last_usage", {}) or {})
             strategy_payload = dict(draft)
             assumptions = [str(item) for item in strategy_payload.pop("assumptions", [])]
             ambiguities = [
@@ -113,14 +128,6 @@ class OpenAIStrategyInterpreter:
                 for item in strategy_payload.pop("unsupported_conditions", [])
             ]
             definition = StrategyDefinition.model_validate(strategy_payload)
-            coverage = audit_prompt_coverage(
-                guided_setup.setup_text or "",
-                definition,
-                assumptions=assumptions,
-                ambiguities=ambiguities,
-                unsupported=unsupported,
-                ai_interpreted=True,
-            )
             if self._should_use_percent_move_fallback(guided_setup, definition):
                 fallback = await self.fallback.interpret(guided_setup)
                 return fallback.model_copy(
@@ -129,9 +136,20 @@ class OpenAIStrategyInterpreter:
                         "raw_metadata": {
                             **(fallback.raw_metadata or {}),
                             "openai_guard": "percent_move_preserved",
+                            "openai_usage": openai_usage,
                         },
                     }
                 )
+            resolution = CapabilityResolver().resolve_prompt(guided_setup.setup_text or "")
+            definition = CapabilityResolver().canonicalize_ai_strategy(definition)
+            coverage = audit_prompt_coverage(
+                guided_setup.setup_text or "",
+                definition,
+                assumptions=assumptions,
+                ambiguities=ambiguities,
+                unsupported=unsupported,
+                ai_interpreted=True,
+            )
             if coverage.activation_blocked:
                 fallback = await self.fallback.interpret(guided_setup)
                 coverage_issue = InterpretationIssue(
@@ -155,6 +173,7 @@ class OpenAIStrategyInterpreter:
                             "openai_output_excerpt": _safe_excerpt(
                                 json.dumps(draft, sort_keys=True, default=str)
                             ),
+                            "openai_usage": openai_usage,
                         },
                     }
                 )
@@ -169,9 +188,11 @@ class OpenAIStrategyInterpreter:
                     "model": self.settings.openai_model,
                     "deterministic_evaluation_required": True,
                     "prompt_coverage_report": coverage.model_dump(mode="json"),
+                    "capability_resolution": resolution.to_dict(),
                     "openai_output_excerpt": _safe_excerpt(
                         json.dumps(draft, sort_keys=True, default=str)
                     ),
+                    "openai_usage": openai_usage,
                 },
             )
         except (httpx.HTTPError, ValueError, KeyError, TypeError, ValidationError) as exc:
@@ -277,16 +298,19 @@ def _safe_excerpt(text: str | None, *, limit: int = 1200) -> str | None:
 
 
 def _instructions() -> str:
-    executable = ", ".join(capability.key for capability in prompt_executable_capabilities())
-    unsupported = ", ".join(capability.key for capability in prompt_blocked_capabilities())
     return (
         "You convert a crypto spot-market setup request into a deterministic strategy draft. "
         "Return only JSON matching the strict strategy schema. Do not invent market data, "
         "indicator values, results, profits, predictions, win rates, exchange API keys, wallet "
         "actions, or trade-execution instructions. The user makes all trading decisions. "
-        "Use only these executable capabilities when creating rules: "
-        f"{executable}. Recognize but do not pretend to execute these capabilities: "
-        f"{unsupported}. Put unsupported terms in unsupported_conditions with blocking=true "
+        "For every condition, select an immutable capability_key only from the candidate keys "
+        "provided in capability_resolution. Never invent an operand, indicator, pattern, metric, "
+        "or capability key. Return parameters separately and let the backend build mechanics. "
+        "Treat verified_capability_bindings as backend-approved interpretations of their source "
+        "fragments and preserve them in the strategy. "
+        "If no candidate represents a phrase, put it in ambiguities with a direct clarification "
+        "question. If a candidate is provider-required or unavailable, put it in "
+        "unsupported_conditions with blocking=true "
         "when the user made them mandatory and blocking=false when they were optional or bonus "
         "confirmation. Separate required and optional rules using the condition mandatory flag. "
         "Condition-tree operators available are AND, OR, NOT, SEQUENCE, WITHIN_LAST, "
@@ -311,11 +335,15 @@ def _instructions() -> str:
     )
 
 
-def _strategy_draft_schema() -> dict[str, Any]:
+def _strategy_draft_schema(candidate_keys: list[str] | None = None) -> dict[str, Any]:
+    capability_key_schema: dict[str, Any] = {"type": "string"}
+    if candidate_keys:
+        capability_key_schema["enum"] = sorted(set(candidate_keys))
     condition = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "capability_key": capability_key_schema,
             "key": {"type": "string"},
             "label": {"type": "string"},
             "condition_type": {
@@ -364,6 +392,7 @@ def _strategy_draft_schema() -> dict[str, Any]:
             "availability": {"type": "string"},
         },
         "required": [
+            "capability_key",
             "condition_id",
             "name",
             "type",

@@ -1,4 +1,6 @@
-from datetime import datetime
+import hashlib
+import json
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -14,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -306,10 +309,46 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     proof_receipt: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    proof_hash: Mapped[str | None] = mapped_column(String(64))
+    proof_schema_version: Mapped[str] = mapped_column(
+        String(20), default="1.0", nullable=False
+    )
+    proof_sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     chart_snapshot_url: Mapped[str | None] = mapped_column(String(1000))
     candle_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     suppressed_reason: Mapped[str | None] = mapped_column(String(160))
+
+
+def canonical_alert_proof_hash(proof_receipt: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        proof_receipt,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@event.listens_for(Alert, "before_insert")
+def _seal_alert_proof_before_insert(_mapper: Any, _connection: Any, alert: Alert) -> None:
+    digest = canonical_alert_proof_hash(alert.proof_receipt or {})
+    if alert.proof_hash and alert.proof_hash != digest:
+        raise ValueError("Alert proof does not match its integrity hash.")
+    alert.proof_hash = digest
+    alert.proof_schema_version = alert.proof_schema_version or "1.0"
+    alert.proof_sealed_at = alert.proof_sealed_at or datetime.now(UTC)
+
+
+@event.listens_for(Alert, "before_update")
+def _verify_alert_proof_before_update(_mapper: Any, _connection: Any, alert: Alert) -> None:
+    digest = canonical_alert_proof_hash(alert.proof_receipt or {})
+    if alert.proof_hash and alert.proof_hash != digest:
+        raise ValueError("Immutable alert proof was modified after it was sealed.")
+    # Seal legacy rows the first time they are safely updated.
+    alert.proof_hash = alert.proof_hash or digest
+    alert.proof_schema_version = alert.proof_schema_version or "1.0"
+    alert.proof_sealed_at = alert.proof_sealed_at or datetime.now(UTC)
 
 
 class AlertDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):

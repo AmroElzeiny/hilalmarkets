@@ -1,3 +1,5 @@
+import logging
+
 from celery import Celery
 
 from ai_market_monitor.core.config import get_settings
@@ -7,6 +9,7 @@ from ai_market_monitor.core.startup import validate_runtime_configuration
 settings = get_settings()
 validate_runtime_configuration(settings)
 configure_logging(settings.log_level)
+logger = logging.getLogger(__name__)
 app = Celery("ai_market_monitor", broker=settings.redis_url, backend=settings.redis_url)
 app.conf.update(
     task_serializer="json",
@@ -76,6 +79,18 @@ app.conf.update(
         "evaluate-strategy-health-every-hour": {
             "task": "ai_market_monitor.evaluate_strategy_health",
             "schedule": 60 * 60,
+        },
+        "aggregate-setup-observability-every-five-minutes": {
+            "task": "ai_market_monitor.aggregate_setup_observability",
+            "schedule": 5 * 60,
+        },
+        "cleanup-setup-observability-nightly": {
+            "task": "ai_market_monitor.cleanup_setup_observability",
+            "schedule": 24 * 60 * 60,
+        },
+        "process-capability-extensions-every-thirty-seconds": {
+            "task": "ai_market_monitor.process_capability_extensions",
+            "schedule": 30,
         },
     },
 )
@@ -192,6 +207,21 @@ def process_dashboard_export_jobs() -> dict:
 @app.task(name="ai_market_monitor.evaluate_strategy_health")
 def evaluate_strategy_health() -> dict:
     return _run_async_task(_evaluate_strategy_health())
+
+
+@app.task(name="ai_market_monitor.aggregate_setup_observability")
+def aggregate_setup_observability() -> dict:
+    return _run_async_task(_aggregate_setup_observability())
+
+
+@app.task(name="ai_market_monitor.cleanup_setup_observability")
+def cleanup_setup_observability() -> dict:
+    return _run_async_task(_cleanup_setup_observability())
+
+
+@app.task(name="ai_market_monitor.process_capability_extensions")
+def process_capability_extensions() -> dict:
+    return _run_async_task(_process_capability_extensions())
 
 
 async def _evaluate_due_trial_cycles() -> dict:
@@ -425,6 +455,19 @@ async def _run_scan_job(job_id: str, *, worker_id: str) -> dict:
                 experiment = await session.get(StrategyExperiment, UUID(str(experiment_id)))
                 if experiment is not None:
                     await StrategyCockpitService(session).refresh_experiment(experiment)
+            if job is not None and job.strategy_version_id is not None:
+                from ai_market_monitor.services.capability_extensions import (
+                    CapabilityExtensionService,
+                )
+
+                await CapabilityExtensionService(settings).record_live_scan(
+                    session,
+                    strategy_version_id=job.strategy_version_id,
+                    scan_job_id=job.id,
+                    symbols_scanned=summary.symbols_scanned,
+                    candidates_found=summary.matches_found,
+                    notifications_created=summary.notifications_created,
+                )
             await session.commit()
             return {
                 "job_id": str(summary.job_id),
@@ -432,8 +475,59 @@ async def _run_scan_job(job_id: str, *, worker_id: str) -> dict:
                 "symbols_planned": summary.symbols_planned,
                 "symbols_scanned": summary.symbols_scanned,
                 "matches_found": summary.matches_found,
+                "notifications_created": summary.notifications_created,
                 "failures": summary.failures,
             }
+    finally:
+        await provider.close()
+
+
+async def _process_capability_extensions() -> dict:
+    if not settings.capability_extension_enabled:
+        return {"processed": 0, "disabled": True}
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import CapabilityExtension
+    from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
+    from ai_market_monitor.services.capability_registry import CapabilityRegistryService
+    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+
+    provider = CcxtMarketDataProvider(settings)
+    processed = 0
+    failed = 0
+    try:
+        async with SessionFactory() as session:
+            await CapabilityRegistryService(settings).initialize(session)
+            await session.commit()
+        for _ in range(5):
+            async with SessionFactory() as session:
+                extension = await session.scalar(
+                    select(CapabilityExtension)
+                    .where(CapabilityExtension.status.in_({"queued", "repair_queued"}))
+                    .order_by(CapabilityExtension.created_at.asc())
+                    .with_for_update(skip_locked=True)
+                    .limit(1)
+                )
+                if extension is None:
+                    break
+                extension_id = extension.id
+                try:
+                    await CapabilityExtensionService(settings).process(
+                        session,
+                        extension,
+                        provider,
+                    )
+                    await session.commit()
+                    processed += 1
+                except Exception:
+                    await session.rollback()
+                    logger.exception(
+                        "Unexpected capability extension failure for %s",
+                        extension_id,
+                    )
+                    failed += 1
+        return {"processed": processed, "failed": failed}
     finally:
         await provider.close()
 
@@ -444,7 +538,7 @@ async def _expire_setup_instances() -> dict:
     from sqlalchemy import select
 
     from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.db.models import SetupInstance
+    from ai_market_monitor.db.models import CandidateReadinessSnapshot, SetupInstance
     from ai_market_monitor.db.models.enums import (
         TERMINAL_SETUP_STATES,
         SetupLifecycleState,
@@ -473,6 +567,16 @@ async def _expire_setup_instances() -> dict:
                         occurred_at=now,
                     )
                 )
+                readiness = await session.scalar(
+                    select(CandidateReadinessSnapshot).where(
+                        CandidateReadinessSnapshot.setup_instance_id == setup.id
+                    )
+                )
+                if readiness is not None:
+                    readiness.lifecycle_state = "expired"
+                    readiness.stage_rank = -2
+                    readiness.most_recent_change = "Lifecycle expired at its configured limit."
+                    readiness.last_changed_at = now
                 expired += 1
             except ValueError:
                 continue
@@ -546,3 +650,36 @@ async def _evaluate_strategy_health() -> dict:
             return {"evaluated": len(strategies)}
     finally:
         await provider.close()
+
+
+async def _aggregate_setup_observability() -> dict:
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import Strategy, StrategyVersion
+    from ai_market_monitor.db.models.enums import StrategyStatus
+    from ai_market_monitor.services.setup_observability import SetupObservabilityService
+
+    async with SessionFactory() as session:
+        rows = (
+            await session.execute(
+                select(Strategy, StrategyVersion)
+                .join(StrategyVersion, StrategyVersion.id == Strategy.active_version_id)
+                .where(Strategy.status == StrategyStatus.ACTIVE)
+            )
+        ).all()
+        service = SetupObservabilityService(session, settings)
+        for strategy, version in rows:
+            await service.aggregate_version(strategy, version)
+        await session.commit()
+        return {"aggregated_versions": len(rows)}
+
+
+async def _cleanup_setup_observability() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.setup_observability import SetupObservabilityService
+
+    async with SessionFactory() as session:
+        result = await SetupObservabilityService(session, settings).cleanup()
+        await session.commit()
+        return result

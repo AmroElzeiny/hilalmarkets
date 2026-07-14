@@ -49,6 +49,20 @@ async def test_context() -> AsyncIterator[dict]:
         billing_provider="static",
         openai_explanation_enabled=False,
         email_adapter="memory",
+        openai_model="gpt-5.4-nano",
+        openai_reasoning_effort="low",
+        openai_model_pricing_usd_per_million={
+            "gpt-5.4-nano": {
+                "input": 0.20,
+                "cached_input": 0.02,
+                "output": 1.25,
+            },
+            "gpt-5.4-mini": {
+                "input": 0.75,
+                "cached_input": 0.075,
+                "output": 4.50,
+            },
+        },
         disclaimer_version="test-2026-06",
         trial_days=14,
     )

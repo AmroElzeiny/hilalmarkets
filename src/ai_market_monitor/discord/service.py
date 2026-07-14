@@ -14,6 +14,7 @@ from ai_market_monitor.core.security import opaque_token, token_digest
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
+    CandidateReadinessSnapshot,
     DashboardPreference,
     DiscordConnection,
     DiscordDeliveryDestination,
@@ -432,6 +433,7 @@ class DiscordAlertService:
         )
         fields = [
             DiscordField("Strategy", presentation.strategy),
+            DiscordField("Strategy version", presentation.strategy_version or "n/a"),
             DiscordField("Exchange", presentation.exchange),
             DiscordField("Timeframe", presentation.timeframe),
             DiscordField("Required completion", score),
@@ -579,6 +581,14 @@ class DiscordAlertService:
                 await TrialLifecycleService(self.session, self.settings).record_successful_delivery(
                     delivery
                 )
+            if alert.setup_instance_id is not None:
+                readiness = await self.session.scalar(
+                    select(CandidateReadinessSnapshot).where(
+                        CandidateReadinessSnapshot.setup_instance_id == alert.setup_instance_id
+                    )
+                )
+                if readiness is not None:
+                    readiness.notification_status = "delivered"
         except Exception as exc:
             delivery.attempt_count += 1
             permanent = delivery.attempt_count >= 5
@@ -593,6 +603,14 @@ class DiscordAlertService:
             )
             delivery.last_error_code = exc.__class__.__name__
             delivery.last_error_detail = "Discord delivery failed; retry scheduled."
+            if alert.setup_instance_id is not None:
+                readiness = await self.session.scalar(
+                    select(CandidateReadinessSnapshot).where(
+                        CandidateReadinessSnapshot.setup_instance_id == alert.setup_instance_id
+                    )
+                )
+                if readiness is not None:
+                    readiness.notification_status = "failed"
         await self.session.flush()
         return delivery
 

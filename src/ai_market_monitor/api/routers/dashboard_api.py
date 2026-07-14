@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from ai_market_monitor.api.dependencies import (
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
+    AISetupChatSession,
     Alert,
     AlertDelivery,
     AuditEvent,
@@ -31,6 +32,8 @@ from ai_market_monitor.db.models import (
     DiscordDeliveryDestination,
     IntegrationTestResult,
     NearMissSnapshot,
+    ObservabilityExplanation,
+    OutcomeReview,
     SetupConditionResult,
     SetupInstance,
     SetupLifecycleEvent,
@@ -38,8 +41,11 @@ from ai_market_monitor.db.models import (
     SetupReplayResult,
     Strategy,
     StrategyCondition,
+    StrategyInterpretationStatement,
     StrategyTemplate,
+    StrategyTestCase,
     StrategyVersion,
+    StrategyVersionVerification,
     SupportRequest,
     SupportTicketMessage,
     TelegramConnection,
@@ -62,6 +68,12 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.condition_registry import condition_registry_payload
 from ai_market_monitor.engine.models import ensure_aware
+from ai_market_monitor.schemas.ai_setup_chat import (
+    MarketSnapshotResponse,
+    SetupChatApprovalRequest,
+    SetupChatMessageRequest,
+    SetupChatSessionResponse,
+)
 from ai_market_monitor.schemas.on_demand import (
     LightScanRequest,
     OnDemandScanRequest,
@@ -74,6 +86,7 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
+from ai_market_monitor.services.ai_setup_chat import AISetupChatService, SetupChatError
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService, export_file_path
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
@@ -83,8 +96,16 @@ from ai_market_monitor.services.lifecycle_dashboard import state_label
 from ai_market_monitor.services.market_preview import timeframe_duration
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
+from ai_market_monitor.services.setup_observability import (
+    GroundedObservabilityExplainer,
+    SetupObservabilityService,
+)
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
+from ai_market_monitor.services.verified_strategy import (
+    VerifiedStrategyError,
+    VerifiedStrategyService,
+)
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard-api"])
@@ -129,6 +150,46 @@ class StrategyApproveRequest(BaseModel):
 class StrategyCompareRequest(BaseModel):
     left_version_id: UUID
     right_version_id: UUID
+
+
+class InterpretationResolutionRequest(BaseModel):
+    action: Literal["accept", "answer"]
+    resolution_text: str | None = Field(default=None, max_length=2000)
+
+
+class StrategyTestCaseRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    case_type: Literal["positive", "negative", "near_match"]
+    expected_result: Literal["should_trigger", "should_not_trigger", "near_match"]
+    exchange: str = Field(default="binance", min_length=2, max_length=40)
+    symbol: str = Field(min_length=3, max_length=40)
+    timeframe: str = Field(min_length=2, max_length=16)
+    evaluation_time: datetime
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class HistoricalValidationRequest(BaseModel):
+    exchange: str = Field(default="binance", min_length=2, max_length=40)
+    symbols: list[str] = Field(min_length=1, max_length=500)
+    timeframe: str = Field(min_length=2, max_length=16)
+    started_at: datetime
+    ended_at: datetime
+
+
+class ForensicInvestigationRequest(BaseModel):
+    strategy_id: UUID
+    exchange: str = Field(default="binance", min_length=2, max_length=40)
+    symbol: str = Field(min_length=3, max_length=40)
+    timeframe: str = Field(min_length=2, max_length=16)
+    requested_time: datetime
+
+
+class OutcomeReviewRequest(BaseModel):
+    horizon_minutes: int = Field(ge=1, le=525_600)
+    classification: Literal["positive", "negative", "neutral", "invalid"]
+    classification_rules: dict[str, Any] = Field(default_factory=dict)
+    notes: str | None = Field(default=None, max_length=4000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
 
 
 class StrategyTemplateCreateRequest(BaseModel):
@@ -274,9 +335,7 @@ class LifecycleChartAnnotation(BaseModel):
     @model_validator(mode="after")
     def validate_geometry(self) -> "LifecycleChartAnnotation":
         if self.type == "line" and (
-            self.time1 is None
-            or self.time2 is None
-            or self.price2 is None
+            self.time1 is None or self.time2 is None or self.price2 is None
         ):
             raise ValueError("Line annotations require two time and price points")
         if self.type == "text" and (self.time1 is None or self.text is None):
@@ -301,6 +360,14 @@ class TradingViewStorageRequest(BaseModel):
     name: str | None = Field(default=None, max_length=160)
     chart_data: dict[str, Any] | list[Any] | str | None = None
     line_tools_state: dict[str, Any] | list[Any] | None = None
+
+
+class ObservabilityExplainRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    explanation_type: Literal["why_no_alert", "candidate", "monitor_health", "bottleneck"] = (
+        "why_no_alert"
+    )
 
 
 def _now() -> datetime:
@@ -344,9 +411,7 @@ async def save_theme_preference(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     preference = await session.scalar(
-        select(DashboardPreference).where(
-            DashboardPreference.user_id == principal.user_id
-        )
+        select(DashboardPreference).where(DashboardPreference.user_id == principal.user_id)
     )
     if preference is None:
         preference = DashboardPreference(
@@ -560,6 +625,31 @@ def _version_payload(version: StrategyVersion) -> dict[str, Any]:
     }
 
 
+def _verification_comparison(
+    verification: StrategyVersionVerification | None,
+) -> dict[str, Any]:
+    if verification is None:
+        return {
+            "test_status": "not_run",
+            "changed_test_results": [],
+            "historical_status": "not_run",
+            "historical_evaluations": 0,
+            "historical_matches": 0,
+            "estimated_frequency": None,
+        }
+    history = dict(verification.historical_summary or {})
+    return {
+        "test_status": verification.tests_status,
+        "changed_test_results": list(
+            (verification.test_effects or {}).get("changed_results") or []
+        ),
+        "historical_status": verification.historical_status,
+        "historical_evaluations": int(history.get("evaluations") or 0),
+        "historical_matches": int(history.get("matches") or 0),
+        "estimated_frequency": history.get("estimated_frequency"),
+    }
+
+
 def _interpretation_payload(preview: InterpretationPreview) -> dict[str, Any]:
     strategy = preview.strategy
     rule_payloads = _condition_rule_payloads(strategy)
@@ -626,6 +716,10 @@ def _condition_rule_payloads(strategy: StrategyDefinition) -> list[dict[str, Any
             rules.append(
                 {
                     "condition_id": node.key,
+                    "capability_key": node.capability_key,
+                    "capability_version": node.capability_version,
+                    "capability_artifact_hash": node.capability_artifact_hash,
+                    "resolved_parameters": node.resolved_parameters,
                     "name": node.label,
                     "condition_type": node.condition_type.value,
                     "operator": node.comparator.value,
@@ -696,9 +790,7 @@ def _guided_from_strategy_builder(
         minimum_reward_to_risk=(
             current.risk.minimum_reward_to_risk if current and current.risk.enabled else None
         ),
-        minimum_quote_volume_24h=(
-            current.universe.min_quote_volume_24h if current else None
-        ),
+        minimum_quote_volume_24h=(current.universe.min_quote_volume_24h if current else None),
         maximum_spread_bps=current.universe.max_spread_bps if current else None,
         forming_alerts=current.alerts.forming_alerts if current else True,
         near_miss_threshold=current.alerts.near_miss_threshold if current else 70,
@@ -736,9 +828,7 @@ def _strategy_visual_diff(
     return {
         "changed_fields": changes,
         "summary": (
-            "No structural changes detected."
-            if not changes
-            else "Changed: " + ", ".join(changes)
+            "No structural changes detected." if not changes else "Changed: " + ", ".join(changes)
         ),
     }
 
@@ -866,6 +956,325 @@ async def current_user(
     }
 
 
+def get_ai_setup_chat_service(
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> AISetupChatService:
+    return AISetupChatService(
+        settings,
+        provider,
+        configured_strategy_interpreter(settings),
+    )
+
+
+async def _setup_chat_response(
+    service: AISetupChatService,
+    session: AsyncSession,
+    chat: AISetupChatSession,
+    *,
+    next_url: str | None = None,
+) -> SetupChatSessionResponse:
+    messages = await service.messages(session, chat.id)
+    definition = (
+        StrategyDefinition.model_validate(chat.draft_schema_json)
+        if chat.draft_schema_json
+        else None
+    )
+    blocking_lint = any(item.get("severity") == "critical" for item in (chat.lint_warnings or []))
+    chat_context = chat.context_json or {}
+    setup_mode = "scanner" if chat_context.get("setup_mode") == "scanner" else "monitor"
+    return SetupChatSessionResponse(
+        id=chat.id,
+        status=chat.status,
+        title=chat.title,
+        original_idea=chat.original_idea,
+        messages=[
+            {
+                "id": item.id,
+                "role": item.role,
+                "message_type": item.message_type,
+                "content": item.content,
+                "payload": item.payload,
+                "client_message_id": item.client_message_id,
+                "created_at": item.created_at,
+            }
+            for item in messages
+        ],
+        draft_strategy=definition,
+        schema_hash=definition.canonical_hash() if definition else None,
+        translation_sheet=chat.translation_sheet or {},
+        lint_warnings=chat.lint_warnings or [],
+        rule_confidence=chat.rule_confidence or [],
+        assumptions=chat.assumptions or [],
+        ambiguities=chat.ambiguities or [],
+        unsupported_conditions=chat.unsupported_conditions or [],
+        setup_mode=setup_mode,
+        can_approve=(chat.status == "ready_for_approval" and not blocking_lint),
+        can_scan=(chat.status == "ready_to_scan" and not blocking_lint),
+        scanner_result=chat_context.get("scanner_result"),
+        approved_strategy_id=chat.approved_strategy_id,
+        approved_strategy_version_id=chat.approved_strategy_version_id,
+        next_url=next_url,
+        updated_at=chat.updated_at,
+    )
+
+
+@router.post(
+    "/setup-chat/sessions",
+    response_model=SetupChatSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ai_setup_chat_session(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    chat = await service.create_session(session, principal.user_id)
+    await session.commit()
+    await session.refresh(chat)
+    return await _setup_chat_response(service, session, chat)
+
+
+@router.get(
+    "/setup-chat/sessions/current",
+    response_model=SetupChatSessionResponse | None,
+)
+async def current_ai_setup_chat_session(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse | None:
+    chat = await service.latest_open_session(session, principal.user_id)
+    if chat is None:
+        return None
+    return await _setup_chat_response(service, session, chat)
+
+
+@router.get("/setup-chat/sessions/{chat_id}", response_model=SetupChatSessionResponse)
+async def get_ai_setup_chat_session(
+    chat_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+    except SetupChatError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    return await _setup_chat_response(service, session, chat)
+
+
+@router.post(
+    "/setup-chat/sessions/{chat_id}/messages",
+    response_model=SetupChatSessionResponse,
+)
+async def send_ai_setup_chat_message(
+    chat_id: UUID,
+    payload: SetupChatMessageRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        await service.handle_message(
+            session,
+            chat,
+            message=payload.message,
+            option_key=payload.option_key,
+            option_value=payload.option_value,
+            option_label=payload.option_label,
+            client_message_id=payload.client_message_id,
+        )
+        await service.finalize_agent_shadow_comparison(session, chat)
+        await session.commit()
+        await session.refresh(chat)
+    except SetupChatError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return await _setup_chat_response(service, session, chat)
+
+
+@router.post(
+    "/setup-chat/sessions/{chat_id}/scan",
+    response_model=SetupChatSessionResponse,
+)
+async def run_ai_setup_chat_scanner(
+    chat_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        await service.run_scanner(session, chat, user_id=principal.user_id)
+        await session.commit()
+        await session.refresh(chat)
+    except SetupChatError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return await _setup_chat_response(service, session, chat)
+
+
+@router.post(
+    "/setup-chat/sessions/{chat_id}/approve",
+    response_model=SetupChatSessionResponse,
+)
+async def approve_ai_setup_chat(
+    chat_id: UUID,
+    payload: SetupChatApprovalRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        if chat.status != "ready_for_approval" or not chat.draft_schema_json:
+            raise SetupChatError(
+                "setup_not_ready",
+                "Resolve every blocking question before approving this setup.",
+                status_code=409,
+            )
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        if definition.canonical_hash() != payload.expected_schema_hash:
+            raise SetupChatError(
+                "setup_changed",
+                "The translated rules changed. Review the latest translation before approval.",
+                status_code=409,
+            )
+        low_confidence = {
+            item["rule_key"]
+            for item in (chat.rule_confidence or [])
+            if item.get("requires_confirmation")
+        }
+        confirmed = set(payload.confirmed_low_confidence_rule_keys)
+        if not low_confidence.issubset(confirmed):
+            raise SetupChatError(
+                "low_confidence_confirmation_required",
+                "Confirm every low-confidence rule before approval.",
+                status_code=409,
+            )
+        if any(item.get("severity") == "critical" for item in (chat.lint_warnings or [])):
+            raise SetupChatError(
+                "strategy_lint_blocked",
+                "Resolve critical strategy lint findings before approval.",
+                status_code=409,
+            )
+        preview = InterpretationPreview(
+            strategy=definition,
+            assumptions=chat.assumptions or [],
+            ambiguities=[
+                InterpretationIssue.model_validate(item) for item in (chat.ambiguities or [])
+            ],
+            unsupported_conditions=[
+                InterpretationIssue.model_validate(item)
+                for item in (chat.unsupported_conditions or [])
+            ],
+            interpreter=str((chat.context_json or {}).get("interpreter") or "ai-setup-chat"),
+            raw_metadata={"source": "ai_setup_chat", "chat_session_id": str(chat.id)},
+        )
+        strategy_service = StrategyService(session, settings.disclaimer_version)
+        strategy, version = await strategy_service.create_from_interpretation(
+            principal.user_id,
+            preview,
+            source_text=chat.original_idea,
+        )
+        verification_service = VerifiedStrategyService(session, settings)
+        await verification_service.prepare_version(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+        )
+        statements = await verification_service.sync_interpretation(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+        )
+        for statement in statements:
+            if (
+                statement.status == "assumed"
+                and statement.resolution_status == "unresolved"
+            ):
+                await verification_service.resolve_statement(
+                    user_id=principal.user_id,
+                    statement_id=statement.id,
+                    action="accept",
+                    resolution_text=None,
+                )
+        await verification_service.approve_interpretation(
+            user_id=principal.user_id,
+            version=version,
+        )
+        await verification_service.approval_gate(
+            user_id=principal.user_id,
+            version=version,
+        )
+        await strategy_service.approve(
+            version,
+            user_id=principal.user_id,
+            expected_schema_hash=version.schema_hash,
+        )
+        artifact_hashes = {
+            str(item["capability_artifact_hash"])
+            for item in _condition_rule_payloads(definition)
+            if item.get("capability_artifact_hash")
+        }
+        if artifact_hashes:
+            from ai_market_monitor.services.capability_extensions import (
+                CapabilityExtensionService,
+            )
+
+            await CapabilityExtensionService(settings).link_strategy_version(
+                session,
+                artifact_hashes=artifact_hashes,
+                strategy_version_id=version.id,
+            )
+        chat.status = "approved"
+        chat.approved_strategy_id = strategy.id
+        chat.approved_strategy_version_id = version.id
+        chat.approved_at = _now()
+        await session.commit()
+        await session.refresh(chat)
+    except SetupChatError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except (StrategyGateError, VerifiedStrategyError, ValidationError) as exc:
+        await session.rollback()
+        code = (
+            exc.code
+            if isinstance(exc, (StrategyGateError, VerifiedStrategyError))
+            else "strategy_schema_invalid"
+        )
+        raise HTTPException(status_code=409, detail=code) from exc
+    return await _setup_chat_response(
+        service,
+        session,
+        chat,
+        next_url=f"/dashboard/strategies/{chat.approved_strategy_id}/verify",
+    )
+
+
+@router.get("/setup-chat/market-snapshot", response_model=MarketSnapshotResponse)
+async def ai_setup_chat_market_snapshot(
+    exchange: str | None = Query(default=None, min_length=2, max_length=40),
+    quote_currency: str = Query(default="USDT", min_length=2, max_length=10),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> MarketSnapshotResponse:
+    del principal
+    return await service.market_snapshot(exchange=exchange, quote_currency=quote_currency.upper())
+
+
 @router.get("/strategies")
 async def list_strategies(
     principal: UserPrincipal = Depends(get_dashboard_principal),
@@ -909,6 +1318,11 @@ async def create_strategy(
         principal.user_id,
         preview,
         source_text=payload.source_text,
+    )
+    await VerifiedStrategyService(session, settings).prepare_version(
+        user_id=principal.user_id,
+        strategy=strategy,
+        version=version,
     )
     await session.commit()
     return {"strategy": _strategy_payload(strategy, version), "version": _version_payload(version)}
@@ -961,18 +1375,55 @@ async def create_strategy_version(
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> dict[str, Any]:
     strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    prior_version = await _latest_version(session, strategy_id)
+    prior_ambiguities = (
+        [InterpretationIssue.model_validate(item) for item in prior_version.ambiguities]
+        if prior_version and prior_version.ambiguities
+        else []
+    )
+    prior_unsupported = (
+        [InterpretationIssue.model_validate(item) for item in prior_version.unsupported_conditions]
+        if prior_version and prior_version.unsupported_conditions
+        else []
+    )
     version = await StrategyService(session, settings.disclaimer_version).revise(
         strategy,
         payload.definition,
         user_id=principal.user_id,
         source_text=payload.source_text,
         assumptions=payload.assumptions,
-        ambiguities=[issue.model_dump(mode="json") for issue in payload.ambiguities],
-        unsupported=[issue.model_dump(mode="json") for issue in payload.unsupported_conditions],
+        ambiguities=[
+            issue.model_dump(mode="json") for issue in (payload.ambiguities or prior_ambiguities)
+        ],
+        unsupported=[
+            issue.model_dump(mode="json")
+            for issue in (payload.unsupported_conditions or prior_unsupported)
+        ],
         interpreter=payload.interpreter,
     )
+    verification_service = VerifiedStrategyService(session, settings)
+    await verification_service.prepare_version(
+        user_id=principal.user_id,
+        strategy=strategy,
+        version=version,
+        parent=prior_version,
+    )
+    saved_test_count = await session.scalar(
+        select(func.count(StrategyTestCase.id)).where(
+            StrategyTestCase.user_id == principal.user_id,
+            StrategyTestCase.strategy_id == strategy.id,
+            StrategyTestCase.active.is_(True),
+        )
+    )
+    if saved_test_count:
+        await verification_service.run_saved_tests(
+            user_id=principal.user_id,
+            version=version,
+            provider=provider,
+        )
     await session.commit()
     return {"version": _version_payload(version)}
 
@@ -985,7 +1436,7 @@ async def approve_strategy_version(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    await _owned_strategy(session, principal.user_id, strategy_id)
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
     version = (
         await _owned_version(session, principal.user_id, payload.strategy_version_id)
         if payload.strategy_version_id
@@ -995,12 +1446,42 @@ async def approve_strategy_version(
         raise HTTPException(status_code=404, detail="Strategy version not found")
     expected_hash = payload.expected_schema_hash or version.schema_hash
     try:
+        definition = StrategyDefinition.model_validate(version.schema_json)
+        from ai_market_monitor.cockpit_service import StrategyCockpitService
+
+        validation = await StrategyCockpitService(session).validate_definition(
+            user_id=principal.user_id,
+            definition=definition,
+            strategy_id=strategy.id,
+            strategy_version_id=version.id,
+        )
+        if validation["blocking"]:
+            raise StrategyGateError(
+                "strategy_conflict_detected",
+                "Critical strategy conflicts must be resolved before activation.",
+            )
+        verification = await session.scalar(
+            select(StrategyVersionVerification).where(
+                StrategyVersionVerification.strategy_version_id == version.id
+            )
+        )
+        verification_service = VerifiedStrategyService(session, settings)
+        if verification is None:
+            await verification_service.prepare_version(
+                user_id=principal.user_id,
+                strategy=strategy,
+                version=version,
+            )
+        await verification_service.approval_gate(
+            user_id=principal.user_id,
+            version=version,
+        )
         approved = await StrategyService(session, settings.disclaimer_version).approve(
             version,
             user_id=principal.user_id,
             expected_schema_hash=expected_hash,
         )
-    except (StrategyGateError, EntitlementError) as exc:
+    except (StrategyGateError, EntitlementError, VerifiedStrategyError) as exc:
         raise HTTPException(status_code=409, detail=exc.code) from exc
     await session.commit()
     return {"version": _version_payload(approved)}
@@ -1026,31 +1507,47 @@ async def publish_strategy_version(
         raise HTTPException(status_code=409, detail="notification_channel_required")
     expected_hash = payload.expected_schema_hash or version.schema_hash
     try:
-        approved = await StrategyService(session, settings.disclaimer_version).approve(
-            version,
-            user_id=principal.user_id,
-            expected_schema_hash=expected_hash,
-        )
-        definition = StrategyDefinition.model_validate(approved.schema_json)
+        definition = StrategyDefinition.model_validate(version.schema_json)
         from ai_market_monitor.cockpit_service import StrategyCockpitService
 
         validation = await StrategyCockpitService(session).validate_definition(
             user_id=principal.user_id,
             definition=definition,
             strategy_id=strategy.id,
-            strategy_version_id=approved.id,
+            strategy_version_id=version.id,
         )
         if validation["blocking"]:
             raise StrategyGateError(
                 "strategy_conflict_detected",
                 "Critical strategy conflicts must be resolved before activation.",
             )
+        verification = await session.scalar(
+            select(StrategyVersionVerification).where(
+                StrategyVersionVerification.strategy_version_id == version.id
+            )
+        )
+        verification_service = VerifiedStrategyService(session, settings)
+        if verification is None:
+            await verification_service.prepare_version(
+                user_id=principal.user_id,
+                strategy=strategy,
+                version=version,
+            )
+        await verification_service.approval_gate(
+            user_id=principal.user_id,
+            version=version,
+        )
+        approved = await StrategyService(session, settings.disclaimer_version).approve(
+            version,
+            user_id=principal.user_id,
+            expected_schema_hash=expected_hash,
+        )
         await EntitlementService(session).enforce_strategy_activation(
             principal.user_id,
             definition,
             strategy_id=strategy.id,
         )
-    except (StrategyGateError, EntitlementError) as exc:
+    except (StrategyGateError, EntitlementError, VerifiedStrategyError) as exc:
         raise HTTPException(status_code=409, detail=exc.code) from exc
     now = _now()
     if strategy.active_version_id and strategy.active_version_id != approved.id:
@@ -1095,11 +1592,492 @@ async def compare_versions(
     from ai_market_monitor.cockpit_service import StrategyCockpitService
 
     behavior = await StrategyCockpitService(session).compare_versions(left, right)
+    verification_rows = list(
+        (
+            await session.scalars(
+                select(StrategyVersionVerification).where(
+                    StrategyVersionVerification.strategy_version_id.in_(
+                        [left.id, right.id]
+                    )
+                )
+            )
+        ).all()
+    )
+    verification_by_version = {
+        item.strategy_version_id: item for item in verification_rows
+    }
     return {
         "left": _version_payload(left),
         "right": _version_payload(right),
         "diff": diff,
         "behavior": behavior,
+        "verification_effects": {
+            "left": _verification_comparison(
+                verification_by_version.get(left.id)
+            ),
+            "right": _verification_comparison(
+                verification_by_version.get(right.id)
+            ),
+        },
+    }
+
+
+@router.get("/strategies/{strategy_id}/verification")
+async def verified_strategy_workspace(
+    strategy_id: UUID,
+    version_id: UUID | None = Query(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    version = (
+        await _owned_version(session, principal.user_id, version_id)
+        if version_id
+        else await _latest_version(session, strategy_id)
+    )
+    if version is None or version.strategy_id != strategy.id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    workspace = await VerifiedStrategyService(session, settings).workspace(
+        user_id=principal.user_id,
+        strategy=strategy,
+        version=version,
+    )
+    await session.commit()
+    return workspace
+
+
+@router.post("/strategies/{strategy_id}/interpretation/{statement_id}/resolve")
+async def resolve_strategy_interpretation(
+    strategy_id: UUID,
+    statement_id: UUID,
+    payload: InterpretationResolutionRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    await _owned_strategy(session, principal.user_id, strategy_id)
+    statement = await session.scalar(
+        select(StrategyInterpretationStatement).where(
+            StrategyInterpretationStatement.id == statement_id,
+            StrategyInterpretationStatement.strategy_id == strategy_id,
+            StrategyInterpretationStatement.user_id == principal.user_id,
+        )
+    )
+    if statement is None:
+        raise HTTPException(status_code=404, detail="Interpretation item not found")
+    try:
+        resolved = await VerifiedStrategyService(session, settings).resolve_statement(
+            user_id=principal.user_id,
+            statement_id=statement_id,
+            action=payload.action,
+            resolution_text=payload.resolution_text,
+        )
+    except VerifiedStrategyError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    await session.commit()
+    return {
+        "id": str(resolved.id),
+        "status": resolved.status,
+        "resolution_status": resolved.resolution_status,
+        "resolution_text": resolved.resolution_text,
+    }
+
+
+@router.post("/strategies/{strategy_id}/versions/{version_id}/interpretation/approve")
+async def approve_strategy_interpretation(
+    strategy_id: UUID,
+    version_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    await _owned_strategy(session, principal.user_id, strategy_id)
+    version = await _owned_version(session, principal.user_id, version_id)
+    if version.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    try:
+        verification = await VerifiedStrategyService(session, settings).approve_interpretation(
+            user_id=principal.user_id,
+            version=version,
+        )
+    except VerifiedStrategyError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    await session.commit()
+    return {"status": verification.interpretation_status}
+
+
+@router.post("/strategies/{strategy_id}/versions/{version_id}/save-draft")
+async def save_verified_strategy_draft(
+    strategy_id: UUID,
+    version_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    version = await _owned_version(session, principal.user_id, version_id)
+    if version.strategy_id != strategy.id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    if version.approved_at is not None or version.status in {
+        StrategyVersionStatus.APPROVED,
+        StrategyVersionStatus.ACTIVE,
+        StrategyVersionStatus.SUPERSEDED,
+    }:
+        raise HTTPException(status_code=409, detail="approved_version_immutable")
+    version.updated_at = _now()
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="user",
+            action="strategy.draft_saved",
+            target_type="strategy_version",
+            target_id=str(version.id),
+            metadata_redacted={"schema_hash": version.schema_hash},
+            created_at=version.updated_at,
+        )
+    )
+    await session.commit()
+    return {"version": _version_payload(version), "saved": True}
+
+
+@router.post("/strategies/{strategy_id}/tests", status_code=status.HTTP_201_CREATED)
+async def create_strategy_test_case(
+    strategy_id: UUID,
+    payload: StrategyTestCaseRequest,
+    version_id: UUID | None = Query(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    version = (
+        await _owned_version(session, principal.user_id, version_id)
+        if version_id
+        else await _latest_version(session, strategy_id)
+    )
+    if version is None or version.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    service = VerifiedStrategyService(session, settings)
+    try:
+        case_row = await service.create_test_case(
+            user_id=principal.user_id,
+            strategy=strategy,
+            **payload.model_dump(),
+        )
+        run = await service.run_test_case(
+            user_id=principal.user_id,
+            case=case_row,
+            version=version,
+            provider=provider,
+        )
+    except VerifiedStrategyError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    await session.commit()
+    return {
+        "test_case_id": str(case_row.id),
+        "status": run.status,
+        "actual_result": run.actual_result,
+        "condition_results": run.condition_results,
+        "mismatch_reason": run.mismatch_reason,
+        "evidence": run.evidence,
+    }
+
+
+@router.post("/strategies/{strategy_id}/tests/{test_case_id}/run")
+async def run_strategy_test_case(
+    strategy_id: UUID,
+    test_case_id: UUID,
+    version_id: UUID = Query(),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> dict[str, Any]:
+    await _owned_strategy(session, principal.user_id, strategy_id)
+    version = await _owned_version(session, principal.user_id, version_id)
+    case_row = await session.scalar(
+        select(StrategyTestCase).where(
+            StrategyTestCase.id == test_case_id,
+            StrategyTestCase.user_id == principal.user_id,
+            StrategyTestCase.strategy_id == strategy_id,
+        )
+    )
+    if case_row is None or version.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    run = await VerifiedStrategyService(session, settings).run_test_case(
+        user_id=principal.user_id,
+        case=case_row,
+        version=version,
+        provider=provider,
+    )
+    await session.commit()
+    return {
+        "status": run.status,
+        "actual_result": run.actual_result,
+        "condition_results": run.condition_results,
+        "mismatch_reason": run.mismatch_reason,
+        "evidence": run.evidence,
+    }
+
+
+@router.post("/strategies/{strategy_id}/versions/{version_id}/tests/run")
+async def rerun_strategy_tests(
+    strategy_id: UUID,
+    version_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> dict[str, Any]:
+    await _owned_strategy(session, principal.user_id, strategy_id)
+    version = await _owned_version(session, principal.user_id, version_id)
+    if version.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    runs = await VerifiedStrategyService(session, settings).run_saved_tests(
+        user_id=principal.user_id,
+        version=version,
+        provider=provider,
+    )
+    await session.commit()
+    return {
+        "items": [
+            {
+                "test_case_id": str(item.test_case_id),
+                "status": item.status,
+                "actual_result": item.actual_result,
+                "mismatch_reason": item.mismatch_reason,
+            }
+            for item in runs
+        ]
+    }
+
+
+@router.post("/strategies/{strategy_id}/versions/{version_id}/historical-validation")
+async def run_verified_historical_validation(
+    strategy_id: UUID,
+    version_id: UUID,
+    payload: HistoricalValidationRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    version = await _owned_version(session, principal.user_id, version_id)
+    if version.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    service = VerifiedStrategyService(session, settings)
+    try:
+        job = await service.queue_historical_validation(
+            user_id=principal.user_id,
+            strategy=strategy,
+            version=version,
+            **payload.model_dump(),
+        )
+        result = await DashboardJobService(session, provider, settings).run_backtest_job(job.id)
+        verification = await service.sync_historical_result(
+            user_id=principal.user_id,
+            job=job,
+            result=result,
+        )
+    except VerifiedStrategyError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    await session.commit()
+    return {
+        "job_id": str(job.id),
+        "status": verification.historical_status,
+        "summary": verification.historical_summary,
+    }
+
+
+@router.post("/strategies/{strategy_id}/versions/{version_id}/restore")
+async def restore_strategy_version(
+    strategy_id: UUID,
+    version_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    source = await _owned_version(session, principal.user_id, version_id)
+    if source.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    restored = await VerifiedStrategyService(session, settings).restore_version(
+        user_id=principal.user_id,
+        strategy=strategy,
+        source=source,
+    )
+    await session.commit()
+    return {"version": _version_payload(restored)}
+
+
+@router.get("/strategies/{strategy_id}/versions/{version_id}/contract")
+async def portable_strategy_contract(
+    strategy_id: UUID,
+    version_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    version = await _owned_version(session, principal.user_id, version_id)
+    if version.strategy_id != strategy_id:
+        raise HTTPException(status_code=404, detail="Strategy version not found")
+    contract = await VerifiedStrategyService(session, settings).contract(
+        user_id=principal.user_id,
+        strategy=strategy,
+        version=version,
+    )
+    await session.commit()
+    return contract
+
+
+@router.post("/forensic-investigations", status_code=status.HTTP_201_CREATED)
+async def create_forensic_investigation(
+    payload: ForensicInvestigationRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, payload.strategy_id)
+    investigation = await VerifiedStrategyService(session, settings).investigate(
+        user_id=principal.user_id,
+        strategy=strategy,
+        symbol=payload.symbol,
+        exchange=payload.exchange,
+        timeframe=payload.timeframe,
+        requested_time=payload.requested_time,
+    )
+    await session.commit()
+    return {
+        "id": str(investigation.id),
+        "status": investigation.status,
+        "evidence_availability": investigation.evidence_availability,
+        "primary_category": investigation.primary_category,
+        "conclusion": investigation.conclusion,
+        "rule_results": investigation.rule_results,
+        "timeline": investigation.timeline,
+        "system_diagnostics": investigation.system_diagnostics,
+        "delivery_diagnostics": investigation.delivery_diagnostics,
+    }
+
+
+@router.post("/alerts/{alert_id}/outcomes")
+async def review_alert_outcome(
+    alert_id: UUID,
+    payload: OutcomeReviewRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> dict[str, Any]:
+    alert = await session.get(Alert, alert_id)
+    if alert is None or alert.user_id != principal.user_id:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    review = await VerifiedStrategyService(session, settings).review_outcome(
+        user_id=principal.user_id,
+        alert=alert,
+        provider=provider,
+        **payload.model_dump(),
+    )
+    await session.commit()
+    return {
+        "id": str(review.id),
+        "status": review.status,
+        "classification": review.classification,
+        "horizon_minutes": review.horizon_minutes,
+        "evaluation_due_at": review.evaluation_due_at,
+        "outcome_metrics": review.outcome_metrics,
+        "price_path": review.price_path,
+        "classification_rules": review.classification_rules,
+        "notes": review.notes,
+        "tags": review.tags,
+    }
+
+
+@router.get("/strategies/{strategy_id}/outcomes")
+async def list_strategy_outcomes(
+    strategy_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    strategy = await _owned_strategy(session, principal.user_id, strategy_id)
+    versions = list(
+        (
+            await session.scalars(
+                select(StrategyVersion).where(
+                    StrategyVersion.strategy_id == strategy.id
+                )
+            )
+        ).all()
+    )
+    version_by_id = {item.id: item for item in versions}
+    alerts = list(
+        (
+            await session.scalars(
+                select(Alert)
+                .where(
+                    Alert.user_id == principal.user_id,
+                    Alert.strategy_version_id.in_(version_by_id),
+                    Alert.alert_type == AlertType.CONFIRMED,
+                )
+                .order_by(Alert.created_at.desc())
+                .limit(100)
+            )
+        ).all()
+    )
+    reviews = list(
+        (
+            await session.scalars(
+                select(OutcomeReview).where(
+                    OutcomeReview.user_id == principal.user_id,
+                    OutcomeReview.alert_id.in_([item.id for item in alerts]),
+                )
+            )
+        ).all()
+    ) if alerts else []
+    review_by_alert: dict[UUID, list[OutcomeReview]] = {}
+    for review in reviews:
+        review_by_alert.setdefault(review.alert_id, []).append(review)
+    return {
+        "items": [
+            {
+                "alert_id": str(alert.id),
+                "title": alert.title,
+                "symbol": (alert.proof_receipt or {}).get("symbol"),
+                "exchange": (alert.proof_receipt or {}).get("exchange"),
+                "timeframe": (alert.proof_receipt or {}).get("timeframe"),
+                "confirmed_at": alert.candle_timestamp or alert.created_at,
+                "strategy_version": (
+                    version_by_id[alert.strategy_version_id].version_number
+                    if alert.strategy_version_id in version_by_id
+                    else None
+                ),
+                "current_version": (
+                    version_by_id[strategy.active_version_id].version_number
+                    if strategy.active_version_id in version_by_id
+                    else None
+                ),
+                "proof_url": f"/api/v1/dashboard/cockpit/alerts/{alert.id}/proof",
+                "reviews": [
+                    {
+                        "id": str(review.id),
+                        "horizon_minutes": review.horizon_minutes,
+                        "classification": review.classification,
+                        "status": review.status,
+                        "outcome_metrics": review.outcome_metrics,
+                        "price_path": review.price_path,
+                        "notes": review.notes,
+                        "tags": review.tags,
+                    }
+                    for review in review_by_alert.get(alert.id, [])
+                ],
+            }
+            for alert in alerts
+        ],
+        "classification_is_user_defined": True,
+        "notice": "Outcome review describes user-defined monitoring results, not advice.",
     }
 
 
@@ -1253,6 +2231,239 @@ async def setup_chart(
     }
 
 
+@router.get("/observability/monitors")
+async def observability_monitors(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    rows = (
+        await session.execute(
+            select(Strategy.id, Strategy.name, Strategy.active_version_id)
+            .where(
+                Strategy.user_id == principal.user_id,
+                Strategy.archived_at.is_(None),
+            )
+            .order_by(Strategy.name.asc())
+        )
+    ).all()
+    return {
+        "items": [
+            {
+                "id": str(strategy_id),
+                "name": name,
+                "active_version_id": str(version_id) if version_id else None,
+            }
+            for strategy_id, name, version_id in rows
+        ]
+    }
+
+
+@router.get("/observability/radar")
+async def observability_radar(
+    monitor_id: UUID | None = Query(default=None),
+    symbol: str | None = Query(default=None, max_length=40),
+    timeframe: str | None = Query(
+        default=None,
+        pattern=r"^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+    ),
+    lifecycle_state: str | None = Query(default=None, max_length=40),
+    blocker: str | None = Query(default=None, max_length=100),
+    data_health: str | None = Query(default=None, max_length=32),
+    sort: str = Query(
+        default="readiness",
+        pattern=(
+            r"^(readiness|newest_change|monitor|symbol|timeframe|"
+            r"lifecycle_state|blocker|data_health)$"
+        ),
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return await SetupObservabilityService(session, settings).radar(
+        principal.user_id,
+        monitor_id=monitor_id,
+        symbol=symbol,
+        timeframe=timeframe,
+        state=lifecycle_state,
+        blocker=blocker,
+        data_health=data_health,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/observability/health")
+async def observability_health(
+    monitor_id: UUID | None = Query(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return {
+        "items": await SetupObservabilityService(session, settings).health(
+            principal.user_id, monitor_id
+        )
+    }
+
+
+@router.get("/observability/bottlenecks")
+async def observability_bottlenecks(
+    monitor_id: UUID | None = Query(default=None),
+    strategy_version_id: UUID | None = Query(default=None),
+    required: bool | None = Query(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return {
+        "items": await SetupObservabilityService(session, settings).bottlenecks(
+            principal.user_id,
+            monitor_id=monitor_id,
+            version_id=strategy_version_id,
+            required=required,
+        )
+    }
+
+
+@router.post("/observability/health/{monitor_id}/explain")
+async def explain_monitor_health(
+    monitor_id: UUID,
+    payload: ObservabilityExplainRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    items = await SetupObservabilityService(session, settings).health(
+        principal.user_id, monitor_id
+    )
+    if not items:
+        raise HTTPException(status_code=404, detail="Monitor health evidence not found")
+    health = items[0]
+    evidence = {
+        "primary_reason": " ".join(
+            item["message"]
+            for item in [
+                *(health.get("technical_causes") or []),
+                *(health.get("strategy_causes") or []),
+            ]
+            if item.get("message")
+        ),
+        "primary_category": "monitor_health",
+        "monitor_name": health["monitor_name"],
+        "symbol": "the configured universe",
+        "timeframe": "the configured schedule",
+        "evidence_availability": "exact",
+        "condition_summary": health.get("metrics"),
+        "conditions": [],
+        "provider_health": {
+            "status": health["technical_status"],
+            "provider_errors": (health.get("metrics") or {}).get("provider_errors"),
+        },
+        "notification_deliveries": [],
+    }
+    explainer = GroundedObservabilityExplainer(settings)
+    explanation = await explainer.explain(evidence)
+    record = ObservabilityExplanation(
+        user_id=principal.user_id,
+        setup_instance_id=None,
+        explanation_type=payload.explanation_type,
+        evidence_hash=explainer.evidence_hash(evidence),
+        grounded_payload=evidence,
+        response_text=explanation,
+        model=settings.openai_model if settings.openai_api_key else None,
+        created_at=_now(),
+    )
+    session.add(record)
+    await session.commit()
+    return {
+        "explanation": explanation,
+        "evidence_hash": record.evidence_hash,
+        "grounded": True,
+    }
+
+
+@router.get("/lifecycles/{setup_id}/investigation")
+async def lifecycle_investigation(
+    setup_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return await SetupObservabilityService(session, settings).investigation(
+            principal.user_id, setup_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Lifecycle not found") from exc
+
+
+@router.post("/lifecycles/{setup_id}/investigation/explain")
+async def explain_lifecycle_investigation(
+    setup_id: UUID,
+    payload: ObservabilityExplainRequest,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    service = SetupObservabilityService(session, settings)
+    try:
+        evidence = await service.investigation(principal.user_id, setup_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Lifecycle not found") from exc
+    explainer = GroundedObservabilityExplainer(settings)
+    explanation = await explainer.explain(evidence)
+    record = ObservabilityExplanation(
+        user_id=principal.user_id,
+        setup_instance_id=setup_id,
+        explanation_type=payload.explanation_type,
+        evidence_hash=explainer.evidence_hash(evidence),
+        grounded_payload=evidence,
+        response_text=explanation,
+        model=settings.openai_model if settings.openai_api_key else None,
+        created_at=_now(),
+    )
+    session.add(record)
+    await session.commit()
+    return {
+        "explanation": explanation,
+        "evidence_hash": record.evidence_hash,
+        "grounded": True,
+        "generated_at": record.created_at,
+    }
+
+
+@router.post("/notification-deliveries/{delivery_id}/retry")
+async def retry_notification_delivery(
+    delivery_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    row = await session.execute(
+        select(AlertDelivery, Alert)
+        .join(Alert, Alert.id == AlertDelivery.alert_id)
+        .where(AlertDelivery.id == delivery_id, Alert.user_id == principal.user_id)
+    )
+    owned = row.one_or_none()
+    if owned is None:
+        raise HTTPException(status_code=404, detail="Notification delivery not found")
+    delivery, _alert = owned
+    if delivery.status not in {
+        DeliveryStatus.FAILED,
+        DeliveryStatus.FAILED_RETRYABLE,
+        DeliveryStatus.FAILED_PERMANENT,
+    }:
+        raise HTTPException(status_code=409, detail="Only failed deliveries can be retried")
+    delivery.status = DeliveryStatus.PENDING
+    delivery.next_retry_at = _now()
+    delivery.last_error_detail = None
+    await session.commit()
+    return {"id": str(delivery.id), "status": delivery.status.value}
+
+
 @router.get("/lifecycles/{setup_id}/chart")
 async def lifecycle_chart(
     setup_id: UUID,
@@ -1324,11 +2535,7 @@ async def lifecycle_chart(
             status_code=502,
             detail=f"Market data unavailable: {type(exc).__name__}",
         ) from exc
-    candles = [
-        candle
-        for candle in candles
-        if start <= ensure_aware(candle.timestamp) <= end
-    ]
+    candles = [candle for candle in candles if start <= ensure_aware(candle.timestamp) <= end]
     if not candles:
         raise HTTPException(status_code=404, detail="No candles available for this lifecycle")
 
@@ -1678,8 +2885,7 @@ async def save_lifecycle_annotations(
         payload.timeframe,
     )
     annotation_payload = [
-        annotation.model_dump(mode="json", exclude_none=True)
-        for annotation in payload.annotations
+        annotation.model_dump(mode="json", exclude_none=True) for annotation in payload.annotations
     ]
     if snapshot is None:
         snapshot = ChartSnapshot(
@@ -1930,7 +3136,7 @@ async def dashboard_scan_now(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "notification_channel_required",
-                "message": "Connect Telegram or Discord before running Quick Scan.",
+                "message": "Connect Telegram or Discord before running Scanner.",
             },
         )
     try:
@@ -1957,9 +3163,7 @@ async def dashboard_scan_prompt_interpret(
     )
     from ai_market_monitor.cockpit_service import StrategyCockpitService
 
-    preference = await StrategyCockpitService(session).strategy_preferences(
-        principal.user_id
-    )
+    preference = await StrategyCockpitService(session).strategy_preferences(principal.user_id)
     strategy = preview.strategy.model_copy(deep=True)
     prompt_text = payload.prompt.casefold()
     applied_preferences: list[str] = []
@@ -1978,13 +3182,9 @@ async def dashboard_scan_prompt_interpret(
         and not any(channel in prompt_text for channel in ("telegram", "discord", "web"))
     ):
         strategy.alerts.channels = [
-            channel
-            for channel in preferred_channels
-            if channel in {"telegram", "discord", "web"}
+            channel for channel in preferred_channels if channel in {"telegram", "discord", "web"}
         ] or strategy.alerts.channels
-        applied_preferences.append(
-            "alert channels: " + ", ".join(strategy.alerts.channels)
-        )
+        applied_preferences.append("alert channels: " + ", ".join(strategy.alerts.channels))
     typical_maximum = preference.preferences.get("typical_max_alerts_per_hour")
     if (
         isinstance(typical_maximum, int | float)
@@ -2084,7 +3284,7 @@ async def dashboard_light_scan(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "notification_channel_required",
-                "message": "Connect Telegram or Discord before running Quick Scan.",
+                "message": "Connect Telegram or Discord before running Scanner.",
             },
         )
     preview = await configured_strategy_interpreter(settings).interpret(
@@ -2097,7 +3297,7 @@ async def dashboard_light_scan(
             detail={
                 "code": "clarification_required",
                 "message": (
-                    "Quick Scan needs at least one supported deterministic condition. "
+                    "Scanner needs at least one supported deterministic condition. "
                     "Add an indicator, price-action event, timeframe, comparator, or threshold."
                 ),
                 "interpretation": interpretation,
@@ -2382,9 +3582,7 @@ async def backtest_chart(
         {
             **marker,
             "time": snapped_time(marker.get("time")),
-            "position": (
-                "aboveBar" if marker.get("outcome") == "confirmed" else "belowBar"
-            ),
+            "position": ("aboveBar" if marker.get("outcome") == "confirmed" else "belowBar"),
             "shape": "arrowUp" if marker.get("outcome") == "confirmed" else "circle",
         }
         for marker in stored_chart.get("markers", [])
@@ -2414,11 +3612,7 @@ async def backtest_chart(
                 }
             )
     setup_result = next(
-        (
-            item
-            for item in reversed(result.setup_results)
-            if str(item.get("symbol")) == symbol
-        ),
+        (item for item in reversed(result.setup_results) if str(item.get("symbol")) == symbol),
         {},
     )
     risk = setup_result.get("risk_calculation") or {}
@@ -2483,8 +3677,7 @@ async def save_backtest_annotations(
         payload.timeframe,
     )
     annotations = [
-        annotation.model_dump(mode="json", exclude_none=True)
-        for annotation in payload.annotations
+        annotation.model_dump(mode="json", exclude_none=True) for annotation in payload.annotations
     ]
     if snapshot is None:
         snapshot = ChartSnapshot(
@@ -2860,9 +4053,13 @@ async def create_support_ticket(
         decoded_screenshots.append(
             (f"screenshot-{index + 1}{extension}", screenshot.content_type, content)
         )
-    contact_email = str(payload.email) if payload.email else await _user_email(
-        session,
-        principal.user_id,
+    contact_email = (
+        str(payload.email)
+        if payload.email
+        else await _user_email(
+            session,
+            principal.user_id,
+        )
     )
     context = {
         **payload.context,
@@ -2899,9 +4096,7 @@ async def create_support_ticket(
                     "content_type": content_type,
                     "size_bytes": len(content),
                     "storage_key": str(
-                        path.relative_to(
-                            Path(settings.dashboard_export_directory).resolve()
-                        )
+                        path.relative_to(Path(settings.dashboard_export_directory).resolve())
                     ),
                 }
             )

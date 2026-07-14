@@ -60,6 +60,7 @@ class ConditionEvaluation:
     error_code: str | None = None
     previous_actual_value: Any = None
     previous_required_value: Any = None
+    mechanic_evidence: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -89,6 +90,7 @@ class ConditionEvaluation:
             "explanation": self.explanation,
             "proximity_score": round(self.proximity_score, 4),
             "error_code": self.error_code,
+            "mechanic_evidence": self.mechanic_evidence,
         }
 
 
@@ -250,15 +252,23 @@ class EvaluationResult:
 
     def proof_receipt(self) -> dict[str, Any]:
         required_conditions = [condition for condition in self.conditions if condition.mandatory]
-        optional_conditions = [condition for condition in self.conditions if not condition.mandatory]
+        optional_conditions = [
+            condition for condition in self.conditions if not condition.mandatory
+        ]
         required_passed = [
-            condition for condition in required_conditions if condition.state == EvaluationState.PASSED
+            condition
+            for condition in required_conditions
+            if condition.state == EvaluationState.PASSED
         ]
         optional_passed = [
-            condition for condition in optional_conditions if condition.state == EvaluationState.PASSED
+            condition
+            for condition in optional_conditions
+            if condition.state == EvaluationState.PASSED
         ]
         optional_failed = [
-            condition for condition in optional_conditions if condition.state != EvaluationState.PASSED
+            condition
+            for condition in optional_conditions
+            if condition.state != EvaluationState.PASSED
         ]
         required_completion_percent = (
             round((len(required_passed) / len(required_conditions)) * 100, 3)

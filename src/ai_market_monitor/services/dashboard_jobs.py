@@ -1,5 +1,6 @@
 import csv
 import json
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,48 @@ class DashboardJobService:
         for job in jobs:
             await self.run_replay_job(job.id)
         return jobs
+
+    async def evaluate_historical_moment(
+        self,
+        *,
+        strategy_version_id: UUID,
+        symbol: str,
+        timeframe: str,
+        evaluation_time: datetime,
+    ) -> EvaluationResult:
+        """Evaluate one retained/provider historical moment through the production rule engine."""
+        definition, version, strategy = await self._load_definition(strategy_version_id)
+        candle_sets = await self._fetch_candle_sets(
+            definition,
+            symbol,
+            max(300, definition.universe.min_historical_candles),
+            extra_timeframes={timeframe},
+            center=ensure_aware(evaluation_time),
+            before_minutes=max(14_400, definition.universe.min_historical_candles * 60),
+            after_minutes=0,
+        )
+        base = candle_sets.get(timeframe) or candle_sets.get(definition.base_timeframe) or []
+        eligible = [
+            candle
+            for candle in base
+            if ensure_aware(candle.timestamp) <= ensure_aware(evaluation_time)
+        ]
+        if not eligible:
+            raise DashboardJobError(
+                "historical_candle_unavailable",
+                "No candle was available at or before the selected historical time.",
+            )
+        selected = eligible[-1]
+        return await self._evaluate(
+            definition,
+            strategy,
+            version,
+            symbol,
+            candle_sets,
+            ensure_aware(selected.timestamp),
+            previous_score=None,
+            chart_reference=f"verification:{version.id}:{symbol}",
+        )
 
     async def run_replay_job(self, job_id: UUID) -> SetupReplayResult:
         job = await self.session.get(SetupReplayJob, job_id)
@@ -207,7 +250,19 @@ class DashboardJobService:
             evaluated = 0
             confirmed = 0
             near_miss = 0
+            outcome_counts: Counter[str] = Counter()
+            blocker_counts: Counter[str] = Counter()
+            condition_evaluations: Counter[str] = Counter()
+            condition_passes: Counter[str] = Counter()
+            condition_failures: Counter[str] = Counter()
+            category_examples: dict[str, list[dict[str, Any]]] = {
+                "matches": [],
+                "near_matches": [],
+                "invalidated": [],
+                "non_matches": [],
+            }
             cumulative_quality = 0.0
+            unavailable_symbols: list[dict[str, str]] = []
             chart_payload: dict[str, Any] = {
                 "symbol": job.symbols[0] if job.symbols else None,
                 "timeframe": job.timeframe,
@@ -216,11 +271,23 @@ class DashboardJobService:
                 "condition_events": [],
             }
             for symbol in job.symbols:
+                range_minutes = max(
+                    1,
+                    int(
+                        (
+                            ensure_aware(job.ended_at_range)
+                            - ensure_aware(job.started_at_range)
+                        ).total_seconds()
+                        / 60
+                    ),
+                )
                 candle_sets = await self._fetch_candle_sets(
                     definition,
                     symbol,
                     1000,
                     extra_timeframes={job.timeframe},
+                    center=ensure_aware(job.ended_at_range),
+                    before_minutes=range_minutes,
                 )
                 base = candle_sets.get(job.timeframe) or candle_sets[definition.base_timeframe]
                 candidates = [
@@ -229,7 +296,15 @@ class DashboardJobService:
                     if ensure_aware(job.started_at_range)
                     <= ensure_aware(candle.timestamp)
                     <= ensure_aware(job.ended_at_range)
-                ] or base[-300:]
+                ]
+                if not candidates:
+                    unavailable_symbols.append(
+                        {
+                            "symbol": symbol,
+                            "reason": "no_candles_in_requested_window",
+                        }
+                    )
+                    continue
                 if symbol == chart_payload["symbol"]:
                     chart_payload["candles"] = [
                         _candle_payload(candle) for candle in candidates[-500:]
@@ -248,12 +323,57 @@ class DashboardJobService:
                     )
                     previous_score = evaluation.near_miss.current_score
                     evaluated += 1
+                    outcome = evaluation.outcome.value
+                    outcome_counts[outcome] += 1
                     cumulative_quality += evaluation.near_miss.current_score / 100
-                    if evaluation.outcome.value == "confirmed":
+                    if outcome == "confirmed":
                         confirmed += 1
-                    if evaluation.outcome.value == "near_miss":
+                    if outcome == "near_miss":
                         near_miss += 1
-                    if evaluation.outcome.value in {"confirmed", "near_miss", "forming"}:
+                    failed_required = [
+                        condition
+                        for condition in evaluation.conditions
+                        if condition.mandatory and condition.state.value != "passed"
+                    ]
+                    if failed_required:
+                        blocker_counts[failed_required[0].name] += 1
+                    for condition in evaluation.conditions:
+                        condition_evaluations[condition.name] += 1
+                        if condition.state.value == "passed":
+                            condition_passes[condition.name] += 1
+                        else:
+                            condition_failures[condition.name] += 1
+                    category = (
+                        "matches"
+                        if outcome == "confirmed"
+                        else "near_matches"
+                        if outcome in {"near_miss", "forming"}
+                        else "invalidated"
+                        if outcome in {"invalid", "expired"}
+                        else "non_matches"
+                    )
+                    if len(category_examples[category]) < 50:
+                        category_examples[category].append(
+                            {
+                                "symbol": symbol,
+                                "timestamp": candle.timestamp.isoformat(),
+                                "outcome": outcome,
+                                "score": round(evaluation.near_miss.current_score, 3),
+                                "primary_blocker": (
+                                    failed_required[0].name if failed_required else None
+                                ),
+                                "conditions": [
+                                    {
+                                        "name": condition.name,
+                                        "state": condition.state.value,
+                                        "actual_value": condition.actual_value,
+                                        "required_value": condition.required_value,
+                                    }
+                                    for condition in evaluation.conditions
+                                ],
+                            }
+                        )
+                    if outcome in {"confirmed", "near_miss", "forming"}:
                         proof = evaluation.proof_receipt()
                         setup_results.append(
                             {
@@ -300,13 +420,42 @@ class DashboardJobService:
                         }
                     )
             result.metrics = {
-                "status": "succeeded",
-                "message": "Historical analysis completed. These are hypothetical evaluations.",
+                "status": "succeeded" if evaluated else "insufficient_data",
+                "message": (
+                    "Historical analysis completed. These are hypothetical evaluations."
+                    if evaluated
+                    else "No candles were available in the requested historical window."
+                ),
                 "executed_trades": False,
                 "evaluations": evaluated,
                 "confirmed_setups": confirmed,
                 "near_miss_setups": near_miss,
+                "invalidated_setups": (
+                    outcome_counts["invalid"] + outcome_counts["expired"]
+                ),
+                "non_match_setups": sum(
+                    outcome_counts[value]
+                    for value in ("invalid", "skipped", "expired", "error")
+                ),
+                "outcome_counts": dict(outcome_counts),
+                "most_common_failed_condition": (
+                    blocker_counts.most_common(1)[0][0] if blocker_counts else None
+                ),
+                "failed_condition_counts": dict(blocker_counts),
+                "condition_statistics": {
+                    name: {
+                        "evaluations": count,
+                        "passes": condition_passes[name],
+                        "failures": condition_failures[name],
+                        "pass_rate": round(condition_passes[name] / count, 6)
+                        if count
+                        else None,
+                    }
+                    for name, count in condition_evaluations.items()
+                },
+                "examples_by_outcome": category_examples,
                 "symbols": job.symbols,
+                "unavailable_symbols": unavailable_symbols,
                 "report": _backtest_report(
                     symbols=job.symbols,
                     evaluated=evaluated,
@@ -461,9 +610,9 @@ class DashboardJobService:
         metadata = {}
         if callable(metadata_loader):
             try:
-                metadata = (
-                    await metadata_loader(definition.universe.exchange, [symbol])
-                ).get(symbol, {})
+                metadata = (await metadata_loader(definition.universe.exchange, [symbol])).get(
+                    symbol, {}
+                )
             except Exception:
                 metadata = {}
         market = market_snapshot_from_candles(
@@ -563,12 +712,16 @@ class DashboardJobService:
         ).all()
         setup_ids = [setup.id for setup in setups]
         lifecycle_events = (
-            await self.session.scalars(
-                select(SetupLifecycleEvent)
-                .where(SetupLifecycleEvent.setup_instance_id.in_(setup_ids))
-                .order_by(SetupLifecycleEvent.occurred_at.asc())
-            )
-        ).all() if setup_ids else []
+            (
+                await self.session.scalars(
+                    select(SetupLifecycleEvent)
+                    .where(SetupLifecycleEvent.setup_instance_id.in_(setup_ids))
+                    .order_by(SetupLifecycleEvent.occurred_at.asc())
+                )
+            ).all()
+            if setup_ids
+            else []
+        )
         inbox_items = (
             await self.session.scalars(
                 select(AlertInboxItem)

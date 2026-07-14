@@ -31,6 +31,7 @@ class FakeOpenAIClient:
                 "operator": "AND",
                 "conditions": [
                     {
+                        "capability_key": "price_above_ema",
                         "condition_id": "price_above_4h_ema_200",
                         "name": "Price above 4h EMA 200",
                         "type": "indicator",
@@ -41,7 +42,7 @@ class FakeOpenAIClient:
                         "right": {
                             "kind": "indicator",
                             "name": "ema",
-                            "parameters": {"period": 200, "field": "close"},
+                            "parameters": {"period": 200},
                         },
                         "weight": 1,
                         "mandatory": True,
@@ -82,6 +83,7 @@ class WrongPercentOpenAIClient(FakeOpenAIClient):
         payload = await super().create_draft(guided_setup)
         payload["logic"]["conditions"] = [
             {
+                "capability_key": "price_above_ema",
                 "condition_id": "price_above_5",
                 "name": "Price above 5",
                 "type": "indicator",
@@ -118,10 +120,14 @@ async def test_openai_interpreter_validates_ai_draft_into_strategy_schema():
 
     preview = await OpenAIStrategyInterpreter(settings, client=FakeOpenAIClient()).interpret(guided)
 
-    assert preview.interpreter == "openai-structured-v1:gpt-5-nano"
+    assert preview.interpreter == "openai-structured-v1:gpt-5.4-nano"
     assert preview.strategy.universe.exchange == "binance"
     assert preview.strategy.supporting_timeframes == ["4h"]
     assert preview.assumptions == ["AI mapped trend filter to EMA 200."]
+    condition = preview.strategy.conditions.children[0]
+    assert condition.capability_key == "price_above_ema"
+    assert condition.left.field == "close"
+    assert condition.right.name == "ema"
 
 
 async def test_openai_percent_guard_preserves_percent_change_prompts():
@@ -189,7 +195,7 @@ def test_openai_response_parser_accepts_top_level_output_text_and_json_fence():
 async def test_openai_suggestion_narrator_only_returns_bounded_wording():
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        assert body["reasoning"]["effort"] == "minimal"
+        assert body["reasoning"]["effort"] == "low"
         return httpx.Response(
             200,
             json={

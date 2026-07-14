@@ -21,6 +21,9 @@ is therefore a greenfield foundation following the requested stack.
 4. **Deterministic market decisions.** Interpretation may translate natural language into the
    strategy DSL. Rule evaluation, actual indicator values, Near-Miss scores, and lifecycle changes
    are deterministic and store condition-level evidence.
+   AI Setup Chat persists its interview and translation sheet, but its text is never executable.
+   Only a schema-validated `StrategyDefinition` with an approved canonical hash can continue into
+   monitor validation and activation.
 5. **One persistent setup instance.** A `(strategy_version, exchange, symbol, timeframe, setup_key)`
    identifies a lifecycle. State transitions append events instead of emitting disconnected alerts.
 6. **Identity is separate from user.** Provider identities are uniquely constrained and linked to
@@ -36,6 +39,11 @@ is therefore a greenfield foundation following the requested stack.
 10. **Discord is optional delivery and community infrastructure.** OAuth linking, destinations,
     role synchronization, setup threads, slash-command shortcuts and support context are modeled
     without making Discord the primary onboarding surface.
+11. **Registry keys are the AI execution boundary.** Natural-language retrieval produces a compact
+    capability shortlist. AI may rerank those keys and extract schema-defined parameters, but every
+    AI condition must carry an immutable `capability_key`. The backend rejects unknown keys and
+    rebuilds operands from the registry before coverage audit, approval, or scanning. Unknown terms
+    become clarification questions, never silent assumptions. See `docs/CAPABILITY_RESOLVER.md`.
 
 ## Layer map
 
@@ -176,6 +184,70 @@ replacement for CI dependency/container vulnerability scanning.
 
 ## Security boundaries
 
+### Capability Coverage Console
+
+`/system-brain` is a separate administrator security boundary for capability-quality
+operations. `services/system_brain.py` verifies an environment-configured PBKDF2 password,
+delivers an expiring email OTP, persists revocable administrator sessions, rate-limits failed
+logins, and audits authentication and alias-review actions. It does not rely on development
+`X-User-ID` headers or ordinary dashboard cookies.
+
+The same service persists capability-resolution evidence and OpenAI usage returned by the API.
+The console aggregates unmatched fragments, low-confidence matches, clarification selections,
+false rankings, provider blocks, registry alias gaps, reviewed alias proposals, capability
+compatibility status, registered users and model/reasoning cost estimates. Approved aliases are
+review records for a tested registry release; they never mutate deterministic production rules
+silently. See `docs/CAPABILITY_COVERAGE_CONSOLE.md`.
+
+### Hybrid Prompt Compiler
+
+`services/hybrid_capability_resolution.py` sits between deterministic candidate retrieval and
+strategy compilation. The resolver removes conversational framing, retrieves a typo-tolerant
+shortlist from the live capability registry, and supplies recent chat context. OpenAI can rerank
+only those candidate keys and extract schema-declared parameters. `CapabilityResolver` validates
+the immutable key, parameters, provider state and timeframe before a capability binding reaches
+the rule-based/OpenAI strategy compilers. See `docs/HYBRID_PROMPT_COMPILER.md`.
+
+### Bounded Agent Control
+
+`services/agent_control.py` optionally coordinates typed AI Setup Chat turns through the OpenAI
+Responses function-calling flow. `services/agent_policy.py` computes a small allowed-tool set from
+authenticated server state on every step; `services/agent_tools.py` adapts those calls to existing
+registry, compiler, provider, Scanner, draft, and monitor services. Strict local schemas, ownership,
+entitlement, state, canonical-hash, duplicate, timeout, token, step, call, and estimated-cost checks
+run before domain execution. Parallel calls are disabled.
+
+The coordinator cannot approve or activate a strategy, modify billing/entitlements, send arbitrary
+notifications, execute code, mutate the registry, call arbitrary URLs, or create/repair a dynamic
+mechanic. Final prose is separately checked against successful tool evidence; invalid or unavailable
+agent turns fall back to the unchanged legacy flow without duplicating chat messages. Scheduled scan
+evaluation remains deterministic and LLM-free.
+
+`agent_runs` and `agent_tool_calls` store redacted decisions, results, evidence, timings, usage,
+budgets, and shadow comparisons, never hidden reasoning or credentials. Live execution is gated by
+a deterministic authenticated-user percentage cohort; shadow mode bypasses cohort selection but
+executes no tools. System Brain exposes rollout and safety metrics. See
+`docs/BOUNDED_AGENT_CONTROL.md`.
+
+### Certified Capability Extensions
+
+An explicitly approved missing OHLCV mechanic enters `services/capability_extensions.py` rather
+than being passed to the scanner as raw AI output. `services/capability_extension_ai.py` produces
+and reviews strict schemas; `engine/dynamic_mechanics.py` is the only compiler and evaluator for the
+bounded JSON expression. It rejects arbitrary code, unknown operations, unsafe parameters,
+nondeterminism and missing proof evidence.
+
+The pipeline performs Bybit spot preflight testing, independent failure classification and bounded
+AI escalation. A market candidate does not prove correctness, and no-candidate evidence does not
+permit silent logic relaxation. Live five-scan reviews distinguish implementation, user logic,
+market data and delivery failures. Certified repairs become pending immutable strategy revisions;
+the active monitor remains unchanged until the user approves and activates the revision.
+
+`services/capability_registry.py` initializes a process-wide search index at startup, keyed by a
+deterministic registry hash. Versioned approved aliases and optional embeddings contribute only to
+retrieval. Every final rule persists its immutable capability key, version, resolved parameters and
+artifact hash. See `docs/CAPABILITY_EXTENSION_PIPELINE.md`.
+
 - Secrets come only from environment settings and are excluded from logs.
 - Continuation tokens are signed; only their SHA-256 digest is stored.
 - Continuation secrets are exchanged in POST bodies, not URL query strings that access logs retain.
@@ -193,3 +265,7 @@ Scan jobs, results, alert deliveries, and billing events have idempotency keys a
 Health records distinguish market-data and integration degradation. Audit events record actor,
 request correlation, action, target, and redacted metadata. PostgreSQL constraints provide the last
 line of defense against duplicate identities, versions, deliveries, and provider events.
+
+Capability extensions add attempt, scan, certification and repair audit records. The System Brain
+console reports retrieval, selection, parameter and evaluator quality separately, along with model,
+reasoning, service tier, usage, cost estimate, candidate rate and delivered-notification evidence.

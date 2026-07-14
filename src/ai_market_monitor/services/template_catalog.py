@@ -767,9 +767,7 @@ TEMPLATE_UI_CATEGORIES: dict[str, tuple[str, ...]] = {
         "Volatility expansion",
         "Volume spike",
     ),
-    "range_breakout_retest": (
-        "Breakout confirmation",
-    ),
+    "range_breakout_retest": ("Breakout confirmation",),
     "breakout_volume": (
         "Breakout confirmation",
         "Volume spike",
@@ -813,9 +811,7 @@ TEMPLATE_UI_CATEGORIES: dict[str, tuple[str, ...]] = {
         "RSI oversold/overbought",
         "Trend continuation",
     ),
-    "six_month_high_breakout": (
-        "Breakout confirmation",
-    ),
+    "six_month_high_breakout": ("Breakout confirmation",),
     "btc_trend_filter_altcoin": (
         "BTC market-context filter",
         "Breakout confirmation",

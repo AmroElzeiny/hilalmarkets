@@ -15,6 +15,13 @@ from ai_market_monitor.db.models.accounts import (
     UserIdentity,
     WebSession,
 )
+from ai_market_monitor.db.models.capability_extensions import (
+    CapabilityClarificationEvidence,
+    CapabilityExtension,
+    CapabilityExtensionAttempt,
+    CapabilityExtensionScan,
+    CapabilityRegistryArtifact,
+)
 from ai_market_monitor.db.models.cockpit import (
     AlertFrequencyForecast,
     AlertInboxItem,
@@ -41,6 +48,8 @@ from ai_market_monitor.db.models.commercial import (
     UsageRecord,
 )
 from ai_market_monitor.db.models.dashboard_extensions import (
+    AISetupChatMessage,
+    AISetupChatSession,
     BacktestJob,
     BacktestResult,
     ChartSnapshot,
@@ -73,6 +82,13 @@ from ai_market_monitor.db.models.monitoring import (
     SetupInstance,
     SetupLifecycleEvent,
 )
+from ai_market_monitor.db.models.observability import (
+    CandidateReadinessSnapshot,
+    ConditionObservabilityAggregate,
+    MonitorEvaluationCycle,
+    MonitorHealthSummary,
+    ObservabilityExplanation,
+)
 from ai_market_monitor.db.models.strategy import (
     Strategy,
     StrategyCondition,
@@ -87,13 +103,36 @@ from ai_market_monitor.db.models.support import (
     SupportRequest,
     UserFeedback,
 )
+from ai_market_monitor.db.models.system_brain import (
+    AgentRun,
+    AgentToolCall,
+    AIUsageEvent,
+    CapabilityAliasProposal,
+    CapabilityResolutionEvent,
+    SystemBrainAuthChallenge,
+    SystemBrainLoginAttempt,
+    SystemBrainSession,
+)
 from ai_market_monitor.db.models.telegram import (
     TelegramCallbackReceipt,
     TelegramConversationState,
     TelegramUpdateReceipt,
 )
+from ai_market_monitor.db.models.verified_strategy import (
+    ForensicInvestigation,
+    OutcomeReview,
+    StrategyInterpretationStatement,
+    StrategyTestCase,
+    StrategyTestRun,
+    StrategyVersionVerification,
+)
 
 __all__ = [
+    "AgentRun",
+    "AgentToolCall",
+    "AISetupChatMessage",
+    "AISetupChatSession",
+    "AIUsageEvent",
     "Alert",
     "AlertDelivery",
     "AlertFrequencyForecast",
@@ -105,8 +144,17 @@ __all__ = [
     "BacktestJob",
     "BacktestResult",
     "ChartSnapshot",
+    "CapabilityAliasProposal",
+    "CapabilityClarificationEvidence",
+    "CapabilityExtension",
+    "CapabilityExtensionAttempt",
+    "CapabilityExtensionScan",
+    "CapabilityRegistryArtifact",
+    "CapabilityResolutionEvent",
+    "CandidateReadinessSnapshot",
     "ConditionBottleneckAggregate",
     "ConditionRuntimeState",
+    "ConditionObservabilityAggregate",
     "DashboardNotification",
     "DashboardPreference",
     "DisclaimerAcceptance",
@@ -120,6 +168,7 @@ __all__ = [
     "DiscordSetupThread",
     "EntitlementSnapshot",
     "EdgeHealthSnapshot",
+    "ForensicInvestigation",
     "IdentityLinkToken",
     "IntegrationHealth",
     "IntegrationTestResult",
@@ -127,10 +176,14 @@ __all__ = [
     "IncidentImpact",
     "IncidentUpdate",
     "MarketDataHealth",
+    "MonitorEvaluationCycle",
+    "MonitorHealthSummary",
     "MissedMoveAnalysis",
     "NearMissSnapshot",
     "OnboardingSession",
     "OperationalMetric",
+    "ObservabilityExplanation",
+    "OutcomeReview",
     "PendingEmailSignup",
     "Plan",
     "ReferralCode",
@@ -146,14 +199,21 @@ __all__ = [
     "StrategyCondition",
     "StrategyDecayEvent",
     "StrategyExperiment",
+    "StrategyInterpretationStatement",
     "StrategySuggestion",
     "StrategyTemplate",
+    "StrategyTestCase",
+    "StrategyTestRun",
     "StrategyUniverse",
     "StrategyValidationRecord",
     "StrategyVersion",
+    "StrategyVersionVerification",
     "Subscription",
     "SupportRequest",
     "SupportTicketMessage",
+    "SystemBrainAuthChallenge",
+    "SystemBrainLoginAttempt",
+    "SystemBrainSession",
     "TelegramConnection",
     "TelegramDashboardLink",
     "TelegramCallbackReceipt",

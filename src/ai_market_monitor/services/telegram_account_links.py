@@ -305,7 +305,8 @@ class TelegramAccountLinkService:
 
     async def _primary_email(self, user_id: UUID) -> str | None:
         identity = await self.session.scalar(
-            select(UserIdentity).where(
+            select(UserIdentity)
+            .where(
                 UserIdentity.user_id == user_id,
                 UserIdentity.provider == IdentityProvider.EMAIL,
             )
