@@ -420,6 +420,14 @@ class ShariaScreeningService:
         )
         reviewed_dimensions = list(snapshot.get("reviewed_dimensions") or [])
         methodology_result = dict(snapshot.get("methodology_result") or {})
+        official_reference = dict(snapshot.get("official_sc_malaysia_reference") or {})
+        factual_profile = dict(
+            snapshot.get("hilalmarkets_factual_information_profile") or {}
+        )
+        separate_use_status = {
+            str(key): str(value)
+            for key, value in dict(snapshot.get("separate_use_status") or {}).items()
+        }
         return AssetPassportResponse(
             assessment=self.assessment_summary(
                 assessment,
@@ -438,6 +446,9 @@ class ShariaScreeningService:
                 if safety_hold
                 else assessment.summary
             ),
+            official_sc_malaysia_reference=official_reference,
+            hilalmarkets_factual_information_profile=factual_profile,
+            separate_use_status=separate_use_status,
             reviewed_dimensions=reviewed_dimensions,
             methodology_result=methodology_result,
             evidence_sources=[self.evidence_response(row) for row in evidence],

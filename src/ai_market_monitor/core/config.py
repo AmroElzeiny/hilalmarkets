@@ -41,6 +41,25 @@ class Settings(BaseSettings):
     sharia_universe_cache_ttl_seconds: int = Field(default=300, ge=30, le=86400)
     sharia_compliance_safety_under_review: bool = True
     sharia_compliance_digest_local_hour: int = Field(default=8, ge=0, le=23)
+    sharia_admin_telegram_chat_id: str | None = None
+    sc_malaysia_digital_assets_url: AnyHttpUrl = AnyHttpUrl(
+        "https://www.sc.com.my/digital-assets"
+    )
+    sharia_ai_model: str = "gpt-5.4-nano"
+    sharia_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "low"
+    sharia_ai_service_tier: Literal["default", "flex"] = "flex"
+    sharia_ai_timeout_seconds: int = Field(default=900, ge=60, le=1800)
+    sharia_ai_max_retries: int = Field(default=5, ge=1, le=10)
+    sharia_ai_allow_standard_fallback: bool = False
+    sharia_review_reminder_hours: int = Field(default=6, ge=1, le=168)
+    sharia_source_scan_interval_hours: int = Field(default=24, ge=1, le=720)
+    sharia_scraper_concurrency: int = Field(default=1, ge=1, le=4)
+    sharia_scraper_obey_robots: bool = True
+    sharia_scraper_download_delay_seconds: float = Field(default=1, ge=0.2, le=60)
+    sharia_pilot_symbols: str = "BTC,ETH,SOL"
+    sharia_process_remaining_imports: bool = False
     tracedge_market_data_mode: Literal["ccxt", "fixture"] = "ccxt"
     tracedge_fixture_market_data_enabled: bool = False
     market_data_provider: Literal["ccxt", "memory"] = "ccxt"
@@ -252,6 +271,12 @@ class Settings(BaseSettings):
             raise ValueError("CAPABILITY_EXTENSION_MIN_CANDIDATE_RATE must be below the maximum")
         if self.capability_extension_candle_limit > self.capability_extension_max_history_candles:
             raise ValueError("CAPABILITY_EXTENSION_CANDLE_LIMIT cannot exceed the history cap")
+        if self.sharia_scraper_concurrency != 1:
+            raise ValueError(
+                "SHARIA_SCRAPER_CONCURRENCY must remain 1 for sequential evidence retrieval"
+            )
+        if not self.sharia_pilot_symbol_set:
+            raise ValueError("SHARIA_PILOT_SYMBOLS must include at least one reviewed symbol")
         return self
 
     @field_validator(
@@ -280,6 +305,14 @@ class Settings(BaseSettings):
     @property
     def support_inbox_email(self) -> str:
         return (self.support_email or "contact@trace-edge.com").strip()
+
+    @property
+    def sharia_pilot_symbol_set(self) -> set[str]:
+        return {
+            value.strip().upper()
+            for value in self.sharia_pilot_symbols.split(",")
+            if value.strip()
+        }
 
     @property
     def system_brain_username(self) -> str | None:

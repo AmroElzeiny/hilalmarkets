@@ -211,11 +211,14 @@ def test_screened_market_passport_and_mobile_visual_qa(
     browser_app,
 ) -> None:
     email = signup(page, base_url, unique_email("screened-market"))
-    seed_sharia_screened_market(browser_app.database_url, email)
+    seeded = seed_sharia_screened_market(browser_app.database_url, email)
     visual_dir = Path("reports/visual-qa/sharia-first")
     visual_dir.mkdir(parents=True, exist_ok=True)
 
-    page.goto(f"{base_url}/dashboard/market?view=opportunities")
+    page.goto(
+        f"{base_url}/dashboard/market?view=opportunities"
+        f"&methodology_id={seeded['methodology_id']}"
+    )
     expect(page.get_by_role("heading", name="Find opportunities inside a screened market."))\
         .to_be_visible()
     card = page.locator(".opportunity-card").first
@@ -238,7 +241,10 @@ def test_screened_market_passport_and_mobile_visual_qa(
         full_page=True,
     )
 
-    page.goto(f"{base_url}/dashboard/market?view=opportunities")
+    page.goto(
+        f"{base_url}/dashboard/market?view=opportunities"
+        f"&methodology_id={seeded['methodology_id']}"
+    )
     page.set_viewport_size({"width": 390, "height": 844})
     expect(card).to_be_visible()
     assert card.bounding_box()["width"] <= 390

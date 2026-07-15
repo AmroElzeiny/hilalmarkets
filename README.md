@@ -19,11 +19,12 @@ in application services; the model never receives approval or activation tools. 
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
 persistent Watchlists, workers, opportunity evidence, and alerts share one versioned methodology
-and universe resolver. Missing or non-executable governance data excludes the asset; AI cannot set
-a religious status. The included development methodology is non-executable and contains no asset
-conclusions. See
-[docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md)
-for architecture, deployment order, tests, and the qualified-human-review requirements.
+and universe resolver. The SC Malaysia workflow imports only explicit asset-level source rows,
+verifies canonical identity, builds a factual evidence dossier, and creates an administrator review
+case. No asset is customer-visible until an application `ADMIN` approves publication. AI cannot set
+a religious status or publish an asset. See
+[docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md](docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md)
+for the architecture, source boundaries, deployment order, tests, and manual review requirements.
 
 The public product surface uses shared HilalMarkets Jinja shells, emerald/ivory/gold design
 tokens, and server-owned content sources. Dedicated routes cover Features, How It Works, How We
@@ -71,6 +72,7 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
 [docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md), and
+[docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md](docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md), and
 [docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
 The production page map, exact prototype asset mapping, and UI verification commands are in
 [docs/HILALMARKETS_UI_MIGRATION.md](docs/HILALMARKETS_UI_MIGRATION.md); the supplied design,

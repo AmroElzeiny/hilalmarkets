@@ -87,6 +87,9 @@ class StatusHistoryResponse(BaseModel):
 class AssetPassportResponse(BaseModel):
     assessment: AssetAssessmentSummary
     why_this_status: str
+    official_sc_malaysia_reference: dict[str, Any] = Field(default_factory=dict)
+    hilalmarkets_factual_information_profile: dict[str, Any] = Field(default_factory=dict)
+    separate_use_status: dict[str, str] = Field(default_factory=dict)
     reviewed_dimensions: list[dict[str, Any]]
     methodology_result: dict[str, Any]
     evidence_sources: list[EvidenceSourceResponse]
@@ -291,6 +294,7 @@ class ComplianceChangeIngestRequest(BaseModel):
         "primary_business_changed",
         "insufficient_disclosure",
         "methodology_rule_changed",
+        "official_source_material_change",
     ]
     severity: ComplianceChangeSeverity
     source_reference: str | None = Field(default=None, max_length=1000)

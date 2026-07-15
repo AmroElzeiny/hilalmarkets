@@ -332,6 +332,10 @@ body.sidebar-collapsed .dash-nav-section { display: none; }
 .passport-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .passport-section { color: var(--te-ink); }
 .passport-section.span-two { grid-column: 1 / -1; }
+.passport-layer { position: relative; overflow: hidden; }
+.passport-layer::before { position: absolute; inset: 0 auto 0 0; width: 3px; content: ""; background: var(--te-brand); }
+.passport-layer-official { background: linear-gradient(145deg, #fffdf8, #fff); }
+.passport-layer-official::before { background: #d2af63; }
 .passport-lead { max-width: 900px; font-size: 18px; }
 .passport-notice { padding: 12px 14px; border-left: 3px solid var(--te-brand); background: var(--te-surface-soft); color: var(--te-muted); }
 .evidence-dimension-list,

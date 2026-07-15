@@ -70,6 +70,31 @@ def validate_runtime_configuration(settings: Settings) -> None:
             errors.append(
                 "SHARIA_ALLOW_LEGACY_UNSCREENED_LOCAL must be false in staging and production"
             )
+        if settings.sharia_screening_enforced:
+            if not settings.sharia_admin_telegram_chat_id:
+                errors.append(
+                    "SHARIA_ADMIN_TELEGRAM_CHAT_ID is required for deployed Sharia governance"
+                )
+            if not settings.telegram_enabled:
+                errors.append(
+                    "TELEGRAM_ENABLED must be true for deployed Sharia governance notifications"
+                )
+            if settings.openai_api_key is None:
+                errors.append(
+                    "OPENAI_API_KEY is required for deployed Sharia factual research"
+                )
+            if settings.sharia_ai_service_tier != "flex":
+                errors.append(
+                    "SHARIA_AI_SERVICE_TIER must be flex for the configured research workflow"
+                )
+            if not settings.sharia_scraper_obey_robots:
+                errors.append(
+                    "SHARIA_SCRAPER_OBEY_ROBOTS must be true in staging and production"
+                )
+            if settings.sharia_scraper_download_delay_seconds < 1:
+                errors.append(
+                    "SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS must be at least 1 when deployed"
+                )
         if settings.binance_derivatives_enabled and settings.derivatives_context_api_url is None:
             errors.append(
                 "DERIVATIVES_CONTEXT_API_URL or a tested derivatives adapter is required "

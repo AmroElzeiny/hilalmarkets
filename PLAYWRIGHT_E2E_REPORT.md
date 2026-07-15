@@ -1,17 +1,17 @@
 # Playwright E2E Report
 
-Generated: 2026-07-15T16:43:23.196578+00:00
+Generated: 2026-07-15T20:41:02.328046+00:00
 
-Base URL tested: not recorded
+Base URL tested: http://127.0.0.1:27125
 Browser: chromium
-App auto-started: False
-Command: `.venv\Scripts\python.exe -m pytest --collect-only -q`
-App command: `not started by browser fixture`
+App auto-started: True
+Command: `.venv\Scripts\python.exe -m pytest`
+App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 27125`
 
 ## Result
 
-- Tests run: 0
-- Passed: 0
+- Tests run: 17
+- Passed: 17
 - Failed: 0
 - Skipped: 0
 - Screenshots/traces/videos: `test-results/browser`
@@ -23,7 +23,23 @@ App command: `not started by browser fixture`
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| none | not run | 0 |
+| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout` | passed | 2.307 |
+| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection` | passed | 5.522 |
+| `tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states` | passed | 8.639 |
+| `tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor` | passed | 6.108 |
+| `tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation` | passed | 2.903 |
+| `tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa` | passed | 5.875 |
+| `tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner` | passed | 2.34 |
+| `tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke` | passed | 1.739 |
+| `tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation` | passed | 3.279 |
+| `tests/browser/test_dashboard_e2e.py::test_screened_market_passport_and_mobile_visual_qa` | passed | 3.156 |
+| `tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims` | passed | 1.959 |
+| `tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa` | passed | 5.185 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload` | passed | 34.492 |
+| `tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board` | passed | 5.285 |
+| `tests/browser/test_dashboard_e2e.py::test_telegram_discord_handoff_links_smoke` | passed | 1.987 |
+| `tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat` | passed | 2.527 |
+| `tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa` | passed | 4.646 |
 
 ## Runtime Checks
 

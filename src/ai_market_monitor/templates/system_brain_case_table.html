@@ -1,0 +1,18 @@
+<div class="brain-table-wrap">
+  <table>
+    <thead><tr><th>Asset</th><th>Case</th><th>State</th><th>Risk</th><th>Age</th><th>Publication</th><th></th></tr></thead>
+    <tbody>
+      {% for item in data.recent_cases %}
+      <tr>
+        <td><strong>{{ item.asset_name }}</strong><small>{{ item.symbol }}</small></td>
+        <td><strong>{{ item.title }}</strong><small>{{ item.reference }} · {{ item.case_type }}</small></td>
+        <td><span class="brain-status {{ item.state }}">{{ item.state.replace('_',' ') }}</span></td>
+        <td><span class="brain-status risk-{{ item.risk }}">{{ item.risk }}</span></td>
+        <td>{{ item.age_hours }}h</td>
+        <td>{{ item.publication_state.replace('_',' ').title() }}</td>
+        <td><a class="brain-row-action" href="/system-brain/reviews/{{ item.id }}" aria-label="Open {{ item.reference }}">Review <i data-icon="arrow"></i></a></td>
+      </tr>
+      {% else %}<tr><td colspan="7" class="brain-empty">No review cases match this queue.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>

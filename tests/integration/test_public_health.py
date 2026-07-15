@@ -32,9 +32,17 @@ async def test_public_deep_health_checks_database_and_redis(test_context, monkey
     response = await test_context["client"].get("/health/deep")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "service": "hilalmarkets",
-        "environment": "test",
-        "checks": {"database": "ok", "redis": "ok"},
-    }
+    payload = response.json()
+    assert payload["service"] == "hilalmarkets"
+    assert payload["environment"] == "test"
+    assert payload["checks"]["database"] == "ok"
+    assert payload["checks"]["redis"] == "ok"
+    assert payload["checks"]["sharia_admin_notifications"] in {"ok", "degraded"}
+    assert payload["checks"]["sharia_ai_research"] in {"ok", "degraded"}
+    assert payload["checks"]["sharia_source_policy"] == "ok"
+    expected_status = (
+        "ok"
+        if all(value == "ok" for value in payload["checks"].values())
+        else "degraded"
+    )
+    assert payload["status"] == expected_status

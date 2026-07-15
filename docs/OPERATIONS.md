@@ -60,6 +60,21 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `CAPABILITY_EXTENSION_REVIEW_MODEL` | Independent escalation model. Default: `gpt-5.4-mini`. |
 | `CAPABILITY_EXTENSION_REPAIR_SERVICE_TIER` | `flex` for review/repair work or `default`. |
 | `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Default: `bybit`. |
+| `SHARIA_ADMIN_TELEGRAM_CHAT_ID` | Admin-only destination for review notifications. Required when deployed screening is enforced. |
+| `SC_MALAYSIA_DIGITAL_ASSETS_URL` | Authoritative SC Malaysia digital-assets page imported by the governance worker. |
+| `SHARIA_AI_MODEL` | Model used for bounded factual dossier/change analysis. Default: `gpt-5.4-nano`. |
+| `SHARIA_AI_REASONING_EFFORT` | Factual research reasoning effort. Default: `low`. |
+| `SHARIA_AI_SERVICE_TIER` | Must be `flex` for the deployed governance workflow. |
+| `SHARIA_AI_TIMEOUT_SECONDS` | Whole factual-analysis request timeout. Default: `900`. |
+| `SHARIA_AI_MAX_RETRIES` | Retry limit for retryable Flex failures. Default: `5`. |
+| `SHARIA_AI_ALLOW_STANDARD_FALLBACK` | Allows an explicit standard-tier fallback; default is fail-closed `false`. |
+| `SHARIA_REVIEW_REMINDER_HOURS` | Reminder window for open review cases. Default: `6`. |
+| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Published-source monitoring interval. Default: `24`. |
+| `SHARIA_SCRAPER_CONCURRENCY` | Must be `1`; official sources are fetched sequentially. |
+| `SHARIA_SCRAPER_OBEY_ROBOTS` | Must remain `true` in staging and production. |
+| `SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS` | Delay between official-source requests; deployed minimum is one second. |
+| `SHARIA_PILOT_SYMBOLS` | Pilot allowlist, default `BTC,ETH,SOL`. |
+| `SHARIA_PROCESS_REMAINING_IMPORTS` | Enables processing of explicit non-pilot rows after pilot approval; default `false`. |
 | `TELEGRAM_ENABLED` | Enables Telegram webhooks and delivery workers. |
 | `TELEGRAM_ADAPTER` | Must be `http` when Telegram is enabled in a deployed environment. |
 | `DISCORD_ENABLED` | Enables Discord OAuth, interactions, delivery and role sync. |
@@ -91,6 +106,9 @@ Never run destructive schema changes without a tested backup and rollback plan.
 
 Migration `b4c5d6e7f8a9` adds redacted bounded-agent run and tool-call traces. Apply it before enabling
 shadow mode.
+
+Migration `d6e7f8a9b0c1` adds the SC Malaysia governance workflow. It seeds only the versioned
+methodology family/version and never seeds or publishes an asset.
 
 ## Local Development
 
@@ -186,6 +204,9 @@ Scheduled tasks currently wired:
 - Discord role-sync retries.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
+- Daily idempotent SC Malaysia import and pilot processing.
+- Hourly open-review reminders and minute-level Telegram retry processing.
+- Published-asset source monitoring at `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`.
 
 The live scanner currently uses shared CCXT REST clients. Jobs are claimed atomically from
 `queued` to `running`, store worker id/claim/heartbeat timestamps, and are not rerun after terminal

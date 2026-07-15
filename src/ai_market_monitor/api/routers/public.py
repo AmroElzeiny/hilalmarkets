@@ -551,7 +551,27 @@ async def deep_health(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    checks: dict[str, str] = {"database": "ok", "redis": "ok"}
+    checks: dict[str, str] = {
+        "database": "ok",
+        "redis": "ok",
+        "sharia_admin_notifications": (
+            "ok"
+            if settings.telegram_enabled and settings.sharia_admin_telegram_chat_id
+            else "degraded"
+        ),
+        "sharia_ai_research": (
+            "ok"
+            if settings.openai_api_key is not None
+            and settings.sharia_ai_service_tier == "flex"
+            else "degraded"
+        ),
+        "sharia_source_policy": (
+            "ok"
+            if settings.sharia_scraper_obey_robots
+            and settings.sharia_scraper_concurrency == 1
+            else "degraded"
+        ),
+    }
 
     try:
         await session.execute(text("SELECT 1"))

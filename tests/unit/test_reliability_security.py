@@ -205,6 +205,38 @@ def test_deployed_runtime_rejects_test_sharia_market():
     assert "SHARIA_TEST_MARKET_ENABLED" in str(error.value)
 
 
+def test_deployed_sharia_governance_requires_safe_operational_dependencies():
+    settings = Settings(
+        app_env="staging",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        discord_enabled=False,
+        billing_enabled=False,
+        sharia_screening_enforced=True,
+        sharia_admin_telegram_chat_id=None,
+        openai_api_key=None,
+        sharia_ai_service_tier="default",
+        sharia_scraper_obey_robots=False,
+        sharia_scraper_download_delay_seconds=0.2,
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    message = str(error.value)
+    assert "SHARIA_ADMIN_TELEGRAM_CHAT_ID" in message
+    assert "TELEGRAM_ENABLED" in message
+    assert "OPENAI_API_KEY" in message
+    assert "SHARIA_AI_SERVICE_TIER" in message
+    assert "SHARIA_SCRAPER_OBEY_ROBOTS" in message
+    assert "SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS" in message
+
+
 def test_deployed_runtime_rejects_fixture_market_data_and_unwired_provider_flags():
     settings = Settings(
         app_env="staging",

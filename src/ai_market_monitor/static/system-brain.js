@@ -8,38 +8,43 @@ document.querySelectorAll("[data-filter-target]").forEach((input) => {
   });
 });
 
-const sections = [...document.querySelectorAll(".brain-section")];
-const links = [...document.querySelectorAll(".brain-sidebar nav a")];
-if (sections.length && "IntersectionObserver" in window) {
-  const observer = new IntersectionObserver((entries) => {
-    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-    if (!visible) return;
-    links.forEach((link) => link.classList.toggle("active", link.hash === `#${visible.target.id}`));
-  }, { rootMargin: "-20% 0px -65%", threshold: [0.05, 0.25] });
-  sections.forEach((section) => observer.observe(section));
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (!reduceMotion) {
+  document.querySelectorAll("[data-count]").forEach((node) => {
+    const raw = String(node.dataset.count || "");
+    const target = Number.parseFloat(raw);
+    if (!Number.isFinite(target) || target <= 0) return;
+    const suffix = raw.endsWith("h") ? "h" : "";
+    const decimals = raw.includes(".") ? 1 : 0;
+    const started = performance.now();
+    const duration = 520;
+    const tick = (now) => {
+      const progress = Math.min((now - started) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      node.textContent = `${(target * eased).toFixed(decimals)}${suffix}`;
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
 }
 
-document.querySelectorAll(".brain-review-case").forEach((reviewCase) => {
-  reviewCase.addEventListener("toggle", () => {
-    if (reviewCase.open) {
-      reviewCase.querySelector(".brain-review-close")?.focus();
+document.querySelectorAll("[data-decision-form]").forEach((form) => {
+  form.addEventListener("submit", (event) => {
+    const submitter = event.submitter;
+    const prompt = submitter?.dataset.confirm;
+    if (prompt && !window.confirm(prompt)) {
+      event.preventDefault();
+      return;
+    }
+    if (!form.checkValidity()) return;
+    form.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+    if (submitter) {
+      submitter.disabled = false;
+      submitter.setAttribute("aria-busy", "true");
+      const original = submitter.textContent.trim();
+      submitter.textContent = `Recording: ${original}`;
     }
   });
-  reviewCase.querySelector("[data-close-review]")?.addEventListener("click", () => {
-    reviewCase.open = false;
-    reviewCase.querySelector(":scope > summary")?.focus();
-  });
-  reviewCase.querySelector(".brain-review-backdrop")?.addEventListener("click", () => {
-    reviewCase.open = false;
-    reviewCase.querySelector(":scope > summary")?.focus();
-  });
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
-  const openReview = document.querySelector(".brain-review-case[open]");
-  if (openReview) {
-    openReview.open = false;
-    openReview.querySelector(":scope > summary")?.focus();
-  }
 });

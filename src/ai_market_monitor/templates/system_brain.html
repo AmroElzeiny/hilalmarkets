@@ -4,221 +4,226 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>Capability Coverage Console | HilalMarkets</title>
-  <link rel="icon" type="image/svg+xml" href="/static/hilalmarkets-logo-mark.svg">
+  <title>Sharia Governance | HilalMarkets</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/system-brain.css">
-  <link rel="stylesheet" href="/static/system-brain-compliance.css">
+  <script src="/static/hilalmarkets-icons.js" defer></script>
   <script src="/static/system-brain.js" defer></script>
 </head>
 <body>
-  <aside class="brain-sidebar">
-    <img src="/static/hilalmarkets-logo-mark.svg" class="brain-logo" alt="HilalMarkets">
-    <p class="brain-nav-title">SYSTEM BRAIN</p>
+  <a class="brain-skip" href="#admin-content">Skip to admin content</a>
+  <aside class="brain-sidebar" aria-label="Sharia governance navigation">
+    <a class="brain-brand" href="/system-brain" aria-label="HilalMarkets governance overview">
+      <img src="/static/hilalmarkets-logo-mark.svg" alt="">
+      <span><strong>HilalMarkets</strong><small>Sharia governance</small></span>
+    </a>
     <nav>
-      <a href="#overview">Overview</a>
-      <a href="#compliance-watch">Compliance Watch</a>
-      <a href="#agent-control">Agent control</a>
-      <a href="#language-gaps">Language gaps</a>
-      <a href="#resolver-quality">Resolver quality</a>
-      <a href="#alias-proposals">Alias proposals</a>
-      <a href="#capability-health">Capability health</a>
-      <a href="#mechanic-extensions">Created mechanics</a>
-      <a href="#users">Registered users</a>
-      <a href="#ai-usage">AI usage</a>
+      <a class="{{ 'active' if section == 'overview' else '' }}" href="/system-brain"><i data-icon="home"></i><span>Overview</span></a>
+      <a class="{{ 'active' if section == 'initial-reviews' else '' }}" href="/system-brain/reviews?kind=initial_asset_review"><i data-icon="compliance"></i><span>Initial Coin Reviews</span></a>
+      <a class="{{ 'active' if section == 'change-reviews' else '' }}" href="/system-brain/reviews?kind=material_source_change"><i data-icon="alert"></i><span>Change Reviews</span></a>
+      <a class="{{ 'active' if section == 'published-assets' else '' }}" href="/system-brain/published-assets"><i data-icon="check"></i><span>Published Assets</span></a>
+      <a class="{{ 'active' if section == 'rejected-assets' else '' }}" href="/system-brain/rejected-assets"><i data-icon="database"></i><span>Rejected / Stored</span></a>
+      <a class="{{ 'active' if section == 'methodologies' else '' }}" href="/system-brain/methodologies"><i data-icon="methodology"></i><span>Methodologies</span></a>
+      <a class="{{ 'active' if section == 'source-registry' else '' }}" href="/system-brain/source-registry"><i data-icon="passport"></i><span>Source Registry</span></a>
+      <a class="{{ 'active' if section == 'scraper-runs' else '' }}" href="/system-brain/scraper-runs"><i data-icon="scan"></i><span>Scraper Runs</span></a>
+      <a class="{{ 'active' if section == 'ai-assessments' else '' }}" href="/system-brain/ai-assessments"><i data-icon="spark"></i><span>AI Assessments</span></a>
+      <a class="{{ 'active' if section == 'delivery-health' else '' }}" href="/system-brain/delivery-health"><i data-icon="telegram"></i><span>Telegram / Delivery</span></a>
+      <a class="{{ 'active' if section == 'audit-history' else '' }}" href="/system-brain/audit-history"><i data-icon="activity"></i><span>Audit History</span></a>
     </nav>
-    <form action="/system-brain/logout" method="post"><button class="brain-logout">Sign out</button></form>
+    <div class="brain-sidebar-foot">
+      <span class="brain-admin-dot" aria-hidden="true"></span>
+      <div><strong>Authenticated admin</strong><small>{{ admin_email }}</small></div>
+      <a href="/dashboard" aria-label="Return to dashboard"><i data-icon="logout"></i></a>
+    </div>
   </aside>
-  <main class="brain-main">
+
+  <main id="admin-content" class="brain-main">
     <header class="brain-topbar">
-      <div><p class="brain-kicker">CAPABILITY COVERAGE CONSOLE</p><h1>How the system understands users.</h1></div>
-      <div class="brain-admin-pill"><span></span>{{ admin_email }}</div>
+      <div>
+        <p class="brain-kicker">SC MALAYSIA REFERENCE GOVERNANCE</p>
+        <h1>{% if section == 'overview' %}Evidence before publication.{% elif section == 'review-detail' %}Review the complete record.{% else %}{{ section.replace('-', ' ').title() }}{% endif %}</h1>
+      </div>
+      <div class="brain-top-actions">
+        <span class="brain-guard"><i data-icon="shield"></i> Admin only</span>
+        <a class="brain-icon-button" href="/system-brain" aria-label="Refresh governance data"><i data-icon="activity"></i></a>
+      </div>
     </header>
 
-    <section id="overview" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">LIVE PRODUCT PULSE</p><h2>Coverage at a glance</h2></div><time>{{ data.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</time></div>
-      <div class="brain-metric-grid">
-        <article><span>Chat messages</span><strong>{{ data.counts.chat_messages }}</strong><small>{{ data.counts.chat_sessions }} sessions</small></article>
-        <article><span>Resolution events</span><strong>{{ data.counts.resolution_events }}</strong><small>{{ data.counts.unmatched }} unmatched</small></article>
-        <article><span>Provider blocked</span><strong>{{ data.counts.provider_blocked }}</strong><small>Real data requirements</small></article>
-        <article><span>Pending aliases</span><strong>{{ data.counts.pending_aliases }}</strong><small>Awaiting review</small></article>
-        <article><span>Active monitors</span><strong>{{ data.counts.active_monitors }}</strong><small>{{ data.counts.scan_jobs }} scan jobs</small></article>
-        <article class="brain-cost-card"><span>Estimated OpenAI cost</span><strong>${{ '%.6f'|format(data.counts.ai_cost_usd) }}</strong><small>{{ data.counts.ai_calls }} recorded calls</small></article>
-        <article><span>Created mechanics</span><strong>{{ data.counts.extension_total }}</strong><small>{{ data.counts.extension_certified }} certified · {{ data.counts.extension_failed }} failed</small></article>
-      </div>
-    </section>
+    {% if success %}<div class="brain-flash success" role="status"><i data-icon="check"></i><span>{{ success }}</span></div>{% endif %}
+    {% if error %}<div class="brain-flash error" role="alert"><i data-icon="alert"></i><span>{{ error }}</span></div>{% endif %}
 
-    <section id="compliance-watch" class="brain-section">
+    {% if section == 'overview' %}
+    <section class="brain-section brain-reveal">
       <div class="brain-section-head">
-        <div><p class="brain-kicker">SCREENING GOVERNANCE</p><h2>Compliance Watch</h2></div>
-        <span class="brain-tag">Human decision required</span>
+        <div><p class="brain-kicker">LIVE GOVERNANCE PULSE</p><h2>Review and publication controls</h2></div>
+        <time datetime="{{ data.generated_at.isoformat() }}">Updated {{ data.generated_at.strftime('%d %b %Y, %H:%M UTC') }}</time>
       </div>
-      {% if compliance_error %}<p class="brain-flash error" role="alert">{{ compliance_error }}</p>{% endif %}
-      {% if compliance_success %}<p class="brain-flash success" role="status">{{ compliance_success }}</p>{% endif %}
       <div class="brain-metric-grid">
-        <article><span>New changes</span><strong>{{ data.compliance_watch.awaiting_triage }}</strong><small>Awaiting triage</small></article>
-        <article><span>Reviews pending</span><strong>{{ data.compliance_watch.reviews_pending }}</strong><small>No status changes without review</small></article>
-        <article><span>Assets under review</span><strong>{{ data.compliance_watch.assets_under_review }}</strong><small>Across pending cases</small></article>
-        <article><span>Status changes</span><strong>{{ data.compliance_watch.status_changes_30d }}</strong><small>Approved in the last 30 days</small></article>
-        <article><span>Watchlists affected</span><strong>{{ data.compliance_watch.monitors_affected }}</strong><small>Assets paused by policy</small></article>
+        {% set metrics = [
+          ('Pending initial reviews', data.metrics.pending_initial_reviews, 'Awaiting an admin decision', 'compliance'),
+          ('Waiting over six hours', data.metrics.waiting_over_six_hours, 'Reminder threshold reached', 'clock'),
+          ('Approved and published', data.metrics.approved_published, 'Customer-visible assessments', 'check'),
+          ('Rejected but retained', data.metrics.rejected_retained, 'Evidence preserved privately', 'database'),
+          ('Published under monitoring', data.metrics.published_under_monitoring, 'Daily source checks enabled', 'radar'),
+          ('Material source changes', data.metrics.material_source_changes, 'Open change reviews', 'alert'),
+          ('AI human reviews', data.metrics.ai_human_reviews, 'Factual analysis requested review', 'spark'),
+          ('Scraper failures', data.metrics.scraper_failures, 'Recorded workflow failures', 'scan'),
+          ('Average review time', data.metrics.average_review_hours ~ 'h', 'Completed decision turnaround', 'clock'),
+          ('Evidence freshness', data.metrics.evidence_freshness_hours ~ 'h', 'Since latest successful snapshot', 'activity')
+        ] %}
+        {% for label, value, detail, icon_name in metrics %}
+        <article class="brain-metric">
+          <span class="brain-metric-icon"><i data-icon="{{ icon_name }}"></i></span>
+          <p>{{ label }}</p><strong data-count="{{ value }}">{{ value }}</strong><small>{{ detail }}</small>
+        </article>
+        {% endfor %}
       </div>
-      <article class="brain-panel brain-compliance-panel">
-        <div class="brain-panel-heading">
-          <div><h3>Review queue</h3><p class="brain-panel-copy">Automated detection supplies evidence only. A qualified reviewer records every final methodology result.</p></div>
-          <span class="brain-tag">{{ data.compliance_watch.queue|length }} open</span>
-        </div>
-        <div class="brain-table-scroll extra-tall">
-          <table class="brain-compliance-table">
-            <thead><tr><th>Asset</th><th>Change</th><th>Severity</th><th>Detected</th><th>Current status</th><th>Impact</th><th>Action</th></tr></thead>
-            <tbody>
-            {% for item in data.compliance_watch.queue %}
-              <tr>
-                <td><strong>{{ item.asset }}</strong><small>{{ item.confidence_label.replace('_', ' ') }}</small></td>
-                <td><strong>{{ item.title }}</strong><small>{{ item.change_type.replace('_', ' ') }}</small></td>
-                <td><span class="brain-status {{ 'fail' if item.severity == 'critical' else 'warning' }}">{{ item.severity.replace('_', ' ') }}</span></td>
-                <td>{{ item.detected_at.strftime('%Y-%m-%d %H:%M') if item.detected_at else '-' }}</td>
-                <td><span class="brain-status {{ 'pass' if item.current_status == 'eligible' else 'warning' }}">{{ item.current_status.replace('_', ' ') }}</span></td>
-                <td>{{ item.affected_watch_plans }} Watchlist{{ 's' if item.affected_watch_plans != 1 else '' }}</td>
-                <td>
-                  <details class="brain-review-case">
-                    <summary>{{ item.suggested_action }}</summary>
-                    <span class="brain-review-backdrop" aria-hidden="true"></span>
-                    <div class="brain-review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title-{{ item.id }}">
-                      <button type="button" class="brain-review-close" data-close-review aria-label="Close review">Close</button>
-                      <p class="brain-kicker">COMPLIANCE REVIEW</p>
-                      <h3 id="review-title-{{ item.id }}">{{ item.asset }} · {{ item.title }}</h3>
-                      <p>{{ item.summary }}</p>
-                      <div class="brain-review-facts">
-                        <div><span>Current status</span><strong>{{ item.current_status.replace('_', ' ').title() }}</strong></div>
-                        <div><span>Severity</span><strong>{{ item.severity.replace('_', ' ').title() }}</strong></div>
-                        <div><span>Source</span><strong>{{ item.source or 'No source reference supplied' }}</strong></div>
-                        <div><span>Watchlists affected</span><strong>{{ item.affected_watch_plans }}</strong></div>
-                      </div>
-                      <details class="brain-evidence-detail"><summary>Inspect normalized change</summary><pre>{{ item.structured_change | tojson(indent=2) }}</pre></details>
-                      <a class="brain-passport-link" href="{{ item.passport_path }}" target="_blank" rel="noopener">Open existing Evidence Passport</a>
-
-                      {% if data.compliance_watch.methodologies %}
-                      <form class="brain-review-form" action="/system-brain/compliance/{{ item.id }}/review" method="post">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <input type="hidden" name="decision" value="approved">
-                        <h4>Approve a new assessment</h4>
-                        <label>Methodology<select name="methodology_id" required>{% for method in data.compliance_watch.methodologies %}<option value="{{ method.id }}" {{ 'selected' if method.is_default else '' }}>{{ method.name }} · v{{ method.version }}</option>{% endfor %}</select></label>
-                        <label>Final status<select name="proposed_status" required>{% for status in ['eligible', 'eligible_with_qualifications', 'under_review', 'disputed', 'excluded', 'insufficient_information'] %}<option value="{{ status }}">{{ status.replace('_', ' ').title() }}</option>{% endfor %}</select></label>
-                        <label>Assessment summary<textarea name="assessment_summary" minlength="20" maxlength="5000" required></textarea></label>
-                        <div class="brain-form-grid"><label>Qualifications, one per line<textarea name="qualifications"></textarea></label><label>Exclusion reasons, one per line<textarea name="exclusion_reasons"></textarea></label></div>
-                        <h4>New evidence</h4>
-                        <div class="brain-form-grid"><label>Source title<input name="source_title" required></label><label>Publisher<input name="source_publisher" required></label></div>
-                        <label>Source URL<input type="url" name="source_url" value="{{ item.source if item.source and item.source.startswith('http') else '' }}" required></label>
-                        <div class="brain-form-grid"><label>Source type<input name="source_type" value="official_update" required></label><label>Evidence category<input name="evidence_category" value="project_change" required></label></div>
-                        <label>Evidence summary<textarea name="evidence_summary" minlength="5" maxlength="5000" required></textarea></label>
-                        <label>Mandatory reviewer note<textarea name="reviewer_notes" minlength="10" maxlength="5000" required></textarea></label>
-                        <button type="submit">Approve and publish assessment</button>
-                      </form>
-                      <div class="brain-secondary-decisions">
-                        <form action="/system-brain/compliance/{{ item.id }}/review" method="post">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="more_evidence_required">
-                          <label>Reviewer note<input name="reviewer_notes" minlength="10" required placeholder="Describe the evidence still required"></label>
-                          <label class="sr-only">Methodology<select name="methodology_id">{% for method in data.compliance_watch.methodologies %}<option value="{{ method.id }}" {{ 'selected' if method.is_default else '' }}>{{ method.name }}</option>{% endfor %}</select></label>
-                          <button type="submit" class="secondary">Request more evidence</button>
-                        </form>
-                        <form action="/system-brain/compliance/{{ item.id }}/review" method="post">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="dismissed">
-                          <label>Reviewer note<input name="reviewer_notes" minlength="10" required placeholder="Explain why this change is dismissed"></label>
-                          <label class="sr-only">Methodology<select name="methodology_id">{% for method in data.compliance_watch.methodologies %}<option value="{{ method.id }}" {{ 'selected' if method.is_default else '' }}>{{ method.name }}</option>{% endfor %}</select></label>
-                          <button type="submit" class="danger">Dismiss change</button>
-                        </form>
-                      </div>
-                      {% else %}
-                      <p class="brain-flash error">No approved active methodology is configured. This case cannot change an asset status.</p>
-                      {% endif %}
-                    </div>
-                  </details>
-                </td>
-              </tr>
-            {% else %}<tr><td colspan="7" class="brain-empty">No compliance changes require review.</td></tr>{% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </article>
     </section>
 
-    <section id="agent-control" class="brain-section">
+    <section class="brain-section brain-reveal">
+      <div class="brain-section-head"><div><p class="brain-kicker">REAL DATABASE AGGREGATES</p><h2>Governance signals</h2></div></div>
+      <div class="brain-chart-grid">
+        {% for title, rows in [
+          ('Review pipeline by state', data.charts.pipeline),
+          ('Decisions by week', data.charts.decisions_by_week),
+          ('Published status', data.charts.published_distribution),
+          ('Source and run health', data.charts.source_health),
+          ('Change severity', data.charts.change_severity),
+          ('AI review outcomes', data.charts.ai_outcomes)
+        ] %}
+        <article class="brain-panel brain-chart">
+          <h3>{{ title }}</h3>
+          {% set maximum = (rows | map(attribute='value') | max) if rows else 0 %}
+          <div class="brain-bars">
+            {% for row in rows %}
+            <div class="brain-bar-row">
+              <span title="{{ row.label }}">{{ row.label }}</span>
+              <div><i style="--bar:{{ ((row.value / maximum) * 100) if maximum else 0 }}%"></i></div>
+              <strong>{{ row.value }}</strong>
+            </div>
+            {% else %}<p class="brain-empty">No recorded data yet.</p>{% endfor %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="brain-section brain-reveal">
+      <div class="brain-section-head"><div><p class="brain-kicker">OPEN WORK</p><h2>Recent review cases</h2></div><a class="brain-link" href="/system-brain/reviews?kind=initial_asset_review">Open full queue <i data-icon="arrow"></i></a></div>
+      {% include 'system_brain_case_table.html' %}
+    </section>
+
+    {% elif section in ['initial-reviews', 'change-reviews'] %}
+    <section class="brain-section brain-reveal">
       <div class="brain-section-head">
-        <div><p class="brain-kicker">BOUNDED ORCHESTRATION</p><h2>Agent safety and rollout</h2></div>
-        <span class="brain-tag">{{ 'Shadow mode' if data.agent_control.shadow_enabled else ((data.agent_control.rollout_percent ~ '% live') if data.agent_control.configured_enabled else 'Kill switch off') }}</span>
+        <div><p class="brain-kicker">HUMAN DECISION QUEUE</p><h2>{{ 'Initial Coin Reviews' if section == 'initial-reviews' else 'Source and Methodology Changes' }}</h2><p>AI organizes factual evidence. Only an authenticated administrator can decide or publish.</p></div>
+        <form class="brain-filter" method="get"><input type="hidden" name="kind" value="{{ review_kind }}"><label for="case-state">State</label><select id="case-state" name="state" onchange="this.form.submit()"><option value="">All states</option>{% for value in ['draft','researching','ready_for_review','needs_evidence','approved','rejected'] %}<option value="{{ value }}" {{ 'selected' if review_state == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></form>
       </div>
-      <div class="brain-metric-grid">
-        <article><span>Recorded runs</span><strong>{{ data.agent_control.recorded_runs }}</strong><small>{{ data.counts.agent_shadow_runs }} shadow runs</small></article>
-        <article><span>Tool selection</span><strong>{{ (data.agent_control.correct_tool_selection_rate ~ '%') if data.agent_control.correct_tool_selection_rate is not none else 'N/A' }}</strong><small>{{ data.agent_control.labeled_shadow_turns }} labeled shadow turns</small></article>
-        <article><span>Completed</span><strong>{{ (data.agent_control.completion_rate ~ '%') if data.agent_control.completion_rate is not none else 'N/A' }}</strong><small>{{ data.counts.agent_completed }} grounded completions</small></article>
-        <article><span>Safe fallback</span><strong>{{ (data.agent_control.fallback_rate ~ '%') if data.agent_control.fallback_rate is not none else 'N/A' }}</strong><small>{{ data.counts.agent_fallbacks }} legacy fallbacks</small></article>
-        <article><span>Contained</span><strong>{{ data.agent_control.ungrounded_claims_contained }}</strong><small>Ungrounded final claims blocked</small></article>
-        <article><span>Forbidden executed</span><strong>{{ data.agent_control.forbidden_executed }}</strong><small>{{ data.agent_control.forbidden_attempts }} rejected attempts</small></article>
-        <article><span>Invalid tool calls</span><strong>{{ (data.agent_control.invalid_call_rate ~ '%') if data.agent_control.invalid_call_rate is not none else 'N/A' }}</strong><small>Rejected before domain execution</small></article>
-        <article><span>Draft compilation</span><strong>{{ (data.agent_control.draft_compilation_success_rate ~ '%') if data.agent_control.draft_compilation_success_rate is not none else 'N/A' }}</strong><small>Deterministic compiler calls completed</small></article>
-        <article><span>Unsupported leakage</span><strong>{{ data.agent_control.unsupported_condition_leakage }}</strong><small>Approval-eligible drafts with unsupported rules</small></article>
-        <article><span>Clarification turns</span><strong>{{ data.agent_control.clarification_turns }}</strong><small>Resolver found missing or ambiguous details</small></article>
-        <article><span>Average latency</span><strong>{{ data.agent_control.average_latency_ms }} ms</strong><small>P95 {{ data.agent_control.p95_latency_ms }} ms</small></article>
-        <article><span>Calls per run</span><strong>{{ data.agent_control.average_calls_per_run }}</strong><small>Limit {{ data.agent_control.max_tool_calls }}</small></article>
-        <article class="brain-cost-card"><span>Agent estimated cost</span><strong>${{ '%.6f'|format(data.agent_control.estimated_cost_usd) }}</strong><small>{{ data.agent_control.input_tokens }} input &middot; {{ data.agent_control.output_tokens }} output tokens &middot; per-turn cap ${{ '%.4f'|format(data.agent_control.cost_limit) }}</small></article>
-      </div>
-      <div class="brain-grid-two">
-        <article class="brain-panel"><h3>Application-managed tools</h3><div class="brain-table-scroll compact"><table><thead><tr><th>Tool</th><th>Calls</th><th>Success</th><th>Blocked</th><th>Average</th></tr></thead><tbody>{% for row in data.agent_control.tool_breakdown %}<tr><td><code>{{ row.tool_name }}</code></td><td>{{ row.calls }}</td><td>{{ (row.success_rate ~ '%') if row.success_rate is not none else 'N/A' }}</td><td>{{ row.blocked }}</td><td>{{ row.average_duration_ms }} ms</td></tr>{% else %}<tr><td colspan="5" class="brain-empty">No agent tool calls have been recorded.</td></tr>{% endfor %}</tbody></table></div></article>
-        <article class="brain-panel"><h3>Recent bounded turns</h3><div class="brain-table-scroll compact"><table><thead><tr><th>Started</th><th>Status</th><th>Intent</th><th>Steps</th><th>Calls</th><th>Boundary result</th></tr></thead><tbody>{% for row in data.agent_control.recent_runs %}<tr><td>{{ row.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td><span class="brain-status {{ 'pass' if row.status == 'completed' else 'warning' if row.status in ['contained', 'shadow_completed', 'shadow_compared'] else 'fail' }}">{{ row.status }}</span></td><td>{{ row.final_intent or '-' }}</td><td>{{ row.steps }}</td><td>{{ row.tool_calls }}</td><td>{{ row.error_type or ('legacy compared' if row.shadow else 'grounded') }}</td></tr>{% else %}<tr><td colspan="6" class="brain-empty">Enable shadow mode to collect comparison evidence without executing tools.</td></tr>{% endfor %}</tbody></table></div></article>
-      </div>
-      <article class="brain-panel"><p class="brain-panel-copy">Current rollout: {{ data.agent_control.rollout_percent }}% deterministic live cohort. Limits: {{ data.agent_control.max_steps }} model steps, {{ data.agent_control.max_tool_calls }} tool calls, and no parallel calls. Prompt text and hidden reasoning are not shown here; tool arguments are stored only in redacted form.</p></article>
+      {% set data = {'recent_cases': cases} %}
+      {% include 'system_brain_case_table.html' %}
     </section>
 
-    <section id="language-gaps" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">LANGUAGE GAPS</p><h2>What users say that the registry misses</h2></div><span class="brain-tag">Evidence, not guesses</span></div>
-      <div class="brain-grid-two">
-        <article class="brain-panel"><h3>Most common unmatched fragments</h3><div class="brain-table-scroll"><table><thead><tr><th>Fragment</th><th>Count</th></tr></thead><tbody>{% for row in data.unmatched %}<tr><td>{{ row.fragment }}</td><td><b>{{ row.count }}</b></td></tr>{% else %}<tr><td colspan="2" class="brain-empty">No unmatched fragments recorded yet.</td></tr>{% endfor %}</tbody></table></div></article>
-        <article class="brain-panel"><h3>Unsupported feature keywords</h3><div class="brain-keyword-cloud">{% for row in data.unsupported_keywords %}<span>{{ row.keyword }} <b>{{ row.count }}</b></span>{% else %}<p class="brain-empty">No unsupported keywords recorded yet.</p>{% endfor %}</div></article>
+    {% elif section == 'review-detail' %}
+    {% set case = detail.case %}{% set asset = detail.asset %}{% set external = detail.external %}{% set dossier = detail.dossier %}{% set analysis = detail.ai %}
+    <section class="brain-section brain-review-layout brain-reveal">
+      <div class="brain-review-content">
+        <a class="brain-back" href="/system-brain/reviews?kind={{ case.case_type }}"><i data-icon="arrow"></i> Back to review queue</a>
+        <article class="brain-review-hero">
+          <div class="brain-asset-mark">{{ (asset.symbol if asset else '?')[:3] }}</div>
+          <div><div class="brain-chip-row"><span class="brain-status {{ case.state }}">{{ case.state.replace('_',' ') }}</span><span class="brain-status neutral">{{ case.case_reference }}</span><span class="brain-status risk-{{ case.risk_severity }}">{{ case.risk_severity }} risk</span></div><h2>{{ asset.name if asset else case.title }}{% if asset %} <small>{{ asset.symbol }}</small>{% endif %}</h2><p>{{ case.human_review_reason }}</p></div>
+        </article>
+
+        <div class="brain-detail-grid">
+          <article class="brain-panel">
+            <div class="brain-panel-title"><i data-icon="coins"></i><div><p class="brain-kicker">IDENTITY</p><h3>Asset identity</h3></div></div>
+            <dl class="brain-facts">
+              <div><dt>Canonical name</dt><dd>{{ asset.name if asset else 'Identity unresolved' }}</dd></div>
+              <div><dt>Symbol</dt><dd>{{ asset.symbol if asset else 'Not established' }}</dd></div>
+              <div><dt>Asset type</dt><dd>{{ asset.asset_type.replace('_',' ').title() if asset else 'Not established' }}</dd></div>
+              <div><dt>Native chain</dt><dd>{{ asset.native_chain if asset and asset.native_chain else 'Not applicable or not established' }}</dd></div>
+              <div><dt>Mapping state</dt><dd><span class="brain-status {{ asset.mapping_state if asset else 'warning' }}">{{ asset.mapping_state if asset else 'unresolved' }}</span></dd></div>
+              <div><dt>Official website</dt><dd>{% if asset and asset.official_website %}<a href="{{ asset.official_website }}" target="_blank" rel="noopener">Open official website</a>{% else %}Not established{% endif %}</dd></div>
+            </dl>
+          </article>
+          <article class="brain-panel brain-official-card">
+            <div class="brain-panel-title"><i data-icon="compliance"></i><div><p class="brain-kicker">OFFICIAL REFERENCE</p><h3>SC Malaysia assessment</h3></div></div>
+            {% if external %}<p class="brain-reference-label">SC Malaysia SAC reference: {{ external.exact_status_wording }}</p><dl class="brain-facts"><div><dt>Authority</dt><dd>{{ external.source_authority }}</dd></div><div><dt>SAC meeting</dt><dd>{{ external.sac_meeting_number }}</dd></div><div><dt>Decision date</dt><dd>{{ external.decision_date.strftime('%d %B %Y') }}</dd></div><div><dt>Retrieved</dt><dd>{{ external.retrieval_date.strftime('%d %B %Y, %H:%M UTC') }}</dd></div><div class="wide"><dt>Regulatory scope</dt><dd>{{ external.regulatory_scope }}</dd></div></dl><a class="brain-link" href="{{ external.source_url }}" target="_blank" rel="noopener">Open authoritative source <i data-icon="arrow"></i></a>{% else %}<p class="brain-empty">No mapped external assessment is attached to this case.</p>{% endif %}
+          </article>
+        </div>
+
+        <article class="brain-warning-card"><i data-icon="info"></i><div><strong>Attribution boundary</strong><p>The official reference and HilalMarkets factual research are separate layers. HilalMarkets does not reconstruct unpublished SC Malaysia reasoning or extend an asset-level reference to lending, yield, leverage, derivatives, or wrapped representations.</p></div></article>
+
+        <article class="brain-panel">
+          <div class="brain-panel-title"><i data-icon="passport"></i><div><p class="brain-kicker">HILALMARKETS FACTUAL PROFILE</p><h3>What the verified sources establish</h3></div></div>
+          <div class="brain-profile-grid">{% for item in detail.profile_sections %}<section><h4>{{ item.label }}</h4><p>{{ item.value }}</p></section>{% else %}<p class="brain-empty">A validated factual profile is not available yet.</p>{% endfor %}</div>
+        </article>
+
+        <div class="brain-detail-grid">
+          <article class="brain-panel"><div class="brain-panel-title"><i data-icon="alert"></i><div><p class="brain-kicker">EVIDENCE GAPS</p><h3>Missing information</h3></div></div><ul class="brain-findings">{% for item in detail.missing_evidence %}<li><i data-icon="alert"></i><span>{{ item }}</span></li>{% else %}<li class="clear"><i data-icon="check"></i><span>No missing evidence was reported by the validated analysis.</span></li>{% endfor %}</ul></article>
+          <article class="brain-panel"><div class="brain-panel-title"><i data-icon="activity"></i><div><p class="brain-kicker">CONSISTENCY</p><h3>Contradictions</h3></div></div><ul class="brain-findings">{% for item in detail.contradictions %}<li><i data-icon="alert"></i><span>{{ item }}</span></li>{% else %}<li class="clear"><i data-icon="check"></i><span>No contradictions were reported in the current evidence package.</span></li>{% endfor %}</ul></article>
+        </div>
+
+        <article class="brain-panel">
+          <div class="brain-panel-title"><i data-icon="spark"></i><div><p class="brain-kicker">BOUNDED AI ANALYSIS</p><h3>Risk analysis and manual checks</h3></div></div>
+          {% if analysis %}<div class="brain-ai-summary"><div><span>Model</span><strong>{{ analysis.model }}</strong></div><div><span>Reasoning</span><strong>{{ analysis.reasoning_effort }}</strong></div><div><span>Service tier</span><strong>{{ analysis.returned_service_tier or analysis.requested_service_tier }}</strong></div><div><span>Schema status</span><strong>{{ analysis.status }}</strong></div></div>{% endif %}
+          <div class="brain-detail-grid compact"><section><h4>Potentially affected methodology areas</h4><ul class="brain-plain-list">{% for item in detail.methodology_areas %}<li>{{ item }}</li>{% else %}<li>None identified from current evidence.</li>{% endfor %}</ul></section><section><h4>Explicit limitations</h4><ul class="brain-plain-list">{% for item in detail.limitations %}<li>{{ item }}</li>{% else %}<li>No additional limitation text was returned.</li>{% endfor %}</ul></section></div>
+        </article>
+
+        <article class="brain-panel">
+          <div class="brain-section-head compact"><div class="brain-panel-title"><i data-icon="database"></i><div><p class="brain-kicker">IMMUTABLE EVIDENCE</p><h3>Related source snapshots</h3></div></div><span class="brain-status neutral">{{ detail.snapshots|length }} snapshots</span></div>
+          <div class="brain-source-list">{% for item in detail.snapshots %}<section><div><span class="brain-status {{ item.status }}">{{ item.status }}</span><strong>{{ item.title }}</strong><small>{{ item.category.replace('_',' ').title() }} | Retrieved {{ item.retrieved_at.strftime('%d %b %Y, %H:%M UTC') }}</small></div><p>{{ item.summary }}</p><div class="brain-source-actions"><a href="{{ item.url }}" target="_blank" rel="noopener">Open source</a><span title="Full immutable hash">Fingerprint {{ item.hash[:12] }}</span></div>{% if item.diff_added or item.diff_removed %}<details><summary>Inspect meaningful text changes</summary>{% for line in item.diff_added %}<p class="brain-diff added">Added: {{ line }}</p>{% endfor %}{% for line in item.diff_removed %}<p class="brain-diff removed">Removed: {{ line }}</p>{% endfor %}</details>{% endif %}</section>{% else %}<p class="brain-empty">No retained snapshots are attached yet.</p>{% endfor %}</div>
+        </article>
+
+        <div class="brain-detail-grid">
+          <article class="brain-panel"><div class="brain-panel-title"><i data-icon="user"></i><div><p class="brain-kicker">REVIEWER RECORD</p><h3>Admin notes</h3></div></div><div class="brain-note-list">{% for note in case.admin_notes %}<blockquote><p>{{ note.note }}</p><time>{{ note.created_at }}</time></blockquote>{% else %}<p class="brain-empty">No admin notes have been added.</p>{% endfor %}</div></article>
+          <article class="brain-panel"><div class="brain-panel-title"><i data-icon="activity"></i><div><p class="brain-kicker">AUDITABILITY</p><h3>Complete case timeline</h3></div></div><ol class="brain-timeline">{% for event in detail.timeline %}<li><span></span><div><strong>{{ event.label }}</strong><p>{{ event.detail }}</p><time>{{ event.at.strftime('%d %b %Y, %H:%M:%S UTC') }}</time></div></li>{% endfor %}</ol></article>
+        </div>
       </div>
-      <article class="brain-panel"><h3>Provider-blocked requests</h3><div class="brain-table-scroll compact"><table><thead><tr><th>Request fragment</th><th>Top candidate</th><th>Provider state</th><th>Count</th></tr></thead><tbody>{% for row in data.provider_blocked %}<tr><td>{{ row.fragment }}</td><td>{{ row.top_candidate }}</td><td><span class="brain-status blocked">{{ row.provider or 'provider required' }}</span></td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No provider blocks recorded yet.</td></tr>{% endfor %}</tbody></table></div></article>
+
+      <aside class="brain-decision-panel" aria-label="Review decision">
+        <div><p class="brain-kicker">HUMAN DECISION</p><h3>{{ 'Decision recorded' if case.done_at else 'Complete this review' }}</h3><p>{{ 'This case is immutable and retained in the audit record.' if case.done_at else 'A reason is mandatory. Telegram cannot make this decision.' }}</p></div>
+        {% if case.done_at %}<div class="brain-terminal"><i data-icon="check"></i><strong>{{ case.state.replace('_',' ').title() }}</strong><small>{{ case.publication_state.replace('_',' ').title() }}</small></div>{% else %}
+        <form method="post" action="/system-brain/reviews/{{ case.id }}/decision" data-decision-form>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="decision-reason">Decision reason</label>
+          <textarea id="decision-reason" name="reason" minlength="10" maxlength="5000" required placeholder="Record the evidence and reasoning for this action."></textarea>
+          <label for="requested-evidence">Specific evidence requested <small>Required only when requesting evidence</small></label>
+          <textarea id="requested-evidence" name="requested_evidence" placeholder="One evidence request per line"></textarea>
+          <div class="brain-decision-actions">
+            <button name="action" value="approve_and_publish" data-confirm="Publish this asset under the scoped SC Malaysia reference?" class="approve"><i data-icon="check"></i>Approve and Publish</button>
+            <button name="action" value="reject_and_store" data-confirm="Store this rejection and keep the asset off every customer surface?" class="danger"><i data-icon="database"></i>Reject and Store</button>
+            <button name="action" value="request_more_evidence" data-confirm="Keep this case open and continue six-hour reminders?" class="secondary"><i data-icon="search"></i>Request More Evidence</button>
+            <button name="action" value="return_to_research" data-confirm="Return this case to research without publication?" class="secondary"><i data-icon="scan"></i>Return to Research</button>
+            <button name="action" value="add_admin_note" class="ghost"><i data-icon="plus"></i>Add Admin Note</button>
+          </div>
+        </form>{% endif %}
+      </aside>
     </section>
 
-    <section id="resolver-quality" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">RESOLVER QUALITY</p><h2>Confidence, choices and ranking mistakes</h2></div></div>
-      <div class="brain-metric-grid">
-        <article><span>Retrieval recall</span><strong>{{ (data.quality_metrics.retrieval.percent ~ '%') if data.quality_metrics.retrieval.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.retrieval.passed }}/{{ data.quality_metrics.retrieval.total }} supported prompt variants shortlisted</small></article>
-        <article><span>AI selection accuracy</span><strong>{{ (data.quality_metrics.ai_selection.percent ~ '%') if data.quality_metrics.ai_selection.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.ai_selection.passed }}/{{ data.quality_metrics.ai_selection.total }} user-labeled rerank decisions</small></article>
-        <article><span>Parameter validation</span><strong>{{ (data.quality_metrics.parameter.percent ~ '%') if data.quality_metrics.parameter.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.parameter.passed }}/{{ data.quality_metrics.parameter.total }} AI selections passed registry schemas</small></article>
-        <article><span>Evaluator correctness</span><strong>{{ (data.quality_metrics.evaluator.percent ~ '%') if data.quality_metrics.evaluator.percent is not none else 'N/A' }}</strong><small>{{ data.quality_metrics.evaluator.passed }}/{{ data.quality_metrics.evaluator.total }} executable capabilities aligned</small></article>
-      </div>
-      <div class="brain-grid-two">
-        <article class="brain-panel"><h3>Supported prompts with low confidence</h3><div class="brain-table-scroll"><table><thead><tr><th>Fragment</th><th>Candidate</th><th>Confidence</th><th>Seen</th></tr></thead><tbody>{% for row in data.low_confidence %}<tr><td>{{ row.fragment }}</td><td>{{ row.top_candidate }}</td><td>{{ row.confidence }}%</td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No low-confidence matches recorded.</td></tr>{% endfor %}</tbody></table></div></article>
-        <article class="brain-panel"><h3>Clarifications users choose</h3><div class="brain-table-scroll"><table><thead><tr><th>User wording</th><th>Selected capability</th><th>Count</th></tr></thead><tbody>{% for row in data.clarification_choices %}<tr><td>{{ row.fragment }}</td><td><code>{{ row.capability_key }}</code></td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="3" class="brain-empty">No resolver clarification choices yet.</td></tr>{% endfor %}</tbody></table></div></article>
-      </div>
-      <article class="brain-panel"><h3>False candidate rankings</h3><p class="brain-panel-copy">The user selected a different capability than the resolver’s first candidate.</p><div class="brain-table-scroll compact"><table><thead><tr><th>Fragment</th><th>Ranked first</th><th>User chose</th><th>Count</th></tr></thead><tbody>{% for row in data.false_rankings %}<tr><td>{{ row.fragment }}</td><td><code>{{ row.ranked }}</code></td><td><code>{{ row.chosen }}</code></td><td>{{ row.count }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No false top rankings recorded yet.</td></tr>{% endfor %}</tbody></table></div></article>
-    </section>
+    {% elif section == 'published-assets' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">CUSTOMER-VISIBLE RECORDS</p><h2>Published assets</h2><p>Only completed admin approvals appear here and in the Screened Market.</p></div></div><div class="brain-card-list">{% for item in published %}<article><div class="brain-asset-mark">{{ item.asset.symbol[:3] }}</div><div><h3>{{ item.asset.name }} <small>{{ item.asset.symbol }}</small></h3><p>SC Malaysia SAC reference | Publication version {{ item.publication.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.publication.publication_state }}">{{ item.publication.publication_state }}</span><span class="brain-status neutral">Published {{ item.publication.published_at.strftime('%d %b %Y') }}</span><span class="brain-status {{ 'verified' if item.publication.is_active else 'warning' }}">{{ 'Active monitoring' if item.publication.is_active else 'Historical version' }}</span></div></div><a class="brain-link" href="/dashboard/sharia/assets/{{ item.asset.symbol }}">View passport <i data-icon="arrow"></i></a></article>{% else %}<p class="brain-empty">No asset has been approved and published yet.</p>{% endfor %}</div></section>
 
-    <section id="alias-proposals" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">REGISTRY IMPROVEMENT</p><h2>Proposed aliases awaiting approval</h2></div><span class="brain-tag">Approval requires reviewed release</span></div>
-      <div class="brain-grid-two">
-        <article class="brain-panel"><h3>Pending proposals</h3><div class="brain-table-scroll tall">{% for proposal in data.alias_proposals if proposal.status == 'pending' %}<form class="brain-alias-card" action="/system-brain/aliases/{{ proposal.id }}/approve" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div><strong>{{ proposal.alias }}</strong><code>{{ proposal.capability_key }}</code><small>{{ proposal.evidence_count }} evidence event{{ 's' if proposal.evidence_count != 1 else '' }}</small></div><input name="review_note" placeholder="Optional review note" aria-label="Review note for {{ proposal.alias }}"><div class="brain-alias-actions"><button type="submit">Approve</button><button type="submit" class="danger" formaction="/system-brain/aliases/{{ proposal.id }}/reject">Reject</button></div></form>{% else %}<p class="brain-empty">No aliases await review.</p>{% endfor %}</div></article>
-        <article class="brain-panel"><h3>Capabilities with poor alias coverage</h3><div class="brain-table-scroll tall"><table><thead><tr><th>Capability</th><th>Aliases</th><th>Gap</th></tr></thead><tbody>{% for row in data.poor_aliases %}<tr><td><strong>{{ row.label }}</strong><code>{{ row.key }}</code></td><td>{{ row.aliases }}</td><td><span class="brain-status warning">{{ row.status }}</span></td></tr>{% endfor %}</tbody></table></div></article>
-      </div>
-    </section>
+    {% elif section == 'rejected-assets' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">PRIVATE RETAINED EVIDENCE</p><h2>Rejected / Stored Assets</h2><p>Rejected means not approved for publication. It is not displayed as a religious ruling.</p></div></div>{% set data = {'recent_cases': cases} %}{% include 'system_brain_case_table.html' %}</section>
 
-    <section id="capability-health" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">REGRESSION MATRIX</p><h2>Status per capability</h2></div><input class="brain-search" data-filter-target="capability-table" placeholder="Filter capability or status" aria-label="Filter capabilities"></div>
-      <article class="brain-panel"><div class="brain-table-scroll extra-tall"><table id="capability-table"><thead><tr><th>Capability</th><th>Version</th><th>Regression</th><th>Availability</th><th>Template</th><th>Evaluator</th><th>Notes</th></tr></thead><tbody>{% for row in data.regressions %}<tr><td><strong>{{ row.label }}</strong><code>{{ row.key }}</code></td><td>{{ row.version }}</td><td><span class="brain-status {{ row.status }}">{{ row.status }}</span></td><td>{{ row.availability }}</td><td>{{ 'Pass' if row.template else 'Fail' }}</td><td>{{ 'Pass' if row.evaluator else 'Fail' }}</td><td>{{ row.notes }}</td></tr>{% endfor %}</tbody></table></div></article>
-    </section>
+    {% elif section == 'methodologies' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">VERSIONED GOVERNANCE</p><h2>Methodologies</h2></div></div><div class="brain-card-list">{% for item in methodologies %}<article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} | Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">Effective {{ item.effective_from.strftime('%d %b %Y') }}</span></div></div></article>{% else %}<p class="brain-empty">No methodology is configured.</p>{% endfor %}</div></section>
 
-    <section id="mechanic-extensions" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">CERTIFIED EXTENSIBILITY</p><h2>Created mechanic status and quality</h2></div><div class="brain-head-actions"><span class="brain-tag">{{ data.counts.extension_repair_ready }} repairs need approval</span><input class="brain-search" data-filter-target="extension-table" placeholder="Filter mechanic or status" aria-label="Filter created mechanics"></div></div>
-      <article class="brain-panel"><p class="brain-panel-copy">AI drafts and reviews bounded JSON mechanics. Deterministic validation and Bybit market tests decide certification; repairs never mutate an approved monitor silently.</p><div class="brain-table-scroll extra-tall"><table id="extension-table"><thead><tr><th>Mechanic</th><th>Status</th><th>Score</th><th>Live scans</th><th>Candidate rate</th><th>Notifications</th><th>AI attempts</th><th>Last model</th><th>Updated</th></tr></thead><tbody>{% for row in data.capability_extensions %}<tr><td><strong>{{ row.capability_key }}</strong><small>{{ row.source_prompt }}</small><code>v{{ row.version }}</code><details class="brain-mechanic-detail"><summary>Inspect code and build log</summary><h4>Certified JSON mechanic</h4><pre>{{ row.generated_code or 'No certified artifact yet.' }}</pre><h4>Build log</h4><ol>{% for event in row.build_log %}<li><time>{{ event.timestamp }}</time><b>{{ event.stage }}</b><span>{{ event.message }}</span></li>{% else %}<li>No build events yet.</li>{% endfor %}</ol>{% if row.last_error %}<p class="brain-error">{{ row.last_error }}</p>{% endif %}</details></td><td><span class="brain-status {{ 'pass' if row.status in ['certified_user', 'approved_global'] else 'warning' if row.status in ['queued', 'building', 'repair_queued', 'repair_ready', 'needs_user_clarification'] else 'fail' }}">{{ row.status }}</span><small>{{ row.stage }}</small></td><td>{{ row.validation_score }}%</td><td>{{ row.scan_count }}<small>{{ row.symbols_scanned }} symbols</small></td><td>{{ row.candidate_rate }}%<small>{{ row.candidates }} candidates</small></td><td>{{ row.notifications }}</td><td>{{ row.attempts }}<small>repair generation {{ row.repair_generation }}</small></td><td><code>{{ row.last_model or '-' }}</code><small>{{ row.last_effort or '' }}</small></td><td>{{ row.updated_at.strftime('%Y-%m-%d %H:%M') if row.updated_at else '-' }}</td></tr>{% else %}<tr><td colspan="9" class="brain-empty">No custom mechanics have entered the certification pipeline yet.</td></tr>{% endfor %}</tbody></table></div></article>
-    </section>
+    {% elif section == 'source-registry' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">VERIFIED INPUTS ONLY</p><h2>Official Source Registry</h2><p>AI cannot add or invent these URLs.</p></div><input class="brain-search" data-filter-target="source-table" placeholder="Filter source or asset" aria-label="Filter source registry"></div><div class="brain-table-wrap"><table id="source-table"><thead><tr><th>Asset</th><th>Category</th><th>Source</th><th>Verification</th><th>Priority</th></tr></thead><tbody>{% for item in sources %}<tr><td><strong>{{ item.asset.symbol }}</strong><small>{{ item.asset.name }}</small></td><td>{{ item.source.category.replace('_',' ').title() }}</td><td><a href="{{ item.source.source_url }}" target="_blank" rel="noopener">{{ item.source.title }}</a></td><td><span class="brain-status {{ item.source.verification_state }}">{{ item.source.verification_state }}</span></td><td>{{ item.source.priority }}</td></tr>{% else %}<tr><td colspan="5" class="brain-empty">No verified source registry entries exist yet.</td></tr>{% endfor %}</tbody></table></div></section>
 
-    <section id="users" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">REGISTERED USERS</p><h2>Customer directory</h2></div><div class="brain-head-actions"><span class="brain-tag">{{ data.counts.visible_users }} shown</span><input class="brain-search" data-filter-target="user-table" placeholder="Search name or email" aria-label="Search users"></div></div>
-      <article class="brain-panel"><div class="brain-table-scroll tall"><table id="user-table"><thead><tr><th>First name</th><th>Email</th><th>Status</th><th>Joined</th><th>Last seen</th></tr></thead><tbody>{% for user in data.users %}<tr><td><strong>{{ user.first_name }}</strong></td><td>{{ user.email }}</td><td><span class="brain-status pass">{{ user.status }}</span></td><td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td><td>{{ user.last_seen_at.strftime('%Y-%m-%d %H:%M') if user.last_seen_at else '-' }}</td></tr>{% else %}<tr><td colspan="5" class="brain-empty">No non-excluded email users found.</td></tr>{% endfor %}</tbody></table></div></article>
-    </section>
+    {% elif section == 'scraper-runs' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">IDEMPOTENT WORKER HISTORY</p><h2>Scraper and Monitoring Runs</h2></div></div><div class="brain-table-wrap"><table><thead><tr><th>Started</th><th>Run</th><th>Status</th><th>Attempted</th><th>Succeeded</th><th>Failed</th><th>Result</th></tr></thead><tbody>{% for item in runs %}<tr><td>{{ (item.started_at or item.created_at).strftime('%d %b %Y %H:%M') }}</td><td>{{ item.run_kind.replace('_',' ').title() }}</td><td><span class="brain-status {{ item.status }}">{{ item.status }}</span></td><td>{{ item.items_attempted }}</td><td>{{ item.items_succeeded }}</td><td>{{ item.items_failed }}</td><td>{{ item.last_error_detail or ('Completed ' ~ item.items_succeeded ~ ' item(s).') }}</td></tr>{% else %}<tr><td colspan="7" class="brain-empty">No scraper or monitoring run has been recorded.</td></tr>{% endfor %}</tbody></table></div></section>
 
-    <section id="ai-usage" class="brain-section">
-      <div class="brain-section-head"><div><p class="brain-kicker">OPENAI USAGE</p><h2>Tokens and estimated cost</h2></div><span class="brain-tag">Configured model pricing</span></div>
-      <article class="brain-panel"><p class="brain-panel-copy">Reasoning tokens are shown separately for diagnosis but are already included in output tokens, so they are not charged twice. Flex estimates use Batch-rate pricing.</p><div class="brain-table-scroll compact"><table><thead><tr><th>Model</th><th>Reasoning effort</th><th>Tier</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Reasoning tokens</th><th>Estimated cost</th></tr></thead><tbody>{% for row in data.usage_breakdown %}<tr><td><code>{{ row.model }}</code></td><td>{{ row.reasoning_effort }}</td><td>{{ row.service_tier }}</td><td>{{ row.calls }}</td><td>{{ row.input_tokens }}</td><td>{{ row.output_tokens }}</td><td>{{ row.reasoning_tokens }}</td><td><strong>${{ '%.6f'|format(row.cost) }}</strong></td></tr>{% else %}<tr><td colspan="8" class="brain-empty">No OpenAI usage has been recorded since telemetry was enabled.</td></tr>{% endfor %}</tbody></table></div></article>
-    </section>
+    {% elif section == 'ai-assessments' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">FACTUAL ANALYSIS, NOT RULINGS</p><h2>AI Assessments</h2></div></div><div class="brain-table-wrap"><table><thead><tr><th>Created</th><th>Model</th><th>Effort / Tier</th><th>Status</th><th>Retries</th><th>Prompt</th><th>Outcome</th></tr></thead><tbody>{% for item in analyses %}<tr><td>{{ item.created_at.strftime('%d %b %Y %H:%M') }}</td><td><strong>{{ item.model }}</strong></td><td>{{ item.reasoning_effort }} | {{ item.returned_service_tier or item.requested_service_tier }}</td><td><span class="brain-status {{ item.status }}">{{ item.status }}</span></td><td>{{ item.retry_count }}</td><td>{{ item.prompt_version }}</td><td>{{ (item.output or {}).get('human_review_reason') or item.error_detail or 'Validated factual analysis retained.' }}</td></tr>{% else %}<tr><td colspan="7" class="brain-empty">No AI factual analysis has been recorded.</td></tr>{% endfor %}</tbody></table></div></section>
+
+    {% elif section == 'delivery-health' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">NOTIFICATION-ONLY CHANNEL</p><h2>Telegram / Delivery Health</h2><p>Telegram alerts administrators; all decisions remain in this authenticated workspace.</p></div></div><div class="brain-table-wrap"><table><thead><tr><th>Created</th><th>Notification</th><th>Status</th><th>Attempts</th><th>Last attempt</th><th>Next retry</th><th>Result</th></tr></thead><tbody>{% for item in deliveries %}<tr><td>{{ item.created_at.strftime('%d %b %Y %H:%M') }}</td><td>{{ item.notification_type.replace('_',' ').title() }}</td><td><span class="brain-status {{ item.status }}">{{ item.status }}</span></td><td>{{ item.attempt_count }}</td><td>{{ item.last_attempt_at.strftime('%d %b %Y %H:%M') if item.last_attempt_at else 'Not attempted' }}</td><td>{{ item.next_retry_at.strftime('%d %b %Y %H:%M') if item.next_retry_at else 'None' }}</td><td>{{ item.last_error_detail or ('Delivered' if item.delivered_at else 'Queued') }}</td></tr>{% else %}<tr><td colspan="7" class="brain-empty">No Sharia review notification has been queued.</td></tr>{% endfor %}</tbody></table></div></section>
+
+    {% elif section == 'audit-history' %}
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">APPEND-ONLY ACCOUNTABILITY</p><h2>Audit History</h2></div><input class="brain-search" data-filter-target="audit-table" placeholder="Filter audited action" aria-label="Filter audit history"></div><div class="brain-table-wrap"><table id="audit-table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th></tr></thead><tbody>{% for item in audits %}<tr><td>{{ item.created_at.strftime('%d %b %Y %H:%M:%S') }}</td><td><strong>{{ item.action.replace('sharia.','').replace('_',' ').replace('.',' ').title() }}</strong></td><td>{{ item.target_type.replace('_',' ').title() }}<small>{{ item.target_id }}</small></td><td>{{ item.actor_user_id or 'System worker' }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No Sharia governance audit events exist yet.</td></tr>{% endfor %}</tbody></table></div></section>
+    {% endif %}
   </main>
 </body>
 </html>

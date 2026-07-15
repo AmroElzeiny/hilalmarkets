@@ -96,6 +96,22 @@ app.conf.update(
             "task": "ai_market_monitor.send_compliance_digests",
             "schedule": 60 * 60,
         },
+        "process-sc-malaysia-imports-daily": {
+            "task": "ai_market_monitor.process_sc_malaysia_imports",
+            "schedule": 24 * 60 * 60,
+        },
+        "send-sharia-review-reminders-hourly": {
+            "task": "ai_market_monitor.send_sharia_review_reminders",
+            "schedule": 60 * 60,
+        },
+        "retry-sharia-admin-telegram-every-minute": {
+            "task": "ai_market_monitor.retry_sharia_admin_telegram",
+            "schedule": 60,
+        },
+        "monitor-published-sharia-sources": {
+            "task": "ai_market_monitor.monitor_published_sharia_sources",
+            "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
+        },
     },
 )
 
@@ -231,6 +247,26 @@ def process_capability_extensions() -> dict:
 @app.task(name="ai_market_monitor.send_compliance_digests")
 def send_compliance_digests() -> dict:
     return _run_async_task(_send_compliance_digests())
+
+
+@app.task(name="ai_market_monitor.process_sc_malaysia_imports")
+def process_sc_malaysia_imports() -> dict:
+    return _run_async_task(_process_sc_malaysia_imports())
+
+
+@app.task(name="ai_market_monitor.send_sharia_review_reminders")
+def send_sharia_review_reminders() -> dict:
+    return _run_async_task(_send_sharia_review_reminders())
+
+
+@app.task(name="ai_market_monitor.retry_sharia_admin_telegram")
+def retry_sharia_admin_telegram() -> dict:
+    return _run_async_task(_retry_sharia_admin_telegram())
+
+
+@app.task(name="ai_market_monitor.monitor_published_sharia_sources")
+def monitor_published_sharia_sources() -> dict:
+    return _run_async_task(_monitor_published_sharia_sources())
 
 
 async def _evaluate_due_trial_cycles() -> dict:
@@ -547,6 +583,134 @@ async def _send_compliance_digests() -> dict:
 
     async with SessionFactory() as session:
         result = await ComplianceDigestService(session, settings).process_due()
+        await session.commit()
+        return result
+
+
+async def _process_sc_malaysia_imports() -> dict:
+    from uuid import UUID
+
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import ExternalAssessment, ReviewCase
+    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.sc_malaysia_import import SCMalaysiaImporter
+    from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
+    from ai_market_monitor.services.sharia_identity import (
+        AssetIdentityError,
+        CanonicalAssetMappingService,
+    )
+    from ai_market_monitor.services.sharia_research import ShariaResearchPipeline
+
+    provider = CcxtMarketDataProvider(settings)
+    try:
+        verified_symbols = {
+            symbol.upper()
+            for symbol in await provider.list_symbols("binance", ["USDT"])
+        }
+        async with SessionFactory() as session:
+            imported = await SCMalaysiaImporter(session, settings).import_latest()
+            await session.commit()
+        allowed = settings.sharia_pilot_symbol_set
+        if settings.sharia_process_remaining_imports:
+            allowed = set()
+        async with SessionFactory() as session:
+            query = select(ExternalAssessment).where(
+                ExternalAssessment.mapping_state == "unresolved"
+            )
+            if allowed:
+                query = query.where(ExternalAssessment.asset_symbol.in_(allowed))
+            drafts = list((await session.scalars(query)).all())
+            mapped = 0
+            cases = 0
+            failed = 0
+            for external in drafts:
+                try:
+                    mapping = CanonicalAssetMappingService(session)
+                    if settings.sharia_process_remaining_imports:
+                        await mapping.map_registered(
+                            external,
+                            verified_exchange_symbols=verified_symbols,
+                        )
+                    else:
+                        await mapping.map_pilot(
+                            external,
+                            verified_exchange_symbols=verified_symbols,
+                        )
+                    await session.flush()
+                    mapped += 1
+                    result = await ShariaResearchPipeline(
+                        session, settings
+                    ).research_initial_asset(external.id)
+                    if result.case_id:
+                        case = await session.get(ReviewCase, UUID(result.case_id))
+                        if case is not None:
+                            await ShariaAdminTelegramService(
+                                session, settings
+                            ).enqueue(
+                                case,
+                                notification_type="new_review_required",
+                                idempotency_key=f"new-review:{case.id}",
+                            )
+                            cases += 1
+                except AssetIdentityError:
+                    failed += 1
+                except Exception:
+                    logger.exception(
+                        "SC Malaysia pilot processing failed for %s", external.asset_symbol
+                    )
+                    failed += 1
+            await session.commit()
+        async with SessionFactory() as session:
+            delivered = await ShariaAdminTelegramService(
+                session, settings
+            ).process_due()
+            await session.commit()
+        return {
+            "import_run_id": imported.run_id,
+            "explicit_rows": imported.explicit_rows,
+            "notice_only_rows_excluded": imported.excluded_notice_rows,
+            "pilot_assets_mapped": mapped,
+            "review_cases_ready": cases,
+            "failed_or_waiting_identity": failed,
+            "telegram_attempts_processed": delivered,
+            "remaining_imports_enabled": settings.sharia_process_remaining_imports,
+        }
+    finally:
+        await provider.close()
+
+
+async def _send_sharia_review_reminders() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
+
+    async with SessionFactory() as session:
+        service = ShariaAdminTelegramService(session, settings)
+        enqueued = await service.enqueue_due_reminders()
+        processed = await service.process_due()
+        await session.commit()
+        return {"enqueued": enqueued, "processed": processed}
+
+
+async def _retry_sharia_admin_telegram() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
+
+    async with SessionFactory() as session:
+        processed = await ShariaAdminTelegramService(session, settings).process_due()
+        await session.commit()
+        return {"processed": processed}
+
+
+async def _monitor_published_sharia_sources() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.sharia_source_monitoring import (
+        ShariaSourceMonitoringService,
+    )
+
+    async with SessionFactory() as session:
+        result = await ShariaSourceMonitoringService(session, settings).run_due()
         await session.commit()
         return result
 

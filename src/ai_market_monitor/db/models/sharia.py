@@ -37,6 +37,9 @@ class ShariaMethodology(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     code: Mapped[str] = mapped_column(String(80), nullable=False)
+    family_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_methodology_families.id", ondelete="SET NULL")
+    )
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     version: Mapped[str] = mapped_column(String(32), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)

@@ -313,6 +313,25 @@ evaluation, universe snapshot, and policy decision. Current status is resolved s
 reviews cannot rewrite prior proof. `ActivityReadService` composes the user-owned read model without
 merging source tables. AI can explain these records but has no status mutation or review tool.
 
+The SC Malaysia governance workflow sits before that existing screening boundary. The idempotent
+`SCMalaysiaImporter` retains the official response and imports only rows with explicit
+`Shariah-compliant` wording, an SAC meeting, and a parseable decision date. Canonical mapping checks
+name, symbol, native/token identity, chain/contracts, official URLs, and a current spot-market
+identity; ticker-only matches create a blocking conflict case. `ShariaResearchPipeline` fetches a
+stable, verified official-source registry sequentially and makes one bounded Flex analysis request
+per asset/run. Its schema contains factual findings and review recommendations, but no publication
+or religious-status field.
+
+`ShariaGovernanceService` is the only publication bridge. It rechecks application `ADMIN` authority,
+records an immutable decision, preserves evidence snapshot references, publishes the two-layer
+Passport transactionally, and invalidates affected screened universes. Rejection retains the source,
+dossier, AI result, and decision while creating no public assessment. Published assets alone enter
+`ShariaSourceMonitoringService`; unchanged sources make no AI request, while material changes create
+a human review and can apply a fail-closed operational hold without rewriting history. The admin-only
+System Brain reads real aggregates and is absent from customer navigation.
+
 The migration pauses legacy active monitors until a real approved methodology and resolved policy
-are attached. The seeded development methodology is draft, non-executable, and contains no asset
-conclusions. See `docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md`.
+are attached. Governance migration `d6e7f8a9b0c1` adds normalized source, dossier, review,
+publication, monitoring, and Telegram-attempt records. It seeds the SC Malaysia methodology
+family/version but no asset conclusion. See
+`docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md`.

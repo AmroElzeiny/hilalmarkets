@@ -126,6 +126,17 @@ SHARIA_DEFAULT_METHODOLOGY_CODE=<qualified-approved-active-code>
 SHARIA_UNIVERSE_CACHE_TTL_SECONDS=300
 SHARIA_COMPLIANCE_SAFETY_UNDER_REVIEW=true
 SHARIA_COMPLIANCE_DIGEST_LOCAL_HOUR=8
+SHARIA_ADMIN_TELEGRAM_CHAT_ID=<admin-chat-id>
+SC_MALAYSIA_DIGITAL_ASSETS_URL=https://www.sc.com.my/digital-assets
+SHARIA_AI_MODEL=gpt-5.4-nano
+SHARIA_AI_REASONING_EFFORT=low
+SHARIA_AI_SERVICE_TIER=flex
+SHARIA_AI_ALLOW_STANDARD_FALLBACK=false
+SHARIA_SCRAPER_CONCURRENCY=1
+SHARIA_SCRAPER_OBEY_ROBOTS=true
+SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS=1
+SHARIA_PILOT_SYMBOLS=BTC,ETH,SOL
+SHARIA_PROCESS_REMAINING_IMPORTS=false
 ```
 
 Deploy this migration with scanning stopped. `alembic upgrade head` pauses every previously active
@@ -143,4 +154,4 @@ opening production scanning.
 This release is technically fail-closed; it is not religiously production-ready until a qualified
 body, reviewers, approved methodology content, evidence-source operations, review cadence, and
 incident SLAs are configured. The complete checklist and known limitations are in
-`docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md`.
+`docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md`.

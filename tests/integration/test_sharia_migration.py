@@ -39,6 +39,56 @@ def test_sharia_migration_identifiers_fit_postgresql_limit():
     assert over_limit == []
 
 
+def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    database_path = tmp_path / "sc-governance.sqlite3"
+    env = os.environ.copy()
+    env.update(
+        {
+            "APP_ENV": "test",
+            "APP_SECRET_KEY": "test-secret-key-with-at-least-thirty-two-characters",
+            "DATABASE_URL": f"sqlite+aiosqlite:///{database_path.as_posix()}",
+            "ALLOW_MOCK_PROVIDERS": "true",
+        }
+    )
+
+    _run_alembic(repo_root, env, "head")
+
+    with sqlite3.connect(database_path) as connection:
+        table_names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        methodology = connection.execute(
+            """
+            SELECT code, version, status
+            FROM sharia_methodologies
+            WHERE code = 'SC_MALAYSIA_SAC_REFERENCE'
+            """
+        ).fetchone()
+        canonical_assets = connection.execute(
+            "SELECT COUNT(*) FROM canonical_assets"
+        ).fetchone()[0]
+        published_assets = connection.execute(
+            "SELECT COUNT(*) FROM published_asset_assessments"
+        ).fetchone()[0]
+
+    assert {
+        "canonical_assets",
+        "external_assessments",
+        "asset_research_dossiers",
+        "sharia_review_cases",
+        "published_asset_assessments",
+        "source_change_events",
+        "sharia_telegram_notification_attempts",
+    }.issubset(table_names)
+    assert methodology == ("SC_MALAYSIA_SAC_REFERENCE", "2026.03", "active")
+    assert canonical_assets == 0
+    assert published_assets == 0
+
+
 def test_sharia_migration_pauses_existing_active_monitors(tmp_path):
     repo_root = Path(__file__).resolve().parents[2]
     database_path = tmp_path / "sharia-migration.sqlite3"
