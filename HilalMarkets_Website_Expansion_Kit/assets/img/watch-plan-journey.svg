@@ -1,0 +1,16 @@
+<svg viewBox="0 0 760 440" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#082f29"/><stop offset="1" stop-color="#0f5c4d"/></linearGradient><filter id="sh"><feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity=".18"/></filter></defs>
+<rect width="760" height="440" rx="34" fill="url(#bg)"/><circle cx="667" cy="55" r="120" fill="#d2af63" opacity=".08"/>
+<text x="52" y="62" font-family="Manrope,Arial" font-size="16" font-weight="800" fill="#d2af63">OPPORTUNITY JOURNEY</text>
+<text x="52" y="103" font-family="Manrope,Arial" font-size="30" font-weight="800" fill="#fff">One opportunity. Every important state.</text>
+<path d="M85 242H675" stroke="#6aa998" stroke-width="4" opacity=".55"/>
+<g filter="url(#sh)">
+<circle cx="105" cy="242" r="25" fill="#1f8b74" stroke="#bce3d7" stroke-width="7"/>
+<circle cx="240" cy="242" r="25" fill="#d2af63" stroke="#f5e8c9" stroke-width="7"/>
+<circle cx="380" cy="242" r="25" fill="#fff" stroke="#5b8d80" stroke-width="7"/>
+<circle cx="520" cy="242" r="25" fill="#fff" stroke="#5b8d80" stroke-width="7"/>
+<circle cx="655" cy="242" r="25" fill="#fff" stroke="#5b8d80" stroke-width="7"/>
+</g>
+<g font-family="Arial" text-anchor="middle"><text x="105" y="299" font-size="14" font-weight="700" fill="#fff">Detected</text><text x="105" y="322" font-size="12" fill="#a9c4bc">10:24</text><text x="240" y="299" font-size="14" font-weight="700" fill="#fff">Forming</text><text x="240" y="322" font-size="12" fill="#d9c991">Now · 80%</text><text x="380" y="299" font-size="14" font-weight="700" fill="#c1d5cf">Ready</text><text x="380" y="322" font-size="12" fill="#89a99f">—</text><text x="520" y="299" font-size="14" font-weight="700" fill="#c1d5cf">Alert sent</text><text x="520" y="322" font-size="12" fill="#89a99f">—</text><text x="655" y="299" font-size="14" font-weight="700" fill="#c1d5cf">Ended</text><text x="655" y="322" font-size="12" fill="#89a99f">—</text></g>
+<rect x="52" y="360" width="656" height="46" rx="15" fill="#fff" opacity=".09"/><circle cx="78" cy="383" r="8" fill="#d2af63"/><text x="97" y="388" font-family="Arial" font-size="13" fill="#fff">Still missing: price has not closed above the recent high.</text>
+</svg>

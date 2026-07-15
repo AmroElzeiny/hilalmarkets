@@ -1,0 +1,24 @@
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <a class="logo" href="{{ url_for('public_home') }}">
+          <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
+          <span>HilalMarkets<small>Halal-conscious market monitoring</small></span>
+        </a>
+        <p class="footer-summary">Sharia-screened crypto spot intelligence and evidence-led monitoring for self-directed Muslim investors.</p>
+        <div class="trust-row"><span><span data-icon="check" data-icon-class="icon"></span>No execution</span><span><span data-icon="check" data-icon-class="icon"></span>Evidence-led</span></div>
+      </div>
+      {% for group in footer_navigation %}
+      <div>
+        <h2>{{ group.label }}</h2>
+        <div class="footer-links">
+          {% for item in group.items %}<a href="{{ url_for(item.endpoint) }}">{{ item.label }}</a>{% endfor %}
+          {% if group.label == 'Legal' %}<button type="button" class="footer-link-button" data-cookie-settings>Cookie Settings</button>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="footer-bottom"><span>&copy; 2026 HilalMarkets. Research and monitoring only.</span><span>Screening is methodology-specific and does not replace qualified advice.</span></div>
+  </div>
+</footer>

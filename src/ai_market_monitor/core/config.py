@@ -20,11 +20,23 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     public_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
     app_base_url: AnyHttpUrl | None = None
+    public_og_image_url: AnyHttpUrl | None = None
+    site_legal_name: str | None = None
+    site_company_address: str | None = None
+    site_governing_law: str | None = None
+    site_privacy_contact_email: str | None = None
+    site_security_contact_email: str | None = None
+    cookie_consent_version: int = Field(default=1, ge=1, le=1000)
+    google_tag_manager_container_id: str | None = None
+    optional_analytics_enabled: bool = False
+    marketing_consent_enabled: bool = False
     log_level: str = "INFO"
     allow_mock_providers: bool = True
     scanning_enabled: bool = False
     sharia_screening_enforced: bool = False
     sharia_allow_legacy_unscreened_local: bool = True
+    sharia_test_market_enabled: bool = False
+    sharia_live_quote_cache_seconds: float = Field(default=0.75, ge=0.5, le=10)
     sharia_default_methodology_code: str | None = None
     sharia_universe_cache_ttl_seconds: int = Field(default=300, ge=30, le=86400)
     sharia_compliance_safety_under_review: bool = True
@@ -85,9 +97,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
     openai_model: str = "gpt-5.4-nano"
-    openai_reasoning_effort: Literal[
-        "none", "minimal", "low", "medium", "high", "xhigh"
-    ] = "low"
+    openai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "low"
     openai_timeout_seconds: int = Field(default=20, ge=1, le=120)
     openai_explanation_enabled: bool = True
     ai_agent_control_enabled: bool = False
@@ -181,6 +191,7 @@ class Settings(BaseSettings):
     system_brain_otp_max_attempts: int = Field(default=5, ge=1, le=10)
     system_brain_session_hours: int = Field(default=8, ge=1, le=72)
     system_brain_login_attempts_per_15_minutes: int = Field(default=5, ge=1, le=20)
+    system_brain_cloudflare_access_required: bool = False
     openai_model_pricing_usd_per_million: dict[str, dict[str, float]] = Field(
         default_factory=lambda: {
             "gpt-5.4-nano": {
@@ -197,7 +208,7 @@ class Settings(BaseSettings):
                 "input": 0.05,
                 "cached_input": 0.005,
                 "output": 0.40,
-            }
+            },
         }
     )
     dashboard_export_directory: str = "./exports"
@@ -233,28 +244,20 @@ class Settings(BaseSettings):
         if self.ai_agent_parallel_tool_calls:
             raise ValueError("AI_AGENT_PARALLEL_TOOL_CALLS must remain false for bounded control")
         if self.ai_agent_tool_timeout_seconds > self.ai_agent_timeout_seconds:
-            raise ValueError(
-                "AI_AGENT_TOOL_TIMEOUT_SECONDS cannot exceed AI_AGENT_TIMEOUT_SECONDS"
-            )
+            raise ValueError("AI_AGENT_TOOL_TIMEOUT_SECONDS cannot exceed AI_AGENT_TIMEOUT_SECONDS")
         if (
             self.capability_extension_min_candidate_rate
             >= self.capability_extension_max_candidate_rate
         ):
-            raise ValueError(
-                "CAPABILITY_EXTENSION_MIN_CANDIDATE_RATE must be below the maximum"
-            )
-        if (
-            self.capability_extension_candle_limit
-            > self.capability_extension_max_history_candles
-        ):
-            raise ValueError(
-                "CAPABILITY_EXTENSION_CANDLE_LIMIT cannot exceed the history cap"
-            )
+            raise ValueError("CAPABILITY_EXTENSION_MIN_CANDIDATE_RATE must be below the maximum")
+        if self.capability_extension_candle_limit > self.capability_extension_max_history_candles:
+            raise ValueError("CAPABILITY_EXTENSION_CANDLE_LIMIT cannot exceed the history cap")
         return self
 
     @field_validator(
         "market_metadata_api_url",
         "app_base_url",
+        "public_og_image_url",
         "crypto_index_api_url",
         "macro_market_api_url",
         "event_feed_api_url",

@@ -1210,7 +1210,7 @@ class AISetupChatService:
                 (
                     "Screened monitoring is not available yet because no real approved "
                     "methodology is active. The development/test methodology is not a "
-                    "religious ruling and cannot be used for scans or Watch Plans."
+                    "religious ruling and cannot be used for scans or Watchlists."
                 ),
                 message_type="screening_unavailable",
                 payload={"can_approve": False, "can_scan": False},
@@ -1491,7 +1491,7 @@ class AISetupChatService:
         context.pop("awaiting_clarification_key", None)
         chat.context_json = context
         chat.status = "interviewing"
-        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watch Plan"
+        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watchlist"
         await self._assistant(
             session,
             chat,

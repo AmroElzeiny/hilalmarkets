@@ -1,0 +1,8 @@
+<svg viewBox="0 0 700 470" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="n" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eff8f5"/><stop offset="1" stop-color="#f7f4ec"/></linearGradient><filter id="z"><feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#082f29" flood-opacity=".13"/></filter></defs>
+<rect width="700" height="470" rx="34" fill="url(#n)"/>
+<g stroke="#9fc6ba" stroke-width="3"><path d="M350 235 150 125M350 235 550 110M350 235 575 340M350 235 135 350"/></g>
+<g filter="url(#z)"><circle cx="350" cy="235" r="88" fill="#0f5c4d"/><circle cx="150" cy="125" r="56" fill="#fff"/><circle cx="550" cy="110" r="56" fill="#fff"/><circle cx="575" cy="340" r="56" fill="#fff"/><circle cx="135" cy="350" r="56" fill="#fff"/></g>
+<path d="M382 175c-53 8-88 59-76 109 7 30 29 54 57 65-50 1-91-39-91-89 0-48 38-87 86-89 8 0 16 1 24 4Z" fill="#f7f4ec"/><path d="M352 252h15v42h-15zM376 231h15v63h-15zM400 204h15v90h-15z" fill="#d2af63"/>
+<g font-family="Arial" text-anchor="middle"><text x="150" y="121" font-size="12" font-weight="700" fill="#0f5c4d">MUSLIM</text><text x="150" y="140" font-size="12" fill="#63716c">INVESTORS</text><text x="550" y="106" font-size="12" font-weight="700" fill="#0f5c4d">QUALIFIED</text><text x="550" y="125" font-size="12" fill="#63716c">REVIEWERS</text><text x="575" y="336" font-size="12" font-weight="700" fill="#0f5c4d">MARKET</text><text x="575" y="355" font-size="12" fill="#63716c">DATA</text><text x="135" y="346" font-size="12" font-weight="700" fill="#0f5c4d">EXPLAINABLE</text><text x="135" y="365" font-size="12" fill="#63716c">TECHNOLOGY</text></g>
+</svg>

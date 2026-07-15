@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard/
+Disallow: /system-brain
+Sitemap: https://hilalmarkets.com/sitemap.xml

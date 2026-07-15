@@ -1,0 +1,38 @@
+<aside class="sidebar" data-sidebar data-hilal-sidebar>
+  <div class="sidebar-head">
+    <a class="logo" href="{{ url_for('dashboard_home') }}" aria-label="HilalMarkets home">
+      <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
+      <span>HilalMarkets<small>Screened market intelligence</small></span>
+    </a>
+    <button class="btn btn-secondary btn-icon sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close menu"><span data-icon="close" data-icon-class="icon"></span></button>
+  </div>
+
+  <nav data-testid="dashboard-nav" aria-label="Dashboard navigation">
+    {% for group in dashboard_navigation %}
+    <div class="nav-group">
+      <div class="nav-label">{{ group.label }}</div>
+      {% for item in group.items %}
+      {% set is_active = page == item.page or page in item.active_pages %}
+      <a class="nav-item {{ 'is-active' if is_active else '' }}" href="{{ url_for(item.endpoint) }}" {% if is_active %}aria-current="page"{% endif %}>
+        <span data-icon="{{ item.icon }}" data-icon-class="icon"></span>
+        <span>{{ item.label }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </nav>
+
+  <div class="sidebar-spacer"></div>
+  <div class="sidebar-profile">
+    <div class="avatar">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</div>
+    <div class="meta">
+      <strong>{{ (user.display_name or 'HilalMarkets user') if user else 'HilalMarkets' }}</strong>
+      <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Screened market intelligence') }}</small>
+    </div>
+    {% if user %}
+    <form method="post" action="/logout"><button class="btn btn-ghost btn-icon" type="submit" aria-label="Sign out"><span data-icon="logout" data-icon-class="icon"></span></button></form>
+    {% else %}
+    <a class="btn btn-ghost btn-icon" href="{{ url_for('signin_page') }}" aria-label="Sign in"><span data-icon="user" data-icon-class="icon"></span></a>
+    {% endif %}
+  </div>
+</aside>

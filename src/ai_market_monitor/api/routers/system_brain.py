@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
@@ -35,7 +35,29 @@ from ai_market_monitor.services.system_brain import (
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
-router = APIRouter(tags=["system-brain"])
+
+
+async def _require_cloudflare_access(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    if not settings.system_brain_cloudflare_access_required:
+        return
+    access_email = request.headers.get("cf-access-authenticated-user-email", "")
+    access_assertion = request.headers.get("cf-access-jwt-assertion", "")
+    expected_email = settings.system_brain_username or ""
+    if (
+        not access_assertion
+        or not expected_email
+        or not hmac.compare_digest(access_email.strip().casefold(), expected_email)
+    ):
+        raise HTTPException(status_code=403, detail="Cloudflare Access is required.")
+
+
+router = APIRouter(
+    tags=["system-brain"],
+    dependencies=[Depends(_require_cloudflare_access)],
+)
 
 
 def _client_ip(request: Request) -> str | None:
@@ -316,7 +338,7 @@ async def system_brain_review_compliance_change(
     query = urlencode(
         {
             "compliance_success": (
-                f"Review recorded. {affected} Watch Plan(s) were re-evaluated."
+                f"Review recorded. {affected} Watchlist(s) were re-evaluated."
             ),
             "assessment_id": str(assessment_id) if assessment_id else "",
         }

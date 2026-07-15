@@ -1,10 +1,10 @@
 # HilalMarkets
 
 HilalMarkets is a screened-market intelligence and monitoring platform for crypto spot
-traders. Users describe a Watch Plan, approve its structured interpretation, preview it against
+traders. Users describe a Watchlist, approve its structured interpretation, preview it against
 recent market data, and receive evidence-backed Telegram or Discord alerts. Version one never places trades.
 
-The web Watch Plan Builder starts with AI Setup Chat. The server-side interviewer keeps a durable
+The web Watchlist Builder starts with AI Setup Chat. The server-side interviewer keeps a durable
 conversation, asks for measurable definitions, compiles only into the validated strategy DSL, shows
 confidence/lint/assumption evidence, and creates an immutable approved strategy version only after
 explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
@@ -18,12 +18,20 @@ in application services; the model never receives approval or activation tools. 
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
-persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
+persistent Watchlists, workers, opportunity evidence, and alerts share one versioned methodology
 and universe resolver. Missing or non-executable governance data excludes the asset; AI cannot set
 a religious status. The included development methodology is non-executable and contains no asset
 conclusions. See
 [docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md)
 for architecture, deployment order, tests, and the qualified-human-review requirements.
+
+The public product surface uses shared HilalMarkets Jinja shells, emerald/ivory/gold design
+tokens, and server-owned content sources. Dedicated routes cover Features, How It Works, How We
+Screen, Pricing, Help, Contact, About, Trust & Safety, Risk Disclosure, Privacy, Terms, and Cookies.
+Public Pricing and authenticated Billing read the same plan catalog. Optional analytics is disabled
+by default; Consent Mode v2 denied defaults execute before the optional GTM loader, and users can
+withdraw consent through Cookie Settings. See
+[docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
 
 If a user confirms a candle-computable mechanic that is not in the registry, HilalMarkets can create a
 user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
@@ -62,7 +70,8 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md](docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md), and
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
-[docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md).
+[docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md), and
+[docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
 The production page map, exact prototype asset mapping, and UI verification commands are in
 [docs/HILALMARKETS_UI_MIGRATION.md](docs/HILALMARKETS_UI_MIGRATION.md); the supplied design,
 component, UX, and QA references are preserved under [docs/hilalmarkets-ui](docs/hilalmarkets-ui/README.md).

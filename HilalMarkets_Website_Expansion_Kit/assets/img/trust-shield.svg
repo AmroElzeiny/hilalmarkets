@@ -1,0 +1,8 @@
+<svg viewBox="0 0 620 470" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="a" x1=".2" y1="0" x2=".8" y2="1"><stop stop-color="#eff8f5"/><stop offset="1" stop-color="#f7f4ec"/></linearGradient><filter id="d"><feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#082f29" flood-opacity=".14"/></filter></defs>
+<rect width="620" height="470" rx="34" fill="url(#a)"/><circle cx="495" cy="95" r="88" fill="#d2af63" opacity=".16"/>
+<g filter="url(#d)"><path d="M310 58 166 112v108c0 105 61 180 144 205 83-25 144-100 144-205V112L310 58Z" fill="#0f5c4d"/></g>
+<path d="M310 93 203 133v86c0 79 44 137 107 160 63-23 107-81 107-160v-86L310 93Z" fill="none" stroke="#d2af63" stroke-width="3" stroke-dasharray="7 8"/>
+<path d="m254 230 38 38 82-96" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+<g font-family="Arial"><rect x="45" y="75" width="156" height="50" rx="16" fill="#fff"/><circle cx="68" cy="100" r="9" fill="#1f8b74"/><text x="86" y="105" font-size="13" font-weight="700" fill="#15231f">Versioned evidence</text><rect x="419" y="151" width="166" height="50" rx="16" fill="#fff"/><circle cx="442" cy="176" r="9" fill="#d2af63"/><text x="460" y="181" font-size="13" font-weight="700" fill="#15231f">Human governance</text><rect x="48" y="338" width="164" height="50" rx="16" fill="#fff"/><circle cx="71" cy="363" r="9" fill="#1f8b74"/><text x="89" y="368" font-size="13" font-weight="700" fill="#15231f">Fail-closed policy</text><rect x="413" y="346" width="170" height="50" rx="16" fill="#fff"/><circle cx="436" cy="371" r="9" fill="#d2af63"/><text x="454" y="376" font-size="13" font-weight="700" fill="#15231f">Visible disagreement</text></g>
+</svg>

@@ -24,7 +24,7 @@ Open `http://localhost:8080/preview.html`.
 ## Product architecture represented
 
 1. **Discover** — Home, Sharia-Screened Market, Watchlist, Evidence Passport.
-2. **Watch** — Watch Plans and the Guided Builder. One-time Scanner is a mode inside the builder, not a second page.
+2. **Watch** — Watchlists and the Guided Builder. One-time Scanner is a mode inside the builder, not a second page.
 3. **Review** — Opportunities & Evidence, Opportunity Detail, Compliance Changes.
 4. **Trust** — How We Screen.
 5. **Account** — Integrations, Billing, Settings, Support.

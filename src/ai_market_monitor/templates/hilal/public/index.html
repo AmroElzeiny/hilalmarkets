@@ -1,0 +1,85 @@
+{% extends "hilal/base_public.html" %}
+{% from "hilal/macros/opportunity_card.html" import opportunity_card %}
+{% from "hilal/macros/empty_state.html" import empty_state %}
+{% block content %}
+<header class="public-hero landing-hero">
+  <div class="container public-hero-grid">
+    <div class="reveal">
+      <span class="eyebrow">Built for self-directed Muslim investors</span>
+      <h1>Halal-conscious crypto monitoring, <span class="emphasis-word">built around evidence</span>.</h1>
+      <p>Begin with Sharia-screened spot assets, describe the market behavior you want to follow, and inspect the evidence behind every forming opportunity, alert, and compliance change.</p>
+      <div class="hero-actions"><a class="btn btn-primary" href="{{ url_for('signup_page') }}"><span data-icon="market" data-icon-class="icon"></span>Explore screened opportunities</a><a class="btn btn-secondary" href="{{ url_for('public_how_we_screen') }}"><span data-icon="methodology" data-icon-class="icon"></span>See how we screen</a></div>
+      <div class="trust-row"><span><span data-icon="check" data-icon-class="icon"></span>Crypto spot only</span><span><span data-icon="check" data-icon-class="icon"></span>No execution</span><span><span data-icon="check" data-icon-class="icon"></span>Methodology-specific status</span><span><span data-icon="check" data-icon-class="icon"></span>Evidence-led monitoring</span></div>
+    </div>
+    <div class="hero-art reveal">
+      <img src="{{ url_for('static', path='/hilal/screening-flow.svg') }}" alt="A screened asset moving through evidence review, a Watchlist, and an explainable alert">
+      <div class="hero-art-card top"><strong>Screened before monitoring</strong><br><span class="muted">Methodology and version stay visible</span></div>
+      <div class="hero-art-card bottom"><strong>You approve every Watchlist</strong><br><span class="muted">No automatic trading</span></div>
+    </div>
+  </div>
+</header>
+
+<section class="trust-strip" aria-label="Trust foundations"><div class="container trust-strip-grid"><div><span data-icon="methodology" data-icon-class="icon"></span><strong>Disclosed methodology</strong><small>Version and effective date</small></div><div><span data-icon="passport" data-icon-class="icon"></span><strong>Evidence Passport</strong><small>Reasons, sources, and history</small></div><div><span data-icon="compliance" data-icon-class="icon"></span><strong>Qualified governance</strong><small>Technology does not issue a fatwa</small></div><div><span data-icon="bell" data-icon-class="icon"></span><strong>Compliance Watch</strong><small>Material changes remain visible</small></div></div></section>
+
+<section class="section" id="screened-market"><div class="container">
+  <div class="section-heading reveal"><span class="eyebrow">Screened Market</span><h2>Start with assets your selected policy allows you to consider.</h2><p>Status, methodology, review date, and evidence stay together. Current readiness appears only after real market rules are evaluated.</p></div>
+  {% if public_market.status == 'ready' %}
+  <div class="market-grid reveal">{% for item in public_market.assets %}{{ opportunity_card(item, '/dashboard/market/' ~ item.symbol|lower, '/dashboard/strategies/new?asset=' ~ item.symbol) }}{% endfor %}</div>
+  <div class="public-market-note"><span data-icon="info" data-icon-class="icon"></span><p>{{ public_market.eligible_count }} current eligible assessment{{ '' if public_market.eligible_count == 1 else 's' }} under {{ public_market.methodology.name }} v{{ public_market.methodology.version }}. No public readiness percentage is inferred from screening status.</p></div>
+  {% else %}
+  <div class="public-market-empty reveal">{{ empty_state('Screening preview is not available yet', public_market.reason, 'passport', 'Learn how screening works', url_for('public_how_we_screen')) }}</div>
+  {% endif %}
+  <div class="center section-action"><a class="btn btn-secondary" href="{{ url_for('screened_market_page') }}"><span data-icon="market" data-icon-class="icon"></span>Open the Screened Market</a></div>
+</div></section>
+
+<section class="section section-tint" id="journey"><div class="container">
+  <div class="section-heading center reveal"><span class="eyebrow">One connected journey</span><h2>From screened evidence to continuous monitoring.</h2><p>The same policy and approved mechanics follow the setup from first review to final evidence.</p></div>
+  <div class="flow-line flow-line-six reveal">
+    <div class="flow-step"><div class="flow-number">1</div><div><h3>Screened Market</h3><p>Browse policy-eligible assets.</p></div></div>
+    <div class="flow-step"><div class="flow-number">2</div><div><h3>Evidence Passport</h3><p>Read why each status exists.</p></div></div>
+    <div class="flow-step"><div class="flow-number">3</div><div><h3>Guided Watchlist</h3><p>Describe measurable behavior.</p></div></div>
+    <div class="flow-step"><div class="flow-number">4</div><div><h3>Market check</h3><p>Run the rules once first.</p></div></div>
+    <div class="flow-step"><div class="flow-number">5</div><div><h3>Continuous watch</h3><p>Follow forming opportunities.</p></div></div>
+    <div class="flow-step"><div class="flow-number">6</div><div><h3>Evidence and drift</h3><p>Review alerts and status changes.</p></div></div>
+  </div>
+</div></section>
+
+<section class="section"><div class="container">
+  <div class="section-heading reveal"><span class="eyebrow">Main capabilities</span><h2>One place to discover, watch, and understand.</h2></div>
+  <div class="feature-bento reveal">
+    <article class="bento-card large"><div class="icon-box is-gold"><span data-icon="market" data-icon-class="icon"></span></div><h2>Screened Market and Evidence Passports</h2><p>Explore assets through a disclosed methodology, then inspect the approved evidence, qualifications, review date, and status history.</p><a class="btn btn-gold" href="{{ url_for('public_features') }}#discover">Explore discovery</a></article>
+    <article class="bento-card"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div><h3>Guided Watchlists</h3><p>Start with plain market behavior and reveal exact mechanics only when you need them.</p></article>
+    <article class="bento-card"><div class="icon-box is-gold"><span data-icon="scan" data-icon-class="icon"></span></div><h3>Check the Market Now</h3><p>Run approved rules once before deciding whether continuous monitoring is useful.</p></article>
+    <article class="bento-card"><div class="icon-box is-amber"><span data-icon="activity" data-icon-class="icon"></span></div><h3>Opportunity evidence</h3><p>See what passed, what is missing, and which data was used.</p></article>
+    <article class="bento-card wide"><div class="row-between"><div><div class="icon-box"><span data-icon="bell" data-icon-class="icon"></span></div><h3>Compliance Watch</h3><p>Connect material screening changes to affected Watchlists and the policy action taken.</p></div><a class="link-arrow" href="{{ url_for('public_features') }}">All features <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div></article>
+  </div>
+</div></section>
+
+<section class="section section-dark"><div class="container journey-evidence-grid">
+  <div class="reveal"><span class="eyebrow">Opportunity journey</span><h2>Make the quiet period before an alert visible.</h2><p>Follow Detected, Forming, Near match, Confirmed, Alert delivered, Invalidated, and Expired states without treating readiness as a profit prediction.</p><div class="journey-compact" aria-label="Example lifecycle states"><span class="is-complete">Detected</span><span class="is-complete">Forming</span><span class="is-current">Near match</span><span>Confirmed</span><span>Alert delivered</span></div></div>
+  <article class="card card-dark reveal"><div class="icon-box is-gold"><span data-icon="search" data-icon-class="icon"></span></div><h3>Why was I not alerted?</h3><p>Separate a failed rule from an incomplete candle, policy exclusion, stale data, cooldown, duplicate suppression, or delivery failure.</p><a class="btn btn-gold" href="{{ url_for('public_how_it_works') }}#evidence">See the evidence flow</a></article>
+</div></section>
+
+<section class="section section-gold"><div class="container compliance-stage">
+  <div class="reveal"><span class="eyebrow">Compliance Watch</span><h2>A project can change. Your screening record should show it.</h2><p>Material changes enter an evidence and qualified-review workflow. The selected policy can protect affected Watchlists while preserving an audit trail.</p><a class="btn btn-primary" href="{{ url_for('public_features') }}#trust"><span data-icon="compliance" data-icon-class="icon"></span>Explore compliance monitoring</a></div>
+  <article class="drift-card reveal"><span class="badge badge-review">Change under review</span><h3>Policy impact remains explicit</h3><div class="timeline"><div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-copy"><strong>Evidence change captured</strong><small>Source and timestamp are preserved</small></div></div><div class="timeline-item is-alert"><span class="timeline-dot"></span><div class="timeline-copy"><strong>Affected assets protected</strong><small>The user's selected drift behavior is applied</small></div></div><div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-copy"><strong>Qualified review required</strong><small>No AI religious ruling is issued</small></div></div></div></article>
+</div></section>
+
+<section class="section"><div class="container methodology-summary reveal">
+  <div><span class="eyebrow">How We Screen</span><h2>Methodology, evidence, date, and authority stay visible.</h2><p>{% if public_market.methodology %}The current public preview uses {{ public_market.methodology.name }} v{{ public_market.methodology.version }}. {% endif %}Different approved methodologies can disagree; HilalMarkets does not manufacture consensus or promise permanent status.</p></div>
+  <div class="methodology-summary-actions"><a class="btn btn-primary" href="{{ url_for('public_how_we_screen') }}"><span data-icon="methodology" data-icon-class="icon"></span>Read How We Screen</a><a class="btn btn-secondary" href="{{ url_for('public_trust_safety') }}">Trust &amp; Safety</a></div>
+</div></section>
+
+<section class="section section-tint" id="pricing"><div class="container">
+  <div class="section-heading center reveal"><span class="eyebrow">Free, Core, and Pro</span><h2>Pay for monitoring capacity, not stronger religious certainty.</h2><p>Sharia screening remains foundational in every plan. Prices and limits below come from the live product catalog.</p></div>
+  {% include "hilal/public/partials/pricing_cards.html" %}
+  <div class="center section-action"><a class="link-arrow" href="{{ url_for('public_pricing') }}">Compare all plan limits <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div>
+</div></section>
+
+<section class="section"><div class="container grid grid-2 faq-layout">
+  <div class="section-heading reveal"><span class="eyebrow">Questions, answered plainly</span><h2>Understand the boundaries before you rely on the product.</h2><p>Operational questions live in the Help Center; these four answers cover the most important purchase decisions.</p><a class="btn btn-secondary" href="{{ url_for('public_help') }}">Open Help Center</a></div>
+  <div class="accordion reveal">{% for item in purchase_faqs %}<div class="accordion-item {{ 'is-open' if loop.first else '' }}"><h3><button class="accordion-button" type="button" data-accordion-button aria-expanded="{{ 'true' if loop.first else 'false' }}">{{ item.question }} <span data-icon="chevron" data-icon-class="icon"></span></button></h3><div class="accordion-content"><p>{{ item.answer }}</p></div></div>{% endfor %}</div>
+</div></section>
+
+<section class="section-sm"><div class="container"><div class="cta-panel reveal"><span class="eyebrow">Start with a screened market</span><h2>Follow what matters without watching every chart.</h2><p>Create a free account, review the evidence, and approve your first guided Watchlist before any monitoring begins.</p><div class="hero-actions"><a class="btn btn-gold" href="{{ url_for('signup_page') }}"><span data-icon="market" data-icon-class="icon"></span>Start free</a><a class="btn btn-secondary" href="{{ dashboard_entry_url }}"><span data-icon="arrow" data-icon-class="icon"></span>Open dashboard</a></div></div></div></section>
+{% endblock %}

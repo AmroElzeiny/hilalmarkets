@@ -1,13 +1,28 @@
+# Local configuration and secrets
 .env
 .env.*
 !.env.example
 !.env.production.example
-.env.production.
+
+# Python environments and caches
+.venv/
+venv/
+env/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Local databases and sidecars
 *.db
 *.sqlite
 *.sqlite3
-data/
-# Local databases and SQLite sidecar files
 *.db-*
 *.sqlite-*
 *.sqlite3-*
@@ -20,27 +35,39 @@ data/
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
-*.db
-*.db-*
-*.sqlite
-*.sqlite-*
-*.sqlite3
-*.sqlite3-*
-*.db-journal
-*.db-wal
-*.db-shm
-# Local DB folders
+data/
 instance/
 var/
 tmp/
 
-# DB backups/dumps
+# Database backups and dumps
 *.dump
 *.backup
 *.bak
 *.sql.gz
 *.sql.zip
 
-# Vvveb local sqlite storage
+# Browser, test, and local runtime artifacts
+playwright-report/
+test-results/
+reports/
+exports/
+screenshots/
+*.log
+cloudflared.log
+
+# Frontend and package build output
+node_modules/
+dist/
+build/
+.parcel-cache/
+
+# Editor and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Vvveb local SQLite storage
 VvvebJs/storage/sqlite/*
 !VvvebJs/storage/sqlite/.htaccess

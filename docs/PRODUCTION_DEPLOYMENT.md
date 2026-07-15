@@ -131,7 +131,7 @@ SHARIA_COMPLIANCE_DIGEST_LOCAL_HOUR=8
 Deploy this migration with scanning stopped. `alembic upgrade head` pauses every previously active
 monitor and records it in `sharia_monitor_migration_records`; this is intentional. Do not resume a
 monitor until qualified governance has published the named methodology, its assets have dated
-evidence-backed assessments, the Watch Plan has resolved a screened universe, and a human operator
+evidence-backed assessments, the Watchlist has resolved a screened universe, and a human operator
 has reviewed its exclusions and explicitly resumed it.
 
 The `TRACEDGE_DEV_TEST_V1` migration seed is schema/test data only. It is non-executable, hidden

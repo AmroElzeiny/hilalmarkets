@@ -18,6 +18,8 @@
   const scanButton = root.querySelector("[data-ai-chat-scan]");
   const errorBox = root.querySelector("[data-ai-chat-error]");
   const errorText = root.querySelector("[data-ai-chat-error-text]");
+  const openCanvasButton = document.querySelector("[data-ai-open-canvas]");
+  const returnChatButton = root.querySelector("[data-ai-return-chat]");
   let chat = null;
   let loading = false;
   let lastAction = null;
@@ -101,7 +103,7 @@
       wrapper.setAttribute("role", "status");
       wrapper.dataset.processState = stage;
       wrapper.innerHTML = `
-        <img src="https://api.iconify.design/lucide:settings-2.svg?color=%230f5c4d" alt="" aria-hidden="true">
+        ${window.icon?.("settings", "icon") || ""}
         <span><strong>${clean(stage.replaceAll("_", " "))}</strong>${clean(brandText(item.content))}</span>`;
       return wrapper;
     }
@@ -112,15 +114,14 @@
       wrapper.setAttribute("role", "status");
       wrapper.dataset.processState = state;
       wrapper.innerHTML = `
-        <img src="https://api.iconify.design/lucide:route.svg?color=%230f5c4d" alt="" aria-hidden="true">
+        ${window.icon?.("workflow", "icon") || ""}
         <span><strong>Current step: ${clean(state.replaceAll("_", " "))}</strong>${clean(brandText(item.content))}</span>`;
       return wrapper;
     }
     const wrapper = document.createElement("article");
     wrapper.className = `ai-chat-message ${user ? "user" : "assistant"}${item.pending ? " pending" : ""}${item.failed ? " failed" : ""}`;
     if (item.client_message_id) wrapper.dataset.clientMessageId = item.client_message_id;
-    const icon = user ? "lucide:user-round" : "lucide:sparkles";
-    const color = user ? "%230f5c4d" : "%23ffffff";
+    const avatarIcon = window.icon?.(user ? "user" : "spark", "icon") || "";
     const timestamp = item.created_at
       ? new Intl.DateTimeFormat(undefined, {hour: "numeric", minute: "2-digit"}).format(new Date(item.created_at))
       : "";
@@ -154,7 +155,7 @@
       ? `<small class="ai-chat-delivery failed">Not sent · Retry below</small>`
       : item.pending ? `<small class="ai-chat-delivery">Sending…</small>` : "";
     wrapper.innerHTML = `
-      <span class="ai-chat-avatar"><img src="https://api.iconify.design/${icon}.svg?color=${color}" alt="" aria-hidden="true"></span>
+      <span class="ai-chat-avatar">${avatarIcon}</span>
       <div class="ai-chat-bubble"><p>${clean(user ? item.content : brandText(item.content))}</p>${understanding}${jargon}${snapshot}${scanner}${delivery}<small class="ai-chat-message-meta">${clean(timestamp)}</small></div>`;
     return wrapper;
   }
@@ -327,7 +328,7 @@
       typing.className = "ai-chat-message assistant";
       typing.dataset.aiTyping = "true";
       typing.innerHTML = `
-        <span class="ai-chat-avatar"><img src="https://api.iconify.design/lucide:sparkles.svg?color=%23ffffff" alt=""></span>
+        <span class="ai-chat-avatar">${window.icon?.("spark", "icon") || ""}</span>
         <div class="ai-chat-bubble"><span class="ai-chat-typing" aria-label="Assistant is responding"><i></i><i></i><i></i></span></div>`;
       messagesTarget.append(typing);
     }
@@ -342,8 +343,15 @@
     };
   }
 
-  function icon(name, color = "%238b5cf6") {
-    return `<img src="https://api.iconify.design/lucide:${name}.svg?color=${color}" alt="" aria-hidden="true">`;
+  function icon(name) {
+    const aliases = {
+      "file-search": "search",
+      "list-checks": "list",
+      "triangle-alert": "alert",
+      "wand-sparkles": "spark",
+      "shield-check": "compliance",
+    };
+    return window.icon?.(aliases[name] || name, "icon") || "";
   }
 
   function renderPreview() {
@@ -616,9 +624,15 @@
     document.body.classList.add("ai-canvas-active");
     builder.hidden = false;
     builder.dataset.openCanvas = "true";
+    const builderForm = builder.querySelector("#strategy-builder-form");
+    if (builderForm) builderForm.hidden = false;
+    builder.querySelector("[data-builder-intro]")?.setAttribute("hidden", "");
+    builder.querySelectorAll("[data-builder-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.builderPanel !== "canvas";
+    });
     document.querySelector('[data-builder-direction="canvas"]')?.click();
-    root.querySelector("[data-ai-open-canvas]").hidden = true;
-    root.querySelector("[data-ai-return-chat]").hidden = false;
+    if (openCanvasButton) openCanvasButton.hidden = true;
+    if (returnChatButton) returnChatButton.hidden = false;
     publishDraftToCanvas();
   }
 
@@ -627,13 +641,13 @@
     root.classList.remove("canvas-open");
     document.body.classList.remove("ai-canvas-active");
     if (builder && !builder.querySelector("[data-strategy-id]")?.dataset.strategyId) builder.hidden = true;
-    root.querySelector("[data-ai-open-canvas]").hidden = false;
-    root.querySelector("[data-ai-return-chat]").hidden = true;
+    if (openCanvasButton) openCanvasButton.hidden = false;
+    if (returnChatButton) returnChatButton.hidden = true;
     input.focus();
   }
 
-  root.querySelector("[data-ai-open-canvas]").addEventListener("click", openCanvas);
-  root.querySelector("[data-ai-return-chat]").addEventListener("click", returnToChat);
+  openCanvasButton?.addEventListener("click", openCanvas);
+  returnChatButton?.addEventListener("click", returnToChat);
 
   async function initialize() {
     if (initialized) return;

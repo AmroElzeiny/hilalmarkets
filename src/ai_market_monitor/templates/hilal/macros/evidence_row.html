@@ -1,0 +1,7 @@
+{% macro evidence_row(title, detail, status=None, icon='database') -%}
+<div class="evidence-row">
+  <span data-icon="{{ icon }}" data-icon-class="icon"></span>
+  <div><strong>{{ title }}</strong><small>{{ detail }}</small></div>
+  {% if status %}<span class="badge badge-neutral">{{ status }}</span>{% endif %}
+</div>
+{%- endmacro %}

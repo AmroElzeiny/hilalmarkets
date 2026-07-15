@@ -1,0 +1,85 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles %}
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260715-builder-runtime">
+<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260715-builder-runtime">
+<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260715-hilal">
+<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260715-builder-cascade">
+<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260715-guided">
+{% endblock %}
+{% block content %}
+<section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
+  <div>
+    <span class="eyebrow">Guided Watchlist</span>
+    <h1>Describe what you want HilalMarkets to watch.</h1>
+    <p>Begin with plain market behavior. You will review the exact screened universe, rules, timing, and compliance-change policy before activation.</p>
+  </div>
+  <div class="guided-builder-heading-actions">
+    <button class="btn btn-secondary btn-sm" type="button" data-ai-open-canvas><span data-icon="chart" data-icon-class="icon"></span>Open Visual Canvas</button>
+    <details class="advanced-control-launcher">
+      <summary><span data-icon="settings" data-icon-class="icon"></span>Advanced Controls</summary>
+      <p>The Visual Canvas provides nested logic, exact thresholds, condition-library tools, and custom mechanics.</p>
+    </details>
+  </div>
+</section>
+
+<section class="guided-starts" aria-label="Guided starting points" {% if strategy %}hidden{% endif %}>
+  <span>Start with</span>
+  <button type="button" data-guided-starter="I want to monitor a measurable breakout on screened spot assets.">Breakout</button>
+  <button type="button" data-guided-starter="I want to monitor a pullback on screened spot assets.">Pullback</button>
+  <button type="button" data-guided-starter="I want to monitor unusual market activity on screened spot assets.">Unusual activity</button>
+  <button type="button" data-guided-starter="I want to monitor price reaching or crossing a specific level.">Price level</button>
+  <button type="button" data-guided-starter="">My own words</button>
+</section>
+
+<section class="ai-setup-chat-shell" data-ai-setup-chat data-testid="ai-setup-chat" {% if strategy %}hidden{% endif %}>
+  <header class="ai-chat-hero">
+    <div>
+      <span class="eyebrow">Watchlist assistant</span>
+      <h2>Turn your idea into inspectable rules.</h2>
+      <p>HilalMarkets asks only for details that affect measurable monitoring, then keeps assumptions and unsupported requirements visible.</p>
+    </div>
+    <div class="ai-chat-safety-badge" aria-label="Safety boundary">
+      <span data-icon="compliance" data-icon-class="icon"></span>
+      <span><strong>You remain in control</strong><small>No execution or financial advice</small></span>
+    </div>
+  </header>
+
+  <div class="ai-chat-layout">
+    <section class="ai-chat-panel" aria-label="Watchlist conversation">
+      <div class="ai-chat-panel-head">
+        <div class="ai-chat-agent">
+          <span><span data-icon="spark" data-icon-class="icon"></span></span>
+          <div><strong>HilalMarkets Assistant</strong><small data-ai-chat-status>Ready to listen</small></div>
+        </div>
+        <div class="ai-chat-head-actions">
+          <button class="ai-chat-quiet-button" type="button" data-ai-chat-new><span data-icon="plus" data-icon-class="icon-sm"></span>New setup</button>
+          <button class="ai-chat-quiet-button" type="button" data-ai-return-chat hidden><span data-icon="arrow" data-icon-class="icon-sm"></span>Return to chat</button>
+        </div>
+      </div>
+      <div class="ai-chat-messages" data-ai-chat-messages role="log" aria-live="polite" aria-label="Watchlist conversation"></div>
+      <div class="ai-chat-suggestions" data-ai-chat-suggestions aria-label="Suggested replies"></div>
+      <div class="ai-chat-error" data-ai-chat-error role="alert" hidden><span data-ai-chat-error-text></span><button type="button" data-ai-chat-retry>Retry</button></div>
+      <form class="ai-chat-composer" data-ai-chat-form>
+        <label class="sr-only" for="ai-setup-chat-input">Describe your crypto spot monitoring setup</label>
+        <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Example: Watch screened USDT pairs for a 15m close above yesterday's high..."></textarea>
+        <button type="submit" data-ai-chat-send disabled aria-label="Send message"><span data-icon="arrow" data-icon-class="icon"></span></button>
+        <small>Enter to send | Shift+Enter for a new line</small>
+      </form>
+    </section>
+
+    <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live Watchlist translation">
+      <div class="ai-preview-head"><div><span class="eyebrow">Live translation</span><h2>Your Watchlist sheet</h2></div><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div>
+      <div class="ai-preview-empty" data-ai-preview-empty><span class="icon-box"><span data-icon="scan" data-icon-class="icon-lg"></span></span><h3>Your reviewed rules will appear here</h3><p>Primary trigger, required filters, confirmations, screened universe, policy, assumptions, and alert behavior remain separate.</p></div>
+      <div class="ai-preview-content" data-ai-preview-content hidden></div>
+      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan hidden>Check the Market Now</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
+    </aside>
+  </div>
+</section>
+
+{% include "hilal/dashboard/partials/builder_workspace.html" %}
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260715-guided-builder"></script>
+<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260715-hilal"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260715-guided"></script>
+{% endblock %}

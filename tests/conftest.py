@@ -49,6 +49,7 @@ async def test_context() -> AsyncIterator[dict]:
         billing_provider="static",
         openai_explanation_enabled=False,
         email_adapter="memory",
+        sharia_test_market_enabled=False,
         openai_model="gpt-5.4-nano",
         openai_reasoning_effort="low",
         openai_model_pricing_usd_per_million={

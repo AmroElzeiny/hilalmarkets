@@ -1,0 +1,149 @@
+      <section class="dash-grid two">
+        <article class="dash-panel">
+          <h2>{{ strategy.name }}</h2>
+          <p>{{ strategy.description or 'No description yet.' }}</p>
+    <div class="metric-strip">
+            <div><span>Status</span><strong>{{ 'active' if strategy.status.value == 'draft' and strategy.active_version_id else strategy.status.value }}</strong></div>
+            <div><span>Versions</span><strong>{{ versions|length }}</strong></div>
+            <div><span>Setups</span><strong>{{ setups_count }}</strong></div>
+          </div>
+          <div class="button-row">
+            <a class="button button-primary" href="/dashboard/strategies/{{ strategy.id }}/verify">Verify strategy</a>
+            <a class="button button-primary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit Watchlist</a>
+          </div>
+        </article>
+        <article class="dash-panel">
+          <h2>Latest rule-version proof</h2>
+          {% if versions %}
+            <p>Version {{ versions[0].version_number }} is linked to all new setup evidence and proof receipts.</p>
+            <details class="advanced-disclosure">
+              <summary>Advanced strategy schema</summary>
+              <pre class="proof-json compact-json">{{ versions[0].schema_json }}</pre>
+            </details>
+          {% else %}
+            <div class="dash-empty">No strategy versions are attached yet.</div>
+          {% endif %}
+        </article>
+      </section>
+      <section class="dash-grid two strategy-health-detail" data-strategy-health="{{ strategy.id }}">
+        <article class="dash-panel health-score-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Monitor behavior</p>
+              <h2>Edge Health</h2>
+            </div>
+            <strong class="health-score-badge">{{ monitor_health.score|round|int }}/100</strong>
+          </div>
+          <p>{{ monitor_health.explanation }}</p>
+          <p><strong>Main issue:</strong> {{ monitor_health.main_issue }}</p>
+          <p><strong>Suggested review:</strong> {{ monitor_health.suggested_action }}</p>
+          <div class="health-component-list">
+            {% for component in monitor_health.components %}
+              <div class="health-component">
+                <span>{{ component.name }}</span>
+                <progress value="{{ component.score }}" max="{{ component.maximum }}"></progress>
+                <strong>{{ component.score|round|int }}/{{ component.maximum|round|int }}</strong>
+                <small>{{ component.explanation }}</small>
+              </div>
+            {% endfor %}
+          </div>
+          {% if monitor_health.trend %}
+            <details class="advanced-disclosure">
+              <summary>Health trend</summary>
+              <div class="metric-strip">
+                {% for point in monitor_health.trend[-6:] %}
+                  <div><span>{{ point.calculated_at|short_dt(user.timezone) }}</span><strong>{{ point.score|round|int }}</strong></div>
+                {% endfor %}
+              </div>
+            </details>
+          {% endif %}
+          <small>{{ monitor_health.non_advisory_notice }}</small>
+        </article>
+        <article class="dash-panel">
+          <p class="eyebrow">Condition diagnostics</p>
+          <h2>Bottleneck Map</h2>
+          {% if monitor_bottlenecks.conditions %}
+            <div class="bottleneck-list">
+              {% for item in monitor_bottlenecks.conditions[:8] %}
+                <button type="button" class="bottleneck-row" data-bottleneck-detail>
+                  <span><strong>{{ item.condition_label }}</strong><small>{{ item.sample_count }} evaluations</small></span>
+                  <span>{{ item.pass_rate|round|int }}% pass</span>
+                  <span>{{ item.blocking_rate|round|int }}% blocking impact</span>
+                  <small>{{ item.suggested_fix }}</small>
+                  <span class="bottleneck-breakdown" hidden>Passed {{ item.passed_count }}, failed {{ item.failed_count }}, pending {{ item.pending_count }}, unavailable {{ item.unavailable_count }}, errors {{ item.error_count }}.</span>
+                </button>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="dash-empty">{{ monitor_bottlenecks.message }}</div>
+          {% endif %}
+        </article>
+      </section>
+      <section class="dash-grid two" data-testid="integrations-root">
+        <article class="dash-panel" data-testid="telegram-integration-card">
+          <p class="eyebrow">Safe improvement drafts</p>
+          <h2>Improve This Monitor</h2>
+          <p>Each action creates a schema-valid visual diff. Nothing changes until you confirm it, and the result is saved as a draft version.</p>
+          <div class="button-row cockpit-action-grid">
+            {% for action, label in [
+              ('make_less_noisy', 'Make less noisy'),
+              ('make_trigger_earlier', 'Trigger earlier'),
+              ('make_safer', 'Make safer'),
+              ('make_simpler', 'Make simpler'),
+              ('add_market_context_filter', 'Add market context'),
+              ('add_volume_confirmation', 'Add volume confirmation')
+            ] %}
+              <button class="button button-secondary" type="button" data-cockpit-suggestion="{{ action }}" data-strategy-id="{{ strategy.id }}">{{ label }}</button>
+            {% endfor %}
+          </div>
+          <div id="cockpit-suggestion-result" class="summary-box" hidden></div>
+        </article>
+        <article class="dash-panel" data-testid="discord-integration-card">
+          <p class="eyebrow">Behavior changes</p>
+          <h2>Decay Review</h2>
+          {% if monitor_decay %}
+            <div class="dash-table">
+              {% for event in monitor_decay %}
+                <div class="dash-row">
+                  <strong>{{ event.event_type.replace('_', ' ').title() }}</strong>
+                  <span>{{ event.severity }}</span>
+                  <small>{{ event.explanation }}</small>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="dash-empty">No material behavior change is detected from the available history.</div>
+          {% endif %}
+        </article>
+      </section>
+      <section class="dash-grid two">
+        <article class="dash-panel">
+          <p class="eyebrow">Version behavior</p>
+          <h2>A/B Monitor Comparison</h2>
+          {% if versions|length >= 2 %}
+            <form class="dash-form" data-experiment-form data-strategy-id="{{ strategy.id }}">
+              <label>Version A
+                <select name="left_version_id">
+                  {% for version in versions %}<option value="{{ version.id }}">Version {{ version.version_number }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>Version B
+                <select name="right_version_id">
+                  {% for version in versions %}<option value="{{ version.id }}" {{ 'selected' if loop.index == 2 else '' }}>Version {{ version.version_number }}</option>{% endfor %}
+                </select>
+              </label>
+              <button class="button button-primary" type="submit">Compare versions</button>
+            </form>
+            <div class="summary-box" data-experiment-result hidden></div>
+          {% else %}
+            <div class="dash-empty">Create a second draft version to compare monitor behavior.</div>
+          {% endif %}
+        </article>
+        <article class="dash-panel">
+          <p class="eyebrow">Screened-universe coverage</p>
+          <h2>Eligible-market preview</h2>
+          <p>Preview included pairs and exclusion reasons using the approved spot-universe rules. Liquidity and spread limits remain enforced during live scans.</p>
+          <button class="button button-primary" type="button" data-universe-preview="{{ strategy.id }}">Preview optimized universe</button>
+          <div class="summary-box" data-universe-result hidden></div>
+        </article>
+      </section>

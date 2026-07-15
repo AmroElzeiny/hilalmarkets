@@ -1,0 +1,16 @@
+      <section class="dash-panel">
+        <h2>Version History</h2>
+        {% if versions %}
+          <div class="dash-table">
+            {% for version in versions %}
+              <div class="dash-row">
+                <strong>Version {{ version.version_number }}</strong>
+                <span>{{ version.status.value }}</span>
+                <small>{{ version.schema_hash[:12] }} | {{ version.created_at|short_dt(user.timezone) }}</small>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="dash-empty">No versions yet.</div>
+        {% endif %}
+      </section>

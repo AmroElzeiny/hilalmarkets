@@ -1,0 +1,17 @@
+<div class="pricing-grid reveal">
+  {% for code, plan in plans.items() %}
+  <article class="price-card {{ 'is-featured' if code == 'trader' else '' }}">
+    {% if code == 'trader' %}<span class="badge badge-dark">Most suitable</span>{% endif %}
+    <span class="kicker">{{ plan.name }}</span>
+    <div class="price"><strong>${{ plan.monthly_price | int }}</strong><span>/month</span></div>
+    <p>{{ plan.description }}</p>
+    <ul class="feature-list">
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.active_strategies }} active Watchlist{{ '' if plan.limits.active_strategies == 1 else 's' }}</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.symbols_per_strategy | plan_limit }} symbols per plan</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.on_demand_scans_per_month }} market check{{ '' if plan.limits.on_demand_scans_per_month == 1 else 's' }} per month</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram delivery' if plan.features.telegram else 'Dashboard delivery' }}</li>
+    </ul>
+    <a class="btn {{ 'btn-gold' if code == 'trader' else 'btn-secondary' }}" href="{{ url_for('signup_page') }}?plan={{ code }}">{{ 'Start free' if code == 'demo' else 'Choose ' ~ plan.name }}</a>
+  </article>
+  {% endfor %}
+</div>

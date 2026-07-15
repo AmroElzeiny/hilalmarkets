@@ -1,0 +1,96 @@
+{% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/opportunity_card.html" import opportunity_card %}
+{% block content %}
+{% if live_test_market|default(false) %}
+<div class="page-header">
+  <div><span class="eyebrow">Sharia market | Test methodology</span><h1>Live spot market watchlist.</h1><p>Follow every active {{ selected_quote_asset }} spot pair with real bid and ask prices, then open its compact test passport.</p></div>
+  <div class="page-actions"><a class="btn btn-secondary" href="/dashboard/methodology"><span data-icon="methodology" data-icon-class="icon"></span>How we screen</a><a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="radar" data-icon-class="icon"></span>New Watchlist</a></div>
+</div>
+
+<div class="notice notice-warning test-methodology-notice" role="note"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Test methodology only</strong><p>{{ test_methodology_notice }}</p></div></div>
+
+<section class="stat-grid live-market-stats" aria-label="Live market summary">
+  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="market" data-icon-class="icon"></span></div><span class="live-dot"><i></i>Live</span></div><div class="value" data-live-market-count>--</div><div class="caption">Active spot pairs</div></article>
+  <article class="stat-card"><div class="stat-head"><div class="icon-box is-gold"><span data-icon="check" data-icon-class="icon"></span></div></div><div class="value" data-live-market-eligible>--</div><div class="caption">Test-eligible pairs</div></article>
+  <article class="stat-card"><div class="stat-head"><div class="icon-box is-amber"><span data-icon="database" data-icon-class="icon"></span></div></div><div class="value" data-live-market-provider>{{ selected_exchange|title }}</div><div class="caption">Price provider</div></article>
+  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div></div><div class="value">{{ active_watchlists }}</div><div class="caption">Active Watchlists</div></article>
+</section>
+
+<section class="panel live-market-panel" data-live-market-root data-endpoint="/api/v1/sharia/test-market" data-exchange="{{ selected_exchange }}" data-quote="{{ selected_quote_asset }}">
+  <div class="live-market-toolbar">
+    <div><span class="kicker">Methodology: Test</span><h2>Every active spot pair</h2><p>Quotes refresh every second through one shared server cache.</p></div>
+    <div class="live-market-controls">
+      <label class="field"><span>Search coins</span><input class="input" type="search" value="{{ market_search }}" placeholder="BTC, ETH, SOL..." data-live-market-search></label>
+      <label class="field"><span>Exchange</span><select class="select" data-live-market-exchange><option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance spot</option><option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit spot</option></select></label>
+      <label class="field"><span>Quote</span><select class="select" data-live-market-quote><option value="USDT" {{ 'selected' if selected_quote_asset == 'USDT' else '' }}>USDT</option><option value="USDC" {{ 'selected' if selected_quote_asset == 'USDC' else '' }}>USDC</option></select></label>
+    </div>
+  </div>
+  <div class="live-market-meta"><span class="live-dot"><i></i><b data-live-market-status>Connecting to provider...</b></span><span data-live-market-updated>Waiting for first verified snapshot</span></div>
+  <div class="live-market-error notice notice-error" data-live-market-error hidden><span data-icon="alert" data-icon-class="icon"></span><div><strong>Quotes unavailable</strong><p data-live-market-error-message>No market values were guessed.</p><button class="btn btn-secondary btn-sm" type="button" data-live-market-retry>Retry</button></div></div>
+  <div class="live-market-scroll" role="region" aria-label="Live spot market quotes" tabindex="0">
+    <div class="live-market-table" role="table" aria-rowcount="-1">
+      <div class="live-market-head" role="row">
+        <span role="columnheader">Coin</span><span role="columnheader">Status</span><span role="columnheader">Bid</span><span role="columnheader">Ask</span><span role="columnheader">24h</span><span role="columnheader">Spread</span><span role="columnheader">24h volume</span><span role="columnheader">Passport</span>
+      </div>
+      <div class="live-market-body" data-live-market-body aria-live="off">
+        {% for _ in range(8) %}<div class="live-market-skeleton"><i></i><i></i><i></i><i></i><i></i></div>{% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="live-market-empty empty-state compact" data-live-market-empty hidden><h3>No symbols match this search</h3><p>Clear the search or choose another exchange or quote asset.</p></div>
+</section>
+
+<dialog class="market-passport-dialog" data-market-passport-dialog aria-labelledby="market-passport-title">
+  <div class="market-passport-shell">
+    <button class="btn btn-ghost btn-icon market-passport-close" type="button" data-market-passport-close aria-label="Close passport"><span data-icon="close" data-icon-class="icon"></span></button>
+    <div class="market-passport-hero">
+      <div class="market-passport-logo" data-passport-logo><span data-passport-fallback>--</span></div>
+      <div><span class="kicker">Test methodology passport</span><h2 id="market-passport-title" data-passport-symbol>Asset passport</h2><p data-passport-name>Provider-backed spot pair</p></div>
+      <span class="badge badge-eligible">Halal (test)</span>
+    </div>
+    <div class="market-passport-facts">
+      <div><small>Status</small><strong>Test eligible</strong></div>
+      <div><small>Methodology</small><strong>Test | v1.0-test</strong></div>
+      <div><small>Exchange</small><strong data-passport-exchange>--</strong></div>
+      <div><small>Recent update</small><strong data-passport-date>--</strong></div>
+    </div>
+    <div class="market-passport-prices">
+      <div><small>Best bid</small><strong data-passport-bid>--</strong><span data-passport-bid-size></span></div>
+      <div><small>Best ask</small><strong data-passport-ask>--</strong><span data-passport-ask-size></span></div>
+      <div><small>Last</small><strong data-passport-last>--</strong><span data-passport-change></span></div>
+      <div><small>24h range</small><strong data-passport-range>--</strong><span data-passport-volume></span></div>
+    </div>
+    <div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Not a religious ruling</strong><p>{{ test_methodology_notice }}</p></div></div>
+    <div class="row-between wrap"><small class="muted" data-passport-provider>Waiting for provider evidence</small><button class="btn btn-primary" type="button" data-market-passport-done>Done</button></div>
+  </div>
+</dialog>
+{% else %}
+<div class="page-header">
+  <div><span class="eyebrow">Sharia-screened market</span><h1>Find opportunities inside a screened market.</h1><p>Browse stored screening outcomes, then inspect the exact methodology and evidence passport before adding an asset to your saved assets.</p></div>
+  <div class="page-actions"><a class="btn btn-secondary" href="/dashboard/methodology"><span data-icon="methodology" data-icon-class="icon"></span>How we screen</a><a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="radar" data-icon-class="icon"></span>New Watchlist</a></div>
+</div>
+
+<section class="stat-grid">
+  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="check" data-icon-class="icon"></span></div></div><div class="value">{{ screened.status_counts.get('eligible', 0) + screened.status_counts.get('eligible_with_qualifications', 0) }}</div><div class="caption">Eligible assets</div></article>
+  <article class="stat-card"><div class="stat-head"><div class="icon-box is-amber"><span data-icon="clock" data-icon-class="icon"></span></div></div><div class="value">{{ screened.status_counts.get('under_review', 0) }}</div><div class="caption">Under review</div></article>
+  <article class="stat-card"><div class="stat-head"><div class="icon-box is-gold"><span data-icon="compliance" data-icon-class="icon"></span></div></div><div class="value">{{ status_changes }}</div><div class="caption">Status changes this week</div></article>
+  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div></div><div class="value">{{ active_watch_plans }}</div><div class="caption">Active Watchlists</div></article>
+</section>
+
+<article class="panel">
+  <form class="filter-bar" method="get" action="/dashboard/market">
+    <div class="field"><label for="market-search">Search assets</label><input id="market-search" class="input" name="search" value="{{ market_search }}" placeholder="BTC, ETH, Solana..."></div>
+    <div class="field"><label for="market-method">Methodology</label><select id="market-method" class="select" name="methodology_id"><option value="">Platform default</option>{% for method in methodologies %}<option value="{{ method.id }}" {% if screened.methodology and screened.methodology.id == method.id %}selected{% endif %}>{{ method.name }} | v{{ method.version }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="market-exchange">Exchange</label><select id="market-exchange" class="select" name="exchange"><option value="">All assessed assets</option><option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance spot</option><option value="bybit" {% if selected_exchange == 'bybit' %}selected{% endif %}>Bybit spot</option></select></div>
+    <input type="hidden" name="view" value="assets"><button class="btn btn-primary" type="submit"><span data-icon="search" data-icon-class="icon"></span>Apply filters</button>
+  </form>
+  <div class="row-between wrap" style="margin-top:16px"><div><span class="kicker">Current record</span><h2>{{ screened.methodology.name if screened.methodology else 'No approved methodology' }}</h2><p>{% if screened.methodology %}Version {{ screened.methodology.version }} | {{ screened.total }} stored results match this view.{% else %}Eligibility is unavailable until qualified governance publishes an executable methodology.{% endif %}</p></div><div class="tabs"><a class="tab {{ 'is-active' if selected_view == 'opportunities' else '' }}" href="/dashboard/market?view=opportunities">Opportunities</a><a class="tab {{ 'is-active' if selected_view == 'assets' else '' }}" href="/dashboard/market?view=assets">All screened assets</a></div></div>
+</article>
+
+{% if market_data_warning or screened.warning %}<div class="notice"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Market data note</strong><p>{{ market_data_warning or screened.warning }}</p></div></div>{% endif %}
+
+{% if opportunity_cards %}<section class="market-grid" style="margin-top:18px">{% for card in opportunity_cards %}{{ opportunity_card(card.presentation, '/dashboard/market/' ~ card.assessment.canonical_asset ~ '?methodology_id=' ~ card.assessment.methodology_id, '/dashboard/strategies/new?asset=' ~ card.assessment.canonical_asset) }}{% endfor %}</section>{% else %}<div class="empty-state"><div class="icon-box"><span data-icon="market" data-icon-class="icon"></span></div><h3>No verified records match this view</h3><p>HilalMarkets did not substitute sample assets or infer missing screening outcomes.</p><a class="btn btn-secondary btn-sm" href="/dashboard/market?view=assets">View all screened assets</a></div>{% endif %}
+{% if market_previous_url or market_next_url %}<nav class="pagination" aria-label="Market pages"><a class="btn btn-secondary btn-sm {{ 'is-disabled' if not market_previous_url else '' }}" href="{{ market_previous_url or '#' }}" {% if not market_previous_url %}aria-disabled="true"{% endif %}>Previous</a><span>Page {{ screened.page }} of {{ market_maximum_page }}</span><a class="btn btn-secondary btn-sm {{ 'is-disabled' if not market_next_url else '' }}" href="{{ market_next_url or '#' }}" {% if not market_next_url %}aria-disabled="true"{% endif %}>Next</a></nav>{% endif %}
+{% endif %}
+{% endblock %}
+{% block page_scripts %}{% if live_test_market|default(false) %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260715-live-market"></script>{% endif %}{% endblock %}

@@ -71,7 +71,7 @@ class ActivityReadService:
                 )
             )
             if owned is None:
-                raise ValueError("Watch Plan not found.")
+                raise ValueError("Watchlist not found.")
         fetch_limit = min(1000, max(limit, page * limit))
         items: list[ActivityItem] = []
         total = 0

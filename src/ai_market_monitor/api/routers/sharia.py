@@ -15,6 +15,7 @@ from ai_market_monitor.db.models import (
     AssetShariaStatusHistory,
     DashboardPreference,
     SetupInstance,
+    ShariaMethodology,
 )
 from ai_market_monitor.db.models.enums import (
     SetupLifecycleState,
@@ -27,6 +28,7 @@ from ai_market_monitor.schemas.sharia import (
     AssetPassportResponse,
     ComplianceChangeIngestRequest,
     ComplianceReviewRequest,
+    LiveSpotMarketResponse,
     MethodologyComparisonResponse,
     MethodologyCreateRequest,
     MethodologyDetail,
@@ -48,6 +50,10 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
     canonical_asset,
     canonical_symbol,
+)
+from ai_market_monitor.services.test_market_quotes import (
+    TEST_METHODOLOGY_CODE,
+    TestMarketQuoteService,
 )
 
 router = APIRouter(prefix="/sharia", tags=["sharia-screening"])
@@ -149,9 +155,7 @@ async def screened_assets(
                 status_code=422,
                 detail={
                     "code": "unsupported_opportunity_type",
-                    "message": (
-                        "Use forming, getting_closer, ready_for_review, or ended."
-                    ),
+                    "message": ("Use forming, getting_closer, ready_for_review, or ended."),
                 },
             )
         opportunity_assets = {
@@ -168,9 +172,7 @@ async def screened_assets(
             ).all()
         }
         asset_scope = (
-            opportunity_assets
-            if asset_scope is None
-            else asset_scope & opportunity_assets
+            opportunity_assets if asset_scope is None else asset_scope & opportunity_assets
         )
     service = ShariaScreeningService(session, settings)
     result = await service.list_screened_assets(
@@ -182,6 +184,39 @@ async def screened_assets(
         limit=limit,
     )
     return result
+
+
+@router.get("/test-market", response_model=LiveSpotMarketResponse)
+async def test_market_quotes(
+    exchange: str = Query(default="binance", pattern="^(binance|bybit)$"),
+    quote_asset: str = Query(default="USDT", min_length=2, max_length=12),
+    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+    settings: Settings = Depends(get_settings),
+) -> LiveSpotMarketResponse:
+    if settings.app_env not in {"development", "test"} or not settings.sharia_test_market_enabled:
+        raise HTTPException(status_code=404, detail="The Test market is not enabled.")
+    methodology_id = await session.scalar(
+        select(ShariaMethodology.id)
+        .where(ShariaMethodology.code == TEST_METHODOLOGY_CODE)
+        .order_by(ShariaMethodology.created_at.desc())
+        .limit(1)
+    )
+    try:
+        return await TestMarketQuoteService(provider, settings).snapshot(
+            exchange=exchange,
+            quote_asset=quote_asset,
+            methodology_id=methodology_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "live_test_market_unavailable",
+                "message": "Live spot quotes are unavailable; no prices were invented.",
+            },
+        ) from exc
 
 
 @router.get("/assets/{asset_id}", response_model=AssetAssessmentSummary)
@@ -474,15 +509,11 @@ async def update_sharia_preferences(
     values.update(
         {
             "default_sharia_methodology_id": (
-                str(payload.default_methodology_id)
-                if payload.default_methodology_id
-                else None
+                str(payload.default_methodology_id) if payload.default_methodology_id else None
             ),
             "allowed_sharia_statuses": [item.value for item in payload.allowed_statuses],
             "compliance_change_behavior": payload.compliance_change_behavior.value,
-            "advanced_sharia_override_acknowledged": (
-                payload.advanced_override_acknowledged
-            ),
+            "advanced_sharia_override_acknowledged": (payload.advanced_override_acknowledged),
             "compliance_alerts_enabled": payload.compliance_alerts_enabled,
             "compliance_alert_channels": payload.compliance_alert_channels,
             "compliance_alert_digest": payload.compliance_alert_digest,

@@ -5,7 +5,7 @@
 The supplied `HilalMarkets_UI_Prototype` is now the product UI source for the live
 HilalMarkets application. Its page structure, emerald/ivory/gold palette, Manrope and
 DM Sans typography, logo, navigation hierarchy, controls, responsive layouts, and
-Watch Plan vocabulary are used directly by the production templates.
+Watchlist vocabulary are used directly by the production templates.
 
 The migration deliberately keeps server-rendered data, validation, strategy approval,
 screening evidence, billing, integration, and lifecycle behavior authoritative. The
@@ -19,7 +19,8 @@ prototype's example values and preview-only JavaScript are not served in product
 | `assets/css/styles.css` | `src/ai_market_monitor/static/hilalmarkets.css` |
 | `assets/js/icons.js` | `src/ai_market_monitor/static/hilalmarkets-icons.js` |
 | Production interaction adapter | `src/ai_market_monitor/static/hilalmarkets.js` |
-| Existing-page visual bridge | `src/ai_market_monitor/static/hilalmarkets-bridge.css` |
+| Guided builder components | `src/ai_market_monitor/static/hilalmarkets-builder.css` |
+| Public components | `src/ai_market_monitor/static/hilalmarkets-public.css` |
 
 The interaction adapter contains only accessibility and production shell behavior. It
 does not replay prototype scan results, fake data, or placeholder links.
@@ -34,8 +35,8 @@ does not replay prototype scan results, fake data, or placeholder links.
 | Sharia-Screened Market | `/dashboard/market` | Versioned screening methodology and evidence |
 | Evidence Passport | `/dashboard/market/{asset_slug}` | Asset passport service |
 | My Watchlist | `/dashboard/watchlist` | `ApprovedWatchlist` and `ApprovedWatchlistAsset` |
-| Watch Plans | `/dashboard/strategies` | User-owned monitor list, health and operations |
-| New Watch Plan | `/dashboard/strategies/new` | AI Setup Chat and Visual Canvas over the validated strategy compiler |
+| Watchlists | `/dashboard/strategies` | User-owned monitor list, health and operations |
+| New Watchlist | `/dashboard/strategies/new` | AI Setup Chat and Visual Canvas over the validated strategy compiler |
 | Scanner | `/dashboard/strategies/new?mode=scanner` | A mode inside the builder; no duplicate page or navigation entry |
 | Opportunities & Evidence | `/dashboard/activity` | Lifecycle and activity evidence |
 | Compliance Changes | `/dashboard/compliance` | User-scoped compliance drift records |
@@ -50,10 +51,10 @@ Backward-compatible routes such as `/dashboard/monitors`, `/dashboard/create-mon
 `/dashboard/scan-now`, and `/dashboard/trial` redirect to the consolidated page that
 owns that workflow. They do not render duplicate sections.
 
-There is no production `Check the Market Now` navigation item or standalone Quick Scan
-card. A one-time check is **Scanner** inside `/dashboard/strategies/new`; persistent
-monitoring is managed from **Watch Plans**. Both use the same validated compiler and
-screened-universe services without duplicating strategy logic.
+`Check the Market Now` is an explicit Watch navigation item. It redirects into Scanner mode at
+`/dashboard/strategies/new?mode=scanner`; it is not a duplicate scanner implementation or a
+standalone Quick Scan page. Persistent monitoring remains under Watchlists. Both paths use the
+same validated compiler and screened-universe services.
 
 ## Data and Preview Rules
 
@@ -80,21 +81,19 @@ screened-universe services without duplicating strategy logic.
 
 ## Verification
 
-Verified on 14 July 2026:
-
-- Full non-browser suite: `pytest --ignore=tests/browser -q` - **1,851 passed**.
-- Browser suite: `pytest tests/browser/test_dashboard_e2e.py --junitxml=reports/hilalmarkets-ui-final.xml -q` - **16 passed**, 0 failed, 0 skipped.
-- Focused public/dashboard routes: `pytest tests/integration/test_landing_page.py tests/integration/test_dashboard_web.py tests/integration/test_public_health.py -q` - **22 passed**.
-- Python style: Ruff passed for the changed routers and browser/integration tests.
-- JavaScript syntax: `node --check` passed for `hilalmarkets.js` and `dashboard.js`.
-- Patch hygiene: `git diff --check` reported no whitespace errors (only the repository's existing CRLF conversion notices).
+Current commands, exact results, public-route coverage, consent checks, and deployment caveats are
+recorded in `docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md`. Generated browser reports and
+screenshots are local/CI artifacts under ignored `reports/`, `playwright-report/`, and
+`test-results/` directories rather than repository source.
 
 ## Visual QA
 
 Current production-backed captures:
 
-- `reports/playwright/visual-qa/hilalmarkets-landing-desktop.png`
-- `reports/playwright/visual-qa/hilalmarkets-landing-mobile-390.png`
+- `reports/playwright/visual-qa/hilalmarkets-landing-1440.png`
+- `reports/playwright/visual-qa/hilalmarkets-landing-1024.png`
+- `reports/playwright/visual-qa/hilalmarkets-landing-768.png`
+- `reports/playwright/visual-qa/hilalmarkets-landing-360.png`
 - `reports/playwright/visual-qa/hilalmarkets-auth-desktop.png`
 - `reports/playwright/visual-qa/hilalmarkets-auth-mobile-390.png`
 - `reports/playwright/visual-qa/hilalmarkets-watch-plans-desktop.png`

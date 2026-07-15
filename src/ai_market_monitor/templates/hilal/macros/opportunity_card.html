@@ -1,0 +1,21 @@
+{% from "hilal/macros/status_badge.html" import sharia_status %}
+{% macro opportunity_card(item, detail_href, watch_href=None, compact=False) -%}
+<article class="opportunity-card{% if compact %} is-compact{% endif %}" data-status="{{ item.status_badge }}" data-opportunity-card>
+  <div class="opportunity-title">
+    <div class="coin"><div class="coin-logo">{{ item.symbol[:3] }}</div><div><h3>{{ item.symbol }}</h3><small>{{ item.name }} | Spot</small></div></div>
+    {{ sharia_status(item.status_label, item.status_badge) }}
+  </div>
+  <div class="opportunity-context"><span>{{ item.methodology_name }} v{{ item.methodology_version }}</span><span>Reviewed {{ item.reviewed_at.strftime('%d %b %Y') }}</span></div>
+  {% if item.opportunity_type %}
+  <span class="kicker">{{ item.opportunity_type }}</span>
+  <div class="readiness"><strong>{{ item.readiness }}% ready</strong><span>{{ item.direction or 'forming' }}</span></div>
+  <div class="progress" data-hilal-progress="{{ item.readiness }}"><span></span></div>
+  {% if item.present_conditions or item.missing_requirement %}<div class="mini-criteria">{% for condition in item.present_conditions %}<div class="mini-criterion"><span data-icon="check" data-icon-class="icon-sm"></span>{{ condition }}</div>{% endfor %}{% if item.missing_requirement %}<div class="mini-criterion is-missing"><span data-icon="clock" data-icon-class="icon-sm"></span>{{ item.missing_requirement }}</div>{% endif %}</div>{% endif %}
+  {% else %}
+  <p class="opportunity-summary">{{ item.summary }}</p>
+  <div class="notice notice-neutral"><span data-icon="radar" data-icon-class="icon"></span><div><strong>No public readiness claim</strong><p>Sign in and run Check the Market Now to calculate current opportunity evidence from your approved rules.</p></div></div>
+  {% endif %}
+  {% if item.qualifications %}<div class="notice"><span data-icon="alert" data-icon-class="icon-sm"></span><div><strong>Qualification</strong><p>{{ item.qualifications[0] }}</p></div></div>{% endif %}
+  <div class="opportunity-actions"><a class="btn btn-secondary btn-sm" href="{{ detail_href }}"><span data-icon="passport" data-icon-class="icon-sm"></span>View evidence</a>{% if watch_href %}<a class="btn btn-primary btn-sm" href="{{ watch_href }}"><span data-icon="radar" data-icon-class="icon-sm"></span>Watch</a>{% endif %}</div>
+</article>
+{%- endmacro %}

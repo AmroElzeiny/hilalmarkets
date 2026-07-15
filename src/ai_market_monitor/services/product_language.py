@@ -96,7 +96,7 @@ def readiness_copy(score: float, state: SetupLifecycleState | str) -> str:
 
 def product_term(term: str) -> str:
     return {
-        "strategy": "Watch Plan",
+        "strategy": "Watchlist",
         "candidate": "Opportunity",
         "lifecycle": "Opportunity journey",
         "partial_match": "Forming",

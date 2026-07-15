@@ -1,9 +1,17 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 DASHBOARD_JS = ROOT / "src" / "ai_market_monitor" / "static" / "dashboard.js"
-DASHBOARD_HTML = ROOT / "src" / "ai_market_monitor" / "templates" / "dashboard.html"
+BUILDER_HTML = (
+    ROOT
+    / "src"
+    / "ai_market_monitor"
+    / "templates"
+    / "hilal"
+    / "dashboard"
+    / "partials"
+    / "builder_workspace.html"
+)
 
 
 def test_strategy_builder_uses_dedicated_interpretation_endpoint():
@@ -30,7 +38,7 @@ def test_builder_preserves_advanced_condition_metadata_fields():
 
 
 def test_builder_hides_raw_json_by_default_and_blocks_critical_activation():
-    html = DASHBOARD_HTML.read_text(encoding="utf-8")
+    html = BUILDER_HTML.read_text(encoding="utf-8")
     source = DASHBOARD_JS.read_text(encoding="utf-8")
 
     assert "Advanced schema and debug details" in html

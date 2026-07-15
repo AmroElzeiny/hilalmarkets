@@ -1,0 +1,14 @@
+<header class="topbar">
+  <div class="topbar-left">
+    <button class="btn btn-secondary btn-icon topbar-menu" type="button" data-open-sidebar data-hilal-open-sidebar aria-label="Open menu"><span data-icon="menu" data-icon-class="icon"></span></button>
+    <form class="topbar-search" action="{{ url_for('screened_market_page') }}" method="get" role="search">
+      <span data-icon="search"></span>
+      <input class="input" name="search" value="{{ request.query_params.get('search', '') }}" placeholder="Search screened assets..." aria-label="Search screened assets">
+    </form>
+  </div>
+  <div class="topbar-right">
+    {% if active_methodology is defined and active_methodology %}<span class="badge badge-eligible">{{ active_methodology.name }} | v{{ active_methodology.version }}</span>{% endif %}
+    <a class="btn btn-secondary btn-icon" href="{{ url_for('lifecycles_page') }}" aria-label="Open recent activity"><span data-icon="bell" data-icon-class="icon"></span></a>
+    <a class="btn btn-primary btn-sm sidebar-create-quick" href="{{ url_for('new_strategy_builder_page') }}"><span data-icon="plus" data-icon-class="icon"></span>New Watchlist</a>
+  </div>
+</header>

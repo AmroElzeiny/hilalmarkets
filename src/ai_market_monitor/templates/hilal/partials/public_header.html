@@ -1,0 +1,22 @@
+<nav class="public-nav" aria-label="Primary navigation">
+  <div class="public-nav-inner">
+    <a class="logo" href="{{ url_for('public_home') }}" aria-label="HilalMarkets home">
+      <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
+      <span>HilalMarkets<small>Halal-conscious market monitoring</small></span>
+    </a>
+    <div class="public-links" id="public-navigation">
+      {% for item in public_navigation %}
+      <a class="public-nav-link {{ 'is-active' if page == item.page else '' }}" href="{{ url_for(item.endpoint) }}" {% if page == item.page %}aria-current="page"{% endif %}>{{ item.label }}</a>
+      {% endfor %}
+      <div class="public-mobile-actions">
+        <a class="btn btn-secondary" href="{{ url_for('signin_page') }}">Sign in</a>
+        <a class="btn btn-primary" href="{{ url_for('signup_page') }}">Start free</a>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn-secondary public-desktop-action" href="{{ url_for('signin_page') }}"><span data-icon="user" data-icon-class="icon"></span>Sign in</a>
+      <a class="btn btn-primary public-desktop-action" href="{{ url_for('signup_page') }}"><span data-icon="arrow" data-icon-class="icon"></span>Start free</a>
+      <button class="btn btn-secondary btn-icon mobile-menu" type="button" data-public-menu aria-label="Open navigation" aria-controls="public-navigation" aria-expanded="false"><span data-icon="menu" data-icon-class="icon"></span></button>
+    </div>
+  </div>
+</nav>

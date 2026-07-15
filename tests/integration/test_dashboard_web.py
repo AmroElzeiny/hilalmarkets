@@ -95,7 +95,8 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
     dashboard = await test_context["client"].get("/dashboard")
     assert dashboard.status_code == 200
     assert "Active monitors" in dashboard.text
-    assert "Coverage score" in dashboard.text
+    assert "Eligible screened assets" in dashboard.text
+    assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
 
     async with test_context["session_factory"]() as session:

@@ -142,4 +142,52 @@ document.addEventListener("DOMContentLoaded", () => {
       button.closest("[data-hilal-dismissible]")?.remove();
     });
   });
+
+  const preferencesTarget = document.getElementById("strategy-preferences");
+  const preferenceButton = document.querySelector("[data-forget-strategy-preferences]");
+  const preferenceRequest = async (options = {}) => {
+    const response = await fetch("/api/v1/dashboard/cockpit/preferences", {
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || payload.message || response.statusText);
+    return payload;
+  };
+  const renderPreferences = (result) => {
+    if (!preferencesTarget) return;
+    const entries = Object.entries(result.preferences || {});
+    preferencesTarget.replaceChildren();
+    if (!entries.length) {
+      preferencesTarget.textContent = "No personal Watchlist preferences are stored yet.";
+      return;
+    }
+    const list = document.createElement("ul");
+    entries.forEach(([key, value]) => {
+      const item = document.createElement("li");
+      const label = document.createElement("strong");
+      label.textContent = key.replaceAll("_", " ");
+      item.append(label, `: ${Array.isArray(value) ? value.join(", ") : value}`);
+      list.append(item);
+    });
+    const evidence = document.createElement("small");
+    evidence.textContent = `Derived from ${result.evidence?.strategy_versions_reviewed || 0} saved Watchlist versions.`;
+    preferencesTarget.append(list, evidence);
+  };
+  if (preferencesTarget) {
+    preferenceRequest().then(renderPreferences).catch((error) => {
+      preferencesTarget.textContent = error.message;
+      preferencesTarget.classList.add("notice-error");
+    });
+  }
+  preferenceButton?.addEventListener("click", async () => {
+    if (!window.confirm("Clear the Watchlist preferences derived for this account?")) return;
+    try {
+      await preferenceRequest({ method: "DELETE" });
+      if (preferencesTarget) preferencesTarget.textContent = "Your personal Watchlist preferences were cleared.";
+    } catch (error) {
+      if (preferencesTarget) preferencesTarget.textContent = error.message;
+    }
+  });
 });

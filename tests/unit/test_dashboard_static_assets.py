@@ -2,6 +2,15 @@ from pathlib import Path
 
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
 
+BUILDER_TEMPLATE = Path("src/ai_market_monitor/templates/hilal/dashboard/builder.html")
+BUILDER_WORKSPACE = Path(
+    "src/ai_market_monitor/templates/hilal/dashboard/partials/builder_workspace.html"
+)
+
+
+def _builder_markup() -> str:
+    return BUILDER_TEMPLATE.read_text() + BUILDER_WORKSPACE.read_text()
+
 
 def test_dashboard_js_includes_safe_render_helpers_and_no_invalid_math_syntax():
     source = Path("src/ai_market_monitor/static/dashboard.js").read_text()
@@ -22,7 +31,7 @@ def test_dashboard_js_includes_safe_render_helpers_and_no_invalid_math_syntax():
 
 def test_strategy_canvas_uses_progressive_disclosure_components():
     source = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    template = Path("src/ai_market_monitor/templates/dashboard.html").read_text()
+    template = _builder_markup()
 
     for helper in (
         "function renderStrategyCanvas",
@@ -57,7 +66,7 @@ def test_strategy_canvas_uses_progressive_disclosure_components():
 
 def test_strategy_canvas_keeps_schema_and_api_compatibility_hooks():
     source = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    template = Path("src/ai_market_monitor/templates/dashboard.html").read_text()
+    template = _builder_markup()
 
     for hook in (
         "loadInitialSchema()",
@@ -83,19 +92,33 @@ def test_strategy_canvas_keeps_schema_and_api_compatibility_hooks():
         assert f'name="{field_name}"' in template
 
 
-def test_traceedge_dashboard_interaction_polish_is_present():
-    template = Path("src/ai_market_monitor/templates/dashboard.html").read_text()
+def test_hilalmarkets_dashboard_interaction_system_is_present():
+    template = _builder_markup()
+    base = Path(
+        "src/ai_market_monitor/templates/hilal/base_dashboard.html"
+    ).read_text()
+    settings = Path(
+        "src/ai_market_monitor/templates/hilal/dashboard/settings.html"
+    ).read_text()
+    support = Path(
+        "src/ai_market_monitor/templates/hilal/dashboard/support.html"
+    ).read_text()
     script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    styles = Path("src/ai_market_monitor/static/traceedge-polish.css").read_text()
+    styles = Path("src/ai_market_monitor/static/hilalmarkets.css").read_text()
+    builder_styles = Path(
+        "src/ai_market_monitor/static/hilalmarkets-builder.css"
+    ).read_text()
 
+    assert "Guided Watchlist" in template
+    assert "Advanced Controls" in template
+    assert "data-ai-setup-chat" in template
     assert "creation-card-top" in template
     assert "builder-header-status" in template
     assert "builder-bottom-bar" not in template
     assert 'name="theme"' not in template
-    assert "data-settings-save" in template
-    assert "data-copy-referral" in template
-    assert "lucide:copy.svg" in template
-    assert "support-file-button" in template
+    assert "data-settings-save" in settings
+    assert 'name="screenshots"' in support
+    assert "api.iconify.design" not in template
     assert "strategy-board-dialog" in template
     assert "data-open-strategy-board" in template
     assert "data-template-categories" in template
@@ -122,14 +145,12 @@ def test_traceedge_dashboard_interaction_polish_is_present():
     assert "strategy-board-arrows" in script
     assert "findConditionByKey" in script
     assert "builderUiController?.isAiInterpreted?.()" not in script
-    assert "Referral link copied." in script
-    assert "mask:url(\"data:image/svg+xml" in styles
-    assert "strategy-board-surface" in styles
-    assert ".understanding-feedback" in styles
-    assert ".builder-coverage-panel" in styles
-    assert ".builder-shell [hidden]" in styles
-    assert "body.dashboard-body .monitor-card" in styles
-    assert "position:relative!important" in styles
+    assert "hilalmarkets.css" in base
+    assert "traceedge-polish.css" not in base + template
+    assert "hilalmarkets-bridge.css" not in base + template
+    assert "--emerald-800" in styles
+    assert ".guided-builder-heading" in builder_styles
+    assert "prefers-reduced-motion" in styles
 
 
 def test_builtin_templates_have_explicit_dashboard_categories():
@@ -147,3 +168,23 @@ def test_builtin_templates_have_explicit_dashboard_categories():
         and "Breakout confirmation" in template["ui_categories"]
         for template in payloads
     )
+
+
+def test_hilalmarkets_core_styles_include_focus_and_reduced_motion_guards():
+    stylesheet = Path("src/ai_market_monitor/static/hilalmarkets.css").read_text()
+
+    assert ":focus-visible" in stylesheet
+    assert "prefers-reduced-motion:reduce" in stylesheet
+    assert "outline:3px solid" in stylesheet
+
+
+def test_hilalmarkets_runtime_icons_do_not_require_remote_iconify():
+    sources = [
+        Path("src/ai_market_monitor/static/ai-setup-chat.js").read_text(),
+        Path("src/ai_market_monitor/static/dashboard.js").read_text(),
+        Path("src/ai_market_monitor/static/hilalmarkets-icons.js").read_text(),
+    ]
+
+    assert all("api.iconify.design" not in source for source in sources)
+    assert "window.icon" in sources[0]
+    assert "window.icon" in sources[1]

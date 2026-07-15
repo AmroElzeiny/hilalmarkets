@@ -1,0 +1,28 @@
+<section class="cookie-banner" data-cookie-banner role="region" aria-label="Cookie choices" aria-live="polite">
+  <div class="cookie-banner-inner">
+    <div class="icon-box is-gold"><span data-icon="settings" data-icon-class="icon"></span></div>
+    <div>
+      <h2>Your privacy choices</h2>
+      <p>Essential storage supports security and your choices. Optional analytics runs only after you allow it and must not receive private Watchlist text, credentials, or direct identifiers. Read the <a class="link-arrow" href="{{ url_for('public_cookies') }}">Cookie Policy</a>.</p>
+    </div>
+    <div class="cookie-actions">
+      <button class="btn btn-secondary btn-sm" type="button" data-cookie-essential>Essential only</button>
+      <button class="btn btn-secondary btn-sm" type="button" data-cookie-customize>Customize</button>
+      <button class="btn btn-secondary btn-sm" type="button" data-cookie-accept-analytics>Accept analytics</button>
+    </div>
+  </div>
+</section>
+<div class="cookie-modal-backdrop" data-cookie-modal role="dialog" aria-modal="true" aria-labelledby="cookie-modal-title" aria-hidden="true">
+  <div class="cookie-modal" tabindex="-1">
+    <div class="row-between">
+      <div><span class="eyebrow">Privacy center</span><h2 id="cookie-modal-title">Choose your cookie settings</h2></div>
+      <button class="btn btn-secondary btn-icon" type="button" data-cookie-close aria-label="Close cookie settings"><span data-icon="close" data-icon-class="icon"></span></button>
+    </div>
+    <p>You can change these choices at any time. Essential security and consent storage stays on because it is required for the service you request.</p>
+    <div class="cookie-category"><div><strong>Essential</strong><p>Authentication, security, consent storage, and requested site behavior.</p></div><span class="cookie-fixed">Always on</span></div>
+    <label class="cookie-category"><span><strong>Analytics</strong><span>Aggregated public-site usage after consent. No private strategy or identity data.</span></span><input type="checkbox" data-consent-analytics></label>
+    <label class="cookie-category"><span><strong>Functional</strong><span>Optional public-site preferences beyond essential operation.</span></span><input type="checkbox" data-consent-functional></label>
+    {% if marketing_consent_enabled %}<label class="cookie-category"><span><strong>Marketing</strong><span>Optional advertising measurement after explicit consent.</span></span><input type="checkbox" data-consent-marketing></label>{% endif %}
+    <div class="cookie-modal-actions"><button class="btn btn-secondary" type="button" data-cookie-essential>Essential only</button><button class="btn btn-primary" type="button" data-cookie-save>Save choices</button></div>
+  </div>
+</div>

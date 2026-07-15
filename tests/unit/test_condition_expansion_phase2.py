@@ -353,7 +353,10 @@ def test_registry_categories_provider_badges_and_builder_markup():
     assert {"min_body_percent", "confirmation_required"}.issubset(
         parameter["name"] for parameter in pattern["parameters"]
     )
-    dashboard = Path("src/ai_market_monitor/templates/dashboard.html").read_text()
+    dashboard = Path(
+        "src/ai_market_monitor/templates/hilal/dashboard/partials/"
+        "builder_workspace.html"
+    ).read_text()
     script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
     assert "Search condition library" in dashboard
     assert "Advanced raw condition" in dashboard

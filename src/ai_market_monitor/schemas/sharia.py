@@ -121,6 +121,52 @@ class ScreenedAssetListResponse(BaseModel):
     warning: str | None = None
 
 
+class TestMethodologySummary(BaseModel):
+    id: UUID | None = None
+    code: str = "TRACEDGE_DEV_TEST_V1"
+    name: str = "Test"
+    version: str = "1.0-test"
+    development_only: bool = True
+    notice: str
+
+
+class LiveSpotMarketQuote(BaseModel):
+    symbol: str
+    canonical_asset: str
+    asset_name: str
+    exchange: str
+    quote_asset: str
+    status: Literal["test_eligible"] = "test_eligible"
+    status_label: str = "Halal (test)"
+    bid: float | None = None
+    ask: float | None = None
+    last: float | None = None
+    bid_size: float | None = None
+    ask_size: float | None = None
+    spread_bps: float | None = None
+    percentage_24h: float | None = None
+    high_24h: float | None = None
+    low_24h: float | None = None
+    base_volume_24h: float | None = None
+    quote_volume_24h: float | None = None
+    logo_module_url: str | None = None
+    data_available: bool
+    updated_at: datetime
+
+
+class LiveSpotMarketResponse(BaseModel):
+    methodology: TestMethodologySummary
+    items: list[LiveSpotMarketQuote]
+    total: int
+    exchange: str
+    quote_asset: str
+    provider: str
+    captured_at: datetime
+    refresh_after_ms: int = 1000
+    stale: bool = False
+    warning: str | None = None
+
+
 class ShariaUniverseExclusion(BaseModel):
     symbol: str
     canonical_asset: str

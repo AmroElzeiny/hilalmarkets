@@ -7,7 +7,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://market_monitor:market_monitor@db:5432/market_monitor
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "${API_HOST_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy

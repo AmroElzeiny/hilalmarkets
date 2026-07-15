@@ -1,0 +1,616 @@
+      <section class="builder-shell" data-builder-shell data-testid="strategy-builder-root" {% if not strategy %}hidden{% endif %}>
+        <section class="dash-panel builder-start-screen" data-builder-intro data-testid="strategy-builder-entry">
+          <p class="eyebrow">Advanced Watchlist Builder</p>
+          <h2>How do you want to create your monitor?</h2>
+          <div class="creation-direction-grid">
+            <article class="creation-card recommended">
+              <div class="creation-card-top">
+                <span class="creation-icon" aria-hidden="true">
+                  <span data-icon="bot" data-icon-class="icon"></span>
+                </span>
+                <span class="badge creation-ai-badge">
+                  <span data-icon="spark" data-icon-class="icon"></span>
+                  AI-powered
+                </span>
+              </div>
+              <h3>Describe my strategy</h3>
+              <p>Turn plain English into an editable strategy map.</p>
+              <button class="button button-primary" type="button" data-builder-direction="prompt" data-testid="strategy-builder-describe">Describe strategy</button>
+            </article>
+            <article class="creation-card">
+              <span class="creation-icon" aria-hidden="true">
+                <span data-icon="workflow" data-icon-class="icon"></span>
+              </span>
+              <h3>Build visually</h3>
+              <p>Compose conditions and logic without writing code.</p>
+              <button class="button button-secondary" type="button" data-builder-direction="canvas" data-testid="strategy-builder-canvas">Open blank canvas</button>
+            </article>
+            <article class="creation-card">
+              <span class="creation-icon" aria-hidden="true">
+                <span data-icon="template" data-icon-class="icon"></span>
+              </span>
+              <h3>Start from template</h3>
+              <p>Choose a proven structure and make it yours.</p>
+              <button class="button button-secondary" type="button" data-builder-direction="templates" data-testid="strategy-builder-templates">Browse templates</button>
+            </article>
+          </div>
+          <p class="builder-start-footnote">All paths open the same editable Strategy Canvas before monitoring starts.</p>
+        </section>
+
+        <form id="strategy-builder-form" class="strategy-builder-workspace dash-form" data-strategy-id="{{ strategy.id if strategy else '' }}" {% if not strategy %}hidden{% endif %}>
+          <section class="dash-panel builder-path-panel" data-builder-panel="prompt" hidden>
+            <div class="builder-path-head">
+              <div>
+                <p class="eyebrow">Describe strategy</p>
+                <h2>Teach HilalMarkets what matters</h2>
+                <p>Describe the setup. You will review the interpreted mechanics before they enter the canvas.</p>
+              </div>
+              <button class="button button-secondary button-nowrap rechoose-path-button" type="button" data-builder-direction="choose">Rechoose path</button>
+            </div>
+            <div class="prompt-builder-grid">
+              <div class="prompt-main structured-prompt-grid">
+                <input name="builder_prompt" type="hidden">
+                <label class="prompt-field-card prompt-field-card-main">What should this monitor find?
+                  <textarea data-builder-prompt-part="goal" rows="3" placeholder="Example: bullish continuation after RSI recovery" data-testid="strategy-prompt-goal"></textarea>
+                </label>
+                <div class="prompt-extra-fields" data-prompt-extra-fields></div>
+              </div>
+              <aside class="prompt-side prompt-add-panel">
+                <h3>Add detail</h3>
+                <p>Choose only the sections you need. Each added box can be removed before generating the preview.</p>
+                <div class="prompt-add-list" data-prompt-add-list>
+                  <button type="button" data-add-prompt-section="must">Must-have rules</button>
+                  <button type="button" data-add-prompt-section="optional">Optional confirmations</button>
+                  <button type="button" data-add-prompt-section="universe">Markets and symbols</button>
+                  <button type="button" data-add-prompt-section="timeframe">Timeframe</button>
+                  <button type="button" data-add-prompt-section="alerts">Alert and risk preferences</button>
+                  <button type="button" data-add-prompt-section="avoid">Things to avoid</button>
+                  <button type="button" data-add-prompt-section="extra">Extra instructions</button>
+                </div>
+                <h3>Quick clarifications</h3>
+                <div class="clarification-chip-list">
+                  <button type="button" data-clarification-template="Use RSI length 14.">RSI length 14</button>
+                  <button type="button" data-clarification-template="Use Binance spot USDT pairs.">Binance USDT spot</button>
+                  <button type="button" data-clarification-template="Wait for candle close confirmation.">Wait for candle close</button>
+                </div>
+                <h3>Example chips</h3>
+                <div class="clarification-chip-list">
+                  <button type="button" data-prompt-example-chip="Find coins up 5% today with volume above average.">5% move today</button>
+                  <button type="button" data-prompt-example-chip="Previous daily candle must be bullish and 15m RSI must be above 50.">Bullish daily candle</button>
+                  <button type="button" data-prompt-example-chip="Liquidity sweep below prior low then bullish engulfing, candle close only.">Sweep + engulfing</button>
+                </div>
+              </aside>
+            </div>
+            <div class="button-row">
+              <button class="button button-primary" type="button" data-interpret-builder-prompt data-testid="strategy-interpret-submit">Preview mechanics</button>
+              <button class="button button-secondary" type="button" data-improve-builder-prompt>Improve my prompt</button>
+              <button class="button button-secondary" type="button" data-builder-direction="templates">Choose template</button>
+              <button class="button button-secondary" type="button" data-builder-direction="canvas">Build visually instead</button>
+            </div>
+            <section id="builder-ai-summary" class="prompt-understanding-preview" aria-live="polite" hidden data-testid="prompt-coverage-panel"></section>
+          </section>
+
+          <section class="dash-panel builder-path-panel" data-builder-panel="templates" hidden>
+            <div class="builder-path-head">
+              <div>
+                <p class="eyebrow">Template picker</p>
+                <h2>Start from a proven structure</h2>
+                <p>Preview the logic, then open it in the same editable Strategy Canvas.</p>
+              </div>
+              <button class="button button-secondary button-nowrap rechoose-path-button" type="button" data-builder-direction="choose">Rechoose path</button>
+            </div>
+            <div class="template-category-row" data-template-categories>
+              {% set template_categories = [
+                'Momentum pullback',
+                'Breakout confirmation',
+                'Trend continuation',
+                'Reversal setup',
+                'Volume spike',
+                'Liquidity sweep',
+                'RSI oversold/overbought',
+                'Moving average trend filter',
+                'BTC market-context filter',
+                'Volatility expansion',
+                'Candle pattern',
+                'Custom blank template'
+              ] %}
+              <button type="button" class="active" data-template-category="All" aria-pressed="true">All</button>
+              {% for category in template_categories %}
+                <button type="button" data-template-category="{{ category }}" aria-pressed="false">{{ category }}</button>
+              {% endfor %}
+            </div>
+            <div class="template-picker-grid">
+              <article class="template-card" data-template-category-card="Custom blank template" data-template-categories="Custom blank template">
+                <div class="mini-logic-tree"><span>Universe</span><i></i><span>Entry logic</span><i></i><span>Proof</span></div>
+                <h3>Custom Blank Template</h3>
+                <p>Start with the guided canvas and add your own rules.</p>
+                <div class="template-meta"><span>Advanced</span><span>Custom</span></div>
+                <div class="button-row compact">
+                  <button class="button button-secondary" type="button" data-preview-blank-template>Preview template</button>
+                  <button class="button button-primary" type="button" data-builder-blank-template>Use template</button>
+                </div>
+              </article>
+              {% for template in builtin_templates %}
+                <article class="template-card" data-template-category-card="{{ template.category }}" data-template-categories="{{ template.ui_categories|join('|') }}" data-template-search="{{ template.category }} {{ template.name }} {{ template.description }} {{ template.tags|join(' ') if template.tags is defined else '' }}">
+                  <div class="mini-logic-tree"><span>Trend filter</span><i></i><span>Trigger</span><i></i><span>Alert</span></div>
+                  <h3>{{ template.name }}</h3>
+                  <p>{{ template.description }}</p>
+                  <div class="template-meta">
+                    <span>{{ template.schema_json.direction|title }}</span>
+                    {% for category in template.ui_categories[:2] %}
+                      <span>{{ category }}</span>
+                    {% endfor %}
+                  </div>
+                  <div class="button-row compact">
+                    <button class="button button-secondary" type="button" data-preview-template='{{ template.schema_json | tojson }}'>Preview template</button>
+                    <button class="button button-primary template-pill" type="button" data-template-schema='{{ template.schema_json | tojson }}'>Use template</button>
+                  </div>
+                </article>
+              {% endfor %}
+              {% for template in templates %}
+                <article class="template-card" data-template-category-card="{{ template.category }}" data-template-categories="{{ template.category|replace('_', ' ')|title }}" data-template-search="{{ template.category }} {{ template.name }} {{ template.description or '' }} {{ template.tags|join(' ') }}">
+                  <div class="mini-logic-tree"><span>Saved map</span><i></i><span>Review</span><i></i><span>Alert</span></div>
+                  <h3>{{ template.name }}</h3>
+                  <p>{{ template.description or 'Saved custom monitor template.' }}</p>
+                  <div class="template-meta"><span>Custom</span><span>{{ template.category|replace('_', ' ')|title }}</span></div>
+                  <div class="button-row compact">
+                    <button class="button button-secondary" type="button" data-preview-template='{{ template.schema_json | tojson }}'>Preview template</button>
+                    <button class="button button-primary template-pill" type="button" data-template-schema='{{ template.schema_json | tojson }}'>Use template</button>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+            <div class="dash-empty template-empty-state" data-template-empty hidden>No templates match the selected categories.</div>
+          </section>
+
+          <section class="strategy-builder-workspace" data-builder-panel="canvas" hidden data-testid="strategy-canvas-panel">
+            <header class="builder-app-header">
+              <div class="builder-title-cluster">
+                <span class="builder-kicker">Visual Strategy Canvas</span>
+                <h2 id="builder-canvas-title">{{ strategy.name if strategy else 'Liquidity Sweep Continuation' }}</h2>
+                <div class="builder-badge-row">
+                  <span class="builder-state-badge" id="builder-status-badge">Draft</span>
+                  <span class="builder-path-badge" id="builder-path-badge">Visual</span>
+                  <span class="builder-review-badge">Review required</span>
+                </div>
+                <div class="builder-header-status">
+                  <strong id="builder-bottom-status">Not validated</strong>
+                  <span id="builder-bottom-counts">0 warnings - 0 critical errors - 0 conditions</span>
+                </div>
+              </div>
+              <div class="builder-header-actions">
+                <button class="button button-secondary" type="button" data-save-draft data-testid="strategy-save-draft">Save draft</button>
+                <button class="button button-secondary" type="button" data-builder-preview-matches>Preview matches</button>
+                <button class="button button-secondary" type="button" data-builder-validate data-testid="strategy-validate" disabled aria-disabled="true">Validate</button>
+                <button class="button button-primary" type="button" data-publish-schema data-testid="strategy-publish" disabled aria-disabled="true">Start monitoring</button>
+              </div>
+            </header>
+            <div id="builder-action-status" class="builder-action-status" aria-live="polite" hidden data-testid="builder-action-status"></div>
+            <div class="builder-validation-nudge" data-builder-validation-nudge>
+              Validate the monitor before activation. Start monitoring will automatically run validation, but reviewing it first prevents blocked launches.
+            </div>
+            <div class="builder-screened-market-banner {{ 'ready' if builder_screening.configured else 'blocked' }}" role="status">
+              <span data-icon="compliance" data-icon-class="icon"></span>
+              <div><span>Screened market</span><strong>{% if builder_screening.configured %}{{ builder_screening.methodology_name }} | v{{ builder_screening.methodology_version }}{% else %}Approved methodology required{% endif %}</strong><small>{% if builder_screening.configured %}Default scope: eligible assets and eligible assets with qualifications. Status changes pause the affected asset.{% else %}This draft can be edited, but validation and activation stay blocked until qualified governance activates a real methodology.{% endif %}</small></div>
+              <a href="/dashboard/methodology">View methodology</a>
+            </div>
+
+            <nav class="builder-mobile-stepper" aria-label="Mobile strategy steps">
+              <button type="button" class="active" data-builder-nav="monitor-card"><span>1</span>Basics</button>
+              <button type="button" data-builder-nav="universe-card"><span>2</span>Universe</button>
+              <button type="button" data-builder-nav="entry-logic-block"><span>3</span>Logic</button>
+              <button type="button" data-builder-nav="alert-rules-block"><span>4</span>Alerts</button>
+              <button type="button" data-builder-nav="proof-review-block"><span>5</span>Review</button>
+            </nav>
+
+            <div class="builder-main-layout">
+              <nav class="builder-left-rail" aria-label="Strategy outline">
+                <span class="builder-rail-label">Strategy outline</span>
+                <button type="button" class="active" data-builder-nav="monitor-card"><span>01</span>Monitor Overview</button>
+                <button type="button" data-builder-nav="universe-card"><span>02</span>Universe</button>
+                <button type="button" data-builder-nav="entry-logic-block"><span>03</span>Condition Logic</button>
+                <button type="button" data-builder-nav="filters-block"><span>04</span>Filters</button>
+                <button type="button" data-builder-nav="alert-rules-block"><span>05</span>Alert Rules</button>
+                <button type="button" data-builder-nav="risk-context-block"><span>06</span>Risk Context</button>
+                <button type="button" data-builder-nav="proof-review-block"><span>07</span>Proof &amp; Review</button>
+                <button type="button" data-builder-nav="advanced-schema-panel"><span>08</span>Advanced</button>
+                <button class="builder-change-path" type="button" data-builder-direction="choose">Change creation path</button>
+              </nav>
+
+              <main class="builder-canvas" aria-label="Visual strategy board">
+                <section class="embedded-board-window" data-board-root="embedded" aria-label="Strategy workflow board" data-testid="strategy-board">
+                  <header class="embedded-board-header">
+                    <div>
+                      <span class="eyebrow">Workflow board</span>
+                      <h3>Build the monitor as connected rules</h3>
+                    </div>
+                    <div class="strategy-board-tools">
+                      <button type="button" data-board-zoom="out" aria-label="Zoom out">-</button>
+                      <span data-board-zoom-label>100%</span>
+                      <button type="button" data-board-zoom="in" aria-label="Zoom in">+</button>
+                      <button type="button" data-board-reset>Reset</button>
+                      <button type="button" data-open-strategy-board aria-label="Show canvas in a maximized board">
+                        <span data-icon="expand" data-icon-class="icon-sm"></span>
+                      </button>
+                    </div>
+                  </header>
+                  <div data-board-steps hidden></div>
+                  <section class="strategy-board-surface embedded-board-surface" data-board-surface aria-label="Embedded freeform strategy board">
+                    <div class="strategy-board-content" data-board-content></div>
+                  </section>
+                </section>
+                <div class="strategy-map-flow legacy-builder-cards" hidden aria-hidden="true">
+                  <article class="strategy-map-card monitor-card" id="monitor-card">
+                    <div class="map-card-icon" aria-hidden="true">M</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div>
+                          <span class="map-card-eyebrow">Monitor</span>
+                          <h3 id="builder-monitor-node-name">Liquidity Sweep Continuation</h3>
+                        </div>
+                        <div class="map-card-actions">
+                          <button class="card-action" type="button" data-open-section-editor="monitor">Edit overview</button>
+                        </div>
+                      </div>
+                      <div class="map-fact-grid" id="builder-monitor-facts"></div>
+                      <p class="map-card-note">No monitoring starts until confirmed.</p>
+                    </div>
+                  </article>
+
+                  <article class="strategy-map-card universe-card" id="universe-card">
+                    <div class="map-card-icon" aria-hidden="true">U</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div><span class="map-card-eyebrow">Universe</span><h3>Markets to scan</h3></div>
+                        <button class="card-action" type="button" data-open-section-editor="universe">Edit universe</button>
+                      </div>
+                      <div class="map-fact-grid" id="builder-universe-facts"></div>
+                      <div class="canvas-empty-state" id="builder-universe-empty" hidden>
+                        <strong>Choose what markets to scan.</strong>
+                        <button type="button" data-quick-universe>Liquid USDT spot pairs</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="strategy-map-card logic-map-card" id="entry-logic-block">
+                    <div class="map-card-icon" aria-hidden="true">L</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div>
+                          <span class="map-card-eyebrow">Condition Logic</span>
+                          <h3 id="builder-logic-heading">ALL OF</h3>
+                        </div>
+                        <div class="map-card-actions">
+                          <button class="card-action" type="button" data-open-condition-library>+ Add condition</button>
+                          <button class="card-action" type="button" data-builder-add-group>+ Add group</button>
+                        </div>
+                      </div>
+                      <div id="condition-tree" class="condition-tree"></div>
+                      <div class="canvas-empty-state" id="builder-condition-empty" hidden>
+                        <strong>Start with one required condition.</strong>
+                        <div>
+                          <button type="button" data-open-condition-library data-library-query="indicator">Add indicator condition</button>
+                          <button type="button" data-open-condition-library data-library-query="price action">Add price action</button>
+                          <button type="button" data-builder-direction="prompt">Ask AI</button>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="strategy-map-card" id="filters-block">
+                    <div class="map-card-icon" aria-hidden="true">F</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div><span class="map-card-eyebrow">Filters</span><h3>Reduce noise</h3></div>
+                        <button class="card-action" type="button" data-open-condition-library data-library-query="filter">+ Add filter</button>
+                      </div>
+                      <div class="filter-chip-grid" id="builder-filter-summary"></div>
+                      <div class="map-quick-actions">
+                        <button type="button" data-builder-add-filter>Trend filter</button>
+                        <button type="button" data-builder-add-market-context>Market context</button>
+                        <button type="button" data-builder-add-time-rule>Session / time</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="strategy-map-card" id="alert-rules-block">
+                    <div class="map-card-icon" aria-hidden="true">A</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div><span class="map-card-eyebrow">Alert Rules</span><h3>When and where to notify</h3></div>
+                        <button class="card-action" type="button" data-open-section-editor="alerts">Edit alerts</button>
+                      </div>
+                      <div class="map-fact-grid" id="builder-alert-facts"></div>
+                      <div class="canvas-empty-state" id="builder-alert-empty" hidden>
+                        <strong>Choose where to receive alerts.</strong>
+                        <button type="button" data-open-section-editor="alerts">Choose channels</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="strategy-map-card" id="risk-context-block">
+                    <div class="map-card-icon" aria-hidden="true">R</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div><span class="map-card-eyebrow">Risk Context</span><h3>Validate setup quality</h3></div>
+                        <button class="card-action" type="button" data-open-section-editor="risk">Edit risk context</button>
+                      </div>
+                      <div class="map-fact-grid" id="builder-risk-facts"></div>
+                      <p class="map-card-note">Context only. HilalMarkets does not place trades.</p>
+                    </div>
+                  </article>
+
+                  <article class="strategy-map-card proof-card" id="proof-review-block">
+                    <div class="map-card-icon" aria-hidden="true">P</div>
+                    <div class="map-card-body">
+                      <div class="map-card-heading">
+                        <div><span class="map-card-eyebrow">Proof &amp; Review</span><h3>Ready for deterministic monitoring?</h3></div>
+                        <span class="proof-readiness" id="builder-readiness">Needs review</span>
+                      </div>
+                      <div class="proof-preview-grid">
+                        <div><span>Proof receipt</span><strong>Condition-by-condition</strong></div>
+                        <div><span>Strategy version</span><strong>Locked on activation</strong></div>
+                        <div><span>Alert estimate</span><strong id="builder-alert-estimate">Run preview</strong></div>
+                      </div>
+                      <div id="builder-confirm-checklist" class="builder-checklist"></div>
+                      <button class="button button-primary" type="button" data-publish-schema disabled>Start monitoring</button>
+                    </div>
+                  </article>
+
+                  <details class="advanced-schema-panel" id="advanced-schema-panel" data-testid="raw-json-panel">
+                    <summary>Advanced schema and debug details</summary>
+                    <div class="advanced-schema-actions">
+                      <button class="button button-secondary" type="button" data-save-template>Save as template</button>
+                      <button class="button button-secondary" type="button" data-builder-add-raw-condition>Advanced raw condition</button>
+                    </div>
+                    <pre id="builder-json" class="proof-json compact-json"></pre>
+                  </details>
+                </div>
+              </main>
+
+              <aside class="builder-right-panel" aria-label="Strategy explanation and validation">
+                <button class="builder-panel-mobile-toggle" type="button" data-toggle-builder-panel aria-expanded="true">Review panel</button>
+                <div class="builder-panel-tabs" role="tablist" aria-label="Builder details">
+                  <button type="button" class="active" role="tab" aria-selected="true" data-builder-right-tab="summary">Summary</button>
+                  <button type="button" role="tab" aria-selected="false" data-builder-right-tab="coverage">Coverage</button>
+                  <button type="button" role="tab" aria-selected="false" data-builder-right-tab="validation">Validation</button>
+                  <button type="button" role="tab" aria-selected="false" data-builder-right-tab="preview">Preview</button>
+                  <button type="button" role="tab" aria-selected="false" data-builder-right-tab="ai-help">AI Help</button>
+                </div>
+                <section class="builder-tab-panel active" data-builder-right-panel="summary">
+                  <h3>What this monitor does</h3>
+                  <div id="builder-summary" class="builder-plain-summary"></div>
+                  <div class="builder-behavior-box">
+                    <span>Estimated behavior</span>
+                    <strong id="builder-behavior-summary">Review the map, then validate.</strong>
+                  </div>
+                </section>
+                <section class="builder-tab-panel" data-builder-right-panel="coverage" hidden>
+                  <h3>Prompt coverage</h3>
+                  <div id="builder-coverage-panel" class="builder-coverage-panel">
+                    <div class="canvas-empty-state"><strong>No prompt coverage yet.</strong><span>Use Describe Strategy to generate a coverage report before opening the board.</span></div>
+                  </div>
+                </section>
+                <section class="builder-tab-panel" data-builder-right-panel="validation" hidden>
+                  <h3>Activation checklist</h3>
+                  <div id="builder-validation-status" class="validation-box">Validate before activation.</div>
+                  <div id="builder-warnings" class="builder-warning-list"></div>
+                </section>
+                <section class="builder-tab-panel" data-builder-right-panel="preview" hidden>
+                  <h3>Current matches</h3>
+                  <div id="builder-preview-results" class="builder-preview-results">
+                    <div class="canvas-empty-state"><strong>No preview yet.</strong><button type="button" data-builder-preview-matches>Preview matches</button></div>
+                  </div>
+                </section>
+                <section class="builder-tab-panel" data-builder-right-panel="ai-help" hidden>
+                  <h3>Improve the draft</h3>
+                  <p>Suggestions are shown as a diff. Nothing changes without approval.</p>
+                  <div class="ai-help-actions">
+                    <button type="button" data-builder-ai-help="simpler">Make it simpler</button>
+                    <button type="button" data-builder-ai-help="stricter">Make it stricter</button>
+                    <button type="button" data-builder-ai-help="less-noisy">Make it less noisy</button>
+                    <button type="button" data-builder-ai-help="earlier">Trigger earlier</button>
+                    <button type="button" data-builder-ai-help="blockers">Explain what blocks it</button>
+                    <button type="button" data-builder-ai-help="market-context">Add market context</button>
+                    <button type="button" data-builder-ai-help="volume">Add volume confirmation</button>
+                  </div>
+                  <div id="builder-ai-diff" class="builder-ai-diff" hidden></div>
+                </section>
+              </aside>
+            </div>
+
+          </section>
+
+          <div class="builder-schema-fields" hidden aria-hidden="true">
+            <input name="name" value="{{ strategy.name if strategy else 'Liquidity Sweep Continuation' }}">
+            <textarea name="description">{{ strategy.description if strategy else 'Research monitor with deterministic trend, volume and price-action conditions.' }}</textarea>
+            <select name="direction"><option value="long">Long</option><option value="short">Short</option><option value="both">Both</option></select>
+            <select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select>
+            <input name="quote" value="USDT">
+            <select name="base_timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select>
+            <input name="supporting_timeframes" value="4h">
+            <select name="trigger_mode"><option value="candle_close">Candle close</option><option value="intrabar">Intrabar</option></select>
+            <input name="include_symbols">
+            <input name="exclude_symbols">
+            <input name="min_quote_volume_24h" type="number" value="1000000">
+            <input name="max_spread_bps" type="number" value="25">
+            <select name="risk_enabled"><option value="false" selected>Disabled</option><option value="true">Enabled</option></select>
+            <select name="stop_method"><option value="structure">Structure</option><option value="fixed_percent">Fixed %</option><option value="atr">ATR</option><option value="swing_low">Swing low</option><option value="swing_high">Swing high</option></select>
+            <input name="maximum_stop_percent" type="number" value="">
+            <input name="target_value" type="number" value="">
+            <input name="minimum_reward_to_risk" type="number" value="">
+            <select name="near_miss_enabled"><option value="true" selected>On</option><option value="false">Off</option></select>
+            <input name="near_miss_threshold" type="number" value="70">
+            <input name="alert_channels" value="telegram">
+            <input name="cooldown_seconds" type="number" value="900">
+            <input name="maximum_alerts_per_hour" type="number" value="10">
+            <select name="forming_alerts"><option value="true">On</option><option value="false">Off</option></select>
+          </div>
+
+          <dialog id="condition-library-modal" class="condition-library-modal" aria-labelledby="condition-library-title">
+            <div class="modal-header">
+              <div><span class="eyebrow">Condition Library</span><h2 id="condition-library-title">Add a deterministic rule</h2></div>
+              <button class="icon-button" type="button" data-close-condition-library aria-label="Close condition library">x</button>
+            </div>
+            <label class="condition-library-search">Search condition library
+              <input type="search" data-capability-search placeholder="RSI, liquidity sweep, session, volume...">
+            </label>
+            <div class="condition-library-layout">
+              <nav class="condition-library-categories" data-capability-categories aria-label="Condition categories"></nav>
+              <div class="condition-library-results" data-capability-results></div>
+            </div>
+          </dialog>
+
+          <div class="builder-drawer-backdrop" data-close-builder-drawer hidden></div>
+          <aside id="condition-editor-drawer" class="builder-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="condition-editor-title" hidden data-testid="condition-drawer">
+            <div class="drawer-header">
+              <div><span class="eyebrow" id="condition-editor-kicker">Condition</span><h2 id="condition-editor-title">Edit condition</h2></div>
+              <button class="icon-button" type="button" data-close-builder-drawer aria-label="Close editor">x</button>
+            </div>
+            <div id="condition-editor-content" class="drawer-content"></div>
+            <div class="drawer-actions">
+              <button class="button button-secondary" type="button" data-close-builder-drawer>Cancel</button>
+              <button class="button button-primary" type="button" data-save-builder-drawer data-testid="condition-save">Save changes</button>
+            </div>
+          </aside>
+          <dialog id="strategy-board-dialog" class="strategy-board-dialog" data-board-root="modal" aria-labelledby="strategy-board-title">
+            <div class="strategy-board-header">
+              <div>
+                <span class="eyebrow">Workflow Strategy Board</span>
+                <h2 id="strategy-board-title">Build the full monitor workflow</h2>
+                <p>Manage the monitor flow. This board edits the same strategy schema the scanner validates.</p>
+              </div>
+              <div class="strategy-board-tools">
+                <button type="button" data-board-maximize aria-label="Maximize board"><span data-icon="expand" data-icon-class="icon-sm"></span></button>
+                <button type="button" data-board-zoom="out" aria-label="Zoom out">-</button>
+                <span data-board-zoom-label>100%</span>
+                <button type="button" data-board-zoom="in" aria-label="Zoom in">+</button>
+                <button type="button" data-board-reset>Reset view</button>
+                <button class="icon-button" type="button" data-close-strategy-board aria-label="Close strategy board">x</button>
+              </div>
+            </div>
+            <div class="strategy-board-workbench">
+              <aside class="strategy-board-steps">
+                <strong>Steps</strong>
+                <div data-board-steps></div>
+              </aside>
+              <section class="strategy-board-surface" data-board-surface aria-label="Freeform strategy board">
+                <div class="strategy-board-content" data-board-content></div>
+              </section>
+              <aside class="strategy-board-inspector">
+                <div class="builder-panel-tabs" role="tablist" aria-label="Board inspector">
+                  <button type="button" class="active" role="tab" aria-selected="true" data-board-tab="summary">Summary</button>
+                  <button type="button" role="tab" aria-selected="false" data-board-tab="coverage">Coverage</button>
+                  <button type="button" role="tab" aria-selected="false" data-board-tab="validation">Validation</button>
+                  <button type="button" role="tab" aria-selected="false" data-board-tab="preview">Preview</button>
+                  <button type="button" role="tab" aria-selected="false" data-board-tab="ai-help">AI Help</button>
+                </div>
+                <div class="board-quick-add-panel">
+                  <strong>Add to board</strong>
+                  <button type="button" data-board-add="condition">Rule</button>
+                  <button type="button" data-board-add="filter">Filter</button>
+                  <button type="button" data-board-add="universe">Universe</button>
+                  <button type="button" data-board-add="alerts">Alerts</button>
+                </div>
+                <section class="builder-tab-panel active" data-board-panel="summary"><h3>Summary</h3><div data-board-summary class="builder-plain-summary"></div></section>
+                <section class="builder-tab-panel" data-board-panel="coverage" hidden><h3>Coverage</h3><div data-board-coverage class="builder-coverage-panel"></div></section>
+                <section class="builder-tab-panel" data-board-panel="validation" hidden><h3>Validation</h3><div data-board-validation class="validation-box"></div></section>
+                <section class="builder-tab-panel" data-board-panel="preview" hidden><h3>Preview</h3><div data-board-preview class="builder-preview-results"></div></section>
+                <section class="builder-tab-panel" data-board-panel="ai-help" hidden><h3>AI Help</h3><div data-board-ai-help class="builder-ai-diff"></div></section>
+              </aside>
+            </div>
+          </dialog>
+          <dialog id="template-use-dialog" class="template-use-dialog" aria-labelledby="template-use-title">
+            <div class="modal-header">
+              <div><span class="eyebrow">Use template</span><h2 id="template-use-title">Where should this template open?</h2></div>
+              <button class="icon-button" type="button" data-close-template-use aria-label="Close template options">x</button>
+            </div>
+            <p>Load the template into the visual canvas, or convert its conditions into a prompt you can edit first.</p>
+            <div class="template-use-options">
+              <button class="button button-primary" type="button" data-template-use-canvas>Use in canvas</button>
+              <button class="button button-secondary" type="button" data-template-use-prompt>Use in Describe Strategy</button>
+            </div>
+          </dialog>
+        </form>
+      </section>
+      <section id="monitors" class="dash-panel monitors-hub" hidden aria-hidden="true">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Monitors</p>
+            <h2>My Monitors</h2>
+            <p>Control each monitor and review its health, scan freshness, and main blocker in one place.</p>
+          </div>
+        </div>
+        {% if monitor_cards %}
+          <div class="monitor-card-grid">
+            {% for item in monitor_cards %}
+              {% set strategy = item.strategy %}
+              {% set monitor_status = 'active' if strategy.status.value == 'draft' and strategy.active_version_id else strategy.status.value %}
+              <article class="monitor-control-card" data-testid="monitor-row">
+                <div class="monitor-card-head">
+                  <span class="monitor-card-icon"><span data-icon="radar" data-icon-class="icon"></span></span>
+                  <div>
+                    <strong>{{ strategy.name }}</strong>
+                    <small>{{ strategy.description or 'No description yet' }}</small>
+                  </div>
+                  <span class="monitor-status-pill" data-testid="monitor-status">{{ monitor_status.replace('_', ' ') }}</span>
+                </div>
+                <div class="monitor-screening-strip">
+                  <div><span data-icon="methodology" data-icon-class="icon"></span><span>Methodology</span><strong>{{ item.methodology.name ~ ' v' ~ item.methodology.version if item.methodology else 'Policy migration required' }}</strong></div>
+                  <div><span data-icon="list" data-icon-class="icon"></span><span>Allowed statuses</span><strong>{{ item.sharia_universe.allowed_sharia_statuses|map('replace', '_', ' ')|join(', ') if item.sharia_universe and item.sharia_universe.allowed_sharia_statuses else 'Not configured' }}</strong></div>
+                  <div><span data-icon="scan" data-icon-class="icon"></span><span>Eligible assets</span><strong>{{ item.eligible_asset_count }}</strong></div>
+                  <div><span data-icon="compliance" data-icon-class="icon"></span><span>Status change</span><strong>{{ item.sharia_universe.compliance_change_behavior.value.replace('_', ' ').title() if item.sharia_universe and item.sharia_universe.compliance_change_behavior else 'Pause affected asset' }}</strong></div>
+                </div>
+                <div class="monitor-health-strip">
+                  <div>
+                    <span>Health</span>
+                    <strong>{{ item.health.score|round|int }}/100</strong>
+                  </div>
+                  <div>
+                    <span>Last scan</span>
+                    <strong>{% if item.latest_scan %}{{ item.latest_scan.status.value.replace('_', ' ').title() }}{% else %}Waiting{% endif %}</strong>
+                  </div>
+                  <div>
+                    <span>Latency</span>
+                    <strong>{{ item.latency_label }}</strong>
+                  </div>
+                </div>
+                <div class="monitor-health-copy">
+                  <p>{{ item.health.main_issue or item.health.explanation }}</p>
+                  {% if item.main_bottleneck %}
+                    <small><strong>Top blocker:</strong> {{ item.main_bottleneck.condition_label }} - {{ item.main_bottleneck.blocking_rate|round|int }}% blocking impact</small>
+                  {% else %}
+                    <small>More scan evidence is needed before HilalMarkets can rank condition blockers.</small>
+                  {% endif %}
+                </div>
+                <div class="row-actions monitor-card-actions">
+                  {% if item.pending_repair %}
+                    <form method="post" action="/dashboard/capability-extensions/{{ item.pending_repair.id }}/prepare-repair">
+                      <button class="button button-primary" type="submit">Review certified repair</button>
+                    </form>
+                  {% endif %}
+                  <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}">View</a>
+                  <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit</a>
+                  <form method="post" action="/dashboard/monitors/{{ strategy.id }}/{{ 'resume' if strategy.status.value == 'paused' else 'pause' }}">
+                    <button class="button button-secondary" type="submit">{{ 'Resume' if strategy.status.value == 'paused' else 'Pause' }}</button>
+                  </form>
+                  <form method="post" action="/dashboard/monitors/{{ strategy.id }}/delete" onsubmit="return confirm('Delete this monitor? It will be archived and hidden, while historical proof is preserved.');">
+                    <button class="button button-secondary danger-button" type="submit">Delete</button>
+                  </form>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="dash-empty">No monitors yet. Create a monitor, approve its structured rules, then activate it.</div>
+        {% endif %}
+      </section>
+      <script id="amm-builder-schema" type="application/json">{% if version and version.schema_json %}{{ version.schema_json | tojson }}{% else %}{}{% endif %}</script>
+      <script id="amm-builder-screening-context" type="application/json">{{ builder_screening | tojson }}</script>
+      <script id="amm-builder-metadata" type="application/json">{% if version %}{{ {
+        'interpreter': version.interpretation_provider or 'saved-strategy-version',
+        'assumptions': version.assumptions or [],
+        'ambiguities': version.ambiguities or [],
+        'unsupported_conditions': version.unsupported_conditions or [],
+        'source_text': version.source_text,
+      } | tojson }}{% else %}{}{% endif %}</script>

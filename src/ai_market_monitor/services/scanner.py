@@ -1090,7 +1090,7 @@ class ScanOrchestrator:
             await self._cancel_job(
                 job,
                 "monitor_paused_for_compliance",
-                "The Watch Plan was paused because a previously included asset left its "
+                "The Watchlist was paused because a previously included asset left its "
                 "screened-market policy.",
             )
             return self._summary(job, failures=0)

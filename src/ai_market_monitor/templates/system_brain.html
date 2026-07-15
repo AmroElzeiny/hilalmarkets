@@ -59,7 +59,7 @@
         <article><span>Reviews pending</span><strong>{{ data.compliance_watch.reviews_pending }}</strong><small>No status changes without review</small></article>
         <article><span>Assets under review</span><strong>{{ data.compliance_watch.assets_under_review }}</strong><small>Across pending cases</small></article>
         <article><span>Status changes</span><strong>{{ data.compliance_watch.status_changes_30d }}</strong><small>Approved in the last 30 days</small></article>
-        <article><span>Watch Plans affected</span><strong>{{ data.compliance_watch.monitors_affected }}</strong><small>Assets paused by policy</small></article>
+        <article><span>Watchlists affected</span><strong>{{ data.compliance_watch.monitors_affected }}</strong><small>Assets paused by policy</small></article>
       </div>
       <article class="brain-panel brain-compliance-panel">
         <div class="brain-panel-heading">
@@ -77,7 +77,7 @@
                 <td><span class="brain-status {{ 'fail' if item.severity == 'critical' else 'warning' }}">{{ item.severity.replace('_', ' ') }}</span></td>
                 <td>{{ item.detected_at.strftime('%Y-%m-%d %H:%M') if item.detected_at else '-' }}</td>
                 <td><span class="brain-status {{ 'pass' if item.current_status == 'eligible' else 'warning' }}">{{ item.current_status.replace('_', ' ') }}</span></td>
-                <td>{{ item.affected_watch_plans }} Watch Plan{{ 's' if item.affected_watch_plans != 1 else '' }}</td>
+                <td>{{ item.affected_watch_plans }} Watchlist{{ 's' if item.affected_watch_plans != 1 else '' }}</td>
                 <td>
                   <details class="brain-review-case">
                     <summary>{{ item.suggested_action }}</summary>
@@ -91,7 +91,7 @@
                         <div><span>Current status</span><strong>{{ item.current_status.replace('_', ' ').title() }}</strong></div>
                         <div><span>Severity</span><strong>{{ item.severity.replace('_', ' ').title() }}</strong></div>
                         <div><span>Source</span><strong>{{ item.source or 'No source reference supplied' }}</strong></div>
-                        <div><span>Watch Plans affected</span><strong>{{ item.affected_watch_plans }}</strong></div>
+                        <div><span>Watchlists affected</span><strong>{{ item.affected_watch_plans }}</strong></div>
                       </div>
                       <details class="brain-evidence-detail"><summary>Inspect normalized change</summary><pre>{{ item.structured_change | tojson(indent=2) }}</pre></details>
                       <a class="brain-passport-link" href="{{ item.passport_path }}" target="_blank" rel="noopener">Open existing Evidence Passport</a>

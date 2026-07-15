@@ -188,24 +188,24 @@
       root?.classList.contains("theme-light");
     return light
       ? {
-          background: "#f7f5fb",
-          text: "#282331",
-          grid: "rgba(124, 92, 191, .13)",
-          up: "#7c3aed",
-          down: "#b4234f",
-          target: "#7c3aed",
-          stop: "#c43b2f",
-          entry: "#8b5cf6",
+          background: "#fbfaf6",
+          text: "#102a24",
+          grid: "rgba(31, 139, 116, .13)",
+          up: "#1f8b74",
+          down: "#c2544d",
+          target: "#d2af63",
+          stop: "#c2544d",
+          entry: "#0f5c4d",
         }
       : {
-          background: "#0a0a0a",
-          text: "#e6e6eb",
-          grid: "rgba(196, 181, 253, .11)",
-          up: "#a78bfa",
-          down: "#ff8a7a",
-          target: "#a78bfa",
-          stop: "#ff8a7a",
-          entry: "#8b5cf6",
+          background: "#082f29",
+          text: "#f7f4ec",
+          grid: "rgba(155, 200, 187, .12)",
+          up: "#4fae96",
+          down: "#d97970",
+          target: "#d2af63",
+          stop: "#d97970",
+          entry: "#1f8b74",
         };
   }
 
@@ -1324,7 +1324,7 @@
       const screening = loadBuilderScreeningContext();
       if (screening.enforced && !schema.universe?.sharia_policy?.methodology_id) {
         blocking.push(
-          "An approved screening methodology is required before this Watch Plan can run.",
+          "An approved screening methodology is required before this Watchlist can run.",
         );
       }
       if (!safeArray(schema.alerts?.channels).length) blocking.push("Choose at least one alert destination.");
@@ -1553,9 +1553,14 @@
       });
       form.querySelectorAll("[data-builder-validate]").forEach((button) => {
         button.dataset.validationState = ready ? "passed" : "required";
-        button.disabled = ready;
-        button.setAttribute("aria-disabled", String(ready));
-        button.title = ready ? "Validation passed" : "Validate this monitor before activation";
+        const initializing = form.dataset.builderInitialized !== "true";
+        button.disabled = initializing || ready;
+        button.setAttribute("aria-disabled", String(initializing || ready));
+        button.title = initializing
+          ? "Preparing deterministic validation"
+          : ready
+            ? "Validation passed"
+            : "Validate this monitor before activation";
       });
     }
 
@@ -3669,6 +3674,8 @@
       event.preventDefault();
       await saveBuilderStrategy(Boolean(event.submitter?.dataset.publishSchema), event.submitter);
     });
+    form.dataset.builderInitialized = "true";
+    updateBuilderStatus();
   }
 
   function initScanNow() {
@@ -4717,7 +4724,19 @@
       if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
       return String(value);
     };
-    const iconUrl = (name, color = "0f5c4d") => `https://api.iconify.design/lucide:${name}.svg?color=%23${color}`;
+    const iconUrl = (name, color = "0f5c4d") => {
+      const aliases = {
+        "triangle-alert": "alert",
+        "lock-keyhole": "shield",
+        "circle-check": "check",
+        "clock-3": "clock",
+        timer: "clock",
+        "flask-conical": "info",
+        "circle-x": "close",
+      };
+      const svg = window.icon?.(aliases[name] || name, "icon") || "";
+      return `data:image/svg+xml,${encodeURIComponent(svg.replaceAll("currentColor", `#${color}`))}`;
+    };
 
     function updateObservabilityUrl() {
       const params = new URLSearchParams(window.location.search);
@@ -5310,10 +5329,10 @@
                 return {
                   id: `${marker.kind || "event"}-${index}-${time}`,
                   time,
-                  color: condition ? "#8b5cf6" : "#c4b5fd",
+                  color: condition ? "#1f8b74" : "#d2af63",
                   text: marker.text || marker.label || "Lifecycle event",
                   label: condition ? "C" : "L",
-                  labelFontColor: condition ? "#ffffff" : "#17131f",
+                  labelFontColor: condition ? "#ffffff" : "#082f29",
                   minSize: 22,
                 };
               })
@@ -5500,15 +5519,15 @@
         overrides: {
           "paneProperties.background": background,
           "paneProperties.backgroundType": "solid",
-          "paneProperties.vertGridProperties.color": theme === "light" ? "#ddd6fe" : "#241737",
-          "paneProperties.horzGridProperties.color": theme === "light" ? "#ddd6fe" : "#241737",
-          "scalesProperties.textColor": theme === "light" ? "#17131f" : "#e6e6eb",
-          "mainSeriesProperties.candleStyle.upColor": "#8b5cf6",
-          "mainSeriesProperties.candleStyle.downColor": "#c4b5fd",
-          "mainSeriesProperties.candleStyle.borderUpColor": "#8b5cf6",
-          "mainSeriesProperties.candleStyle.borderDownColor": "#c4b5fd",
-          "mainSeriesProperties.candleStyle.wickUpColor": "#8b5cf6",
-          "mainSeriesProperties.candleStyle.wickDownColor": "#c4b5fd",
+          "paneProperties.vertGridProperties.color": theme === "light" ? "#d7e8e2" : "#174a40",
+          "paneProperties.horzGridProperties.color": theme === "light" ? "#d7e8e2" : "#174a40",
+          "scalesProperties.textColor": theme === "light" ? "#102a24" : "#f7f4ec",
+          "mainSeriesProperties.candleStyle.upColor": "#1f8b74",
+          "mainSeriesProperties.candleStyle.downColor": "#d97970",
+          "mainSeriesProperties.candleStyle.borderUpColor": "#1f8b74",
+          "mainSeriesProperties.candleStyle.borderDownColor": "#d97970",
+          "mainSeriesProperties.candleStyle.wickUpColor": "#1f8b74",
+          "mainSeriesProperties.candleStyle.wickDownColor": "#d97970",
         },
         container_id: "lifecycle-tradingview-widget",
       });
@@ -5536,25 +5555,25 @@
       const chart = window.LightweightCharts.createChart(container, {
         autoSize: true,
         layout: {
-          background: { color: theme === "light" ? "#f3efff" : "#151021" },
-          textColor: theme === "light" ? "#17131f" : "#f7f3ff",
+          background: { color: theme === "light" ? "#fbfaf6" : "#082f29" },
+          textColor: theme === "light" ? "#102a24" : "#f7f4ec",
           fontFamily: "Inter, Satoshi, system-ui, sans-serif",
         },
         grid: {
-          vertLines: { color: theme === "light" ? "rgba(139,92,246,.16)" : "rgba(196,181,253,.12)" },
-          horzLines: { color: theme === "light" ? "rgba(139,92,246,.16)" : "rgba(196,181,253,.12)" },
+          vertLines: { color: theme === "light" ? "rgba(31,139,116,.14)" : "rgba(155,200,187,.12)" },
+          horzLines: { color: theme === "light" ? "rgba(31,139,116,.14)" : "rgba(155,200,187,.12)" },
         },
-        rightPriceScale: { borderColor: "rgba(196,181,253,.22)" },
-        timeScale: { borderColor: "rgba(196,181,253,.22)", timeVisible: true },
+        rightPriceScale: { borderColor: "rgba(155,200,187,.28)" },
+        timeScale: { borderColor: "rgba(155,200,187,.28)", timeVisible: true },
         crosshair: { mode: window.LightweightCharts.CrosshairMode.Normal },
       });
       const series = chart.addCandlestickSeries({
-        upColor: "#8b5cf6",
-        downColor: "#c4b5fd",
-        borderUpColor: "#8b5cf6",
-        borderDownColor: "#c4b5fd",
-        wickUpColor: "#8b5cf6",
-        wickDownColor: "#c4b5fd",
+        upColor: "#1f8b74",
+        downColor: "#d97970",
+        borderUpColor: "#1f8b74",
+        borderDownColor: "#d97970",
+        wickUpColor: "#1f8b74",
+        wickDownColor: "#d97970",
       });
       const data = safeArray(payload.candles)
         .map((candle) => ({
@@ -5571,7 +5590,7 @@
         .map((marker) => ({
           time: Math.floor(new Date(marker.time).getTime() / 1000),
           position: marker.position === "aboveBar" ? "aboveBar" : "belowBar",
-          color: marker.kind === "lifecycle" ? "#c4b5fd" : "#8b5cf6",
+          color: marker.kind === "lifecycle" ? "#d2af63" : "#1f8b74",
           shape: marker.kind === "lifecycle" ? "arrowDown" : "circle",
           text: String(marker.text || marker.label || "event").slice(0, 20),
         }))
@@ -5605,7 +5624,7 @@
         <div class="lifecycle-native-chart">
           <div class="lifecycle-native-chart-head">
             <span>
-              <img src="https://api.iconify.design/lucide:chart-candlestick.svg?color=%23c4b5fd" alt="" aria-hidden="true">
+              ${window.icon?.("chart", "icon") || ""}
               Native evidence chart
             </span>
             <small>${escapeHtml(candles.length)} candles | ${escapeHtml(markers.length)} evidence marks</small>
@@ -5669,16 +5688,18 @@
 
     document.querySelectorAll("[data-lifecycle-chart]").forEach((button) => {
       button.addEventListener("click", () => {
+        if (!dialog) return;
         dialog.showModal();
         loadLifecycleChart(button.dataset.lifecycleChart, "1m");
       });
     });
     async function closeDialog() {
+      if (!dialog) return;
       dialog.close();
       destroyChart();
     }
     document.querySelector("[data-lifecycle-dialog-close]")?.addEventListener("click", closeDialog);
-    dialog.addEventListener("cancel", (event) => {
+    dialog?.addEventListener("cancel", (event) => {
       event.preventDefault();
       closeDialog();
     });

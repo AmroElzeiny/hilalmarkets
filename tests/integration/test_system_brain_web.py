@@ -57,7 +57,37 @@ async def test_system_brain_web_requires_otp_and_renders_console(test_context):
         "Application-managed tools",
     ):
         assert heading in dashboard.text
-    assert "#0a0a0a" in (await test_context["client"].get("/static/system-brain.css")).text
+    stylesheet = (await test_context["client"].get("/static/system-brain.css")).text
+    assert "#082f29" in stylesheet
+    assert "#0a0a0a" not in stylesheet
+
+
+async def test_system_brain_can_require_cloudflare_access_before_app_auth(test_context):
+    _configure(test_context)
+    settings = test_context["settings"]
+    settings.system_brain_cloudflare_access_required = True
+
+    missing = await test_context["client"].get("/system-brain")
+    assert missing.status_code == 403
+
+    wrong_identity = await test_context["client"].get(
+        "/system-brain",
+        headers={
+            "cf-access-authenticated-user-email": "other@example.com",
+            "cf-access-jwt-assertion": "test-assertion",
+        },
+    )
+    assert wrong_identity.status_code == 403
+
+    outer_gate_passed = await test_context["client"].get(
+        "/system-brain",
+        headers={
+            "cf-access-authenticated-user-email": "contact@trace-edge.com",
+            "cf-access-jwt-assertion": "test-assertion",
+        },
+    )
+    assert outer_gate_passed.status_code == 200
+    assert "Continue securely" in outer_gate_passed.text
 
 
 async def test_system_brain_excludes_named_accounts_and_reviews_alias(test_context):

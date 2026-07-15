@@ -37,10 +37,10 @@ Use server-side `url_for` rather than hard-coded production paths.
 
 Suggested service/read-model mapping:
 
-- Home: user Watch Plan health, resolved screened coverage, latest opportunities, compliance changes.
+- Home: user Watchlist health, resolved screened coverage, latest opportunities, compliance changes.
 - Screened Market: `ShariaUniverseResolver`, current effective assessments, market opportunity read model.
 - Passport: assessment, methodology version, evidence sources, status history, methodology comparison.
-- Watch Plans: existing monitor/strategy services plus Sharia universe and drift policy.
+- Watchlists: existing monitor/strategy services plus Sharia universe and drift policy.
 - Activity: unified lifecycle, alert, compliance, and investigation read model.
 - Opportunity Detail: immutable evidence receipt plus current status context.
 - Compliance Changes: compliance change/read-review services and user impact.
@@ -67,7 +67,7 @@ The pages should remain useful after server rendering. JavaScript should enhance
 2. Create shared public/dashboard shells.
 3. Migrate Landing and authentication.
 4. Migrate Home and Screened Market.
-5. Migrate Passport and Watch Plans.
+5. Migrate Passport and Watchlists.
 6. Migrate Activity, Opportunity Detail, and Compliance.
 7. Migrate account/support pages.
 8. Integrate System Brain last and test authorization separately.

@@ -140,7 +140,9 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
 
     page.goto(base_url, wait_until="domcontentloaded")
     expect(page.locator(".public-nav .logo")).to_contain_text("HilalMarkets")
-    expect(page.locator(".hero h1")).to_contain_text("Know what fits your values")
+    expect(page.locator(".landing-hero h1")).to_contain_text(
+        "Halal-conscious crypto monitoring"
+    )
     expect(page.locator(".feature-bento")).to_contain_text("Evidence Passports")
     assert "TODO_" not in page.content()
     page.evaluate(
@@ -155,19 +157,34 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
         }"""
     )
     expect(page.locator(".reveal:not(.is-visible)")).to_have_count(0)
-    page.screenshot(path=str(output / "hilalmarkets-landing-desktop.png"), full_page=True)
+    for width, height in ((1440, 1000), (1024, 900), (768, 900)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.screenshot(
+            path=str(output / f"hilalmarkets-landing-{width}.png"),
+            full_page=True,
+        )
 
-    page.set_viewport_size({"width": 390, "height": 844})
+    page.set_viewport_size({"width": 360, "height": 800})
     page.locator("[data-public-menu]").click()
     expect(page.locator(".public-links")).to_be_visible()
-    page.screenshot(path=str(output / "hilalmarkets-landing-mobile-390.png"), full_page=True)
+    page.screenshot(path=str(output / "hilalmarkets-landing-360.png"), full_page=True)
+
+    page.keyboard.press("Tab")
+    focused = page.evaluate("document.activeElement && document.activeElement.tagName")
+    assert focused in {"A", "BUTTON", "INPUT"}
+
+    page.emulate_media(reduced_motion="reduce")
+    reduced_motion = page.evaluate(
+        "window.matchMedia('(prefers-reduced-motion: reduce)').matches"
+    )
+    assert reduced_motion is True
 
     page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
     expect(page.locator(".auth-shell")).to_be_visible()
     expect(page.locator(".auth-form-wrap")).to_be_visible()
     expect(page.get_by_test_id("signup-form")).to_be_visible()
     assert "placeholder-note" not in page.content()
-    page.screenshot(path=str(output / "hilalmarkets-auth-mobile-390.png"), full_page=True)
+    page.screenshot(path=str(output / "hilalmarkets-auth-mobile-360.png"), full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.screenshot(path=str(output / "hilalmarkets-auth-desktop.png"), full_page=True)
     assert_no_raw_traceback(page)
@@ -205,14 +222,14 @@ def test_screened_market_passport_and_mobile_visual_qa(
     expect(card).to_be_visible()
     expect(card).to_contain_text("SOL/USDT")
     expect(card).to_contain_text("Eligible")
-    expect(card).to_contain_text("80% ready")
-    expect(card).to_contain_text("SOL Browser Watch Plan")
+    expect(card).to_contain_text("80%")
+    expect(card).to_contain_text("SOL Browser Watchlist")
     page.screenshot(
         path=str(visual_dir / "screened-market-desktop.png"),
         full_page=True,
     )
 
-    card.get_by_role("link", name="See why").click()
+    card.get_by_role("link", name="View evidence").click()
     expect(page.get_by_text("SHARIA EVIDENCE PASSPORT")).to_be_visible()
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
     expect(page.get_by_text("HilalMarkets AI does not issue religious rulings.")).to_be_visible()
@@ -346,7 +363,7 @@ def test_ai_setup_chat_visual_qa_states(
     assert notification_box is not None and notification_box["width"] <= 60
     assert create_plan_box is not None and create_plan_box["width"] <= 220
     expect(page.locator(".topbar-right > .sidebar-create-quick")).to_contain_text(
-        "New Watch Plan"
+        "New Watchlist"
     )
     page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
 
@@ -596,7 +613,7 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
 def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("monitor-lifecycle-smoke"))
     page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("Watch Plans")
+    expect(page.locator("body")).to_contain_text("Watchlists")
     expect(page.locator("body")).not_to_contain_text("Alert Quality Inbox")
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
     expect(page.locator("body")).to_contain_text("Follow every market journey.")

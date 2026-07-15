@@ -1,0 +1,152 @@
+      <main class="verified-workspace" data-verified-workspace data-strategy-id="{{ strategy.id }}" data-version-id="{{ version.id }}">
+        <section class="verified-hero dash-panel">
+          <div>
+            <p class="eyebrow">Verified strategy monitoring</p>
+            <h2>Confirm the system HilalMarkets will monitor</h2>
+            <p>Review the interpretation, test real historical moments, inspect expected behaviour, then approve this exact version.</p>
+          </div>
+          <div class="verified-hero-actions">
+            <span class="verified-version-badge">Version {{ version.version_number }}</span>
+            <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit in Canvas</a>
+            <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}">Monitor details</a>
+          </div>
+        </section>
+
+        <nav class="verified-stage-nav" aria-label="Verification stages">
+          <a href="#interpretation-review"><span>1</span>Interpretation</a>
+          <a href="#strategy-tests"><span>2</span>Examples</a>
+          <a href="#historical-validation"><span>3</span>History</a>
+          <a href="#strategy-quality"><span>4</span>Readiness</a>
+          <a href="#version-control"><span>5</span>Approve</a>
+        </nav>
+
+        <div class="verified-notice" data-verified-notice role="status" aria-live="polite">
+          Loading the immutable strategy record...
+        </div>
+        <div class="verified-skeleton-grid" data-verified-loading aria-hidden="true">
+          <div class="verified-skeleton"></div><div class="verified-skeleton"></div>
+        </div>
+
+        <div class="verified-content" data-verified-content hidden>
+          <section class="dash-panel verified-section" id="interpretation-review">
+            <div class="section-head">
+              <div><p class="eyebrow">Phrase-to-rule audit</p><h2>What HilalMarkets understood</h2><p>Every phrase remains attached to its deterministic mechanics and assumptions.</p></div>
+              <span class="verified-state" data-interpretation-state>Needs review</span>
+            </div>
+            <div class="interpretation-review-grid">
+              <article class="original-language-card">
+                <span>Your original language</span>
+                <blockquote data-original-prompt>{{ version.source_text or 'Created from structured rules.' }}</blockquote>
+              </article>
+              <div class="interpretation-rule-list" data-interpretation-list></div>
+            </div>
+            <div class="button-row verified-actions">
+              <button class="button button-primary" type="button" data-approve-interpretation>Approve interpretation</button>
+              <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Resolve in Chat or Canvas</a>
+            </div>
+          </section>
+
+          <section class="dash-panel verified-section" id="strategy-tests">
+            <div class="section-head">
+              <div><p class="eyebrow">Your expected examples</p><h2>Strategy unit tests</h2><p>Choose a real historical moment and tell HilalMarkets what should have happened.</p></div>
+              <button class="button button-primary" type="button" data-toggle-test-form>Add test case</button>
+            </div>
+            <form class="verified-form verified-test-form" data-test-form hidden>
+              <label>Test name<input name="title" required maxlength="160" placeholder="SOL breakout should trigger"></label>
+              <label>Example type<select name="case_type"><option value="positive">Positive example</option><option value="negative">Negative example</option><option value="near_match">Near-match example</option></select></label>
+              <label>Expected result<select name="expected_result"><option value="should_trigger">Should trigger</option><option value="should_not_trigger">Should not trigger</option><option value="near_match">Should be near match</option></select></label>
+              <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
+              <label>Symbol<input name="symbol" required placeholder="SOL/USDT"></label>
+              <label>Timeframe<select name="timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select></label>
+              <label>Historical time<input name="evaluation_time" type="datetime-local" required></label>
+              <label class="verified-form-wide">Notes<textarea name="notes" rows="2" placeholder="Why this example matters"></textarea></label>
+              <div class="button-row verified-form-wide"><button class="button button-primary" type="submit">Save and run test</button><button class="button button-secondary" type="button" data-cancel-test>Cancel</button></div>
+            </form>
+            <div class="verified-test-list" data-test-list></div>
+          </section>
+
+          <section class="dash-panel verified-section" id="historical-validation">
+            <div class="section-head">
+              <div><p class="eyebrow">Historical preview</p><h2>How these rules behaved</h2><p>Deterministic historical evaluations, not a prediction of future results.</p></div>
+              <button class="button button-primary" type="button" data-toggle-history-form>Test on historical data</button>
+            </div>
+            <form class="verified-form" data-history-form hidden>
+              <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
+              <label>Symbols<input name="symbols" required placeholder="BTC/USDT, SOL/USDT"></label>
+              <label>Timeframe<select name="timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select></label>
+              <label>From<input name="started_at" type="datetime-local" required></label>
+              <label>To<input name="ended_at" type="datetime-local" required></label>
+              <div class="button-row verified-form-wide"><button class="button button-primary" type="submit">Run historical preview</button></div>
+            </form>
+            <div class="historical-summary" data-history-summary></div>
+            <div class="historical-chart-preview" data-history-chart></div>
+            <div class="verified-tabs" role="tablist" aria-label="Historical results" data-history-tabs>
+              <button type="button" role="tab" data-history-tab="matches" aria-selected="true">Matches</button>
+              <button type="button" role="tab" data-history-tab="near_matches">Near matches</button>
+              <button type="button" role="tab" data-history-tab="invalidated">Invalidated</button>
+              <button type="button" role="tab" data-history-tab="non_matches">Non-matches</button>
+            </div>
+            <div class="historical-examples" data-history-examples></div>
+          </section>
+
+          <section class="verified-two-column" id="strategy-quality">
+            <article class="dash-panel verified-section">
+              <div class="section-head"><div><p class="eyebrow">Separate dimensions</p><h2>Strategy quality report</h2></div><span class="verified-state" data-monitor-compatible></span></div>
+              <div class="quality-dimensions" data-quality-dimensions></div>
+              <div class="verified-findings" data-quality-findings></div>
+            </article>
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Operational evidence</p><h2>Monitor health</h2>
+              <div class="health-explanation" data-verified-health></div>
+              <div class="button-row"><a class="button button-secondary" href="/dashboard/activity#monitor-health">View health</a><a class="button button-secondary" href="/dashboard/integrations">Test delivery</a></div>
+            </article>
+          </section>
+
+          <section class="dash-panel verified-section" id="version-control">
+            <div class="section-head"><div><p class="eyebrow">Immutable change control</p><h2>Versions and approval</h2><p>Live logic is never overwritten. Restoring creates a new draft.</p></div><button class="button button-secondary" type="button" data-compare-versions>Compare versions</button></div>
+            <div class="version-timeline" data-version-list></div>
+            <div class="semantic-diff" data-semantic-diff></div>
+            <div class="button-row verified-actions">
+              <button class="button button-secondary" type="button" data-save-draft>Save draft</button>
+              <button class="button button-primary" type="button" data-approve-version>Approve version</button>
+              <button class="button button-primary" type="button" data-activate-version>Activate monitor</button>
+            </div>
+          </section>
+
+          <section class="verified-two-column" id="outcome-review">
+            <article class="dash-panel verified-section">
+              <div class="section-head"><div><p class="eyebrow">User-defined follow-up</p><h2>Outcome review</h2><p>Classify what happened at your chosen horizon. HilalMarkets never invents a profit-quality label.</p></div><a class="button button-secondary" href="/dashboard/activity">Open alert proofs</a></div>
+              <div class="outcome-review-list" data-outcome-list></div>
+            </article>
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Controlled analysis</p><h2>Possible improvements</h2><p>Suggestions cite stored evidence, create a draft, rerun saved examples, and never alter the active version.</p>
+              <div class="button-row">
+                <button class="button button-secondary" type="button" data-improvement="add_volume_confirmation">Review volume confirmation</button>
+                <button class="button button-secondary" type="button" data-improvement="add_market_context_filter">Review market regime filter</button>
+                <button class="button button-secondary" type="button" data-improvement="make_less_noisy">Review a less noisy version</button>
+              </div>
+              <div class="improvement-result" data-improvement-result></div>
+            </article>
+          </section>
+
+          <section class="verified-two-column">
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Guided reconstruction</p><h2>Why wasn't I alerted?</h2><p>Select the market moment. HilalMarkets separates market logic, data, monitor state, and delivery evidence.</p>
+              <form class="verified-form compact" data-forensic-form>
+                <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
+                <label>Symbol<input name="symbol" required placeholder="SOL/USDT"></label>
+                <label>Timeframe<select name="timeframe"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option></select></label>
+                <label>Expected time<input name="requested_time" type="datetime-local" required></label>
+                <button class="button button-primary verified-form-wide" type="submit">Investigate</button>
+              </form>
+              <div class="forensic-result" data-forensic-result></div>
+            </article>
+            <article class="dash-panel verified-section">
+              <p class="eyebrow">Portable strategy contract</p><h2>A complete record</h2><p>Export the prompt, approved mechanics, assumptions, tests, history, activation, delivery settings, and integrity hash.</p>
+              <div class="contract-summary" data-contract-summary></div>
+              <div class="button-row"><button class="button button-primary" type="button" data-export-contract>Export contract</button><button class="button button-secondary" type="button" data-copy-contract>Copy summary</button></div>
+              <p><a href="/dashboard/activity">Open opportunity journeys, alert proofs, and outcome reviews</a></p>
+            </article>
+          </section>
+        </div>
+      </main>

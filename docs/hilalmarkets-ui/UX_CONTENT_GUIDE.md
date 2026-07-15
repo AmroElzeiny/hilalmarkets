@@ -13,7 +13,7 @@ The guided active Muslim investor:
 
 | Avoid as default | Use |
 |---|---|
-| Strategy | Watch Plan |
+| Strategy | Watchlist |
 | Candidate | Opportunity |
 | Partial match | Forming |
 | Near miss | Getting closer |

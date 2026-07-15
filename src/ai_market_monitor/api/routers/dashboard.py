@@ -16,7 +16,11 @@ from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
+from ai_market_monitor.core.site_content import (
+    DASHBOARD_NAVIGATION,
+    SHARIA_STATUS_PRESENTATION,
+)
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -79,6 +83,7 @@ from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkService,
 )
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
+from ai_market_monitor.services.test_market_quotes import TEST_METHODOLOGY_NOTICE
 from ai_market_monitor.services.trials import TrialError, TrialLifecycleService
 from ai_market_monitor.services.verified_strategy import seal_alert_proof
 from ai_market_monitor.services.web_auth import (
@@ -126,8 +131,15 @@ def _reward_amount(value: Decimal) -> str:
     return f"${value:.2f}"
 
 
+def _plan_limit(value: object) -> str:
+    if isinstance(value, int) and value >= 100_000:
+        return "Unlimited"
+    return str(value)
+
+
 templates.env.filters["short_dt"] = _short_datetime
 templates.env.filters["reward_amount"] = _reward_amount
+templates.env.filters["plan_limit"] = _plan_limit
 
 SUPPORTED_TIMEZONES = [
     "UTC",
@@ -280,9 +292,7 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
                 )
             )
             if sharia_universe and sharia_universe.methodology_id:
-                methodology = await session.get(
-                    ShariaMethodology, sharia_universe.methodology_id
-                )
+                methodology = await session.get(ShariaMethodology, sharia_universe.methodology_id)
                 eligible_asset_count = int(
                     await session.scalar(
                         select(func.count(MonitorShariaAssetState.id)).where(
@@ -455,6 +465,7 @@ async def _context(
         "error": error or request.query_params.get("error"),
         "telegram_url": telegram_url,
         "plans": PLAN_DEFINITIONS,
+        "dashboard_navigation": DASHBOARD_NAVIGATION,
         "dashboard_preference": dashboard_preference,
         "dashboard_theme": dashboard_theme,
         **extra,
@@ -558,108 +569,6 @@ async def _builder_screening_context(
             else None
         ),
     }
-
-
-@router.get("/how-it-works", response_class=HTMLResponse, include_in_schema=False)
-async def how_it_works(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "dashboard_public.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="how",
-            title="How It Works",
-        ),
-    )
-
-
-@router.get("/pricing", response_class=HTMLResponse, include_in_schema=False)
-async def pricing(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    await PlanCatalogService(session).sync_defaults()
-    await session.commit()
-    return templates.TemplateResponse(
-        request,
-        "dashboard_public.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="pricing",
-            title="Pricing",
-        ),
-    )
-
-
-@router.get("/about", response_class=HTMLResponse, include_in_schema=False)
-async def about(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "dashboard_public.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="about",
-            title="About",
-        ),
-    )
-
-
-@router.get("/faq", response_class=HTMLResponse, include_in_schema=False)
-async def faq(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "dashboard_public.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="faq",
-            title="FAQ",
-        ),
-    )
-
-
-@router.get("/risk", response_class=HTMLResponse, include_in_schema=False)
-async def risk(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "dashboard_public.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=await _current_user(request, session, settings),
-            page="risk",
-            title="Risk Disclaimer",
-        ),
-    )
 
 
 @router.get("/signup", response_class=HTMLResponse, include_in_schema=False)
@@ -1157,8 +1066,7 @@ async def dashboard_home(
         await session.scalar(
             select(func.count(ComplianceDriftNotification.id)).where(
                 ComplianceDriftNotification.user_id == user.id,
-                ComplianceDriftNotification.created_at
-                >= datetime.now(UTC) - timedelta(days=30),
+                ComplianceDriftNotification.created_at >= datetime.now(UTC) - timedelta(days=30),
                 ComplianceDriftNotification.new_status.in_(
                     [ShariaAssetStatus.UNDER_REVIEW, ShariaAssetStatus.EXCLUDED]
                 ),
@@ -1181,7 +1089,7 @@ async def dashboard_home(
     }
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_home.html",
+        "hilal/dashboard/home.html",
         await _context(
             request=request,
             session=session,
@@ -1214,6 +1122,41 @@ async def screened_market_page(
     settings: Settings = Depends(get_settings),
     provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> HTMLResponse:
+    test_market_enabled = (
+        settings.app_env in {"development", "test"} and settings.sharia_test_market_enabled
+    )
+    if test_market_enabled:
+        active_watchlists = int(
+            await session.scalar(
+                select(func.count(Strategy.id)).where(
+                    Strategy.user_id == user.id,
+                    Strategy.status == StrategyStatus.ACTIVE,
+                    Strategy.archived_at.is_(None),
+                )
+            )
+            or 0
+        )
+        selected_live_exchange = (exchange or settings.market_data_exchange).lower()
+        if selected_live_exchange not in {"binance", "bybit"}:
+            selected_live_exchange = "binance"
+        return templates.TemplateResponse(
+            request,
+            "hilal/dashboard/market.html",
+            await _context(
+                request=request,
+                session=session,
+                settings=settings,
+                user=user,
+                page="screened_market",
+                title="Sharia Market",
+                live_test_market=True,
+                test_methodology_notice=TEST_METHODOLOGY_NOTICE,
+                selected_exchange=selected_live_exchange,
+                selected_quote_asset=quote_asset.upper(),
+                market_search=search or "",
+                active_watchlists=active_watchlists,
+            ),
+        )
     screening = ShariaScreeningService(session, settings)
     methodologies = await screening.executable_methodologies()
     preference = await session.scalar(
@@ -1221,13 +1164,11 @@ async def screened_market_page(
     )
     preference_values = dict(preference.notification_preferences or {}) if preference else {}
     stored_policy = (
-        preference_values.get("sharia")
-        if isinstance(preference_values.get("sharia"), dict)
-        else {}
+        preference_values.get("sharia") if isinstance(preference_values.get("sharia"), dict) else {}
     )
-    preference_methodology = stored_policy.get(
-        "default_methodology_id"
-    ) or preference_values.get("default_sharia_methodology_id")
+    preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
+        "default_sharia_methodology_id"
+    )
     if methodology_id is None and preference_methodology:
         try:
             methodology_id = UUID(str(preference_methodology))
@@ -1250,9 +1191,7 @@ async def screened_market_page(
                     symbols = [
                         symbol
                         for symbol in symbols
-                        if (
-                            metadata.get(symbol.upper(), {}).get("quote_volume_24h") or 0
-                        )
+                        if (metadata.get(symbol.upper(), {}).get("quote_volume_24h") or 0)
                         >= liquidity
                     ]
             asset_scope = {canonical_asset(symbol) for symbol in symbols}
@@ -1287,9 +1226,7 @@ async def screened_market_page(
             ).all()
         }
         asset_scope = (
-            opportunity_assets
-            if asset_scope is None
-            else asset_scope & opportunity_assets
+            opportunity_assets if asset_scope is None else asset_scope & opportunity_assets
         )
     screened = await screening.list_screened_assets(
         methodology_id=methodology_id,
@@ -1321,6 +1258,7 @@ async def screened_market_page(
         latest = latest_by_asset.get(assessment.canonical_asset)
         setup, strategy_id, strategy_name = latest if latest else (None, None, None)
         readiness = round(float(setup.completion_score)) if setup else 0
+        status_presentation = SHARIA_STATUS_PRESENTATION[assessment.status.value]
         opportunity_cards.append(
             {
                 "assessment": assessment,
@@ -1335,14 +1273,44 @@ async def screened_market_page(
                     if readiness > 0
                     else "Not started"
                 ),
-                "summary": "Custom Watch Plan" if setup else "Screened asset",
+                "summary": "Custom Watchlist" if setup else "Screened asset",
                 "still_missing": (
                     setup.close_reason
                     if setup and setup.close_reason
                     else "Open the journey to inspect the next required market check."
                     if setup
-                    else "Create a Watch Plan to define what market change matters to you."
+                    else "Create a Watchlist to define what market change matters to you."
                 ),
+                "presentation": {
+                    "symbol": f"{assessment.canonical_asset}/{quote_asset}",
+                    "name": assessment.asset_name or "Crypto spot asset",
+                    "status_label": status_presentation["label"],
+                    "status_badge": status_presentation["badge"],
+                    "methodology_name": assessment.methodology_name,
+                    "methodology_version": assessment.methodology_version,
+                    "reviewed_at": assessment.reviewed_at,
+                    "opportunity_type": strategy_name if setup else None,
+                    "readiness": max(0, min(100, readiness)) if setup else None,
+                    "direction": (
+                        "Getting closer"
+                        if readiness >= 70
+                        else "Stable"
+                        if readiness > 0
+                        else "Not started"
+                    )
+                    if setup
+                    else None,
+                    "present_conditions": (),
+                    "missing_requirement": (
+                        setup.close_reason
+                        if setup and setup.close_reason
+                        else "Open the journey to inspect the next required market check."
+                        if setup
+                        else None
+                    ),
+                    "summary": assessment.summary,
+                    "qualifications": tuple(assessment.qualifications[:3]),
+                },
             }
         )
     if view == "opportunities":
@@ -1392,13 +1360,11 @@ async def screened_market_page(
     maximum_page = max(1, (screened.total + screened.limit - 1) // screened.limit)
 
     def market_page_url(target_page: int) -> str:
-        return "/dashboard/market?" + urlencode(
-            [*market_query, ("page", str(target_page))]
-        )
+        return "/dashboard/market?" + urlencode([*market_query, ("page", str(target_page))])
 
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_market.html",
+        "hilal/dashboard/market.html",
         await _context(
             request=request,
             session=session,
@@ -1421,13 +1387,9 @@ async def screened_market_page(
             market_search=search or "",
             market_data_warning=market_data_warning,
             watchlists=watchlists,
-            market_previous_url=(
-                market_page_url(screened.page - 1) if screened.page > 1 else None
-            ),
+            market_previous_url=(market_page_url(screened.page - 1) if screened.page > 1 else None),
             market_next_url=(
-                market_page_url(screened.page + 1)
-                if screened.page < maximum_page
-                else None
+                market_page_url(screened.page + 1) if screened.page < maximum_page else None
             ),
             market_maximum_page=maximum_page,
         ),
@@ -1464,7 +1426,7 @@ async def screened_asset_passport_page(
     )
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_passport.html",
+        "hilal/dashboard/passport.html",
         await _context(
             request=request,
             session=session,
@@ -1535,7 +1497,18 @@ async def add_screened_asset_to_watchlist(
     return _redirect(f"/dashboard/market/{asset}?message=added_to_approved_watchlist")
 
 
-@router.get("/dashboard/watchlist", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/dashboard/saved-assets",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="saved_assets_page",
+)
+@router.get(
+    "/dashboard/watchlist",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="approved_watchlist_page",
+)
 async def approved_watchlist_page(
     request: Request,
     user: User = Depends(_require_user),
@@ -1580,14 +1553,14 @@ async def approved_watchlist_page(
     ]
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_watchlist.html",
+        "hilal/dashboard/watchlist.html",
         await _context(
             request=request,
             session=session,
             settings=settings,
             user=user,
-            page="watchlist",
-            title="My Watchlist",
+            page="saved_assets",
+            title="Saved Assets",
             watchlists=watchlists,
             watchlist_assets=watchlist_assets,
         ),
@@ -1614,7 +1587,7 @@ async def compliance_changes_page(
     )
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_compliance.html",
+        "hilal/dashboard/compliance.html",
         await _context(
             request=request,
             session=session,
@@ -1637,9 +1610,27 @@ async def methodology_page(
     service = ShariaScreeningService(session, settings)
     rows = await service.executable_methodologies()
     selected = await service.default_methodology()
+    test_methodology = None
+    if settings.app_env in {"development", "test"} and settings.sharia_test_market_enabled:
+        test_methodology = {
+            "name": "Test",
+            "version": "1.0-test",
+            "governing_body": "Development/test environment",
+            "reviewer_group": "No religious review authority",
+            "rules": {
+                "universe": "Every active spot pair returned by the selected exchange",
+                "display_status": "Halal (test)",
+                "execution": "Display-only; forbidden for production screening",
+            },
+            "evidence_requirements": {
+                "quotes": "Real best bid and ask from the configured spot provider",
+                "refresh": "Shared server snapshot refreshed approximately every second",
+                "religious_conclusion": "None; this methodology is a UI and data-flow test",
+            },
+        }
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_methodology.html",
+        "hilal/dashboard/methodology.html",
         await _context(
             request=request,
             session=session,
@@ -1649,12 +1640,29 @@ async def methodology_page(
             title="Methodology",
             methodologies=[service.methodology_detail(row) for row in rows],
             selected_methodology=service.methodology_detail(selected) if selected else None,
+            test_methodology=test_methodology,
         ),
     )
 
 
-@router.get("/dashboard/strategies", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/dashboard/monitors", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/dashboard/watchlists",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="watchlists_page",
+)
+@router.get(
+    "/dashboard/strategies",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="monitors_page",
+)
+@router.get(
+    "/dashboard/monitors",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="legacy_monitors_page",
+)
 async def monitors_page(
     request: Request,
     user: User = Depends(_require_user),
@@ -1663,14 +1671,14 @@ async def monitors_page(
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_watch_plans.html",
+        "hilal/dashboard/watch_plans.html",
         await _context(
             request=request,
             session=session,
             settings=settings,
             user=user,
-            page="watch_plans",
-            title="Watch Plans",
+            page="watchlists",
+            title="Watchlists",
             monitor_cards=await _monitor_cards_context(session, user),
         ),
     )
@@ -1692,7 +1700,7 @@ async def new_strategy_builder_page(
     ).all()
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard/builder.html",
         await _context(
             request=request,
             session=session,
@@ -1705,9 +1713,7 @@ async def new_strategy_builder_page(
             templates=templates_list,
             builtin_templates=builtin_template_payloads(),
             monitor_cards=await _monitor_cards_context(session, user),
-            builder_screening=await _builder_screening_context(
-                session, user, settings
-            ),
+            builder_screening=await _builder_screening_context(session, user, settings),
         ),
     )
 
@@ -1751,7 +1757,7 @@ async def strategy_detail_page(
     monitor_decay = await cockpit_service.detect_decay(strategy, persist=False)
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard/strategy_detail.html",
         await _context(
             request=request,
             session=session,
@@ -1765,9 +1771,7 @@ async def strategy_detail_page(
             monitor_health=monitor_health,
             monitor_bottlenecks=monitor_bottlenecks,
             monitor_decay=monitor_decay,
-            builder_screening=await _builder_screening_context(
-                session, user, settings
-            ),
+            builder_screening=await _builder_screening_context(session, user, settings),
         ),
     )
 
@@ -1802,7 +1806,7 @@ async def verified_strategy_page(
         raise HTTPException(status_code=404, detail="Strategy version not found")
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard/strategy_verify.html",
         await _context(
             request=request,
             session=session,
@@ -1846,7 +1850,7 @@ async def strategy_builder_edit_page(
     ).all()
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard/builder.html",
         await _context(
             request=request,
             session=session,
@@ -1859,9 +1863,7 @@ async def strategy_builder_edit_page(
             templates=templates_list,
             builtin_templates=builtin_template_payloads(),
             monitor_cards=await _monitor_cards_context(session, user),
-            builder_screening=await _builder_screening_context(
-                session, user, settings
-            ),
+            builder_screening=await _builder_screening_context(session, user, settings),
         ),
     )
 
@@ -1890,7 +1892,7 @@ async def strategy_versions_page(
     ).all()
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "hilal/dashboard/strategy_versions.html",
         await _context(
             request=request,
             session=session,
@@ -1985,12 +1987,8 @@ async def prepare_capability_repair(
         await session.commit()
     except ValueError:
         await session.rollback()
-        return _redirect(
-            "/dashboard/strategies/new?error=repair_revision_unavailable#monitors"
-        )
-    return _redirect(
-        f"/dashboard/strategies/{strategy.id}/builder?message=repair_revision_ready"
-    )
+        return _redirect("/dashboard/strategies/new?error=repair_revision_unavailable#monitors")
+    return _redirect(f"/dashboard/strategies/{strategy.id}/builder?message=repair_revision_ready")
 
 
 @router.get("/dashboard/create-monitor", response_class=HTMLResponse, include_in_schema=False)
@@ -2010,6 +2008,23 @@ async def scan_now_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
+    del request, user, session, settings
+    return _redirect("/dashboard/strategies/new?mode=scanner")
+
+
+@router.get(
+    "/dashboard/check-market",
+    response_class=RedirectResponse,
+    include_in_schema=False,
+    name="dashboard_check_market",
+)
+async def dashboard_check_market(
+    request: Request,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Open the one-time scanner through the shared validated builder flow."""
     del request, user, session, settings
     return _redirect("/dashboard/strategies/new?mode=scanner")
 
@@ -2097,7 +2112,7 @@ async def lifecycles_page(
     )
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_activity.html",
+        "hilal/dashboard/activity.html",
         await _context(
             request=request,
             session=session,
@@ -2203,7 +2218,7 @@ async def alert_proof_page(
     return _no_store(
         templates.TemplateResponse(
             request,
-            "dashboard.html",
+            "hilal/dashboard/alert_proof.html",
             await _context(
                 request=request,
                 session=session,
@@ -2313,7 +2328,7 @@ async def billing_page(
     await session.commit()
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_billing.html",
+        "hilal/dashboard/billing.html",
         await _context(
             request=request,
             session=session,
@@ -2323,6 +2338,7 @@ async def billing_page(
             title="Subscription and Billing",
             entitlement=entitlement,
             trial=trial,
+            purchase_plans={code: PLAN_DEFINITIONS[code] for code in PURCHASABLE_PLAN_CODES},
         ),
     )
 
@@ -2336,6 +2352,8 @@ async def billing_checkout(
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     base = str(settings.public_base_url).rstrip("/")
+    if plan_code not in PURCHASABLE_PLAN_CODES:
+        return _redirect("/dashboard/billing?error=plan_not_available")
     try:
         plan = PLAN_DEFINITIONS.get(plan_code)
         if plan is not None and plan.monthly_price == 0:
@@ -2489,7 +2507,7 @@ async def connections_page(
         await session.rollback()
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_integrations.html",
+        "hilal/dashboard/integrations.html",
         await _context(
             request=request,
             session=session,
@@ -2529,7 +2547,7 @@ async def settings_page(
     sharia_preferences = dict((preference.notification_preferences or {}) if preference else {})
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_settings.html",
+        "hilal/dashboard/settings.html",
         await _context(
             request=request,
             session=session,
@@ -2566,9 +2584,7 @@ async def settings_submit(
             ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
         ]
     ),
-    compliance_change_behavior: str = Form(
-        default=ComplianceChangeBehavior.PAUSE_ASSET.value
-    ),
+    compliance_change_behavior: str = Form(default=ComplianceChangeBehavior.PAUSE_ASSET.value),
     compliance_alert_channels: list[str] = Form(default=["web"]),
     compliance_alert_digest: str = Form(default="immediate"),
     qualification_change_alerts: str = Form(default="true"),
@@ -2669,7 +2685,7 @@ async def settings_submit(
                 else "immediate"
             ),
             "qualification_change_alerts": qualification_change_alerts == "true",
-            # Active Watch Plans must retain at least in-app notices for these events.
+            # Active Watchlists must retain at least in-app notices for these events.
             "under_review_alerts": True,
             "exclusion_alerts": True,
             "advanced_sharia_override_acknowledged": advanced_ack,
@@ -2714,7 +2730,7 @@ async def support_page(
     )
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_support.html",
+        "hilal/dashboard/support.html",
         await _context(
             request=request,
             session=session,
@@ -2768,7 +2784,7 @@ async def referrals_page(
             continue
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard_referrals.html",
+        "hilal/dashboard/referrals.html",
         await _context(
             request=request,
             session=session,

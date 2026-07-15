@@ -281,7 +281,7 @@ async def test_whole_monitor_policy_stops_scan_after_included_asset_changes(test
         ).create_from_interpretation(
             user.id,
             InterpretationPreview(strategy=definition, interpreter="test"),
-            source_text="Pause this Watch Plan if SOL leaves the screened policy",
+            source_text="Pause this Watchlist if SOL leaves the screened policy",
         )
         strategy.status = StrategyStatus.ACTIVE
         resolver = ShariaUniverseResolver(session, ScreeningProvider(), screening_settings())

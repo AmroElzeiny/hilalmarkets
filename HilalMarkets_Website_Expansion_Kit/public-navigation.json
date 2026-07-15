@@ -1,0 +1,53 @@
+{
+  "header": [
+    {
+      "label": "Features",
+      "route": "TODO_FEATURES",
+      "preview": "features.html"
+    },
+    {
+      "label": "How It Works",
+      "route": "TODO_HOW_IT_WORKS",
+      "preview": "how-it-works.html"
+    },
+    {
+      "label": "How We Screen",
+      "route": "TODO_HOW_WE_SCREEN",
+      "preview": "how-we-screen.html"
+    },
+    {
+      "label": "Pricing",
+      "route": "TODO_PRICING",
+      "preview": "pricing.html"
+    },
+    {
+      "label": "Help Center",
+      "route": "TODO_HELP_CENTER",
+      "preview": "help-center.html"
+    }
+  ],
+  "footer": {
+    "Product": [
+      "Features",
+      "How It Works",
+      "Pricing",
+      "Screened Market"
+    ],
+    "Trust": [
+      "How We Screen",
+      "Trust & Safety",
+      "Risk Disclosure"
+    ],
+    "Company & Support": [
+      "About",
+      "Help Center",
+      "Contact"
+    ],
+    "Legal": [
+      "Privacy",
+      "Terms",
+      "Cookie Policy",
+      "Cookie Settings"
+    ]
+  }
+}

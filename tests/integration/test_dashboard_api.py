@@ -308,7 +308,8 @@ async def test_dashboard_analytics_coverage_uses_scan_jobs(test_context):
 
     dashboard = await test_context["client"].get("/dashboard")
     assert dashboard.status_code == 200
-    assert "Coverage score</span><strong>80%</strong>" in dashboard.text
+    assert "Coverage score" not in dashboard.text
+    assert "Eligible screened assets" in dashboard.text
 
 
 async def test_dashboard_strategy_template_is_persisted(test_context):
@@ -1074,8 +1075,9 @@ async def test_advanced_dashboard_pages_render(test_context):
     await _signup(test_context, "dashboard-pages@example.com")
 
     for path, expected in [
-        ("/dashboard/strategies/new", "Strategy Builder"),
-        ("/dashboard/strategies/new", "How do you want to create your monitor?"),
+        ("/dashboard/strategies/new", "Guided Watchlist"),
+        ("/dashboard/strategies/new", "Describe what you want HilalMarkets to watch."),
+        ("/dashboard/strategies/new", "Advanced Controls"),
         ("/dashboard/strategies/new", "Preview mechanics"),
         ("/dashboard/strategies/new", "Visual Strategy Canvas"),
         ("/dashboard/strategies/new", "Search condition library"),
@@ -1095,7 +1097,8 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "Alerts & Proof" not in dashboard.text
     assert "Latest Setups" not in dashboard.text
     assert "Strategy Cockpit" not in dashboard.text
-    assert "Coverage score" in dashboard.text
+    assert "Coverage score" not in dashboard.text
+    assert "Eligible screened assets" in dashboard.text
     assert "data-open-sidebar" in dashboard.text
     assert "data-close-sidebar" in dashboard.text
     assert "sidebar-create-quick" in dashboard.text

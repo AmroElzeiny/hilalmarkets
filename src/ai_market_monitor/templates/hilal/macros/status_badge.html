@@ -1,0 +1,7 @@
+{% macro sharia_status(label, badge='neutral', prefix='Sharia-screened') -%}
+<span class="badge badge-{{ badge }}"><span data-icon="compliance" data-icon-class="icon-sm"></span>{{ prefix }}: {{ label }}</span>
+{%- endmacro %}
+
+{% macro lifecycle_status(label, badge='neutral') -%}
+<span class="badge badge-{{ badge }}">{{ label }}</span>
+{%- endmacro %}

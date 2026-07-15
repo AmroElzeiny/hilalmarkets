@@ -180,6 +180,7 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "PUBLIC_BASE_URL": base_url,
             "ALLOW_MOCK_PROVIDERS": "true",
             "SCANNING_ENABLED": "false",
+            "SHARIA_TEST_MARKET_ENABLED": "false",
             "TRACEDGE_MARKET_DATA_MODE": "fixture",
             "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED": "true",
             "MARKET_DATA_PROVIDER": "ccxt",
@@ -574,7 +575,7 @@ def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]
             )
             strategy = Strategy(
                 user_id=identity.user_id,
-                name="SOL Browser Watch Plan",
+                name="SOL Browser Watchlist",
                 status=StrategyStatus.ACTIVE,
                 activated_at=now,
             )

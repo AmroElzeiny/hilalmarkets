@@ -291,7 +291,7 @@ class StrategyService:
             if not resolution.included_symbols:
                 raise StrategyGateError(
                     "screened_universe_empty",
-                    "No assets currently meet this Watch Plan's screening policy.",
+                    "No assets currently meet this Watchlist's screening policy.",
                 )
             preview_definition = definition.model_copy(
                 update={

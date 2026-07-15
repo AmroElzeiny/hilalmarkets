@@ -18,7 +18,7 @@
 - Opportunity Card
 - Readiness Progress
 - Opportunity Journey
-- Watch Plan Card
+- Watchlist Card
 - Sharia Evidence Passport
 - Methodology Seal
 - Methodology Comparison Table

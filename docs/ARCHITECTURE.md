@@ -1,12 +1,14 @@
 # HilalMarkets Architecture
 
-Date: 2026-06-15
+Date: 2026-07-15
 
-## Repository audit
+## Repository evolution
 
-The supplied `Trading_assistant` directory was empty and was not a Git repository. There were no
-dependencies, working features, data models, or deployment assets to preserve. This implementation
-is therefore a greenfield foundation following the requested stack.
+HilalMarkets is an incremental evolution of the existing monitoring system, not a greenfield
+rewrite. Strategy compilation, deterministic evaluation, lifecycle evidence, screening,
+authentication, billing, delivery, and administration remain authoritative domain services. The
+current public and dashboard presentation layers bind those services to shared HilalMarkets
+templates without replacing persisted models or approval boundaries.
 
 ## Decisions
 
@@ -58,9 +60,29 @@ is therefore a greenfield foundation following the requested stack.
 | Telegram | `telegram/` | Async command/callback application service and alert rendering |
 | Discord | `discord/` | OAuth linking, destination validation, embeds, threads, roles, support, moderation |
 | Workers | `worker.py` | Idempotent scan scheduling, scan execution, expiry, delivery and health jobs |
-| Web | `templates/`, `static/` | Acquisition page and product demonstration |
+| Web | `templates/hilal/`, `static/hilalmarkets*` | Shared public/dashboard shells, production read models, guided Watchlist UI, consent, and accessibility behavior |
 | Reliability | `services/reliability.py` | Market-data health, incidents, delivery failure state, metrics |
 | Admin | `api/routers/admin.py`, `services/admin_dashboard.py` | RBAC dashboard APIs and audited admin actions |
+
+## Public and Presentation Architecture
+
+- `core/site_content.py` owns public navigation, dashboard navigation, footer groups, page
+  metadata, help articles, customer-facing status labels, purchase FAQs, and prohibited analytics
+  properties.
+- `services/public_site.py` emits bounded public read models from active methodology and current
+  assessment records. It never substitutes prototype assets or readiness values.
+- `api/routers/public.py` owns the public route set, canonical URLs, JSON-LD, sitemap, robots,
+  legacy redirects, and plan-catalog binding.
+- `templates/hilal/base_public.html` and `base_dashboard.html` own their shells. Shared partials and
+  macros render navigation, footer, consent, statuses, opportunity cards, evidence rows, and empty
+  states.
+- Public Pricing and dashboard Billing expose only `PURCHASABLE_PLAN_CODES`; internal founder,
+  trial, and legacy catalog entries remain usable by entitlement services but cannot be purchased
+  through a hidden form value.
+- `hilalmarkets-consent.js` stores a versioned first-party preference and is the only optional GTM
+  loader. Consent defaults are emitted before it, with analytics and advertising storage denied.
+- `/system-brain` is absent from customer navigation. Production can require Cloudflare Access
+  headers before the existing application password, email OTP, database session, and CSRF gates.
 
 ## Deterministic Strategy Engine
 
@@ -274,7 +296,7 @@ reasoning, service tier, usage, cost estimate, candidate rate and delivered-noti
 
 `ShariaScreeningService` is the authority for approved methodology versions, effective-dated asset
 assessments, evidence, history, passports, and comparison. `ShariaUniverseResolver` is the single
-fail-closed boundary used by one-time Scanner mode, persistent Watch Plans, preview/validation, and
+fail-closed boundary used by one-time Scanner mode, persistent Watchlists, preview/validation, and
 the worker. It intersects the technical spot universe with one approved methodology, selected
 statuses, exchange/quote filters, explicit symbols or an owner-scoped approved watchlist. Missing
 evidence is `insufficient_information` and never becomes an ordinary technical non-match.

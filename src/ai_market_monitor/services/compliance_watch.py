@@ -438,7 +438,7 @@ class ComplianceWatchService:
                 state.policy_decision = ShariaPolicyDecision.PAUSED_FOR_COMPLIANCE
                 state.policy_reason = (
                     f"Screening status changed to {new_status.value}; the asset no longer "
-                    "meets this Watch Plan's selected policy."
+                    "meets this Watchlist's selected policy."
                 )
                 if behavior == ComplianceChangeBehavior.PAUSE_MONITOR_IF_ANY_ASSET_CHANGES:
                     strategy.status = StrategyStatus.PAUSED
@@ -839,7 +839,7 @@ class ComplianceDigestService:
                     body=(
                         "Your daily Sharia screening summary:\n\n"
                         + "\n".join(lines)
-                        + "\n\nOpen Activity to review the stored evidence and Watch Plan impact."
+                        + "\n\nOpen Activity to review the stored evidence and Watchlist impact."
                     ),
                     proof_receipt={
                         "event_type": "sharia.compliance_daily_digest",

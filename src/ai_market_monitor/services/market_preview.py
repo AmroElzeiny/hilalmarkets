@@ -233,6 +233,7 @@ class CcxtMarketDataProvider:
             market = markets.get(symbol) or markets.get(symbol.replace("/", ""))
             market = market if isinstance(market, dict) else {}
             ticker = tickers.get(symbol, {})
+            ticker_info = ticker.get("info") if isinstance(ticker.get("info"), dict) else {}
             bid = _number(ticker.get("bid"))
             ask = _number(ticker.get("ask"))
             midpoint = ((bid + ask) / 2) if bid and ask and bid > 0 and ask > 0 else None
@@ -246,16 +247,22 @@ class CcxtMarketDataProvider:
             if include_listing_dates and listed_at is None:
                 missing_listing_dates.append(symbol)
             metadata[symbol] = {
+                "asset_name": str(market.get("base") or symbol.partition("/")[0]).upper(),
                 "quote_volume_24h": _number(
                     ticker.get("quoteVolume")
                     or ticker.get("quote_volume")
-                    or (ticker.get("info") or {}).get("turnover24h")
+                    or ticker_info.get("turnover24h")
                 ),
                 "base_volume_24h": _number(ticker.get("baseVolume")),
                 "bid": bid,
                 "ask": ask,
+                "last": _number(ticker.get("last")),
+                "bid_size": _number(ticker.get("bidVolume") or ticker_info.get("bid1Size")),
+                "ask_size": _number(ticker.get("askVolume") or ticker_info.get("ask1Size")),
                 "spread_bps": round(spread_bps, 6) if spread_bps is not None else None,
                 "percentage_24h": percentage,
+                "high_24h": _number(ticker.get("high")),
+                "low_24h": _number(ticker.get("low")),
                 "relative_strength_btc": (
                     round(percentage - benchmark_percentage, 6)
                     if percentage is not None and benchmark_percentage is not None

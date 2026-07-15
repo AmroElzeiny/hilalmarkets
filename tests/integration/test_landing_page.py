@@ -1,35 +1,32 @@
-from html import unescape
-
-
 async def test_landing_page_contains_product_flow_without_performance_claims(test_context):
     response = await test_context["client"].get("/")
     assert response.status_code == 200
     content = response.text
     for required in (
-        "Know what fits your values.",
-        "Explore screened market",
+        "Halal-conscious crypto monitoring",
+        "Built for self-directed Muslim investors",
         "HilalMarkets",
         "Screened Market",
-        "Evidence Passports",
+        "Evidence Passport",
         "Compliance Watch",
-        "How we screen",
+        "How We Screen",
     ):
         assert required in content
     lowered = content.lower()
     for forbidden in ("guaranteed profits", "guaranteed returns", "fake win rate"):
         assert forbidden not in lowered
     assert "Entry zone" not in content
-    assert "Still missing" in content
-    assert "No material change" in content
+    assert "No public readiness percentage is inferred" in content or (
+        "Screening preview is not available yet" in content
+    )
 
 
-async def test_landing_page_strips_at_sign_from_telegram_username(test_context):
+async def test_landing_page_does_not_lead_with_notification_channels(test_context):
     test_context["settings"].telegram_bot_username = "@simiautobybit_bot"
     response = await test_context["client"].get("/")
     assert response.status_code == 200
-    content = unescape(response.text)
-    assert "https://t.me/simiautobybit_bot?start=landing" in content
-    assert "https://t.me/@simiautobybit_bot" not in content
+    assert "https://t.me/" not in response.text
+    assert "Start on Telegram" not in response.text
 
 
 async def test_landing_page_links_to_primary_start_paths(test_context):
@@ -39,7 +36,7 @@ async def test_landing_page_links_to_primary_start_paths(test_context):
     assert "/signup" in response.text
     assert "Explore screened opportunities" in response.text
     assert 'href="/dashboard-entry"' in response.text
-    assert ">Open the dashboard</span></a>" in response.text
+    assert "Open dashboard</a>" in response.text
     assert "Start on Discord" not in response.text
     assert "Start on Telegram" not in response.text
     assert "data-public-menu" in response.text

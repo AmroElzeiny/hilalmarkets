@@ -196,7 +196,7 @@ async def test_screened_market_opportunity_filter_uses_persisted_user_lifecycle(
         )
         strategy = Strategy(
             user_id=user.id,
-            name="Opportunity Watch Plan",
+            name="Opportunity Watchlist",
             status=StrategyStatus.ACTIVE,
         )
         session.add(strategy)
@@ -246,7 +246,7 @@ async def test_screened_market_opportunity_filter_uses_persisted_user_lifecycle(
     assert page.status_code == 200
     assert 'class="opportunity-card" data-status="eligible"' in page.text
     assert "SOL/USDT" in page.text
-    assert "Opportunity Watch Plan" in page.text
+    assert "Opportunity Watchlist" in page.text
     assert "80% ready" in page.text
     assert forming.status_code == 200
     assert forming.json()["total"] == 1

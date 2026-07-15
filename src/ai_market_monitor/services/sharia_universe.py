@@ -79,7 +79,7 @@ class ShariaUniverseResolver:
         ):
             raise ShariaUniverseError(
                 "explicit_assets_required",
-                "Choose at least one specific eligible asset for this Watch Plan.",
+                "Choose at least one specific eligible asset for this Watchlist.",
             )
 
         try:
@@ -134,7 +134,7 @@ class ShariaUniverseResolver:
                         reason_code=ShariaPolicyDecision.EXCLUDED_STATUS.value,
                         reason=(
                             f"Current screening status {effective_status.value!r} is not "
-                            "included by this Watch Plan's policy."
+                            "included by this Watchlist's policy."
                         ),
                         status=effective_status,
                         assessment_id=assessment.id,
@@ -191,7 +191,7 @@ class ShariaUniverseResolver:
                         symbol=item.symbol,
                         canonical_asset=item.canonical_asset,
                         reason_code="symbol_limit",
-                        reason="The current plan or Watch Plan symbol limit was reached.",
+                        reason="The current plan or Watchlist symbol limit was reached.",
                         status=item.status,
                         assessment_id=item.assessment_id,
                     )
@@ -314,7 +314,7 @@ class ShariaUniverseResolver:
             if not considered:
                 raise ShariaUniverseError(
                     "explicit_assets_required",
-                    "Choose at least one specific eligible asset for this Watch Plan.",
+                    "Choose at least one specific eligible asset for this Watchlist.",
                 )
             return considered, []
         if user_id is None or policy.approved_watchlist_id is None:
