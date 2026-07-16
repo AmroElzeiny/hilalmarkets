@@ -82,7 +82,7 @@ async def test_test_market_api_and_dashboard_are_gated_and_provider_backed(test_
     assert all(item["status_label"] == "Halal (test)" for item in payload["items"])
     assert all(item["bid"] == 10.0 and item["ask"] == 10.1 for item in payload["items"])
     assert page.status_code == 200
-    assert 'data-endpoint="/api/v1/sharia/test-market"' in page.text
+    assert 'data-endpoint="/api/v1/sharia/market-quotes"' in page.text
     assert "Test methodology only" in page.text
     assert "data-market-passport-dialog" in page.text
     assert "sharia-market.js" in page.text
@@ -160,16 +160,45 @@ async def test_local_test_market_does_not_hide_selected_executable_methodology(t
     malaysia_page = await test_context["client"].get(
         f"/dashboard/market?methodology_id={malaysia.id}&view=assets"
     )
+    malaysia_quotes = await test_context["client"].get(
+        "/api/v1/sharia/market-quotes",
+        params={
+            "methodology_id": str(malaysia.id),
+            "exchange": "bybit",
+            "quote_asset": "USDT",
+        },
+    )
+    exact_pair_search = await test_context["client"].get(
+        "/api/v1/sharia/assets",
+        params={"methodology": str(malaysia.id), "search": "SOL/USDT"},
+    )
+    empty_methodology = await test_context["client"].get(
+        "/dashboard/market?methodology_id=&view=assets"
+    )
 
     assert default_page.status_code == 200
-    assert "SOL/USDT" in default_page.text
+    assert 'data-endpoint="/api/v1/sharia/market-quotes"' in default_page.text
     assert "Test methodology only" not in default_page.text
     assert test_page.status_code == 200
     assert "Test methodology only" in test_page.text
     assert "SC Malaysia selection test" in test_page.text
     assert malaysia_page.status_code == 200
-    assert "SOL/USDT" in malaysia_page.text
+    assert 'data-endpoint="/api/v1/sharia/market-quotes"' in malaysia_page.text
+    assert "live-market-table" in malaysia_page.text
     assert str(assessment.id) not in malaysia_page.text
+    assert malaysia_quotes.status_code == 200
+    malaysia_payload = malaysia_quotes.json()
+    assert malaysia_payload["methodology"]["id"] == str(malaysia.id)
+    assert malaysia_payload["methodology"]["name"] == "SC Malaysia selection test"
+    assert [item["symbol"] for item in malaysia_payload["items"]] == ["SOL/USDT"]
+    assert malaysia_payload["items"][0]["status_label"] == "Eligible"
+    assert malaysia_payload["items"][0]["passport_url"] == (
+        f"/dashboard/market/SOL?methodology_id={malaysia.id}"
+    )
+    assert exact_pair_search.status_code == 200
+    assert exact_pair_search.json()["total"] == 1
+    assert exact_pair_search.json()["items"][0]["canonical_asset"] == "SOL"
+    assert empty_methodology.status_code == 200
 
 
 async def test_active_methodology_without_publications_has_clear_readiness_state(test_context):
@@ -213,7 +242,7 @@ async def test_active_methodology_without_publications_has_clear_readiness_state
 
     assert page.status_code == 200
     assert "no reviewed asset assessments have been published" in page.text
-    assert "No reviewed asset passports are published yet" in page.text
+    assert "live-market-table" in page.text
     assert settings_page.status_code == 200
     assert "Empty SC Malaysia test | v2026.03-test | 0 published passports" in settings_page.text
     assert saved.status_code == 303

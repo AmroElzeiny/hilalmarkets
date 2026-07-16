@@ -669,6 +669,7 @@ body.hilal-dashboard .readiness-candidate.state-forming{
 .live-dot{display:inline-flex;align-items:center;gap:7px;color:var(--emerald-700);font-size:.79rem;font-weight:700}
 .live-dot i{width:8px;height:8px;border-radius:50%;background:var(--emerald-600);box-shadow:0 0 0 5px rgba(31,139,116,.12)}
 .live-market-panel{padding:0;overflow:hidden;margin-top:18px}
+.live-market-error[hidden],.live-market-empty[hidden]{display:none!important}
 .live-market-toolbar{display:flex;align-items:end;justify-content:space-between;gap:24px;padding:22px 24px;border-bottom:1px solid var(--line)}
 .live-market-toolbar h2{font-size:1.45rem;margin:2px 0 5px}
 .live-market-toolbar p{margin:0}

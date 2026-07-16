@@ -124,13 +124,20 @@ class ScreenedAssetListResponse(BaseModel):
     warning: str | None = None
 
 
-class TestMethodologySummary(BaseModel):
+class LiveMarketMethodologySummary(BaseModel):
     id: UUID | None = None
+    code: str
+    name: str
+    version: str
+    development_only: bool = False
+    notice: str
+
+
+class TestMethodologySummary(LiveMarketMethodologySummary):
     code: str = "TRACEDGE_DEV_TEST_V1"
     name: str = "Test"
     version: str = "1.0-test"
     development_only: bool = True
-    notice: str
 
 
 class LiveSpotMarketQuote(BaseModel):
@@ -139,8 +146,13 @@ class LiveSpotMarketQuote(BaseModel):
     asset_name: str
     exchange: str
     quote_asset: str
-    status: Literal["test_eligible"] = "test_eligible"
+    methodology_id: UUID | None = None
+    methodology_name: str = "Test"
+    methodology_version: str = "1.0-test"
+    status: str = "test_eligible"
     status_label: str = "Halal (test)"
+    reviewed_at: datetime | None = None
+    passport_url: str | None = None
     bid: float | None = None
     ask: float | None = None
     last: float | None = None
@@ -158,7 +170,7 @@ class LiveSpotMarketQuote(BaseModel):
 
 
 class LiveSpotMarketResponse(BaseModel):
-    methodology: TestMethodologySummary
+    methodology: LiveMarketMethodologySummary
     items: list[LiveSpotMarketQuote]
     total: int
     exchange: str

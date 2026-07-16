@@ -257,7 +257,7 @@ class ShariaScreeningService:
             or_(
                 AssetShariaAssessment.valid_until.is_(None),
                 AssetShariaAssessment.valid_until > as_of,
-            ),
+            )
         )
         normalized_assets = {canonical_asset(asset) for asset in assets or set()}
         if normalized_assets:
@@ -308,7 +308,7 @@ class ShariaScreeningService:
                     ComplianceChangeStatus.TRIAGED,
                     ComplianceChangeStatus.AWAITING_REVIEW,
                 ]
-            )
+            ),
         )
         normalized = {canonical_asset(asset) for asset in assets or set()}
         if assets is not None and not normalized:
@@ -372,11 +372,13 @@ class ShariaScreeningService:
             ]
         if search:
             needle = search.casefold().strip()
+            searched_asset = canonical_asset(search).casefold()
             values = [
                 row
                 for row in values
                 if needle in row.canonical_asset.casefold()
                 or needle in (row.asset_name or "").casefold()
+                or searched_asset == row.canonical_asset.casefold()
             ]
         values.sort(key=lambda row: (row.canonical_asset, row.reviewed_at), reverse=False)
         counts: dict[str, int] = {}

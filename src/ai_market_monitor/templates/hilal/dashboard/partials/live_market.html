@@ -1,0 +1,59 @@
+<section
+  class="panel live-market-panel"
+  data-live-market-root
+  data-endpoint="/api/v1/sharia/market-quotes"
+  data-methodology-id="{{ selected_methodology_id }}"
+  data-exchange="{{ selected_exchange }}"
+  data-quote="{{ selected_quote_asset }}"
+>
+  <div class="live-market-toolbar">
+    <div>
+      <span class="kicker">Methodology: {{ live_methodology_name }}</span>
+      <h2>Live screened assets</h2>
+      <p>Bid, ask, spread, and market activity refresh every second. Screening status comes only from the selected methodology.</p>
+    </div>
+    <div class="live-market-controls">
+      <label class="field"><span>Search coins</span><input class="input" type="search" value="{{ market_search }}" placeholder="BTC, Bitcoin, BTC/USDT..." data-live-market-search></label>
+      <label class="field"><span>Exchange</span><select class="select" data-live-market-exchange><option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance spot</option><option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit spot</option></select></label>
+      <label class="field"><span>Quote</span><select class="select" data-live-market-quote><option value="USDT" {{ 'selected' if selected_quote_asset == 'USDT' else '' }}>USDT</option><option value="USDC" {{ 'selected' if selected_quote_asset == 'USDC' else '' }}>USDC</option></select></label>
+    </div>
+  </div>
+  <div class="live-market-meta"><span class="live-dot"><i></i><b data-live-market-status>Connecting to provider...</b></span><span data-live-market-updated>Waiting for the first verified snapshot</span></div>
+  <div class="live-market-error notice notice-error" data-live-market-error hidden><span data-icon="alert" data-icon-class="icon"></span><div><strong>Quotes unavailable</strong><p data-live-market-error-message>No market values were guessed.</p><button class="btn btn-secondary btn-sm" type="button" data-live-market-retry>Retry</button></div></div>
+  <div class="live-market-scroll" role="region" aria-label="Live screened spot market quotes" tabindex="0">
+    <div class="live-market-table" role="table" aria-rowcount="-1">
+      <div class="live-market-head" role="row">
+        <span role="columnheader">Coin</span><span role="columnheader">Status</span><span role="columnheader">Bid</span><span role="columnheader">Ask</span><span role="columnheader">24h</span><span role="columnheader">Spread</span><span role="columnheader">24h volume</span><span role="columnheader">Passport</span>
+      </div>
+      <div class="live-market-body" data-live-market-body aria-live="off">
+        {% for _ in range(8) %}<div class="live-market-skeleton"><i></i><i></i><i></i><i></i><i></i></div>{% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="live-market-empty empty-state compact" data-live-market-empty hidden><h3>No screened symbols match</h3><p>Clear the search, choose another exchange, or review whether this methodology has published passports.</p></div>
+</section>
+
+<dialog class="market-passport-dialog" data-market-passport-dialog aria-labelledby="market-passport-title">
+  <div class="market-passport-shell">
+    <button class="btn btn-ghost btn-icon market-passport-close" type="button" data-market-passport-close aria-label="Close passport"><span data-icon="close" data-icon-class="icon"></span></button>
+    <div class="market-passport-hero">
+      <div class="market-passport-logo" data-passport-logo><span>--</span></div>
+      <div><span class="kicker" data-passport-kicker>Screening passport</span><h2 id="market-passport-title" data-passport-symbol>Asset passport</h2><p data-passport-name>Provider-backed spot pair</p></div>
+      <span class="badge badge-eligible" data-passport-status>Screened</span>
+    </div>
+    <div class="market-passport-facts">
+      <div><small>Status</small><strong data-passport-status-detail>--</strong></div>
+      <div><small>Methodology</small><strong data-passport-methodology>--</strong></div>
+      <div><small>Exchange</small><strong data-passport-exchange>--</strong></div>
+      <div><small>Reviewed</small><strong data-passport-reviewed>--</strong></div>
+    </div>
+    <div class="market-passport-prices">
+      <div><small>Best bid</small><strong data-passport-bid>--</strong><span data-passport-bid-size></span></div>
+      <div><small>Best ask</small><strong data-passport-ask>--</strong><span data-passport-ask-size></span></div>
+      <div><small>Last</small><strong data-passport-last>--</strong><span data-passport-change></span></div>
+      <div><small>24h range</small><strong data-passport-range>--</strong><span data-passport-volume></span></div>
+    </div>
+    <div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Methodology-specific information</strong><p data-passport-notice>{{ live_methodology_notice }}</p></div></div>
+    <div class="row-between wrap"><small class="muted" data-passport-provider>Waiting for provider evidence</small><div class="row"><a class="btn btn-secondary" href="#" data-passport-full hidden>View full passport</a><button class="btn btn-primary" type="button" data-market-passport-done>Done</button></div></div>
+  </div>
+</dialog>

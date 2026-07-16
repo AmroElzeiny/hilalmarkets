@@ -196,6 +196,16 @@ def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
 
 
+def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
+    normalized = (value or "").strip()
+    if not normalized:
+        return None
+    try:
+        return UUID(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Choose a valid {label}.") from exc
+
+
 def _no_store(response: HTMLResponse) -> HTMLResponse:
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -1110,7 +1120,11 @@ async def dashboard_home(
 @router.get("/dashboard/market", response_class=HTMLResponse, include_in_schema=False)
 async def screened_market_page(
     request: Request,
-    methodology_id: UUID | None = Query(default=None),
+    methodology_id_input: str | None = Query(
+        default=None,
+        alias="methodology_id",
+        max_length=64,
+    ),
     status_filter: list[ShariaAssetStatus] | None = Query(default=None, alias="status"),
     exchange: str | None = Query(default=None, max_length=40),
     quote_asset: str = Query(default="USDT", max_length=12),
@@ -1123,6 +1137,10 @@ async def screened_market_page(
     settings: Settings = Depends(get_settings),
     provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> HTMLResponse:
+    methodology_id = _optional_uuid(methodology_id_input, label="methodology")
+    selected_live_exchange = (exchange or settings.market_data_exchange).lower()
+    if selected_live_exchange not in {"binance", "bybit"}:
+        selected_live_exchange = "binance"
     screening = ShariaScreeningService(session, settings)
     methodologies = await screening.selectable_market_methodologies()
     executable_methodologies = [
@@ -1163,9 +1181,6 @@ async def screened_market_page(
             )
             or 0
         )
-        selected_live_exchange = (exchange or settings.market_data_exchange).lower()
-        if selected_live_exchange not in {"binance", "bybit"}:
-            selected_live_exchange = "binance"
         return templates.TemplateResponse(
             request,
             "hilal/dashboard/market.html",
@@ -1184,6 +1199,7 @@ async def screened_market_page(
                 ),
                 selected_exchange=selected_live_exchange,
                 selected_quote_asset=quote_asset.upper(),
+                selected_view="assets",
                 market_search=search or "",
                 active_watchlists=active_watchlists,
             ),
@@ -1254,7 +1270,9 @@ async def screened_market_page(
         page=page_number,
         limit=30,
     )
-    visible_assets = {item.canonical_asset for item in screened.items}
+    visible_assets = (
+        {item.canonical_asset for item in screened.items} if view == "opportunities" else set()
+    )
     latest_by_asset: dict[str, tuple[SetupInstance, UUID, str]] = {}
     if visible_assets:
         setup_rows = (
@@ -1331,8 +1349,7 @@ async def screened_market_page(
                 },
             }
         )
-    if view == "opportunities":
-        opportunity_cards = [card for card in opportunity_cards if card["setup"] is not None]
+    opportunity_cards = [card for card in opportunity_cards if card["setup"] is not None]
     active_watch_plans = int(
         await session.scalar(
             select(func.count(Strategy.id)).where(
@@ -1399,8 +1416,8 @@ async def screened_market_page(
             selected_statuses={
                 item.value for item in (status_filter or list(DEFAULT_ALLOWED_STATUSES))
             },
-            selected_exchange=exchange or "",
-            selected_quote_asset=quote_asset,
+            selected_exchange=selected_live_exchange,
+            selected_quote_asset=quote_asset.upper(),
             selected_liquidity=liquidity,
             selected_view=view,
             market_search=search or "",

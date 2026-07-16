@@ -2,6 +2,7 @@ const root = document.querySelector("[data-live-market-root]");
 
 if (root) {
   const endpoint = root.dataset.endpoint;
+  const methodologyId = root.dataset.methodologyId;
   const body = root.querySelector("[data-live-market-body]");
   const search = root.querySelector("[data-live-market-search]");
   const exchange = root.querySelector("[data-live-market-exchange]");
@@ -23,6 +24,7 @@ if (root) {
   let timer = null;
   let refreshAfter = 1000;
   let firstSnapshot = true;
+  let currentMethodology = null;
 
   const logoPrefix = "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/";
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
@@ -59,7 +61,7 @@ if (root) {
     row.dataset.symbol = item.symbol;
     row.innerHTML = `
       <div class="live-asset" role="cell"><span class="live-asset-logo" data-coin-logo><b data-coin-fallback></b></span><span><strong data-coin-symbol></strong><small data-coin-name></small></span></div>
-      <div role="cell"><span class="badge badge-eligible live-test-badge">Halal <small>Test</small></span></div>
+      <div role="cell"><span class="badge badge-eligible" data-screening-status></span></div>
       <strong class="live-quote" role="cell" data-bid>--</strong>
       <strong class="live-quote" role="cell" data-ask>--</strong>
       <strong class="live-change" role="cell" data-change>--</strong>
@@ -67,7 +69,7 @@ if (root) {
       <span role="cell" data-volume>--</span>
       <div role="cell"><button class="btn btn-secondary btn-xs" type="button" data-show-passport>Show passport</button></div>`;
     row.querySelector("[data-coin-symbol]").textContent = item.symbol;
-    row.querySelector("[data-coin-name]").textContent = `${item.exchange.toUpperCase()} spot`;
+    row.querySelector("[data-coin-name]").textContent = item.asset_name || `${item.exchange.toUpperCase()} spot`;
     row.querySelector("[data-coin-fallback]").textContent = item.canonical_asset.slice(0, 3);
     body.append(row);
     observeLogo(row.querySelector("[data-coin-logo]"), item);
@@ -145,15 +147,46 @@ if (root) {
     change.textContent = formatChange(item.percentage_24h);
     change.classList.toggle("is-positive", finite(item.percentage_24h) && item.percentage_24h > 0);
     change.classList.toggle("is-negative", finite(item.percentage_24h) && item.percentage_24h < 0);
+    const screeningStatus = row.querySelector("[data-screening-status]");
+    screeningStatus.textContent = item.status_label || "Screened";
+    screeningStatus.className = `badge ${
+      ["under_review", "disputed"].includes(item.status)
+        ? "badge-review"
+        : item.status === "insufficient_information"
+          ? "badge-neutral"
+          : item.status === "excluded"
+            ? "badge-excluded"
+            : "badge-eligible"
+    }`;
     row.classList.toggle("is-unavailable", !item.data_available);
   }
 
+  function searchable(value) {
+    return String(value || "").normalize("NFKD").toUpperCase();
+  }
+
+  function compactSearch(value) {
+    return searchable(value).replace(/[^A-Z0-9]/g, "");
+  }
+
   function applySearch() {
-    const needle = (search.value || "").trim().toUpperCase();
+    const needle = searchable(search.value).trim();
+    const compactNeedle = compactSearch(needle);
     let visible = 0;
     rows.forEach((row, symbol) => {
       const item = latestItems.get(symbol);
-      const matches = !needle || symbol.includes(needle) || item?.asset_name?.toUpperCase().includes(needle);
+      const candidates = [
+        symbol,
+        item?.canonical_asset,
+        item?.asset_name,
+        `${item?.canonical_asset || ""}/${item?.quote_asset || ""}`,
+      ];
+      const matches = !needle || candidates.some((candidate) => {
+        const normalized = searchable(candidate);
+        return normalized.includes(needle) || (
+          compactNeedle && compactSearch(normalized).includes(compactNeedle)
+        );
+      });
       row.hidden = !matches;
       if (matches) visible += 1;
     });
@@ -176,7 +209,11 @@ if (root) {
     }
     controller?.abort();
     controller = new AbortController();
-    const params = new URLSearchParams({ exchange: exchange.value, quote_asset: quote.value });
+    const params = new URLSearchParams({
+      methodology_id: methodologyId,
+      exchange: exchange.value,
+      quote_asset: quote.value,
+    });
     try {
       const response = await fetch(`${endpoint}?${params}`, {
         credentials: "same-origin",
@@ -189,6 +226,7 @@ if (root) {
         throw new Error(payload.detail?.message || payload.detail || `Quote request failed (${response.status})`);
       }
       const payload = await response.json();
+      currentMethodology = payload.methodology;
       if (firstSnapshot) {
         body.replaceChildren();
         firstSnapshot = false;
@@ -203,9 +241,9 @@ if (root) {
         }
       });
       applySearch();
-      count.textContent = String(payload.total);
-      eligible.textContent = String(payload.total);
-      provider.textContent = payload.exchange[0].toUpperCase() + payload.exchange.slice(1);
+      if (count) count.textContent = String(payload.total);
+      if (eligible) eligible.textContent = String(payload.total);
+      if (provider) provider.textContent = payload.exchange[0].toUpperCase() + payload.exchange.slice(1);
       status.textContent = payload.stale ? "Showing last verified snapshot" : "Live quotes connected";
       updated.textContent = `Updated ${new Date(payload.captured_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} | ${payload.provider}`;
       errorBox.hidden = !payload.warning;
@@ -229,8 +267,12 @@ if (root) {
   async function openPassport(item) {
     setDialogText("[data-passport-symbol]", item.symbol);
     setDialogText("[data-passport-name]", `${item.asset_name} | ${item.exchange.toUpperCase()} spot`);
+    setDialogText("[data-passport-kicker]", `${item.methodology_name} passport`);
+    setDialogText("[data-passport-status]", item.status_label || "Screened");
+    setDialogText("[data-passport-status-detail]", item.status_label || "Screened");
+    setDialogText("[data-passport-methodology]", `${item.methodology_name} | v${item.methodology_version}`);
     setDialogText("[data-passport-exchange]", item.exchange.toUpperCase());
-    setDialogText("[data-passport-date]", new Date(item.updated_at).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" }));
+    setDialogText("[data-passport-reviewed]", item.reviewed_at ? new Date(item.reviewed_at).toLocaleDateString([], { dateStyle: "medium" }) : "Test snapshot");
     setDialogText("[data-passport-bid]", formatPrice(item.bid));
     setDialogText("[data-passport-ask]", formatPrice(item.ask));
     setDialogText("[data-passport-last]", formatPrice(item.last));
@@ -240,6 +282,10 @@ if (root) {
     setDialogText("[data-passport-range]", `${formatPrice(item.low_24h)} - ${formatPrice(item.high_24h)}`);
     setDialogText("[data-passport-volume]", `${formatCompact(item.quote_volume_24h)} ${item.quote_asset} volume`);
     setDialogText("[data-passport-provider]", `Prices: ${item.exchange.toUpperCase()} via CCXT | Updated ${new Date(item.updated_at).toLocaleTimeString()}`);
+    setDialogText("[data-passport-notice]", currentMethodology?.notice || "Review the stored methodology and evidence before relying on this status.");
+    const fullPassport = dialog.querySelector("[data-passport-full]");
+    fullPassport.hidden = !item.passport_url;
+    if (item.passport_url) fullPassport.href = item.passport_url;
     const logo = dialog.querySelector("[data-passport-logo]");
     logo.replaceChildren();
     const fallback = document.createElement("span");

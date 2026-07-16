@@ -50,6 +50,7 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
     canonical_asset,
     canonical_symbol,
+    methodology_is_development_only,
 )
 from ai_market_monitor.services.test_market_quotes import (
     TEST_METHODOLOGY_CODE,
@@ -214,6 +215,69 @@ async def test_market_quotes(
             status_code=503,
             detail={
                 "code": "live_test_market_unavailable",
+                "message": "Live spot quotes are unavailable; no prices were invented.",
+            },
+        ) from exc
+
+
+@router.get("/market-quotes", response_model=LiveSpotMarketResponse)
+async def screened_market_quotes(
+    methodology_id: UUID,
+    exchange: str = Query(default="binance", pattern="^(binance|bybit)$"),
+    quote_asset: str = Query(default="USDT", min_length=2, max_length=12),
+    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+    settings: Settings = Depends(get_settings),
+) -> LiveSpotMarketResponse:
+    screening = ShariaScreeningService(session, settings)
+    try:
+        methodology = await screening.methodology(methodology_id)
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+
+    quote_service = TestMarketQuoteService(provider, settings)
+    if methodology_is_development_only(methodology):
+        if (
+            settings.app_env not in {"development", "test"}
+            or not settings.sharia_test_market_enabled
+        ):
+            raise HTTPException(status_code=404, detail="The Test market is not enabled.")
+        try:
+            return await quote_service.snapshot(
+                exchange=exchange,
+                quote_asset=quote_asset,
+                methodology_id=methodology.id,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "live_market_unavailable",
+                    "message": "Live spot quotes are unavailable; no prices were invented.",
+                },
+            ) from exc
+
+    try:
+        screened = await screening.list_screened_assets(
+            methodology_id=methodology.id,
+            statuses=DEFAULT_ALLOWED_STATUSES,
+            limit=10_000,
+        )
+        return await quote_service.screened_snapshot(
+            exchange=exchange,
+            quote_asset=quote_asset,
+            methodology=screening.methodology_summary(methodology),
+            assessments=screened.items,
+            warning=screened.warning,
+        )
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "live_market_unavailable",
                 "message": "Live spot quotes are unavailable; no prices were invented.",
             },
         ) from exc

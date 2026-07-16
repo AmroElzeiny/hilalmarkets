@@ -232,7 +232,36 @@ def test_screened_market_passport_and_mobile_visual_qa(
         full_page=True,
     )
 
-    card.get_by_role("link", name="View evidence").click()
+    page.goto(
+        f"{base_url}/dashboard/market?view=assets"
+        f"&methodology_id={seeded['methodology_id']}"
+    )
+    live_row = page.locator(".live-market-row", has_text="SOL/USDT")
+    expect(live_row).to_be_visible(timeout=15_000)
+    expect(live_row).to_contain_text("Eligible")
+    expect(page.locator("[data-live-market-error]")).to_be_hidden()
+    expect(page.locator("[data-live-market-status]")).to_have_text("Live quotes connected")
+    page.locator("[data-live-market-search]").fill("SOL/USDT")
+    expect(live_row).to_be_visible()
+    expect(page.locator(".live-market-row:visible")).to_have_count(1)
+    live_row.get_by_role("button", name="Show passport").click()
+    passport_dialog = page.locator("[data-market-passport-dialog]")
+    expect(passport_dialog).to_be_visible()
+    expect(passport_dialog).to_contain_text("Eligible")
+    expect(passport_dialog.get_by_role("link", name="View full passport")).to_be_visible()
+    passport_dialog.get_by_role("button", name="Done").click()
+    page.screenshot(
+        path=str(visual_dir / "screened-market-live-table-desktop.png"),
+        full_page=True,
+    )
+
+    page.goto(
+        f"{base_url}/dashboard/market?view=opportunities"
+        f"&methodology_id={seeded['methodology_id']}"
+    )
+    page.locator(".opportunity-card").first.get_by_role(
+        "link", name="View evidence"
+    ).click()
     expect(page.get_by_text("SHARIA EVIDENCE PASSPORT")).to_be_visible()
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
     expect(page.get_by_text("HilalMarkets AI does not issue religious rulings.")).to_be_visible()

@@ -4,6 +4,9 @@
     <form class="topbar-search" action="{{ url_for('screened_market_page') }}" method="get" role="search">
       <span data-icon="search"></span>
       <input class="input" name="search" value="{{ request.query_params.get('search', '') }}" placeholder="Search screened assets..." aria-label="Search screened assets">
+      <input type="hidden" name="view" value="assets">
+      {% if page == 'screened_market' and selected_methodology_id is defined and selected_methodology_id %}<input type="hidden" name="methodology_id" value="{{ selected_methodology_id }}">{% endif %}
+      {% if page == 'screened_market' and selected_exchange is defined and selected_exchange %}<input type="hidden" name="exchange" value="{{ selected_exchange }}">{% endif %}
     </form>
   </div>
   <div class="topbar-right">

@@ -197,6 +197,8 @@ async def test_setup_chat_html_is_mobile_ready_and_does_not_expose_api_key(test_
     assert 'data-testid="setup-entry-screen"' not in response.text
     assert 'data-ai-open-canvas' in response.text
     assert 'href="/dashboard/scan-now"' not in response.text
+    assert "ai-chat-hero" not in response.text
+    assert 'class="ai-chat-composer"' in response.text
     assert "data-ai-chat-input" in response.text
     assert "ai-setup-chat.css" in response.text
     assert "ai-setup-chat.js" in response.text

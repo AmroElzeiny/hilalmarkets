@@ -9,8 +9,11 @@ from uuid import UUID
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.schemas.sharia import (
+    AssetAssessmentSummary,
+    LiveMarketMethodologySummary,
     LiveSpotMarketQuote,
     LiveSpotMarketResponse,
+    MethodologySummary,
     TestMethodologySummary,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
@@ -35,8 +38,8 @@ class _QuoteCacheEntry:
 class TestMarketQuoteService:
     """Provider-backed quotes for the explicit development-only Test methodology."""
 
-    _cache: dict[tuple[int, str, str], _QuoteCacheEntry] = {}
-    _locks: dict[tuple[int, str, str], asyncio.Lock] = {}
+    _cache: dict[tuple[int, str, str, UUID | None], _QuoteCacheEntry] = {}
+    _locks: dict[tuple[int, str, str, UUID | None], asyncio.Lock] = {}
 
     def __init__(self, provider: MarketDataProvider, settings: Settings):
         self.provider = provider
@@ -56,7 +59,7 @@ class TestMarketQuoteService:
     ) -> LiveSpotMarketResponse:
         exchange_key = exchange.strip().lower()
         quote_key = quote_asset.strip().upper()
-        cache_key = (id(self.provider), exchange_key, quote_key)
+        cache_key = (id(self.provider), exchange_key, quote_key, methodology_id)
         now = monotonic()
         cached = self._cache.get(cache_key)
         if cached is not None and cached.expires_at > now:
@@ -92,6 +95,62 @@ class TestMarketQuoteService:
             )
             return snapshot
 
+    async def screened_snapshot(
+        self,
+        *,
+        exchange: str,
+        quote_asset: str,
+        methodology: MethodologySummary,
+        assessments: list[AssetAssessmentSummary],
+        warning: str | None = None,
+    ) -> LiveSpotMarketResponse:
+        """Attach live quotes only to evidence-backed assets for one methodology."""
+        snapshot = await self.snapshot(
+            exchange=exchange,
+            quote_asset=quote_asset,
+            methodology_id=methodology.id,
+        )
+        by_asset = {item.canonical_asset: item for item in assessments}
+        items = []
+        for quote in snapshot.items:
+            assessment = by_asset.get(quote.canonical_asset)
+            if assessment is None:
+                continue
+            items.append(
+                quote.model_copy(
+                    update={
+                        "asset_name": assessment.asset_name or quote.asset_name,
+                        "methodology_id": methodology.id,
+                        "methodology_name": methodology.name,
+                        "methodology_version": methodology.version,
+                        "status": assessment.status.value,
+                        "status_label": assessment.status_label,
+                        "reviewed_at": assessment.reviewed_at,
+                        "passport_url": (
+                            f"/dashboard/market/{assessment.canonical_asset}"
+                            f"?methodology_id={methodology.id}"
+                        ),
+                    }
+                )
+            )
+        return snapshot.model_copy(
+            update={
+                "methodology": LiveMarketMethodologySummary(
+                    id=methodology.id,
+                    code=methodology.code,
+                    name=methodology.name,
+                    version=methodology.version,
+                    notice=(
+                        "Statuses come from stored, reviewed methodology evidence. Live prices "
+                        "do not change the published screening decision."
+                    ),
+                ),
+                "items": items,
+                "total": len(items),
+                "warning": warning or snapshot.warning,
+            }
+        )
+
     async def _load_snapshot(
         self,
         *,
@@ -117,6 +176,7 @@ class TestMarketQuoteService:
                     asset_name=str(values.get("asset_name") or asset),
                     exchange=exchange,
                     quote_asset=quote_asset,
+                    methodology_id=methodology_id,
                     bid=values.get("bid"),
                     ask=values.get("ask"),
                     last=values.get("last"),
