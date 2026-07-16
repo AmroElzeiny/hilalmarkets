@@ -123,8 +123,14 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         "tests": tests,
         "remaining_browser_side_risks": [
             "Live Telegram/Discord message delivery is not exercised without real test tokens.",
-            "Quick Scan interpretation is mocked for browser determinism; light-scan submission uses the backend fixture market-data provider.",
-            "Long-running worker scans and production billing webhooks remain covered by non-browser tests/manual checks.",
+            (
+                "Quick Scan interpretation is mocked for browser determinism; light-scan "
+                "submission uses the backend fixture market-data provider."
+            ),
+            (
+                "Long-running worker scans and production billing webhooks remain covered "
+                "by non-browser tests/manual checks."
+            ),
         ],
     }
     (reports_dir / "playwright-summary.json").write_text(
@@ -865,10 +871,28 @@ def seed_setup_observability(database_url: str, email: str) -> dict[str, str]:
                     strategy_version_id=version.id,
                     technical_status="degraded",
                     strategy_status="too_strict",
-                    technical_causes=[{"code": "cycle_incomplete", "message": "84/86 symbols were evaluated in the latest cycle."}],
-                    strategy_causes=[{"code": "no_confirmations", "message": "No confirmations in 14 days; RVOL blocked most near-misses."}],
+                    technical_causes=[
+                        {
+                            "code": "cycle_incomplete",
+                            "message": "84/86 symbols were evaluated in the latest cycle.",
+                        }
+                    ],
+                    strategy_causes=[
+                        {
+                            "code": "no_confirmations",
+                            "message": (
+                                "No confirmations in 14 days; RVOL blocked most "
+                                "near-misses."
+                            ),
+                        }
+                    ],
                     actions=[],
-                    metrics={"symbols_scanned": 84, "symbols_expected": 86, "provider_errors": 2, "alerts_24h": 0},
+                    metrics={
+                        "symbols_scanned": 84,
+                        "symbols_expected": 86,
+                        "provider_errors": 2,
+                        "alerts_24h": 0,
+                    },
                     calculated_at=now,
                 )
             )
@@ -898,7 +922,13 @@ def seed_setup_observability(database_url: str, email: str) -> dict[str, str]:
                     average_distance=Decimal("0.23"),
                     co_occurrence={},
                     previous_version_delta={"pass_rate_points": -4.2, "previous_version": 2},
-                    counterfactual_preview={"preview_only": True, "current_threshold": 1.5, "proposed_threshold": 1.27, "additional_historical_completions": 31, "sample_count": 120},
+                    counterfactual_preview={
+                        "preview_only": True,
+                        "current_threshold": 1.5,
+                        "proposed_threshold": 1.27,
+                        "additional_historical_completions": 31,
+                        "sample_count": 120,
+                    },
                     sample_status="sufficient",
                     window_started_at=now.replace(day=1),
                     window_ended_at=now,
@@ -1082,7 +1112,10 @@ App command: `{summary['app_command']}`
 - Publish flow for executable monitors and active monitor list visibility.
 - Quick Scan/Finder prompt interpretation and backend fixture light-scan result rendering path.
 - Seeded deterministic proof receipt API visibility.
-- Strategy Cockpit and integrations smoke screens.
+- Screened Market search, Passport Quick View focus behavior, full Passport, and mobile layout.
+- Server-catalog checkout review at desktop and mobile widths.
+- System Brain customer isolation, responsive review workspace, and separate approve/publish flow.
+- Setup observability, lifecycle, and integrations smoke screens.
 
 ## Remaining Browser-Side Risks
 
@@ -1090,9 +1123,14 @@ App command: `{summary['app_command']}`
 
 ## Next Recommended Fixes
 
-- Add a dedicated visual proof receipt page if product wants proof viewing outside the cockpit API.
-- Keep Quick Scan browser coverage on fixture market data; add a separate staging-only live-provider smoke test before using real exchange candles in browser E2E.
-- Run the same browser suite in CI after installing Chromium with `.venv\\Scripts\\python.exe -m playwright install chromium`.
+- Keep immutable proof and historical Passport routes in the browser regression set as alert UI
+  evolves.
+- Keep Quick Scan browser coverage on fixture market data; add a staging-only live-provider smoke
+  test before using real exchange candles in browser E2E.
+- Run controlled provider-sandbox checkout, SMTP, and Telegram delivery tests in staging; CI
+  remains fake/no-send.
+- Run the same browser suite in CI after installing Chromium with
+  `.venv\\Scripts\\python.exe -m playwright install chromium`.
 """
 
 
@@ -1111,8 +1149,19 @@ def _html_report(summary: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <title>HilalMarkets Playwright E2E Report</title>
   <style>
-    body {{ font-family: Inter, Segoe UI, sans-serif; margin: 2rem; background: #0a0a0a; color: #f5f5f5; }}
-    .card {{ border: 1px solid #3b2a5f; border-radius: 18px; padding: 1rem; margin-bottom: 1rem; background: #111114; }}
+    body {{
+      font-family: Inter, Segoe UI, sans-serif;
+      margin: 2rem;
+      background: #0a0a0a;
+      color: #f5f5f5;
+    }}
+    .card {{
+      border: 1px solid #3b2a5f;
+      border-radius: 18px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      background: #111114;
+    }}
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ border-bottom: 1px solid #2f2544; padding: .75rem; text-align: left; }}
     strong, a {{ color: #c4b5fd; }}
@@ -1130,8 +1179,11 @@ def _html_report(summary: dict[str, Any]) -> str:
   </section>
   <section class="card">
     <h2>Summary</h2>
-    <p>Run {summary['tests_run']} / passed {summary['passed']} / failed {summary['failed']} / skipped {summary['skipped']}</p>
-    <p>Console errors: {len(summary['console_errors'])}; API/network errors: {len(summary['failed_network_calls'])}; page errors: {len(summary['page_errors'])}</p>
+    <p>Run {summary['tests_run']} / passed {summary['passed']} /
+      failed {summary['failed']} / skipped {summary['skipped']}</p>
+    <p>Console errors: {len(summary['console_errors'])};
+      API/network errors: {len(summary['failed_network_calls'])};
+      page errors: {len(summary['page_errors'])}</p>
   </section>
   <section class="card">
     <h2>Tests</h2>
@@ -1139,7 +1191,8 @@ def _html_report(summary: dict[str, Any]) -> str:
   </section>
   <section class="card">
     <h2>Artifacts</h2>
-    <p>Failure screenshots, traces, and videos are written under <code>test-results/browser</code>.</p>
+    <p>Failure screenshots, traces, and videos are written under
+      <code>test-results/browser</code>.</p>
   </section>
 </body>
 </html>

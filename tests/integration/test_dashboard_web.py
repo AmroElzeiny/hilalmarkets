@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 
 from pydantic import SecretStr
@@ -387,9 +388,25 @@ async def test_payment_page_loads_and_static_checkout_redirects(test_context):
     page = await test_context["client"].get("/dashboard/billing")
     assert page.status_code == 200
     assert "Subscription and Billing" in page.text
+    review = await test_context["client"].get(
+        "/dashboard/billing/checkout?plan_code=trader"
+    )
+    assert review.status_code == 200
+    csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', review.text)
+    request_id = re.search(
+        r'name="checkout_request_id" value="([a-f0-9]+)"', review.text
+    )
+    assert csrf is not None
+    assert request_id is not None
     checkout = await test_context["client"].post(
         "/dashboard/billing/checkout",
-        data={"plan_code": "trader"},
+        data={
+            "plan_code": "trader",
+            "billing_cycle": "monthly",
+            "checkout_request_id": request_id.group(1),
+            "terms_accepted": "true",
+            "csrf_token": csrf.group(1),
+        },
         follow_redirects=False,
     )
     assert checkout.status_code == 303

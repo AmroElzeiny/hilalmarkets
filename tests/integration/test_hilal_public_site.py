@@ -118,13 +118,16 @@ async def test_pricing_and_billing_share_the_purchasable_plan_catalog(test_conte
     assert billing.status_code == 200
     for code in PURCHASABLE_PLAN_CODES:
         assert PLAN_DEFINITIONS[code].name in billing.text
-        assert f'name="plan_code" value="{code}"' in billing.text
+        if code == "demo":
+            assert "Current plan" in billing.text
+            assert f'name="plan_code" value="{code}"' not in billing.text
+        else:
+            assert f"/dashboard/billing/checkout?plan_code={code}" in billing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
-        assert f'name="plan_code" value="{internal_code}"' not in billing.text
+        assert f"plan_code={internal_code}" not in billing.text
 
-    blocked = await test_context["client"].post(
-        "/dashboard/billing/checkout",
-        data={"plan_code": "lifetime"},
+    blocked = await test_context["client"].get(
+        "/dashboard/billing/checkout?plan_code=lifetime",
         follow_redirects=False,
     )
     assert blocked.status_code == 303

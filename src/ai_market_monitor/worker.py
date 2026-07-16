@@ -108,6 +108,10 @@ app.conf.update(
             "task": "ai_market_monitor.retry_sharia_admin_telegram",
             "schedule": 60,
         },
+        "retry-payment-emails-every-minute": {
+            "task": "ai_market_monitor.retry_payment_emails",
+            "schedule": 60,
+        },
         "monitor-published-sharia-sources": {
             "task": "ai_market_monitor.monitor_published_sharia_sources",
             "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
@@ -257,6 +261,11 @@ def process_sc_malaysia_imports() -> dict:
 @app.task(name="ai_market_monitor.send_sharia_review_reminders")
 def send_sharia_review_reminders() -> dict:
     return _run_async_task(_send_sharia_review_reminders())
+
+
+@app.task(name="ai_market_monitor.retry_payment_emails")
+def retry_payment_emails() -> dict:
+    return _run_async_task(_retry_payment_emails())
 
 
 @app.task(name="ai_market_monitor.retry_sharia_admin_telegram")
@@ -701,6 +710,14 @@ async def _retry_sharia_admin_telegram() -> dict:
         processed = await ShariaAdminTelegramService(session, settings).process_due()
         await session.commit()
         return {"processed": processed}
+
+
+async def _retry_payment_emails() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.payment_emails import PaymentEmailOutboxService
+
+    async with SessionFactory() as session:
+        return await PaymentEmailOutboxService(session, settings).process_due()
 
 
 async def _monitor_published_sharia_sources() -> dict:

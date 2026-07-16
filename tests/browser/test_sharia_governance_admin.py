@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 from conftest import _run_async_in_thread, assert_no_raw_traceback, signup, unique_email
@@ -15,12 +14,11 @@ def _promote_admin_and_seed_case(database_url: str | None, email: str) -> str:
 
     async def _seed() -> str:
         from ai_market_monitor.db.models import (
-            CanonicalAsset,
-            ReviewCase,
             User,
             UserIdentity,
         )
         from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
+        from tests.services.test_sc_malaysia_governance import _ready_case
 
         engine = create_async_engine(database_url)
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -37,39 +35,7 @@ def _promote_admin_and_seed_case(database_url: str | None, email: str) -> str:
             if user is None:
                 raise AssertionError("Signed-up browser user record was not found.")
             user.role = UserRole.ADMIN
-
-            asset = CanonicalAsset(
-                symbol="SOL",
-                name="Solana",
-                asset_type="native_coin",
-                native_chain="Solana",
-                contract_addresses={},
-                official_website="https://solana.com/",
-                official_documentation="https://solana.com/docs",
-                provider_ids={"binance": "SOL"},
-                identity_hash=hashlib.sha256(b"browser-governance-solana").hexdigest(),
-                mapping_state="verified",
-                mapping_evidence={"source": "browser visual QA"},
-            )
-            session.add(asset)
-            await session.flush()
-            case = ReviewCase(
-                case_reference="SCMY-BROWSER-SOL",
-                case_type="initial_asset_review",
-                state="ready_for_review",
-                publication_state="unpublished",
-                canonical_asset_id=asset.id,
-                title="Review Solana under the SC Malaysia reference",
-                priority="normal",
-                risk_severity="low",
-                human_review_reason=(
-                    "Human approval is required before any customer-facing publication."
-                ),
-                requested_evidence=[],
-                admin_notes=[],
-                idempotency_key="browser-governance-solana-review",
-            )
-            session.add(case)
+            case, _ = await _ready_case(session)
             await session.commit()
             case_id = str(case.id)
         await engine.dispose()
@@ -93,7 +59,7 @@ def test_sharia_governance_workspace_visual_qa(
     page.goto(f"{base_url}/system-brain", wait_until="networkidle")
     expect(page.get_by_role("heading", name="Evidence before publication")).to_be_visible()
     expect(page.get_by_text("Pending initial reviews")).to_be_visible()
-    expect(page.get_by_text("SCMY-BROWSER-SOL")).to_be_visible()
+    expect(page.get_by_text("SC-BTC-TEST")).to_be_visible()
     expect(page.locator("pre")).to_have_count(0)
     assert_no_raw_traceback(page)
     page.screenshot(path=str(output / "admin-overview-desktop-1440.png"), full_page=True)
@@ -103,13 +69,14 @@ def test_sharia_governance_workspace_visual_qa(
 
     page.goto(f"{base_url}/system-brain/reviews/{case_id}", wait_until="networkidle")
     expect(page.get_by_role("heading", name="Asset identity")).to_be_visible()
-    expect(page.get_by_role("heading", name="Complete this review")).to_be_visible()
-    expect(page.get_by_role("button", name="Approve and Publish")).to_be_visible()
-    expect(page.get_by_label("Decision reason")).to_be_visible()
+    expect(page.get_by_role("heading", name="Review each criterion")).to_be_visible()
+    expect(page.get_by_role("button", name="Approve", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Approve with qualification")).to_be_visible()
+    expect(page.get_by_label("Final written reasoning")).to_be_visible()
     page.screenshot(path=str(output / "review-case-tablet-900.png"), full_page=True)
 
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.get_by_role("heading", name="Complete this review")).to_be_visible()
+    expect(page.get_by_role("heading", name="Review each criterion")).to_be_visible()
     page.screenshot(path=str(output / "review-case-mobile-390.png"), full_page=True)
 
     page.emulate_media(reduced_motion="reduce")
@@ -117,4 +84,23 @@ def test_sharia_governance_workspace_visual_qa(
         "node => getComputedStyle(node).animationDuration"
     )
     assert animation_duration in {"0s", "1e-05s"}
+    page.emulate_media(reduced_motion="no-preference")
+    page.set_viewport_size({"width": 900, "height": 1000})
+    page.get_by_label("Final written reasoning").fill(
+        "The retained source, identity mapping, dossier, and criteria were reviewed."
+    )
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Approve", exact=True).click()
+    page.wait_for_url("**/system-brain/reviews/**?success=**")
+    expect(page.get_by_role("button", name="Review publication summary")).to_be_visible()
+    page.get_by_role("button", name="Review publication summary").click()
+    publication = page.locator("[data-publication-dialog]")
+    expect(publication).to_be_visible()
+    publication.get_by_label("Publication reason").fill(
+        "Publish the separately approved immutable Passport for customer evidence."
+    )
+    publication.get_by_role("button", name="Publish approved version").click()
+    page.wait_for_url("**/system-brain/reviews/**?success=**")
+    expect(page.locator(".brain-terminal strong")).to_have_text("Published")
+    page.screenshot(path=str(output / "review-case-published-tablet-900.png"), full_page=True)
     assert_no_raw_traceback(page)

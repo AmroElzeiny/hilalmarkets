@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260715-expansion">
   {% block page_styles %}{% endblock %}
 </head>
-<body class="dashboard-body hilal-dashboard theme-light app-body" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-testid="dashboard-root">
+<body class="dashboard-body hilal-dashboard theme-light app-body" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-testid="dashboard-root">
   <div class="app-shell">
     {% include "hilal/partials/dashboard_sidebar.html" %}
     <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
@@ -26,9 +26,11 @@
       </div>
     </main>
   </div>
+  {% include "hilal/dashboard/partials/passport_quick_view.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715-expansion"></script>
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260715-expansion"></script>
+  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260716-passport"></script>
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

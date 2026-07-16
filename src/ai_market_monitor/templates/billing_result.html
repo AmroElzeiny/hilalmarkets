@@ -1,5 +1,37 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
-<section class="page-header"><div><span class="eyebrow">Plan &amp; Billing</span><h1>{{ title }}</h1><p>Payment status is confirmed by the billing provider webhook and reflected in your server-side entitlement.</p></div></section>
-<section class="panel" style="max-width:760px"><div class="empty-state"><div class="empty-icon"><span data-icon="{{ 'check' if message else 'alert' }}" data-icon-class="icon-lg"></span></div><h2>{{ message.replace('_', ' ').title() if message else error.replace('_', ' ').title() }}</h2><p>{{ 'Your billing request was recorded. Your plan updates only after verified provider confirmation.' if message else 'The billing request could not be completed. No entitlement was changed.' }}</p><a class="btn btn-primary" href="/dashboard/billing">Back to Plan &amp; Billing</a></div></section>
+<section class="page-header">
+  <div>
+    <span class="eyebrow">Plan and billing</span>
+    <h1>{{ title }}</h1>
+    <p>Only a verified payment-provider event can activate a paid plan.</p>
+  </div>
+</section>
+
+<section class="panel billing-result-card">
+  <div class="empty-state">
+    <div class="empty-icon"><span data-icon="{{ 'check' if message == 'payment_successful' else ('clock' if message else 'alert') }}" data-icon-class="icon-lg"></span></div>
+    <h2>{{ message.replace('_', ' ').title() if message else error.replace('_', ' ').title() }}</h2>
+    {% if message == 'payment_successful' %}
+      <p>Your verified payment was recorded and the {{ plan.name if plan else 'selected' }} plan is active.</p>
+      {% if entitlement %}<span class="badge badge-dark">Active plan | {{ entitlement.plan.name }}</span>{% endif %}
+    {% elif message %}
+      <p>The provider returned you to HilalMarkets, but its signed webhook has not confirmed the payment yet. Your entitlement remains unchanged until confirmation arrives.</p>
+    {% else %}
+      <p>The billing request did not complete. No entitlement was changed.</p>
+    {% endif %}
+    {% if checkout_attempt %}
+      <dl class="billing-result-facts">
+        <div><dt>Checkout status</dt><dd>{{ checkout_attempt.status.replace('_', ' ').title() }}</dd></div>
+        <div><dt>Amount</dt><dd>{{ checkout_attempt.amount }} {{ checkout_attempt.currency }}</dd></div>
+        <div><dt>Billing</dt><dd>{{ checkout_attempt.billing_cycle.title() }}</dd></div>
+      </dl>
+    {% endif %}
+    <div class="billing-result-actions">
+      {% if message == 'payment_successful' %}<a class="btn btn-primary" href="/dashboard/strategies/new">Create a Watch Plan</a>{% endif %}
+      <a class="btn btn-secondary" href="/dashboard/billing">Open Plan and Billing</a>
+      <a class="btn btn-secondary" href="/dashboard/support">Contact support</a>
+    </div>
+  </div>
+</section>
 {% endblock %}

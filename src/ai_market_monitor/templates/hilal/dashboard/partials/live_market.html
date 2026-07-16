@@ -32,28 +32,3 @@
   </div>
   <div class="live-market-empty empty-state compact" data-live-market-empty hidden><h3>No screened symbols match</h3><p>Clear the search, choose another exchange, or review whether this methodology has published passports.</p></div>
 </section>
-
-<dialog class="market-passport-dialog" data-market-passport-dialog aria-labelledby="market-passport-title">
-  <div class="market-passport-shell">
-    <button class="btn btn-ghost btn-icon market-passport-close" type="button" data-market-passport-close aria-label="Close passport"><span data-icon="close" data-icon-class="icon"></span></button>
-    <div class="market-passport-hero">
-      <div class="market-passport-logo" data-passport-logo><span>--</span></div>
-      <div><span class="kicker" data-passport-kicker>Screening passport</span><h2 id="market-passport-title" data-passport-symbol>Asset passport</h2><p data-passport-name>Provider-backed spot pair</p></div>
-      <span class="badge badge-eligible" data-passport-status>Screened</span>
-    </div>
-    <div class="market-passport-facts">
-      <div><small>Status</small><strong data-passport-status-detail>--</strong></div>
-      <div><small>Methodology</small><strong data-passport-methodology>--</strong></div>
-      <div><small>Exchange</small><strong data-passport-exchange>--</strong></div>
-      <div><small>Reviewed</small><strong data-passport-reviewed>--</strong></div>
-    </div>
-    <div class="market-passport-prices">
-      <div><small>Best bid</small><strong data-passport-bid>--</strong><span data-passport-bid-size></span></div>
-      <div><small>Best ask</small><strong data-passport-ask>--</strong><span data-passport-ask-size></span></div>
-      <div><small>Last</small><strong data-passport-last>--</strong><span data-passport-change></span></div>
-      <div><small>24h range</small><strong data-passport-range>--</strong><span data-passport-volume></span></div>
-    </div>
-    <div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Methodology-specific information</strong><p data-passport-notice>{{ live_methodology_notice }}</p></div></div>
-    <div class="row-between wrap"><small class="muted" data-passport-provider>Waiting for provider evidence</small><div class="row"><a class="btn btn-secondary" href="#" data-passport-full hidden>View full passport</a><button class="btn btn-primary" type="button" data-market-passport-done>Done</button></div></div>
-  </div>
-</dialog>

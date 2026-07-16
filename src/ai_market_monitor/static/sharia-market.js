@@ -16,7 +16,6 @@ if (root) {
   const count = document.querySelector("[data-live-market-count]");
   const eligible = document.querySelector("[data-live-market-eligible]");
   const provider = document.querySelector("[data-live-market-provider]");
-  const dialog = document.querySelector("[data-market-passport-dialog]");
   const rows = new Map();
   const latestItems = new Map();
   const logoUrls = new Map();
@@ -259,54 +258,18 @@ if (root) {
     }
   }
 
-  function setDialogText(selector, value) {
-    const node = dialog.querySelector(selector);
-    if (node) node.textContent = value;
-  }
-
-  async function openPassport(item) {
-    setDialogText("[data-passport-symbol]", item.symbol);
-    setDialogText("[data-passport-name]", `${item.asset_name} | ${item.exchange.toUpperCase()} spot`);
-    setDialogText("[data-passport-kicker]", `${item.methodology_name} passport`);
-    setDialogText("[data-passport-status]", item.status_label || "Screened");
-    setDialogText("[data-passport-status-detail]", item.status_label || "Screened");
-    setDialogText("[data-passport-methodology]", `${item.methodology_name} | v${item.methodology_version}`);
-    setDialogText("[data-passport-exchange]", item.exchange.toUpperCase());
-    setDialogText("[data-passport-reviewed]", item.reviewed_at ? new Date(item.reviewed_at).toLocaleDateString([], { dateStyle: "medium" }) : "Test snapshot");
-    setDialogText("[data-passport-bid]", formatPrice(item.bid));
-    setDialogText("[data-passport-ask]", formatPrice(item.ask));
-    setDialogText("[data-passport-last]", formatPrice(item.last));
-    setDialogText("[data-passport-bid-size]", finite(item.bid_size) ? `Size ${formatCompact(item.bid_size)}` : "Size unavailable");
-    setDialogText("[data-passport-ask-size]", finite(item.ask_size) ? `Size ${formatCompact(item.ask_size)}` : "Size unavailable");
-    setDialogText("[data-passport-change]", `${formatChange(item.percentage_24h)} over 24h`);
-    setDialogText("[data-passport-range]", `${formatPrice(item.low_24h)} - ${formatPrice(item.high_24h)}`);
-    setDialogText("[data-passport-volume]", `${formatCompact(item.quote_volume_24h)} ${item.quote_asset} volume`);
-    setDialogText("[data-passport-provider]", `Prices: ${item.exchange.toUpperCase()} via CCXT | Updated ${new Date(item.updated_at).toLocaleTimeString()}`);
-    setDialogText("[data-passport-notice]", currentMethodology?.notice || "Review the stored methodology and evidence before relying on this status.");
-    const fullPassport = dialog.querySelector("[data-passport-full]");
-    fullPassport.hidden = !item.passport_url;
-    if (item.passport_url) fullPassport.href = item.passport_url;
-    const logo = dialog.querySelector("[data-passport-logo]");
-    logo.replaceChildren();
-    const fallback = document.createElement("span");
-    fallback.textContent = item.canonical_asset.slice(0, 3);
-    logo.append(fallback);
-    const src = await importLogo(item);
-    if (src) {
-      const image = document.createElement("img");
-      image.src = src;
-      image.alt = `${item.canonical_asset} logo`;
-      logo.replaceChildren(image);
-    }
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
+  function openPassport(item, trigger) {
+    window.HilalPassportQuickView?.open({
+      asset: item.canonical_asset,
+      methodologyId: item.methodology_id || currentMethodology?.id || methodologyId,
+    }, trigger);
   }
 
   body.addEventListener("click", (event) => {
     const button = event.target.closest("[data-show-passport]");
     if (!button) return;
     const item = latestItems.get(button.closest("[data-symbol]")?.dataset.symbol);
-    if (item) openPassport(item);
+    if (item) openPassport(item, button);
   });
   search.addEventListener("input", applySearch);
   [exchange, quote].forEach((control) => control.addEventListener("change", () => {
@@ -314,12 +277,6 @@ if (root) {
     refresh();
   }));
   retry.addEventListener("click", refresh);
-  dialog.querySelectorAll("[data-market-passport-close], [data-market-passport-done]").forEach((button) => {
-    button.addEventListener("click", () => dialog.close());
-  });
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog) dialog.close();
-  });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refresh();
   });

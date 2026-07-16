@@ -28,7 +28,7 @@ if (!reduceMotion) {
   });
 }
 
-document.querySelectorAll("[data-decision-form]").forEach((form) => {
+document.querySelectorAll("[data-decision-form], [data-guarded-form]").forEach((form) => {
   form.addEventListener("submit", (event) => {
     const submitter = event.submitter;
     const prompt = submitter?.dataset.confirm;
@@ -48,3 +48,18 @@ document.querySelectorAll("[data-decision-form]").forEach((form) => {
     }
   });
 });
+
+const publicationDialog = document.querySelector("[data-publication-dialog]");
+const publicationLauncher = document.querySelector("[data-open-publication]");
+if (publicationDialog && publicationLauncher) {
+  publicationLauncher.addEventListener("click", () => {
+    publicationDialog.showModal();
+  });
+  publicationDialog.querySelectorAll("[data-close-publication]").forEach((button) => {
+    button.addEventListener("click", () => publicationDialog.close());
+  });
+  publicationDialog.addEventListener("click", (event) => {
+    if (event.target === publicationDialog) publicationDialog.close();
+  });
+  publicationDialog.addEventListener("close", () => publicationLauncher.focus());
+}

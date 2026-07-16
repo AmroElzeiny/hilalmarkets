@@ -1,0 +1,106 @@
+<dialog class="passport-quick-dialog" data-passport-quick-dialog aria-labelledby="passport-quick-title">
+  <div class="passport-quick-shell">
+    <button class="btn btn-ghost btn-icon passport-quick-close" type="button" data-passport-quick-close aria-label="Close Passport Quick View">
+      <span data-icon="close" data-icon-class="icon"></span>
+    </button>
+
+    <div class="passport-quick-loading" data-passport-quick-loading aria-live="polite">
+      <span class="sr-only">Loading Passport evidence</span>
+      <div class="passport-quick-skeleton is-wide"></div>
+      <div class="passport-quick-skeleton"></div>
+      <div class="passport-quick-skeleton"></div>
+      <div class="passport-quick-skeleton is-tall"></div>
+    </div>
+
+    <div class="notice notice-error" data-passport-quick-error hidden role="alert">
+      <span data-icon="alert" data-icon-class="icon"></span>
+      <div>
+        <strong>Passport evidence is unavailable</strong>
+        <p data-passport-quick-error-message>No status or source details were guessed.</p>
+        <button class="btn btn-secondary btn-sm" type="button" data-passport-quick-retry>Retry</button>
+      </div>
+    </div>
+
+    <div data-passport-quick-content hidden>
+      <header class="passport-quick-hero">
+        <div class="passport-quick-identity">
+          <div class="coin-logo passport-quick-logo" data-passport-quick-logo>--</div>
+          <div class="passport-quick-title-copy">
+            <span class="kicker">Sharia Evidence Passport</span>
+            <h2 id="passport-quick-title" data-passport-quick-name>Asset Passport</h2>
+            <p data-passport-quick-identity>Verified identity unavailable</p>
+          </div>
+        </div>
+        <div class="passport-quick-state">
+          <span class="badge badge-neutral" data-passport-quick-status>Status unavailable</span>
+          <span class="passport-freshness" data-passport-quick-freshness>Evidence unavailable</span>
+        </div>
+      </header>
+
+      <div class="notice notice-warning passport-history-notice" data-passport-history-notice hidden>
+        <span data-icon="clock" data-icon-class="icon"></span>
+        <div>
+          <strong>Passport used at alert time</strong>
+          <p data-passport-history-copy></p>
+          <p data-passport-current-copy></p>
+        </div>
+      </div>
+
+      <p class="passport-quick-primary" data-passport-quick-primary></p>
+
+      <div class="passport-contract-row" data-passport-contract-row hidden>
+        <div><small>Contract</small><strong data-passport-contract-address></strong></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-passport-copy-contract>
+          <span data-icon="copy" data-icon-class="icon-sm"></span>Copy
+        </button>
+      </div>
+
+      <div class="passport-quick-facts">
+        <div><small>Methodology</small><strong data-passport-quick-methodology>--</strong></div>
+        <div><small>Reviewed by</small><strong data-passport-quick-authority>--</strong></div>
+        <div><small>Decision date</small><strong data-passport-quick-decision>--</strong></div>
+        <div><small>Published</small><strong data-passport-quick-publication>--</strong></div>
+        <div><small>Next review</small><strong data-passport-quick-next-review>Not scheduled</strong></div>
+      </div>
+
+      <section class="passport-quick-section">
+        <div class="row-between"><h3>Main reasons</h3><span class="badge badge-info">Evidence-led</span></div>
+        <ul class="passport-reason-list" data-passport-quick-reasons></ul>
+        <div class="notice notice-warning" data-passport-quick-qualification hidden>
+          <span data-icon="alert" data-icon-class="icon"></span>
+          <div><strong>Qualification or limitation</strong><p></p></div>
+        </div>
+      </section>
+
+      <section class="passport-quick-section">
+        <div class="row-between wrap"><h3>Important use coverage</h3><a class="link-arrow" data-passport-view-all-uses href="#">View all uses <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div>
+        <div class="passport-use-preview" data-passport-quick-uses></div>
+      </section>
+
+      <div class="notice notice-neutral" data-passport-quick-restriction hidden>
+        <span data-icon="info" data-icon-class="icon"></span>
+        <div><strong>What happens next</strong><p></p></div>
+      </div>
+
+      <footer class="passport-quick-actions">
+        <div class="row wrap">
+          <button class="btn btn-secondary btn-sm" type="button" data-passport-copy-reference>
+            <span data-icon="copy" data-icon-class="icon-sm"></span>Copy evidence reference
+          </button>
+          <a class="btn btn-secondary btn-sm" data-passport-official-source href="#" target="_blank" rel="noopener" hidden>
+            <span data-icon="arrow" data-icon-class="icon-sm"></span>Official source
+          </a>
+        </div>
+        <div class="row wrap passport-quick-primary-actions">
+          <form method="post" data-passport-add-watchlist hidden>
+            <input type="hidden" name="methodology_id" data-passport-watchlist-methodology>
+            <button class="btn btn-secondary" type="submit"><span data-icon="watchlist" data-icon-class="icon-sm"></span>Add to My Screened Watchlist</button>
+          </form>
+          <a class="btn btn-secondary" data-passport-compliance-change href="#" hidden>View compliance change</a>
+          <a class="btn btn-secondary" data-passport-full-page href="#">Open Full Passport</a>
+          <a class="btn btn-primary" data-passport-create-plan href="#">Create Watch Plan</a>
+        </div>
+      </footer>
+    </div>
+  </div>
+</dialog>

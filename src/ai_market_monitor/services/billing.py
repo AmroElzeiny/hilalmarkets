@@ -3,6 +3,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256, sha512
 from typing import Any, Protocol
 from uuid import UUID, uuid4
@@ -12,8 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS
-from ai_market_monitor.db.models import AuditEvent, BillingEvent, Subscription
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
+from ai_market_monitor.db.models import (
+    AuditEvent,
+    BillingCheckoutAttempt,
+    BillingEvent,
+    Plan,
+    Subscription,
+)
 from ai_market_monitor.db.models.enums import SubscriptionStatus
 from ai_market_monitor.discord.service import DiscordRoleSyncService
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
@@ -45,6 +52,12 @@ class CheckoutSession:
 
 
 @dataclass(frozen=True, slots=True)
+class CheckoutAttemptResult:
+    attempt: BillingCheckoutAttempt
+    duplicate: bool
+
+
+@dataclass(frozen=True, slots=True)
 class BillingPortalSession:
     provider: str
     portal_url: str
@@ -63,7 +76,16 @@ class BillingProvider(Protocol):
     provider_name: str
 
     async def create_checkout_session(
-        self, *, user_id: UUID, plan_code: str, success_url: str, cancel_url: str
+        self,
+        *,
+        user_id: UUID,
+        checkout_attempt_id: UUID,
+        plan_code: str,
+        plan_name: str,
+        amount: Decimal,
+        currency: str,
+        success_url: str,
+        cancel_url: str,
     ) -> CheckoutSession: ...
 
     async def create_billing_portal_session(
@@ -78,15 +100,34 @@ class BillingProvider(Protocol):
 class StaticBillingProvider:
     provider_name = "static"
 
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
     async def create_checkout_session(
-        self, *, user_id: UUID, plan_code: str, success_url: str, cancel_url: str
+        self,
+        *,
+        user_id: UUID,
+        checkout_attempt_id: UUID,
+        plan_code: str,
+        plan_name: str,
+        amount: Decimal,
+        currency: str,
+        success_url: str,
+        cancel_url: str,
     ) -> CheckoutSession:
-        session_id = f"static_{user_id}_{plan_code}_{uuid4().hex[:12]}"
+        session_id = f"static_{checkout_attempt_id.hex}"
+        token = hmac.new(
+            self.settings.app_secret_key.get_secret_value().encode("utf-8"),
+            f"static-checkout:{checkout_attempt_id}:{user_id}".encode(),
+            sha256,
+        ).hexdigest()
+        separator = "&" if "?" in success_url else "?"
+        attempt_parameter = "" if "attempt=" in success_url else f"attempt={checkout_attempt_id}&"
         return CheckoutSession(
             provider=self.provider_name,
             checkout_url=(
-                f"{success_url}?checkout=pending&plan={plan_code}&user={user_id}"
-                f"&session={session_id}"
+                f"{success_url}{separator}{attempt_parameter}"
+                f"static_session={session_id}&static_token={token}"
             ),
             provider_session_id=session_id,
         )
@@ -108,7 +149,16 @@ class StripeBillingProvider:
         self.settings = settings
 
     async def create_checkout_session(
-        self, *, user_id: UUID, plan_code: str, success_url: str, cancel_url: str
+        self,
+        *,
+        user_id: UUID,
+        checkout_attempt_id: UUID,
+        plan_code: str,
+        plan_name: str,
+        amount: Decimal,
+        currency: str,
+        success_url: str,
+        cancel_url: str,
     ) -> CheckoutSession:
         price_id = self.settings.stripe_price_ids.get(plan_code)
         if not price_id:
@@ -125,8 +175,10 @@ class StripeBillingProvider:
                 "client_reference_id": str(user_id),
                 "metadata[user_id]": str(user_id),
                 "metadata[plan_code]": plan_code,
+                "metadata[checkout_attempt_id]": str(checkout_attempt_id),
                 "subscription_data[metadata][user_id]": str(user_id),
                 "subscription_data[metadata][plan_code]": plan_code,
+                "subscription_data[metadata][checkout_attempt_id]": str(checkout_attempt_id),
                 "success_url": success_url,
                 "cancel_url": cancel_url,
                 "allow_promotion_codes": "true",
@@ -192,7 +244,16 @@ class NowPaymentsBillingProvider:
         self.settings = settings
 
     async def create_checkout_session(
-        self, *, user_id: UUID, plan_code: str, success_url: str, cancel_url: str
+        self,
+        *,
+        user_id: UUID,
+        checkout_attempt_id: UUID,
+        plan_code: str,
+        plan_name: str,
+        amount: Decimal,
+        currency: str,
+        success_url: str,
+        cancel_url: str,
     ) -> CheckoutSession:
         api_key = self.settings.nowpayments_api_key
         if api_key is None:
@@ -200,15 +261,12 @@ class NowPaymentsBillingProvider:
                 "nowpayments_api_key_missing",
                 "NOWPayments API key is missing.",
             )
-        plan = PLAN_DEFINITIONS.get(plan_code)
-        if plan is None:
-            raise BillingError("plan_not_found", f"Plan {plan_code} was not found.")
-        order_id = f"amm|{user_id}|{plan_code}|{uuid4().hex[:12]}"
+        order_id = f"hm|{checkout_attempt_id.hex}|{plan_code}"
         payload = {
-            "price_amount": float(plan.monthly_price),
-            "price_currency": plan.currency.lower(),
+            "price_amount": float(amount),
+            "price_currency": currency.lower(),
             "order_id": order_id,
-            "order_description": f"HilalMarkets {plan.name} monthly access",
+            "order_description": f"HilalMarkets {plan_name} monthly access",
             "ipn_callback_url": (
                 f"{str(self.settings.public_base_url).rstrip('/')}"
                 "/api/v1/billing/webhooks/nowpayments"
@@ -387,18 +445,206 @@ class BillingService:
                 "A real billing provider must be configured in staging and production.",
             )
         else:
-            self.provider = StaticBillingProvider()
+            self.provider = StaticBillingProvider(settings)
 
     async def checkout_session(
         self, *, user_id: UUID, plan_code: str, success_url: str, cancel_url: str
     ) -> CheckoutSession:
-        await PlanCatalogService(self.session).get_or_sync(plan_code)
-        return await self.provider.create_checkout_session(
+        prepared = await self.prepare_checkout(
             user_id=user_id,
             plan_code=plan_code,
+            billing_cycle="monthly",
+            request_key=uuid4().hex,
+            terms_accepted=True,
+        )
+        return await self.open_checkout_attempt(
+            attempt_id=prepared.attempt.id,
+            user_id=user_id,
             success_url=success_url,
             cancel_url=cancel_url,
         )
+
+    async def prepare_checkout(
+        self,
+        *,
+        user_id: UUID,
+        plan_code: str,
+        billing_cycle: str,
+        request_key: str,
+        terms_accepted: bool,
+    ) -> CheckoutAttemptResult:
+        if billing_cycle != "monthly":
+            raise BillingError(
+                "billing_cycle_not_available",
+                "Only monthly billing is currently available.",
+            )
+        if plan_code not in PURCHASABLE_PLAN_CODES:
+            raise BillingError("plan_not_available", "This plan is not available for checkout.")
+        if not terms_accepted:
+            raise BillingError(
+                "billing_terms_required",
+                "Accept the billing agreement before continuing.",
+            )
+        plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
+        if not plan.is_active or plan.price_monthly <= 0:
+            raise BillingError("plan_not_available", "This paid plan is not available.")
+
+        current_plan = await self.session.scalar(
+            select(Plan.code)
+            .join(Subscription, Subscription.plan_id == Plan.id)
+            .where(
+                Subscription.user_id == user_id,
+                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+                (Subscription.current_period_end.is_(None))
+                | (Subscription.current_period_end > datetime.now(UTC)),
+            )
+            .order_by(Subscription.updated_at.desc())
+            .limit(1)
+        )
+        if current_plan == plan_code:
+            raise BillingError(
+                "already_subscribed",
+                f"Your {plan.name} plan is already active.",
+            )
+
+        now = datetime.now(UTC)
+        expired = list(
+            (
+                await self.session.scalars(
+                    select(BillingCheckoutAttempt).where(
+                        BillingCheckoutAttempt.user_id == user_id,
+                        BillingCheckoutAttempt.status.in_({"creating", "pending"}),
+                        BillingCheckoutAttempt.expires_at <= now,
+                    )
+                )
+            ).all()
+        )
+        for row in expired:
+            row.status = "expired"
+
+        normalized_key = request_key.strip()
+        if not normalized_key or len(normalized_key) > 100:
+            raise BillingError(
+                "checkout_request_invalid",
+                "The checkout request expired. Return to billing and try again.",
+            )
+        idempotency_key = sha256(
+            (
+                f"checkout:{user_id}:{plan.id}:{billing_cycle}:"
+                f"{self.settings.billing_terms_version}:{normalized_key}"
+            ).encode()
+        ).hexdigest()
+        existing = await self.session.scalar(
+            select(BillingCheckoutAttempt).where(
+                BillingCheckoutAttempt.idempotency_key == idempotency_key
+            )
+        )
+        if existing is None:
+            existing = await self.session.scalar(
+                select(BillingCheckoutAttempt)
+                .where(
+                    BillingCheckoutAttempt.user_id == user_id,
+                    BillingCheckoutAttempt.plan_id == plan.id,
+                    BillingCheckoutAttempt.billing_cycle == billing_cycle,
+                    BillingCheckoutAttempt.status.in_({"creating", "pending"}),
+                    BillingCheckoutAttempt.expires_at > now,
+                )
+                .order_by(BillingCheckoutAttempt.created_at.desc())
+                .limit(1)
+            )
+        if existing is not None:
+            return CheckoutAttemptResult(attempt=existing, duplicate=True)
+
+        attempt = BillingCheckoutAttempt(
+            user_id=user_id,
+            plan_id=plan.id,
+            billing_cycle=billing_cycle,
+            provider=self.provider.provider_name,
+            status="creating",
+            idempotency_key=idempotency_key,
+            terms_version=self.settings.billing_terms_version,
+            amount=plan.price_monthly,
+            currency=plan.currency.upper(),
+            terms_accepted_at=now,
+            expires_at=now + timedelta(minutes=self.settings.billing_checkout_ttl_minutes),
+        )
+        self.session.add(attempt)
+        await self.session.flush()
+        self._audit(
+            user_id,
+            "billing.checkout_prepared",
+            "billing_checkout_attempt",
+            attempt.id,
+            {
+                "plan_code": plan.code,
+                "billing_cycle": billing_cycle,
+                "amount": str(attempt.amount),
+                "currency": attempt.currency,
+                "terms_version": attempt.terms_version,
+            },
+        )
+        return CheckoutAttemptResult(attempt=attempt, duplicate=False)
+
+    async def open_checkout_attempt(
+        self,
+        *,
+        attempt_id: UUID,
+        user_id: UUID,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        attempt = await self.session.get(BillingCheckoutAttempt, attempt_id)
+        if attempt is None or attempt.user_id != user_id:
+            raise BillingError("checkout_not_found", "The checkout request was not found.")
+        now = datetime.now(UTC)
+        if attempt.expires_at <= now:
+            attempt.status = "expired"
+            await self.session.flush()
+            raise BillingError("checkout_expired", "This checkout request has expired.")
+        if attempt.status == "completed":
+            raise BillingError("already_subscribed", "This checkout is already complete.")
+        if attempt.status == "pending" and attempt.checkout_url and attempt.provider_session_id:
+            return CheckoutSession(
+                provider=attempt.provider,
+                checkout_url=attempt.checkout_url,
+                provider_session_id=attempt.provider_session_id,
+            )
+        plan = await self.session.get(Plan, attempt.plan_id)
+        if plan is None or not plan.is_active:
+            raise BillingError("plan_not_available", "The selected plan is no longer available.")
+        try:
+            checkout = await self.provider.create_checkout_session(
+                user_id=user_id,
+                checkout_attempt_id=attempt.id,
+                plan_code=plan.code,
+                plan_name=plan.name,
+                amount=attempt.amount,
+                currency=attempt.currency,
+                success_url=success_url,
+                cancel_url=cancel_url,
+            )
+        except BillingError as exc:
+            attempt.status = "provider_unavailable"
+            attempt.last_error = exc.code
+            await self.session.flush()
+            raise
+        attempt.provider = checkout.provider
+        attempt.provider_session_id = checkout.provider_session_id
+        attempt.checkout_url = checkout.checkout_url
+        attempt.status = "pending"
+        attempt.last_error = None
+        self._audit(
+            user_id,
+            "billing.checkout_opened",
+            "billing_checkout_attempt",
+            attempt.id,
+            {
+                "provider": checkout.provider,
+                "plan_code": plan.code,
+            },
+        )
+        await self.session.flush()
+        return checkout
 
     async def activate_free_plan(self, *, user_id: UUID, plan_code: str = "demo") -> Subscription:
         plan_definition = PLAN_DEFINITIONS.get(plan_code)
@@ -477,6 +723,14 @@ class BillingService:
             return payload
         stripe_object = dict(event_data["object"])
         metadata = dict(stripe_object.get("metadata") or {})
+        if not metadata:
+            metadata = dict(
+                dict(stripe_object.get("subscription_details") or {}).get("metadata") or {}
+            )
+        if not metadata:
+            line_items = dict(stripe_object.get("lines") or {}).get("data") or []
+            if line_items and isinstance(line_items[0], Mapping):
+                metadata = dict(line_items[0].get("metadata") or {})
         customer = stripe_object.get("customer")
         subscription_value = stripe_object.get("subscription")
         object_type = str(stripe_object.get("object") or "")
@@ -492,12 +746,20 @@ class BillingService:
         normalized_data = {
             "user_id": metadata.get("user_id") or stripe_object.get("client_reference_id"),
             "plan_code": plan_code,
+            "checkout_attempt_id": metadata.get("checkout_attempt_id"),
             "provider_customer_id": customer,
             "provider_subscription_id": provider_subscription_id,
-            "status": stripe_object.get("status"),
+            "provider_payment_reference": stripe_object.get("payment_intent")
+            or stripe_object.get("id"),
+            "status": stripe_object.get("payment_status") or stripe_object.get("status"),
             "current_period_start": stripe_object.get("current_period_start"),
             "current_period_end": stripe_object.get("current_period_end"),
             "cancel_at_period_end": stripe_object.get("cancel_at_period_end", False),
+            "amount": BillingService._stripe_amount(stripe_object),
+            "currency": stripe_object.get("currency"),
+            "receipt_url": stripe_object.get("hosted_invoice_url")
+            or stripe_object.get("invoice_pdf")
+            or stripe_object.get("receipt_url"),
         }
         return {
             "id": payload.get("id"),
@@ -510,8 +772,12 @@ class BillingService:
         order_id = str(payload.get("order_id") or "")
         user_id: str | None = None
         plan_code: str | None = None
+        checkout_attempt_id: str | None = None
         parts = order_id.split("|")
-        if len(parts) >= 4 and parts[0] == "amm":
+        if len(parts) >= 3 and parts[0] == "hm":
+            checkout_attempt_id = parts[1]
+            plan_code = parts[2]
+        elif len(parts) >= 4 and parts[0] == "amm":
             user_id = parts[1]
             plan_code = parts[2]
         status = str(payload.get("payment_status") or payload.get("invoice_status") or "unknown")
@@ -529,14 +795,31 @@ class BillingService:
             "data": {
                 "user_id": user_id,
                 "plan_code": plan_code,
+                "checkout_attempt_id": checkout_attempt_id,
                 "provider_customer_id": str(payload.get("purchase_id") or "") or None,
                 "provider_subscription_id": f"nowpayments_{payment_id}",
+                "provider_payment_reference": payment_id,
                 "status": normalized_status,
                 "current_period_start": now.isoformat(),
                 "current_period_end": (now + timedelta(days=30)).isoformat(),
                 "cancel_at_period_end": False,
+                "amount": payload.get("price_amount") or payload.get("actually_paid"),
+                "currency": payload.get("price_currency"),
+                "receipt_url": payload.get("invoice_url"),
             },
         }
+
+    @staticmethod
+    def _stripe_amount(payload: Mapping[str, Any]) -> str | None:
+        raw = payload.get("amount_paid")
+        if raw is None:
+            raw = payload.get("amount_total")
+        if raw is None:
+            return None
+        try:
+            return str((Decimal(str(raw)) / Decimal("100")).quantize(Decimal("0.01")))
+        except (InvalidOperation, ValueError):
+            return None
 
     async def process_event(
         self, *, provider: str, payload: Mapping[str, Any]
@@ -557,6 +840,7 @@ class BillingService:
                 user_id=existing.user_id,
             )
         data = dict(payload.get("data") or {})
+        await self._hydrate_checkout_data(data)
         user_id = self._parse_uuid(data.get("user_id"))
         event = BillingEvent(
             user_id=user_id,
@@ -570,9 +854,28 @@ class BillingService:
         self.session.add(event)
         await self.session.flush()
         try:
-            await self._apply_event(
+            subscription = await self._apply_event(
                 provider=provider, event_id=event_id, event_type=event_type, data=data
             )
+            await self._record_checkout_event(
+                provider_event_id=event_id,
+                event_type=event_type,
+                data=data,
+            )
+            if subscription is not None and self._is_payment_email_event(
+                provider=provider,
+                event_type=event_type,
+                subscription=subscription,
+            ):
+                from ai_market_monitor.services.payment_emails import (
+                    PaymentEmailOutboxService,
+                )
+
+                await PaymentEmailOutboxService(self.session, self.settings).enqueue(
+                    billing_event=event,
+                    subscription=subscription,
+                    data=data,
+                )
         except Exception as exc:
             event.processing_status = "failed"
             event.error_code = getattr(exc, "code", exc.__class__.__name__)
@@ -608,12 +911,31 @@ class BillingService:
         payload = dict(event.payload_redacted or {})
         data = dict(payload.get("data") or {})
         try:
-            await self._apply_event(
+            subscription = await self._apply_event(
                 provider=event.provider,
                 event_id=event.provider_event_id,
                 event_type=event.event_type,
                 data=data,
             )
+            await self._record_checkout_event(
+                provider_event_id=event.provider_event_id,
+                event_type=event.event_type,
+                data=data,
+            )
+            if subscription is not None and self._is_payment_email_event(
+                provider=event.provider,
+                event_type=event.event_type,
+                subscription=subscription,
+            ):
+                from ai_market_monitor.services.payment_emails import (
+                    PaymentEmailOutboxService,
+                )
+
+                await PaymentEmailOutboxService(self.session, self.settings).enqueue(
+                    billing_event=event,
+                    subscription=subscription,
+                    data=data,
+                )
         except Exception as exc:
             event.processing_status = "failed"
             event.error_code = getattr(exc, "code", exc.__class__.__name__)
@@ -632,7 +954,7 @@ class BillingService:
 
     async def _apply_event(
         self, *, provider: str, event_id: str, event_type: str, data: dict[str, Any]
-    ) -> None:
+    ) -> Subscription | None:
         if event_type in {
             "checkout.session.completed",
             "customer.subscription.created",
@@ -669,7 +991,7 @@ class BillingService:
                     "status": subscription.status.value,
                 },
             )
-            return
+            return subscription
         if event_type in {
             "customer.subscription.deleted",
             "subscription.deleted",
@@ -694,7 +1016,7 @@ class BillingService:
                 subscription.id,
                 {},
             )
-            return
+            return subscription
         if event_type in {"invoice.payment_failed", "payment.failed"}:
             subscription = await self._upsert_subscription(
                 provider=provider, data=data, forced_status=SubscriptionStatus.PAST_DUE
@@ -711,16 +1033,101 @@ class BillingService:
                 subscription.id,
                 {},
             )
-            return
+            return subscription
         if event_type in {"payment.expired", "payment.failed", "payment.refunded"}:
             user_id = self._parse_uuid(data.get("user_id"))
             if user_id:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
-            return
+            return None
         if event_type in {"charge.refunded", "refund.created", "charge.dispute.created"}:
             user_id = self._parse_uuid(data.get("user_id"))
             if user_id:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
+        return None
+
+    async def _hydrate_checkout_data(self, data: dict[str, Any]) -> None:
+        raw_attempt_id = data.get("checkout_attempt_id")
+        if raw_attempt_id in (None, ""):
+            return
+        try:
+            attempt_id = self._parse_uuid(raw_attempt_id)
+        except (TypeError, ValueError) as exc:
+            raise BillingError(
+                "checkout_reference_invalid",
+                "Billing event included an invalid checkout reference.",
+            ) from exc
+        attempt = (
+            await self.session.get(BillingCheckoutAttempt, attempt_id)
+            if attempt_id is not None
+            else None
+        )
+        if attempt is None:
+            raise BillingError(
+                "checkout_reference_missing",
+                "Billing event did not match a server-created checkout.",
+            )
+        plan = await self.session.get(Plan, attempt.plan_id)
+        if plan is None:
+            raise BillingError("plan_not_found", "Checkout plan no longer exists.")
+        data["checkout_attempt_id"] = str(attempt.id)
+        data["user_id"] = str(attempt.user_id)
+        data["plan_code"] = plan.code
+        data["amount"] = str(attempt.amount)
+        data["currency"] = attempt.currency
+
+    async def _record_checkout_event(
+        self,
+        *,
+        provider_event_id: str,
+        event_type: str,
+        data: Mapping[str, Any],
+    ) -> None:
+        attempt_id = self._parse_uuid(data.get("checkout_attempt_id"))
+        if attempt_id is None:
+            return
+        attempt = await self.session.get(BillingCheckoutAttempt, attempt_id)
+        if attempt is None:
+            return
+        attempt.provider_event_id = provider_event_id
+        normalized_status = self._status_from_provider(str(data.get("status") or "pending"))
+        if event_type in {
+            "checkout.session.completed",
+            "invoice.payment_succeeded",
+            "payment.finished",
+        } and normalized_status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
+            attempt.status = "completed"
+            attempt.completed_at = datetime.now(UTC)
+            attempt.last_error = None
+        elif event_type in {
+            "invoice.payment_failed",
+            "payment.failed",
+            "payment.expired",
+            "payment.refunded",
+        }:
+            attempt.status = event_type.split(".", 1)[1]
+            attempt.last_error = event_type
+        else:
+            attempt.status = "processing"
+        await self.session.flush()
+
+    @staticmethod
+    def _is_payment_email_event(
+        *,
+        provider: str,
+        event_type: str,
+        subscription: Subscription,
+    ) -> bool:
+        if subscription.status not in {
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.TRIALING,
+        }:
+            return False
+        expected = {
+            "stripe": {"invoice.payment_succeeded"},
+            "nowpayments": {"payment.finished"},
+            "static": {"checkout.session.completed"},
+        }
+        return event_type in expected.get(provider, {"invoice.payment_succeeded"})
 
     async def _upsert_subscription(
         self,

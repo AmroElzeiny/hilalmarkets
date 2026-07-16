@@ -84,7 +84,7 @@ async def test_test_market_api_and_dashboard_are_gated_and_provider_backed(test_
     assert page.status_code == 200
     assert 'data-endpoint="/api/v1/sharia/market-quotes"' in page.text
     assert "Test methodology only" in page.text
-    assert "data-market-passport-dialog" in page.text
+    assert "data-passport-quick-dialog" in page.text
     assert "sharia-market.js" in page.text
 
 
@@ -241,7 +241,8 @@ async def test_active_methodology_without_publications_has_clear_readiness_state
     default_market = await test_context["client"].get("/dashboard/market?view=assets")
 
     assert page.status_code == 200
-    assert "no reviewed asset assessments have been published" in page.text
+    assert "No screened assets are available yet." in page.text
+    assert "Open governance reviews" not in page.text
     assert "live-market-table" in page.text
     assert settings_page.status_code == 200
     assert "Empty SC Malaysia test | v2026.03-test | 0 published passports" in settings_page.text

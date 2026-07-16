@@ -110,6 +110,9 @@ class ScanResult(UUIDPrimaryKeyMixin, Base):
     sharia_assessment_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("asset_sharia_assessments.id", ondelete="SET NULL")
     )
+    sharia_passport_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("published_asset_assessments.id", ondelete="SET NULL")
+    )
     sharia_universe_snapshot_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("sharia_universe_snapshots.id", ondelete="SET NULL")
     )
@@ -211,6 +214,13 @@ class SetupInstance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sharia_assessment_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("asset_sharia_assessments.id", ondelete="SET NULL")
     )
+    sharia_passport_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("published_asset_assessments.id", ondelete="SET NULL")
+    )
+    sharia_universe_snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_universe_snapshots.id", ondelete="SET NULL")
+    )
+    sharia_policy_decision: Mapped[str | None] = mapped_column(String(60))
 
     __mapper_args__ = {"version_id_col": lifecycle_version}
 
@@ -339,6 +349,19 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     candle_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     suppressed_reason: Mapped[str | None] = mapped_column(String(160))
+    sharia_assessment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("asset_sharia_assessments.id", ondelete="SET NULL")
+    )
+    sharia_passport_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("published_asset_assessments.id", ondelete="SET NULL")
+    )
+    sharia_methodology_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_methodologies.id", ondelete="SET NULL")
+    )
+    sharia_universe_snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_universe_snapshots.id", ondelete="SET NULL")
+    )
+    sharia_policy_decision: Mapped[str | None] = mapped_column(String(60))
 
 
 def canonical_alert_proof_hash(proof_receipt: dict[str, Any]) -> str:

@@ -1,13 +1,15 @@
 import asyncio
+import hmac
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
 from ai_market_monitor.core.site_content import (
@@ -27,12 +30,15 @@ from ai_market_monitor.db.models import (
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
     AssetShariaStatusHistory,
+    BillingCheckoutAttempt,
     CapabilityExtension,
     ComplianceDriftNotification,
     DashboardPreference,
     DiscordConnection,
     MonitorShariaAssetState,
     NearMissSnapshot,
+    Plan,
+    PublishedAssetAssessment,
     ReferralRelationship,
     ScanJob,
     SetupInstance,
@@ -71,6 +77,8 @@ from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
 )
+from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
     ShariaScreeningError,
@@ -479,6 +487,7 @@ async def _context(
         "dashboard_navigation": DASHBOARD_NAVIGATION,
         "dashboard_preference": dashboard_preference,
         "dashboard_theme": dashboard_theme,
+        "dashboard_csrf_token": csrf_token(settings, user.id) if user else None,
         **extra,
     }
 
@@ -1318,12 +1327,16 @@ async def screened_market_page(
                     else "Create a Watchlist to define what market change matters to you."
                 ),
                 "presentation": {
+                    "asset": assessment.canonical_asset,
                     "symbol": f"{assessment.canonical_asset}/{quote_asset}",
                     "name": assessment.asset_name or "Crypto spot asset",
                     "status_label": status_presentation["label"],
                     "status_badge": status_presentation["badge"],
                     "methodology_name": assessment.methodology_name,
                     "methodology_version": assessment.methodology_version,
+                    "methodology_id": assessment.methodology_id,
+                    "passport_version_id": (setup.sharia_passport_version_id if setup else None),
+                    "event_time": setup.last_evaluated_at if setup else None,
                     "reviewed_at": assessment.reviewed_at,
                     "opportunity_type": strategy_name if setup else None,
                     "readiness": max(0, min(100, readiness)) if setup else None,
@@ -1447,7 +1460,11 @@ async def screened_asset_passport_page(
 ) -> HTMLResponse:
     screening = ShariaScreeningService(session, settings)
     try:
-        passport = await screening.passport(asset_slug, methodology_id=methodology_id)
+        passport = await ShariaPassportReadService(session, settings).current(
+            asset_slug,
+            methodology_id=methodology_id,
+            user_id=user.id,
+        )
     except ShariaScreeningError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     comparison = await screening.methodology_comparison(asset_slug)
@@ -1470,6 +1487,60 @@ async def screened_asset_passport_page(
             user=user,
             page="asset_passport",
             title=f"{passport.assessment.canonical_asset} Evidence Passport",
+            passport=passport,
+            methodology_comparison=comparison,
+            watchlists=watchlists,
+        ),
+    )
+
+
+@router.get(
+    "/passports/{canonical_asset_id}/versions/{passport_version_id}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def historical_asset_passport_page(
+    request: Request,
+    canonical_asset_id: UUID,
+    passport_version_id: UUID,
+    event_time: datetime | None = Query(default=None),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    screening = ShariaScreeningService(session, settings)
+    try:
+        passport = await ShariaPassportReadService(session, settings).historical(
+            canonical_asset_id=canonical_asset_id,
+            passport_version_id=passport_version_id,
+            event_time=event_time,
+            user_id=user.id,
+        )
+    except ShariaScreeningError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    comparison = await screening.methodology_comparison(passport.assessment.canonical_asset)
+    watchlists = list(
+        (
+            await session.scalars(
+                select(ApprovedWatchlist)
+                .where(ApprovedWatchlist.user_id == user.id)
+                .order_by(
+                    ApprovedWatchlist.is_default.desc(),
+                    ApprovedWatchlist.name.asc(),
+                )
+            )
+        ).all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "hilal/dashboard/passport.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="asset_passport",
+            title=f"{passport.assessment.canonical_asset} Historical Evidence Passport",
             passport=passport,
             methodology_comparison=comparison,
             watchlists=watchlists,
@@ -1606,18 +1677,23 @@ async def approved_watchlist_page(
 @router.get("/dashboard/compliance", response_class=HTMLResponse, include_in_schema=False)
 async def compliance_changes_page(
     request: Request,
+    asset: str | None = None,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     """Show persisted, user-scoped screening status changes."""
+    statement = select(ComplianceDriftNotification).where(
+        ComplianceDriftNotification.user_id == user.id
+    )
+    if asset:
+        statement = statement.where(
+            ComplianceDriftNotification.canonical_asset == canonical_asset(asset)
+        )
     changes = list(
         (
             await session.scalars(
-                select(ComplianceDriftNotification)
-                .where(ComplianceDriftNotification.user_id == user.id)
-                .order_by(ComplianceDriftNotification.created_at.desc())
-                .limit(100)
+                statement.order_by(ComplianceDriftNotification.created_at.desc()).limit(100)
             )
         ).all()
     )
@@ -1632,6 +1708,7 @@ async def compliance_changes_page(
             page="compliance",
             title="Compliance Changes",
             compliance_changes=changes,
+            filtered_asset=canonical_asset(asset) if asset else None,
         ),
     )
 
@@ -2250,6 +2327,20 @@ async def alert_proof_page(
     sharia_passport_asset = sharia_asset.get("canonical_asset") or (
         canonical_asset(str(proof_symbol)) if proof_symbol else None
     )
+    passport_publication = (
+        await session.get(PublishedAssetAssessment, alert.sharia_passport_version_id)
+        if alert.sharia_passport_version_id
+        else None
+    )
+    sharia_passport_url = (
+        f"/passports/{passport_publication.canonical_asset_id}/versions/"
+        f"{passport_publication.id}?event_time="
+        f"{(alert.candle_timestamp or alert.created_at).isoformat()}"
+        if passport_publication is not None
+        else (
+            f"/dashboard/market/{sharia_passport_asset.lower()}" if sharia_passport_asset else None
+        )
+    )
     await session.commit()
     return _no_store(
         templates.TemplateResponse(
@@ -2275,6 +2366,13 @@ async def alert_proof_page(
                 sharia_proof=sharia_proof,
                 sharia_asset=sharia_asset,
                 sharia_passport_asset=sharia_passport_asset,
+                sharia_passport_url=sharia_passport_url,
+                sharia_passport_version_id=alert.sharia_passport_version_id,
+                sharia_passport_canonical_asset_id=(
+                    passport_publication.canonical_asset_id
+                    if passport_publication is not None
+                    else None
+                ),
             ),
         )
     )
@@ -2379,20 +2477,83 @@ async def billing_page(
     )
 
 
+@router.get(
+    "/dashboard/billing/checkout",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def billing_checkout_review(
+    request: Request,
+    plan_code: str = Query(..., min_length=1, max_length=50),
+    attempt: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if plan_code not in PURCHASABLE_PLAN_CODES:
+        return _redirect("/dashboard/billing?error=plan_not_available")
+    await PlanCatalogService(session).sync_defaults()
+    plan = await session.scalar(
+        select(Plan).where(Plan.code == plan_code, Plan.is_active.is_(True))
+    )
+    if plan is None or plan.price_monthly <= 0:
+        await session.commit()
+        return _redirect("/dashboard/billing?error=plan_not_available")
+    checkout_attempt = None
+    attempt_id = _optional_uuid(attempt, label="checkout")
+    if attempt_id is not None:
+        checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id)
+        if checkout_attempt is None or checkout_attempt.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Checkout not found")
+    entitlement = await EntitlementService(session).current(user.id)
+    await session.commit()
+    features = dict(plan.features or {})
+    response = templates.TemplateResponse(
+        request,
+        "hilal/dashboard/checkout.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="billing",
+            title=f"Review {plan.name} checkout",
+            plan=plan,
+            plan_limits=dict(features.get("limits") or {}),
+            plan_features=dict(features.get("features") or {}),
+            billing_cycle="monthly",
+            checkout_request_id=uuid4().hex,
+            checkout_attempt=checkout_attempt,
+            checkout_state=state,
+            already_subscribed=(
+                entitlement.source == "subscription" and entitlement.plan.code == plan.code
+            ),
+        ),
+    )
+    return _no_store(response)
+
+
 @router.post("/dashboard/billing/checkout", include_in_schema=False)
 async def billing_checkout(
     request: Request,
     plan_code: str = Form(...),
+    billing_cycle: str = Form(default="monthly"),
+    checkout_request_id: str = Form(default="free-plan"),
+    terms_accepted: str | None = Form(default=None),
+    csrf_token_value: str = Form(..., alias="csrf_token"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token")
     base = str(settings.public_base_url).rstrip("/")
     if plan_code not in PURCHASABLE_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
     try:
-        plan = PLAN_DEFINITIONS.get(plan_code)
-        if plan is not None and plan.monthly_price == 0:
+        plan = await PlanCatalogService(session).get_or_sync(plan_code)
+        if plan.price_monthly == 0:
             await BillingService(session, settings).activate_free_plan(
                 user_id=user.id,
                 plan_code=plan_code,
@@ -2402,11 +2563,31 @@ async def billing_checkout(
                 f"Free plan: {user.display_name or user.id} {plan_code}"
             )
             return _redirect("/dashboard/billing?message=free_plan_activated")
-        checkout = await BillingService(session, settings).checkout_session(
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
             user_id=user.id,
             plan_code=plan_code,
-            success_url=f"{base}/billing/success",
-            cancel_url=f"{base}/billing/cancel",
+            billing_cycle=billing_cycle,
+            request_key=checkout_request_id,
+            terms_accepted=terms_accepted == "true",
+        )
+        await session.commit()
+        if prepared.duplicate and prepared.attempt.checkout_url:
+            return _redirect(
+                "/dashboard/billing/checkout?"
+                + urlencode(
+                    {
+                        "plan_code": plan_code,
+                        "attempt": str(prepared.attempt.id),
+                        "state": "duplicate",
+                    }
+                )
+            )
+        checkout = await service.open_checkout_attempt(
+            attempt_id=prepared.attempt.id,
+            user_id=user.id,
+            success_url=f"{base}/billing/success?attempt={prepared.attempt.id}",
+            cancel_url=f"{base}/billing/cancel?attempt={prepared.attempt.id}",
         )
         await session.commit()
         await AdminNotificationService(settings).send(
@@ -2414,48 +2595,83 @@ async def billing_checkout(
         )
         return _redirect(checkout.checkout_url)
     except BillingError as exc:
-        await session.rollback()
-        return _redirect(f"/dashboard/billing?error={exc.code}")
+        if session.in_transaction():
+            await session.commit()
+        return _redirect(
+            "/dashboard/billing/checkout?" + urlencode({"plan_code": plan_code, "state": exc.code})
+        )
 
 
 @router.get("/billing/success", response_class=HTMLResponse, include_in_schema=False)
 async def billing_success(
     request: Request,
+    attempt: str | None = Query(default=None),
+    static_session: str | None = Query(default=None),
+    static_token: str | None = Query(default=None),
+    user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    message = "payment_successful"
-    if request.query_params.get("checkout") == "pending":
-        user_id = request.query_params.get("user")
-        plan_code = request.query_params.get("plan")
-        session_id = request.query_params.get("session") or f"static:{user_id}:{plan_code}"
-        if user_id and plan_code:
+    attempt_id = _optional_uuid(attempt, label="checkout")
+    checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id) if attempt_id else None
+    if checkout_attempt is not None and checkout_attempt.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Checkout not found")
+    if (
+        checkout_attempt is not None
+        and checkout_attempt.provider == "static"
+        and settings.app_env in {"development", "test"}
+        and static_session == checkout_attempt.provider_session_id
+        and static_token
+    ):
+        expected = hmac.new(
+            settings.app_secret_key.get_secret_value().encode("utf-8"),
+            f"static-checkout:{checkout_attempt.id}:{user.id}".encode(),
+            sha256,
+        ).hexdigest()
+        if hmac.compare_digest(expected, static_token):
+            now = datetime.now(UTC)
             try:
                 await BillingService(session, settings).process_event(
                     provider="static",
                     payload={
-                        "id": f"static_checkout:{session_id}",
+                        "id": f"static_checkout:{static_session}",
                         "type": "checkout.session.completed",
                         "data": {
-                            "user_id": user_id,
-                            "plan_code": plan_code,
-                            "provider_subscription_id": session_id,
+                            "checkout_attempt_id": str(checkout_attempt.id),
+                            "provider_subscription_id": static_session,
+                            "provider_payment_reference": static_session,
                             "status": "active",
-                            "current_period_start": datetime.now(UTC).isoformat(),
-                            "current_period_end": (
-                                datetime.now(UTC) + timedelta(days=30)
-                            ).isoformat(),
+                            "current_period_start": now.isoformat(),
+                            "current_period_end": (now + timedelta(days=30)).isoformat(),
                             "cancel_at_period_end": False,
                         },
                     },
                 )
                 await session.commit()
-                await AdminNotificationService(settings).send(
-                    f"Payment success: user:{user_id} {plan_code}"
+                from ai_market_monitor.services.payment_emails import (
+                    PaymentEmailOutboxService,
                 )
+
+                await PaymentEmailOutboxService(session, settings).process_due(limit=5)
+                checkout_attempt = await session.get(BillingCheckoutAttempt, checkout_attempt.id)
             except BillingError:
                 await session.rollback()
-                message = "payment_pending_provider_confirmation"
+    status = checkout_attempt.status if checkout_attempt else "processing"
+    state_content = {
+        "completed": ("Plan activated", "payment_successful"),
+        "pending": ("Payment confirmation pending", "webhook_confirmation_delayed"),
+        "processing": ("Payment is processing", "payment_processing"),
+        "failed": ("Payment failed", "payment_failed"),
+        "cancelled": ("Payment cancelled", "payment_canceled"),
+        "expired": ("Checkout expired", "checkout_expired"),
+        "provider_unavailable": ("Payment provider unavailable", "provider_unavailable"),
+    }
+    title, state_message = state_content.get(
+        status,
+        ("Payment confirmation pending", "webhook_confirmation_delayed"),
+    )
+    plan = await session.get(Plan, checkout_attempt.plan_id) if checkout_attempt else None
+    entitlement = await EntitlementService(session).current(user.id)
     return templates.TemplateResponse(
         request,
         "billing_result.html",
@@ -2463,10 +2679,14 @@ async def billing_success(
             request=request,
             session=session,
             settings=settings,
-            user=await _current_user(request, session, settings),
+            user=user,
             page="billing_success",
-            title="Payment Successful",
-            message=message,
+            title=title,
+            message=state_message if status in {"completed", "pending", "processing"} else None,
+            error=state_message if status not in {"completed", "pending", "processing"} else None,
+            checkout_attempt=checkout_attempt,
+            plan=plan,
+            entitlement=entitlement,
         ),
     )
 
@@ -2474,9 +2694,19 @@ async def billing_success(
 @router.get("/billing/cancel", response_class=HTMLResponse, include_in_schema=False)
 async def billing_cancel(
     request: Request,
+    attempt: str | None = Query(default=None),
+    user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
+    attempt_id = _optional_uuid(attempt, label="checkout")
+    checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id) if attempt_id else None
+    if checkout_attempt is not None:
+        if checkout_attempt.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Checkout not found")
+        if checkout_attempt.status not in {"completed", "failed", "expired"}:
+            checkout_attempt.status = "cancelled"
+            await session.commit()
     return templates.TemplateResponse(
         request,
         "billing_result.html",
@@ -2484,10 +2714,12 @@ async def billing_cancel(
             request=request,
             session=session,
             settings=settings,
-            user=await _current_user(request, session, settings),
+            user=user,
             page="billing_cancel",
             title="Payment Canceled",
             error="payment_canceled",
+            checkout_attempt=checkout_attempt,
+            plan=(await session.get(Plan, checkout_attempt.plan_id) if checkout_attempt else None),
         ),
     )
 
@@ -2495,6 +2727,7 @@ async def billing_cancel(
 @router.get("/billing/error", response_class=HTMLResponse, include_in_schema=False)
 async def billing_error(
     request: Request,
+    user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
@@ -2505,12 +2738,47 @@ async def billing_error(
             request=request,
             session=session,
             settings=settings,
-            user=await _current_user(request, session, settings),
+            user=user,
             page="billing_error",
             title="Payment Error",
             error="payment_failed",
         ),
     )
+
+
+@router.get(
+    "/dashboard/admin/payment-email-preview",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def payment_email_preview(
+    plan_code: str = Query(default="pro", min_length=1, max_length=50),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    if user.role != UserRole.ADMIN and settings.app_env not in {"development", "test"}:
+        raise HTTPException(status_code=403, detail="Administrator role required")
+    plan = await PlanCatalogService(session).get_or_sync(plan_code)
+    await session.commit()
+    features = dict(plan.features or {})
+    now = datetime.now(UTC)
+    first_name = ((user.display_name or "").strip().split() or ["there"])[0]
+    rendered = PaymentEmailRenderer(settings).render(
+        first_name=first_name,
+        plan_name=plan.name,
+        billing_frequency="monthly",
+        amount=plan.price_monthly,
+        currency=plan.currency,
+        payment_date=now,
+        renewal_date=now + timedelta(days=30),
+        receipt_url=None,
+        plan_limits=dict(features.get("limits") or {}),
+    )
+    response = HTMLResponse(rendered.html_body)
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 
 
 @router.get("/dashboard/integrations", response_class=HTMLResponse, include_in_schema=False)

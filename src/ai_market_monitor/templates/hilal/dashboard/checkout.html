@@ -1,0 +1,67 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block content %}
+<div class="page-header checkout-heading">
+  <div>
+    <span class="eyebrow">Secure checkout</span>
+    <h1>Review before payment.</h1>
+    <p>Your plan, price, and limits below were loaded from the server plan catalog.</p>
+  </div>
+  <a class="btn btn-secondary" href="/dashboard/billing">Back to plans</a>
+</div>
+
+{% if checkout_state %}
+  <div class="notice {{ 'notice-error' if checkout_state in ['provider_unavailable','checkout_expired','plan_not_available'] else '' }}" role="status">
+    <span data-icon="{{ 'alert' if checkout_state in ['provider_unavailable','checkout_expired','plan_not_available'] else 'info' }}" data-icon-class="icon"></span>
+    <div>
+      <strong>{{ 'Checkout already in progress' if checkout_state == 'duplicate' else checkout_state.replace('_', ' ').title() }}</strong>
+      <p>{% if checkout_state == 'duplicate' %}A recent checkout for this plan is still available. Continue it instead of creating a duplicate payment.{% elif checkout_state == 'billing_terms_required' %}Review and accept the billing agreement before continuing.{% elif checkout_state == 'provider_unavailable' %}The payment provider could not open a secure checkout. Your plan was not changed.{% elif checkout_state == 'already_subscribed' %}This plan is already active on your account.{% else %}No entitlement was changed. Review the details or return to Plan and Billing.{% endif %}</p>
+    </div>
+  </div>
+{% endif %}
+
+<div class="checkout-layout">
+  <section class="panel checkout-review-card">
+    <div class="checkout-plan-head">
+      <div><span class="kicker">Selected plan</span><h2>{{ plan.name }}</h2><p>{{ plan.description or 'HilalMarkets monitoring access.' }}</p></div>
+      <span class="icon-box is-gold"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
+    </div>
+    <dl class="checkout-facts">
+      <div><dt>Billing frequency</dt><dd>Monthly</dd></div>
+      <div><dt>Price</dt><dd>{{ plan.price_monthly }} {{ plan.currency }}</dd></div>
+      <div><dt>Tax</dt><dd>Shown by the payment provider where applicable</dd></div>
+      <div><dt>Renewal</dt><dd>Renews monthly until cancelled</dd></div>
+      <div><dt>Cancellation</dt><dd>Manage from Plan and Billing; provider and legal terms apply</dd></div>
+    </dl>
+    <div class="checkout-limit-grid">
+      <article><span data-icon="watchlist" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>Active Watch Plans</span></article>
+      <article><span data-icon="market" data-icon-class="icon"></span><strong>{{ plan_limits.get('on_demand_scans_per_month', 0)|plan_limit }}</strong><span>Market checks / month</span></article>
+      <article><span data-icon="passport" data-icon-class="icon"></span><strong>{{ plan_limits.get('detailed_history_days', 'Plan default')|plan_limit }}</strong><span>Evidence-history days</span></article>
+      <article><span data-icon="telegram" data-icon-class="icon"></span><strong>{{ 'Telegram' if plan_features.get('telegram') else 'In-app' }}</strong><span>Notification access</span></article>
+    </div>
+  </section>
+
+  <aside class="panel checkout-action-card">
+    <span class="kicker">Order summary</span>
+    <div class="checkout-total"><span>{{ plan.name }}</span><strong>{{ plan.price_monthly }} {{ plan.currency }}</strong></div>
+    <p class="muted">Payment details are entered only on the configured payment provider's secure page.</p>
+    {% if already_subscribed %}
+      <div class="notice notice-success"><span data-icon="check" data-icon-class="icon"></span><div><strong>Already subscribed</strong><p>Your {{ plan.name }} plan is active.</p></div></div>
+      <a class="btn btn-primary" href="/dashboard/billing">Open billing</a>
+    {% elif checkout_attempt and checkout_attempt.checkout_url and checkout_attempt.status in ['pending','creating'] %}
+      <a class="btn btn-primary" href="{{ checkout_attempt.checkout_url }}" rel="nofollow">Continue secure payment</a>
+      <p class="checkout-small">This existing checkout expires {{ checkout_attempt.expires_at|short_dt(user.timezone) }}.</p>
+    {% else %}
+      <form class="checkout-confirm-form" method="post" action="/dashboard/billing/checkout">
+        <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
+        <input type="hidden" name="plan_code" value="{{ plan.code }}">
+        <input type="hidden" name="billing_cycle" value="monthly">
+        <input type="hidden" name="checkout_request_id" value="{{ checkout_request_id }}">
+        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, and recurring monthly payment.</span></label>
+        <button class="btn btn-primary" type="submit"><span data-icon="shield" data-icon-class="icon-sm"></span>Continue to secure payment</button>
+      </form>
+    {% endif %}
+    <div class="checkout-security"><span data-icon="shield" data-icon-class="icon"></span><p>HilalMarkets never receives or stores your full card or crypto-wallet credentials from this form.</p></div>
+    <a class="checkout-support" href="/dashboard/support">Need help? Contact support</a>
+  </aside>
+</div>
+{% endblock %}

@@ -84,6 +84,109 @@ class StatusHistoryResponse(BaseModel):
     approved_by: str
 
 
+class PassportExchangeMarket(BaseModel):
+    exchange: str
+    market_symbol: str
+    quote_asset: str
+    market_type: str
+    is_active: bool
+
+
+class PassportIdentity(BaseModel):
+    canonical_asset_id: UUID | None = None
+    name: str
+    symbol: str
+    network: str | None = None
+    asset_type: str = "unknown"
+    native_asset: bool | None = None
+    contract_addresses: dict[str, str] = Field(default_factory=dict)
+    official_website: str | None = None
+    official_documentation: str | None = None
+    provider_ids: dict[str, str] = Field(default_factory=dict)
+    exchange_markets: list[PassportExchangeMarket] = Field(default_factory=list)
+    identity_state: str = "unavailable"
+    identity_verified_at: datetime | None = None
+    aliases: list[str] = Field(default_factory=list)
+
+
+class PassportUseCoverage(BaseModel):
+    key: str
+    label: str
+    status: str
+    reason: str
+    supporting_reference: str | None = None
+    last_verified_at: datetime | None = None
+
+
+class PassportCriterionOutcome(BaseModel):
+    key: str
+    label: str
+    outcome: str
+    evidence: list[str] = Field(default_factory=list)
+    reviewer_explanation: str | None = None
+    ai_factual_summary: str | None = None
+    known_gaps: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    verified_at: datetime | None = None
+
+
+class PassportEvidenceDetail(EvidenceSourceResponse):
+    snapshot_id: UUID | None = None
+    content_hash: str | None = None
+    parser_version: str | None = None
+    ai_extraction_version: str | None = None
+    availability: str = "available"
+    supports_criteria: list[str] = Field(default_factory=list)
+
+
+class PassportDecisionRecord(BaseModel):
+    review_case_id: UUID | None = None
+    decision_id: UUID | None = None
+    reviewer_user_id: UUID | None = None
+    reviewer_display_name: str
+    actor_role: str = "REVIEWER"
+    decision: str
+    reason: str
+    qualifications: list[str] = Field(default_factory=list)
+    evidence_snapshot_ids: list[str] = Field(default_factory=list)
+    criterion_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    acknowledged_gaps: list[str] = Field(default_factory=list)
+    decided_at: datetime | None = None
+    published_by_user_id: UUID | None = None
+    published_at: datetime | None = None
+    integrity_hash: str | None = None
+
+
+class PassportTimelineEntry(BaseModel):
+    action: str
+    actor: str
+    occurred_at: datetime
+    reason: str
+    previous_state: str | None = None
+    new_state: str | None = None
+    related_source_ids: list[str] = Field(default_factory=list)
+    passport_version_id: UUID | None = None
+
+
+class PassportHistoricalContext(BaseModel):
+    is_historical: bool = False
+    event_time: datetime | None = None
+    passport_version_id: UUID | None = None
+    passport_version: int | None = None
+    current_status: ShariaAssetStatus | None = None
+    current_reviewed_at: datetime | None = None
+    current_passport_url: str | None = None
+
+
+class PassportHistoricalReference(BaseModel):
+    reference_type: Literal["alert", "opportunity"]
+    reference_id: UUID
+    label: str
+    event_time: datetime
+    url: str
+    strategy_version_id: UUID | None = None
+
+
 class AssetPassportResponse(BaseModel):
     assessment: AssetAssessmentSummary
     why_this_status: str
@@ -96,6 +199,73 @@ class AssetPassportResponse(BaseModel):
     status_history: list[StatusHistoryResponse]
     evidence_available: bool
     notice: str
+    identity: PassportIdentity | None = None
+    freshness: str = "current"
+    next_review_at: datetime | None = None
+    decision_date: datetime | None = None
+    publication_date: datetime | None = None
+    last_verified_at: datetime | None = None
+    main_reasons: list[str] = Field(default_factory=list)
+    main_qualification: str | None = None
+    use_coverage: list[PassportUseCoverage] = Field(default_factory=list)
+    criteria: list[PassportCriterionOutcome] = Field(default_factory=list)
+    evidence_details: list[PassportEvidenceDetail] = Field(default_factory=list)
+    decision_record: PassportDecisionRecord | None = None
+    timeline: list[PassportTimelineEntry] = Field(default_factory=list)
+    historical_references: list[PassportHistoricalReference] = Field(default_factory=list)
+    historical: PassportHistoricalContext = Field(default_factory=PassportHistoricalContext)
+    passport_version_id: UUID | None = None
+    passport_version: int | None = None
+    integrity_hash: str | None = None
+    official_source_url: str | None = None
+    can_create_watch_plan: bool = False
+    restriction_explanation: str | None = None
+
+
+class PassportQuickViewResponse(BaseModel):
+    identity: PassportIdentity
+    assessment: AssetAssessmentSummary
+    primary_wording: str
+    main_reasons: list[str]
+    main_qualification: str | None = None
+    freshness: str
+    next_review_at: datetime | None = None
+    review_authority: str
+    decision_date: datetime | None = None
+    publication_date: datetime | None = None
+    use_coverage: list[PassportUseCoverage]
+    historical: PassportHistoricalContext
+    passport_version_id: UUID | None = None
+    passport_version: int | None = None
+    official_source_url: str | None = None
+    full_passport_url: str
+    evidence_reference: str
+    can_create_watch_plan: bool
+    watchlist_action_url: str | None = None
+    compliance_change_url: str | None = None
+    restriction_explanation: str | None = None
+
+
+class PassportProblemReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_type: Literal[
+        "wrong_asset_identity",
+        "broken_source",
+        "outdated_evidence",
+        "incorrect_qualification",
+        "status_disagreement",
+        "other",
+    ]
+    details: str = Field(min_length=20, max_length=5000)
+    passport_version_id: UUID | None = None
+
+
+class PassportProblemReportResponse(BaseModel):
+    id: UUID
+    state: str
+    created_at: datetime
+    message: str
 
 
 class MethodologyComparisonItem(BaseModel):
@@ -194,8 +364,11 @@ class ShariaUniverseExclusion(BaseModel):
 class ShariaUniverseInclusion(BaseModel):
     symbol: str
     canonical_asset: str
+    canonical_asset_id: UUID | None = None
+    exchange_market_id: UUID | None = None
     status: ShariaAssetStatus
     assessment_id: UUID
+    passport_version_id: UUID | None = None
     qualification: list[str] = Field(default_factory=list)
     reviewed_at: datetime
 

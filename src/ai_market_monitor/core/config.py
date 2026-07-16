@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     app_name: str = "HilalMarkets"
     app_env: Literal["development", "test", "staging", "production"] = "development"
+    application_version: str = "development"
     app_secret_key: SecretStr = SecretStr("development-only-change-me-32-characters")
     database_url: str = "sqlite+aiosqlite:///./ai_market_monitor.db"
     redis_url: str = "redis://localhost:6379/0"
@@ -54,6 +55,8 @@ class Settings(BaseSettings):
     sharia_ai_max_retries: int = Field(default=5, ge=1, le=10)
     sharia_ai_allow_standard_fallback: bool = False
     sharia_review_reminder_hours: int = Field(default=6, ge=1, le=168)
+    sharia_review_sla_hours: int = Field(default=48, ge=1, le=720)
+    require_second_reviewer: bool = False
     sharia_source_scan_interval_hours: int = Field(default=24, ge=1, le=720)
     sharia_scraper_concurrency: int = Field(default=1, ge=1, le=4)
     sharia_scraper_obey_robots: bool = True
@@ -70,6 +73,10 @@ class Settings(BaseSettings):
     discord_adapter: Literal["noop", "http"] = "noop"
     billing_enabled: bool = False
     billing_provider: Literal["static", "stripe", "nowpayments"] = "static"
+    billing_checkout_ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    billing_terms_version: str = "2026-07"
+    payment_email_max_attempts: int = Field(default=5, ge=1, le=20)
+    payment_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
 
     telegram_bot_username: str | None = None
     telegram_bot_token: SecretStr | None = None

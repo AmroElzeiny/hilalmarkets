@@ -5,7 +5,7 @@ import json
 import random
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
@@ -609,6 +609,9 @@ class ShariaResearchPipeline:
             human_review_reason=analysis.human_review_reason,
             requested_evidence=analysis.missing_evidence,
             idempotency_key=key,
+            due_at=now + timedelta(hours=self.settings.sharia_review_sla_hours),
+            source_freshness_deadline=now
+            + timedelta(hours=self.settings.sharia_source_scan_interval_hours),
             next_reminder_at=now,
         )
         self.session.add(case)

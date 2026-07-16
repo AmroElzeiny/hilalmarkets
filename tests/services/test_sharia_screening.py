@@ -472,6 +472,18 @@ async def test_approved_compliance_review_pauses_asset_and_deduplicates_alert(te
         assert await session.scalar(
             select(func.count(Alert.id)).where(Alert.alert_type == AlertType.COMPLIANCE)
         ) == 1
+        compliance_alert = await session.scalar(
+            select(Alert).where(Alert.alert_type == AlertType.COMPLIANCE)
+        )
+        assert compliance_alert is not None
+        assert compliance_alert.proof_receipt["previous_status"] == "eligible"
+        assert compliance_alert.proof_receipt["new_status"] == "under_review"
+        assert compliance_alert.proof_receipt["methodology_id"] == str(methodology.id)
+        assert compliance_alert.proof_receipt["methodology_version"] == methodology.version
+        assert compliance_alert.proof_receipt["evidence_passport_path"] == (
+            "/dashboard/market/sol"
+        )
+        assert compliance_alert.proof_receipt["ai_generated_ruling"] is False
         assert await session.scalar(select(func.count(DashboardNotification.id))) == 1
         assert await session.scalar(select(func.count(AssetShariaStatusHistory.id))) == 2
         snapshot = await session.get(ShariaUniverseSnapshot, resolution.snapshot_id)

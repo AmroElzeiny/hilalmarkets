@@ -150,6 +150,68 @@ class BillingEvent(UUIDPrimaryKeyMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class BillingCheckoutAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "billing_checkout_attempts"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_billing_checkout_idempotency"),
+        Index("ix_billing_checkout_user_status", "user_id", "status", "expires_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("plans.id", ondelete="RESTRICT"), nullable=False
+    )
+    billing_cycle: Mapped[str] = mapped_column(String(20), default="monthly", nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_session_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    provider_event_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    checkout_url: Mapped[str | None] = mapped_column(String(2000))
+    status: Mapped[str] = mapped_column(String(32), default="creating", nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    terms_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    terms_accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class PaymentEmailDelivery(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "payment_email_deliveries"
+    __table_args__ = (
+        UniqueConstraint("event_key", name="uq_payment_email_event_key"),
+        Index("ix_payment_email_due", "status", "next_retry_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    billing_event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("billing_events.id", ondelete="CASCADE"), nullable=False
+    )
+    event_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(320), nullable=False)
+    plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    billing_frequency: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    payment_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    renewal_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    receipt_url: Mapped[str | None] = mapped_column(String(2000))
+    plan_limits: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class EntitlementSnapshot(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "entitlement_snapshots"
     __table_args__ = (

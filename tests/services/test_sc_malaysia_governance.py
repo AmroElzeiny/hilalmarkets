@@ -5,10 +5,12 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
+from ai_market_monitor.core.security import hash_password
 from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     AssetResearchDossier,
     AssetShariaAssessment,
+    AuditEvent,
     CanonicalAsset,
     ExternalAssessment,
     PublishedAssetAssessment,
@@ -19,8 +21,14 @@ from ai_market_monitor.db.models import (
     SourceSnapshot,
     TelegramNotificationAttempt,
     User,
+    UserIdentity,
 )
-from ai_market_monitor.db.models.enums import ShariaMethodologyStatus, UserRole
+from ai_market_monitor.db.models.enums import (
+    IdentityProvider,
+    ShariaAssetStatus,
+    ShariaMethodologyStatus,
+    UserRole,
+)
 from ai_market_monitor.services.sc_malaysia_import import (
     FetchedSource,
     SCMalaysiaImporter,
@@ -37,6 +45,7 @@ from ai_market_monitor.services.sharia_identity import (
     AssetIdentityError,
     CanonicalAssetMappingService,
 )
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_research import (
     AIAnalysisResult,
     ShariaFactualAnalysis,
@@ -333,6 +342,249 @@ async def test_only_admin_can_publish_and_passport_keeps_two_layers(test_context
         "not_covered_by_asset_reference"
     )
     assert attempt_count == 1
+
+
+async def test_review_publication_hold_and_restore_are_separate_immutable_actions(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        admin = User(display_name="Governance owner", role=UserRole.ADMIN)
+        ordinary = User(display_name="Ordinary customer", role=UserRole.USER)
+        session.add_all([admin, ordinary])
+        await session.flush()
+        session.add(
+            UserIdentity(
+                user_id=admin.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject="passport-history@example.com",
+                normalized_identifier="passport-history@example.com",
+                display_identifier="passport-history@example.com",
+                password_hash=hash_password("CorrectHorse123!"),
+                is_verified=True,
+                is_primary=True,
+            )
+        )
+        service = ShariaGovernanceService(session, test_context["settings"])
+
+        await service.approve_for_publication(
+            case.id,
+            admin_user_id=admin.id,
+            reason="The complete evidence package and every criterion were reviewed.",
+        )
+        assert case.state == "approved"
+        assert case.publication_state == "approved_not_published"
+        assert await session.scalar(select(func.count(PublishedAssetAssessment.id))) == 0
+
+        first = await service.publish_approved(
+            case.id,
+            admin_user_id=admin.id,
+            reason="Publish the separately approved evidence record for customer review.",
+        )
+        first_snapshot = dict(first.passport_snapshot)
+        first_integrity_hash = first.integrity_hash
+
+        with pytest.raises(ShariaGovernanceError) as denied:
+            await service.place_safety_hold(
+                case.id,
+                admin_user_id=ordinary.id,
+                reason="An ordinary customer cannot place a public safety hold.",
+            )
+        assert denied.value.code == "admin_required"
+
+        held = await service.place_safety_hold(
+            case.id,
+            admin_user_id=admin.id,
+            reason="A material concern requires the public Passport to fail closed.",
+        )
+        replay = await service.place_safety_hold(
+            case.id,
+            admin_user_id=admin.id,
+            reason="A repeated request must be idempotent and keep the same hold.",
+        )
+        assert held is replay
+        assert case.state == "safety_hold"
+        assert first.is_active is False
+        assert first.publication_state == "safety_hold"
+
+        await service.request_safety_hold_removal(
+            case.id,
+            admin_user_id=admin.id,
+            reason="Fresh evidence is available and must pass a new human review.",
+        )
+        assert case.state == "ready_for_review"
+        assert case.publication_state == "safety_hold_pending_review"
+        assert first.is_active is False
+
+        await service.approve_for_publication(
+            case.id,
+            admin_user_id=admin.id,
+            reason="The fresh evidence and prior safety concern were reviewed again.",
+            with_qualifications=True,
+            qualifications=[
+                "The restored record includes a new use-specific qualification."
+            ],
+        )
+        second = await service.publish_approved(
+            case.id,
+            admin_user_id=admin.id,
+            reason="Publish a new version after the completed hold-removal review.",
+        )
+        await session.flush()
+        historical = await ShariaPassportReadService(
+            session, test_context["settings"]
+        ).historical(
+            canonical_asset_id=first.canonical_asset_id,
+            passport_version_id=first.id,
+            event_time=first.published_at,
+            user_id=admin.id,
+        )
+        current = await ShariaPassportReadService(
+            session, test_context["settings"]
+        ).current("BTC", methodology_id=case.methodology_id, user_id=admin.id)
+
+        audit_actions = list(
+            (
+                await session.scalars(
+                    select(AuditEvent.action).where(
+                        AuditEvent.target_id.in_([str(first.id), str(second.id)])
+                        | AuditEvent.action.in_(
+                            {
+                                "sharia.review_decision_approved",
+                                "sharia.safety_hold_removal_review_requested",
+                            }
+                        )
+                    )
+                )
+            ).all()
+        )
+        await session.commit()
+
+    signed_in = await test_context["client"].post(
+        "/signin",
+        data={
+            "email": "passport-history@example.com",
+            "password": "CorrectHorse123!",
+        },
+        follow_redirects=False,
+    )
+    assert signed_in.status_code == 303
+    headers = {"X-User-ID": str(admin.id)}
+    historical_api = await test_context["client"].get(
+        f"/api/v1/sharia/passports/{first.canonical_asset_id}/versions/{first.id}",
+        params={"event_time": first.published_at.isoformat()},
+        headers=headers,
+    )
+    historical_page = await test_context["client"].get(
+        f"/passports/{first.canonical_asset_id}/versions/{first.id}",
+        params={"event_time": first.published_at.isoformat()},
+    )
+
+    assert second.version == first.version + 1
+    assert second.supersedes_publication_id == first.id
+    assert second.is_active is True
+    assert first.passport_snapshot == first_snapshot
+    assert first.integrity_hash == first_integrity_hash
+    assert historical.passport_version_id == first.id
+    assert historical.assessment.status == ShariaAssetStatus.ELIGIBLE
+    assert historical.historical.current_status == (
+        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS
+    )
+    assert current.passport_version_id == second.id
+    assert current.assessment.status == ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS
+    assert historical_api.status_code == 200
+    assert historical_api.json()["passport_version_id"] == str(first.id)
+    assert historical_api.json()["historical"]["is_historical"] is True
+    assert historical_page.status_code == 200
+    assert "Passport used at alert time" in historical_page.text
+    assert "Current status:" in historical_page.text
+    assert audit_actions.count("sharia.publication_safety_hold_placed") == 1
+    assert audit_actions.count("sharia.publication_completed") == 2
+    assert audit_actions.count("sharia.review_decision_approved") == 2
+    assert audit_actions.count("sharia.safety_hold_removal_review_requested") == 1
+
+
+async def test_false_positive_dismissal_is_audited_without_changing_public_data(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        admin = User(display_name="Review admin", role=UserRole.ADMIN)
+        session.add(admin)
+        await session.flush()
+        case = ReviewCase(
+            case_reference="SC-FALSE-POSITIVE",
+            case_type="material_source_change",
+            state="ready_for_review",
+            publication_state="change_under_review",
+            title="Review a reported source change",
+            priority="normal",
+            risk_severity="low",
+            human_review_reason="A reported source change requires a human decision.",
+            idempotency_key="review:false-positive:test",
+        )
+        session.add(case)
+        await session.flush()
+
+        await ShariaGovernanceService(
+            session, test_context["settings"]
+        ).dismiss_false_positive(
+            case.id,
+            admin_user_id=admin.id,
+            reason="The source content is unchanged and the report is not material.",
+        )
+        await session.flush()
+        event = await session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "sharia.review_false_positive_dismissed"
+            )
+        )
+        publication_count = await session.scalar(
+            select(func.count(PublishedAssetAssessment.id))
+        )
+
+    assert case.state == "superseded"
+    assert case.publication_state == "published_unchanged"
+    assert case.done_at is not None
+    assert publication_count == 0
+    assert event is not None
+    assert event.metadata_redacted["published_assessment_changed"] is False
+
+
+async def test_optional_four_eyes_requires_a_different_publisher(test_context):
+    settings = test_context["settings"]
+    settings.require_second_reviewer = True
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = User(display_name="First reviewer", role=UserRole.ADMIN)
+        publisher = User(display_name="Second publisher", role=UserRole.ADMIN)
+        session.add_all([reviewer, publisher])
+        await session.flush()
+        service = ShariaGovernanceService(session, settings)
+
+        await service.approve_for_publication(
+            case.id,
+            admin_user_id=reviewer.id,
+            reason="The first reviewer completed and recorded the evidence decision.",
+        )
+        assert case.publication_state == "awaiting_second_approval"
+
+        with pytest.raises(ShariaGovernanceError) as same_actor:
+            await service.publish_approved(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="The same reviewer must not satisfy the optional second approval.",
+            )
+        assert same_actor.value.code == "second_reviewer_required"
+
+        publication = await service.publish_approved(
+            case.id,
+            admin_user_id=publisher.id,
+            reason="A separate publisher verified the recorded review before publication.",
+        )
+
+    assert publication.published_by_user_id == publisher.id
+    assert publication.is_active is True
+    assert case.state == "published"
 
 
 async def test_rejected_case_is_retained_without_public_assessment(test_context):

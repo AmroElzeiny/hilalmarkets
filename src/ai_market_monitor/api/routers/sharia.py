@@ -1,13 +1,14 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import UserPrincipal, get_market_data_provider
 from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
 from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.csrf import csrf_token_matches
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
@@ -33,6 +34,9 @@ from ai_market_monitor.schemas.sharia import (
     MethodologyCreateRequest,
     MethodologyDetail,
     MethodologySummary,
+    PassportProblemReportRequest,
+    PassportProblemReportResponse,
+    PassportQuickViewResponse,
     ScreenedAssetListResponse,
     ShariaPreferenceUpdateRequest,
     StatusHistoryResponse,
@@ -44,6 +48,7 @@ from ai_market_monitor.services.compliance_watch import (
     ComplianceWatchService,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
     ShariaScreeningError,
@@ -191,7 +196,7 @@ async def screened_assets(
 async def test_market_quotes(
     exchange: str = Query(default="binance", pattern="^(binance|bybit)$"),
     quote_asset: str = Query(default="USDT", min_length=2, max_length=12),
-    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     provider: MarketDataProvider = Depends(get_market_data_provider),
     settings: Settings = Depends(get_settings),
@@ -225,7 +230,7 @@ async def screened_market_quotes(
     methodology_id: UUID,
     exchange: str = Query(default="binance", pattern="^(binance|bybit)$"),
     quote_asset: str = Query(default="USDT", min_length=2, max_length=12),
-    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     provider: MarketDataProvider = Depends(get_market_data_provider),
     settings: Settings = Depends(get_settings),
@@ -308,16 +313,95 @@ async def screened_asset(
 async def asset_passport(
     asset_id: str,
     methodology: UUID | None = None,
-    _principal: UserPrincipal = Depends(get_dashboard_principal),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> AssetPassportResponse:
     try:
-        return await ShariaScreeningService(session, settings).passport(
+        return await ShariaPassportReadService(session, settings).current(
             asset_id,
             methodology_id=methodology,
+            user_id=principal.user_id,
         )
     except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+
+
+@router.get(
+    "/assets/{asset_id}/passport/quick-view",
+    response_model=PassportQuickViewResponse,
+)
+async def asset_passport_quick_view(
+    asset_id: str,
+    methodology: UUID | None = None,
+    passport_version_id: UUID | None = None,
+    canonical_asset_id: UUID | None = None,
+    event_time: datetime | None = None,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> PassportQuickViewResponse:
+    try:
+        return await ShariaPassportReadService(session, settings).quick_view(
+            asset_id,
+            methodology_id=methodology,
+            passport_version_id=passport_version_id,
+            canonical_asset_id=canonical_asset_id,
+            event_time=event_time,
+            user_id=principal.user_id,
+        )
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+
+
+@router.get(
+    "/passports/{canonical_asset_id}/versions/{passport_version_id}",
+    response_model=AssetPassportResponse,
+)
+async def historical_asset_passport(
+    canonical_asset_id: UUID,
+    passport_version_id: UUID,
+    event_time: datetime | None = None,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> AssetPassportResponse:
+    try:
+        return await ShariaPassportReadService(session, settings).historical(
+            canonical_asset_id=canonical_asset_id,
+            passport_version_id=passport_version_id,
+            event_time=event_time,
+            user_id=principal.user_id,
+        )
+    except ShariaScreeningError as exc:
+        raise _screening_error(exc) from exc
+
+
+@router.post(
+    "/passports/{canonical_asset_id}/problem-reports",
+    response_model=PassportProblemReportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def report_passport_problem(
+    canonical_asset_id: UUID,
+    payload: PassportProblemReportRequest,
+    x_csrf_token: str | None = Header(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> PassportProblemReportResponse:
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    try:
+        result = await ShariaPassportReadService(session, settings).report_problem(
+            user_id=principal.user_id,
+            canonical_asset_id=canonical_asset_id,
+            payload=payload,
+        )
+        await session.commit()
+        return result
+    except ShariaScreeningError as exc:
+        await session.rollback()
         raise _screening_error(exc) from exc
 
 

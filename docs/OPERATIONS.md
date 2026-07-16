@@ -69,6 +69,8 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `SHARIA_AI_MAX_RETRIES` | Retry limit for retryable Flex failures. Default: `5`. |
 | `SHARIA_AI_ALLOW_STANDARD_FALLBACK` | Allows an explicit standard-tier fallback; default is fail-closed `false`. |
 | `SHARIA_REVIEW_REMINDER_HOURS` | Reminder window for open review cases. Default: `6`. |
+| `SHARIA_REVIEW_SLA_HOURS` | Initial due-date window for review cases. Default: `48`. |
+| `REQUIRE_SECOND_REVIEWER` | When true, the reviewer cannot publish the same decision. Default: `false`. |
 | `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Published-source monitoring interval. Default: `24`. |
 | `SHARIA_SCRAPER_CONCURRENCY` | Must be `1`; official sources are fetched sequentially. |
 | `SHARIA_SCRAPER_OBEY_ROBOTS` | Must remain `true` in staging and production. |
@@ -82,11 +84,16 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `DISCORD_BOT_TOKEN` | Discord bot token used for API delivery and role operations. |
 | `BILLING_ENABLED` | Enables checkout, portal and billing webhook processing. |
 | `BILLING_PROVIDER` | Configured payment provider. Use `nowpayments` for this build. |
+| `BILLING_CHECKOUT_TTL_MINUTES` | Expiry for a prepared first-party checkout attempt. Default: `30`. |
+| `BILLING_TERMS_VERSION` | Version captured with checkout consent. |
+| `PAYMENT_EMAIL_MAX_ATTEMPTS` | Maximum outbox delivery attempts. Default: `5`. |
+| `PAYMENT_EMAIL_RETRY_MINUTES` | Delay between payment-email retries. Default: `15`. |
 | `NOWPAYMENTS_API_KEY` | NOWPayments server API key. |
 | `NOWPAYMENTS_BASE_URL` | NOWPayments API base URL. |
 | `BILLING_WEBHOOK_SECRET` | Provider webhook/IPN signature secret. |
 | `STRIPE_SECRET_KEY` | Optional Stripe server API key if the provider is switched later. |
 | `STRIPE_PRICE_IDS` | Optional Stripe price-id map if the provider is switched later. |
+| `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED` | Requires Access headers in addition to application ADMIN auth. Enable only after origin access is restricted. |
 
 ## Database Migration
 
@@ -109,6 +116,10 @@ shadow mode.
 
 Migration `d6e7f8a9b0c1` adds the SC Malaysia governance workflow. It seeds only the versioned
 methodology family/version and never seeds or publishes an asset.
+
+Migration `e7f8a9b0c1d2` adds immutable Passport/event references, governance roles, reviewer
+profiles and assignments, problem reports, decision/publication integrity fields, first-party
+checkout attempts, and payment-email outbox state.
 
 ## Local Development
 
@@ -241,16 +252,46 @@ Discord developer portal or deployment automation.
 
 ## Billing Setup
 
-1. Configure plans from `core/plans.py` and create matching payment options in NOWPayments.
+1. Configure plans from `core/plans.py` and create matching payment options in NOWPayments. Public
+   Pricing, checkout review, and entitlements must continue to use this same catalog.
 2. Send checkout and subscription events to `/api/v1/billing/webhooks/{provider}`.
 3. Set `BILLING_PROVIDER=nowpayments`, `NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_BASE_URL` and
    `BILLING_WEBHOOK_SECRET`.
 4. Treat provider webhooks as the source of truth.
 5. Use `/api/v1/admin/billing-events/{provider_event_id}/reprocess` for failed-event retries.
 
-NOWPayments invoice links are created server-side from Dashboard billing. IPN signatures are
-verified with replay-safe event processing. Telegram and Discord may show plan status and open a
-signed Dashboard billing link, but they do not collect payment directly.
+The Dashboard first shows `/dashboard/billing/checkout`, where plan, cycle, price, currency, limits,
+and terms are loaded from the server. The server then creates the NOWPayments invoice. IPN
+signatures are verified with replay-safe event processing. Telegram and Discord may show plan status
+and open a signed Dashboard billing link, but they do not collect payment directly.
+
+Verified successful payment enqueues a unique `PaymentEmailDelivery`. The scheduler runs
+`ai_market_monitor.retry_payment_emails` every minute and the worker processes due rows with bounded
+retry state. Before live rollout, use `scripts/test_payment_email.py` for a local no-send preview and
+the ADMIN/development preview route for authenticated rendering. Confirm SMTP domain authentication,
+sender identity, links, and provider logs in staging.
+
+## System Brain Edge Protection
+
+Application ADMIN authentication and scoped CSRF validation are always authoritative. In
+production, also set `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true` and place `/system-brain*`
+behind a Cloudflare Access application. The application header check is not a substitute for
+cryptographic Access validation at the edge and is unsafe if clients can reach the origin and spoof
+headers.
+
+Use Cloudflare Tunnel or firewall rules that accept web traffic only from the intended reverse
+proxy. Remove alternate public origin ports and DNS records. From an external network verify:
+
+1. The public System Brain route is denied before Access authentication.
+2. Access success still requires an application ADMIN session.
+3. A normal customer session receives `403` and has no System Brain navigation.
+4. Direct origin IP/hostname requests fail at the network layer.
+5. Spoofed `cf-access-*` headers sent to any reachable origin do not bypass the edge.
+6. System Brain is absent from sitemap, customer navigation, analytics, and robots indexing.
+
+Use `scripts/test_compliance_notification.py` without `--live` for safe payload/delivery-state
+inspection. A live test requires the explicit live flag, confirmation phrase, and dedicated test
+chat ID; never use a customer chat for deployment verification.
 
 ## Monitoring Setup
 

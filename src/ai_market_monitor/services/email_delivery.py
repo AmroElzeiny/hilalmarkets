@@ -2,7 +2,7 @@ import asyncio
 import json
 import smtplib
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 from typing import Any
 from uuid import UUID
 
@@ -129,6 +129,51 @@ class AuthEmailService:
             attachments=screenshots,
         )
 
+    async def send_transactional(
+        self,
+        *,
+        recipient: str,
+        subject: str,
+        text_body: str,
+        html_body: str,
+        idempotency_key: str,
+        purpose: str,
+    ) -> str:
+        message_id = make_msgid(
+            idstring=idempotency_key[:48],
+            domain=(self.settings.smtp_from_email or "hilalmarkets.local").split("@")[-1],
+        )
+        if self.settings.email_adapter == "memory":
+            self.settings.email_test_outbox.append(
+                {
+                    "recipient": recipient,
+                    "subject": subject,
+                    "body": text_body,
+                    "html_body": html_body,
+                    "purpose": purpose,
+                    "message_id": message_id,
+                }
+            )
+            return message_id
+        if self.settings.email_adapter != "smtp":
+            raise EmailDeliveryError(
+                "EMAIL_ADAPTER must be set to smtp to send transactional email.",
+                code="email_adapter_disabled",
+            )
+        if not self.settings.smtp_host or not self.settings.smtp_from_email:
+            raise EmailDeliveryError(
+                "SMTP_HOST and SMTP_FROM_EMAIL are required.",
+                code="smtp_required_fields_missing",
+            )
+        return await asyncio.to_thread(
+            self._send_smtp,
+            recipient=recipient,
+            subject=subject,
+            body=text_body,
+            html_body=html_body,
+            message_id=message_id,
+        )
+
     def _send_smtp(
         self,
         *,
@@ -136,7 +181,9 @@ class AuthEmailService:
         subject: str,
         body: str,
         attachments: list[tuple[str, str, bytes]] | None = None,
-    ) -> None:
+        html_body: str | None = None,
+        message_id: str | None = None,
+    ) -> str:
         host = self.settings.smtp_host
         if not host:
             raise EmailDeliveryError(
@@ -147,7 +194,11 @@ class AuthEmailService:
         message["From"] = self._from_header()
         message["To"] = recipient
         message["Subject"] = subject
+        if message_id:
+            message["Message-ID"] = message_id
         message.set_content(body)
+        if html_body:
+            message.add_alternative(html_body, subtype="html")
         for filename, content_type, content in attachments or []:
             maintype, subtype = content_type.split("/", 1)
             message.add_attachment(
@@ -174,6 +225,7 @@ class AuthEmailService:
                 "The verification email could not be sent.",
                 code="smtp_delivery_failed",
             ) from exc
+        return message_id or str(message.get("Message-ID") or "")
 
     def _smtp_connection(self, host: str):
         if self._uses_implicit_ssl():

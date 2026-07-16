@@ -170,6 +170,10 @@ tbody tr:hover { background: rgba(31,139,116,.08); }
 .brain-filter select, .brain-search, .brain-decision-panel textarea { border: 1px solid var(--line); border-radius: 11px; background: #071f1a; color: var(--ivory); outline: none; }
 .brain-filter select, .brain-search { min-height: 40px; padding: 0 12px; }
 .brain-search { min-width: 230px; }
+.brain-filter-grid { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(130px, .7fr)) auto; align-items: end; width: min(100%, 850px); }
+.brain-filter-grid label { display: grid; gap: 5px; }
+.brain-filter-grid .brain-search { width: 100%; min-width: 0; }
+.brain-status.overdue { border-color: rgba(242,138,138,.35); background: rgba(145,52,52,.3); color: #ffd0d0; }
 
 .brain-review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; align-items: start; gap: 16px; }
 .brain-review-content { min-width: 0; display: grid; gap: 14px; }
@@ -244,6 +248,28 @@ tbody tr:hover { background: rgba(31,139,116,.08); }
 .brain-decision-panel label { color: #c5d5d0; font-size: 11px; font-weight: 650; }
 .brain-decision-panel label small { display: block; color: #78948a; font-weight: 400; }
 .brain-decision-panel textarea { min-height: 105px; padding: 11px; resize: vertical; }
+.brain-decision-panel select, .brain-assignment-panel select, .brain-assignment-panel input { min-height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 10px; background: #071f1a; color: var(--ivory); }
+.brain-criterion-list { display: grid; gap: 9px; margin: 12px 0; }
+.brain-criterion-list fieldset { display: grid; gap: 7px; min-width: 0; margin: 0; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: rgba(7,31,26,.62); }
+.brain-criterion-list legend { padding: 0 5px; color: var(--gold-soft); font-size: 11px; font-weight: 700; }
+.brain-criterion-list textarea { min-height: 70px; }
+.brain-terminal.pending { border-color: rgba(240,189,98,.24); background: rgba(240,189,98,.07); }
+.brain-terminal.pending .icon { color: var(--amber); }
+.brain-publish-launch { width: 100%; margin-top: 12px; }
+.brain-assignment-panel form { display: grid; grid-template-columns: repeat(2, minmax(150px, .7fr)) minmax(220px, 1.5fr) auto; align-items: end; gap: 10px; }
+.brain-assignment-panel label { display: grid; gap: 5px; color: #c5d5d0; font-size: 11px; }
+.brain-inline-form { margin: 0; }
+.brain-inline-form button { border: 0; background: transparent; cursor: pointer; }
+
+.brain-publication-dialog { width: min(680px, calc(100vw - 28px)); max-height: calc(100vh - 28px); padding: 0; overflow: auto; border: 1px solid rgba(210,175,99,.28); border-radius: 20px; background: #082b24; color: var(--ivory); box-shadow: 0 34px 110px rgba(0,10,8,.65); }
+.brain-publication-dialog::backdrop { background: rgba(1,14,11,.76); backdrop-filter: blur(4px); }
+.brain-publication-dialog form { position: relative; display: grid; gap: 16px; padding: 26px; }
+.brain-publication-dialog h2 { margin: 0; font-size: 25px; }
+.brain-publication-dialog label { display: grid; gap: 7px; color: #c5d5d0; font-size: 11px; }
+.brain-publication-dialog textarea { min-height: 110px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: #071f1a; color: var(--ivory); resize: vertical; }
+.brain-dialog-close { position: absolute; top: 16px; right: 16px; display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.04); color: var(--ivory); cursor: pointer; }
+.brain-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.brain-action-button.secondary { border-color: var(--line); background: rgba(255,255,255,.04); color: #d5e3de; }
 .brain-decision-panel textarea:focus, .brain-filter select:focus, .brain-search:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(210,175,99,.12); }
 .brain-decision-actions { display: grid; gap: 8px; margin-top: 7px; }
 .brain-decision-actions button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 0 12px; border: 1px solid transparent; border-radius: 11px; color: #fff; cursor: pointer; transition: transform .2s var(--ease), background .2s, border-color .2s; }
@@ -279,6 +305,9 @@ tbody tr:hover { background: rgba(31,139,116,.08); }
   .brain-sidebar-foot { display: flex; justify-content: center; }
   .brain-review-layout { grid-template-columns: 1fr; }
   .brain-decision-panel { position: static; }
+  .brain-filter-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .brain-assignment-panel form { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .brain-assignment-panel form .wide { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
   :root { --sidebar: 0px; }
@@ -303,6 +332,10 @@ tbody tr:hover { background: rgba(31,139,116,.08); }
   .brain-card-list > article { grid-template-columns: auto minmax(0,1fr); }
   .brain-card-list > article > a { grid-column: 2; }
   .brain-filter, .brain-filter select, .brain-search { width: 100%; min-width: 0; }
+  .brain-filter-grid, .brain-assignment-panel form { grid-template-columns: 1fr; }
+  .brain-assignment-panel form .wide { grid-column: auto; }
+  .brain-publication-dialog { width: 100vw; max-width: none; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
+  .brain-publication-dialog form { min-height: 100%; align-content: start; padding: 24px 16px; }
 }
 @media (max-width: 460px) {
   .brain-metric-grid { grid-template-columns: 1fr; }

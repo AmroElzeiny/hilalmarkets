@@ -11,14 +11,18 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     AssetResearchDossier,
+    AssetShariaAssessment,
     AuditEvent,
     CanonicalAsset,
     ExternalAssessment,
+    MonitorShariaAssetState,
     OfficialSource,
     PublishedAssetAssessment,
     ReviewCase,
     ReviewDecision,
+    ShariaGovernanceRoleGrant,
     ShariaMethodology,
+    ShariaReviewAssignmentEvent,
     ShariaUniverseSnapshot,
     SourceSnapshot,
     TelegramNotificationAttempt,
@@ -37,8 +41,9 @@ from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHt
 from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMessage
 
 SC_METHODOLOGY_CODE = "SC_MALAYSIA_SAC_REFERENCE"
-TERMINAL_CASE_STATES = {"approved", "rejected"}
+TERMINAL_CASE_STATES = {"published", "rejected", "superseded"}
 OPEN_REMINDER_STATES = {"ready_for_review", "needs_evidence"}
+GOVERNANCE_ROLES = {"SYSTEM_ADMIN", "RESEARCHER", "REVIEWER", "PUBLISHER"}
 
 
 class ShariaGovernanceError(ValueError):
@@ -59,7 +64,29 @@ class ShariaGovernanceService:
         admin_user_id: UUID,
         reason: str,
     ) -> PublishedAssetAssessment:
-        admin = await self._require_admin(admin_user_id)
+        await self.approve_for_publication(
+            case_id,
+            admin_user_id=admin_user_id,
+            reason=reason,
+        )
+        return await self.publish_approved(
+            case_id,
+            admin_user_id=admin_user_id,
+            reason="Publication confirmed after the recorded human review decision.",
+        )
+
+    async def approve_for_publication(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+        with_qualifications: bool = False,
+        criterion_decisions: list[dict] | None = None,
+        qualifications: list[str] | None = None,
+        acknowledged_gaps: list[str] | None = None,
+    ) -> ReviewDecision:
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
         if case.state != "ready_for_review":
             raise ShariaGovernanceError(
@@ -68,6 +95,142 @@ class ShariaGovernanceService:
         if len(reason.strip()) < 10:
             raise ShariaGovernanceError(
                 "decision_reason_required", "Provide a clear decision reason."
+            )
+        if not case.canonical_asset_id or not case.external_assessment_id or not case.dossier_id:
+            raise ShariaGovernanceError(
+                "case_evidence_incomplete", "Canonical identity and research evidence are required."
+            )
+        asset = await self.session.get(CanonicalAsset, case.canonical_asset_id)
+        external = await self.session.get(ExternalAssessment, case.external_assessment_id)
+        dossier = await self.session.get(AssetResearchDossier, case.dossier_id)
+        if asset is None or external is None or dossier is None:
+            raise ShariaGovernanceError("case_evidence_missing", "Review evidence is missing.")
+        if asset.mapping_state != "verified" or external.mapping_state != "mapped":
+            raise ShariaGovernanceError(
+                "identity_not_verified", "Canonical identity must be verified before approval."
+            )
+        analysis = await self.session.scalar(
+            select(AIAnalysisSnapshot)
+            .where(
+                AIAnalysisSnapshot.dossier_id == dossier.id,
+                AIAnalysisSnapshot.status == "completed",
+            )
+            .order_by(AIAnalysisSnapshot.analysis_version.desc())
+            .limit(1)
+        )
+        if analysis is None:
+            raise ShariaGovernanceError(
+                "validated_analysis_missing", "A schema-valid factual dossier is required."
+            )
+        methodology = await self._sc_methodology()
+        evidence_ids = [str(value) for value in dossier.source_snapshot_ids]
+        criteria = criterion_decisions or self._default_criterion_decisions(
+            asset=asset,
+            external=external,
+            dossier=dossier,
+            evidence_snapshot_ids=evidence_ids,
+        )
+        invalid_outcomes = {
+            str(item.get("outcome", "")).casefold()
+            for item in criteria
+            if isinstance(item, dict)
+        } & {"fail", "needs_evidence", "needs_more_evidence", "under_review"}
+        if invalid_outcomes:
+            raise ShariaGovernanceError(
+                "criteria_not_approvable",
+                "Resolve failed or evidence-incomplete criteria before approval.",
+            )
+        qualification_rows = [item.strip() for item in qualifications or [] if item.strip()]
+        if with_qualifications and not qualification_rows:
+            raise ShariaGovernanceError(
+                "qualification_required",
+                "Approval with qualification requires at least one written qualification.",
+            )
+        decision = await self._decision(
+            case,
+            admin_user_id=admin.id,
+            methodology_id=methodology.id,
+            decision=("approved_with_qualifications" if with_qualifications else "approved"),
+            reason=reason,
+            evidence_snapshot_ids=evidence_ids,
+            criterion_decisions=criteria,
+            qualifications=qualification_rows,
+            acknowledged_gaps=acknowledged_gaps or [],
+            ai_analysis_snapshot_id=analysis.id,
+            actor_role="REVIEWER",
+        )
+        now = datetime.now(UTC)
+        case.state = "approved"
+        case.publication_state = (
+            "awaiting_second_approval"
+            if self.settings.require_second_reviewer
+            else "approved_not_published"
+        )
+        case.methodology_id = methodology.id
+        case.next_reminder_at = None
+        self._audit(
+            admin.id,
+            "sharia.review_decision_approved",
+            "sharia_review_decision",
+            str(decision.id),
+            {
+                "case_id": str(case.id),
+                "decision": decision.decision,
+                "criterion_count": len(criteria),
+                "qualification_count": len(qualification_rows),
+                "occurred_at": now.isoformat(),
+            },
+        )
+        await self.session.flush()
+        return decision
+
+    async def publish_approved(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> PublishedAssetAssessment:
+        admin = await self._require_permission(admin_user_id, "PUBLISHER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        decision = await self.session.scalar(
+            select(ReviewDecision)
+            .where(
+                ReviewDecision.review_case_id == case.id,
+                ReviewDecision.decision.in_({"approved", "approved_with_qualifications"}),
+            )
+            .order_by(ReviewDecision.decision_version.desc())
+            .limit(1)
+        )
+        if decision is not None:
+            existing_publication = await self.session.scalar(
+                select(PublishedAssetAssessment).where(
+                    PublishedAssetAssessment.review_decision_id == decision.id
+                )
+            )
+            if existing_publication is not None:
+                return existing_publication
+        if case.state != "approved" or case.publication_state not in {
+            "approved_not_published",
+            "awaiting_second_approval",
+        }:
+            raise ShariaGovernanceError(
+                "case_not_approved", "Record a human approval before publication."
+            )
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "publication_reason_required", "Record a clear publication reason."
+            )
+        if decision is None:
+            raise ShariaGovernanceError(
+                "approval_record_missing", "The human approval record is missing."
+            )
+        if self.settings.require_second_reviewer and decision.admin_user_id == admin.id:
+            raise ShariaGovernanceError(
+                "second_reviewer_required",
+                "Awaiting second approval: the publisher must differ from the reviewer.",
             )
         if not case.canonical_asset_id or not case.external_assessment_id or not case.dossier_id:
             raise ShariaGovernanceError(
@@ -97,15 +260,6 @@ class ShariaGovernanceService:
             )
         methodology = await self._sc_methodology()
         now = datetime.now(UTC)
-        evidence_ids = [str(value) for value in dossier.source_snapshot_ids]
-        decision = await self._decision(
-            case,
-            admin_user_id=admin.id,
-            methodology_id=methodology.id,
-            decision="approve_and_publish",
-            reason=reason,
-            evidence_snapshot_ids=evidence_ids,
-        )
         passport = await self._passport_snapshot(
             asset=asset,
             external=external,
@@ -116,7 +270,15 @@ class ShariaGovernanceService:
             published_at=now,
         )
         evidence_sources = await self._assessment_sources(external, dossier)
-        reviewer = await self._admin_label(admin)
+        reviewer_user = await self.session.get(User, decision.admin_user_id)
+        reviewer = await self._admin_label(reviewer_user or admin)
+        standard_qualification = (
+            "Spot ownership and monitoring only; related financial products and uses "
+            "are assessed separately."
+        )
+        qualifications = list(decision.qualifications or [])
+        if standard_qualification not in qualifications:
+            qualifications.append(standard_qualification)
         assessment = await ShariaScreeningService(
             self.session, self.settings
         ).create_assessment(
@@ -124,15 +286,16 @@ class ShariaGovernanceService:
                 canonical_asset=asset.symbol,
                 asset_name=asset.name,
                 methodology_id=methodology.id,
-                status=ShariaAssetStatus.ELIGIBLE,
+                status=(
+                    ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS
+                    if decision.decision == "approved_with_qualifications"
+                    else ShariaAssetStatus.ELIGIBLE
+                ),
                 summary=(
                     "SC Malaysia SAC reference: Shariah-compliant. This is scoped to the "
                     "Securities Commission Malaysia regulated digital-assets framework."
                 ),
-                qualifications=[
-                    "Spot ownership and monitoring only; related financial products and uses "
-                    "are assessed separately."
-                ],
+                qualifications=qualifications,
                 exclusion_reasons=[],
                 evidence_snapshot=passport,
                 evidence_sources=evidence_sources,
@@ -144,17 +307,23 @@ class ShariaGovernanceService:
             ),
             actor_user_id=admin.id,
         )
-        prior = list(
+        active_publications = list(
             (
                 await self.session.scalars(
                     select(PublishedAssetAssessment).where(
                         PublishedAssetAssessment.canonical_asset_id == asset.id,
                         PublishedAssetAssessment.is_active.is_(True),
-                    )
+                    ).order_by(PublishedAssetAssessment.version.desc())
                 )
             ).all()
         )
-        for row in prior:
+        latest_publication = await self.session.scalar(
+            select(PublishedAssetAssessment)
+            .where(PublishedAssetAssessment.canonical_asset_id == asset.id)
+            .order_by(PublishedAssetAssessment.version.desc())
+            .limit(1)
+        )
+        for row in active_publications:
             row.is_active = False
             row.withdrawn_at = now
         version = int(
@@ -181,6 +350,7 @@ class ShariaGovernanceService:
             review_decision_id=decision.id,
             asset_assessment_id=assessment.id,
             version=version,
+            supersedes_publication_id=(latest_publication.id if latest_publication else None),
             publication_state="published",
             passport_snapshot=passport,
             integrity_hash=integrity_hash,
@@ -189,7 +359,7 @@ class ShariaGovernanceService:
             published_at=now,
         )
         self.session.add(publication)
-        case.state = "approved"
+        case.state = "published"
         case.publication_state = "published"
         case.methodology_id = methodology.id
         case.done_at = now
@@ -207,7 +377,7 @@ class ShariaGovernanceService:
         )
         self._audit(
             admin.id,
-            "sharia.asset_approved_and_published",
+            "sharia.publication_completed",
             "published_asset_assessment",
             str(publication.id),
             {
@@ -216,6 +386,9 @@ class ShariaGovernanceService:
                 "version": version,
                 "assessment_id": str(assessment.id),
                 "decision_reason_recorded": True,
+                "reviewer_user_id": str(decision.admin_user_id),
+                "publisher_user_id": str(admin.id),
+                "publication_reason": reason.strip(),
             },
         )
         await self.session.flush()
@@ -233,7 +406,7 @@ class ShariaGovernanceService:
         admin_user_id: UUID,
         reason: str,
     ) -> ReviewDecision:
-        admin = await self._require_admin(admin_user_id)
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
         if len(reason.strip()) < 10:
             raise ShariaGovernanceError(
@@ -279,7 +452,7 @@ class ShariaGovernanceService:
         reason: str,
         requested_evidence: list[str],
     ) -> ReviewDecision:
-        admin = await self._require_admin(admin_user_id)
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
         if len(reason.strip()) < 10 or not requested_evidence:
             raise ShariaGovernanceError(
@@ -312,7 +485,7 @@ class ShariaGovernanceService:
     async def return_to_research(
         self, case_id: UUID, *, admin_user_id: UUID, reason: str
     ) -> ReviewDecision:
-        admin = await self._require_admin(admin_user_id)
+        admin = await self._require_permission(admin_user_id, "RESEARCHER")
         case = await self._open_case(case_id)
         if len(reason.strip()) < 10:
             raise ShariaGovernanceError(
@@ -335,7 +508,7 @@ class ShariaGovernanceService:
     async def add_admin_note(
         self, case_id: UUID, *, admin_user_id: UUID, note: str
     ) -> ReviewCase:
-        admin = await self._require_admin(admin_user_id)
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self.session.get(ReviewCase, case_id)
         if case is None:
             raise ShariaGovernanceError("case_not_found", "Review case not found.")
@@ -360,11 +533,482 @@ class ShariaGovernanceService:
         await self.session.flush()
         return case
 
-    async def _require_admin(self, user_id: UUID) -> User:
+    async def assign_case(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        assigned_reviewer_id: UUID | None,
+        reason: str,
+        priority: str | None = None,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "SYSTEM_ADMIN")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if len(reason.strip()) < 5:
+            raise ShariaGovernanceError(
+                "assignment_reason_required", "Record a reason for this assignment."
+            )
+        if assigned_reviewer_id is not None:
+            await self._require_permission(assigned_reviewer_id, "REVIEWER")
+        now = datetime.now(UTC)
+        previous = case.assigned_reviewer_id
+        case.assigned_reviewer_id = assigned_reviewer_id
+        case.assigned_at = now if assigned_reviewer_id else None
+        case.due_at = now + timedelta(hours=self.settings.sharia_review_sla_hours)
+        if priority:
+            if priority not in {"low", "normal", "high", "urgent"}:
+                raise ShariaGovernanceError("invalid_priority", "Unknown review priority.")
+            case.priority = priority
+        self.session.add(
+            ShariaReviewAssignmentEvent(
+                review_case_id=case.id,
+                actor_user_id=admin.id,
+                previous_assignee_id=previous,
+                assigned_reviewer_id=assigned_reviewer_id,
+                action="assigned" if assigned_reviewer_id else "unassigned",
+                priority=case.priority,
+                reason=reason.strip(),
+                created_at=now,
+            )
+        )
+        self._audit(
+            admin.id,
+            "sharia.review_assignment_changed",
+            "sharia_review_case",
+            str(case.id),
+            {
+                "previous_assignee_id": str(previous) if previous else None,
+                "assigned_reviewer_id": (
+                    str(assigned_reviewer_id) if assigned_reviewer_id else None
+                ),
+                "priority": case.priority,
+            },
+        )
+        await self.session.flush()
+        return case
+
+    async def reopen_case(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "reopen_reason_required", "Record why this review is being reopened."
+            )
+        previous_state = case.state
+        now = datetime.now(UTC)
+        case.state = "ready_for_review"
+        case.publication_state = (
+            "change_under_review"
+            if previous_state in {"published", "approved"}
+            else "unpublished"
+        )
+        case.done_at = None
+        case.due_at = now + timedelta(hours=self.settings.sharia_review_sla_hours)
+        case.next_reminder_at = now + timedelta(
+            hours=self.settings.sharia_review_reminder_hours
+        )
+        self.session.add(
+            ShariaReviewAssignmentEvent(
+                review_case_id=case.id,
+                actor_user_id=admin.id,
+                previous_assignee_id=case.assigned_reviewer_id,
+                assigned_reviewer_id=case.assigned_reviewer_id,
+                action="reopened",
+                priority=case.priority,
+                reason=reason.strip(),
+                created_at=now,
+            )
+        )
+        self._audit(
+            admin.id,
+            "sharia.review_reopened",
+            "sharia_review_case",
+            str(case.id),
+            {"previous_state": previous_state, "new_state": case.state},
+        )
+        await self.session.flush()
+        return case
+
+    async def place_safety_hold(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "PUBLISHER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "safety_hold_reason_required", "Record why the public Passport must be held."
+            )
+        if case.canonical_asset_id is None:
+            raise ShariaGovernanceError(
+                "asset_identity_missing", "A safety hold requires a canonical asset."
+            )
+        publication_query = (
+            select(PublishedAssetAssessment)
+            .join(
+                AssetShariaAssessment,
+                AssetShariaAssessment.id
+                == PublishedAssetAssessment.asset_assessment_id,
+            )
+            .where(
+                PublishedAssetAssessment.canonical_asset_id == case.canonical_asset_id,
+                PublishedAssetAssessment.is_active.is_(True),
+                PublishedAssetAssessment.publication_state == "published",
+            )
+        )
+        if case.methodology_id is not None:
+            publication_query = publication_query.where(
+                AssetShariaAssessment.methodology_id == case.methodology_id
+            )
+        publication = await self.session.scalar(
+            publication_query.order_by(PublishedAssetAssessment.version.desc()).limit(1)
+        )
+        if publication is None:
+            if case.state == "safety_hold":
+                return case
+            raise ShariaGovernanceError(
+                "active_publication_missing", "No active publication is available to hold."
+            )
+        now = datetime.now(UTC)
+        previous_state = case.state
+        publication.is_active = False
+        publication.publication_state = "safety_hold"
+        publication.paused_at = now
+        case.state = "safety_hold"
+        case.publication_state = "safety_hold"
+        case.done_at = None
+        case.due_at = now + timedelta(hours=self.settings.sharia_review_sla_hours)
+        assessment = await self.session.get(
+            AssetShariaAssessment, publication.asset_assessment_id
+        )
+        if assessment is not None:
+            snapshots = list(
+                (
+                    await self.session.scalars(
+                        select(ShariaUniverseSnapshot).where(
+                            ShariaUniverseSnapshot.methodology_id
+                            == assessment.methodology_id,
+                            ShariaUniverseSnapshot.invalidated_at.is_(None),
+                        )
+                    )
+                ).all()
+            )
+            for snapshot in snapshots:
+                snapshot.invalidated_at = now
+                snapshot.invalidation_reason = f"manual safety hold {case.id}"
+        self._audit(
+            admin.id,
+            "sharia.publication_safety_hold_placed",
+            "published_asset_assessment",
+            str(publication.id),
+            {
+                "review_case_id": str(case.id),
+                "previous_state": previous_state,
+                "new_state": case.state,
+                "reason": reason.strip(),
+            },
+        )
+        await self.session.flush()
+        return case
+
+    async def request_safety_hold_removal(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if case.state != "safety_hold":
+            raise ShariaGovernanceError(
+                "safety_hold_not_active", "This case does not have an active safety hold."
+            )
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "safety_hold_review_reason_required",
+                "Record why removal should proceed through a fresh review.",
+            )
+        now = datetime.now(UTC)
+        case.state = "ready_for_review"
+        case.publication_state = "safety_hold_pending_review"
+        case.done_at = None
+        case.due_at = now + timedelta(hours=self.settings.sharia_review_sla_hours)
+        case.next_reminder_at = now
+        self._audit(
+            admin.id,
+            "sharia.safety_hold_removal_review_requested",
+            "sharia_review_case",
+            str(case.id),
+            {
+                "previous_state": "safety_hold",
+                "new_state": case.state,
+                "reason": reason.strip(),
+                "publication_reactivated": False,
+            },
+        )
+        await self.session.flush()
+        return case
+
+    async def dismiss_false_positive(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
+        case = await self._open_case(case_id)
+        if case.case_type not in {"material_source_change", "user_factual_report"}:
+            raise ShariaGovernanceError(
+                "dismissal_not_available",
+                "Only a change or factual-report review can be dismissed as unsupported.",
+            )
+        if case.state not in {"ready_for_review", "needs_evidence"}:
+            raise ShariaGovernanceError(
+                "dismissal_not_reviewable",
+                "Complete or pause research before dismissing this review.",
+            )
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "dismissal_reason_required", "Record why the reported change is not material."
+            )
+        previous = case.state
+        now = datetime.now(UTC)
+        case.state = "superseded"
+        case.publication_state = "published_unchanged"
+        case.done_at = now
+        case.due_at = None
+        case.next_reminder_at = None
+        self._audit(
+            admin.id,
+            "sharia.review_false_positive_dismissed",
+            "sharia_review_case",
+            str(case.id),
+            {
+                "previous_state": previous,
+                "new_state": case.state,
+                "reason": reason.strip(),
+                "published_assessment_changed": False,
+            },
+        )
+        await self.session.flush()
+        return case
+
+    async def start_research(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "RESEARCHER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if case.state not in {"draft", "research_failed", "needs_evidence", "researching"}:
+            raise ShariaGovernanceError(
+                "invalid_research_transition",
+                f"Research cannot start while the case is {case.state.replace('_', ' ')}.",
+            )
+        if len(reason.strip()) < 5:
+            raise ShariaGovernanceError(
+                "research_reason_required", "Record why research is being started or retried."
+            )
+        previous = case.state
+        case.state = "researching"
+        case.publication_state = "unpublished"
+        case.done_at = None
+        case.due_at = datetime.now(UTC) + timedelta(
+            hours=self.settings.sharia_review_sla_hours
+        )
+        self._audit(
+            admin.id,
+            "sharia.research_started" if previous != "researching" else "sharia.research_retried",
+            "sharia_review_case",
+            str(case.id),
+            {"previous_state": previous, "new_state": case.state, "reason": reason.strip()},
+        )
+        await self.session.flush()
+        return case
+
+    async def mark_ready_for_review(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "RESEARCHER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if case.state not in {"researching", "needs_evidence", "ready_for_review"}:
+            raise ShariaGovernanceError(
+                "invalid_ready_transition",
+                f"This case cannot enter review from {case.state.replace('_', ' ')}.",
+            )
+        if len(reason.strip()) < 5:
+            raise ShariaGovernanceError(
+                "readiness_reason_required", "Record why the evidence package is ready."
+            )
+        if not case.canonical_asset_id or not case.external_assessment_id or not case.dossier_id:
+            raise ShariaGovernanceError(
+                "case_evidence_incomplete",
+                "Canonical identity, official assessment, and research dossier are required.",
+            )
+        asset = await self.session.get(CanonicalAsset, case.canonical_asset_id)
+        external = await self.session.get(ExternalAssessment, case.external_assessment_id)
+        dossier = await self.session.get(AssetResearchDossier, case.dossier_id)
+        analysis = await self.session.scalar(
+            select(AIAnalysisSnapshot)
+            .where(
+                AIAnalysisSnapshot.dossier_id == case.dossier_id,
+                AIAnalysisSnapshot.status == "completed",
+            )
+            .order_by(AIAnalysisSnapshot.analysis_version.desc())
+            .limit(1)
+        )
+        if (
+            asset is None
+            or external is None
+            or dossier is None
+            or analysis is None
+            or asset.mapping_state != "verified"
+            or external.mapping_state != "mapped"
+        ):
+            raise ShariaGovernanceError(
+                "completeness_gate_failed",
+                "Identity mapping, official evidence, and the validated factual dossier "
+                "must all be complete before review.",
+            )
+        previous = case.state
+        case.state = "ready_for_review"
+        case.next_reminder_at = datetime.now(UTC) + timedelta(
+            hours=self.settings.sharia_review_reminder_hours
+        )
+        self._audit(
+            admin.id,
+            "sharia.case_marked_ready_for_review",
+            "sharia_review_case",
+            str(case.id),
+            {"previous_state": previous, "new_state": case.state, "reason": reason.strip()},
+        )
+        await self.session.flush()
+        return case
+
+    async def retry_notification(
+        self,
+        attempt_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+    ) -> TelegramNotificationAttempt:
+        admin = await self._require_permission(admin_user_id, "SYSTEM_ADMIN")
+        attempt = await self.session.get(TelegramNotificationAttempt, attempt_id)
+        if attempt is None:
+            raise ShariaGovernanceError(
+                "notification_not_found", "Notification attempt not found."
+            )
+        if attempt.status == "sent":
+            return attempt
+        if len(reason.strip()) < 5:
+            raise ShariaGovernanceError(
+                "retry_reason_required", "Record why this delivery is being retried."
+            )
+        previous = attempt.status
+        attempt.status = "pending"
+        attempt.next_retry_at = datetime.now(UTC)
+        attempt.last_error_code = None
+        attempt.last_error_detail = None
+        self._audit(
+            admin.id,
+            "sharia.notification_retry_requested",
+            "sharia_telegram_notification_attempt",
+            str(attempt.id),
+            {"previous_status": previous, "reason": reason.strip()},
+        )
+        await self.session.flush()
+        return attempt
+
+    async def _require_permission(self, user_id: UUID, permission: str) -> User:
+        if permission not in GOVERNANCE_ROLES:
+            raise ShariaGovernanceError("unknown_permission", "Unknown governance role.")
         user = await self.session.get(User, user_id)
         if user is None or user.role != UserRole.ADMIN:
             raise ShariaGovernanceError("admin_required", "Administrator role required.")
+        grants = set(
+            (
+                await self.session.scalars(
+                    select(ShariaGovernanceRoleGrant.role).where(
+                        ShariaGovernanceRoleGrant.user_id == user.id,
+                        ShariaGovernanceRoleGrant.revoked_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        if grants and permission not in grants and "SYSTEM_ADMIN" not in grants:
+            raise ShariaGovernanceError(
+                "governance_permission_required",
+                f"The {permission.replace('_', ' ').title()} permission is required.",
+            )
         return user
+
+    @staticmethod
+    def _default_criterion_decisions(
+        *,
+        asset: CanonicalAsset,
+        external: ExternalAssessment,
+        dossier: AssetResearchDossier,
+        evidence_snapshot_ids: list[str],
+    ) -> list[dict]:
+        return [
+            {
+                "key": "canonical_asset_identity",
+                "label": "Canonical asset identity",
+                "outcome": "pass",
+                "evidence": evidence_snapshot_ids,
+                "reviewer_explanation": (
+                    f"Verified {asset.name} ({asset.symbol}) as {asset.mapping_state}."
+                ),
+            },
+            {
+                "key": "official_methodology_reference",
+                "label": "Official methodology reference",
+                "outcome": "pass",
+                "evidence": evidence_snapshot_ids,
+                "reviewer_explanation": (
+                    f"Reviewed the retained {external.source_authority} reference."
+                ),
+            },
+            {
+                "key": "evidence_completeness",
+                "label": "Evidence completeness",
+                "outcome": "pass",
+                "evidence": evidence_snapshot_ids,
+                "reviewer_explanation": (
+                    f"Completeness {dossier.evidence_completeness:.0%}; "
+                    f"{dossier.missing_information_count} missing item(s)."
+                ),
+            },
+        ]
 
     async def _open_case(self, case_id: UUID) -> ReviewCase:
         case = await self.session.get(ReviewCase, case_id)
@@ -402,6 +1046,11 @@ class ShariaGovernanceService:
         decision: str,
         reason: str,
         evidence_snapshot_ids: list[str],
+        criterion_decisions: list[dict] | None = None,
+        qualifications: list[str] | None = None,
+        acknowledged_gaps: list[str] | None = None,
+        ai_analysis_snapshot_id: UUID | None = None,
+        actor_role: str = "REVIEWER",
     ) -> ReviewDecision:
         version = int(
             await self.session.scalar(
@@ -418,10 +1067,37 @@ class ShariaGovernanceService:
             decision=decision,
             reason=reason.strip(),
             evidence_snapshot_ids=evidence_snapshot_ids,
+            criterion_decisions=criterion_decisions or [],
+            qualifications=qualifications or [],
+            acknowledged_gaps=acknowledged_gaps or [],
+            ai_analysis_snapshot_id=ai_analysis_snapshot_id,
+            actor_role=actor_role,
+            application_version=getattr(
+                self.settings, "application_version", "development"
+            ),
+            security_metadata={"source": "authenticated_system_brain"},
             decision_version=version,
             created_at=datetime.now(UTC),
         )
         self.session.add(row)
+        await self.session.flush()
+        row.integrity_hash = _hash_json(
+            {
+                "id": str(row.id),
+                "case_id": str(case.id),
+                "actor": str(admin_user_id),
+                "role": actor_role,
+                "methodology_id": str(methodology_id) if methodology_id else None,
+                "decision": decision,
+                "reason": row.reason,
+                "evidence_snapshot_ids": evidence_snapshot_ids,
+                "criterion_decisions": row.criterion_decisions,
+                "qualifications": row.qualifications,
+                "acknowledged_gaps": row.acknowledged_gaps,
+                "decision_version": version,
+                "created_at": row.created_at.isoformat(),
+            }
+        )
         await self.session.flush()
         return row
 
@@ -788,12 +1464,33 @@ class ShariaAdminTelegramService:
             if case.dossier_id
             else None
         )
+        methodology = (
+            await self.session.get(ShariaMethodology, case.methodology_id)
+            if case.methodology_id
+            else None
+        )
+        affected_watch_plans = 0
+        affected_users = 0
+        if asset is not None:
+            impact_filters = [MonitorShariaAssetState.canonical_asset == asset.symbol]
+            if methodology is not None:
+                impact_filters.append(
+                    MonitorShariaAssetState.methodology_id == methodology.id
+                )
+            impact = await self.session.execute(
+                select(
+                    func.count(func.distinct(MonitorShariaAssetState.strategy_id)),
+                    func.count(func.distinct(MonitorShariaAssetState.user_id)),
+                ).where(*impact_filters)
+            )
+            affected_watch_plans, affected_users = impact.one()
         title = {
             "new_review_required": "New Sharia asset review required",
             "review_reminder": "Sharia review reminder",
             "publication_success": "Sharia asset publication completed",
             "rejection_stored": "Sharia asset review stored without publication",
             "material_change": "Material Sharia source change requires review",
+            "user_factual_report": "User Passport report requires review",
         }.get(notification_type, "Sharia review update")
         lines = [
             title,
@@ -821,6 +1518,12 @@ class ShariaAdminTelegramService:
                     ),
                 ]
             )
+        if methodology:
+            lines.append(f"Methodology: {methodology.name} v{methodology.version}")
+        lines.append(
+            f"Affected Watch Plans/users: {int(affected_watch_plans or 0)}/"
+            f"{int(affected_users or 0)}"
+        )
         lines.extend(
             [
                 f"Human review: {case.human_review_reason[:220]}",

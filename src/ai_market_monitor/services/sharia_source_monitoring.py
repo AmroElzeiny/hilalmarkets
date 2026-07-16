@@ -9,6 +9,7 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     AssetResearchDossier,
+    AssetShariaAssessment,
     CanonicalAsset,
     ExternalAssessment,
     OfficialSource,
@@ -308,6 +309,9 @@ class ShariaSourceMonitoringService:
         if existing is not None:
             return existing
         now = datetime.now(UTC)
+        assessment = await self.session.get(
+            AssetShariaAssessment, publication.asset_assessment_id
+        )
         case = ReviewCase(
             case_reference=f"CHG-{asset.symbol}-{str(dossier.id)[:8].upper()}",
             case_type="material_source_change",
@@ -316,12 +320,16 @@ class ShariaSourceMonitoringService:
             canonical_asset_id=asset.id,
             external_assessment_id=external.id,
             dossier_id=dossier.id,
+            methodology_id=assessment.methodology_id if assessment else None,
             title=f"Material source change: {asset.name} ({asset.symbol})",
             priority="urgent" if severity == "critical" else "high",
             risk_severity=severity,
             human_review_reason=reason,
             requested_evidence=[],
             idempotency_key=key,
+            due_at=now + timedelta(hours=self.settings.sharia_review_sla_hours),
+            source_freshness_deadline=now
+            + timedelta(hours=self.settings.sharia_source_scan_interval_hours),
             next_reminder_at=now,
         )
         self.session.add(case)

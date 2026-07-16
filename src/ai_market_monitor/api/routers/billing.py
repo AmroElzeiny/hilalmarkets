@@ -19,6 +19,7 @@ from ai_market_monitor.services.entitlements import (
     PlanCatalogService,
     UsageService,
 )
+from ai_market_monitor.services.payment_emails import PaymentEmailOutboxService
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -144,6 +145,8 @@ async def receive_billing_webhook(
             signature=x_nowpayments_sig if provider == "nowpayments" else x_billing_signature,
         )
         await session.commit()
+        if not result.replayed and result.processing_status == "processed":
+            await PaymentEmailOutboxService(session, settings).process_due(limit=5)
         await _notify_admin_payment_received(
             session=session,
             settings=settings,

@@ -388,6 +388,11 @@ class ScanPersistenceService:
                 if sharia_asset.get("assessment_id")
                 else None
             ),
+            sharia_passport_version_id=(
+                UUID(sharia_asset["passport_version_id"])
+                if sharia_asset.get("passport_version_id")
+                else None
+            ),
             sharia_universe_snapshot_id=(
                 UUID(sharia_context["universe_snapshot_id"])
                 if sharia_context.get("universe_snapshot_id")
@@ -562,6 +567,9 @@ class ScanPersistenceService:
                 sharia_methodology_version=scan_result.sharia_methodology_version,
                 sharia_status_at_detection=scan_result.sharia_status_at_scan,
                 sharia_assessment_id=scan_result.sharia_assessment_id,
+                sharia_passport_version_id=scan_result.sharia_passport_version_id,
+                sharia_universe_snapshot_id=scan_result.sharia_universe_snapshot_id,
+                sharia_policy_decision=scan_result.sharia_policy_decision,
             )
             self.session.add(setup)
             await self.session.flush()
@@ -583,11 +591,17 @@ class ScanPersistenceService:
                             "assessment_id": str(scan_result.sharia_assessment_id)
                             if scan_result.sharia_assessment_id
                             else None,
+                            "passport_version_id": str(
+                                scan_result.sharia_passport_version_id
+                            )
+                            if scan_result.sharia_passport_version_id
+                            else None,
                             "universe_snapshot_id": str(
                                 scan_result.sharia_universe_snapshot_id
                             )
                             if scan_result.sharia_universe_snapshot_id
                             else None,
+                            "policy_decision": scan_result.sharia_policy_decision,
                         },
                     },
                     occurred_at=result.evaluation_time,
@@ -790,6 +804,11 @@ class ScanPersistenceService:
                     chart_snapshot_url=result.chart_reference,
                     candle_timestamp=result.market_data_timestamp,
                     suppressed_reason="trial_alert_limit_reached",
+                    sharia_assessment_id=setup.sharia_assessment_id,
+                    sharia_passport_version_id=setup.sharia_passport_version_id,
+                    sharia_methodology_id=setup.sharia_methodology_id,
+                    sharia_universe_snapshot_id=setup.sharia_universe_snapshot_id,
+                    sharia_policy_decision=setup.sharia_policy_decision,
                 )
                 self.session.add(suppressed_alert)
                 await self.session.flush()
@@ -860,6 +879,11 @@ class ScanPersistenceService:
             },
             chart_snapshot_url=result.chart_reference,
             candle_timestamp=result.market_data_timestamp,
+            sharia_assessment_id=setup.sharia_assessment_id,
+            sharia_passport_version_id=setup.sharia_passport_version_id,
+            sharia_methodology_id=setup.sharia_methodology_id,
+            sharia_universe_snapshot_id=setup.sharia_universe_snapshot_id,
+            sharia_policy_decision=setup.sharia_policy_decision,
         )
         self.session.add(alert)
         await self.session.flush()

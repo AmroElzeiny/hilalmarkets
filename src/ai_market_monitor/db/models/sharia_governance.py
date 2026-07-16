@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -309,6 +309,14 @@ class ReviewCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     requested_evidence: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     admin_notes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    assigned_reviewer_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    source_freshness_deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     last_reminder_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_reminder_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -318,6 +326,9 @@ class ReviewDecision(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "sharia_review_decisions"
     __table_args__ = (
         UniqueConstraint("review_case_id", "decision_version", name="uq_review_decision_version"),
+        UniqueConstraint(
+            "integrity_hash", name="uq_sharia_review_decision_integrity_hash"
+        ),
         Index("ix_review_decision_case_created", "review_case_id", "created_at"),
     )
 
@@ -333,6 +344,18 @@ class ReviewDecision(UUIDPrimaryKeyMixin, Base):
     decision: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_snapshot_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    criterion_decisions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    qualifications: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    acknowledged_gaps: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    ai_analysis_snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_ai_analysis_snapshots.id", ondelete="SET NULL")
+    )
+    actor_role: Mapped[str] = mapped_column(String(40), default="REVIEWER", nullable=False)
+    application_version: Mapped[str | None] = mapped_column(String(80))
+    security_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    integrity_hash: Mapped[str | None] = mapped_column(String(64))
     decision_version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -360,6 +383,9 @@ class PublishedAssetAssessment(UUIDPrimaryKeyMixin, Base):
         ForeignKey("asset_sharia_assessments.id", ondelete="RESTRICT"), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    supersedes_publication_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("published_asset_assessments.id", ondelete="SET NULL")
+    )
     publication_state: Mapped[str] = mapped_column(String(32), nullable=False)
     passport_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     integrity_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
@@ -425,3 +451,97 @@ class TelegramNotificationAttempt(UUIDPrimaryKeyMixin, Base):
     last_error_code: Mapped[str | None] = mapped_column(String(100))
     last_error_detail: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ShariaGovernanceRoleGrant(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "sharia_governance_role_grants"
+    __table_args__ = (
+        UniqueConstraint("user_id", "role", name="uq_sharia_governance_user_role"),
+        Index("ix_sharia_governance_role_active", "role", "revoked_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    granted_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+
+class ShariaReviewerProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "sharia_reviewer_profiles"
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    organization: Mapped[str | None] = mapped_column(String(240))
+    authorization_role: Mapped[str] = mapped_column(String(160), nullable=False)
+    qualifications: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class ShariaReviewAssignmentEvent(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "sharia_review_assignment_events"
+    __table_args__ = (
+        Index("ix_sharia_assignment_case_created", "review_case_id", "created_at"),
+    )
+
+    review_case_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sharia_review_cases.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    previous_assignee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    assigned_reviewer_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    priority: Mapped[str | None] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ShariaPassportProblemReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "sharia_passport_problem_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "review_case_id", name="uq_sharia_passport_problem_report_case"
+        ),
+        Index("ix_sharia_passport_report_state_created", "state", "created_at"),
+        Index("ix_sharia_passport_report_asset", "canonical_asset_id", "created_at"),
+    )
+
+    reporter_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    canonical_asset_id: Mapped[UUID] = mapped_column(
+        ForeignKey("canonical_assets.id", ondelete="RESTRICT"), nullable=False
+    )
+    asset_assessment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("asset_sharia_assessments.id", ondelete="SET NULL")
+    )
+    passport_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("published_asset_assessments.id", ondelete="SET NULL")
+    )
+    review_case_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_review_cases.id", ondelete="SET NULL")
+    )
+    report_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    details: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), default="open", nullable=False)
+    resolution: Mapped[str | None] = mapped_column(Text)
+    resolved_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

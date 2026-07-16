@@ -323,15 +323,35 @@ per asset/run. Its schema contains factual findings and review recommendations, 
 or religious-status field.
 
 `ShariaGovernanceService` is the only publication bridge. It rechecks application `ADMIN` authority,
-records an immutable decision, preserves evidence snapshot references, publishes the two-layer
-Passport transactionally, and invalidates affected screened universes. Rejection retains the source,
-dossier, AI result, and decision while creating no public assessment. Published assets alone enter
+records an immutable decision, preserves evidence snapshot references, and then requires a separate
+publication action before publishing the two-layer Passport transactionally and invalidating
+affected screened universes. Governance role grants distinguish `SYSTEM_ADMIN`, `RESEARCHER`,
+`REVIEWER`, and `PUBLISHER`; one owner may hold all four. With `REQUIRE_SECOND_REVIEWER=true`, the
+reviewer cannot publish the same decision. Rejection retains the source, dossier, AI result, and
+decision while creating no public assessment. Published assets alone enter
 `ShariaSourceMonitoringService`; unchanged sources make no AI request, while material changes create
 a human review and can apply a fail-closed operational hold without rewriting history. The admin-only
 System Brain reads real aggregates and is absent from customer navigation.
+
+`ShariaPassportReadService` composes one current/historical Passport model for Quick View, the full
+page, and event references. Published versions are immutable and linked through
+`supersedes_publication_id`. Scan results, setup instances, and alerts retain the exact assessment,
+Passport publication, methodology, screened-universe snapshot, and policy decision used at
+evaluation. Historical routes resolve that publication directly and display current status as a
+separate fact. Missing legacy evidence is shown as unavailable rather than reconstructed.
+
+Checkout is prepared from the server-owned Plan Catalog and persisted in `BillingCheckoutAttempt`.
+Verified idempotent provider events activate entitlements and enqueue one `PaymentEmailDelivery`
+logical event. The payment email worker renders HTML/plain-text messages and retries bounded failures
+without letting browser prices, webhook replays, or email retries create another entitlement event.
 
 The migration pauses legacy active monitors until a real approved methodology and resolved policy
 are attached. Governance migration `d6e7f8a9b0c1` adds normalized source, dossier, review,
 publication, monitoring, and Telegram-attempt records. It seeds the SC Malaysia methodology
 family/version but no asset conclusion. See
 `docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md`.
+
+Governance/Passport/checkout migration `e7f8a9b0c1d2` adds exact historical references, reviewer
+roles/profiles/assignments, Passport problem reports, immutable decision details, superseding
+publication linkage, checkout attempts, and payment-email delivery state. See
+`docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md`.

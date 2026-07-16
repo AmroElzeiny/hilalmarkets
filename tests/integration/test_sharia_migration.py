@@ -23,17 +23,24 @@ def _run_alembic(repo_root: Path, env: dict[str, str], revision: str) -> None:
 
 def test_sharia_migration_identifiers_fit_postgresql_limit():
     repo_root = Path(__file__).resolve().parents[2]
-    migration_path = (
+    migration_paths = [
         repo_root
         / "alembic"
         / "versions"
-        / "c5d6e7f8a9b0_add_sharia_first_product_layer.py"
-    )
-    migration_source = migration_path.read_text(encoding="utf-8")
-    explicit_names = re.findall(
-        r'"((?:fk|ix|uq|ck)_[A-Za-z0-9_]+)"',
-        migration_source,
-    )
+        / "c5d6e7f8a9b0_add_sharia_first_product_layer.py",
+        repo_root
+        / "alembic"
+        / "versions"
+        / "e7f8a9b0c1d2_add_passport_governance_checkout_email.py",
+    ]
+    explicit_names = [
+        name
+        for migration_path in migration_paths
+        for name in re.findall(
+            r'"((?:fk|ix|uq|ck)_[A-Za-z0-9_]+)"',
+            migration_path.read_text(encoding="utf-8"),
+        )
+    ]
 
     over_limit = sorted({name for name in explicit_names if len(name) > 63})
     assert over_limit == []
@@ -83,6 +90,12 @@ def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):
         "published_asset_assessments",
         "source_change_events",
         "sharia_telegram_notification_attempts",
+        "sharia_governance_role_grants",
+        "sharia_reviewer_profiles",
+        "sharia_review_assignment_events",
+        "sharia_passport_problem_reports",
+        "billing_checkout_attempts",
+        "payment_email_deliveries",
     }.issubset(table_names)
     assert methodology == ("SC_MALAYSIA_SAC_REFERENCE", "2026.03", "active")
     assert canonical_assets == 0

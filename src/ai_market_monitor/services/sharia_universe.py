@@ -10,7 +10,11 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
+    AssetShariaAssessment,
+    CanonicalAsset,
+    ExchangeMarket,
     MonitorShariaAssetState,
+    PublishedAssetAssessment,
     ShariaUniverseSnapshot,
     Strategy,
     StrategyUniverse,
@@ -103,6 +107,12 @@ class ShariaUniverseResolver:
         safety_holds = await self.screening.safety_hold_assets(
             assets={canonical_asset(symbol) for symbol in scoped_symbols}
         )
+        publications = await self._active_publications(assessments)
+        canonical_assets, exchange_markets = await self._market_mappings(
+            publications,
+            exchange=definition.universe.exchange,
+            symbols=scoped_symbols,
+        )
         allowed = set(policy.allowed_statuses)
         included: list[ShariaUniverseInclusion] = []
         excluded: list[ShariaUniverseExclusion] = list(scope_exclusions)
@@ -120,6 +130,66 @@ class ShariaUniverseResolver:
                             "methodology. The asset was excluded fail-closed."
                         ),
                         status=ShariaAssetStatus.INSUFFICIENT_INFORMATION,
+                    )
+                )
+                continue
+            publication = publications.get(assessment.id)
+            canonical_record = (
+                canonical_assets.get(publication.canonical_asset_id)
+                if publication is not None
+                else None
+            )
+            market = exchange_markets.get(canonical_symbol(symbol))
+            if publication is None and self.settings.is_deployed:
+                excluded.append(
+                    ShariaUniverseExclusion(
+                        symbol=symbol,
+                        canonical_asset=asset,
+                        reason_code="passport_version_unavailable",
+                        reason=(
+                            "No immutable published Passport version is bound to this "
+                            "assessment, so the market was excluded fail-closed."
+                        ),
+                        status=assessment.status,
+                        assessment_id=assessment.id,
+                    )
+                )
+                continue
+            if publication is not None and (
+                canonical_record is None or canonical_record.mapping_state != "verified"
+            ):
+                excluded.append(
+                    ShariaUniverseExclusion(
+                        symbol=symbol,
+                        canonical_asset=asset,
+                        reason_code="canonical_identity_unverified",
+                        reason=(
+                            "The published assessment is not bound to a verified canonical "
+                            "asset identity, so the market was excluded fail-closed."
+                        ),
+                        status=assessment.status,
+                        assessment_id=assessment.id,
+                    )
+                )
+                continue
+            if publication is not None and (
+                market is None
+                or not market.is_active
+                or market.market_type.casefold() != "spot"
+                or market.canonical_asset_id != publication.canonical_asset_id
+            ):
+                excluded.append(
+                    ShariaUniverseExclusion(
+                        symbol=symbol,
+                        canonical_asset=asset,
+                        reason_code="eligible_market_unavailable",
+                        reason=(
+                            "The asset is screened under this methodology, but the selected "
+                            "exchange spot market is unavailable or not verified for the "
+                            "same canonical asset."
+                        ),
+                        status=assessment.status,
+                        assessment_id=assessment.id,
                     )
                 )
                 continue
@@ -175,8 +245,13 @@ class ShariaUniverseResolver:
                 ShariaUniverseInclusion(
                     symbol=symbol,
                     canonical_asset=asset,
+                    canonical_asset_id=(
+                        publication.canonical_asset_id if publication else None
+                    ),
+                    exchange_market_id=market.id if market else None,
                     status=effective_status,
                     assessment_id=assessment.id,
+                    passport_version_id=publication.id if publication else None,
                     qualification=list(assessment.qualifications or []),
                     reviewed_at=assessment.reviewed_at,
                 )
@@ -260,6 +335,60 @@ class ShariaUniverseResolver:
             snapshot_version=snapshot.snapshot_version if snapshot else None,
             resolved_at=now,
             monitor_paused_for_compliance=monitor_paused_for_compliance,
+        )
+
+    async def _active_publications(
+        self,
+        assessments: dict[str, AssetShariaAssessment],
+    ) -> dict[UUID, PublishedAssetAssessment]:
+        assessment_ids = [row.id for row in assessments.values()]
+        if not assessment_ids:
+            return {}
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(PublishedAssetAssessment).where(
+                        PublishedAssetAssessment.asset_assessment_id.in_(assessment_ids),
+                        PublishedAssetAssessment.is_active.is_(True),
+                        PublishedAssetAssessment.publication_state == "published",
+                    )
+                )
+            ).all()
+        )
+        return {row.asset_assessment_id: row for row in rows}
+
+    async def _market_mappings(
+        self,
+        publications: dict[UUID, PublishedAssetAssessment],
+        *,
+        exchange: str,
+        symbols: list[str],
+    ) -> tuple[dict[UUID, CanonicalAsset], dict[str, ExchangeMarket]]:
+        asset_ids = {row.canonical_asset_id for row in publications.values()}
+        if not asset_ids:
+            return {}, {}
+        assets = list(
+            (
+                await self.session.scalars(
+                    select(CanonicalAsset).where(CanonicalAsset.id.in_(asset_ids))
+                )
+            ).all()
+        )
+        normalized_symbols = {canonical_symbol(symbol) for symbol in symbols}
+        markets = list(
+            (
+                await self.session.scalars(
+                    select(ExchangeMarket).where(
+                        ExchangeMarket.canonical_asset_id.in_(asset_ids),
+                        func.lower(ExchangeMarket.exchange) == exchange.casefold(),
+                        ExchangeMarket.market_symbol.in_(normalized_symbols),
+                    )
+                )
+            ).all()
+        )
+        return (
+            {row.id: row for row in assets},
+            {canonical_symbol(row.market_symbol): row for row in markets},
         )
 
     async def invalidate_methodology_snapshots(
@@ -431,6 +560,17 @@ class ShariaUniverseResolver:
                 {
                     "symbol": item.symbol,
                     "assessment_id": str(item.assessment_id),
+                    "passport_version_id": (
+                        str(item.passport_version_id)
+                        if item.passport_version_id
+                        else None
+                    ),
+                    "canonical_asset_id": (
+                        str(item.canonical_asset_id) if item.canonical_asset_id else None
+                    ),
+                    "exchange_market_id": (
+                        str(item.exchange_market_id) if item.exchange_market_id else None
+                    ),
                     "status": item.status.value,
                 }
                 for item in included

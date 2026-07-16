@@ -132,11 +132,14 @@ SHARIA_AI_MODEL=gpt-5.4-nano
 SHARIA_AI_REASONING_EFFORT=low
 SHARIA_AI_SERVICE_TIER=flex
 SHARIA_AI_ALLOW_STANDARD_FALLBACK=false
+SHARIA_REVIEW_SLA_HOURS=48
+REQUIRE_SECOND_REVIEWER=false
 SHARIA_SCRAPER_CONCURRENCY=1
 SHARIA_SCRAPER_OBEY_ROBOTS=true
 SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS=1
 SHARIA_PILOT_SYMBOLS=BTC,ETH,SOL
 SHARIA_PROCESS_REMAINING_IMPORTS=false
+SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true
 ```
 
 Deploy this migration with scanning stopped. `alembic upgrade head` pauses every previously active
@@ -158,7 +161,24 @@ An authenticated administrator must review and approve each evidence package bef
 appear in the customer screener. An active methodology with zero approved assessments therefore
 produces an intentionally empty, clearly labelled screener.
 
+Review and publication are separate audited actions. With the default one-owner policy, the same
+account can perform both. Set `REQUIRE_SECOND_REVIEWER=true` only after a second active publisher is
+provisioned and the four-eyes staging test passes. Apply migration `e7f8a9b0c1d2` before using the
+new Passport history, assignment, checkout, or payment-email flow.
+
+Protect `/system-brain*` with Cloudflare Access and application ADMIN authentication. Restrict the
+origin with Cloudflare Tunnel or firewall rules; Access headers are not trustworthy if arbitrary
+clients can reach the origin. Test unauthenticated, non-admin, spoofed-header, alternate-hostname,
+and direct-origin-IP bypass attempts from outside the VPS before launch.
+
+For billing, configure the server Plan Catalog and provider webhook first, then SMTP. Verify one
+provider sandbox checkout creates one entitlement transition and one payment-email event despite a
+replayed webhook. Run `scripts/test_payment_email.py` for a no-send preview and
+`scripts/test_compliance_notification.py` without `--live` before controlled staging sends.
+
 This release is technically fail-closed; it is not religiously production-ready until a qualified
 body, reviewers, approved methodology content, evidence-source operations, review cadence, and
 incident SLAs are configured. The complete checklist and known limitations are in
 `docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md`.
+Passport, billing, notification, and edge-protection details are in
+`docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md`.

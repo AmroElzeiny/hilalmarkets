@@ -1,6 +1,8 @@
 import re
 
-from ai_market_monitor.db.models import User, UserIdentity
+from sqlalchemy import func, select
+
+from ai_market_monitor.db.models import AuditEvent, ReviewCase, User, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
 
 
@@ -170,3 +172,91 @@ async def test_system_brain_can_require_cloudflare_access_before_admin(test_cont
         },
     )
     assert passed.status_code == 200
+
+
+async def test_review_action_enforces_admin_csrf_state_and_audit(test_context):
+    admin = await _user(
+        test_context,
+        role=UserRole.ADMIN,
+        email="review-actions@example.com",
+    )
+    ordinary = await _user(
+        test_context,
+        role=UserRole.USER,
+        email="review-actions-customer@example.com",
+    )
+    async with test_context["session_factory"]() as session:
+        case = ReviewCase(
+            case_reference="CHG-WEB-ACTION",
+            case_type="material_source_change",
+            state="ready_for_review",
+            publication_state="change_under_review",
+            title="Review reported source change",
+            priority="normal",
+            risk_severity="low",
+            human_review_reason="A source report requires a recorded human decision.",
+            requested_evidence=[],
+            admin_notes=[],
+            idempotency_key="web-review-action-test",
+        )
+        session.add(case)
+        await session.commit()
+        case_id = case.id
+
+    headers = {"X-User-ID": str(admin.id)}
+    detail = await test_context["client"].get(
+        f"/system-brain/reviews/{case_id}", headers=headers
+    )
+    assert detail.status_code == 200
+    assert "Dismiss false positive" in detail.text
+    csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', detail.text)
+    assert csrf is not None
+    form = {
+        "action": "dismiss_false_positive",
+        "reason": "The reviewed source content is unchanged and the report is not material.",
+        "csrf_token": csrf.group(1),
+    }
+
+    denied = await test_context["client"].post(
+        f"/system-brain/reviews/{case_id}/decision",
+        data=form,
+        headers={"X-User-ID": str(ordinary.id)},
+        follow_redirects=False,
+    )
+    bad_csrf = await test_context["client"].post(
+        f"/system-brain/reviews/{case_id}/decision",
+        data={**form, "csrf_token": "invalid"},
+        headers=headers,
+        follow_redirects=False,
+    )
+    recorded = await test_context["client"].post(
+        f"/system-brain/reviews/{case_id}/decision",
+        data=form,
+        headers=headers,
+        follow_redirects=False,
+    )
+    replay = await test_context["client"].post(
+        f"/system-brain/reviews/{case_id}/decision",
+        data=form,
+        headers=headers,
+        follow_redirects=False,
+    )
+
+    assert denied.status_code == 403
+    assert bad_csrf.status_code == 403
+    assert recorded.status_code == 303
+    assert "success=" in recorded.headers["location"]
+    assert replay.status_code == 303
+    assert "error=" in replay.headers["location"]
+
+    async with test_context["session_factory"]() as session:
+        stored = await session.get(ReviewCase, case_id)
+        event_count = await session.scalar(
+            select(func.count(AuditEvent.id)).where(
+                AuditEvent.action == "sharia.review_false_positive_dismissed",
+                AuditEvent.target_id == str(case_id),
+            )
+        )
+
+    assert stored is not None and stored.state == "superseded"
+    assert event_count == 1

@@ -16,6 +16,10 @@
   <div class="notice notice-neutral"><span data-icon="radar" data-icon-class="icon"></span><div><strong>No public readiness claim</strong><p>Sign in and run Check the Market Now to calculate current opportunity evidence from your approved rules.</p></div></div>
   {% endif %}
   {% if item.qualifications %}<div class="notice"><span data-icon="alert" data-icon-class="icon-sm"></span><div><strong>Qualification</strong><p>{{ item.qualifications[0] }}</p></div></div>{% endif %}
-  <div class="opportunity-actions"><a class="btn btn-secondary btn-sm" href="{{ detail_href }}"><span data-icon="passport" data-icon-class="icon-sm"></span>View evidence</a>{% if watch_href %}<a class="btn btn-primary btn-sm" href="{{ watch_href }}"><span data-icon="radar" data-icon-class="icon-sm"></span>Watch</a>{% endif %}</div>
+  <div class="opportunity-actions">
+    {% if item.asset %}<button class="btn btn-secondary btn-sm" type="button" data-passport-quick-view data-passport-asset="{{ item.asset }}"{% if item.methodology_id %} data-passport-methodology-id="{{ item.methodology_id }}"{% endif %}{% if item.passport_version_id %} data-passport-version-id="{{ item.passport_version_id }}"{% endif %}{% if item.event_time %} data-passport-event-time="{{ item.event_time.isoformat() }}"{% endif %}><span data-icon="passport" data-icon-class="icon-sm"></span>Quick View</button>{% endif %}
+    <a class="btn btn-secondary btn-sm" href="{{ detail_href }}"><span data-icon="eye" data-icon-class="icon-sm"></span>Full Passport</a>
+    {% if watch_href %}<a class="btn btn-primary btn-sm" href="{{ watch_href }}"><span data-icon="radar" data-icon-class="icon-sm"></span>Watch</a>{% endif %}
+  </div>
 </article>
 {%- endmacro %}

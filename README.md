@@ -25,6 +25,11 @@ case. No asset is customer-visible until an application `ADMIN` approves publica
 a religious status or publish an asset. See
 [docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md](docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md)
 for the architecture, source boundaries, deployment order, tests, and manual review requirements.
+Current and historical Passport views now share one read model, alerts retain the exact Passport
+version used at evaluation, and System Brain separates review from publication with optional
+four-eyes enforcement. The first-party checkout uses the server Plan Catalog and a durable
+successful-payment email outbox. See
+[docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md](docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md).
 
 The public product surface uses shared HilalMarkets Jinja shells, emerald/ivory/gold design
 tokens, and server-owned content sources. Dedicated routes cover Features, How It Works, How We
@@ -73,6 +78,7 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
 [docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md), and
 [docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md](docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md), and
+[docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md](docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md), and
 [docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
 The production page map, exact prototype asset mapping, and UI verification commands are in
 [docs/HILALMARKETS_UI_MIGRATION.md](docs/HILALMARKETS_UI_MIGRATION.md); the supplied design,

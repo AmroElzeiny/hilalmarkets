@@ -244,12 +244,19 @@ def test_screened_market_passport_and_mobile_visual_qa(
     page.locator("[data-live-market-search]").fill("SOL/USDT")
     expect(live_row).to_be_visible()
     expect(page.locator(".live-market-row:visible")).to_have_count(1)
-    live_row.get_by_role("button", name="Show passport").click()
-    passport_dialog = page.locator("[data-market-passport-dialog]")
+    passport_button = live_row.get_by_role("button", name="Show passport")
+    passport_button.click()
+    passport_dialog = page.locator("[data-passport-quick-dialog]")
     expect(passport_dialog).to_be_visible()
     expect(passport_dialog).to_contain_text("Eligible")
-    expect(passport_dialog.get_by_role("link", name="View full passport")).to_be_visible()
-    passport_dialog.get_by_role("button", name="Done").click()
+    expect(passport_dialog.get_by_role("link", name="Open Full Passport")).to_be_visible()
+    page.screenshot(
+        path=str(visual_dir / "passport-quick-view-desktop.png"),
+        full_page=False,
+    )
+    page.keyboard.press("Escape")
+    expect(passport_dialog).to_be_hidden()
+    expect(passport_button).to_be_focused()
     page.screenshot(
         path=str(visual_dir / "screened-market-live-table-desktop.png"),
         full_page=True,
@@ -260,11 +267,18 @@ def test_screened_market_passport_and_mobile_visual_qa(
         f"&methodology_id={seeded['methodology_id']}"
     )
     page.locator(".opportunity-card").first.get_by_role(
-        "link", name="View evidence"
+        "link", name="Full Passport"
     ).click()
-    expect(page.get_by_text("SHARIA EVIDENCE PASSPORT")).to_be_visible()
+    expect(page.locator(".passport-page-title .eyebrow")).to_have_text(
+        "Sharia Evidence Passport"
+    )
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
-    expect(page.get_by_text("HilalMarkets AI does not issue religious rulings.")).to_be_visible()
+    expect(
+        page.get_by_role(
+            "heading",
+            name="AI-organized factual research — not a religious decision.",
+        )
+    ).to_be_visible()
     page.screenshot(
         path=str(visual_dir / "sharia-evidence-passport-desktop.png"),
         full_page=True,
@@ -277,10 +291,44 @@ def test_screened_market_passport_and_mobile_visual_qa(
     page.set_viewport_size({"width": 390, "height": 844})
     expect(card).to_be_visible()
     assert card.bounding_box()["width"] <= 390
+    card.get_by_role("button", name="Quick View").click()
+    expect(passport_dialog).to_be_visible()
+    page.screenshot(
+        path=str(visual_dir / "passport-quick-view-mobile-390.png"),
+        full_page=False,
+    )
+    page.keyboard.press("Escape")
     page.screenshot(
         path=str(visual_dir / "screened-market-mobile-390.png"),
         full_page=True,
     )
+    assert_no_raw_traceback(page)
+
+
+def test_checkout_review_desktop_and_mobile_visual_qa(
+    page: Page,
+    base_url: str,
+) -> None:
+    signup(page, base_url, unique_email("checkout-review"))
+    output = Path("reports/visual-qa/checkout")
+    output.mkdir(parents=True, exist_ok=True)
+
+    page.goto(f"{base_url}/dashboard/billing/checkout?plan_code=trader")
+    expect(page.get_by_role("heading", name="Review before payment.")).to_be_visible()
+    catalog_copy = page.get_by_text(
+        "Your plan, price, and limits below were loaded from the server plan catalog."
+    )
+    expect(catalog_copy).to_be_visible()
+    expect(page.get_by_text("Billing frequency")).to_be_visible()
+    expect(page.get_by_text("Monthly", exact=True)).to_be_visible()
+    expect(page.get_by_role("checkbox")).to_be_visible()
+    expect(page.get_by_role("button", name="Continue to secure payment")).to_be_visible()
+    page.screenshot(path=str(output / "checkout-desktop-1440.png"), full_page=True)
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.get_by_role("heading", name="Review before payment.")).to_be_visible()
+    expect(page.get_by_role("button", name="Continue to secure payment")).to_be_visible()
+    page.screenshot(path=str(output / "checkout-mobile-390.png"), full_page=True)
     assert_no_raw_traceback(page)
 
 
