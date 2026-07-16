@@ -106,6 +106,11 @@ img, svg { display: block; max-width: 100%; }
 .brain-guard, .brain-icon-button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: rgba(15,92,77,.45); }
 .brain-guard { gap: 8px; padding: 9px 13px; border-radius: 999px; color: #d7e7e2; }
 .brain-icon-button { width: 40px; height: 40px; border-radius: 12px; color: #bfd2cb; }
+.brain-import-actions { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.brain-import-actions time { color: var(--muted); }
+.brain-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid rgba(210,175,99,.45); border-radius: 11px; background: rgba(210,175,99,.12); color: var(--gold-soft); cursor: pointer; font-weight: 700; transition: transform .2s var(--ease), background .2s, border-color .2s; }
+.brain-action-button:hover { transform: translateY(-1px); background: rgba(210,175,99,.19); border-color: rgba(210,175,99,.72); }
+.brain-action-button .icon { width: 16px; height: 16px; }
 .brain-flash { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 13px 15px; border: 1px solid; border-radius: 13px; }
 .brain-flash.success { border-color: rgba(85,216,174,.3); background: rgba(32,125,94,.18); color: #a9efd7; }
 .brain-flash.error { border-color: rgba(242,138,138,.3); background: rgba(147,56,56,.15); color: #ffc6c6; }

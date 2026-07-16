@@ -76,6 +76,7 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
     ShariaScreeningService,
     canonical_asset,
+    methodology_is_development_only,
     sharia_evidence_from_proof,
 )
 from ai_market_monitor.services.telegram_account_links import (
@@ -1122,10 +1123,36 @@ async def screened_market_page(
     settings: Settings = Depends(get_settings),
     provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> HTMLResponse:
-    test_market_enabled = (
-        settings.app_env in {"development", "test"} and settings.sharia_test_market_enabled
+    screening = ShariaScreeningService(session, settings)
+    methodologies = await screening.selectable_market_methodologies()
+    executable_methodologies = [
+        row for row in methodologies if not methodology_is_development_only(row)
+    ]
+    test_methodology = await screening.development_methodology()
+    preference = await session.scalar(
+        select(DashboardPreference).where(DashboardPreference.user_id == user.id)
     )
-    if test_market_enabled:
+    raw_preference_values = preference.notification_preferences if preference else None
+    preference_values = dict(raw_preference_values or {})
+    stored_policy = (
+        preference_values.get("sharia") if isinstance(preference_values.get("sharia"), dict) else {}
+    )
+    preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
+        "default_sharia_methodology_id"
+    )
+    if methodology_id is None and preference_methodology:
+        try:
+            methodology_id = UUID(str(preference_methodology))
+        except ValueError:
+            methodology_id = None
+    use_test_market = bool(
+        screening.development_methodologies_enabled()
+        and (
+            (test_methodology is not None and methodology_id == test_methodology.id)
+            or (methodology_id is None and not executable_methodologies)
+        )
+    )
+    if use_test_market:
         active_watchlists = int(
             await session.scalar(
                 select(func.count(Strategy.id)).where(
@@ -1151,28 +1178,19 @@ async def screened_market_page(
                 title="Sharia Market",
                 live_test_market=True,
                 test_methodology_notice=TEST_METHODOLOGY_NOTICE,
+                methodologies=methodologies,
+                selected_methodology_id=(
+                    test_methodology.id if test_methodology is not None else None
+                ),
                 selected_exchange=selected_live_exchange,
                 selected_quote_asset=quote_asset.upper(),
                 market_search=search or "",
                 active_watchlists=active_watchlists,
             ),
         )
-    screening = ShariaScreeningService(session, settings)
-    methodologies = await screening.executable_methodologies()
-    preference = await session.scalar(
-        select(DashboardPreference).where(DashboardPreference.user_id == user.id)
-    )
-    preference_values = dict(preference.notification_preferences or {}) if preference else {}
-    stored_policy = (
-        preference_values.get("sharia") if isinstance(preference_values.get("sharia"), dict) else {}
-    )
-    preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
-        "default_sharia_methodology_id"
-    )
-    if methodology_id is None and preference_methodology:
-        try:
-            methodology_id = UUID(str(preference_methodology))
-        except ValueError:
+    if methodology_id is not None:
+        selected_row = await session.get(ShariaMethodology, methodology_id)
+        if selected_row is not None and methodology_is_development_only(selected_row):
             methodology_id = None
     asset_scope: set[str] | None = None
     market_data_warning: str | None = None
@@ -1374,6 +1392,7 @@ async def screened_market_page(
             title="Screened Market",
             screened=screened,
             methodologies=methodologies,
+            selected_methodology_id=selected_methodology_id,
             opportunity_cards=opportunity_cards,
             active_watch_plans=active_watch_plans,
             status_changes=status_changes,
@@ -2545,6 +2564,17 @@ async def settings_page(
     )
     screening = ShariaScreeningService(session, settings)
     sharia_preferences = dict((preference.notification_preferences or {}) if preference else {})
+    sharia_methodologies = []
+    for methodology in await screening.executable_methodologies():
+        assessments = await screening.effective_assessments(methodology.id)
+        sharia_methodologies.append(
+            {
+                "id": methodology.id,
+                "name": methodology.name,
+                "version": methodology.version,
+                "published_asset_count": len(assessments),
+            }
+        )
     return templates.TemplateResponse(
         request,
         "hilal/dashboard/settings.html",
@@ -2560,7 +2590,7 @@ async def settings_page(
             supported_themes=SUPPORTED_THEMES,
             alert_days=ALERT_DAYS,
             alert_hours=ALERT_HOURS,
-            sharia_methodologies=await screening.executable_methodologies(),
+            sharia_methodologies=sharia_methodologies,
             sharia_preferences=sharia_preferences,
         ),
     )

@@ -56,7 +56,7 @@
     <section class="brain-section brain-reveal">
       <div class="brain-section-head">
         <div><p class="brain-kicker">LIVE GOVERNANCE PULSE</p><h2>Review and publication controls</h2></div>
-        <time datetime="{{ data.generated_at.isoformat() }}">Updated {{ data.generated_at.strftime('%d %b %Y, %H:%M UTC') }}</time>
+        <div class="brain-import-actions"><time datetime="{{ data.generated_at.isoformat() }}">Updated {{ data.generated_at.strftime('%d %b %Y, %H:%M UTC') }}</time><form method="post" action="/system-brain/sc-malaysia/import"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="brain-action-button" type="submit"><i data-icon="scan"></i>Import SC Malaysia now</button></form></div>
       </div>
       <div class="brain-metric-grid">
         {% set metrics = [
@@ -68,6 +68,8 @@
           ('Material source changes', data.metrics.material_source_changes, 'Open change reviews', 'alert'),
           ('AI human reviews', data.metrics.ai_human_reviews, 'Factual analysis requested review', 'spark'),
           ('Scraper failures', data.metrics.scraper_failures, 'Recorded workflow failures', 'scan'),
+          ('Official rows imported', data.metrics.official_rows_imported, 'Explicit SC Malaysia records retained', 'database'),
+          ('SC import runs', data.metrics.import_runs, 'Idempotent source-import executions', 'scan'),
           ('Average review time', data.metrics.average_review_hours ~ 'h', 'Completed decision turnaround', 'clock'),
           ('Evidence freshness', data.metrics.evidence_freshness_hours ~ 'h', 'Since latest successful snapshot', 'activity')
         ] %}

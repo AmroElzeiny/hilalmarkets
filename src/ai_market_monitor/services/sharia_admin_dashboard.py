@@ -141,6 +141,11 @@ class ShariaAdminDashboardService:
                 "evidence_freshness_hours": round(
                     (now - last_fresh).total_seconds() / 3600 if last_fresh else 0, 2
                 ),
+                "official_rows_imported": await self.session.scalar(
+                    select(func.count(ExternalAssessment.id))
+                )
+                or 0,
+                "import_runs": sum(row.run_kind == "sc_import" for row in runs),
             },
             "charts": {
                 "pipeline": _chart(state_counts),

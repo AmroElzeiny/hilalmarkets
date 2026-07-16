@@ -220,6 +220,37 @@ async def system_brain_review_detail(
     )
 
 
+@router.post(
+    "/system-brain/sc-malaysia/import",
+    include_in_schema=False,
+)
+async def system_brain_import_sc_malaysia(
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    settings: Settings = Depends(get_settings),
+):
+    """Queue the idempotent SC import without publishing any customer conclusion."""
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        from ai_market_monitor.worker import app as worker_app
+
+        worker_app.send_task("ai_market_monitor.process_sc_malaysia_imports")
+    except Exception:
+        query = urlencode(
+            {"error": "The SC Malaysia import could not be queued. Check worker and Redis health."}
+        )
+        return RedirectResponse(f"/system-brain?{query}", status_code=303)
+    query = urlencode(
+        {
+            "success": (
+                "SC Malaysia import queued. Imported evidence will appear in Initial Coin "
+                "Reviews; nothing is customer-visible until an admin approves publication."
+            )
+        }
+    )
+    return RedirectResponse(f"/system-brain?{query}", status_code=303)
+
+
 @router.get(
     "/system-brain/{section_name}",
     response_class=HTMLResponse,

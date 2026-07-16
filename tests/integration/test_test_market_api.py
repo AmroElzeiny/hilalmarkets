@@ -1,4 +1,16 @@
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
+
 from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.db.models import ShariaMethodology, User
+from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
+from ai_market_monitor.schemas.sharia import (
+    AssessmentCreateRequest,
+    EvidenceSourceInput,
+    MethodologyCreateRequest,
+)
+from ai_market_monitor.services.sharia_screening import ShariaScreeningService
 
 
 class ApiQuoteProvider:
@@ -74,6 +86,140 @@ async def test_test_market_api_and_dashboard_are_gated_and_provider_backed(test_
     assert "Test methodology only" in page.text
     assert "data-market-passport-dialog" in page.text
     assert "sharia-market.js" in page.text
+
+
+async def test_local_test_market_does_not_hide_selected_executable_methodology(test_context):
+    await _signup(test_context, "coexisting-methodologies@example.com")
+    test_context["settings"].sharia_test_market_enabled = True
+    test_context["app"].dependency_overrides[get_market_data_provider] = ApiQuoteProvider
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User))
+        assert user is not None
+        screening = ShariaScreeningService(session, test_context["settings"])
+        malaysia = await screening.create_methodology(
+            MethodologyCreateRequest(
+                code="SC_MALAYSIA_SELECTION_TEST",
+                name="SC Malaysia selection test",
+                version="2026.03-test",
+                description=(
+                    "Evidence-backed active methodology used to verify explicit market selection."
+                ),
+                status=ShariaMethodologyStatus.ACTIVE,
+                governing_body="Qualified test governance",
+                reviewer_group="Qualified test reviewers",
+                effective_from=now - timedelta(days=1),
+                rules={"versioned": True},
+                evidence_requirements={"minimum_sources": 1},
+            ),
+            actor_user_id=user.id,
+            actor_identity="test-admin",
+        )
+        assessment = await screening.create_assessment(
+            AssessmentCreateRequest(
+                canonical_asset="SOL",
+                asset_name="Solana",
+                methodology_id=malaysia.id,
+                status=ShariaAssetStatus.ELIGIBLE,
+                summary="A qualified reviewer approved this test evidence package.",
+                evidence_sources=[
+                    EvidenceSourceInput(
+                        source_type="official_regulator",
+                        title="Official regulator reference",
+                        publisher="Test regulator",
+                        source_url="https://example.com/sc-reference",
+                        retrieved_at=now,
+                        evidence_category="external_status",
+                        evidence_summary="Explicit status evidence retained for route testing.",
+                    )
+                ],
+                reviewed_by="Qualified reviewer",
+                reviewed_at=now,
+                valid_from=now,
+                reason_code="route_test",
+                reason_summary="Qualified review completed for route selection testing.",
+            ),
+            actor_user_id=user.id,
+        )
+        test_methodology = ShariaMethodology(
+            code="TRACEDGE_DEV_TEST_ROUTE",
+            name="Development Test route",
+            version="1.0-test",
+            description="Development-only permissive market used for local product testing.",
+            status=ShariaMethodologyStatus.DRAFT,
+            rules_json={"development_only": True},
+            evidence_requirements_json={"live_quotes": True},
+        )
+        session.add(test_methodology)
+        await session.commit()
+
+    default_page = await test_context["client"].get("/dashboard/market?view=assets")
+    test_page = await test_context["client"].get(
+        f"/dashboard/market?methodology_id={test_methodology.id}&exchange=bybit"
+    )
+    malaysia_page = await test_context["client"].get(
+        f"/dashboard/market?methodology_id={malaysia.id}&view=assets"
+    )
+
+    assert default_page.status_code == 200
+    assert "SOL/USDT" in default_page.text
+    assert "Test methodology only" not in default_page.text
+    assert test_page.status_code == 200
+    assert "Test methodology only" in test_page.text
+    assert "SC Malaysia selection test" in test_page.text
+    assert malaysia_page.status_code == 200
+    assert "SOL/USDT" in malaysia_page.text
+    assert str(assessment.id) not in malaysia_page.text
+
+
+async def test_active_methodology_without_publications_has_clear_readiness_state(test_context):
+    await _signup(test_context, "empty-methodology@example.com")
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User))
+        assert user is not None
+        screening = ShariaScreeningService(session, test_context["settings"])
+        methodology = await screening.create_methodology(
+            MethodologyCreateRequest(
+                code="EMPTY_SC_MALAYSIA_TEST",
+                name="Empty SC Malaysia test",
+                version="2026.03-test",
+                description="Active methodology awaiting authenticated asset publication reviews.",
+                status=ShariaMethodologyStatus.ACTIVE,
+                governing_body="Qualified test governance",
+                reviewer_group="Qualified test reviewers",
+                effective_from=now - timedelta(days=1),
+                rules={"versioned": True},
+                evidence_requirements={"minimum_sources": 1},
+            ),
+            actor_user_id=user.id,
+            actor_identity="test-admin",
+        )
+        await session.commit()
+
+    page = await test_context["client"].get(
+        f"/dashboard/market?methodology_id={methodology.id}&view=assets"
+    )
+    settings_page = await test_context["client"].get("/dashboard/settings")
+    saved = await test_context["client"].post(
+        "/dashboard/settings",
+        data={
+            "timezone": "UTC",
+            "default_sharia_methodology_id": str(methodology.id),
+        },
+        follow_redirects=False,
+    )
+    default_market = await test_context["client"].get("/dashboard/market?view=assets")
+
+    assert page.status_code == 200
+    assert "no reviewed asset assessments have been published" in page.text
+    assert "No reviewed asset passports are published yet" in page.text
+    assert settings_page.status_code == 200
+    assert "Empty SC Malaysia test | v2026.03-test | 0 published passports" in settings_page.text
+    assert saved.status_code == 303
+    assert "settings_saved" in saved.headers["location"]
+    assert default_market.status_code == 200
+    assert "Empty SC Malaysia test" in default_market.text
 
 
 async def test_watchlists_saved_assets_and_market_scanner_are_distinct_routes(test_context):

@@ -148,6 +148,34 @@ class ShariaScreeningService:
             and not methodology_is_development_only(row)
         ]
 
+    def development_methodologies_enabled(self) -> bool:
+        """Return whether development-only methodologies may be shown in local UI."""
+        return bool(
+            self.settings
+            and self.settings.app_env in {"development", "test"}
+            and self.settings.sharia_test_market_enabled
+        )
+
+    async def selectable_market_methodologies(self) -> list[ShariaMethodology]:
+        """Return executable methods plus an explicitly enabled local test method.
+
+        Development methodologies remain excluded from strategy execution. This method is
+        only for choosing which market view to render, so enabling the Test screener cannot
+        make its permissive results executable in production monitoring.
+        """
+        executable = await self.executable_methodologies()
+        if not self.development_methodologies_enabled():
+            return executable
+        rows = await self.methodologies(include_non_active=True)
+        development = [row for row in rows if methodology_is_development_only(row)]
+        return [*executable, *development]
+
+    async def development_methodology(self) -> ShariaMethodology | None:
+        if not self.development_methodologies_enabled():
+            return None
+        rows = await self.methodologies(include_non_active=True)
+        return next((row for row in rows if methodology_is_development_only(row)), None)
+
     async def methodology(
         self,
         methodology_id: UUID,
@@ -318,6 +346,14 @@ class ShariaScreeningService:
                 ),
             )
         assessments = await self.effective_assessments(methodology.id)
+        readiness_warning = None
+        if not assessments:
+            readiness_warning = (
+                f"{methodology.name}, version {methodology.version}, is active, but no "
+                "reviewed asset assessments have been published under it yet. The screener "
+                "and passports will remain empty until an authenticated governance review "
+                "publishes evidence-backed asset records."
+            )
         safety_holds = await self.safety_hold_assets(assets=set(assessments))
         values = list(assessments.values())
         if asset_scope is not None:
@@ -378,6 +414,7 @@ class ShariaScreeningService:
             total=total,
             status_counts=counts,
             methodology=self.methodology_summary(methodology),
+            warning=readiness_warning,
         )
 
     async def passport(

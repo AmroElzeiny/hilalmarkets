@@ -1,3 +1,5 @@
+import re
+
 from ai_market_monitor.db.models import User, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
 
@@ -56,7 +58,7 @@ async def test_system_brain_requires_real_application_admin_role(test_context):
     assert 'href="/system-brain"' not in customer_dashboard.text
 
 
-async def test_system_brain_renders_live_sharia_governance_workspace(test_context):
+async def test_system_brain_renders_live_sharia_governance_workspace(test_context, monkeypatch):
     admin = await _user(
         test_context,
         role=UserRole.ADMIN,
@@ -71,6 +73,7 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
     assert "Initial Coin Reviews" in dashboard.text
     assert "Published Assets" in dashboard.text
     assert "Telegram / Delivery" in dashboard.text
+    assert "Import SC Malaysia now" in dashboard.text
     assert "governance@example.com" in dashboard.text
     assert "<pre" not in dashboard.text
     assert "tojson" not in dashboard.text
@@ -78,6 +81,22 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
     stylesheet = (await test_context["client"].get("/static/system-brain.css")).text
     assert "--emerald-950" in stylesheet
     assert "prefers-reduced-motion" in stylesheet
+
+    csrf_match = re.search(r'name="csrf_token" value="([a-f0-9]+)"', dashboard.text)
+    assert csrf_match is not None
+    queued: list[str] = []
+    monkeypatch.setattr(
+        "ai_market_monitor.worker.app.send_task",
+        lambda task_name: queued.append(task_name),
+    )
+    imported = await test_context["client"].post(
+        "/system-brain/sc-malaysia/import",
+        data={"csrf_token": csrf_match.group(1)},
+        headers=headers,
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+    assert queued == ["ai_market_monitor.process_sc_malaysia_imports"]
 
     for path in (
         "/system-brain/reviews?kind=initial_asset_review",

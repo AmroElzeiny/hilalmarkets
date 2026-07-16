@@ -122,7 +122,7 @@ Deployed live scanning must use the fail-closed screened-market boundary:
 ```text
 SHARIA_SCREENING_ENFORCED=true
 SHARIA_ALLOW_LEGACY_UNSCREENED_LOCAL=false
-SHARIA_DEFAULT_METHODOLOGY_CODE=<qualified-approved-active-code>
+SHARIA_DEFAULT_METHODOLOGY_CODE=SC_MALAYSIA_SAC_REFERENCE
 SHARIA_UNIVERSE_CACHE_TTL_SECONDS=300
 SHARIA_COMPLIANCE_SAFETY_UNDER_REVIEW=true
 SHARIA_COMPLIANCE_DIGEST_LOCAL_HOUR=8
@@ -150,6 +150,13 @@ from ordinary methodology selection, and must never be promoted or represented a
 ruling. Verify the Compliance Watch review queue, cache invalidation, one provisional safety hold,
 one approved status transition, and in-app plus staging Telegram/Discord drift delivery before
 opening production scanning.
+
+After the migration, open `/system-brain` and choose **Import SC Malaysia now**, or run
+`celery -A ai_market_monitor.worker call ai_market_monitor.process_sc_malaysia_imports` from the
+worker container. Importing creates evidence and review cases; it does not publish passports.
+An authenticated administrator must review and approve each evidence package before the asset can
+appear in the customer screener. An active methodology with zero approved assessments therefore
+produces an intentionally empty, clearly labelled screener.
 
 This release is technically fail-closed; it is not religiously production-ready until a qualified
 body, reviewers, approved methodology content, evidence-source operations, review cadence, and
