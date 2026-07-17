@@ -126,6 +126,22 @@ def validate_runtime_configuration(settings: Settings) -> None:
             settings.openai_api_key
         ):
             errors.append("OPENAI_API_KEY must not use a placeholder value")
+        if settings.public_chat_enabled:
+            if settings.email_adapter != "smtp":
+                errors.append("EMAIL_ADAPTER=smtp is required when the public chat is enabled")
+            required_public_chat_email = {
+                "SMTP_HOST": settings.smtp_host,
+                "SMTP_USERNAME": settings.smtp_username,
+                "SMTP_PASSWORD": settings.smtp_password,
+                "SMTP_FROM_EMAIL": settings.smtp_from_email,
+            }
+            for name, value in required_public_chat_email.items():
+                if value is None or not (_secret_value(value) or "").strip():
+                    errors.append(f"{name} is required when the public chat is enabled")
+                elif _looks_like_placeholder(value):
+                    errors.append(f"{name} must not use a placeholder value")
+            if "@" not in settings.public_chat_inquiry_email:
+                errors.append("PUBLIC_CHAT_INQUIRY_EMAIL must be a valid delivery address")
         if settings.telegram_enabled:
             if settings.telegram_adapter != "http":
                 errors.append("TELEGRAM_ADAPTER=http is required when Telegram is enabled")
@@ -166,23 +182,6 @@ def validate_runtime_configuration(settings: Settings) -> None:
                     "WHATSAPP_TEMPLATE_NAMES must configure confirmed_research_event when "
                     "WhatsApp opportunity alerts are enabled"
                 )
-        if settings.discord_enabled:
-            if settings.discord_adapter == "noop":
-                errors.append("NoopDiscordGateway is forbidden when Discord is enabled")
-            if not settings.discord_client_id:
-                errors.append("DISCORD_CLIENT_ID is required when Discord is enabled")
-            if settings.discord_client_secret is None:
-                errors.append("DISCORD_CLIENT_SECRET is required when Discord is enabled")
-            if settings.discord_bot_token is None:
-                errors.append("DISCORD_BOT_TOKEN is required when Discord is enabled")
-            if settings.discord_webhook_public_key is None:
-                errors.append("DISCORD_WEBHOOK_PUBLIC_KEY is required when Discord is enabled")
-            if _looks_like_placeholder(settings.discord_client_secret):
-                errors.append("DISCORD_CLIENT_SECRET must not use a placeholder value")
-            if _looks_like_placeholder(settings.discord_bot_token):
-                errors.append("DISCORD_BOT_TOKEN must not use a placeholder value")
-            if _looks_like_placeholder(settings.discord_webhook_public_key):
-                errors.append("DISCORD_WEBHOOK_PUBLIC_KEY must not use a placeholder value")
         if settings.billing_enabled:
             if settings.billing_provider == "static":
                 errors.append("StaticBillingProvider is forbidden when billing is enabled")

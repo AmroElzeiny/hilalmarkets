@@ -28,6 +28,7 @@ from ai_market_monitor.schemas.agent_control import (
     AgentToolResult,
     AgentUsageTotals,
 )
+from ai_market_monitor.services.ai_model_routing import AISetupModelRoute, select_setup_model
 from ai_market_monitor.services.agent_policy import (
     AgentPolicyService,
     AgentPolicyViolation,
@@ -122,6 +123,17 @@ class AgentControlService:
     ) -> AgentTurnOutcome:
         turn_started = monotonic()
         context = await self.policy.build_context(session, chat=chat, request_text=message)
+        model_route = select_setup_model(
+            self.settings,
+            current_message=message,
+            accumulated_setup="\n".join(
+                str(item)
+                for item in ((chat.context_json or {}).get("setup_fragments") or [])
+            ),
+            history=history,
+            active_clarification=(chat.context_json or {}).get("awaiting_clarification"),
+            capability_context=(chat.context_json or {}).get("capability_resolution"),
+        )
         budgets = AgentBudgetState(
             max_steps=self.settings.ai_agent_max_steps,
             max_tool_calls=self.settings.ai_agent_max_tool_calls_per_turn,
@@ -134,8 +146,8 @@ class AgentControlService:
         run = AgentRun(
             user_id=chat.user_id,
             chat_session_id=chat.id,
-            model=self.settings.openai_model,
-            reasoning_effort=self.settings.openai_reasoning_effort,
+            model=model_route.model,
+            reasoning_effort=model_route.reasoning_effort,
             started_at=datetime.now(UTC),
             status="shadow_running" if shadow_mode else "running",
             correlation_id=uuid4().hex,
@@ -145,6 +157,11 @@ class AgentControlService:
                 "legacy_draft_hash_before": context.draft_hash,
                 "agent_selected_tools": [],
                 "comparison_pending": shadow_mode,
+                "model_route": {
+                    "tier": model_route.tier,
+                    "reasons": list(model_route.reasons),
+                    "condition_count": model_route.condition_count,
+                },
             },
         )
         session.add(run)
@@ -157,9 +174,7 @@ class AgentControlService:
             history=history[-20:],
             setup_fragments=list((chat.context_json or {}).get("setup_fragments") or []),
         )
-        pricing = self.settings.openai_model_pricing_usd_per_million.get(
-            self.settings.openai_model
-        )
+        pricing = self.settings.openai_model_pricing_usd_per_million.get(model_route.model)
         if not pricing or any(
             float(pricing.get(rate_name, 0)) <= 0
             for rate_name in ("input", "cached_input", "output")
@@ -228,6 +243,7 @@ class AgentControlService:
                     offered_tools=offered,
                     context=context,
                     max_output_tokens=remaining_output,
+                    model_route=model_route,
                 )
                 if _request_cost_upper_bound(
                     self.settings,
@@ -256,12 +272,12 @@ class AgentControlService:
 
                 run.step_count += 1
                 response_usage = dict(response.get("usage") or {})
-                self._add_usage(usage, response_usage)
+                self._add_usage(usage, response_usage, model=model_route.model)
                 await CapabilityCoverageService(self.settings).record_usage(
                     session,
                     chat=chat,
                     operation="bounded_agent_control",
-                    usage=response_usage,
+                    usage={**response_usage, **model_route.usage_metadata()},
                 )
                 run.input_tokens = usage.input_tokens
                 run.cached_input_tokens = usage.cached_input_tokens
@@ -495,12 +511,13 @@ class AgentControlService:
         offered_tools: tuple[str, ...],
         context: Any,
         max_output_tokens: int,
+        model_route: AISetupModelRoute,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "model": self.settings.openai_model,
+            "model": model_route.model,
             "store": False,
             "max_output_tokens": max_output_tokens,
-            "reasoning": {"effort": self.settings.openai_reasoning_effort},
+            "reasoning": {"effort": model_route.reasoning_effort},
             "instructions": _coordinator_instructions(),
             "input": input_items,
             "parallel_tool_calls": False,
@@ -518,7 +535,13 @@ class AgentControlService:
             payload["tool_choice"] = "auto"
         return payload
 
-    def _add_usage(self, totals: AgentUsageTotals, usage: dict[str, Any]) -> None:
+    def _add_usage(
+        self,
+        totals: AgentUsageTotals,
+        usage: dict[str, Any],
+        *,
+        model: str,
+    ) -> None:
         input_details = (
             usage.get("input_tokens_details")
             or usage.get("prompt_tokens_details")
@@ -538,7 +561,7 @@ class AgentControlService:
             + float(
                 estimate_usage_cost(
                     self.settings,
-                    model=self.settings.openai_model,
+                    model=model,
                     usage=usage,
                 )
             ),
@@ -978,7 +1001,8 @@ def _request_cost_upper_bound(
     *,
     already_spent: float,
 ) -> float:
-    pricing = settings.openai_model_pricing_usd_per_million[settings.openai_model]
+    model = str(payload.get("model") or settings.openai_model)
+    pricing = settings.openai_model_pricing_usd_per_million[model]
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     estimated_input_tokens = max(1, (len(serialized) + 3) // 4)
     maximum_output_tokens = int(payload.get("max_output_tokens") or 0)

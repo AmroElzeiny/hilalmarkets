@@ -702,7 +702,6 @@ class ComplianceWatchService:
                 [
                     DeliveryChannel.TELEGRAM,
                     DeliveryChannel.WHATSAPP,
-                    DeliveryChannel.DISCORD,
                 ]
             )
         await NotificationDispatcher(self.session).enqueue_user_alert(

@@ -6,7 +6,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
-from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 from ai_market_monitor.db.models import (
     AdminOverride,
@@ -88,7 +88,9 @@ async def test_plan_catalog_syncs_central_definitions(test_context):
         assert await session.scalar(select(func.count(Plan.id))) == len(PLAN_DEFINITIONS)
         pro = await session.scalar(select(Plan).where(Plan.code == "pro"))
         assert pro is not None
-        assert pro.discord_enabled is True
+        # The legacy column remains readable for old rows, but new catalog rows
+        # can no longer grant an active Discord entitlement.
+        assert pro.discord_enabled is False
         assert pro.features["limits"]["active_strategies"] == 10
 
 
@@ -339,7 +341,7 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
             await EntitlementService(session).enforce_strategy_activation(
                 second_user.id, discord_definition
             )
-        assert discord_error.value.code == "discord_not_included"
+        assert discord_error.value.code == "delivery_channel_retired"
 
 
 async def test_lifetime_plan_removes_practical_activation_and_delivery_limits(test_context):
@@ -349,7 +351,7 @@ async def test_lifetime_plan_removes_practical_activation_and_delivery_limits(te
         definition = load_strategy()
         definition.universe.include_symbols = [f"COIN{i}/USDT" for i in range(500)]
         definition.supporting_timeframes = ["1m", "4h"]
-        definition.alerts.channels = ["telegram", "discord"]
+        definition.alerts.channels = ["telegram"]
 
         context = await EntitlementService(session).enforce_strategy_activation(
             user.id,
@@ -357,7 +359,6 @@ async def test_lifetime_plan_removes_practical_activation_and_delivery_limits(te
         )
 
         assert context.plan.code == "lifetime"
-        assert context.feature_enabled("discord") is True
         assert context.feature_enabled("advanced_forensics") is True
         assert context.limit("active_strategies") >= 100_000
         assert context.limit("symbols_per_strategy") >= 100_000
@@ -847,6 +848,7 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
         nowpayments_settings = Settings(
             app_env="test",
             app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+            billing_enabled=True,
             billing_webhook_secret="secret",
             billing_provider="nowpayments",
         )
@@ -859,6 +861,8 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
         )
         attempt_id = prepared.attempt.id
         await session.commit()
+
+    test_context["app"].dependency_overrides[get_settings] = lambda: nowpayments_settings
 
     payload = {
         "payment_id": "pay_admin_notice",

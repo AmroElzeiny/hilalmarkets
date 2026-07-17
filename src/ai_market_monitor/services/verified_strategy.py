@@ -18,7 +18,6 @@ from ai_market_monitor.db.models import (
     AuditEvent,
     BacktestJob,
     BacktestResult,
-    DiscordConnection,
     ForensicInvestigation,
     MonitorHealthSummary,
     OutcomeReview,
@@ -1117,12 +1116,6 @@ class VerifiedStrategyService:
                 TelegramConnection.status == ConnectionStatus.ACTIVE,
             )
         )
-        discord = await self.session.scalar(
-            select(DiscordConnection).where(
-                DiscordConnection.user_id == user_id,
-                DiscordConnection.status == ConnectionStatus.ACTIVE,
-            )
-        )
         payload = {
             "contract_version": "1.0",
             "generated_at": datetime.now(UTC).isoformat(),
@@ -1162,7 +1155,6 @@ class VerifiedStrategyService:
             },
             "delivery": {
                 "telegram_connected": telegram is not None,
-                "discord_connected": discord is not None,
                 "channels": StrategyDefinition.model_validate(version.schema_json).alerts.channels,
             },
             "permissions": {"owner_user_id": str(user_id), "shareable": False},

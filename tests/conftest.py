@@ -50,6 +50,7 @@ async def test_context() -> AsyncIterator[dict]:
         openai_explanation_enabled=False,
         email_adapter="memory",
         sharia_test_market_enabled=False,
+        sharia_default_methodology_code=None,
         openai_model="gpt-5.4-nano",
         openai_reasoning_effort="low",
         openai_model_pricing_usd_per_million={

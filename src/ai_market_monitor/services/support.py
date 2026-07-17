@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.db.models import (
     AlertDelivery,
     AuditEvent,
-    DiscordConnection,
     IntegrationHealth,
     MarketDataHealth,
     ScanJob,
@@ -40,9 +39,6 @@ class SupportEscalationService:
         entitlement = await EntitlementService(self.session).current(user_id)
         telegram = await self.session.scalar(
             select(TelegramConnection).where(TelegramConnection.user_id == user_id)
-        )
-        discord = await self.session.scalar(
-            select(DiscordConnection).where(DiscordConnection.user_id == user_id)
         )
         strategy = await self.session.get(Strategy, strategy_id) if strategy_id else None
         scan_job = await self.session.get(ScanJob, scan_job_id) if scan_job_id else None
@@ -99,7 +95,6 @@ class SupportEscalationService:
             "plan": entitlement.plan.code,
             "entitlement_source": entitlement.source,
             "telegram_connection": bool(telegram),
-            "discord_connection": bool(discord),
             "strategy": {
                 "id": str(strategy.id),
                 "name": strategy.name,

@@ -893,3 +893,70 @@ meaning question.
 - The exact reported head-and-shoulders prompt was executed inside the rebuilt API container. It
   selected `head_and_shoulders_formed` and `head_and_shoulders_neckline_break`, excluded routing
   text from rule fragments, and required no capability clarification.
+
+## Private-Beta Interpretation and Shadow Patch
+
+Date: 2026-07-17
+
+### Adaptive model routing
+
+`services/ai_model_routing.py` now selects between configured simple and complex model tiers. The
+complex route is used for four or more conditions, mixed Boolean logic, multiple timeframes,
+possible contradictions, repeated corrections, repeated clarification friction, low capability
+confidence, custom terminology, and multilingual/mixed-language text. Model names and reasoning
+efforts come only from environment settings. Routing never changes the available tools, registry,
+compiler, lint, approval, activation, provider, or evaluation authority.
+
+The route is used consistently by the turn classifier, interviewer, structured strategy client,
+and Bounded Agent shadow coordinator. Actual selected model/effort drives usage and cost records.
+System Brain aggregates route tier, reasons, model and effort from persisted usage events rather
+than creating a second telemetry source.
+
+### Structured intent and clause coverage
+
+Every chat refreshes an application-owned intent state containing setup-message references,
+correction history and latest correction by field, required and optional conditions,
+capability/version references, timeframes, universe, alert timing, invalidation, delivery choices,
+resolved clarifications, unresolved conflicts and clause coverage. This state is review evidence;
+the deterministic schema remains execution authority.
+
+The Translation Sheet now shows `Your wording, accounted for`. Each meaningful user clause is
+classified as covered, needs clarification, provider-blocked, intentionally optional, or outside
+executable logic. A meaningful unclassified clause creates a critical lint finding and blocks
+approval instead of disappearing silently.
+
+### Language quality and feedback
+
+`tests/fixtures/setup_chat_language_quality_corpus.jsonl` contains reviewed English, Arabic,
+Egyptian Arabic, Arabizi, mixed Arabic/English and common-misspelling cases. Every row labels final
+capability intent, parameters, timeframe, direction, required/optional intent, Boolean structure,
+and expected correction bound. Deterministic English rows are compiled field by field in CI;
+multilingual and typo rows verify configured complex routing and are explicitly marked for shadow
+semantic review. This does not misreport shortlist recall as final semantic accuracy.
+
+Translation feedback accepts Correct, Partially correct, Wrong condition, Wrong timeframe, Missing
+condition, Wrong required/optional status and Asked an unnecessary question. Feedback is retained
+as audit evidence only and cannot promote aliases or executable capabilities automatically.
+
+### Files added or materially changed
+
+- `src/ai_market_monitor/services/ai_model_routing.py`
+- `src/ai_market_monitor/services/ai_setup_chat.py`
+- `src/ai_market_monitor/services/openai_interpreter.py`
+- `src/ai_market_monitor/services/agent_control.py`
+- `src/ai_market_monitor/services/system_brain.py`
+- `src/ai_market_monitor/core/config.py`
+- `src/ai_market_monitor/static/ai-setup-chat.js`
+- `src/ai_market_monitor/static/ai-setup-chat.css`
+- `.env.example`, `.env.production.example`
+- `tests/unit/test_ai_model_routing.py`
+- `tests/unit/test_setup_chat_language_quality.py`
+- `tests/fixtures/setup_chat_language_quality_corpus.jsonl`
+- relevant Setup Chat, System Brain and dashboard API tests
+
+### Verification status
+
+The focused model-routing, Setup Chat, Bounded Agent, System Brain, public-chat, request-guard and
+dashboard feedback selection passed before the local Python 3.12 installation became unavailable.
+The complete post-patch backend/browser/static result is intentionally reported only in
+`docs/PRIVATE_BETA_READINESS_REPORT.md`; the historical counts above do not prove this later patch.

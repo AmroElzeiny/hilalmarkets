@@ -13,8 +13,10 @@ async def _users(test_context) -> tuple[User, User]:
 async def test_public_billing_catalog_excludes_private_plans(test_context) -> None:
     response = await test_context["client"].get("/api/v1/billing/plans")
     assert response.status_code == 200
+    assert response.json()["billing_enabled"] is False
+    assert response.json()["billing_mode"] == "disabled_private_beta"
     codes = {plan["code"] for plan in response.json()["plans"]}
-    assert codes == {"demo", "trader", "pro"}
+    assert codes == {"demo"}
     assert not codes & {"lifetime", "creator", "community", "trial", "admin"}
 
 
@@ -45,24 +47,21 @@ async def test_billing_routes_derive_and_enforce_authenticated_owner(test_contex
     )
     assert injected.status_code == 422
 
+    disabled = await test_context["client"].post(
+        "/api/v1/billing/checkout",
+        headers={"X-User-ID": str(owner.id)},
+        json={"plan_code": "trader"},
+    )
+    assert disabled.status_code == 409
+    assert disabled.json()["detail"]["code"] == "billing_disabled"
 
-async def test_discord_user_routes_do_not_trust_browser_user_ids(test_context) -> None:
-    owner, other = await _users(test_context)
-    unauthenticated = await test_context["client"].post(
+
+async def test_retired_discord_routes_are_not_registered(test_context) -> None:
+    response = await test_context["client"].post(
         "/api/v1/discord/oauth/state",
         json={},
     )
-    assert unauthenticated.status_code == 401
-
-    injected = await test_context["client"].post(
-        "/api/v1/discord/oauth/state",
-        headers={"X-User-ID": str(owner.id)},
-        json={
-            "user_id": str(other.id),
-            "redirect_url": "https://attacker.invalid/callback",
-        },
-    )
-    assert injected.status_code == 422
+    assert response.status_code == 404
 
 
 async def test_operational_status_detail_requires_admin(test_context) -> None:

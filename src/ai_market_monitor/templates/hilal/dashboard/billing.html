@@ -16,7 +16,7 @@
     <div class="row wrap">
       <span class="badge badge-dark">Source | {{ entitlement.source }}</span>
       {% if trial %}<span class="badge badge-dark">Trial ends {{ trial.ends_at|short_dt(user.timezone) }}</span>{% endif %}
-      <span class="badge badge-dark">{{ 'Automatic monthly renewal' if billing_capabilities.supports_recurring_billing else 'Manual 30-day renewal' }}</span>
+      <span class="badge badge-dark">{{ 'Private beta access' if not billing_enabled else ('Automatic monthly renewal' if billing_capabilities.supports_recurring_billing else 'Manual 30-day renewal') }}</span>
     </div>
   </div>
   <span class="icon-box is-gold"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
@@ -25,9 +25,9 @@
 <section class="panel billing-plan-panel">
   <div class="panel-head">
     <div>
-      <span class="kicker">Plans</span>
-      <h2>Choose by monitoring capacity</h2>
-      <p>Prices and limits come from the same server plan catalog used at checkout.</p>
+      <span class="kicker">{{ 'Private beta' if not billing_enabled else 'Plans' }}</span>
+      <h2>{{ 'Billing is paused for invited beta users' if not billing_enabled else 'Choose by monitoring capacity' }}</h2>
+      <p>{{ 'Your access is provisioned without paid checkout while the beta is evaluated.' if not billing_enabled else 'Prices and limits come from the same server plan catalog used at checkout.' }}</p>
     </div>
   </div>
   <div class="pricing-grid">
@@ -42,9 +42,11 @@
           <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.get('active_strategies') | plan_limit }} active Watch Plans</li>
           <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.get('symbols_per_strategy') | plan_limit }} markets per plan</li>
           <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram included' if plan.features.get('telegram') else 'In-app delivery' }}</li>
-          <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Discord available when the channel returns to service' if settings.discord_enabled and settings.discord_adapter == 'http' and plan.features.get('discord') else 'Discord currently unavailable' }}</li>
+          <li><span data-icon="check" data-icon-class="icon-sm"></span>In-app evidence and lifecycle history</li>
         </ul>
-        {% if current %}
+        {% if not billing_enabled %}
+          <a class="btn btn-primary" href="/contact">Contact the beta team</a>
+        {% elif current %}
           <button class="btn btn-gold" type="button" disabled aria-disabled="true">Current plan</button>
         {% elif plan.monthly_price == 0 %}
           <form method="post" action="/dashboard/billing/checkout">
@@ -71,7 +73,7 @@
     </tbody></table></div>
   {% else %}<div class="empty-state"><strong>No payment history yet</strong><p>A verified checkout will appear here.</p></div>{% endif %}
   {% if payment_receipts %}<div class="row wrap billing-receipts">{% for receipt in payment_receipts %}{% if receipt.receipt_url %}<a class="btn btn-secondary" href="{{ receipt.receipt_url }}" target="_blank" rel="noopener">Open {{ receipt.plan_code|title }} receipt</a>{% endif %}{% endfor %}</div>{% endif %}
-  {% if billing_capabilities.supports_customer_portal %}<form method="post" action="/dashboard/billing/portal"><input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}"><button class="btn btn-secondary" type="submit">Manage recurring subscription</button></form>{% else %}<div class="notice"><span data-icon="info" data-icon-class="icon"></span><div><strong>No automatic cancellation portal</strong><p>{{ billing_provider|title }} provides one-time 30-day access. It does not charge again automatically.</p></div></div>{% endif %}
+  {% if not billing_enabled %}<div class="notice"><span data-icon="info" data-icon-class="icon"></span><div><strong>Paid billing is disabled</strong><p>Private-beta access is provisioned by invitation; no charge or automatic renewal can be created here.</p></div></div>{% elif billing_capabilities.supports_customer_portal %}<form method="post" action="/dashboard/billing/portal"><input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}"><button class="btn btn-secondary" type="submit">Manage recurring subscription</button></form>{% else %}<div class="notice"><span data-icon="info" data-icon-class="icon"></span><div><strong>No automatic cancellation portal</strong><p>{{ billing_provider|title }} provides one-time 30-day access. It does not charge again automatically.</p></div></div>{% endif %}
 </section>
 
 <div class="notice">

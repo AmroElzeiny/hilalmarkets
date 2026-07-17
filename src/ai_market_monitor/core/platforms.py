@@ -6,7 +6,6 @@ class Platform(StrEnum):
     DASHBOARD = "dashboard"
     TELEGRAM = "telegram"
     WHATSAPP = "whatsapp"
-    DISCORD = "discord"
 
 
 class PlatformCapability(StrEnum):
@@ -130,54 +129,6 @@ PLATFORM_CAPABILITY_MATRIX: dict[Platform, dict[PlatformCapability, PlatformCapa
         ),
         PlatformCapability.ADMIN_CONTROLS: PlatformCapabilityRule(
             Platform.WHATSAPP, PlatformCapability.ADMIN_CONTROLS, False, Platform.DASHBOARD
-        ),
-    },
-    Platform.DISCORD: {
-        PlatformCapability.ALERT_DELIVERY: PlatformCapabilityRule(
-            Platform.DISCORD, PlatformCapability.ALERT_DELIVERY, True
-        ),
-        PlatformCapability.PROOF_SUMMARY: PlatformCapabilityRule(
-            Platform.DISCORD,
-            PlatformCapability.PROOF_SUMMARY,
-            True,
-            Platform.DASHBOARD,
-            "Full proof viewer opens Dashboard.",
-        ),
-        PlatformCapability.COMMUNITY_DELIVERY: PlatformCapabilityRule(
-            Platform.DISCORD,
-            PlatformCapability.COMMUNITY_DELIVERY,
-            True,
-            Platform.DASHBOARD,
-            "Plan-gated creator/community mode.",
-        ),
-        PlatformCapability.ROLE_SYNC: PlatformCapabilityRule(
-            Platform.DISCORD,
-            PlatformCapability.ROLE_SYNC,
-            True,
-            Platform.DASHBOARD,
-            "Billing entitlements remain the source of truth.",
-        ),
-        PlatformCapability.BILLING_STATUS: PlatformCapabilityRule(
-            Platform.DISCORD, PlatformCapability.BILLING_STATUS, True, Platform.DASHBOARD
-        ),
-        PlatformCapability.FULL_BILLING: PlatformCapabilityRule(
-            Platform.DISCORD,
-            PlatformCapability.FULL_BILLING,
-            False,
-            Platform.DASHBOARD,
-            "No payment collection in Discord.",
-        ),
-        PlatformCapability.FULL_MONITOR_MANAGEMENT: PlatformCapabilityRule(
-            Platform.DISCORD,
-            PlatformCapability.FULL_MONITOR_MANAGEMENT,
-            False,
-            Platform.DASHBOARD,
-        ),
-        PlatformCapability.FULL_ANALYTICS: PlatformCapabilityRule(
-            Platform.DISCORD, PlatformCapability.FULL_ANALYTICS, False, Platform.DASHBOARD
-        ),
-        PlatformCapability.ADMIN_CONTROLS: PlatformCapabilityRule(
-            Platform.DISCORD, PlatformCapability.ADMIN_CONTROLS, False, Platform.DASHBOARD
         ),
     },
 }

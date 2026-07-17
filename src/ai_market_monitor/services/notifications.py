@@ -8,7 +8,6 @@ from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
     CandidateReadinessSnapshot,
-    DiscordDeliveryDestination,
     TelegramConnection,
     WhatsAppConnection,
 )
@@ -46,9 +45,13 @@ class NotificationDispatcher:
             for channel in definition.alerts.channels
             if channel in {item.value for item in DeliveryChannel}
         }
-        preference = await NotificationPreferenceService(self.session).current(alert.user_id)
+        preference = await NotificationPreferenceService(
+            self.session, self.settings
+        ).current(alert.user_id)
         requested |= preference.channels
-        requested = await NotificationPreferenceService(self.session).allowed_channels(
+        requested = await NotificationPreferenceService(
+            self.session, self.settings
+        ).allowed_channels(
             alert.user_id,
             requested,
             alert=alert,
@@ -74,24 +77,6 @@ class NotificationDispatcher:
             delivery = await self._enqueue_whatsapp(alert)
             if delivery is not None:
                 deliveries.append(delivery)
-        if DeliveryChannel.DISCORD in requested:
-            destinations = (
-                await self.session.scalars(
-                    select(DiscordDeliveryDestination).where(
-                        DiscordDeliveryDestination.user_id == alert.user_id,
-                        DiscordDeliveryDestination.status == "active",
-                        DiscordDeliveryDestination.permissions_status.in_(["ok", "valid"]),
-                        DiscordDeliveryDestination.test_status == "sent",
-                    )
-                )
-            ).all()
-            for destination in destinations:
-                key = (
-                    f"dm:{destination.discord_user_id}"
-                    if destination.mode == "dm"
-                    else f"guild:{destination.guild_id}:channel:{destination.channel_id}"
-                )
-                deliveries.append(await self._enqueue_one(alert, DeliveryChannel.DISCORD, key))
         if DeliveryChannel.WEB in requested:
             deliveries.append(
                 await self._enqueue_one(
@@ -112,11 +97,15 @@ class NotificationDispatcher:
     ) -> list[AlertDelivery]:
         if channels is None:
             requested = (
-                await NotificationPreferenceService(self.session).current(alert.user_id)
+                await NotificationPreferenceService(
+                    self.session, self.settings
+                ).current(alert.user_id)
             ).channels
         else:
             requested = set(channels)
-        requested = await NotificationPreferenceService(self.session).allowed_channels(
+        requested = await NotificationPreferenceService(
+            self.session, self.settings
+        ).allowed_channels(
             alert.user_id,
             requested,
             alert=alert,
@@ -143,24 +132,6 @@ class NotificationDispatcher:
             delivery = await self._enqueue_whatsapp(alert)
             if delivery is not None:
                 deliveries.append(delivery)
-        if DeliveryChannel.DISCORD in requested:
-            destinations = (
-                await self.session.scalars(
-                    select(DiscordDeliveryDestination).where(
-                        DiscordDeliveryDestination.user_id == alert.user_id,
-                        DiscordDeliveryDestination.status == "active",
-                        DiscordDeliveryDestination.permissions_status.in_(["ok", "valid"]),
-                        DiscordDeliveryDestination.test_status == "sent",
-                    )
-                )
-            ).all()
-            for destination in destinations:
-                key = (
-                    f"dm:{destination.discord_user_id}"
-                    if destination.mode == "dm"
-                    else f"guild:{destination.guild_id}:channel:{destination.channel_id}"
-                )
-                deliveries.append(await self._enqueue_one(alert, DeliveryChannel.DISCORD, key))
         if DeliveryChannel.WEB in requested:
             deliveries.append(
                 await self._enqueue_one(

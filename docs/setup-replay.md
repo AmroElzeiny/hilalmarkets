@@ -26,4 +26,4 @@ Rules:
 - Run deterministic reconstruction first.
 - Do not let AI guess the reason.
 - Show chart overlays and condition rows in the dashboard.
-- Telegram and Discord may open secure dashboard links for full replay evidence.
+- Telegram may open secure dashboard links for full replay evidence.

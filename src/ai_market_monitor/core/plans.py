@@ -6,6 +6,11 @@ PUBLIC_PLAN_CODES = ("demo", "trader", "pro")
 PURCHASABLE_PLAN_CODES = ("trader", "pro")
 
 
+def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
+    """Return the customer catalog allowed by the current release mode."""
+    return PUBLIC_PLAN_CODES if billing_enabled else ("demo",)
+
+
 @dataclass(frozen=True, slots=True)
 class PlanDefinition:
     code: str
@@ -37,7 +42,6 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
-            "discord": False,
             "light_prompt_scan": True,
             "near_miss": False,
             "condition_proof": True,
@@ -64,7 +68,6 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
-            "discord": False,
             "light_prompt_scan": True,
             "near_miss": True,
             "condition_proof": True,
@@ -91,7 +94,6 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
-            "discord": True,
             "light_prompt_scan": True,
             "near_miss": True,
             "full_near_miss_history": True,
@@ -113,18 +115,15 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
             "minimum_timeframe_minutes": 1,
             "alerts_per_day": 2000,
-            "discord_servers": 3,
             "on_demand_scans_per_month": 300,
             "light_prompt_scans_per_day": 200,
             "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
         },
         features={
             "telegram": True,
-            "discord": True,
             "light_prompt_scan": True,
             "shared_templates": True,
             "community_delivery": True,
-            "private_discord_channels": True,
             "custom_webhooks": True,
             "api_access": True,
             "exports": True,
@@ -141,14 +140,12 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
             "minimum_timeframe_minutes": 1,
             "alerts_per_day": 10000,
-            "discord_servers": 10,
             "on_demand_scans_per_month": 1500,
             "light_prompt_scans_per_day": 1000,
             "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
         },
         features={
             "telegram": True,
-            "discord": True,
             "light_prompt_scan": True,
             "team_members": True,
             "shared_strategies": True,
@@ -178,12 +175,10 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "on_demand_scans_total": UNLIMITED_SYMBOL_CAP,
             "light_prompt_scans_per_day": UNLIMITED_SYMBOL_CAP,
             "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
-            "discord_servers": UNLIMITED_SYMBOL_CAP,
             "detailed_history_days": UNLIMITED_SYMBOL_CAP,
         },
         features={
             "telegram": True,
-            "discord": True,
             "light_prompt_scan": True,
             "near_miss": True,
             "full_near_miss_history": True,
@@ -198,7 +193,6 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "advanced_analytics": True,
             "shared_templates": True,
             "community_delivery": True,
-            "private_discord_channels": True,
             "custom_webhooks": True,
             "api_access": True,
             "exports": True,
@@ -235,7 +229,6 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
-            "discord": False,
             "light_prompt_scan": True,
             "near_miss": True,
             "condition_proof": True,

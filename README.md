@@ -2,7 +2,7 @@
 
 HilalMarkets is a screened-market intelligence and monitoring platform for crypto spot
 traders. Users describe a Watch Plan, approve its structured interpretation, preview it against
-recent market data, and receive evidence-backed in-app, Telegram, WhatsApp, or Discord alerts.
+recent market data, and receive evidence-backed in-app or Telegram alerts during private beta.
 Version one never places trades.
 
 The guided Watch Plan builder starts with AI Setup Chat. The server-side interviewer keeps a durable
@@ -12,8 +12,8 @@ explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is 
 to `gpt-5.4-nano` with low reasoning.
 
 An optional Bounded Agent Control coordinator can select among a small server-offered tool set for
-messy, multi-intent chat turns. It is off by default, has a no-execution shadow mode, and uses a
-stable percentage cohort for gradual live rollout. Registry,
+messy, multi-intent chat turns. The private beta runs it only in no-execution shadow mode with a
+zero-percent live cohort. Registry,
 compiler, provider, scanner, ownership, entitlement, hash, approval, and activation authority remain
 in application services; the model never receives approval or activation tools. See
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
@@ -35,15 +35,22 @@ successful-payment email outbox. See
 The public product surface uses shared HilalMarkets Jinja shells, emerald/ivory/gold design
 tokens, and server-owned content sources. Dedicated routes cover Features, How It Works, How We
 Screen, Pricing, Help, Contact, About, Trust & Safety, Risk Disclosure, Privacy, Terms, and Cookies.
-Public Pricing and authenticated Billing read the same plan catalog. Optional analytics is disabled
+Public Pricing and authenticated Billing read the same plan catalog. The private beta exposes only
+free invite access and rejects paid checkout while billing is disabled. Optional analytics is disabled
 by default; Consent Mode v2 denied defaults execute before the optional GTM loader, and users can
 withdraw consent through Cookie Settings. See
 [docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
-The current closed-beta correction status, including verification blockers and required staging
+The landing-page product assistant is a separate public, non-executing boundary. It answers only
+from the server-owned public catalog, cannot inspect accounts or Watch Plans, and routes unknown
+questions into a CSRF-protected, rate-limited, idempotent inquiry flow. The inquiry stores bounded
+contact data, queues one visitor email and one office email, supports token-bound feedback/deletion,
+and never exposes the authenticated Setup Chat tools.
+The current private-beta correction status, including verification blockers and required staging
 evidence, is recorded in
-[docs/LAUNCH_READINESS_CORRECTION_REPORT.md](docs/LAUNCH_READINESS_CORRECTION_REPORT.md).
+[docs/PRIVATE_BETA_READINESS_REPORT.md](docs/PRIVATE_BETA_READINESS_REPORT.md).
 
-If a user confirms a candle-computable mechanic that is not in the registry, HilalMarkets can create a
+Outside the private beta, a confirmed candle-computable mechanic that is not in the registry can be
+prepared as a
 user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
 tests it against the configured spot provider, independently reviews it, and requires the normal
 strategy approval flow before activation. It never executes AI-generated Python or fabricates
@@ -77,6 +84,7 @@ services only. Strategy activation requires explicit user approval and a recent-
 See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/ROADMAP.md](docs/ROADMAP.md),
 [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md),
+[docs/PRIVATE_BETA_SOAK_RUNBOOK.md](docs/PRIVATE_BETA_SOAK_RUNBOOK.md),
 [docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md](docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md), and
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
@@ -89,12 +97,11 @@ The production page map, exact prototype asset mapping, and UI verification comm
 component, UX, and QA references are preserved under [docs/hilalmarkets-ui](docs/hilalmarkets-ui/README.md).
 
 Current beta infrastructure includes idempotent scheduled scans, shared CCXT REST clients,
-deterministic proof persistence, setup lifecycle records, Telegram webhook delivery, official Meta
-WhatsApp Cloud API delivery, Discord HTTP delivery/interactions, and provider-capability-aware
-billing. WhatsApp is disabled by default and market-opportunity messages require both an explicit
-feature flag and a configured approved template. See
-[docs/WHATSAPP_CLOUD_API_RUNBOOK.md](docs/WHATSAPP_CLOUD_API_RUNBOOK.md). The selected NOWPayments launch path
-uses one-time 30-day access with manual renewal; Stripe recurring support remains optional. See
+deterministic proof persistence, setup lifecycle records, and Telegram webhook delivery. WhatsApp
+code remains dormant pending Meta onboarding and controlled tests; it is not mounted or shown when
+disabled. Custom capability creation and paid billing are also disabled for beta users. See
+[docs/WHATSAPP_CLOUD_API_RUNBOOK.md](docs/WHATSAPP_CLOUD_API_RUNBOOK.md). Retained payment providers
+remain covered by tests for a later explicit rollout. See
 [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) for the required fail-closed
 configuration.
 

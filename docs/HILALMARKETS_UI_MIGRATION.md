@@ -41,7 +41,7 @@ does not replay prototype scan results, fake data, or placeholder links.
 | Opportunities & Evidence | `/dashboard/activity` | Lifecycle and activity evidence |
 | Compliance Changes | `/dashboard/compliance` | User-scoped compliance drift records |
 | How We Screen | `/dashboard/methodology` | Approved methodology records |
-| Integrations | `/dashboard/integrations` | Telegram and Discord connection records |
+| Integrations | `/dashboard/integrations` | In-app and Telegram connection records |
 | Plan & Billing | `/dashboard/billing` | Entitlement and billing services |
 | Settings | `/dashboard/settings` | User preferences |
 | Support | `/dashboard/support` | Support request service |
@@ -66,7 +66,7 @@ same validated compiler and screened-universe services.
 - Prototype previews remain design evidence only; production pages use persisted data,
   provider results, explicit empty states, and server plan definitions.
 - New page routes are authenticated and scope queries to the current user.
-- User-facing email, Telegram, Discord, billing, capability clarification, AI chat,
+- User-facing email, Telegram, billing, capability clarification, AI chat,
   screening, and lifecycle copy uses HilalMarkets. Legacy internal schema names,
   cookies, event keys, and persisted identifiers remain unchanged for compatibility.
 

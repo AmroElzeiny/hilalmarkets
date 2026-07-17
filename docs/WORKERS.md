@@ -8,7 +8,7 @@ celery -A ai_market_monitor.worker.app beat --loglevel=INFO
 ```
 
 Beat schedules trial maintenance, scan-job creation, stale/retryable scan recovery, setup
-expiration, Telegram and Discord delivery retries, Discord role synchronization, and database health
+expiration, Telegram delivery retries, public-inquiry email retries, and database health
 metrics. Each due scan creates only new idempotent `ScanJob` rows. `run_scan_job` atomically claims
 only queued jobs, records worker id/claim/heartbeat fields, resolves the plan-capped universe and
 persists deterministic evidence per symbol.

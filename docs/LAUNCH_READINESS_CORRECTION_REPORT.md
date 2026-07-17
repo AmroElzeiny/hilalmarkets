@@ -1,5 +1,9 @@
 # Launch-Readiness Correction Report
 
+> Historical baseline notice (2026-07-17): this report predates the private-beta channel and
+> checkout reduction. Discord is retired, WhatsApp and billing are disabled, and current status is
+> tracked in `docs/PRIVATE_BETA_READINESS_REPORT.md`.
+
 Date: 2026-07-17  
 Branch inspected: `main`  
 Baseline commit inspected: `a7a52964`

@@ -1,7 +1,7 @@
 # Condition Capability Registry
 
 `ai_market_monitor.engine.condition_registry` is the source of truth for condition discovery in
-the Visual Strategy Builder and future simplified Telegram and Discord builders.
+the Visual Strategy Builder and notification-channel entry points.
 
 The dashboard endpoint is:
 

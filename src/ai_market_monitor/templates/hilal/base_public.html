@@ -19,6 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260715-expansion">
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260715-expansion">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260717-beta3">{% endif %}
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -48,9 +49,11 @@
   <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
   {% include "hilal/partials/public_footer.html" %}
   {% include "hilal/partials/cookie_banner.html" %}
+  {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260715-expansion"></script>
   <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260715-expansion"></script>
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260717-beta3"></script>{% endif %}
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

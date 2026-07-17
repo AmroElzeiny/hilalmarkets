@@ -11,8 +11,8 @@
       <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.on_demand_scans_per_month }} market check{{ '' if plan.limits.on_demand_scans_per_month == 1 else 's' }} per month</li>
       <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram delivery' if plan.features.telegram else 'Dashboard delivery' }}</li>
     </ul>
-    <a class="btn {{ 'btn-gold' if code == 'trader' else 'btn-secondary' }}" href="{{ url_for('signup_page') }}?plan={{ code }}">{{ 'Start free' if code == 'demo' else 'Choose ' ~ plan.name }}</a>
+    <a class="btn {{ 'btn-gold' if code == 'trader' else 'btn-secondary' }}" href="{{ url_for('signup_page') }}?plan={{ code }}">{{ 'Request beta access' if not billing_enabled else ('Start free' if code == 'demo' else 'Choose ' ~ plan.name) }}</a>
   </article>
   {% endfor %}
 </div>
-{% if not billing_capabilities.supports_recurring_billing %}<p class="pricing-provider-note">Paid access is purchased for 30 days and renewed manually. No automatic charge or cancellation portal is offered.</p>{% endif %}
+{% if not billing_enabled %}<p class="pricing-provider-note">The private beta is free and invite-only. Paid checkout is currently disabled.</p>{% elif not billing_capabilities.supports_recurring_billing %}<p class="pricing-provider-note">Paid access is purchased for 30 days and renewed manually. No automatic charge or cancellation portal is offered.</p>{% endif %}

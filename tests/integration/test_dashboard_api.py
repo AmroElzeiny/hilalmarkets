@@ -227,6 +227,17 @@ async def test_dashboard_strategy_builder_interpretation_feedback_is_audited(tes
         assert event.metadata_redacted["feedback_type"] == "missed_condition"
         assert event.metadata_redacted["coverage_score"] == 80
 
+    response = await test_context["client"].post(
+        "/api/v1/dashboard/strategies/interpret/feedback",
+        json={
+            "feedback_type": "unnecessary_question",
+            "raw_prompt": "RSI below 30 on 15m.",
+            "prompt_coverage_report": {"coverage_score": 100},
+            "strategy": {"conditions": {"children": [{"key": "rsi"}]}},
+        },
+    )
+    assert response.status_code == 201
+
 
 async def test_dashboard_analytics_coverage_uses_scan_jobs(test_context):
     await _signup(test_context, "dashboard-coverage@example.com")
@@ -710,8 +721,8 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
             "near_miss_threshold": "82",
             "maximum_alerts_per_hour": "7",
             "maximum_alerts_per_day": "120",
-            "alert_channels": ["telegram", "discord"],
-            "providers": ["binance", "bybit"],
+            "alert_channels": ["telegram"],
+            "providers": ["binance"],
             "alert_days": ["Monday", "Friday"],
             "alert_hours": ["09:00", "21:00"],
         },
@@ -728,9 +739,9 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
         assert preference.notification_preferences["near_miss_threshold"] == 82
         assert preference.notification_preferences["maximum_alerts_per_hour"] == 7
         assert preference.notification_preferences["maximum_alerts_per_day"] == 120
-        assert preference.notification_preferences["alert_channels"] == ["telegram", "discord"]
-        assert preference.notification_preferences["channels"] == ["telegram", "discord"]
-        assert preference.notification_preferences["providers"] == ["binance", "bybit"]
+        assert preference.notification_preferences["alert_channels"] == ["telegram"]
+        assert preference.notification_preferences["channels"] == ["telegram"]
+        assert preference.notification_preferences["providers"] == ["binance"]
         assert preference.notification_preferences["alert_days"] == ["Monday", "Friday"]
         assert preference.notification_preferences["alert_hours"] == ["09:00", "21:00"]
 

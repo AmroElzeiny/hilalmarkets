@@ -240,10 +240,7 @@ PUBLIC_PAGES = (
         "public_pricing",
         "/pricing",
         "Pricing",
-        (
-            "Compare HilalMarkets Free, Core, and Pro monitoring plans from the "
-            "current product catalog."
-        ),
+        "Review current HilalMarkets access, limits, and billing availability.",
         "hilal/public/pricing.html",
     ),
     PublicPageMetadata(

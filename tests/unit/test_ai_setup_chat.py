@@ -23,6 +23,7 @@ from ai_market_monitor.services.ai_setup_chat import (
     OpenAISetupChatInterviewer,
     SetupChatError,
     lint_strategy,
+    translation_sheet,
 )
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from tests.factories import candle_sets, load_strategy
@@ -413,6 +414,11 @@ async def test_vague_prompt_clarifies_then_compiles_and_persists(test_context):
         assert chat.draft_schema_json
         assert chat.translation_sheet["approval_required"] is True
         assert any(item["requires_confirmation"] for item in chat.rule_confidence)
+        intent_state = chat.context_json["intent_state"]
+        assert intent_state["version"] == 1
+        assert intent_state["required_conditions"]
+        assert intent_state["timeframes"]
+        assert chat.context_json["setup_fragment_records"]
 
     async with test_context["session_factory"]() as session:
         resumed = await service.latest_open_session(session, user.id)
@@ -1499,6 +1505,92 @@ async def test_openai_turn_classifier_uses_context_and_strict_schema():
     assert result.intent == "product_question"
     assert result.technical_fragments == []
     assert client.last_usage["input_tokens"] == 25
+
+
+async def test_openai_interviewer_uses_configured_complex_route_for_mixed_logic():
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["model"] == "configured-complex"
+        assert payload["reasoning"] == {"effort": "medium"}
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "intent": "setup_instruction",
+                                        "assistant_message": "",
+                                        "technical_fragments": [
+                                            "RSI below 30 and volume above 1.5x or EMA above 200"
+                                        ],
+                                        "clarification_answer": None,
+                                        "segments": [
+                                            {
+                                                "text": (
+                                                    "RSI below 30 and volume above 1.5x or "
+                                                    "EMA above 200"
+                                                ),
+                                                "category": "technical_instruction",
+                                            }
+                                        ],
+                                        "preserve_pending_question": False,
+                                        "confidence": 0.9,
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 20, "output_tokens": 10},
+            },
+        )
+
+    settings = _settings()
+    settings.ai_setup_simple_model = "configured-simple"
+    settings.ai_setup_complex_model = "configured-complex"
+    settings.ai_setup_complex_reasoning_effort = "medium"
+    client = OpenAISetupChatInterviewer(settings, transport=httpx.MockTransport(handler))
+    result = await client.classify_turn(
+        history=[],
+        current_message="RSI below 30 and volume above 1.5x or EMA above 200",
+        accumulated_setup="",
+    )
+
+    assert result.intent == "setup_instruction"
+    assert client.last_usage["_traceedge_route_tier"] == "complex"
+
+
+def test_translation_sheet_exposes_beginner_clause_coverage_and_blocks_loss():
+    definition = load_strategy().model_copy(deep=True)
+    preview = InterpretationPreview(
+        strategy=definition,
+        interpreter="test",
+        raw_metadata={
+            "prompt_coverage_report": {
+                "mapping_table": [
+                    {
+                        "fragment": "RSI below 30",
+                        "bucket": "executable_condition",
+                        "condition_id": _first_rule(definition.conditions).key,
+                    },
+                    {"fragment": "avoid noisy periods", "bucket": "unclassified"},
+                ]
+            }
+        },
+    )
+
+    sheet = translation_sheet("RSI below 30 and avoid noisy periods", definition, preview)
+    warnings = lint_strategy(definition, preview)
+
+    assert sheet["clause_coverage"][0]["status"] == "covered"
+    assert sheet["clause_coverage"][1]["status"] == "needs_clarification"
+    assert sheet["clause_coverage"][1]["blocking"] is True
+    assert any(item["code"] == "meaningful_clause_uncovered" for item in warnings)
 
 
 def test_strategy_lint_detects_contradictory_thresholds():

@@ -22,7 +22,6 @@ from ai_market_monitor.db.models import (
     Subscription,
 )
 from ai_market_monitor.db.models.enums import SubscriptionStatus
-from ai_market_monitor.discord.service import DiscordRoleSyncService
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.trials import TrialLifecycleService
 
@@ -798,10 +797,6 @@ class BillingService:
             await EntitlementService(self.session).pause_excess_after_downgrade(
                 subscription.user_id
             )
-            await DiscordRoleSyncService(self.session).enqueue_for_user(
-                user_id=subscription.user_id,
-                source_event_id=f"access-expired:{subscription.id}",
-            )
             self._audit(
                 subscription.user_id,
                 "billing.access_expired",
@@ -1104,10 +1099,6 @@ class BillingService:
             await EntitlementService(self.session).pause_excess_after_downgrade(
                 subscription.user_id
             )
-            await DiscordRoleSyncService(self.session).enqueue_for_user(
-                user_id=subscription.user_id,
-                source_event_id=event_id,
-            )
             self._audit(
                 subscription.user_id,
                 "billing.subscription_synced",
@@ -1133,10 +1124,6 @@ class BillingService:
             await EntitlementService(self.session).pause_excess_after_downgrade(
                 subscription.user_id
             )
-            await DiscordRoleSyncService(self.session).enqueue_for_user(
-                user_id=subscription.user_id,
-                source_event_id=event_id,
-            )
             self._audit(
                 subscription.user_id,
                 "billing.subscription_canceled",
@@ -1150,10 +1137,6 @@ class BillingService:
                 provider=provider, data=data, forced_status=SubscriptionStatus.PAST_DUE
             )
             await EntitlementService(self.session).snapshot(subscription.user_id)
-            await DiscordRoleSyncService(self.session).enqueue_for_user(
-                user_id=subscription.user_id,
-                source_event_id=event_id,
-            )
             self._audit(
                 subscription.user_id,
                 "billing.payment_failed",

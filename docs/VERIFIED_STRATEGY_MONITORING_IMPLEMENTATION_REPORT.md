@@ -1,5 +1,8 @@
 # Verified Strategy Monitoring Implementation Report
 
+> Historical record notice (2026-07-17): Discord references below describe retired behavior and
+> are not part of the private-beta product. See `docs/RETIRED_DISCORD_COMPATIBILITY.md`.
+
 Date: 2026-07-13
 
 ## Status
@@ -336,4 +339,3 @@ Static checks:
 - Apply a possible improvement and confirm it creates a tested draft without changing the active
   monitor.
 - Verify desktop keyboard flow, 390px mobile layout, reduced-motion behavior, and error retry states.
-

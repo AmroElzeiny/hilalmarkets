@@ -1,0 +1,130 @@
+<button class="public-chat-launcher" type="button" data-public-chat-launcher aria-haspopup="dialog" aria-controls="public-product-chat" aria-expanded="false">
+  <span class="public-chat-launcher-icon" data-icon="bot" aria-hidden="true"></span>
+  <span>Ask HilalMarkets</span>
+</button>
+
+<div class="public-chat-backdrop" data-public-chat-backdrop hidden></div>
+<section class="public-chat-panel" id="public-product-chat" data-public-chat-panel role="dialog" aria-modal="true" aria-labelledby="public-chat-title" aria-describedby="public-chat-description" hidden>
+  <header class="public-chat-head">
+    <div class="public-chat-brand">
+      <span class="public-chat-brand-icon" data-icon="bot" aria-hidden="true"></span>
+      <div>
+        <h2 id="public-chat-title">Ask HilalMarkets</h2>
+        <p id="public-chat-description">Verified product help, without market advice.</p>
+      </div>
+    </div>
+    <div class="public-chat-head-actions">
+      <button class="public-chat-head-action" type="button" data-public-chat-new aria-label="Start a new product-help conversation">New</button>
+      <button class="public-chat-close" type="button" data-public-chat-close aria-label="Close product assistant">
+        <span data-icon="close" aria-hidden="true"></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="public-chat-connectivity" data-public-chat-connectivity role="status" hidden>
+    You are offline. Your message is still here; reconnect, then retry.
+  </div>
+
+  <div class="public-chat-body">
+    <div class="public-chat-state" data-public-chat-loading>
+      <span class="public-chat-spinner" aria-hidden="true"></span>
+      <p>Preparing verified product help...</p>
+    </div>
+
+    <form class="public-chat-profile" data-public-chat-profile hidden>
+      <div class="public-chat-intro">
+        <span class="badge badge-neutral">Product assistant</span>
+        <h3>Let’s make this useful.</h3>
+        <p>Share your name and email so we can keep the conversation personal and send a reply if the verified help library does not cover your question.</p>
+      </div>
+      <div class="field">
+        <label for="public-chat-name">Name</label>
+        <input class="input" id="public-chat-name" name="name" autocomplete="name" maxlength="120" required>
+      </div>
+      <div class="field">
+        <label for="public-chat-email">Email</label>
+        <input class="input" id="public-chat-email" name="email" type="email" autocomplete="email" maxlength="320" required>
+      </div>
+      <label class="public-chat-remember">
+        <input type="checkbox" name="remember_on_device">
+        <span>Remember me on this device</span>
+      </label>
+      <p class="field-help">Device memory is used only when Functional cookies are enabled. See our <a href="/privacy">Privacy notice</a>.</p>
+      <p class="public-chat-form-error" data-public-chat-profile-error role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit">Start conversation</button>
+    </form>
+
+    <div class="public-chat-conversation" data-public-chat-conversation hidden>
+      <div class="public-chat-messages" data-public-chat-messages role="log" aria-live="polite" aria-relevant="additions"></div>
+      <div class="public-chat-starters" data-public-chat-starters aria-label="Suggested questions">
+        <button type="button" class="chip" data-public-chat-question="What does HilalMarkets do?">What does it do?</button>
+        <button type="button" class="chip" data-public-chat-question="How does Sharia screening work?">How screening works</button>
+        <button type="button" class="chip" data-public-chat-question="Which markets are available in private beta?">Private-beta markets</button>
+        <button type="button" class="chip" data-public-chat-question="How much does the private beta cost?">Pricing</button>
+      </div>
+
+      <form class="public-chat-inquiry" data-public-chat-inquiry hidden>
+        <div class="public-chat-inquiry-head">
+          <span class="public-chat-mini-icon" data-icon="support" aria-hidden="true"></span>
+          <div>
+            <strong>Send this to the team</strong>
+            <p>We will email a copy to you and route the question to HilalMarkets.</p>
+          </div>
+        </div>
+        <div class="field">
+          <label for="public-chat-category">Topic</label>
+          <select class="select" id="public-chat-category" name="category">
+            <option value="product">Product</option>
+            <option value="screening">Screening</option>
+            <option value="pricing">Pricing</option>
+            <option value="technical_support">Technical support</option>
+            <option value="partnership">Partnership</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="public-chat-inquiry-details">Question</label>
+          <textarea class="textarea" id="public-chat-inquiry-details" name="details" minlength="5" maxlength="4000" required></textarea>
+        </div>
+        <div class="public-chat-honeypot" aria-hidden="true">
+          <label for="public-chat-company">Company website</label>
+          <input id="public-chat-company" name="company_website" tabindex="-1" autocomplete="off">
+        </div>
+        <p class="public-chat-form-error" data-public-chat-inquiry-error role="alert" hidden></p>
+        <div class="public-chat-form-actions">
+          <button class="btn btn-primary btn-sm" type="submit">Send question</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-public-chat-inquiry-cancel>Not now</button>
+        </div>
+      </form>
+
+      <div class="public-chat-success" data-public-chat-success hidden tabindex="-1">
+        <span class="public-chat-success-icon" data-icon="check" aria-hidden="true"></span>
+        <h3>Question received</h3>
+        <p data-public-chat-success-copy></p>
+        <div class="public-chat-rating" data-public-chat-rating>
+          <div class="public-chat-rating-controls" data-public-chat-rating-controls>
+            <span>Was this handoff helpful?</span>
+            <label for="public-chat-rating-feedback">Optional feedback</label>
+            <textarea id="public-chat-rating-feedback" data-public-chat-rating-feedback maxlength="800" rows="2" placeholder="Tell us what could be clearer"></textarea>
+            <div>
+              <button type="button" class="chip" data-public-chat-helpful="true">Yes</button>
+              <button type="button" class="chip" data-public-chat-helpful="false">No</button>
+            </div>
+          </div>
+          <span data-public-chat-rating-thanks hidden>Thank you. Your feedback was recorded.</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" data-public-chat-another>Ask another question</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-public-chat-success-close>Close chat</button>
+      </div>
+    </div>
+  </div>
+
+  <form class="public-chat-composer" data-public-chat-composer hidden>
+    <label class="sr-only" for="public-chat-message">Ask a product question</label>
+    <textarea id="public-chat-message" data-public-chat-input rows="1" maxlength="800" placeholder="Ask about the product, screening, pricing, or private beta" required></textarea>
+    <button type="submit" data-public-chat-send aria-label="Send question">
+      <span data-icon="arrow" aria-hidden="true"></span>
+    </button>
+  </form>
+  <footer class="public-chat-foot"><span>Verified product information only. No financial advice or religious rulings.</span><span class="public-chat-foot-actions"><a href="/privacy">Privacy</a><button type="button" data-public-chat-forget>Forget saved details</button></span></footer>
+</section>

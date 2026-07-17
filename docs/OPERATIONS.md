@@ -24,9 +24,6 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `WHATSAPP_BUSINESS_PHONE_E164` | Registered HilalMarkets WhatsApp business number in normalized E.164 form. |
 | `WHATSAPP_TEMPLATE_NAMES` | JSON event/locale map containing only templates actually approved in the configured WABA. |
 | `WHATSAPP_OPPORTUNITY_ALERTS_ENABLED` | Separate default-off gate for lifecycle and confirmed research-event messaging. |
-| `DISCORD_CLIENT_ID` | Discord application client id. |
-| `DISCORD_CLIENT_SECRET` | Discord OAuth client secret. Keep secret. |
-| `DISCORD_WEBHOOK_PUBLIC_KEY` | Discord interaction public key. Keep secret. |
 | `BILLING_WEBHOOK_SECRET` | Billing provider webhook signing secret. Keep secret. |
 | `TRIAL_DAYS` | Trial monitoring-cycle length. Default is `14`. |
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
@@ -51,6 +48,11 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `OPENAI_MODEL` | Default interpretation model. Default: `gpt-5.4-nano`. |
 | `OPENAI_REASONING_EFFORT` | Default interpretation reasoning effort. Default: `low`. |
 | `OPENAI_BASE_URL` | OpenAI API base URL, default `https://api.openai.com/v1`. |
+| `AI_SETUP_SIMPLE_MODEL` / `AI_SETUP_SIMPLE_REASONING_EFFORT` | Configured low-cost Setup Chat route for greetings, option answers and clear one-condition requests. |
+| `AI_SETUP_COMPLEX_MODEL` / `AI_SETUP_COMPLEX_REASONING_EFFORT` | Configured stronger Setup Chat route for complex logic, corrections, low-confidence retrieval and multilingual turns. It receives no additional authority. |
+| `AI_SETUP_COMPLEX_CONDITION_THRESHOLD` | Condition-count threshold for complex routing. Default: `4`. |
+| `AI_SETUP_REPEATED_CORRECTION_THRESHOLD` | Correction count that escalates interpretation capacity. Default: `2`. |
+| `AI_SETUP_LOW_CAPABILITY_CONFIDENCE` | Resolver-confidence threshold for complex routing. Default: `0.72`. |
 | `AI_AGENT_CONTROL_ENABLED` | Bounded Setup Chat coordinator kill switch. Default: `false`. |
 | `AI_AGENT_SHADOW_MODE` | Records proposed agent tool selection but executes no agent tools. Default: `false`. |
 | `AI_AGENT_ROLLOUT_PERCENT` | Stable authenticated-user cohort allowed to execute agent tools outside shadow mode. Default: `0`. |
@@ -67,7 +69,7 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `CAPABILITY_EXTENSION_IMPLEMENTATION_MODEL` | Implementation-only repair model. Default: `gpt-5.4-nano`. |
 | `CAPABILITY_EXTENSION_REVIEW_MODEL` | Independent escalation model. Default: `gpt-5.4-mini`. |
 | `CAPABILITY_EXTENSION_REPAIR_SERVICE_TIER` | `flex` for review/repair work or `default`. |
-| `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Default: `bybit`. |
+| `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Private beta keeps this disabled and set to `binance`. |
 | `SHARIA_ADMIN_TELEGRAM_CHAT_ID` | Admin-only destination for review notifications. Required when deployed screening is enforced. |
 | `SC_MALAYSIA_DIGITAL_ASSETS_URL` | Authoritative SC Malaysia digital-assets page imported by the governance worker. |
 | `SHARIA_AI_MODEL` | Model used for bounded factual dossier/change analysis. Default: `gpt-5.4-nano`. |
@@ -87,9 +89,6 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `SHARIA_PROCESS_REMAINING_IMPORTS` | Enables processing of explicit non-pilot rows after pilot approval; default `false`. |
 | `TELEGRAM_ENABLED` | Enables Telegram webhooks and delivery workers. |
 | `TELEGRAM_ADAPTER` | Must be `http` when Telegram is enabled in a deployed environment. |
-| `DISCORD_ENABLED` | Enables Discord OAuth, interactions, delivery and role sync. |
-| `DISCORD_ADAPTER` | Must be `http` when Discord is enabled in a deployed environment. |
-| `DISCORD_BOT_TOKEN` | Discord bot token used for API delivery and role operations. |
 | `BILLING_ENABLED` | Enables checkout, portal and billing webhook processing. |
 | `BILLING_PROVIDER` | Configured payment provider. Use `nowpayments` for this build. |
 | `BILLING_CHECKOUT_TTL_MINUTES` | Expiry for a prepared first-party checkout attempt. Default: `30`. |
@@ -102,6 +101,24 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `STRIPE_SECRET_KEY` | Optional Stripe server API key if the provider is switched later. |
 | `STRIPE_PRICE_IDS` | Optional Stripe price-id map if the provider is switched later. |
 | `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED` | Requires Access headers in addition to application ADMIN auth. Enable only after origin access is restricted. |
+| `PUBLIC_CHAT_ENABLED` | Enables the separate public product-information assistant. |
+| `PUBLIC_CHAT_INQUIRY_EMAIL` | Office recipient for consented public inquiries. |
+| `PUBLIC_CHAT_PROFILE_VERSION` | Invalidates stale local-only visitor profile consent when changed. |
+| `PUBLIC_CHAT_MESSAGE_MAX_LENGTH` / `PUBLIC_CHAT_INQUIRY_MAX_LENGTH` | Server-enforced public input bounds. |
+| `PUBLIC_CHAT_ANSWER_AUDIT_RETENTION_DAYS` / `PUBLIC_CHAT_INQUIRY_RETENTION_DAYS` | Retention for hashed answer telemetry and consented inquiries. |
+| `PUBLIC_CHAT_EMAIL_MAX_ATTEMPTS` / `PUBLIC_CHAT_EMAIL_RETRY_MINUTES` / `PUBLIC_CHAT_EMAIL_CLAIM_TIMEOUT_MINUTES` | Bounded inquiry-email outbox retry and abandoned-claim recovery. |
+
+When `PUBLIC_CHAT_ENABLED=true` in staging or production, startup requires `EMAIL_ADAPTER=smtp`
+plus non-placeholder SMTP host, username, password, and sender address. This deliberately prevents
+an inquiry-enabled deployment from accepting questions into an outbox that cannot be delivered.
+
+## Private-Beta Locked Profile
+
+The initial private beta is invite-only and free. Production examples intentionally enforce BTC,
+ETH and SOL on Binance spot, one approved methodology, in-app and Telegram delivery, paid checkout
+off, WhatsApp off, Discord retired, capability extensions off, and Bounded Agent shadow mode with a
+zero-percent live cohort. Changing any of those values is a separate release decision and must pass
+the release invariant plus staging review.
 
 ## Database Migration
 
@@ -219,9 +236,8 @@ Scheduled tasks currently wired:
 - Stale/retryable scan-job recovery.
 - Setup-instance expiration.
 - Telegram delivery retries.
-- WhatsApp webhook processing, bounded delivery retries, and receipt retention cleanup.
-- Discord delivery retries.
-- Discord role-sync retries.
+- Public-inquiry email retries and bounded public-chat retention cleanup.
+- Dormant WhatsApp webhook/retry tasks only when the separately disabled WhatsApp feature is enabled.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
 - Daily idempotent SC Malaysia import and pilot processing.
@@ -248,7 +264,8 @@ messages, answers callbacks, and records bounded delivery retries.
 
 ## WhatsApp Cloud API Setup
 
-WhatsApp uses signed webhooks only; do not add polling. Configure the callback as
+WhatsApp is not a private-beta channel. Keep `WHATSAPP_ENABLED=false` and do not mount or advertise
+it. A later approved rollout uses signed webhooks only; do not add polling. Configure the callback as
 `https://<public-host>/api/v1/whatsapp/webhook`, subscribe the WABA to message events, and keep
 `WHATSAPP_ENABLED=false` until the registered phone, token permissions, callback verification, and
 required templates have been validated in staging. Complete setup, rotation, smoke tests, event
@@ -260,20 +277,11 @@ due receipts and WhatsApp `AlertDelivery` rows, then removes expired bounded rec
 free-form fallback outside Meta's customer-service window. Market-opportunity delivery remains off
 unless `WHATSAPP_OPPORTUNITY_ALERTS_ENABLED=true` and its approved template is configured.
 
-## Discord Setup
-
-1. Create a Discord application and bot.
-2. Configure OAuth redirect URLs under `PUBLIC_BASE_URL`.
-3. Store `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and `DISCORD_WEBHOOK_PUBLIC_KEY`.
-4. Install the bot in eligible servers.
-5. Verify permissions for channel delivery and setup threads.
-6. Configure role mappings from billing entitlements.
-
-The HTTP gateway performs server-side OAuth exchange, signed interaction validation, bot delivery,
-thread reuse, role synchronization and bounded retries. Register slash commands separately in the
-Discord developer portal or deployment automation.
-
 ## Billing Setup
+
+Paid billing is not a private-beta capability. Keep `BILLING_ENABLED=false`; public Pricing exposes
+only invite access and checkout/portal/webhook mutations fail closed. The retained provider flow
+below is for a later provider-sandbox release decision.
 
 1. Configure plans from `core/plans.py` and create matching payment options in NOWPayments. Public
    Pricing, checkout review, and entitlements must continue to use this same catalog.
@@ -285,7 +293,7 @@ Discord developer portal or deployment automation.
 
 The Dashboard first shows `/dashboard/billing/checkout`, where plan, cycle, price, currency, limits,
 and terms are loaded from the server. The server then creates the NOWPayments invoice. IPN
-signatures are verified with replay-safe event processing. Telegram and Discord may show plan status
+signatures are verified with replay-safe event processing. Telegram may show plan status
 and open a signed Dashboard billing link, but they do not collect payment directly.
 
 Verified successful payment enqueues a unique `PaymentEmailDelivery`. The scheduler runs
@@ -330,6 +338,10 @@ Use `scripts/test_compliance_notification.py` without `--live` for safe payload/
 inspection. A live test requires the explicit live flag, confirmation phrase, and dedicated test
 chat ID; never use a customer chat for deployment verification.
 
+Before inviting external users, execute the seven-day staging procedure in
+`docs/PRIVATE_BETA_SOAK_RUNBOOK.md`. Retain the daily output of
+`scripts/audit_private_beta_soak.py`; never commit those environment-specific reports.
+
 ## Monitoring Setup
 
 Operational APIs:
@@ -349,7 +361,7 @@ Track at minimum:
 - Scan duration and failures.
 - Queue depth and failed Celery jobs.
 - Chart generation failures.
-- Telegram, WhatsApp, and Discord delivery failures.
+- Telegram delivery failures, plus WhatsApp failures only in explicitly enabled staging tests.
 - Billing webhook failures.
 - Database and Redis health.
 - API latency and error rate.

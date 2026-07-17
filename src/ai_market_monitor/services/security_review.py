@@ -25,8 +25,6 @@ class SecurityReviewService:
         "binance_api_secret",
         "billing_webhook_secret",
         "client_secret",
-        "discord_bot_token",
-        "discord_client_secret",
         "nowpayments_api_key",
         "openai_api_key",
         "password",

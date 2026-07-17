@@ -36,10 +36,6 @@ app.conf.update(
             "task": "ai_market_monitor.repair_trial_cycle_counters",
             "schedule": 6 * 60 * 60,
         },
-        "retry-discord-deliveries-every-five-minutes": {
-            "task": "ai_market_monitor.retry_discord_deliveries",
-            "schedule": 5 * 60,
-        },
         "retry-telegram-deliveries-every-minute": {
             "task": "ai_market_monitor.retry_telegram_deliveries",
             "schedule": 60,
@@ -59,10 +55,6 @@ app.conf.update(
         "poll-telegram-updates": {
             "task": "ai_market_monitor.poll_telegram_updates",
             "schedule": settings.telegram_polling_interval_seconds,
-        },
-        "sync-discord-roles-every-five-minutes": {
-            "task": "ai_market_monitor.process_discord_role_sync",
-            "schedule": 5 * 60,
         },
         "record-database-health-every-minute": {
             "task": "ai_market_monitor.record_database_health",
@@ -123,6 +115,14 @@ app.conf.update(
         "retry-payment-emails-every-minute": {
             "task": "ai_market_monitor.retry_payment_emails",
             "schedule": 60,
+        },
+        "retry-public-inquiry-emails-every-minute": {
+            "task": "ai_market_monitor.retry_public_inquiry_emails",
+            "schedule": 60,
+        },
+        "cleanup-public-chat-data-nightly": {
+            "task": "ai_market_monitor.cleanup_public_chat_data",
+            "schedule": 24 * 60 * 60,
         },
         "expire-ended-paid-access-every-five-minutes": {
             "task": "ai_market_monitor.expire_ended_paid_access",
@@ -188,11 +188,6 @@ def trial_reminders_due() -> dict:
     return _run_async_task(_send_trial_cycle_reminders())
 
 
-@app.task(name="ai_market_monitor.retry_discord_deliveries")
-def retry_discord_deliveries() -> dict:
-    return _run_async_task(_retry_discord_deliveries())
-
-
 @app.task(name="ai_market_monitor.retry_telegram_deliveries")
 def retry_telegram_deliveries() -> dict:
     return _run_async_task(_retry_telegram_deliveries())
@@ -221,11 +216,6 @@ def retry_whatsapp_deliveries() -> dict:
 @app.task(name="ai_market_monitor.cleanup_whatsapp_webhook_receipts")
 def cleanup_whatsapp_webhook_receipts() -> dict:
     return _run_async_task(_cleanup_whatsapp_webhook_receipts())
-
-
-@app.task(name="ai_market_monitor.process_discord_role_sync")
-def process_discord_role_sync() -> dict:
-    return _run_async_task(_process_discord_role_sync())
 
 
 @app.task(name="ai_market_monitor.record_database_health")
@@ -304,6 +294,16 @@ def retry_payment_emails() -> dict:
     return _run_async_task(_retry_payment_emails())
 
 
+@app.task(name="ai_market_monitor.retry_public_inquiry_emails")
+def retry_public_inquiry_emails() -> dict:
+    return _run_async_task(_retry_public_inquiry_emails())
+
+
+@app.task(name="ai_market_monitor.cleanup_public_chat_data")
+def cleanup_public_chat_data() -> dict:
+    return _run_async_task(_cleanup_public_chat_data())
+
+
 @app.task(name="ai_market_monitor.expire_ended_paid_access")
 def expire_ended_paid_access() -> dict:
     return _run_async_task(_expire_ended_paid_access())
@@ -357,18 +357,6 @@ async def _repair_trial_cycle_counters() -> dict:
         result = await TrialLifecycleService(session, settings).repair_cycle_counters()
         await session.commit()
         return result
-
-
-async def _retry_discord_deliveries() -> dict:
-    from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.discord.service import DiscordAlertService
-
-    async with SessionFactory() as session:
-        if not settings.discord_enabled:
-            return {"retried": 0, "disabled": True}
-        retried = await DiscordAlertService(session, settings=settings).retry_due_deliveries()
-        await session.commit()
-        return {"retried": len(retried)}
 
 
 async def _retry_telegram_deliveries() -> dict:
@@ -557,18 +545,6 @@ async def _cleanup_whatsapp_webhook_receipts() -> dict:
         )
         await session.commit()
         return {"deleted": int(result.rowcount or 0)}
-
-
-async def _process_discord_role_sync() -> dict:
-    from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.discord.service import DiscordRoleSyncService
-
-    async with SessionFactory() as session:
-        if not settings.discord_enabled:
-            return {"processed": 0, "disabled": True}
-        processed = await DiscordRoleSyncService(session, settings=settings).process_due()
-        await session.commit()
-        return {"processed": len(processed)}
 
 
 async def _record_database_health() -> dict:
@@ -859,6 +835,24 @@ async def _retry_payment_emails() -> dict:
 
     async with SessionFactory() as session:
         return await PaymentEmailOutboxService(session, settings).process_due()
+
+
+async def _retry_public_inquiry_emails() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.public_chat import PublicChatService
+
+    async with SessionFactory() as session:
+        return await PublicChatService(session, settings).process_due()
+
+
+async def _cleanup_public_chat_data() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.public_chat import PublicChatService
+
+    async with SessionFactory() as session:
+        result = await PublicChatService(session, settings).cleanup_expired()
+        await session.commit()
+        return result
 
 
 async def _expire_ended_paid_access() -> dict:

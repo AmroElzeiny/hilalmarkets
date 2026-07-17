@@ -55,6 +55,7 @@ from ai_market_monitor.services.agent_control import (
     AgentTurnOutcome,
 )
 from ai_market_monitor.services.agent_tools import AgentToolService
+from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.hybrid_capability_resolution import (
     HybridCapabilityResolutionService,
 )
@@ -128,11 +129,19 @@ class OpenAISetupChatInterviewer:
                 "AI Setup Chat is unavailable because OPENAI_API_KEY is not configured.",
                 status_code=503,
             )
+        route = select_setup_model(
+            self.settings,
+            current_message=current_message,
+            accumulated_setup=accumulated_setup,
+            history=history,
+            active_clarification=active_clarification,
+            capability_context=capability_context,
+        )
         payload = {
-            "model": self.settings.openai_model,
+            "model": route.model,
             "store": False,
             "max_output_tokens": 900,
-            "reasoning": {"effort": self.settings.openai_reasoning_effort},
+            "reasoning": {"effort": route.reasoning_effort},
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -166,7 +175,10 @@ class OpenAISetupChatInterviewer:
                 response = await client.post("/responses", headers=headers, json=payload)
             response.raise_for_status()
             response_payload = response.json()
-            self.last_usage = dict(response_payload.get("usage") or {})
+            self.last_usage = {
+                **dict(response_payload.get("usage") or {}),
+                **route.usage_metadata(),
+            }
             return SetupChatTurnClassification.model_validate_json(
                 _extract_responses_output_text(response_payload)
             )
@@ -199,11 +211,18 @@ class OpenAISetupChatInterviewer:
                 "AI Setup Chat is unavailable because OPENAI_API_KEY is not configured.",
                 status_code=503,
             )
+        route = select_setup_model(
+            self.settings,
+            current_message=current_message,
+            accumulated_setup=accumulated_setup,
+            history=history,
+            capability_context=capability_context,
+        )
         payload = {
-            "model": self.settings.openai_model,
+            "model": route.model,
             "store": False,
             "max_output_tokens": 1600,
-            "reasoning": {"effort": self.settings.openai_reasoning_effort},
+            "reasoning": {"effort": route.reasoning_effort},
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -236,7 +255,10 @@ class OpenAISetupChatInterviewer:
                 response = await client.post("/responses", headers=headers, json=payload)
             response.raise_for_status()
             response_payload = response.json()
-            self.last_usage = dict(response_payload.get("usage") or {})
+            self.last_usage = {
+                **dict(response_payload.get("usage") or {}),
+                **route.usage_metadata(),
+            }
             return SetupChatInterviewResult.model_validate_json(
                 _extract_responses_output_text(response_payload)
             )
@@ -386,6 +408,7 @@ class AISetupChatService:
                 return chat
         context = dict(chat.context_json or {})
         fragments = list(context.get("setup_fragments") or [])
+        fragment_count_before = len(fragments)
         resolved = dict(context.get("resolved_ambiguities") or {})
         answered_keys = set(context.get("answered_clarification_keys") or [])
         answered_fingerprints = set(context.get("answered_clarification_fingerprints") or [])
@@ -741,7 +764,7 @@ class AISetupChatService:
         context["answered_clarification_keys"] = sorted(answered_keys)
         context["answered_clarification_fingerprints"] = sorted(answered_fingerprints)
         chat.context_json = dict(context)
-        await self._append_message(
+        user_message = await self._append_message(
             session,
             chat,
             role="user",
@@ -759,6 +782,38 @@ class AISetupChatService:
             },
             client_message_id=client_message_id,
         )
+        new_fragments = fragments[fragment_count_before:]
+        if new_fragments:
+            fragment_records = list(context.get("setup_fragment_records") or [])
+            for fragment in new_fragments:
+                fragment_records.append(
+                    {
+                        "fragment": str(fragment)[:500],
+                        "user_message_id": str(user_message.id),
+                        "user_message_sequence": user_message.sequence,
+                        "user_text": cleaned[:1000],
+                    }
+                )
+            context["setup_fragment_records"] = fragment_records[-100:]
+        if (
+            turn_classification is not None
+            and turn_classification.intent == "setup_revision"
+        ):
+            correction_history = list(context.get("correction_history") or [])
+            correction_field = awaiting_key or "strategy_logic"
+            correction = {
+                "field": correction_field,
+                "user_message_id": str(user_message.id),
+                "user_message_sequence": user_message.sequence,
+                "user_text": cleaned[:1000],
+                "superseded_schema_hash": context.get("schema_hash"),
+            }
+            correction_history.append(correction)
+            context["correction_history"] = correction_history[-50:]
+            latest_corrections = dict(context.get("latest_correction_by_field") or {})
+            latest_corrections[correction_field] = correction
+            context["latest_correction_by_field"] = latest_corrections
+        chat.context_json = dict(context)
         await CapabilityCoverageService(self.settings).record_clarification_choice(
             session,
             chat=chat,
@@ -1897,6 +1952,12 @@ class AISetupChatService:
             else "ready_to_scan"
             if _setup_mode(chat) == "scanner"
             else "ready_for_approval"
+        )
+        context["intent_state"] = _structured_intent_state(
+            definition,
+            context=context,
+            preview=preview,
+            lint=lint,
         )
         for key in (
             "awaiting_clarification",
@@ -3291,6 +3352,23 @@ def lint_strategy(
                 "message": issue.message,
             }
         )
+    coverage = _prompt_coverage_report(preview)
+    uncovered = [
+        item
+        for item in coverage.get("mapping_table", [])
+        if isinstance(item, dict) and item.get("bucket") == "unclassified"
+    ]
+    if uncovered:
+        warnings.append(
+            {
+                "code": "meaningful_clause_uncovered",
+                "severity": "critical",
+                "message": (
+                    "One or more instructions are not represented in the rule set. "
+                    "Clarify or remove them before approval."
+                ),
+            }
+        )
     required = [rule for rule in rules if rule.required]
     if rules and not required:
         warnings.append(
@@ -3446,6 +3524,7 @@ def translation_sheet(
         },
         {"label": "Invalidation", "value": invalidation},
     ]
+    coverage = _prompt_coverage_report(preview)
     return {
         "original_idea": original_idea,
         "setup_mode": setup_mode,
@@ -3483,8 +3562,148 @@ def translation_sheet(
         "unsupported_conditions": [
             issue.model_dump(mode="json") for issue in preview.unsupported_conditions
         ],
+        "clause_coverage": [
+            _beginner_clause_coverage(item)
+            for item in coverage.get("mapping_table", [])
+            if isinstance(item, dict)
+        ],
         "approval_required": setup_mode == "monitor",
         "execution": "No automatic trade execution. Deterministic monitoring only.",
+    }
+
+
+def _prompt_coverage_report(preview: InterpretationPreview) -> dict[str, Any]:
+    metadata = dict(preview.raw_metadata or {})
+    report = metadata.get("prompt_coverage_report") or metadata.get(
+        "openai_prompt_coverage_report"
+    )
+    return dict(report) if isinstance(report, dict) else {}
+
+
+def _beginner_clause_coverage(item: dict[str, Any]) -> dict[str, Any]:
+    bucket = str(item.get("bucket") or "unclassified")
+    status_map = {
+        "executable_condition": ("covered", "Included as a required rule.", False),
+        "optional_condition": (
+            "intentionally_optional",
+            "Included as an optional confirmation.",
+            False,
+        ),
+        "ambiguity": ("needs_clarification", "Needs one clear definition.", True),
+        "unsupported": ("unsupported", "Cannot run with the configured data.", True),
+        "assumption": ("covered_as_assumption", "Shown openly as an assumption.", False),
+        "ignored_filler": ("not_executable", "Conversational wording only.", False),
+        "unclassified": (
+            "needs_clarification",
+            "This instruction is not represented in the current rules.",
+            True,
+        ),
+    }
+    status, explanation, blocking = status_map.get(
+        bucket,
+        ("needs_clarification", "This instruction needs review.", True),
+    )
+    return {
+        "source_fragment": str(item.get("fragment") or "")[:1000],
+        "status": status,
+        "explanation": explanation,
+        "condition_key": item.get("condition_id"),
+        "blocking": blocking,
+    }
+
+
+def _structured_intent_state(
+    definition: StrategyDefinition,
+    *,
+    context: dict[str, Any],
+    preview: InterpretationPreview,
+    lint: list[dict[str, Any]],
+) -> dict[str, Any]:
+    rules = _condition_rules(definition.conditions)
+    roles = _rule_roles(definition)
+    fragment_records = [
+        item for item in context.get("setup_fragment_records") or [] if isinstance(item, dict)
+    ]
+
+    def rule_record(rule: ConditionRule) -> dict[str, Any]:
+        source = str(rule.source_fragment or "")
+        source_normalized = " ".join(source.casefold().split())
+        references = []
+        for item in fragment_records:
+            candidate = " ".join(
+                str(item.get("fragment") or item.get("user_text") or "").casefold().split()
+            )
+            if source_normalized and candidate and (
+                source_normalized in candidate or candidate in source_normalized
+            ):
+                references.append(
+                    {
+                        "message_id": item.get("user_message_id"),
+                        "sequence": item.get("user_message_sequence"),
+                    }
+                )
+        return {
+            "rule_key": rule.key,
+            "capability_key": rule.capability_key,
+            "capability_version": rule.capability_version,
+            "label": rule.label,
+            "role": roles.get(rule.key, "required_rule" if rule.required else "optional"),
+            "required": rule.required,
+            "timeframe": str(rule.timeframe),
+            "source_fragment": rule.source_fragment,
+            "message_references": references[-5:],
+        }
+
+    rule_records = [rule_record(rule) for rule in rules]
+    unresolved = [
+        {
+            "code": item.get("code"),
+            "message": item.get("message"),
+        }
+        for item in lint
+        if item.get("severity") == "critical"
+    ]
+    return {
+        "version": 1,
+        "confirmed_requirements": [
+            item for item in rule_records if item["required"]
+        ],
+        "rejected_interpretations": list(context.get("correction_history") or [])[-50:],
+        "required_conditions": [item for item in rule_records if item["required"]],
+        "optional_conditions": [item for item in rule_records if not item["required"]],
+        "timeframes": list(
+            dict.fromkeys(
+                [str(definition.base_timeframe), *map(str, definition.supporting_timeframes)]
+            )
+        ),
+        "universe": {
+            "exchange": definition.universe.exchange,
+            "market_type": definition.universe.market_type.value,
+            "symbols": list(definition.universe.include_symbols),
+            "quote_currencies": list(definition.universe.quote_currencies),
+            "screened_universe_mode": context.get("screened_universe_mode"),
+        },
+        "alert_timing": {
+            "trigger_mode": definition.trigger_mode.value,
+            "cooldown_seconds": definition.alerts.cooldown_seconds,
+            "forming_alerts": definition.alerts.forming_alerts,
+        },
+        "invalidation": {
+            "enabled": definition.risk.enabled,
+            "stop_method": definition.risk.stop_method,
+            "maximum_stop_percent": definition.risk.maximum_stop_percent,
+        },
+        "delivery_choices": list(definition.alerts.channels),
+        "unresolved_conflicts": unresolved,
+        "latest_correction_by_field": dict(
+            context.get("latest_correction_by_field") or {}
+        ),
+        "resolved_clarifications": dict(context.get("resolved_ambiguities") or {}),
+        "clause_coverage": [
+            _beginner_clause_coverage(item)
+            for item in _prompt_coverage_report(preview).get("mapping_table", [])
+            if isinstance(item, dict)
+        ],
     }
 
 

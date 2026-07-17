@@ -20,7 +20,6 @@ from ai_market_monitor.db.models import (
     AlertDelivery,
     CandidateReadinessSnapshot,
     ConditionObservabilityAggregate,
-    DiscordConnection,
     MarketDataHealth,
     MonitorEvaluationCycle,
     MonitorHealthSummary,
@@ -1240,27 +1239,22 @@ class SetupObservabilityService:
                 TelegramConnection.chat_id.is_not(None),
             )
         )
-        discord = await self.session.scalar(
-            select(DiscordConnection.id).where(
-                DiscordConnection.user_id == user_id,
-                DiscordConnection.status == ConnectionStatus.ACTIVE,
+        whatsapp = None
+        if self.settings.whatsapp_enabled:
+            whatsapp = await self.session.scalar(
+                select(WhatsAppConnection.id).where(
+                    WhatsAppConnection.user_id == user_id,
+                    WhatsAppConnection.status == ConnectionStatus.ACTIVE,
+                    WhatsAppConnection.alerts_enabled.is_(True),
+                    WhatsAppConnection.verified_at.is_not(None),
+                    WhatsAppConnection.opt_out_at.is_(None),
+                )
             )
-        )
-        whatsapp = await self.session.scalar(
-            select(WhatsAppConnection.id).where(
-                WhatsAppConnection.user_id == user_id,
-                WhatsAppConnection.status == ConnectionStatus.ACTIVE,
-                WhatsAppConnection.alerts_enabled.is_(True),
-                WhatsAppConnection.verified_at.is_not(None),
-                WhatsAppConnection.opt_out_at.is_(None),
-            )
-        )
         return [
             name
             for name, present in (
                 ("telegram", telegram),
                 ("whatsapp", whatsapp),
-                ("discord", discord),
             )
             if present
         ]

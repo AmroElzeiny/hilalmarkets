@@ -164,10 +164,10 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
             full_page=True,
         )
 
-    page.set_viewport_size({"width": 360, "height": 800})
+    page.set_viewport_size({"width": 390, "height": 844})
     page.locator("[data-public-menu]").click()
     expect(page.locator(".public-links")).to_be_visible()
-    page.screenshot(path=str(output / "hilalmarkets-landing-360.png"), full_page=True)
+    page.screenshot(path=str(output / "hilalmarkets-landing-390.png"), full_page=True)
 
     page.keyboard.press("Tab")
     focused = page.evaluate("document.activeElement && document.activeElement.tagName")
@@ -184,9 +184,131 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
     expect(page.locator(".auth-form-wrap")).to_be_visible()
     expect(page.get_by_test_id("signup-form")).to_be_visible()
     assert "placeholder-note" not in page.content()
-    page.screenshot(path=str(output / "hilalmarkets-auth-mobile-360.png"), full_page=True)
+    page.screenshot(path=str(output / "hilalmarkets-auth-mobile-390.png"), full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.screenshot(path=str(output / "hilalmarkets-auth-desktop.png"), full_page=True)
+    assert_no_raw_traceback(page)
+
+
+def test_public_product_chat_consent_grounding_inquiry_and_returning_profile(
+    page: Page,
+    base_url: str,
+    repo_root: Path,
+) -> None:
+    output = repo_root / "reports" / "playwright" / "visual-qa" / "public-chat"
+    output.mkdir(parents=True, exist_ok=True)
+    page.goto(base_url, wait_until="domcontentloaded")
+
+    page.locator("[data-cookie-customize]").first.click()
+    page.locator("[data-consent-functional]").check()
+    page.locator("[data-cookie-save]").click()
+    launcher = page.locator("[data-public-chat-launcher]")
+    page.emulate_media(reduced_motion="reduce")
+    expect(launcher).to_have_css("animation-name", "none")
+    page.emulate_media(reduced_motion="no-preference")
+    launcher.click()
+    panel = page.locator("[data-public-chat-panel]")
+    expect(panel).to_be_visible()
+    expect(launcher).to_have_class(re.compile("was-opened"))
+    expect(page.locator("[data-public-chat-profile]")).to_be_visible()
+
+    page.get_by_label("Name", exact=True).fill("Amina Beta")
+    page.get_by_label("Email", exact=True).fill("AMINA@EXAMPLE.COM")
+    page.get_by_text("Remember me on this device").click()
+    page.get_by_role("button", name="Start conversation").click()
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text("Hi Amina")
+    page.get_by_role("button", name="Private-beta markets").click()
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text(
+        "BTC, ETH, and SOL",
+        timeout=10_000,
+    )
+    page.screenshot(path=str(output / "public-chat-desktop-1440.png"), full_page=False)
+
+    page.locator("[data-public-chat-close]").click()
+    expect(launcher).to_be_focused()
+    page.reload(wait_until="domcontentloaded")
+    page.locator("[data-public-chat-launcher]").click()
+    expect(page.locator("[data-public-chat-profile]")).to_be_hidden()
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text("Hi Amina")
+    page.locator("[data-public-chat-new]").click()
+    expect(page.locator(".public-chat-message")).to_have_count(1)
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text("Hi Amina")
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(panel).to_be_visible()
+    assert panel.bounding_box()["width"] <= 390
+    page.screenshot(path=str(output / "public-chat-mobile-390.png"), full_page=False)
+
+    question = "Can your team certify my private satellite telemetry feed?"
+    page.locator("[data-public-chat-input]").fill(question)
+    page.locator("[data-public-chat-send]").click()
+    inquiry = page.locator("[data-public-chat-inquiry]")
+    expect(inquiry).to_be_visible(timeout=10_000)
+    expect(inquiry.locator("textarea[name='details']")).to_have_value(question)
+    inquiry.get_by_role("button", name="Send question").click()
+    success = page.locator("[data-public-chat-success]")
+    expect(success).to_be_visible(timeout=10_000)
+    expect(success).to_contain_text("Your message was sent successfully")
+    success.locator("[data-public-chat-rating-feedback]").fill("Easy handoff.")
+    success.get_by_role("button", name="Yes").click()
+    expect(success).to_contain_text("feedback was recorded")
+    success.get_by_role("button", name="Ask another question").click()
+    page.locator("[data-public-chat-forget]").click()
+    expect(page.locator("[data-public-chat-profile]")).to_be_visible()
+    assert page.evaluate(
+        "localStorage.getItem('hm-public-chat-profile-v1')"
+    ) is None
+    page.keyboard.press("Escape")
+    expect(launcher).to_be_focused()
+    assert_no_raw_traceback(page)
+
+
+def test_public_product_chat_session_profile_offline_and_focus_containment(
+    page: Page,
+    base_url: str,
+) -> None:
+    page.goto(base_url, wait_until="domcontentloaded")
+    page.locator("[data-cookie-essential]").first.click()
+    launcher = page.locator("[data-public-chat-launcher]")
+    launcher.click()
+    page.get_by_label("Name", exact=True).fill("Session Visitor")
+    page.get_by_label("Email", exact=True).fill("session@example.com")
+    page.get_by_role("button", name="Start conversation").click()
+
+    assert page.evaluate(
+        "localStorage.getItem('hm-public-chat-profile-v1')"
+    ) is None
+    assert page.evaluate(
+        "sessionStorage.getItem('hm-public-chat-profile-v1')"
+    ) is not None
+    page.reload(wait_until="domcontentloaded")
+    launcher = page.locator("[data-public-chat-launcher]")
+    launcher.click()
+    expect(page.locator("[data-public-chat-profile]")).to_be_hidden()
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text(
+        "Hi Session"
+    )
+
+    page.locator("[data-public-chat-new]").focus()
+    page.keyboard.press("Shift+Tab")
+    assert page.evaluate(
+        "document.querySelector('[data-public-chat-panel]').contains(document.activeElement)"
+    )
+
+    page.context.set_offline(True)
+    page.locator("[data-public-chat-input]").fill("What does HilalMarkets do?")
+    expect(page.locator("[data-public-chat-connectivity]")).to_be_visible()
+    expect(page.locator("[data-public-chat-send]")).to_be_disabled()
+    page.context.set_offline(False)
+    expect(page.locator("[data-public-chat-connectivity]")).to_be_hidden()
+    expect(page.locator("[data-public-chat-send]")).to_be_enabled()
+
+    page.locator("[data-public-chat-forget]").click()
+    assert page.evaluate(
+        "sessionStorage.getItem('hm-public-chat-profile-v1')"
+    ) is None
+    page.keyboard.press("Escape")
+    expect(launcher).to_be_focused()
     assert_no_raw_traceback(page)
 
 
@@ -305,7 +427,7 @@ def test_screened_market_passport_and_mobile_visual_qa(
     assert_no_raw_traceback(page)
 
 
-def test_checkout_review_desktop_and_mobile_visual_qa(
+def test_private_beta_billing_desktop_and_mobile_visual_qa(
     page: Page,
     base_url: str,
 ) -> None:
@@ -313,22 +435,17 @@ def test_checkout_review_desktop_and_mobile_visual_qa(
     output = Path("reports/visual-qa/checkout")
     output.mkdir(parents=True, exist_ok=True)
 
-    page.goto(f"{base_url}/dashboard/billing/checkout?plan_code=trader")
-    expect(page.get_by_role("heading", name="Review before payment.")).to_be_visible()
-    catalog_copy = page.get_by_text(
-        "Your plan, price, and limits below were loaded from the server plan catalog."
-    )
-    expect(catalog_copy).to_be_visible()
-    expect(page.get_by_text("Billing frequency")).to_be_visible()
-    expect(page.get_by_text("Monthly", exact=True)).to_be_visible()
-    expect(page.get_by_role("checkbox")).to_be_visible()
-    expect(page.get_by_role("button", name="Continue to secure payment")).to_be_visible()
-    page.screenshot(path=str(output / "checkout-desktop-1440.png"), full_page=True)
+    page.goto(f"{base_url}/dashboard/billing")
+    expect(page.get_by_role("heading", name="Plan and billing.")).to_be_visible()
+    expect(page.get_by_text("Billing is paused for invited beta users")).to_be_visible()
+    expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
+    expect(page.get_by_role("link", name="Review and pay")).to_have_count(0)
+    page.screenshot(path=str(output / "private-beta-access-desktop-1440.png"), full_page=True)
 
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.get_by_role("heading", name="Review before payment.")).to_be_visible()
-    expect(page.get_by_role("button", name="Continue to secure payment")).to_be_visible()
-    page.screenshot(path=str(output / "checkout-mobile-390.png"), full_page=True)
+    expect(page.get_by_role("heading", name="Plan and billing.")).to_be_visible()
+    expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
+    page.screenshot(path=str(output / "private-beta-access-mobile-390.png"), full_page=True)
     assert_no_raw_traceback(page)
 
 
@@ -780,14 +897,13 @@ def test_notification_channel_handoff_links_smoke(page: Page, base_url: str) -> 
     page.goto(f"{base_url}/dashboard/integrations", wait_until="domcontentloaded")
     expect(page.get_by_test_id("integrations-root")).to_be_visible()
     expect(page.get_by_test_id("telegram-integration-card")).to_contain_text("Telegram")
-    expect(page.get_by_test_id("whatsapp-integration-card")).to_contain_text("WhatsApp")
-    expect(page.get_by_test_id("discord-integration-card")).to_contain_text("Discord")
+    expect(page.get_by_test_id("whatsapp-integration-card")).to_have_count(0)
+    expect(page.get_by_test_id("discord-integration-card")).to_have_count(0)
     body = page.locator("body").inner_text(timeout=10_000).lower()
     assert "telegram_bot_token" not in body
     assert "whatsapp_access_token" not in body
     assert "whatsapp_app_secret" not in body
     assert "whatsapp_verify_token" not in body
-    assert "discord_bot_token" not in body
     assert "bot token" not in body
     assert_no_raw_traceback(page)
 

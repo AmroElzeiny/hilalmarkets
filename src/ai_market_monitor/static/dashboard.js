@@ -46,7 +46,7 @@
 
   function friendlyApiError(detail) {
     if (detail === "notification_channel_required") {
-      return "Connect Telegram, WhatsApp, or Discord before starting monitoring.";
+      return "Connect Telegram before starting monitoring.";
     }
     const verifiedMessages = {
       interpretation_approval_required: "Review and approve the interpretation first.",
@@ -99,12 +99,7 @@
   function connectedNotificationChannel(payload) {
     const channelActive = (channel) =>
       Boolean(channel && channel.status === "active" && channel.alerts_enabled !== false);
-    const whatsappActive = Boolean(
-      channelActive(payload?.whatsapp)
-      && payload.whatsapp.verified !== false
-      && payload.whatsapp.opted_in !== false,
-    );
-    return channelActive(payload?.telegram) || whatsappActive || channelActive(payload?.discord);
+    return channelActive(payload?.telegram);
   }
 
   async function hasNotificationChannel() {
@@ -1255,7 +1250,7 @@
         if (shouldPublish && id && version) {
           if (!(await hasNotificationChannel())) {
             savePendingMonitorPublish(id, version);
-            showToast("Connect Telegram, WhatsApp, or Discord before starting monitoring.", "error");
+            showToast("Connect Telegram before starting monitoring.", "error");
             window.location.href = pendingMonitorPublishUrl();
             return;
           }
@@ -2431,7 +2426,7 @@
           content: `
             <fieldset class="drawer-channel-picker">
               <legend>Alert channels</legend>
-              ${["telegram", "whatsapp", "discord"].map((channel) => `<label><input type="checkbox" data-alert-channel value="${channel}" ${safeArray(schema.alerts?.channels).includes(channel) ? "checked" : ""}><span>${titleize(channel)}</span></label>`).join("")}
+              ${["telegram"].map((channel) => `<label><input type="checkbox" data-alert-channel value="${channel}" ${safeArray(schema.alerts?.channels).includes(channel) ? "checked" : ""}><span>${titleize(channel)}</span></label>`).join("")}
             </fieldset>
             <div class="drawer-field-grid">
               <label>Forming alerts<select data-section-field="forming_alerts">${optionMarkup([{value: "true", label: "On"}, {value: "false", label: "Off"}], String(schema.alerts?.forming_alerts !== false))}</select></label>
@@ -3002,10 +2997,10 @@
           if (!(await hasNotificationChannel())) {
             savePendingMonitorPublish(id, version);
             setBuilderActionStatus(
-              "Connect Telegram, WhatsApp, or Discord before starting monitoring. Opening Integrations...",
+              "Connect Telegram before starting monitoring. Opening Integrations...",
               "error",
             );
-            showToast("Connect Telegram, WhatsApp, or Discord before starting monitoring.", "error");
+            showToast("Connect Telegram before starting monitoring.", "error");
             window.location.href = pendingMonitorPublishUrl();
             return;
           }
@@ -3906,7 +3901,7 @@
       event.preventDefault();
       const result = document.getElementById("scan-result");
       if (!(await hasNotificationChannel())) {
-        showToast("Connect Telegram, WhatsApp, or Discord before running Scanner.", "error");
+        showToast("Connect Telegram before running Scanner.", "error");
         window.location.href = notificationChannelRequiredUrl("quick_scan_channel_required");
         return;
       }
@@ -5979,7 +5974,7 @@
         showToast("Monitor is active.");
         window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
       } catch (error) {
-        if (!/Telegram|WhatsApp|Discord|notification channel/i.test(error.message)) {
+        if (!/Telegram|notification channel/i.test(error.message)) {
           window.localStorage.removeItem(pendingMonitorPublishKey);
         }
         showToast(error.message, "error");
@@ -6186,8 +6181,6 @@
     if (!rootElement) return;
     const buttons = {
       telegram: rootElement.querySelector('[data-overview-channel="telegram"]'),
-      whatsapp: rootElement.querySelector('[data-overview-channel="whatsapp"]'),
-      discord: rootElement.querySelector('[data-overview-channel="discord"]'),
     };
 
     function updateButton(channel, connected) {
@@ -6209,8 +6202,6 @@
       try {
         const payload = await api("/integrations");
         updateButton("telegram", connectedNotificationChannel({ telegram: payload.telegram }));
-        updateButton("whatsapp", connectedNotificationChannel({ whatsapp: payload.whatsapp }));
-        updateButton("discord", connectedNotificationChannel({ discord: payload.discord }));
       } catch {
         return;
       }

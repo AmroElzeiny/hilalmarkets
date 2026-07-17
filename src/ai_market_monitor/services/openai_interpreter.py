@@ -14,6 +14,7 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.services.interfaces import StrategyInterpreter
+from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 
 
@@ -49,11 +50,20 @@ class OpenAIResponsesInterpretationClient:
             if item.get("capability_key")
         ]
         candidate_keys = list(dict.fromkeys([*resolution.candidate_keys, *binding_keys]))
+        route = select_setup_model(
+            self.settings,
+            current_message=guided_setup.setup_text or "",
+            accumulated_setup=guided_setup.setup_text or "",
+            capability_context={
+                "capability_resolution": resolution.ai_context(),
+                "verified_capability_bindings": guided_setup.capability_bindings,
+            },
+        )
         payload = {
-            "model": self.settings.openai_model,
+            "model": route.model,
             "store": False,
             "max_output_tokens": 4000,
-            "reasoning": {"effort": self.settings.openai_reasoning_effort},
+            "reasoning": {"effort": route.reasoning_effort},
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -84,7 +94,10 @@ class OpenAIResponsesInterpretationClient:
             response = await client.post("/responses", headers=headers, json=payload)
         response.raise_for_status()
         response_payload = response.json()
-        self.last_usage = dict(response_payload.get("usage") or {})
+        self.last_usage = {
+            **dict(response_payload.get("usage") or {}),
+            **route.usage_metadata(),
+        }
         output_text = _extract_output_text(response_payload)
         try:
             return _loads_json_object(output_text)
@@ -178,15 +191,18 @@ class OpenAIStrategyInterpreter:
                         },
                     }
                 )
+            selected_model = str(
+                openai_usage.get("_traceedge_model") or self.settings.openai_model
+            )
             return InterpretationPreview(
                 strategy=definition,
                 assumptions=assumptions,
                 ambiguities=ambiguities,
                 unsupported_conditions=unsupported,
-                interpreter=f"{self.name}:{self.settings.openai_model}",
+                interpreter=f"{self.name}:{selected_model}",
                 raw_metadata={
                     "provider": "openai",
-                    "model": self.settings.openai_model,
+                    "model": selected_model,
                     "deterministic_evaluation_required": True,
                     "prompt_coverage_report": coverage.model_dump(mode="json"),
                     "capability_resolution": resolution.to_dict(),

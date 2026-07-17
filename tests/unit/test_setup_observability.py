@@ -192,7 +192,7 @@ async def test_opportunity_card_uses_retained_conditions_and_prior_score(test_co
                     contribution_score=Decimal("100"),
                     candle_timestamp=setup.last_evaluated_at,
                     evaluated_at=setup.last_evaluated_at,
-                    data_freshness_ms=None,
+                    data_freshness_ms=300,
                 ),
                 NearMissSnapshot(
                     scan_result_id=scan.id,
@@ -239,9 +239,7 @@ async def test_opportunity_card_uses_retained_conditions_and_prior_score(test_co
             "Still missing: Volume confirmation - Current 1.27 - Required 1.5"
         )
         assert card["direction"] == "Getting closer"
-        assert card["data_freshness"] == (
-            "Partial freshness: 0.3s at evaluation; 1 condition unavailable"
-        )
+        assert card["data_freshness"] == "0.3s at evaluation"
         assert card["market_availability"] == "Exact active spot mapping unavailable"
         assert card["can_create_watch_plan"] is False
 

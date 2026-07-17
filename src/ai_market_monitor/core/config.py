@@ -90,8 +90,6 @@ class Settings(BaseSettings):
     telegram_adapter: Literal["none", "http"] = "none"
     whatsapp_enabled: bool = False
     whatsapp_adapter: Literal["none", "http"] = "none"
-    discord_enabled: bool = False
-    discord_adapter: Literal["noop", "http"] = "noop"
     billing_enabled: bool = False
     billing_provider: Literal["static", "stripe", "nowpayments"] = "static"
     billing_checkout_ttl_minutes: int = Field(default=30, ge=5, le=1440)
@@ -113,6 +111,8 @@ class Settings(BaseSettings):
             "passport_report": {"limit": 5, "window_seconds": 3600},
             "telegram_test": {"limit": 5, "window_seconds": 300},
             "whatsapp_test": {"limit": 5, "window_seconds": 300},
+            "public_chat": {"limit": 20, "window_seconds": 60},
+            "public_inquiry": {"limit": 5, "window_seconds": 3600},
             "admin_mutation": {"limit": 30, "window_seconds": 60},
         }
     )
@@ -139,10 +139,6 @@ class Settings(BaseSettings):
     whatsapp_opt_in_version: str = "2026-07"
     whatsapp_mark_inbound_read: bool = True
     whatsapp_webhook_receipt_retention_days: int = Field(default=30, ge=1, le=365)
-    discord_client_id: str | None = None
-    discord_client_secret: SecretStr | None = None
-    discord_bot_token: SecretStr | None = None
-    discord_webhook_public_key: SecretStr | None = None
     billing_webhook_secret: SecretStr | None = None
     stripe_secret_key: SecretStr | None = None
     stripe_price_ids: dict[str, str] = Field(default_factory=dict)
@@ -180,6 +176,17 @@ class Settings(BaseSettings):
     openai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "low"
     openai_timeout_seconds: int = Field(default=20, ge=1, le=120)
     openai_explanation_enabled: bool = True
+    ai_setup_simple_model: str | None = None
+    ai_setup_complex_model: str | None = None
+    ai_setup_simple_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] | None = None
+    ai_setup_complex_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] | None = None
+    ai_setup_complex_condition_threshold: int = Field(default=4, ge=2, le=20)
+    ai_setup_repeated_correction_threshold: int = Field(default=2, ge=1, le=10)
+    ai_setup_low_capability_confidence: float = Field(default=0.72, ge=0, le=1)
     ai_agent_control_enabled: bool = False
     ai_agent_shadow_mode: bool = False
     ai_agent_rollout_percent: int = Field(default=0, ge=0, le=100)
@@ -204,7 +211,7 @@ class Settings(BaseSettings):
     capability_embeddings_enabled: bool = True
     capability_embedding_model: str = "text-embedding-3-small"
     capability_embedding_dimensions: int = Field(default=256, ge=64, le=3072)
-    capability_extension_enabled: bool = True
+    capability_extension_enabled: bool = False
     capability_extension_draft_model: str = "gpt-5.4-nano"
     capability_extension_draft_reasoning_effort: Literal[
         "none", "low", "medium", "high", "xhigh"
@@ -265,6 +272,16 @@ class Settings(BaseSettings):
     auth_code_max_attempts: int = Field(default=5, ge=1, le=10)
     auth_test_fixed_code: str | None = None
     email_test_outbox: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
+    public_chat_enabled: bool = True
+    public_chat_inquiry_email: str = "office@hilalmarkets.com"
+    public_chat_profile_version: int = Field(default=1, ge=1, le=1000)
+    public_chat_message_max_length: int = Field(default=800, ge=100, le=4000)
+    public_chat_inquiry_max_length: int = Field(default=4000, ge=500, le=10000)
+    public_chat_answer_audit_retention_days: int = Field(default=90, ge=1, le=730)
+    public_chat_inquiry_retention_days: int = Field(default=365, ge=30, le=3650)
+    public_chat_email_max_attempts: int = Field(default=5, ge=1, le=20)
+    public_chat_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
+    public_chat_email_claim_timeout_minutes: int = Field(default=10, ge=1, le=120)
     system_brain_admin_username: str | None = None
     system_brain_admin_password_hash: SecretStr | None = None
     system_brain_otp_ttl_minutes: int = Field(default=10, ge=2, le=30)
@@ -348,6 +365,8 @@ class Settings(BaseSettings):
             "passport_report",
             "telegram_test",
             "whatsapp_test",
+            "public_chat",
+            "public_inquiry",
             "admin_mutation",
         }
         if set(self.api_rate_limits) != required_rate_limits:

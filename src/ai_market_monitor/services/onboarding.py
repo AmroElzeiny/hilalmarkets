@@ -64,7 +64,7 @@ class OnboardingService:
         elif self.settings.is_production:
             raise OnboardingError(
                 "identity_assertion_required",
-                "Identity must be verified by Telegram, Discord, or an email magic link",
+                "Identity must be verified by Telegram or an email magic link",
             )
         user, identity, _ = await identity_service.resolve_or_create(
             request.identity, trusted_provider_assertion=trusted_assertion

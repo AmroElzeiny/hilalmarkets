@@ -1,4 +1,4 @@
-# Closed-Beta Launch Checklist
+# Private-Beta Launch Checklist
 
 Last corrected: 2026-07-17
 
@@ -33,6 +33,13 @@ Status vocabulary:
 | GitHub Actions release gate | IMPLEMENTED | CI PENDING | N/A | Branch protection pending |
 | Resolved transitive dependency lock | PARTIAL | CI PENDING | N/A | Generate and review a Python 3.12 lock artifact |
 | Generated/runtime artifacts absent from Git index | IMPLEMENTED | CI PENDING | N/A | N/A |
+| Initial beta profile is BTC/ETH/SOL, Binance spot, invite-only/free | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
+| Bounded Agent is shadow-only with a zero-percent live cohort | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
+| Billing, WhatsApp, and capability extensions are disabled | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
+| Active Discord product/API/worker/UI surfaces are removed | IMPLEMENTED | CI PENDING | STAGING PENDING | Historical data inventory before physical DB removal |
+| Public product chatbot is grounded, rate-limited, and non-executing | IMPLEMENTED | CI PENDING | STAGING PENDING | Privacy and owner content review |
+| Public inquiry outbox sends one customer and one office event | IMPLEMENTED | CI PENDING | STAGING PENDING | Controlled SMTP delivery proof |
+| Enabled deployed public chat refuses missing/fake SMTP configuration | IMPLEMENTED | CI PENDING | STAGING PENDING | Replace example placeholders and verify provider |
 
 ## Product Acceptance
 
@@ -51,8 +58,11 @@ Status vocabulary:
 | Opportunity Journey state transitions are durable/idempotent | PARTIAL | CI PENDING | STAGING PENDING | Seven-day duplicate/restart soak |
 | Compliance drift payload contains status, reason, action, plans, and Passport | IMPLEMENTED | CI PENDING | STAGING PENDING | Controlled Telegram delivery matrix |
 | Methodology comparison hidden below two approved assessments | IMPLEMENTED | CI PENDING | STAGING PENDING | Browser check with one/two methods |
-| Invoice/payment history and provider-accurate checkout/email | IMPLEMENTED | CI PENDING | STAGING PENDING | Sandbox event matrix |
+| Paid billing remains provider-accurate but inaccessible in beta | IMPLEMENTED | CI PENDING | STAGING PENDING | Billing is not a beta acceptance dependency |
 | Explicit first-owner governance grants | IMPLEMENTED | CI PENDING | STAGING PENDING | Run bootstrap CLI and retain audit event |
+| AI Setup Chat structured intent and clause coverage | IMPLEMENTED | CI PENDING | STAGING PENDING | Reviewed multilingual shadow corpus |
+| Adaptive model routing uses configured tiers and records telemetry | IMPLEMENTED | CI PENDING | STAGING PENDING | Cost/latency/quality review before any live-agent cohort |
+| Public profile consent, session fallback, inquiry redaction, and retention | IMPLEMENTED | CI PENDING | STAGING PENDING | Browser/privacy review |
 
 ## Required Staging Drill
 
@@ -71,13 +81,17 @@ database backup identifier, evidence hashes, screenshots, provider IDs, and inci
 10. Inspect each current Passport and its exact canonical exchange mappings.
 11. Run Check the Market Now and the worker against the same frozen candle snapshot.
 12. Deliver one controlled Telegram test and verify one delivery record.
-13. Complete one NOWPayments sandbox payment, replay its IPN, test a distinct repeated deposit, and
-    verify exactly one entitlement transition and one logical payment email.
-14. Trigger a material source change, safety hold, review, superseding publication, and restore.
-15. Verify the old alert still opens its original Passport while current status is shown separately.
-16. Exercise stale source, unavailable source, provider timeout, DB timeout, Redis loss, and restart.
-17. Run desktop/mobile browser smoke and capture 1440, 1024, 768, and 390 pixel evidence.
-18. Run a seven-day schedule/alert soak and verify no duplicate jobs, journeys, alerts, or emails.
+13. Open the public chatbot with and without Functional consent; verify grounded product answers,
+    session/device profile behavior, an unsupported-question inquiry, and deletion/redaction.
+14. Deliver one customer inquiry confirmation and one office copy through staging SMTP; force a
+    retry and verify the same two logical event keys are not duplicated.
+15. Trigger a material source change, safety hold, review, superseding publication, and restore.
+16. Verify the old alert still opens its original Passport while current status is shown separately.
+17. Exercise stale source, unavailable source, provider timeout, DB timeout, Redis loss, and restart.
+18. Run desktop/mobile browser smoke and capture 1440, 1024, 768, and 390 pixel evidence.
+19. Run the procedure in `docs/PRIVATE_BETA_SOAK_RUNBOOK.md` and retain day-zero/day-seven
+    `scripts/audit_private_beta_soak.py` output showing no duplicate schedules, journeys, alerts,
+    payment-email events, or public-inquiry email events.
 
 No staging drill in this section has been executed by the 2026-07-17 local correction run.
 
@@ -92,7 +106,7 @@ No staging drill in this section has been executed by the 2026-07-17 local corre
 - [ ] Alerts exist for abnormal Sharia exclusions, stale sources, failed scans, and deliveries.
 - [ ] SMTP sender passes SPF, DKIM, and DMARC checks.
 - [ ] Telegram webhook secret and live test chat are configured.
-- [ ] NOWPayments sandbox catalog matches the public Plan Catalog.
+- [ ] Before any post-beta billing launch, the selected provider sandbox catalog matches the public Plan Catalog.
 - [ ] GitHub branch protection requires every Release Gate job.
 - [ ] Legal, source-rights, religious-governance, privacy, refund, and incident policies are approved.
 
@@ -102,8 +116,29 @@ Pending: test with at least ten target users and record whether each person can 
 Market, My Screened Watchlist, and Watch Plan; understand a Passport; activate a Watch Plan without
 help; test Telegram; and explain why an alert did or did not occur.
 
+## Local Verification Snapshot
+
+The first full local baseline on 2026-07-17 reached `1970 passed`, with six production-contract
+failures and 18 browser setup errors. The six code failures were corrected and their focused rerun
+passed. The browser errors were caused by a missing Playwright Chromium installation, not test
+assertions.
+
+Post-patch full verification is currently blocked by the workstation, not reported as green:
+
+- `.venv` targets a removed Python 3.12 installation;
+- only Python 3.11 is installed while the project requires Python 3.12;
+- Node is not installed;
+- Docker Engine access is denied from this session.
+
+Static checks completed after the latest patch: changed Python syntax passed; `git diff --check`
+passed; the migration graph has one statically derived head (`1acbd2e3f405`); the production beta
+profile has no mismatches; active Discord scan count is zero; and forbidden tracked artifact count
+is zero. These checks do not replace pytest, MyPy, Ruff, Playwright, Alembic/PostgreSQL, dependency,
+secret, or container scans.
+
 ## Release Decision
 
-**Not ready for external beta yet.** Repository blockers have been substantially corrected, but a
-post-change green CI run, the staging pilot, external delivery/payment/edge tests, seven-day soak,
-ten-user usability study, and accountable owner/legal/governance approvals remain mandatory.
+**Not ready for external private beta yet.** Repository blockers have been substantially corrected,
+but a post-change green Release Gate run, the staging pilot, controlled SMTP and Telegram delivery,
+edge tests, seven-day soak, ten-user usability study, and accountable owner/legal/governance
+approvals remain mandatory. Payment-provider acceptance is deferred while beta billing is disabled.

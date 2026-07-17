@@ -1,5 +1,8 @@
 # HilalMarkets Expansion Implementation Report
 
+> Historical record notice (2026-07-17): Discord references below describe retired behavior and
+> are not part of the private-beta product. See `docs/RETIRED_DISCORD_COMPATIBILITY.md`.
+
 ## Audit Matrix
 
 The implementation started with a repository and design-kit audit on 15 July 2026.

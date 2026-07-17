@@ -227,3 +227,73 @@ async def test_system_brain_reports_bounded_agent_safety_metrics(test_context):
     assert data["agent_control"]["clarification_turns"] == 1
     assert data["agent_control"]["tool_breakdown"][0]["tool_name"] == "activate_monitor"
     assert data["agent_control"]["tool_breakdown"][0]["blocked"] == 1
+
+
+async def test_system_brain_reports_persisted_setup_model_routes(test_context):
+    settings = test_context["settings"]
+    async with test_context["session_factory"]() as session:
+        session.add_all(
+            [
+                AIUsageEvent(
+                    operation="setup_interview",
+                    model="configured-simple",
+                    reasoning_effort="low",
+                    input_tokens=10,
+                    output_tokens=5,
+                    reasoning_tokens=0,
+                    estimated_cost_usd=Decimal("0.00000100"),
+                    pricing_source="test",
+                    raw_usage={
+                        "_traceedge_route_tier": "simple",
+                        "_traceedge_route_reasons": ["simple_clear_request"],
+                    },
+                    created_at=datetime.now(UTC),
+                ),
+                AIUsageEvent(
+                    operation="setup_interview",
+                    model="configured-complex",
+                    reasoning_effort="medium",
+                    input_tokens=20,
+                    output_tokens=10,
+                    reasoning_tokens=2,
+                    estimated_cost_usd=Decimal("0.00000200"),
+                    pricing_source="test",
+                    raw_usage={
+                        "_traceedge_route_tier": "complex",
+                        "_traceedge_route_reasons": [
+                            "mixed_boolean_logic",
+                            "multiple_timeframes",
+                        ],
+                    },
+                    created_at=datetime.now(UTC),
+                ),
+                AIUsageEvent(
+                    operation="legacy_interpretation",
+                    model="legacy-model",
+                    reasoning_effort="low",
+                    input_tokens=5,
+                    output_tokens=2,
+                    reasoning_tokens=0,
+                    estimated_cost_usd=Decimal("0"),
+                    pricing_source="test",
+                    raw_usage={},
+                    created_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.commit()
+
+        data = await CapabilityCoverageService(settings).overview(session)
+
+    routing = data["setup_model_routing"]
+    assert routing["routed_calls"] == 2
+    assert routing["unclassified_calls"] == 1
+    assert {item["tier"]: item["calls"] for item in routing["tiers"]} == {
+        "simple": 1,
+        "complex": 1,
+    }
+    assert routing["reasons"][0]["calls"] == 1
+    assert {item["model"] for item in routing["models"]} == {
+        "configured-simple",
+        "configured-complex",
+    }

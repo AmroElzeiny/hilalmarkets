@@ -28,8 +28,6 @@ from ai_market_monitor.db.models import (
     ChartSnapshot,
     DashboardNotification,
     DashboardPreference,
-    DiscordConnection,
-    DiscordDeliveryDestination,
     IntegrationTestResult,
     NearMissSnapshot,
     ObservabilityExplanation,
@@ -54,7 +52,6 @@ from ai_market_monitor.db.models import (
     User,
     UserExportJob,
     UserIdentity,
-    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     AlertType,
@@ -263,8 +260,13 @@ class StrategyBuilderInterpretRequest(BaseModel):
 class BuilderInterpretationFeedbackRequest(BaseModel):
     feedback_type: Literal[
         "correct",
+        "partially_correct",
+        "wrong_condition",
         "wrong_timeframe",
         "missed_condition",
+        "missing_condition",
+        "wrong_required_optional",
+        "unnecessary_question",
         "wrong_direction",
         "too_strict",
         "too_loose",
@@ -454,27 +456,7 @@ async def _has_active_notification_channel(session: AsyncSession, user_id: UUID)
     )
     if telegram is not None:
         return True
-    whatsapp = await session.scalar(
-        select(WhatsAppConnection.id).where(
-            WhatsAppConnection.user_id == user_id,
-            WhatsAppConnection.status == ConnectionStatus.ACTIVE,
-            WhatsAppConnection.alerts_enabled.is_(True),
-            WhatsAppConnection.verified_at.is_not(None),
-            WhatsAppConnection.opt_in_at.is_not(None),
-            WhatsAppConnection.opt_out_at.is_(None),
-            WhatsAppConnection.revoked_at.is_(None),
-        )
-    )
-    if whatsapp is not None:
-        return True
-    discord = await session.scalar(
-        select(DiscordConnection.id).where(
-            DiscordConnection.user_id == user_id,
-            DiscordConnection.status == ConnectionStatus.ACTIVE,
-            DiscordConnection.alerts_enabled.is_(True),
-        )
-    )
-    return discord is not None
+    return False
 
 
 async def _owned_version(
@@ -3156,7 +3138,7 @@ async def dashboard_scan_now(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "notification_channel_required",
-                "message": "Connect Telegram, WhatsApp, or Discord before running Scanner.",
+                "message": "Connect Telegram before running Scanner.",
             },
         )
     try:
@@ -3203,13 +3185,13 @@ async def dashboard_scan_prompt_interpret(
         and preferred_channels
         and not any(
             channel in prompt_text
-            for channel in ("telegram", "whatsapp", "discord", "web")
+            for channel in ("telegram", "web")
         )
     ):
         strategy.alerts.channels = [
             channel
             for channel in preferred_channels
-            if channel in {"telegram", "whatsapp", "discord", "web"}
+            if channel in {"telegram", "web"}
         ] or strategy.alerts.channels
         applied_preferences.append("alert channels: " + ", ".join(strategy.alerts.channels))
     typical_maximum = preference.preferences.get("typical_max_alerts_per_hour")
@@ -3311,7 +3293,7 @@ async def dashboard_light_scan(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "notification_channel_required",
-                "message": "Connect Telegram, WhatsApp, or Discord before running Scanner.",
+                "message": "Connect Telegram before running Scanner.",
             },
         )
     preview = await configured_strategy_interpreter(settings).interpret(
@@ -3951,46 +3933,19 @@ async def integrations(
     telegram = await session.scalar(
         select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
     )
-    discord = await session.scalar(
-        select(DiscordConnection).where(DiscordConnection.user_id == principal.user_id)
-    )
-    whatsapp = await session.scalar(
-        select(WhatsAppConnection).where(
-            WhatsAppConnection.user_id == principal.user_id
-        )
-    )
-    destinations = (
-        await session.scalars(
-            select(DiscordDeliveryDestination).where(
-                DiscordDeliveryDestination.user_id == principal.user_id
-            )
-        )
-    ).all()
     tests = (
         await session.scalars(
             select(IntegrationTestResult)
-            .where(IntegrationTestResult.user_id == principal.user_id)
+            .where(
+                IntegrationTestResult.user_id == principal.user_id,
+                IntegrationTestResult.integration == "telegram",
+            )
             .order_by(IntegrationTestResult.created_at.desc())
             .limit(10)
         )
     ).all()
     return {
         "telegram": _telegram_payload(telegram),
-        "whatsapp": _whatsapp_payload(whatsapp),
-        "discord": _discord_payload(discord),
-        "discord_destinations": [
-            {
-                "id": destination.id,
-                "mode": destination.mode,
-                "guild_id": destination.guild_id,
-                "channel_id": destination.channel_id,
-                "permissions_status": destination.permissions_status,
-                "test_status": destination.test_status,
-                "status": destination.status,
-                "is_default": destination.is_default,
-            }
-            for destination in destinations
-        ],
         "recent_tests": [
             {
                 "id": test.id,
@@ -4269,30 +4224,6 @@ def _telegram_payload(connection: TelegramConnection | None) -> dict[str, Any] |
         "id": connection.id,
         "telegram_user_id": connection.telegram_user_id,
         "username": connection.username,
-        "status": connection.status.value,
-        "alerts_enabled": connection.alerts_enabled,
-        "connected_at": connection.connected_at,
-        "last_delivery_at": connection.last_delivery_at,
-        "last_error_code": connection.last_error_code,
-    }
-
-
-def _whatsapp_payload(connection: WhatsAppConnection | None) -> dict[str, Any] | None:
-    if connection is None:
-        return None
-    from ai_market_monitor.whatsapp.service import connection_payload
-
-    return connection_payload(connection)
-
-
-def _discord_payload(connection: DiscordConnection | None) -> dict[str, Any] | None:
-    if connection is None:
-        return None
-    return {
-        "id": connection.id,
-        "discord_user_id": connection.discord_user_id,
-        "guild_id": connection.guild_id,
-        "channel_id": connection.channel_id,
         "status": connection.status.value,
         "alerts_enabled": connection.alerts_enabled,
         "connected_at": connection.connected_at,

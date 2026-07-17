@@ -28,7 +28,6 @@ class RateLimitRule:
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _PROVIDER_CALLBACK_PREFIXES = (
     "/api/v1/billing/webhooks/",
-    "/api/v1/discord/interactions",
     "/api/v1/telegram/webhook",
     "/api/v1/whatsapp/webhook",
 )
@@ -87,6 +86,18 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
             "whatsapp_test",
             {"POST"},
             r"^/api/v1/whatsapp/(test|link)(/|$)",
+            configured,
+        ),
+        _rule(
+            "public_chat",
+            {"POST"},
+            r"^/api/v1/public-chat/(profile|answers|ratings)(/|$)",
+            configured,
+        ),
+        _rule(
+            "public_inquiry",
+            {"POST", "DELETE"},
+            r"^/api/v1/public-chat/inquiries(?:/|$)",
             configured,
         ),
         _rule(

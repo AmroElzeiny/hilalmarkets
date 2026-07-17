@@ -1,5 +1,8 @@
 # Setup Observability Implementation Report
 
+> Historical record notice (2026-07-17): Discord references below describe retired behavior and
+> are not part of the private-beta product. See `docs/RETIRED_DISCORD_COMPATIBILITY.md`.
+
 ## 1. Architecture and mechanism
 
 Setup observability is one pipeline shared by the readiness radar, monitor/strategy
@@ -185,4 +188,3 @@ runtime has no shared browser WebSocket event bus.
 - Filter by monitor, refresh, and use browser back/forward.
 - Open investigation using keyboard and close with Escape.
 - Verify mobile at 390 px and reduced-motion browser preference.
-

@@ -2370,13 +2370,6 @@ class TelegramBotService:
             )
         if action == "menu:about":
             return self._about_message(message)
-        if action == "menu:connect_discord":
-            return self._plain(
-                message,
-                "Discord connection is configured from the web dashboard so channel "
-                "permissions can be verified safely.",
-                buttons=self._back_buttons("dashboard:connections"),
-            )
         if action == "menu:settings":
             return await self._dashboard_callback(
                 self._callback_from_message(message, "dashboard:settings"), conversation
@@ -2583,8 +2576,8 @@ class TelegramBotService:
         if label == "Alert Channels":
             return self._plain(
                 message,
-                "Alert Channels\n\nTelegram is enabled for this bot. Discord starts from the "
-                "website when your plan includes it.",
+                "Alert Channels\n\nTelegram is the external notification channel available "
+                "during private beta. In-app records remain available in the dashboard.",
                 buttons=self._back_buttons("dashboard:settings"),
             )
         if label == "Time Zone":

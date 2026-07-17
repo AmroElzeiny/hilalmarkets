@@ -59,7 +59,8 @@ class PlanCatalogService:
                     max(60, int(definition.limits.get("minimum_timeframe_minutes", 1) or 1) * 60)
                 ),
                 "telegram_enabled": bool(definition.features.get("telegram", False)),
-                "discord_enabled": bool(definition.features.get("discord", False)),
+                # Retained database column for legacy subscription snapshots only.
+                "discord_enabled": False,
                 "backtest_enabled": bool(definition.features.get("advanced_forensics", False)),
                 "features": {
                     "limits": definition.limits,
@@ -203,8 +204,11 @@ class EntitlementService:
                 "timeframe_not_allowed",
                 f"Plan supports {minimum_minutes}-minute timeframe or higher.",
             )
-        if "discord" in definition.alerts.channels and not context.feature_enabled("discord"):
-            raise EntitlementError("discord_not_included", "Discord alerts are not included.")
+        if "discord" in definition.alerts.channels:
+            raise EntitlementError(
+                "delivery_channel_retired",
+                "This saved strategy uses a retired channel. Choose in-app or Telegram delivery.",
+            )
         return context
 
     async def pause_excess_after_downgrade(self, user_id: UUID) -> list[Strategy]:

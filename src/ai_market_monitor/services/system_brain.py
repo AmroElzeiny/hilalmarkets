@@ -475,9 +475,14 @@ class CapabilityCoverageService:
         )
         cached = int(input_details.get("cached_tokens") or 0)
         reasoning = int(output_details.get("reasoning_tokens") or 0)
+        model = str(usage.get("_traceedge_model") or self.settings.openai_model)
+        reasoning_effort = str(
+            usage.get("_traceedge_reasoning_effort")
+            or self.settings.openai_reasoning_effort
+        )
         cost = estimate_usage_cost(
             self.settings,
-            model=self.settings.openai_model,
+            model=model,
             usage=usage,
         )
         session.add(
@@ -485,8 +490,8 @@ class CapabilityCoverageService:
                 user_id=chat.user_id,
                 chat_session_id=chat.id,
                 operation=operation,
-                model=self.settings.openai_model,
-                reasoning_effort=self.settings.openai_reasoning_effort,
+                model=model,
+                reasoning_effort=reasoning_effort,
                 input_tokens=input_tokens,
                 cached_input_tokens=cached,
                 output_tokens=output_tokens,
@@ -867,6 +872,7 @@ class CapabilityCoverageService:
                 "cost_limit": self.settings.ai_agent_max_estimated_cost_usd_per_turn,
             }
         )
+        setup_model_routing = _setup_model_routing_summary(usage)
         attempts_by_extension: dict[UUID, list[CapabilityExtensionAttempt]] = {}
         for attempt in extension_attempts:
             attempts_by_extension.setdefault(attempt.extension_id, []).append(attempt)
@@ -928,7 +934,47 @@ class CapabilityCoverageService:
             "capability_extensions": extension_rows,
             "quality_metrics": quality_metrics,
             "agent_control": agent_control,
+            "setup_model_routing": setup_model_routing,
         }
+
+
+def _setup_model_routing_summary(events: list[AIUsageEvent]) -> dict[str, Any]:
+    """Summarize persisted model-route decisions without treating them as quality proof."""
+
+    tiers: Counter[str] = Counter()
+    reasons: Counter[str] = Counter()
+    models: Counter[str] = Counter()
+    efforts: Counter[str] = Counter()
+    routed_calls = 0
+    for event in events:
+        raw = dict(event.raw_usage or {})
+        tier = str(raw.get("_traceedge_route_tier") or "").strip()
+        if not tier:
+            continue
+        routed_calls += 1
+        tiers[tier] += 1
+        models[event.model] += 1
+        efforts[event.reasoning_effort] += 1
+        raw_reasons = raw.get("_traceedge_route_reasons") or []
+        if isinstance(raw_reasons, list):
+            reasons.update(str(item) for item in raw_reasons if str(item).strip())
+    return {
+        "routed_calls": routed_calls,
+        "unclassified_calls": max(0, len(events) - routed_calls),
+        "tiers": [
+            {"tier": name, "calls": count} for name, count in tiers.most_common()
+        ],
+        "reasons": [
+            {"reason": name, "calls": count} for name, count in reasons.most_common()
+        ],
+        "models": [
+            {"model": name, "calls": count} for name, count in models.most_common()
+        ],
+        "reasoning_efforts": [
+            {"reasoning_effort": name, "calls": count}
+            for name, count in efforts.most_common()
+        ],
+    }
 
 
 def _agent_control_summary(

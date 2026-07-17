@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, visible_public_plan_codes
 from ai_market_monitor.core.site_content import (
     COOKIE_CONSENT_VERSION,
     FOOTER_NAVIGATION,
@@ -188,7 +188,11 @@ def _public_context(
             if telegram_username
             else None
         ),
-        "plans": {code: PLAN_DEFINITIONS[code] for code in PUBLIC_PLAN_CODES},
+        "plans": {
+            code: PLAN_DEFINITIONS[code]
+            for code in visible_public_plan_codes(billing_enabled=settings.billing_enabled)
+        },
+        "billing_enabled": settings.billing_enabled,
         "billing_provider": settings.billing_provider,
         "billing_capabilities": billing_provider_capabilities(settings.billing_provider),
         "purchase_faqs": PURCHASE_FAQS,
@@ -203,6 +207,7 @@ def _public_context(
         "gtm_container_id": settings.google_tag_manager_container_id,
         "optional_analytics_enabled": settings.optional_analytics_enabled,
         "marketing_consent_enabled": settings.marketing_consent_enabled,
+        "public_chat_enabled": settings.public_chat_enabled,
         **extra,
     }
 

@@ -17,10 +17,6 @@
 - Configurable commercial catalog, entitlement service, conditional 14-day trial lifecycle, billing
   provider abstraction, verified/idempotent webhook processing, usage records, referral foundations
   and audited admin commercial overrides.
-- Discord foundations: OAuth state/linking, guild installation and permission validation, personal
-  and server-channel delivery destinations, proof-backed embeds, setup-thread reuse, retryable
-  deliveries, slash-command shortcuts, support tickets, moderation safeguards and billing-driven
-  role-sync jobs.
 - Reliability and admin foundations: market-data freshness health, integration health, operational
   metrics, incident history, support escalation context, API-first admin dashboard, audited admin
   actions, security review utilities, worker/scheduler task hooks and operational documentation.
@@ -31,7 +27,7 @@
 - Persist deterministic `EvaluationResult` into `ScanResult`, `SetupInstance`,
   `SetupConditionResult`, `NearMissSnapshot` and `Alert` rows inside worker jobs.
 - Plan-capped universes, per-symbol partial jobs, cooldown persistence and scan idempotency.
-- Telegram Bot API, Discord HTTP/OAuth/interactions and Stripe Checkout/Portal adapters.
+- Telegram Bot API and provider-accurate payment adapters.
 - V2 scan-job claiming/recovery, shared alert presentation, and conditional 14-day trial cycles.
 
 ## Next: delivery and investigation

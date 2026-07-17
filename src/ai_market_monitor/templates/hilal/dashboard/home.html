@@ -55,8 +55,7 @@
       <div class="panel-head"><div><span class="kicker">Delivery</span><h2>Notification channels</h2></div></div>
       <div class="setting-list" data-overview-channel-status>
         <a class="setting-row" href="/dashboard/integrations" data-overview-channel="telegram"><div><strong>Telegram</strong><small>{{ 'Connected' if overview.telegram_connected else 'Not connected' }}</small></div><span class="badge {{ 'badge-eligible' if overview.telegram_connected else 'badge-neutral' }}">{{ 'Ready' if overview.telegram_connected else 'Set up' }}</span></a>
-        <a class="setting-row" href="/dashboard/integrations" data-overview-channel="whatsapp"><div><strong>WhatsApp</strong><small>{{ 'Connected' if overview.whatsapp_connected else 'Not connected' }}</small></div><span class="badge {{ 'badge-eligible' if overview.whatsapp_connected else 'badge-neutral' }}">{{ 'Ready' if overview.whatsapp_connected else 'Set up' }}</span></a>
-        <a class="setting-row" href="/dashboard/integrations" data-overview-channel="discord"><div><strong>Discord</strong><small>{{ 'Connected' if overview.discord_connected else 'Not connected' }}</small></div><span class="badge {{ 'badge-eligible' if overview.discord_connected else 'badge-neutral' }}">{{ 'Ready' if overview.discord_connected else 'Set up' }}</span></a>
+        <div class="setting-row"><div><strong>In-app</strong><small>Evidence and lifecycle records</small></div><span class="badge badge-eligible">Always on</span></div>
       </div>
     </article>
     <article class="panel">

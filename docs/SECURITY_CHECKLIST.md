@@ -1,8 +1,8 @@
 # Security Checklist
 
 - Reject default secrets, SQLite, HTTP origins and mock providers in deployed environments.
-- Keep Telegram, Discord, Stripe and application secrets in a managed secret store.
-- Require Telegram secret, Discord Ed25519 and Stripe timestamped webhook verification.
+- Keep Telegram, payment-provider, SMTP and application secrets in a managed secret store.
+- Require Telegram secrets and payment-provider timestamped webhook verification when enabled.
 - Apply API-wide authentication, ownership authorization, rate limits and request-size limits.
 - Restrict CORS and secure cookies to the production origin.
 - Run Ruff, tests, dependency audit, container scan and secret scan in CI.

@@ -60,6 +60,24 @@
     return response.json();
   }
 
+  async function recordInterpretationFeedback(feedbackType) {
+    const response = await fetch("/api/v1/dashboard/strategies/interpret/feedback", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        feedback_type: feedbackType,
+        raw_prompt: chat?.translation_sheet?.original_idea || chat?.original_idea || null,
+        prompt_coverage_report: {
+          mapping_table: chat?.translation_sheet?.clause_coverage || [],
+        },
+        strategy: chat?.draft_strategy || {},
+      }),
+    });
+    if (!response.ok) throw new Error("Interpretation feedback could not be recorded.");
+    return response.json();
+  }
+
   function setLoading(value, label = "Thinking through your setup") {
     loading = value;
     input.disabled = value;
@@ -371,6 +389,7 @@
     const assumptions = sheet.assumptions || [];
     const reasons = reportReasons(sheet);
     const improvements = latestAssistantPayload().suggestions || [];
+    const clauseCoverage = Array.isArray(sheet.clause_coverage) ? sheet.clause_coverage : [];
     const lowRules = (chat.rule_confidence || []).filter((item) => item.requires_confirmation);
     const fallbackFields = [
       {label: "Original idea", value: sheet.original_idea || chat.original_idea},
@@ -405,6 +424,17 @@
           }).join("") || "<p>No executable rules are ready yet.</p>"}
         </div>
       </section>
+      ${clauseCoverage.length ? `<section class="ai-sheet-card">
+        <h3>${icon("search")} Your wording, accounted for</h3>
+        <p class="ai-sheet-lead">Every meaningful phrase must be covered or clearly held for review.</p>
+        <div class="ai-clause-coverage-list">
+          ${clauseCoverage.map((item) => `<article class="ai-clause-coverage" data-status="${clean(item.status)}">
+            <strong>${clean(item.source_fragment || "Instruction")}</strong>
+            <span>${clean(String(item.status || "needs review").replaceAll("_", " "))}</span>
+            <small>${clean(item.explanation || "Review this instruction.")}</small>
+          </article>`).join("")}
+        </div>
+      </section>` : ""}
       ${reasons.length ? `<section class="ai-sheet-card ai-refusal-report">
         <h3>${icon("triangle-alert", "%23f59e0b")} What needs attention</h3>
         <p class="ai-refusal-intro">${reasons.some((item) => item.blocking) ? "Approval is paused until these exact items are resolved." : "These notes are shown once so the rule set stays consistent."}</p>
@@ -421,6 +451,19 @@
         <div class="ai-improvement-list">${improvements.map((item) => `<article><span>${clean(item)}</span><button type="button" data-ai-apply-suggestion="${clean(item)}">Use</button></article>`).join("")}</div>
         <p><small>Suggestions only. Nothing is added unless you ask for it and approve the result.</small></p>
       </section>` : ""}
+      <section class="ai-sheet-card ai-translation-feedback">
+        <h3>${icon("message")} Did I understand this correctly?</h3>
+        <div class="ai-translation-feedback-actions">
+          <button type="button" data-ai-translation-feedback="correct">Correct</button>
+          <button type="button" data-ai-translation-feedback="partially_correct">Partially correct</button>
+          <button type="button" data-ai-translation-feedback="wrong_condition">Wrong condition</button>
+          <button type="button" data-ai-translation-feedback="wrong_timeframe">Wrong timeframe</button>
+          <button type="button" data-ai-translation-feedback="missing_condition">Missing condition</button>
+          <button type="button" data-ai-translation-feedback="wrong_required_optional">Wrong required or optional status</button>
+          <button type="button" data-ai-translation-feedback="unnecessary_question">Asked an unnecessary question</button>
+        </div>
+        <p><small>Feedback becomes review evidence. It never changes production capabilities automatically.</small></p>
+      </section>
       <section class="ai-sheet-card">
         <h3>${icon("shield-check")} Safety boundary</h3>
         <p>${clean(sheet.execution || "Deterministic crypto spot monitoring only. No automatic trade execution.")}</p>
@@ -432,6 +475,18 @@
       button.addEventListener("click", () => {
         const suggestion = button.dataset.aiApplySuggestion;
         sendMessage({message: `Apply: ${suggestion}`}, `Apply: ${suggestion}`);
+      });
+    });
+    previewContent.querySelectorAll("[data-ai-translation-feedback]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await recordInterpretationFeedback(button.dataset.aiTranslationFeedback);
+          button.textContent = "Recorded";
+        } catch (error) {
+          button.disabled = false;
+          showError(error);
+        }
       });
     });
     approvalNote.textContent = chat?.setup_mode === "scanner"

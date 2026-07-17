@@ -1,5 +1,9 @@
 # Official WhatsApp Cloud API Implementation Report
 
+> Private-beta rollout notice (2026-07-17): this implementation remains dormant. Its routes and
+> customer UI are disabled until Meta approval, staging verification, consent review and an
+> explicit later release decision are complete.
+
 Generated: 2026-07-17T04:55:12Z
 
 Scope: production-oriented, first-party Meta WhatsApp Cloud API integration for

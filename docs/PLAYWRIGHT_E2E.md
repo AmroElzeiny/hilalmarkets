@@ -70,5 +70,5 @@ only when a failure/runtime error occurs.
 - Seeded deterministic proof receipt through authenticated Cockpit proof API.
 - Strategy Cockpit and integration cards smoke tests.
 
-Live Telegram/Discord delivery and live exchange scans are intentionally not performed
+Live Telegram delivery and live exchange scans are intentionally not performed
 by this browser suite unless separate test credentials/providers are configured.

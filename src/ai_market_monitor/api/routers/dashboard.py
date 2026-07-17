@@ -24,6 +24,7 @@ from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
+    visible_public_plan_codes,
 )
 from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION
 from ai_market_monitor.db.models import (
@@ -36,7 +37,6 @@ from ai_market_monitor.db.models import (
     CapabilityExtension,
     ComplianceDriftNotification,
     DashboardPreference,
-    DiscordConnection,
     MonitorShariaAssetState,
     NearMissSnapshot,
     PaymentEmailDelivery,
@@ -55,7 +55,6 @@ from ai_market_monitor.db.models import (
     Trial,
     User,
     UserIdentity,
-    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
@@ -1060,12 +1059,6 @@ async def dashboard_home(
     telegram = await session.scalar(
         select(TelegramConnection).where(TelegramConnection.user_id == user.id)
     )
-    discord = await session.scalar(
-        select(DiscordConnection).where(DiscordConnection.user_id == user.id)
-    )
-    whatsapp = await session.scalar(
-        select(WhatsAppConnection).where(WhatsAppConnection.user_id == user.id)
-    )
     coverage = await market_coverage_for_user(session, user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
     entitlement = await EntitlementService(session).current(user.id)
@@ -1112,16 +1105,6 @@ async def dashboard_home(
         "latest_alert": _alert_view(latest_alert) if latest_alert else None,
         "coverage": coverage,
         "telegram_connected": telegram is not None,
-        "whatsapp_connected": bool(
-            whatsapp is not None
-            and whatsapp.status.value == "active"
-            and whatsapp.alerts_enabled
-            and whatsapp.verified_at is not None
-            and whatsapp.opt_in_at is not None
-            and whatsapp.opt_out_at is None
-            and whatsapp.revoked_at is None
-        ),
-        "discord_connected": discord is not None,
         "eligible_market_count": screened_home.total,
         "screening_methodology": screened_home.methodology,
         "forming_screened_count": forming_screened,
@@ -2496,7 +2479,13 @@ async def billing_page(
             title="Subscription and Billing",
             entitlement=entitlement,
             trial=trial,
-            purchase_plans={code: PLAN_DEFINITIONS[code] for code in PUBLIC_PLAN_CODES},
+            purchase_plans={
+                code: PLAN_DEFINITIONS[code]
+                for code in visible_public_plan_codes(
+                    billing_enabled=settings.billing_enabled
+                )
+            },
+            billing_enabled=settings.billing_enabled,
             billing_provider=billing.provider.provider_name,
             billing_capabilities=billing.provider_capabilities,
             billing_cycle_code=billing.billing_cycle_code,
@@ -2523,6 +2512,8 @@ async def dashboard_billing_portal(
 ) -> RedirectResponse:
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
+    if not settings.billing_enabled:
+        return _redirect("/dashboard/billing?error=billing_disabled")
     try:
         base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
         result = await BillingService(session, settings).billing_portal(
@@ -2548,6 +2539,8 @@ async def billing_checkout_review(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> Response:
+    if not settings.billing_enabled:
+        return _redirect("/dashboard/billing?error=billing_disabled")
     if plan_code not in PURCHASABLE_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
     await PlanCatalogService(session).sync_defaults()
@@ -2608,6 +2601,8 @@ async def billing_checkout(
 ) -> RedirectResponse:
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
+    if not settings.billing_enabled:
+        return _redirect("/dashboard/billing?error=billing_disabled")
     base = str(settings.public_base_url).rstrip("/")
     if plan_code not in PUBLIC_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
@@ -2864,23 +2859,6 @@ async def connections_page(
     telegram = await session.scalar(
         select(TelegramConnection).where(TelegramConnection.user_id == user.id)
     )
-    discord = await session.scalar(
-        select(DiscordConnection).where(DiscordConnection.user_id == user.id)
-    )
-    whatsapp = await session.scalar(
-        select(WhatsAppConnection).where(WhatsAppConnection.user_id == user.id)
-    )
-    from ai_market_monitor.whatsapp.service import connection_payload
-
-    whatsapp_public = connection_payload(whatsapp)
-    whatsapp_locales = {settings.whatsapp_default_language}
-    if whatsapp is not None:
-        whatsapp_locales.add(whatsapp.preferred_locale)
-    for configured_templates in settings.whatsapp_template_names.values():
-        if isinstance(configured_templates, dict):
-            whatsapp_locales.update(
-                locale for locale in configured_templates if locale != "default"
-            )
     telegram_connect_url = None
     telegram_start_command = None
     try:
@@ -2906,17 +2884,8 @@ async def connections_page(
             page="integrations",
             title="Integrations",
             telegram=telegram,
-            whatsapp=whatsapp,
-            whatsapp_public=whatsapp_public,
-            whatsapp_locales=sorted(whatsapp_locales),
-            discord=discord,
             telegram_connect_url=telegram_connect_url,
             telegram_start_command=telegram_start_command,
-            whatsapp_enabled=settings.whatsapp_enabled,
-            whatsapp_opportunity_alerts_enabled=(
-                settings.whatsapp_opportunity_alerts_enabled
-                and "confirmed_research_event" in settings.whatsapp_template_names
-            ),
         ),
     )
 
@@ -2983,7 +2952,7 @@ async def settings_submit(
     maximum_alerts_per_hour: int = Form(50),
     maximum_alerts_per_day: int = Form(500),
     alert_channels: list[str] = Form(default=["telegram"]),
-    providers: list[str] = Form(default=["binance", "bybit"]),
+    providers: list[str] = Form(default=["binance"]),
     alert_days: list[str] = Form(default=["Every Day"]),
     alert_hours: list[str] = Form(default=ALERT_HOURS),
     default_sharia_methodology_id: str = Form(default=""),
@@ -3006,14 +2975,14 @@ async def settings_submit(
 ) -> RedirectResponse:
     if timezone not in SUPPORTED_TIMEZONES:
         return _redirect("/dashboard/settings?error=unsupported_timezone")
-    allowed_channels = {"telegram", "whatsapp", "discord"}
+    allowed_channels = {"telegram"}
     channels = [channel for channel in alert_channels if channel in allowed_channels]
     if not channels:
         channels = ["telegram"]
-    allowed_providers = {"binance", "bybit"}
+    allowed_providers = {"binance"}
     selected_providers = [provider for provider in providers if provider in allowed_providers]
     if not selected_providers:
-        selected_providers = ["binance", "bybit"]
+        selected_providers = ["binance"]
     days = [day for day in alert_days if day in ALERT_DAYS]
     if not days:
         days = ["Every Day"]
@@ -3051,7 +3020,7 @@ async def settings_submit(
     selected_compliance_channels = [
         channel
         for channel in dict.fromkeys(compliance_alert_channels)
-        if channel in {"web", "telegram", "whatsapp", "discord"}
+        if channel in {"web", "telegram"}
     ]
     if "web" not in selected_compliance_channels:
         selected_compliance_channels.insert(0, "web")

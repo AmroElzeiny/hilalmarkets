@@ -1,5 +1,8 @@
 # Lifecycle Investigation and Monitor Naming Report
 
+> Historical record notice (2026-07-17): Discord references below describe retired behavior and
+> are not part of the private-beta product. See `docs/RETIRED_DISCORD_COMPATIBILITY.md`.
+
 ## 1. Files changed
 
 - `src/ai_market_monitor/services/setup_observability.py`

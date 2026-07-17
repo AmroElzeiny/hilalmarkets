@@ -31,7 +31,7 @@ Overview should show:
 - Latest alert.
 - Market Coverage Score.
 - Telegram connection.
-- Discord connection.
+- In-app and Telegram connection state.
 - Quick actions.
 
 Style:

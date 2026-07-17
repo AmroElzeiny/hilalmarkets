@@ -71,9 +71,9 @@
 </div></section>
 
 <section class="section section-tint" id="pricing"><div class="container">
-  <div class="section-heading center reveal"><span class="eyebrow">Free, Core, and Pro</span><h2>Pay for monitoring capacity, not stronger religious certainty.</h2><p>Sharia screening remains foundational in every plan. Prices and limits below come from the live product catalog.</p></div>
+  <div class="section-heading center reveal"><span class="eyebrow">{{ 'Private beta' if not billing_enabled else 'Free, Core, and Pro' }}</span><h2>{{ 'Invited users start free.' if not billing_enabled else 'Pay for monitoring capacity, not stronger religious certainty.' }}</h2><p>{{ 'The first beta is limited, invite-only, and has no paid checkout.' if not billing_enabled else 'Sharia screening remains foundational in every plan. Prices and limits below come from the live product catalog.' }}</p></div>
   {% include "hilal/public/partials/pricing_cards.html" %}
-  <div class="center section-action"><a class="link-arrow" href="{{ url_for('public_pricing') }}">Compare all plan limits <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div>
+  <div class="center section-action"><a class="link-arrow" href="{{ url_for('public_pricing') }}">{{ 'Read beta access details' if not billing_enabled else 'Compare all plan limits' }} <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div>
 </div></section>
 
 <section class="section"><div class="container grid grid-2 faq-layout">

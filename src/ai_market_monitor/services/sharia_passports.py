@@ -66,7 +66,15 @@ class ShariaPassportReadService:
         methodology_id: UUID | None = None,
         user_id: UUID | None = None,
     ) -> AssetPassportResponse:
-        base = await self.screening.passport(asset, methodology_id=methodology_id)
+        try:
+            base = await self.screening.passport(asset, methodology_id=methodology_id)
+        except ShariaScreeningError as exc:
+            if self.settings.is_deployed and exc.code == "assessment_not_found":
+                raise ShariaScreeningError(
+                    "passport_not_published",
+                    "No published Passport record is available for this asset and methodology.",
+                ) from exc
+            raise
         publication_query = select(PublishedAssetAssessment).where(
             PublishedAssetAssessment.asset_assessment_id == base.assessment.id
         )

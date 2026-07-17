@@ -1,6 +1,6 @@
 # HilalMarkets Architecture
 
-Date: 2026-07-15
+Date: 2026-07-17
 
 ## Repository evolution
 
@@ -35,21 +35,26 @@ templates without replacing persisted models or approval boundaries.
    task dispatch are interfaces. Core services are testable with deterministic fakes.
 8. **JSON only for variable evidence/configuration.** Query-critical ownership, status, timestamps,
    relationships, deduplication keys, and monetary values use typed columns and indexes.
-9. **Billing events are the source of commercial truth.** Plan definitions live in one catalog,
-   entitlement checks run in API/services/workers, and verified billing webhooks drive subscription
-   state, downgrade pauses, entitlement snapshots and Discord role-sync jobs.
-10. **Discord is optional delivery and community infrastructure.** OAuth linking, destinations,
-    role synchronization, setup threads, slash-command shortcuts and support context are modeled
-    without making Discord the primary onboarding surface.
-11. **WhatsApp is an opt-in delivery and navigation channel.** The official Meta Cloud API adapter
+9. **Billing events are the source of commercial truth when billing is enabled.** Plan definitions
+   live in one catalog and entitlement checks run in API/services/workers. Private beta disables
+   checkout and exposes only invite access without deleting provider-accurate payment history.
+10. **WhatsApp is a dormant opt-in delivery and navigation channel.** The official Meta Cloud API adapter
     accepts only verified inbound-linked recipients. Free-form replies require an open service
     window; business-initiated delivery outside it requires an explicitly configured template.
     Strategy approval and activation remain authenticated dashboard actions.
-12. **Registry keys are the AI execution boundary.** Natural-language retrieval produces a compact
+11. **Registry keys are the AI execution boundary.** Natural-language retrieval produces a compact
     capability shortlist. AI may rerank those keys and extract schema-defined parameters, but every
     AI condition must carry an immutable `capability_key`. The backend rejects unknown keys and
     rebuilds operands from the registry before coverage audit, approval, or scanning. Unknown terms
     become clarification questions, never silent assumptions. See `docs/CAPABILITY_RESOLVER.md`.
+12. **Adaptive models do not receive adaptive authority.** Setup Chat deterministically chooses a
+    configured inexpensive or complex model tier from request shape, corrections, terminology and
+    resolver confidence. Both tiers receive the same bounded context and remain subordinate to the
+    capability registry, compiler, lint, canonical hash and user approval.
+13. **Public product chat is a separate non-executing boundary.** It retrieves from server-owned
+    public content and records hashed answer telemetry. It cannot authenticate, inspect private
+    records, compile rules, call market providers, or invoke Setup Chat tools. Unknown questions may
+    become consented inquiries through a separate bounded outbox.
 
 ## Layer map
 
@@ -63,11 +68,11 @@ templates without replacing persisted models or approval boundaries.
 | Engine | `engine/` | Deterministic indicators, rule evaluation, Near-Miss, risk, proofs, forensics |
 | Telegram | `telegram/` | Async command/callback application service and alert rendering |
 | WhatsApp | `whatsapp/` | Signed Meta webhooks, verified opt-in linking, interactive navigation, template/session delivery, and status reconciliation |
-| Discord | `discord/` | OAuth linking, destination validation, embeds, threads, roles, support, moderation |
 | Workers | `worker.py` | Idempotent scan scheduling, scan execution, expiry, delivery and health jobs |
 | Web | `templates/hilal/`, `static/hilalmarkets*` | Shared public/dashboard shells, production read models, guided Watch Plan UI, consent, and accessibility behavior |
 | Reliability | `services/reliability.py` | Market-data health, incidents, delivery failure state, metrics |
 | Admin | `api/routers/admin.py`, `services/admin_dashboard.py` | RBAC dashboard APIs and audited admin actions |
+| Public product assistant | `api/routers/public_chat.py`, `services/public_chat.py` | Grounded public answers, consented inquiry intake, bounded email outbox and feedback |
 
 ## Public and Presentation Architecture
 
@@ -81,13 +86,17 @@ templates without replacing persisted models or approval boundaries.
 - `templates/hilal/base_public.html` and `base_dashboard.html` own their shells. Shared partials and
   macros render navigation, footer, consent, statuses, opportunity cards, evidence rows, and empty
   states.
-- Public Pricing and dashboard Billing expose only `PURCHASABLE_PLAN_CODES`; internal founder,
-  trial, and legacy catalog entries remain usable by entitlement services but cannot be purchased
-  through a hidden form value.
+- Public Pricing and dashboard Billing expose only the free plan while billing is disabled.
+  Internal, trial, and paid catalog entries remain available to entitlement/provider tests but
+  cannot be purchased through a hidden form value.
 - `hilalmarkets-consent.js` stores a versioned first-party preference and is the only optional GTM
   loader. Consent defaults are emitted before it, with analytics and advertising storage denied.
 - `/system-brain` is absent from customer navigation. Production can require Cloudflare Access
   headers before the existing application password, email OTP, database session, and CSRF gates.
+- `services/public_chat.py` builds its knowledge index from `site_content.py`, public-page metadata
+  and the server Plan Catalog. The browser receives related-route enums and same-origin links, not
+  arbitrary model URLs. Anonymous answer telemetry stores hashes and source IDs rather than raw
+  questions; contact details are stored only after explicit inquiry submission.
 
 ## Deterministic Strategy Engine
 
@@ -112,6 +121,22 @@ Implemented engine modules:
 - `dedup.py`: duplicate-event hashing and alert-fatigue guard.
 - `forward_test.py`: hypothetical live-data forward-test records, never presented as executed trades.
 
+## Setup Chat Interpretation Boundary
+
+The authenticated Setup Chat persists structured intent separately from assistant prose: confirmed
+requirements, corrections by field, required and optional conditions, capability keys/versions,
+timeframes, universe, alert timing, invalidation, delivery, unresolved conflicts, clarification
+evidence and exact user-message references. A clause-coverage audit maps every meaningful
+user-authored fragment to covered, clarification, provider-blocked, intentionally optional or
+non-executable status. Unaccounted meaningful clauses block approval.
+
+`services/ai_model_routing.py` selects only configured model and reasoning tiers. Greetings and
+clear one-condition turns use the simple tier; complex Boolean logic, multiple timeframes,
+contradictions, repeated corrections, low resolver confidence, custom terminology, multilingual
+text and clarification friction use the complex tier. The selected route and reason are retained in
+usage telemetry and System Brain aggregates. This routing changes cost/interpretation capacity, not
+the executable policy boundary.
+
 ## Telegram Application Layer
 
 `telegram/service.py` implements framework-independent async handlers used by the production
@@ -124,7 +149,7 @@ Current Telegram capabilities:
 - `/start` with deep-link attribution, referral and shared-template metadata.
 - Risk disclaimer acceptance and trial activation.
 - Persistent menu labels for Create Monitor, My Monitors, Near-Miss Radar, Latest Setups, Why No
-  Alert, Performance, Subscription, Connect Discord, Support and Settings.
+  Alert, Performance, Subscription, Support and Settings.
 - Describe-my-setup monitor creation, interpretation summary, approval, historical preview and
   activation.
 - Near-Miss list rendering through a provider interface.
@@ -136,7 +161,7 @@ Current Telegram capabilities:
 
 ## WhatsApp Cloud API Layer
 
-`whatsapp/` implements the official Meta WhatsApp Cloud API without a BSP or WhatsApp Web
+`whatsapp/` implements a dormant official Meta WhatsApp Cloud API adapter without a BSP or WhatsApp Web
 automation. Dashboard consent creates a short-lived, digest-only `IdentityLinkToken`; an inbound
 signed `LINK <token>` message verifies the sender `wa_id` and E.164 number before a
 `WhatsAppConnection` becomes active. Raw Meta webhook bodies are authenticated before parsing,
@@ -148,14 +173,16 @@ category consent and service-window/template policy. API acceptance stores the M
 separate sent, delivered, read, and failed receipts update delivery state monotonically. STOP-style
 commands opt out immediately and cancel unsent WhatsApp rows. Interactive menus expose safe account
 and Watch Plan navigation, while strategy interpretation, approval, activation, and sensitive
-account work use short-lived authenticated dashboard links. See `docs/WHATSAPP_CLOUD_API_RUNBOOK.md`.
+account work use short-lived authenticated dashboard links. The router and customer controls are
+absent when `WHATSAPP_ENABLED=false`, which is mandatory for private beta. See
+`docs/WHATSAPP_CLOUD_API_RUNBOOK.md`.
 
 ## Commercial Layer
 
 `core/plans.py` is the single plan catalog for Demo, Trader, Pro, Creator, Community and the
 conditional 14-day trial. `services/entitlements.py` syncs that catalog into `Plan`, calculates the
 current entitlement from subscription/trial/default state, enforces active-strategy, symbol,
-timeframe and Discord-access limits, snapshots entitlement decisions, records idempotent usage, and
+timeframe and delivery limits, snapshots entitlement decisions, records idempotent usage, and
 pauses excess strategies after downgrades without deleting user data.
 
 `services/billing.py` provides a capability-declared billing-provider protocol. Stripe supports
@@ -163,29 +190,10 @@ automatic subscription renewal and its customer portal; the configured NOWPaymen
 uses signed one-time invoices for 30-day access and no cancellation portal. The service validates
 checkout ownership, plan, amount, and currency before an idempotent `BillingEvent` can change an
 entitlement. It also handles access expiry, refunds, payload redaction, trial conversion, downgrade
-pauses, and Discord role-sync enqueueing.
+pauses.
 `services/trials.py`, `services/referrals.py` and `services/admin.py` cover trial eligibility,
 monitoring cycles, qualifying-alert attribution, no-alert renewal decisions, reminder state,
 referral foundations and audited commercial overrides.
-
-## Discord Application Layer
-
-`discord/service.py` is framework-independent and is connected to the Discord HTTP API and signed
-interaction endpoint. Current Discord capabilities:
-
-- Short-lived OAuth state creation and verified identity linking to existing users.
-- Personal DM and server-channel delivery destinations with permission validation and test sends.
-- Confirmed setup and Near-Miss embed rendering from deterministic proof data.
-- Per-setup thread reuse for server delivery so lifecycle updates remain grouped.
-- Idempotent Discord alert deliveries with retry scheduling.
-- Slash-command shortcuts for monitor creation links, monitor lists, subscription status, support,
-  Near-Miss and investigation handoff.
-- Billing-driven role-sync jobs; paid roles are never granted from Discord commands alone.
-- Support ticket creation with available diagnostic context.
-- Moderation safeguards for scam language, support impersonation, guaranteed-profit claims,
-  unsafe secret requests and suspicious attachments.
-- Server-side OAuth code exchange, DMs, channel messages, threads, components, role changes and
-  Ed25519 interaction-signature verification.
 
 ## Scanning Pipeline
 
@@ -216,7 +224,7 @@ status, affected users/strategies, material impact and user-visible updates. Adm
 resolve incidents, and strategy pauses caused by incidents are audited.
 
 `services/support.py` implements the Tier 0-3 escalation path. Tickets automatically attach plan,
-Telegram/Discord connection state, strategy/scan/alert identifiers, delivery logs and recent health
+Telegram connection state, strategy/scan/alert identifiers, delivery logs and recent health
 records so users do not need to repeat technical context.
 
 `api/routers/admin.py` exposes API-first admin dashboard endpoints for user search, subscription and
@@ -368,6 +376,8 @@ Checkout is prepared from the server-owned Plan Catalog and persisted in `Billin
 Verified idempotent provider events activate entitlements and enqueue one `PaymentEmailDelivery`
 logical event. The payment email worker renders HTML/plain-text messages and retries bounded failures
 without letting browser prices, webhook replays, or email retries create another entitlement event.
+Paid checkout is disabled for private beta; these retained paths are compatibility for a separately
+approved later release.
 
 The migration pauses legacy active monitors until a real approved methodology and resolved policy
 are attached. Governance migration `d6e7f8a9b0c1` adds normalized source, dossier, review,

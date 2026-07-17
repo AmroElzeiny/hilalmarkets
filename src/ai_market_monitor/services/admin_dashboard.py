@@ -10,7 +10,6 @@ from ai_market_monitor.db.models import (
     AlertDelivery,
     AuditEvent,
     BillingEvent,
-    DiscordConnection,
     Incident,
     MarketDataHealth,
     ScanJob,
@@ -130,9 +129,6 @@ class AdminDashboardService:
         telegram = await self.session.scalar(
             select(TelegramConnection).where(TelegramConnection.user_id == user_id)
         )
-        discord = await self.session.scalar(
-            select(DiscordConnection).where(DiscordConnection.user_id == user_id)
-        )
         return {
             "id": str(user.id),
             "display_name": user.display_name,
@@ -156,7 +152,6 @@ class AdminDashboardService:
                 for row in strategies
             ],
             "telegram": bool(telegram),
-            "discord": bool(discord),
         }
 
     async def health_dashboard(self) -> dict:

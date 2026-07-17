@@ -88,6 +88,7 @@ def screening_settings() -> Settings:
         database_url="sqlite+aiosqlite://",
         sharia_screening_enforced=True,
         sharia_allow_legacy_unscreened_local=False,
+        sharia_default_methodology_code=None,
         openai_explanation_enabled=False,
     )
 

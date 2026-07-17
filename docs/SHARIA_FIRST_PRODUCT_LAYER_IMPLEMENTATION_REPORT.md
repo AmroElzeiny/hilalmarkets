@@ -1,5 +1,8 @@
 # Sharia-First Product Layer Implementation Report
 
+> Historical record notice (2026-07-17): Discord references below describe retired behavior and
+> are not part of the private-beta product. See `docs/RETIRED_DISCORD_COMPATIBILITY.md`.
+
 Date: 14 July 2026
 
 ## Readiness Statement

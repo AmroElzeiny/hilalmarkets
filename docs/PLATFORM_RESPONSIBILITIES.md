@@ -28,16 +28,11 @@ Telegram is the personal fast-action assistant.
 
 Telegram never collects payment details and does not own separate strategy or subscription state.
 
-## Discord
+## Retired channels
 
-Discord is optional and is not required for normal users.
-
-- Personal alert delivery
-- Community/creator delivery where plan entitlements allow it
-- Per-setup threads, role sync and support channels
-- Slash commands for quick status and secure Dashboard links
-
-Discord never collects payment details and does not own separate strategy or subscription state.
+Discord is no longer an active product channel. Historical rows remain read-only so old alert and
+audit records can still be interpreted. WhatsApp is also unavailable in private beta and remains
+behind a disabled server feature flag.
 
 ## Capability Matrix
 

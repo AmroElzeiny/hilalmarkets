@@ -1,7 +1,7 @@
 import html
 import re
 
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 from ai_market_monitor.core.site_content import (
     DASHBOARD_NAVIGATION,
     FOOTER_NAVIGATION,
@@ -106,23 +106,24 @@ async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
 async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     pricing = await test_context["client"].get("/pricing")
     assert pricing.status_code == 200
-    for code in PUBLIC_PLAN_CODES:
-        plan = PLAN_DEFINITIONS[code]
-        assert plan.name in pricing.text
-        assert f"${int(plan.monthly_price)}" in pricing.text
+    assert PLAN_DEFINITIONS["demo"].name in pricing.text
+    assert "$0" in pricing.text
+    assert "free and invite-only" in pricing.text
+    assert "$12" not in pricing.text
+    assert "$29" not in pricing.text
+    assert "Choose Core" not in pricing.text
+    assert "Choose Pro" not in pricing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
         assert PLAN_DEFINITIONS[internal_code].name not in pricing.text
 
     await _signup(test_context, "catalog-parity@example.com")
     billing = await test_context["client"].get("/dashboard/billing")
     assert billing.status_code == 200
-    for code in PUBLIC_PLAN_CODES:
-        assert PLAN_DEFINITIONS[code].name in billing.text
-        if code == "demo":
-            assert "Current plan" in billing.text
-            assert f'name="plan_code" value="{code}"' not in billing.text
-        else:
-            assert f"/dashboard/billing/checkout?plan_code={code}" in billing.text
+    assert PLAN_DEFINITIONS["demo"].name in billing.text
+    assert "Current plan" in billing.text
+    assert "Paid billing is disabled" in billing.text
+    for code in ("trader", "pro"):
+        assert f"/dashboard/billing/checkout?plan_code={code}" not in billing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
         assert f"plan_code={internal_code}" not in billing.text
 
@@ -131,7 +132,7 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
         follow_redirects=False,
     )
     assert blocked.status_code == 303
-    assert blocked.headers["location"] == "/dashboard/billing?error=plan_not_available"
+    assert blocked.headers["location"] == "/dashboard/billing?error=billing_disabled"
 
 
 async def test_dashboard_navigation_matches_the_customer_information_architecture(

@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 
+from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     PaymentEmailDelivery,
@@ -36,6 +37,8 @@ async def _signup(test_context, email: str = "checkout@example.com") -> None:
 
 
 async def _review_form(test_context, plan_code: str = "trader") -> dict[str, str]:
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
     response = await test_context["client"].get(
         f"/dashboard/billing/checkout?plan_code={plan_code}"
     )

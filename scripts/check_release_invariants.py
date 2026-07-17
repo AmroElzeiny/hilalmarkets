@@ -8,7 +8,11 @@ from ai_market_monitor.api.route_security import (
     audit_versioned_api_routes,
     iter_versioned_api_routes,
 )
-from ai_market_monitor.core.plans import PUBLIC_PLAN_CODES, PURCHASABLE_PLAN_CODES
+from ai_market_monitor.core.plans import (
+    PUBLIC_PLAN_CODES,
+    PURCHASABLE_PLAN_CODES,
+    visible_public_plan_codes,
+)
 from ai_market_monitor.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +37,15 @@ FORBIDDEN_CUSTOMER_PHRASES = (
     "create your first watchlist",
     "watchlists follow approved",
 )
+ACTIVE_DISCORD_SCAN_ROOTS = (
+    ROOT / "src" / "ai_market_monitor" / "api",
+    ROOT / "src" / "ai_market_monitor" / "templates",
+    ROOT / "src" / "ai_market_monitor" / "static",
+    ROOT / "src" / "ai_market_monitor" / "telegram",
+    ROOT / "src" / "ai_market_monitor" / "worker.py",
+    ROOT / "src" / "ai_market_monitor" / "main.py",
+)
+ACTIVE_DISCORD_SUFFIXES = {".py", ".html", ".js", ".css"}
 
 
 def _production_example() -> dict[str, str]:
@@ -52,6 +65,8 @@ def main() -> int:
         failures.append(f"Public plan allowlist changed: {PUBLIC_PLAN_CODES!r}")
     if tuple(PURCHASABLE_PLAN_CODES) != EXPECTED_PURCHASABLE_PLANS:
         failures.append(f"Purchasable plan allowlist changed: {PURCHASABLE_PLAN_CODES!r}")
+    if visible_public_plan_codes(billing_enabled=False) != ("demo",):
+        failures.append("Disabled billing must expose only the free private-beta plan")
 
     routes = iter_versioned_api_routes(app)
     if not routes:
@@ -63,15 +78,33 @@ def main() -> int:
     expected_values = {
         "ALLOW_MOCK_PROVIDERS": "false",
         "SHARIA_TEST_MARKET_ENABLED": "false",
+        "SHARIA_PILOT_SYMBOLS": "btc,eth,sol",
         "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED": "false",
-        "BILLING_ENABLED": "true",
-        "BILLING_PROVIDER": "nowpayments",
+        "TRACEDGE_MARKET_DATA_MODE": "ccxt",
+        "MARKET_DATA_EXCHANGE": "binance",
+        "BILLING_ENABLED": "false",
+        "BILLING_PROVIDER": "static",
+        "WHATSAPP_ENABLED": "false",
+        "WHATSAPP_OPPORTUNITY_ALERTS_ENABLED": "false",
+        "AI_AGENT_CONTROL_ENABLED": "true",
+        "AI_AGENT_SHADOW_MODE": "true",
+        "AI_AGENT_ROLLOUT_PERCENT": "0",
+        "CAPABILITY_EXTENSION_ENABLED": "false",
+        "PUBLIC_CHAT_ENABLED": "true",
+        "PUBLIC_CHAT_INQUIRY_EMAIL": "office@hilalmarkets.com",
+        "EMAIL_ADAPTER": "smtp",
         "API_RATE_LIMITING_ENABLED": "true",
         "API_RATE_LIMIT_FAIL_CLOSED": "true",
     }
     for key, expected in expected_values.items():
         if production.get(key, "").casefold() != expected:
             failures.append(f"Production example requires {key}={expected}")
+    discord_keys = sorted(key for key in production if key.startswith("DISCORD_"))
+    if discord_keys:
+        failures.append(
+            "Retired Discord settings remain in production example: "
+            + ", ".join(discord_keys)
+        )
 
     tracked = subprocess.run(
         ["git", "ls-files"],
@@ -97,6 +130,17 @@ def main() -> int:
                     failures.append(
                         f"Deprecated Watch Plan terminology in {relative}: {phrase!r}"
                     )
+
+    for source in ACTIVE_DISCORD_SCAN_ROOTS:
+        candidates = source.rglob("*") if source.is_dir() else (source,)
+        for candidate in candidates:
+            if not candidate.is_file() or candidate.suffix.casefold() not in ACTIVE_DISCORD_SUFFIXES:
+                continue
+            if "discord" in candidate.read_text(encoding="utf-8").casefold():
+                failures.append(
+                    "Active Discord reference remains in "
+                    f"{candidate.relative_to(ROOT)}"
+                )
 
     if failures:
         print("Release invariants failed:")

@@ -20,8 +20,13 @@ env:
   EMAIL_ADAPTER: memory
   SCANNING_ENABLED: "false"
   TELEGRAM_ENABLED: "false"
-  DISCORD_ENABLED: "false"
+  WHATSAPP_ENABLED: "false"
+  WHATSAPP_OPPORTUNITY_ALERTS_ENABLED: "false"
   BILLING_ENABLED: "false"
+  AI_AGENT_CONTROL_ENABLED: "true"
+  AI_AGENT_SHADOW_MODE: "true"
+  AI_AGENT_ROLLOUT_PERCENT: "0"
+  CAPABILITY_EXTENSION_ENABLED: "false"
 
 jobs:
   backend-quality:
@@ -67,7 +72,7 @@ jobs:
       - name: Validate one Alembic head and upgrade from previous revision
         run: |
           test "$(alembic heads | wc -l)" -eq 1
-          alembic upgrade e7f8a9b0c1d2
+          alembic upgrade 09bac1d2e3f4
           alembic upgrade head
       - run: ruff check .
       - run: mypy src/ai_market_monitor

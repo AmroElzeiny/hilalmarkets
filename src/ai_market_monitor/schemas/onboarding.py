@@ -36,7 +36,7 @@ class IdentityInput(BaseModel):
 
 class StartOnboardingRequest(BaseModel):
     identity: IdentityInput
-    entry_channel: Literal["web", "telegram", "whatsapp", "discord"]
+    entry_channel: Literal["web", "telegram", "whatsapp"]
     attribution: AttributionInput = Field(default_factory=AttributionInput)
     identity_assertion: str | None = Field(default=None, min_length=20, max_length=2000)
 
@@ -59,7 +59,7 @@ class OnboardingSessionResponse(BaseModel):
 class DisclaimerRequest(BaseModel):
     identity_id: UUID
     accepted: Literal[True]
-    acceptance_source: Literal["web", "telegram", "whatsapp", "discord"]
+    acceptance_source: Literal["web", "telegram", "whatsapp"]
     disclaimer_version: str
 
 
@@ -79,7 +79,7 @@ class GuidedSetupRequest(BaseModel):
     maximum_spread_bps: float | None = Field(default=None, ge=0, le=1000)
     forming_alerts: bool = True
     near_miss_threshold: float = Field(default=70, ge=1, le=100)
-    delivery_channels: list[Literal["telegram", "whatsapp", "discord", "web"]] = Field(
+    delivery_channels: list[Literal["telegram", "whatsapp", "web"]] = Field(
         min_length=1
     )
     maximum_alerts_per_hour: int = Field(default=50, ge=1, le=1000)

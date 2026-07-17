@@ -61,13 +61,10 @@ async def _alert(
 
 async def test_platform_matrix_keeps_full_billing_dashboard_owned():
     telegram_rule = capability_rule(Platform.TELEGRAM, PlatformCapability.FULL_BILLING)
-    discord_rule = capability_rule(Platform.DISCORD, PlatformCapability.FULL_BILLING)
     dashboard_rule = capability_rule(Platform.DASHBOARD, PlatformCapability.FULL_BILLING)
 
     assert telegram_rule.enabled is False
     assert telegram_rule.handoff_platform == Platform.DASHBOARD
-    assert discord_rule.enabled is False
-    assert discord_rule.handoff_platform == Platform.DASHBOARD
     assert dashboard_rule.enabled is True
 
 
@@ -98,8 +95,8 @@ async def test_signed_dashboard_link_expiry_fails_safely(test_context):
         user = await _user(session)
         url = await DashboardLinkService(session, test_context["settings"]).create(
             user_id=user.id,
-            source_platform=Platform.DISCORD,
-            source_subject="discord-123",
+            source_platform=Platform.TELEGRAM,
+            source_subject="telegram-expired-123",
             target_path="/dashboard",
             ttl_minutes=-1,
         )
@@ -111,7 +108,7 @@ async def test_signed_dashboard_link_expiry_fails_safely(test_context):
     assert response.headers["location"] == "/signin?error=dashboard_link_expired"
 
 
-async def test_notification_preferences_filter_cross_channel_deliveries(test_context):
+async def test_notification_preferences_ignore_retired_channel_values(test_context):
     async with test_context["session_factory"]() as session:
         user = await _user(session)
         session.add(
@@ -144,12 +141,9 @@ async def test_notification_preferences_filter_cross_channel_deliveries(test_con
         definition.alerts.channels = ["telegram", "discord"]
         deliveries = await NotificationDispatcher(session).enqueue(alert, definition)
 
-        assert {delivery.channel for delivery in deliveries} == {
-            DeliveryChannel.TELEGRAM,
-            DeliveryChannel.DISCORD,
-        }
+        assert {delivery.channel for delivery in deliveries} == {DeliveryChannel.TELEGRAM}
         assert await session.scalar(select(func.count(Alert.id))) == 1
-        assert await session.scalar(select(func.count(AlertDelivery.id))) == 2
+        assert await session.scalar(select(func.count(AlertDelivery.id))) == 1
 
 
 async def test_notification_preferences_mute_near_miss_without_ui_bypass(test_context):
@@ -298,7 +292,7 @@ async def test_shared_monitor_operations_pause_resume_and_audit(test_context):
         assert strategy.status == StrategyStatus.PAUSED
         assert strategy.paused_at is not None
 
-        await service.resume(user_id=user.id, strategy_id=strategy.id, actor_type="discord_user")
+        await service.resume(user_id=user.id, strategy_id=strategy.id, actor_type="telegram_user")
         assert strategy.status == StrategyStatus.ACTIVE
         assert strategy.paused_at is None
         assert await session.scalar(select(func.count(AuditEvent.id))) == 2

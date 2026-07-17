@@ -37,7 +37,7 @@ MATRIX_COLUMNS = (
     "live_scanner_support",
     "proof_receipt_support",
     "dashboard_rendering_support",
-    "telegram_discord_rendering_support",
+    "notification_rendering_support",
     "current_status",
     "reason",
     "fix_needed",
@@ -115,7 +115,7 @@ def concept_e2e_rows() -> list[dict[str, Any]]:
                 "dashboard_rendering_support": (
                     "yes" if template and manual_add != "hidden" else "hidden"
                 ),
-                "telegram_discord_rendering_support": (
+                "notification_rendering_support": (
                     "proof_renderer" if status in {"GREEN", "PROVIDER_REQUIRED"} else "not_live"
                 ),
                 "current_status": status,

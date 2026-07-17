@@ -91,6 +91,12 @@ from ai_market_monitor.db.models.observability import (
     MonitorHealthSummary,
     ObservabilityExplanation,
 )
+from ai_market_monitor.db.models.public_chat import (
+    PublicChatAnswerEvent,
+    PublicInquiry,
+    PublicInquiryEmailDelivery,
+    PublicInquiryRating,
+)
 from ai_market_monitor.db.models.sharia import (
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
@@ -246,6 +252,10 @@ __all__ = [
     "PaymentEmailDelivery",
     "Plan",
     "PublishedAssetAssessment",
+    "PublicChatAnswerEvent",
+    "PublicInquiry",
+    "PublicInquiryEmailDelivery",
+    "PublicInquiryRating",
     "ReferralCode",
     "ReferralRelationship",
     "ScanJob",

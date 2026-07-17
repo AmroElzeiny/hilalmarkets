@@ -11,7 +11,7 @@ from ai_market_monitor.api.dependencies import UserPrincipal, get_user_principal
 from ai_market_monitor.api.route_security import public_api, signed_webhook
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, visible_public_plan_codes
 from ai_market_monitor.db.models import BillingEvent, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
@@ -53,13 +53,19 @@ async def list_plans(
     await session.commit()
     billing = BillingService(session, settings)
     capabilities = billing.provider_capabilities
+    visible_codes = visible_public_plan_codes(billing_enabled=settings.billing_enabled)
     return {
+        "billing_enabled": settings.billing_enabled,
         "provider": billing.provider.provider_name,
         "provider_capabilities": asdict(capabilities),
         "billing_mode": (
-            "monthly_auto_renewal"
-            if capabilities.supports_recurring_billing
-            else "manual_30_day_access"
+            "disabled_private_beta"
+            if not settings.billing_enabled
+            else (
+                "monthly_auto_renewal"
+                if capabilities.supports_recurring_billing
+                else "manual_30_day_access"
+            )
         ),
         "plans": [
             {
@@ -71,7 +77,7 @@ async def list_plans(
                 "limits": plan.limits,
                 "features": plan.features,
             }
-            for code in PUBLIC_PLAN_CODES
+            for code in visible_codes
             for plan in [PLAN_DEFINITIONS[code]]
         ]
     }
@@ -119,6 +125,14 @@ async def create_checkout(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    if not settings.billing_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "billing_disabled",
+                "message": "Paid checkout is disabled during the private beta.",
+            },
+        )
     base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
     try:
         result = await BillingService(session, settings).checkout_session(
@@ -146,6 +160,14 @@ async def create_portal(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    if not settings.billing_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "billing_disabled",
+                "message": "The billing portal is unavailable during the private beta.",
+            },
+        )
     base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
     try:
         result = await BillingService(session, settings).billing_portal(
@@ -169,6 +191,8 @@ async def receive_billing_webhook(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    if not settings.billing_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
     body = await request.body()
     try:
         result = await BillingService(session, settings).process_verified_webhook(

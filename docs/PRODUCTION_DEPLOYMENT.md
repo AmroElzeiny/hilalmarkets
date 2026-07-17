@@ -21,20 +21,21 @@ TELEGRAM_ENABLED=true
 TELEGRAM_ADAPTER=http
 WHATSAPP_ENABLED=false
 WHATSAPP_ADAPTER=none
-DISCORD_ENABLED=true
-DISCORD_ADAPTER=http
-BILLING_ENABLED=true
-BILLING_PROVIDER=nowpayments
+BILLING_ENABLED=false
+BILLING_PROVIDER=static
+AI_AGENT_CONTROL_ENABLED=true
+AI_AGENT_SHADOW_MODE=true
+AI_AGENT_ROLLOUT_PERCENT=0
+CAPABILITY_EXTENSION_ENABLED=false
 EMAIL_ADAPTER=smtp
 ```
 
 Then provide every secret documented in `.env.example`. For OpenAI interpretation, set
 `OPENAI_API_KEY` and keep `OPENAI_MODEL` configurable. For Binance public spot data, API keys are
 optional; if you add `BINANCE_API_KEY` and `BINANCE_API_SECRET`, do not grant withdrawal or trade
-permissions for the v1 monitoring-only product. For NOWPayments, set
-`NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_BASE_URL`, and `BILLING_WEBHOOK_SECRET` for IPN signature
-verification. Stripe remains behind the billing-provider abstraction, but it is not the configured
-payment path for this build.
+permissions for the v1 monitoring-only product. The initial private beta has no enabled payment
+provider. NOWPayments and Stripe settings remain documented in their provider tests and should be
+configured only after sandbox validation and an explicit release decision.
 
 WhatsApp is an optional official Meta Cloud API channel. Follow
 [`WHATSAPP_CLOUD_API_RUNBOOK.md`](WHATSAPP_CLOUD_API_RUNBOOK.md), provide every required
@@ -161,7 +162,7 @@ has reviewed its exclusions and explicitly resumed it.
 The `TRACEDGE_DEV_TEST_V1` migration seed is schema/test data only. It is non-executable, hidden
 from ordinary methodology selection, and must never be promoted or represented as a religious
 ruling. Verify the Compliance Watch review queue, cache invalidation, one provisional safety hold,
-one approved status transition, and in-app plus staging Telegram/Discord drift delivery before
+one approved status transition, and in-app plus staging Telegram drift delivery before
 opening production scanning.
 
 After the migration, open `/system-brain` and choose **Import SC Malaysia now**, or run

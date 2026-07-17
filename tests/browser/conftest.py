@@ -123,7 +123,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         "tests": tests,
         "remaining_browser_side_risks": [
             (
-                "Live Telegram/WhatsApp/Discord delivery is not exercised without "
+                "Live Telegram delivery is not exercised without "
                 "dedicated staging credentials."
             ),
             (
@@ -196,7 +196,6 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "AI_INTERPRETER_PROVIDER": "rules",
             "OPENAI_EXPLANATION_ENABLED": "false",
             "TELEGRAM_ENABLED": "false",
-            "DISCORD_ENABLED": "false",
             "BILLING_ENABLED": "false",
             "BILLING_PROVIDER": "static",
             "EMAIL_ADAPTER": "memory",

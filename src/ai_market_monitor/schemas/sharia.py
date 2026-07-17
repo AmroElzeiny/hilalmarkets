@@ -582,9 +582,7 @@ class WatchlistAssetRemovalImpact(BaseModel):
     requires_confirmation: bool
 
 
-def _default_compliance_channels() -> list[
-    Literal["telegram", "whatsapp", "discord", "web"]
-]:
+def _default_compliance_channels() -> list[Literal["telegram", "web"]]:
     return ["web"]
 
 
@@ -599,10 +597,8 @@ class ShariaPreferenceUpdateRequest(BaseModel):
     )
     compliance_change_behavior: ComplianceChangeBehavior = ComplianceChangeBehavior.PAUSE_ASSET
     compliance_alerts_enabled: bool = True
-    compliance_alert_channels: list[
-        Literal["telegram", "whatsapp", "discord", "web"]
-    ] = Field(
-        default_factory=_default_compliance_channels, max_length=3
+    compliance_alert_channels: list[Literal["telegram", "web"]] = Field(
+        default_factory=_default_compliance_channels, max_length=2
     )
     compliance_alert_digest: Literal["immediate", "daily"] = "immediate"
     qualification_change_alerts: bool = True

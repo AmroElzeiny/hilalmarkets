@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.db.models import Alert, AlertDelivery, DashboardPreference
 from ai_market_monitor.db.models.enums import AlertType, DeliveryChannel
 
@@ -36,8 +37,15 @@ class NotificationPreference:
 
 
 class NotificationPreferenceService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, settings: Settings | None = None):
         self.session = session
+        self.settings = settings or get_settings()
+
+    def _supported_channels(self) -> set[DeliveryChannel]:
+        channels = {DeliveryChannel.TELEGRAM, DeliveryChannel.WEB}
+        if self.settings.whatsapp_enabled:
+            channels.add(DeliveryChannel.WHATSAPP)
+        return channels
 
     async def current(self, user_id: UUID) -> NotificationPreference:
         row = await self.session.scalar(
@@ -49,7 +57,7 @@ class NotificationPreferenceService:
             DeliveryChannel(value)
             for value in channel_values
             if value in {channel.value for channel in DeliveryChannel}
-        }
+        } & self._supported_channels()
         return NotificationPreference(
             channels=channels or {DeliveryChannel.TELEGRAM},
             near_miss_enabled=bool(data.get("near_miss_enabled", True)),
@@ -84,6 +92,7 @@ class NotificationPreferenceService:
                 for value in data.get("compliance_alert_channels", ["web"])
                 if value in {channel.value for channel in DeliveryChannel}
             }
+            & self._supported_channels()
             or {DeliveryChannel.WEB},
             compliance_alert_digest=str(data.get("compliance_alert_digest", "immediate")),
             qualification_change_alerts=bool(data.get("qualification_change_alerts", True)),

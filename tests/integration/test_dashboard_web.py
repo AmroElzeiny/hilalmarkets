@@ -1,4 +1,3 @@
-import re
 from datetime import UTC, datetime
 
 from pydantic import SecretStr
@@ -383,34 +382,18 @@ async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
         assert len(trials) == 1
 
 
-async def test_payment_page_loads_and_static_checkout_redirects(test_context):
+async def test_private_beta_billing_page_blocks_paid_checkout(test_context):
     await _signup_and_verify(test_context, email="billing@example.com")
     page = await test_context["client"].get("/dashboard/billing")
     assert page.status_code == 200
     assert "Subscription and Billing" in page.text
+    assert "Paid billing is disabled" in page.text
     review = await test_context["client"].get(
-        "/dashboard/billing/checkout?plan_code=trader"
-    )
-    assert review.status_code == 200
-    csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', review.text)
-    request_id = re.search(
-        r'name="checkout_request_id" value="([a-f0-9]+)"', review.text
-    )
-    assert csrf is not None
-    assert request_id is not None
-    checkout = await test_context["client"].post(
-        "/dashboard/billing/checkout",
-        data={
-            "plan_code": "trader",
-            "billing_cycle": "monthly",
-            "checkout_request_id": request_id.group(1),
-            "terms_accepted": "true",
-            "csrf_token": csrf.group(1),
-        },
+        "/dashboard/billing/checkout?plan_code=trader",
         follow_redirects=False,
     )
-    assert checkout.status_code == 303
-    assert "/billing/success" in checkout.headers["location"]
+    assert review.status_code == 303
+    assert review.headers["location"] == "/dashboard/billing?error=billing_disabled"
 
 
 async def test_dashboard_settings_timezone_dropdown_persists(test_context):

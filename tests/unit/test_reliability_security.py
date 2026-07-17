@@ -177,11 +177,42 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
         scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=False,
-        discord_enabled=False,
         billing_enabled=False,
         sharia_test_market_enabled=False,
+        public_chat_enabled=True,
+        email_adapter="smtp",
+        smtp_host="smtp.example.com",
+        smtp_username="production-smtp-user",
+        smtp_password="production-smtp-password",
+        smtp_from_email="no-reply@example.com",
     )
     validate_runtime_configuration(settings)
+
+
+def test_deployed_public_chat_requires_real_smtp_configuration():
+    settings = Settings(
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        billing_enabled=False,
+        public_chat_enabled=True,
+        email_adapter="none",
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    message = str(error.value)
+    assert "EMAIL_ADAPTER=smtp" in message
+    assert "SMTP_HOST" in message
+    assert "SMTP_USERNAME" in message
+    assert "SMTP_PASSWORD" in message
+    assert "SMTP_FROM_EMAIL" in message
 
 
 def test_deployed_runtime_rejects_test_sharia_market():
@@ -194,7 +225,6 @@ def test_deployed_runtime_rejects_test_sharia_market():
         scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=False,
-        discord_enabled=False,
         billing_enabled=False,
         sharia_test_market_enabled=True,
     )
@@ -236,7 +266,6 @@ def test_deployed_sharia_governance_requires_safe_operational_dependencies():
         scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=False,
-        discord_enabled=False,
         billing_enabled=False,
         sharia_screening_enforced=True,
         sharia_admin_telegram_chat_id=None,
@@ -294,7 +323,6 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
         ai_interpreter_provider="rules",
         telegram_enabled=True,
         telegram_adapter="none",
-        discord_enabled=True,
         billing_enabled=True,
         billing_provider="static",
     )
@@ -302,7 +330,6 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
         validate_runtime_configuration(settings)
     message = str(error.value)
     assert "TELEGRAM_ADAPTER=http" in message
-    assert "NoopDiscordGateway" in message
     assert "StaticBillingProvider" in message
 
 
@@ -316,7 +343,6 @@ def test_enabled_production_whatsapp_requires_complete_cloud_api_configuration()
         scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=False,
-        discord_enabled=False,
         billing_enabled=False,
         whatsapp_enabled=True,
         whatsapp_adapter="none",
@@ -346,7 +372,6 @@ def test_whatsapp_opportunity_delivery_requires_an_explicit_template():
         scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=False,
-        discord_enabled=False,
         billing_enabled=False,
         whatsapp_enabled=True,
         whatsapp_adapter="http",

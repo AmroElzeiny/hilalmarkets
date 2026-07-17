@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from ai_market_monitor.db.models import (
-    DiscordConnection,
     IntegrationHealth,
     Plan,
     Subscription,
@@ -48,16 +47,9 @@ async def test_support_escalation_attaches_diagnostic_context(test_context):
             )
         )
         session.add(
-            DiscordConnection(
-                user_id=user.id,
-                discord_user_id="discord-support",
-                status=ConnectionStatus.ACTIVE,
-            )
-        )
-        session.add(
             IntegrationHealth(
-                integration="discord",
-                scope_key="dm:discord-support",
+                integration="telegram",
+                scope_key="chat:tg-support",
                 status=HealthStatus.DEGRADED,
                 consecutive_failures=2,
                 last_error_code="RateLimited",
@@ -67,13 +59,12 @@ async def test_support_escalation_attaches_diagnostic_context(test_context):
         service = SupportEscalationService(session)
         ticket = await service.create_ticket(
             user_id=user.id,
-            category="discord_delivery",
+            category="missing_alert",
             description="My alert did not arrive.",
-            source="discord",
+            source="telegram",
         )
         assert ticket.context["plan"] == "pro"
         assert ticket.context["telegram_connection"] is True
-        assert ticket.context["discord_connection"] is True
         assert ticket.context["integration_health"][0]["last_error_code"] == "RateLimited"
 
         await service.escalate(

@@ -190,7 +190,7 @@ def test_hilalmarkets_runtime_icons_do_not_require_remote_iconify():
     assert "window.icon" in sources[1]
 
 
-def test_whatsapp_dashboard_requires_consent_and_exposes_complete_controls():
+def test_private_beta_integrations_expose_only_in_app_and_telegram():
     template = Path(
         "src/ai_market_monitor/templates/hilal/dashboard/integrations.html"
     ).read_text()
@@ -198,26 +198,11 @@ def test_whatsapp_dashboard_requires_consent_and_exposes_complete_controls():
         "src/ai_market_monitor/templates/hilal/dashboard/settings.html"
     ).read_text()
     script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    icons = Path("src/ai_market_monitor/static/hilalmarkets-icons.js").read_text()
-
-    for marker in (
-        "data-whatsapp-connect-form",
-        "data-whatsapp-consent required",
-        "data-whatsapp-category",
-        "data-whatsapp-test",
-        "data-whatsapp-pause",
-        "data-whatsapp-resume",
-        "data-whatsapp-save",
-        "data-whatsapp-preference-locale",
-        "data-whatsapp-disconnect",
-        "reply STOP",
-    ):
-        assert marker in template
-    assert "checked data-whatsapp-category" not in template
-    assert "['telegram', 'whatsapp', 'discord']" in settings
-    assert 'whatsappApi("/link"' in script
-    assert 'whatsappApi("/test"' in script
-    assert 'whatsappApi("/preferences"' in script
-    assert 'whatsappApi("/connection"' in script
-    assert "payload?.whatsapp" in script
-    assert "whatsapp:'" in icons
+    assert 'data-testid="telegram-integration-card"' in template
+    assert "In-app" in template
+    assert "WhatsApp" not in template
+    assert "Discord" not in template
+    assert 'value="telegram"' in settings
+    assert 'value="whatsapp"' not in settings
+    assert 'value="discord"' not in settings
+    assert "return channelActive(payload?.telegram);" in script

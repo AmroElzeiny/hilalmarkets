@@ -8,7 +8,10 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
-from ai_market_monitor.api.routers.whatsapp import get_whatsapp_receipt_enqueuer
+from ai_market_monitor.api.routers.whatsapp import (
+    get_whatsapp_receipt_enqueuer,
+    router as whatsapp_router,
+)
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token
 from ai_market_monitor.db.models import (
@@ -93,6 +96,16 @@ def _wa_settings(base: Settings, **changes) -> Settings:
     }
     values.update(changes)
     return base.model_copy(update=values)
+
+
+def _enable_whatsapp_test_routes(test_context, settings: Settings) -> None:
+    """Mount the dormant integration only inside its explicitly enabled tests."""
+    if not any(
+        getattr(route, "path", None) == "/api/v1/whatsapp/status"
+        for route in test_context["app"].routes
+    ):
+        test_context["app"].include_router(whatsapp_router, prefix="/api/v1")
+    test_context["app"].dependency_overrides[get_settings] = lambda: settings
 
 
 async def _signup(test_context, email: str) -> None:
@@ -215,7 +228,7 @@ async def test_dashboard_link_requires_csrf_and_inbound_phone_ownership(test_con
     await _signup(test_context, "whatsapp-link@example.com")
     user_id = await _user_id(test_context)
     settings = _wa_settings(test_context["settings"])
-    test_context["app"].dependency_overrides[get_settings] = lambda: settings
+    _enable_whatsapp_test_routes(test_context, settings)
 
     missing_csrf = await test_context["client"].post(
         "/api/v1/whatsapp/link",
@@ -277,7 +290,7 @@ async def test_dashboard_link_requires_csrf_and_inbound_phone_ownership(test_con
 
 async def test_signed_webhook_verification_batching_and_idempotency(test_context):
     settings = _wa_settings(test_context["settings"])
-    test_context["app"].dependency_overrides[get_settings] = lambda: settings
+    _enable_whatsapp_test_routes(test_context, settings)
     queued: list[str] = []
     test_context["app"].dependency_overrides[get_whatsapp_receipt_enqueuer] = (
         lambda: queued.append

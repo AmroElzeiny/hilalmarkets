@@ -106,7 +106,7 @@ def validate_strategy_conflicts(definition: StrategyDefinition) -> list[Diagnost
                 code="missing_alert_destination",
                 severity="critical",
                 message="No alert destination is configured.",
-                suggested_fix="Select Telegram, Discord, or web delivery.",
+                suggested_fix="Select in-app or Telegram delivery.",
                 ignorable=False,
             )
         )

@@ -85,9 +85,9 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
         "/api/v1/admin/incidents",
         headers=admin_headers,
         json={
-            "title": "Discord delivery degraded",
-            "description": "Discord API errors exceeded retry threshold.",
-            "incident_type": "discord_delivery",
+            "title": "Telegram delivery degraded",
+            "description": "Telegram API errors exceeded retry threshold.",
+            "incident_type": "telegram_delivery",
             "severity": "major",
             "affected_users": [str(normal.id)],
         },
@@ -96,7 +96,7 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
     incident_id = incident.json()["incident_id"]
     incident_queue = await client.get("/api/v1/admin/incidents", headers=admin_headers)
     assert incident_queue.status_code == 200
-    assert incident_queue.json()["incidents"][0]["incident_type"] == "discord_delivery"
+    assert incident_queue.json()["incidents"][0]["incident_type"] == "telegram_delivery"
 
     resolved = await client.post(
         f"/api/v1/admin/incidents/{incident_id}/resolve",
