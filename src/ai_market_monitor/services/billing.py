@@ -64,6 +64,53 @@ class BillingPortalSession:
 
 
 @dataclass(frozen=True, slots=True)
+class BillingProviderCapabilities:
+    supports_recurring_billing: bool
+    supports_customer_portal: bool
+    supports_automatic_cancellation: bool
+    supports_refunds: bool
+    supports_invoice_receipts: bool
+
+
+STATIC_BILLING_CAPABILITIES = BillingProviderCapabilities(
+    supports_recurring_billing=False,
+    supports_customer_portal=False,
+    supports_automatic_cancellation=False,
+    supports_refunds=False,
+    supports_invoice_receipts=False,
+)
+STRIPE_BILLING_CAPABILITIES = BillingProviderCapabilities(
+    supports_recurring_billing=True,
+    supports_customer_portal=True,
+    supports_automatic_cancellation=True,
+    supports_refunds=True,
+    supports_invoice_receipts=True,
+)
+NOWPAYMENTS_BILLING_CAPABILITIES = BillingProviderCapabilities(
+    supports_recurring_billing=False,
+    supports_customer_portal=False,
+    supports_automatic_cancellation=False,
+    supports_refunds=False,
+    supports_invoice_receipts=True,
+)
+
+
+def billing_provider_capabilities(provider: str) -> BillingProviderCapabilities:
+    capabilities = {
+        "static": STATIC_BILLING_CAPABILITIES,
+        "stripe": STRIPE_BILLING_CAPABILITIES,
+        "nowpayments": NOWPAYMENTS_BILLING_CAPABILITIES,
+    }
+    try:
+        return capabilities[provider]
+    except KeyError as exc:
+        raise BillingError(
+            "billing_provider_unknown",
+            "The billing provider is not supported.",
+        ) from exc
+
+
+@dataclass(frozen=True, slots=True)
 class BillingWebhookResult:
     event_id: str
     event_type: str
@@ -74,6 +121,7 @@ class BillingWebhookResult:
 
 class BillingProvider(Protocol):
     provider_name: str
+    capabilities: BillingProviderCapabilities
 
     async def create_checkout_session(
         self,
@@ -99,6 +147,7 @@ class BillingProvider(Protocol):
 
 class StaticBillingProvider:
     provider_name = "static"
+    capabilities = STATIC_BILLING_CAPABILITIES
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -139,11 +188,15 @@ class StaticBillingProvider:
         return_url: str,
         provider_customer_id: str | None = None,
     ) -> BillingPortalSession:
-        return BillingPortalSession(provider=self.provider_name, portal_url=return_url)
+        raise BillingError(
+            "billing_portal_unavailable",
+            "This local billing adapter does not provide a customer portal.",
+        )
 
 
 class StripeBillingProvider:
     provider_name = "stripe"
+    capabilities = STRIPE_BILLING_CAPABILITIES
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -239,6 +292,7 @@ class StripeBillingProvider:
 
 class NowPaymentsBillingProvider:
     provider_name = "nowpayments"
+    capabilities = NOWPAYMENTS_BILLING_CAPABILITIES
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -266,7 +320,7 @@ class NowPaymentsBillingProvider:
             "price_amount": float(amount),
             "price_currency": currency.lower(),
             "order_id": order_id,
-            "order_description": f"HilalMarkets {plan_name} monthly access",
+            "order_description": f"HilalMarkets {plan_name} 30-day access",
             "ipn_callback_url": (
                 f"{str(self.settings.public_base_url).rstrip('/')}"
                 "/api/v1/billing/webhooks/nowpayments"
@@ -306,7 +360,10 @@ class NowPaymentsBillingProvider:
         return_url: str,
         provider_customer_id: str | None = None,
     ) -> BillingPortalSession:
-        return BillingPortalSession(provider=self.provider_name, portal_url=return_url)
+        raise BillingError(
+            "billing_portal_unavailable",
+            "NOWPayments invoices provide 30-day access and do not include a subscription portal.",
+        )
 
     @staticmethod
     def _json_response(response: httpx.Response) -> dict[str, Any]:
@@ -447,13 +504,25 @@ class BillingService:
         else:
             self.provider = StaticBillingProvider(settings)
 
+    @property
+    def provider_capabilities(self) -> BillingProviderCapabilities:
+        return self.provider.capabilities
+
+    @property
+    def billing_cycle_code(self) -> str:
+        return (
+            "monthly_auto_renewal"
+            if self.provider.capabilities.supports_recurring_billing
+            else "one_time_30_day"
+        )
+
     async def checkout_session(
         self, *, user_id: UUID, plan_code: str, success_url: str, cancel_url: str
     ) -> CheckoutSession:
         prepared = await self.prepare_checkout(
             user_id=user_id,
             plan_code=plan_code,
-            billing_cycle="monthly",
+            billing_cycle=self.billing_cycle_code,
             request_key=uuid4().hex,
             terms_accepted=True,
         )
@@ -473,11 +542,15 @@ class BillingService:
         request_key: str,
         terms_accepted: bool,
     ) -> CheckoutAttemptResult:
-        if billing_cycle != "monthly":
+        accepted_cycles = {self.billing_cycle_code}
+        if not self.provider.capabilities.supports_recurring_billing:
+            accepted_cycles.add("monthly")  # Backward-compatible form/API input.
+        if billing_cycle not in accepted_cycles:
             raise BillingError(
                 "billing_cycle_not_available",
-                "Only monthly billing is currently available.",
+                "The requested billing cycle is not available from this provider.",
             )
+        billing_cycle = self.billing_cycle_code
         if plan_code not in PURCHASABLE_PLAN_CODES:
             raise BillingError("plan_not_available", "This plan is not available for checkout.")
         if not terms_accepted:
@@ -687,6 +760,11 @@ class BillingService:
         return subscription
 
     async def billing_portal(self, *, user_id: UUID, return_url: str) -> BillingPortalSession:
+        if not self.provider.capabilities.supports_customer_portal:
+            raise BillingError(
+                "billing_portal_unavailable",
+                "The enabled payment provider does not offer a recurring-subscription portal.",
+            )
         subscription = await self.session.scalar(
             select(Subscription)
             .where(Subscription.user_id == user_id)
@@ -697,6 +775,47 @@ class BillingService:
             return_url=return_url,
             provider_customer_id=subscription.provider_customer_id if subscription else None,
         )
+
+    async def expire_ended_access(self, *, now: datetime | None = None) -> int:
+        cutoff = now or datetime.now(UTC)
+        subscriptions = list(
+            (
+                await self.session.scalars(
+                    select(Subscription).where(
+                        Subscription.status.in_(
+                            {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}
+                        ),
+                        Subscription.current_period_end.is_not(None),
+                        Subscription.current_period_end <= cutoff,
+                        Subscription.cancel_at_period_end.is_(True),
+                    )
+                )
+            ).all()
+        )
+        for subscription in subscriptions:
+            subscription.status = SubscriptionStatus.EXPIRED
+            await EntitlementService(self.session).snapshot(subscription.user_id)
+            await EntitlementService(self.session).pause_excess_after_downgrade(
+                subscription.user_id
+            )
+            await DiscordRoleSyncService(self.session).enqueue_for_user(
+                user_id=subscription.user_id,
+                source_event_id=f"access-expired:{subscription.id}",
+            )
+            self._audit(
+                subscription.user_id,
+                "billing.access_expired",
+                "subscription",
+                subscription.id,
+                {
+                    "provider": subscription.provider,
+                    "period_end": subscription.current_period_end.isoformat()
+                    if subscription.current_period_end
+                    else None,
+                },
+            )
+        await self.session.flush()
+        return len(subscriptions)
 
     async def process_verified_webhook(
         self, *, provider: str, body: bytes, signature: str | None
@@ -802,9 +921,14 @@ class BillingService:
                 "status": normalized_status,
                 "current_period_start": now.isoformat(),
                 "current_period_end": (now + timedelta(days=30)).isoformat(),
-                "cancel_at_period_end": False,
-                "amount": payload.get("price_amount") or payload.get("actually_paid"),
+                "cancel_at_period_end": True,
+                "access_type": "one_time_30_day",
+                "renews_automatically": False,
+                "amount": payload.get("price_amount"),
                 "currency": payload.get("price_currency"),
+                "settlement_expected_amount": payload.get("pay_amount"),
+                "settlement_actual_amount": payload.get("actually_paid"),
+                "settlement_currency": payload.get("pay_currency"),
                 "receipt_url": payload.get("invoice_url"),
             },
         }
@@ -840,7 +964,11 @@ class BillingService:
                 user_id=existing.user_id,
             )
         data = dict(payload.get("data") or {})
-        await self._hydrate_checkout_data(data)
+        await self._hydrate_checkout_data(
+            data,
+            provider=provider,
+            event_type=event_type,
+        )
         user_id = self._parse_uuid(data.get("user_id"))
         event = BillingEvent(
             user_id=user_id,
@@ -1034,7 +1162,26 @@ class BillingService:
                 {},
             )
             return subscription
-        if event_type in {"payment.expired", "payment.failed", "payment.refunded"}:
+        if event_type == "payment.refunded":
+            subscription = await self._upsert_subscription(
+                provider=provider,
+                data=data,
+                forced_status=SubscriptionStatus.CANCELED,
+            )
+            subscription.canceled_at = datetime.now(UTC)
+            await EntitlementService(self.session).snapshot(subscription.user_id)
+            await EntitlementService(self.session).pause_excess_after_downgrade(
+                subscription.user_id
+            )
+            self._audit(
+                subscription.user_id,
+                "billing.payment_refunded",
+                "subscription",
+                subscription.id,
+                {},
+            )
+            return subscription
+        if event_type in {"payment.expired", "payment.failed"}:
             user_id = self._parse_uuid(data.get("user_id"))
             if user_id:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
@@ -1045,9 +1192,23 @@ class BillingService:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
         return None
 
-    async def _hydrate_checkout_data(self, data: dict[str, Any]) -> None:
+    async def _hydrate_checkout_data(
+        self,
+        data: dict[str, Any],
+        *,
+        provider: str,
+        event_type: str,
+    ) -> None:
         raw_attempt_id = data.get("checkout_attempt_id")
         if raw_attempt_id in (None, ""):
+            if provider == "nowpayments" or event_type in {
+                "checkout.session.completed",
+                "payment.finished",
+            }:
+                raise BillingError(
+                    "checkout_reference_missing",
+                    "A successful payment must match a server-created checkout attempt.",
+                )
             return
         try:
             attempt_id = self._parse_uuid(raw_attempt_id)
@@ -1056,24 +1217,127 @@ class BillingService:
                 "checkout_reference_invalid",
                 "Billing event included an invalid checkout reference.",
             ) from exc
-        attempt = (
-            await self.session.get(BillingCheckoutAttempt, attempt_id)
-            if attempt_id is not None
-            else None
-        )
+        attempt = None
+        if attempt_id is not None:
+            attempt = await self.session.scalar(
+                select(BillingCheckoutAttempt)
+                .where(BillingCheckoutAttempt.id == attempt_id)
+                .with_for_update()
+            )
         if attempt is None:
             raise BillingError(
                 "checkout_reference_missing",
                 "Billing event did not match a server-created checkout.",
             )
+        if (
+            provider == "nowpayments"
+            and event_type == "payment.finished"
+            and attempt.status == "completed"
+        ):
+            raise BillingError(
+                "checkout_already_completed",
+                "This one-time checkout has already granted its access period.",
+            )
         plan = await self.session.get(Plan, attempt.plan_id)
         if plan is None:
             raise BillingError("plan_not_found", "Checkout plan no longer exists.")
+        if attempt.provider not in {provider, "static"}:
+            raise BillingError(
+                "checkout_provider_mismatch",
+                "The payment provider does not match the checkout attempt.",
+            )
+        supplied_user_id = self._parse_uuid(data.get("user_id"))
+        if supplied_user_id is not None and supplied_user_id != attempt.user_id:
+            raise BillingError(
+                "checkout_user_mismatch", "The payment user does not match the checkout attempt."
+            )
+        supplied_plan = str(data.get("plan_code") or "")
+        if supplied_plan and supplied_plan != plan.code:
+            raise BillingError(
+                "checkout_plan_mismatch", "The paid plan does not match the checkout attempt."
+            )
+        if event_type in {
+            "checkout.session.completed",
+            "invoice.payment_succeeded",
+            "payment.finished",
+        }:
+            self._validate_paid_amount_and_currency(
+                paid_amount=data.get("amount"),
+                paid_currency=data.get("currency"),
+                expected_amount=attempt.amount,
+                expected_currency=attempt.currency,
+            )
+        if provider == "nowpayments" and event_type == "payment.finished":
+            self._validate_nowpayments_settlement(data)
         data["checkout_attempt_id"] = str(attempt.id)
         data["user_id"] = str(attempt.user_id)
         data["plan_code"] = plan.code
         data["amount"] = str(attempt.amount)
         data["currency"] = attempt.currency
+
+    def _validate_paid_amount_and_currency(
+        self,
+        *,
+        paid_amount: object,
+        paid_currency: object,
+        expected_amount: Decimal,
+        expected_currency: str,
+    ) -> None:
+        try:
+            actual = Decimal(str(paid_amount))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise BillingError(
+                "payment_amount_missing", "The provider did not report a valid paid amount."
+            ) from exc
+        currency = str(paid_currency or "").upper()
+        if currency != expected_currency.upper():
+            raise BillingError(
+                "payment_currency_mismatch",
+                "The paid currency does not match the checkout attempt.",
+            )
+        tolerance = expected_amount * Decimal(
+            str(self.settings.billing_payment_amount_tolerance_percent)
+        ) / Decimal("100")
+        minimum = expected_amount - tolerance
+        maximum = expected_amount + tolerance
+        if actual < minimum:
+            raise BillingError(
+                "payment_underpaid", "The verified payment is below the accepted amount."
+            )
+        if actual > maximum and not self.settings.billing_allow_overpayment:
+            raise BillingError(
+                "payment_overpaid",
+                "The verified payment exceeds the accepted amount and requires manual review.",
+            )
+
+    def _validate_nowpayments_settlement(self, data: Mapping[str, Any]) -> None:
+        try:
+            expected = Decimal(str(data.get("settlement_expected_amount")))
+            actual = Decimal(str(data.get("settlement_actual_amount")))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise BillingError(
+                "payment_settlement_missing",
+                "NOWPayments did not report a valid expected and actually paid amount.",
+            ) from exc
+        currency = str(data.get("settlement_currency") or "").strip().upper()
+        if expected <= 0 or actual < 0 or not currency:
+            raise BillingError(
+                "payment_settlement_invalid",
+                "NOWPayments reported invalid settlement amount or currency evidence.",
+            )
+        tolerance = expected * Decimal(
+            str(self.settings.billing_payment_amount_tolerance_percent)
+        ) / Decimal("100")
+        if actual < expected - tolerance:
+            raise BillingError(
+                "payment_underpaid",
+                "The amount actually received is below the accepted payment amount.",
+            )
+        if actual > expected + tolerance and not self.settings.billing_allow_overpayment:
+            raise BillingError(
+                "payment_overpaid",
+                "The amount actually received exceeds policy and requires manual review.",
+            )
 
     async def _record_checkout_event(
         self,
@@ -1102,6 +1366,7 @@ class BillingService:
             "invoice.payment_failed",
             "payment.failed",
             "payment.expired",
+            "payment.partially_paid",
             "payment.refunded",
         }:
             attempt.status = event_type.split(".", 1)[1]

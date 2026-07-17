@@ -12,6 +12,6 @@
   <div class="topbar-right">
     {% if active_methodology is defined and active_methodology %}<span class="badge badge-eligible">{{ active_methodology.name }} | v{{ active_methodology.version }}</span>{% endif %}
     <a class="btn btn-secondary btn-icon" href="{{ url_for('lifecycles_page') }}" aria-label="Open recent activity"><span data-icon="bell" data-icon-class="icon"></span></a>
-    <a class="btn btn-primary btn-sm sidebar-create-quick" href="{{ url_for('new_strategy_builder_page') }}"><span data-icon="plus" data-icon-class="icon"></span>New Watchlist</a>
+    <a class="btn btn-primary btn-sm sidebar-create-quick" href="{{ url_for('new_strategy_builder_page') }}"><span data-icon="plus" data-icon-class="icon"></span>New Watch Plan</a>
   </div>
 </header>

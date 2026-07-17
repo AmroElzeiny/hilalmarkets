@@ -205,6 +205,27 @@ def test_deployed_runtime_rejects_test_sharia_market():
     assert "SHARIA_TEST_MARKET_ENABLED" in str(error.value)
 
 
+def test_deployed_runtime_requires_fail_closed_api_rate_limits():
+    settings = Settings(
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        api_rate_limiting_enabled=False,
+        api_rate_limit_fail_closed=False,
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    message = str(error.value)
+    assert "API_RATE_LIMITING_ENABLED" in message
+    assert "API_RATE_LIMIT_FAIL_CLOSED" in message
+
+
 def test_deployed_sharia_governance_requires_safe_operational_dependencies():
     settings = Settings(
         app_env="staging",
@@ -283,6 +304,78 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
     assert "TELEGRAM_ADAPTER=http" in message
     assert "NoopDiscordGateway" in message
     assert "StaticBillingProvider" in message
+
+
+def test_enabled_production_whatsapp_requires_complete_cloud_api_configuration():
+    settings = Settings(
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        discord_enabled=False,
+        billing_enabled=False,
+        whatsapp_enabled=True,
+        whatsapp_adapter="none",
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    message = str(error.value)
+    assert "WHATSAPP_ADAPTER=http" in message
+    assert "WHATSAPP_GRAPH_API_VERSION" in message
+    assert "WHATSAPP_ACCESS_TOKEN" in message
+    assert "WHATSAPP_APP_SECRET" in message
+    assert "WHATSAPP_VERIFY_TOKEN" in message
+    assert "WHATSAPP_PHONE_NUMBER_ID" in message
+    assert "WHATSAPP_BUSINESS_ACCOUNT_ID" in message
+    assert "WHATSAPP_BUSINESS_PHONE_E164" in message
+
+
+def test_whatsapp_opportunity_delivery_requires_an_explicit_template():
+    settings = Settings(
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        discord_enabled=False,
+        billing_enabled=False,
+        whatsapp_enabled=True,
+        whatsapp_adapter="http",
+        whatsapp_graph_api_version="v23.0",
+        whatsapp_access_token="production-access-token-value",
+        whatsapp_app_secret="production-app-secret-value",
+        whatsapp_verify_token="production-webhook-verify-value",
+        whatsapp_phone_number_id="phone-number-id",
+        whatsapp_business_account_id="waba-id",
+        whatsapp_business_phone_e164="+12025550123",
+        whatsapp_opportunity_alerts_enabled=True,
+        whatsapp_template_names={},
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    assert "confirmed_research_event" in str(error.value)
+
+
+def test_whatsapp_template_locale_keys_are_validated():
+    with pytest.raises(ValueError, match="invalid locale key"):
+        Settings(
+            app_env="test",
+            app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+            whatsapp_template_names={
+                "connection_test": {"english-US": "connection_test_v1"}
+            },
+        )
 
 
 def test_production_runtime_rejects_placeholder_credentials():

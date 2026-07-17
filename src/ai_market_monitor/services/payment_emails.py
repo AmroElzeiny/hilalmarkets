@@ -21,6 +21,7 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider
+from ai_market_monitor.services.billing import billing_provider_capabilities
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 
 TEMPLATE_DIRECTORY = Path(__file__).resolve().parents[1] / "templates" / "email"
@@ -50,7 +51,8 @@ class PaymentEmailRenderer:
         amount: Decimal | None,
         currency: str,
         payment_date: datetime,
-        renewal_date: datetime | None,
+        period_end_date: datetime | None,
+        renews_automatically: bool,
         receipt_url: str | None,
         plan_limits: dict[str, Any],
     ) -> RenderedPaymentEmail:
@@ -62,7 +64,17 @@ class PaymentEmailRenderer:
             "amount": f"{amount:.2f}" if amount is not None else None,
             "currency": currency.upper(),
             "payment_date": _utc_label(payment_date),
-            "renewal_date": _utc_label(renewal_date) if renewal_date else None,
+            "renewal_date": (
+                _utc_label(period_end_date)
+                if period_end_date and renews_automatically
+                else None
+            ),
+            "access_until": (
+                _utc_label(period_end_date)
+                if period_end_date and not renews_automatically
+                else None
+            ),
+            "renews_automatically": renews_automatically,
             "receipt_url": receipt_url,
             "limits": _main_limits(plan_limits),
             "dashboard_url": f"{base_url}/dashboard",
@@ -128,13 +140,18 @@ class PaymentEmailOutboxService:
             amount = plan.price_monthly
         features = dict(plan.features or {})
         limits = dict(features.get("limits") or {})
+        capabilities = billing_provider_capabilities(billing_event.provider)
         delivery = PaymentEmailDelivery(
             user_id=subscription.user_id,
             billing_event_id=billing_event.id,
             event_key=event_key,
             recipient=identity.normalized_identifier,
             plan_code=plan.code,
-            billing_frequency="monthly",
+            billing_frequency=(
+                "monthly auto-renewal"
+                if capabilities.supports_recurring_billing
+                else "30-day access"
+            ),
             amount=amount,
             currency=str(data.get("currency") or plan.currency).upper()[:3],
             payment_date=billing_event.created_at or now,
@@ -234,8 +251,10 @@ class PaymentEmailOutboxService:
             raise RuntimeError("Payment email delivery disappeared before rendering.")
         user = await self.session.get(User, delivery.user_id)
         plan = await self.session.scalar(select(Plan).where(Plan.code == delivery.plan_code))
-        if user is None or plan is None:
-            raise RuntimeError("Payment email user or plan is unavailable.")
+        billing_event = await self.session.get(BillingEvent, delivery.billing_event_id)
+        if user is None or plan is None or billing_event is None:
+            raise RuntimeError("Payment email user, plan, or billing event is unavailable.")
+        capabilities = billing_provider_capabilities(billing_event.provider)
         first_name = ((user.display_name or "").strip().split() or ["there"])[0]
         return PaymentEmailRenderer(self.settings).render(
             first_name=first_name,
@@ -244,7 +263,8 @@ class PaymentEmailOutboxService:
             amount=delivery.amount,
             currency=delivery.currency,
             payment_date=delivery.payment_date,
-            renewal_date=delivery.renewal_date,
+            period_end_date=delivery.renewal_date,
+            renews_automatically=capabilities.supports_recurring_billing,
             receipt_url=delivery.receipt_url,
             plan_limits=delivery.plan_limits,
         )

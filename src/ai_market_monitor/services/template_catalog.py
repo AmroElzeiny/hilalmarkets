@@ -43,7 +43,7 @@ class StrategyTemplateSpec:
     maximum_stop_percent: float = 2.0
 
     def definition(self) -> StrategyDefinition:
-        conditions = [
+        conditions: list[ConditionRule | ConditionGroup] = [
             _condition_from_spec(spec, self.base_timeframe) for spec in self.condition_specs
         ]
         supporting = sorted(

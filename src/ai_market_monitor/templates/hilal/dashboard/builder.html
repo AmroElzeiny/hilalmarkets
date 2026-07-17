@@ -9,7 +9,7 @@
 {% block content %}
 <section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
   <div>
-    <span class="eyebrow">Guided Watchlist</span>
+    <span class="eyebrow">Guided Watch Plan</span>
     <h1>Describe what you want HilalMarkets to watch.</h1>
     <p>Begin with plain market behavior. You will review the exact screened universe, rules, timing, and compliance-change policy before activation.</p>
   </div>
@@ -33,7 +33,7 @@
 
 <section class="ai-setup-chat-shell" data-ai-setup-chat data-testid="ai-setup-chat" {% if strategy %}hidden{% endif %}>
   <div class="ai-chat-layout">
-    <section class="ai-chat-panel" aria-label="Watchlist conversation">
+    <section class="ai-chat-panel" aria-label="Watch Plan conversation">
       <div class="ai-chat-panel-head">
         <div class="ai-chat-agent">
           <span><span data-icon="spark" data-icon-class="icon"></span></span>
@@ -44,7 +44,7 @@
           <button class="ai-chat-quiet-button" type="button" data-ai-return-chat hidden><span data-icon="arrow" data-icon-class="icon-sm"></span>Return to chat</button>
         </div>
       </div>
-      <div class="ai-chat-messages" data-ai-chat-messages role="log" aria-live="polite" aria-label="Watchlist conversation"></div>
+      <div class="ai-chat-messages" data-ai-chat-messages role="log" aria-live="polite" aria-label="Watch Plan conversation"></div>
       <div class="ai-chat-suggestions" data-ai-chat-suggestions aria-label="Suggested replies"></div>
       <div class="ai-chat-error" data-ai-chat-error role="alert" hidden><span data-ai-chat-error-text></span><button type="button" data-ai-chat-retry>Retry</button></div>
       <form class="ai-chat-composer" data-ai-chat-form>
@@ -55,11 +55,11 @@
       </form>
     </section>
 
-    <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live Watchlist translation">
-      <div class="ai-preview-head"><div><span class="eyebrow">Live translation</span><h2>Your Watchlist sheet</h2></div><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div>
+    <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live Watch Plan translation">
+      <div class="ai-preview-head"><div><span class="eyebrow">Live translation</span><h2>Your Watch Plan sheet</h2></div><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div>
       <div class="ai-preview-empty" data-ai-preview-empty><span class="icon-box"><span data-icon="scan" data-icon-class="icon-lg"></span></span><h3>Your reviewed rules will appear here</h3><p>Primary trigger, required filters, confirmations, screened universe, policy, assumptions, and alert behavior remain separate.</p></div>
       <div class="ai-preview-content" data-ai-preview-content hidden></div>
-      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan hidden>Check the Market Now</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
+      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve disabled>Approve Watch Plan</button><button class="button button-primary" type="button" data-ai-chat-scan hidden>Check the Market Now</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
     </aside>
   </div>
 </section>

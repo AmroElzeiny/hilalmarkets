@@ -16,6 +16,7 @@
     <div class="row wrap">
       <span class="badge badge-dark">Source | {{ entitlement.source }}</span>
       {% if trial %}<span class="badge badge-dark">Trial ends {{ trial.ends_at|short_dt(user.timezone) }}</span>{% endif %}
+      <span class="badge badge-dark">{{ 'Automatic monthly renewal' if billing_capabilities.supports_recurring_billing else 'Manual 30-day renewal' }}</span>
     </div>
   </div>
   <span class="icon-box is-gold"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
@@ -35,7 +36,7 @@
       <article class="price-card {{ 'is-featured' if current else '' }}">
         {% if current %}<span class="badge badge-dark">Current plan</span>{% endif %}
         <span class="kicker">{{ plan.name }}</span>
-        <div class="price"><strong>${{ plan.monthly_price }}</strong><span>/month</span></div>
+        <div class="price"><strong>${{ plan.monthly_price }}</strong><span>{% if plan.monthly_price == 0 %} free{% elif billing_capabilities.supports_recurring_billing %}/month{% else %}/30 days{% endif %}</span></div>
         <p>{{ plan.description or 'Configurable monitoring plan.' }}</p>
         <ul class="feature-list">
           <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.get('active_strategies') | plan_limit }} active Watch Plans</li>
@@ -58,6 +59,19 @@
       </article>
     {% endfor %}
   </div>
+</section>
+
+<section class="panel billing-history-panel">
+  <div class="panel-head">
+    <div><span class="kicker">Payment history</span><h2>Checkout and receipt records</h2><p>These records come from server-created checkout attempts and verified payment events.</p></div>
+  </div>
+  {% if billing_history %}
+    <div class="table-wrap"><table><thead><tr><th>Plan</th><th>Provider</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead><tbody>
+    {% for row in billing_history %}<tr><td>{{ row.plan_name }}</td><td>{{ row.attempt.provider }}</td><td>{{ row.attempt.amount }} {{ row.attempt.currency }}</td><td><span class="badge badge-dark">{{ row.attempt.status.replace('_', ' ')|title }}</span></td><td>{{ row.attempt.created_at|short_dt(user.timezone) }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<div class="empty-state"><strong>No payment history yet</strong><p>A verified checkout will appear here.</p></div>{% endif %}
+  {% if payment_receipts %}<div class="row wrap billing-receipts">{% for receipt in payment_receipts %}{% if receipt.receipt_url %}<a class="btn btn-secondary" href="{{ receipt.receipt_url }}" target="_blank" rel="noopener">Open {{ receipt.plan_code|title }} receipt</a>{% endif %}{% endfor %}</div>{% endif %}
+  {% if billing_capabilities.supports_customer_portal %}<form method="post" action="/dashboard/billing/portal"><input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}"><button class="btn btn-secondary" type="submit">Manage recurring subscription</button></form>{% else %}<div class="notice"><span data-icon="info" data-icon-class="icon"></span><div><strong>No automatic cancellation portal</strong><p>{{ billing_provider|title }} provides one-time 30-day access. It does not charge again automatically.</p></div></div>{% endif %}
 </section>
 
 <div class="notice">

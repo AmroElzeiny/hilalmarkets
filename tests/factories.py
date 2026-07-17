@@ -12,6 +12,71 @@ def load_strategy(name: str = "liquidity_sweep_continuation.json") -> StrategyDe
     return StrategyDefinition.model_validate(json.loads(path.read_text()))
 
 
+def methodology_rules(
+    *,
+    source_family: str = "qualified_test_source",
+    source_adapter: str = "manual_test",
+) -> dict:
+    outcomes = ["pass", "qualification", "fail", "not_applicable", "needs_evidence"]
+    use_decisions = [
+        "covered",
+        "qualified",
+        "not_covered",
+        "not_applicable",
+        "under_review",
+        "excluded",
+    ]
+    return {
+        "schema_version": "1",
+        "criteria_version": "test.criteria.1",
+        "source_family": source_family,
+        "source_adapter": source_adapter,
+        "executable": True,
+        "required_criteria": [
+            {
+                "key": "reviewed_evidence",
+                "label": "Reviewed evidence",
+                "description": "Verify the retained test evidence and exact asset identity.",
+                "required": True,
+                "allowed_outcomes": outcomes,
+                "evidence_categories": ["reviewed_test_evidence"],
+                "qualification_rules": {"written_reason_required": True},
+                "blocking_outcomes": ["fail", "not_applicable", "needs_evidence"],
+            }
+        ],
+        "use_cases": [
+            {
+                "key": "spot_monitoring",
+                "label": "Spot market monitoring",
+                "description": "Test-only spot market monitoring coverage for this asset.",
+                "required": True,
+                "allowed_decisions": use_decisions,
+                "criterion_keys": ["reviewed_evidence"],
+                "evidence_categories": ["reviewed_test_evidence"],
+                "default_scope": "Spot market monitoring in isolated tests.",
+                "execution_blocking_decisions": [
+                    "not_covered",
+                    "not_applicable",
+                    "under_review",
+                    "excluded",
+                ],
+            }
+        ],
+    }
+
+
+def methodology_evidence_requirements() -> dict:
+    return {
+        "schema_version": "1",
+        "mandatory_source_categories": ["reviewed_test_evidence"],
+        "minimum_evidence_completeness": 1.0,
+        "maximum_source_age_days": 3650,
+        "critical_missing_fields": ["test_evidence.identity"],
+        "contradiction_policy": "block_any_unresolved",
+        "review_cadence_days": 365,
+    }
+
+
 def candles(
     count: int,
     *,

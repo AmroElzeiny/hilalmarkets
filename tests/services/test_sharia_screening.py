@@ -16,7 +16,9 @@ from ai_market_monitor.db.models import (
     DashboardNotification,
     DashboardPreference,
     MonitorShariaAssetState,
+    OperationalMetric,
     SetupInstance,
+    ShariaMethodology,
     ShariaUniverseSnapshot,
     TelegramConnection,
     User,
@@ -29,6 +31,7 @@ from ai_market_monitor.db.models.enums import (
     ComplianceReviewDecision,
     ConnectionStatus,
     DeliveryChannel,
+    HealthStatus,
     MonitorShariaAssetStatus,
     SetupLifecycleState,
     ShariaAssetStatus,
@@ -66,7 +69,11 @@ from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseResolver,
 )
 from ai_market_monitor.services.strategy import StrategyService
-from tests.factories import load_strategy
+from tests.factories import (
+    load_strategy,
+    methodology_evidence_requirements,
+    methodology_rules,
+)
 
 
 class ScreeningProvider:
@@ -96,8 +103,8 @@ async def active_methodology(session, user_id):
         governing_body="Qualified test governance",
         reviewer_group="Qualified test reviewers",
         effective_from=now - timedelta(days=30),
-        rules={"versioned_rules": True},
-        evidence_requirements={"minimum_sources": 1},
+        rules=methodology_rules(),
+        evidence_requirements=methodology_evidence_requirements(),
     )
     return await ShariaScreeningService(session, screening_settings()).create_methodology(
         payload,
@@ -210,6 +217,95 @@ async def test_effective_status_and_screened_universe_fail_closed(test_context):
         assert second.snapshot_id == first.snapshot_id
         assert second.snapshot_hash == first.snapshot_hash
         assert await session.scalar(select(func.count(ShariaUniverseSnapshot.id))) == 1
+
+
+async def test_universe_resolution_records_fail_closed_and_abnormal_exclusion_metrics(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Screening telemetry user")
+        session.add(user)
+        await session.flush()
+        methodology = await active_methodology(session, user.id)
+        await assess(session, methodology.id, user.id, "SOL", ShariaAssetStatus.ELIGIBLE)
+        await assess(
+            session,
+            methodology.id,
+            user.id,
+            "BAD",
+            ShariaAssetStatus.UNDER_REVIEW,
+        )
+        settings = screening_settings().model_copy(
+            update={
+                "sharia_abnormal_exclusion_rate_threshold": 0.5,
+                "sharia_abnormal_exclusion_minimum_assets": 1,
+            }
+        )
+
+        resolution = await ShariaUniverseResolver(
+            session,
+            ScreeningProvider(),
+            settings,
+        ).resolve(screened_strategy(methodology.id), user_id=user.id)
+
+        metrics = list(
+            (
+                await session.scalars(
+                    select(OperationalMetric).where(
+                        OperationalMetric.component == "sharia_universe"
+                    )
+                )
+            ).all()
+        )
+        names = {metric.metric_name for metric in metrics}
+        assert resolution.included_count == 1
+        assert {
+            "sharia_fail_closed_total",
+            "sharia_universe_resolution_seconds",
+            "sharia_universe_included_count",
+            "sharia_universe_excluded_count",
+            "sharia_universe_exclusion_rate",
+        }.issubset(names)
+        exclusion_rate = next(
+            metric
+            for metric in metrics
+            if metric.metric_name == "sharia_universe_exclusion_rate"
+        )
+        assert exclusion_rate.status == HealthStatus.DEGRADED
+        assert exclusion_rate.dimensions["abnormal"] is True
+        assert {
+            metric.dimensions.get("reason")
+            for metric in metrics
+            if metric.metric_name == "sharia_fail_closed_total"
+        } == {"excluded_status", "missing_assessment"}
+
+
+async def test_provider_timeout_is_normalized_and_recorded_fail_closed(test_context):
+    class TimeoutProvider:
+        async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
+            raise TimeoutError("provider did not respond")
+
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Provider timeout user")
+        session.add(user)
+        await session.flush()
+        methodology = await active_methodology(session, user.id)
+        with pytest.raises(ShariaUniverseError) as exc:
+            await ShariaUniverseResolver(
+                session,
+                TimeoutProvider(),
+                screening_settings(),
+            ).resolve(screened_strategy(methodology.id), user_id=user.id)
+
+        assert exc.value.code == "universe_dependency_timeout"
+        metric = await session.scalar(
+            select(OperationalMetric).where(
+                OperationalMetric.metric_name == "sharia_fail_closed_total"
+            )
+        )
+        assert metric is not None
+        assert metric.status == HealthStatus.DOWN
+        assert metric.dimensions == {"reason": "universe_dependency_timeout"}
 
 
 async def test_missing_policy_is_rejected_when_screening_is_enforced(test_context):
@@ -327,8 +423,8 @@ async def test_methodology_comparison_keeps_conflicting_results_separate(test_co
                 governing_body="Second test governance",
                 reviewer_group="Second test reviewers",
                 effective_from=datetime.now(UTC) - timedelta(days=20),
-                rules={"different_rules": True},
-                evidence_requirements={"minimum_sources": 1},
+                rules=methodology_rules(source_family="second_qualified_test_source"),
+                evidence_requirements=methodology_evidence_requirements(),
             ),
             actor_user_id=user.id,
             actor_identity="test-admin",
@@ -373,6 +469,56 @@ async def test_methodology_versions_are_immutable_and_unique(test_context):
             )
 
         assert exc.value.code == "methodology_version_exists"
+
+
+async def test_active_methodology_contract_cannot_be_bypassed_in_service_or_database(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Methodology contract admin")
+        session.add(user)
+        await session.flush()
+        service = ShariaScreeningService(session, screening_settings())
+        with pytest.raises(ShariaScreeningError) as creation:
+            await service.create_methodology(
+                MethodologyCreateRequest(
+                    code="INCOMPLETE_ACTIVE_METHOD",
+                    name="Incomplete active methodology",
+                    version="1.0",
+                    description=(
+                        "An incomplete contract must never become executable screening policy."
+                    ),
+                    status=ShariaMethodologyStatus.ACTIVE,
+                    governing_body="Qualified test governance",
+                    reviewer_group="Qualified test reviewers",
+                    effective_from=datetime.now(UTC) - timedelta(days=1),
+                    rules={"versioned": True},
+                    evidence_requirements={"minimum_sources": 1},
+                ),
+                actor_user_id=user.id,
+                actor_identity="test-admin",
+            )
+        assert creation.value.code == "methodology_contract_invalid"
+
+        bypassed = ShariaMethodology(
+            code="DIRECT_DATABASE_BYPASS",
+            name="Direct database bypass",
+            version="1.0",
+            description="A deliberately invalid directly inserted methodology contract.",
+            status=ShariaMethodologyStatus.ACTIVE,
+            governing_body="Qualified test governance",
+            reviewer_group="Qualified test reviewers",
+            published_at=datetime.now(UTC),
+            effective_from=datetime.now(UTC) - timedelta(days=1),
+            rules_json={"versioned": True},
+            evidence_requirements_json={"minimum_sources": 1},
+        )
+        session.add(bypassed)
+        await session.flush()
+        with pytest.raises(ShariaScreeningError) as execution:
+            await service.methodology(bypassed.id, require_active=True)
+        assert execution.value.code == "methodology_contract_invalid"
+        assert bypassed not in await service.executable_methodologies()
 
 
 async def test_approved_compliance_review_pauses_asset_and_deduplicates_alert(test_context):
@@ -480,6 +626,17 @@ async def test_approved_compliance_review_pauses_asset_and_deduplicates_alert(te
         assert compliance_alert.proof_receipt["new_status"] == "under_review"
         assert compliance_alert.proof_receipt["methodology_id"] == str(methodology.id)
         assert compliance_alert.proof_receipt["methodology_version"] == methodology.version
+        # The immutable alert records the immediate safety hold, before the
+        # reviewer decision. Approval is retained in ComplianceReview rather
+        # than rewriting or duplicating this historical notification.
+        assert compliance_alert.proof_receipt["review_state"] == "awaiting_review"
+        assert compliance_alert.proof_receipt["provisional_safety_hold"] is True
+        assert compliance_alert.proof_receipt["automatic_watch_plan_action"] == "paused"
+        assert compliance_alert.proof_receipt["affected_watch_plans"] == [strategy.name]
+        assert "Review the updated Passport" in (
+            compliance_alert.proof_receipt["next_user_action"]
+        )
+        assert "Automatic Watch Plan action: paused" in compliance_alert.body
         assert compliance_alert.proof_receipt["evidence_passport_path"] == (
             "/dashboard/market/sol"
         )
@@ -614,8 +771,8 @@ async def test_development_methodology_never_becomes_executable_default(test_con
                 governing_body="Test fixtures only",
                 reviewer_group="Automated test fixtures",
                 effective_from=datetime.now(UTC) - timedelta(days=1),
-                rules={"test_only": True},
-                evidence_requirements={"test_only": True},
+                rules=methodology_rules(source_family="development_test_source"),
+                evidence_requirements=methodology_evidence_requirements(),
             ),
             actor_user_id=user.id,
             actor_identity="test-admin",
@@ -632,6 +789,36 @@ async def test_development_methodology_never_becomes_executable_default(test_con
         with pytest.raises(ShariaScreeningError) as list_exc:
             await service.list_screened_assets(methodology_id=development.id)
         assert list_exc.value.code == "development_methodology_not_executable"
+
+
+async def test_inactive_and_expired_methodologies_fail_closed(test_context):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Expired methodology user")
+        session.add(user)
+        await session.flush()
+        methodology = await active_methodology(session, user.id)
+        definition = screened_strategy(methodology.id)
+        methodology.status = ShariaMethodologyStatus.ARCHIVED
+        await session.flush()
+
+        with pytest.raises(ShariaUniverseError) as inactive:
+            await ShariaUniverseResolver(
+                session,
+                ScreeningProvider(),
+                screening_settings(),
+            ).resolve(definition, user_id=user.id)
+        assert inactive.value.code == "methodology_not_active"
+
+        methodology.status = ShariaMethodologyStatus.ACTIVE
+        methodology.effective_to = datetime.now(UTC) - timedelta(seconds=1)
+        await session.flush()
+        with pytest.raises(ShariaUniverseError) as expired:
+            await ShariaUniverseResolver(
+                session,
+                ScreeningProvider(),
+                screening_settings(),
+            ).resolve(definition, user_id=user.id)
+        assert expired.value.code == "methodology_expired"
 
 
 async def test_approved_watchlist_is_intersected_and_owner_checked(test_context):

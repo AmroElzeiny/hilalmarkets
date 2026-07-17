@@ -32,6 +32,7 @@ class MethodologySummary(BaseModel):
     reviewer_group: str | None
     published_at: datetime | None
     effective_from: datetime | None
+    effective_to: datetime | None
     is_development_only: bool = False
 
 
@@ -116,6 +117,10 @@ class PassportUseCoverage(BaseModel):
     reason: str
     supporting_reference: str | None = None
     last_verified_at: datetime | None = None
+    source_ids: list[str] = Field(default_factory=list)
+    criterion_ids: list[str] = Field(default_factory=list)
+    scope: str | None = None
+    reviewer_user_id: UUID | None = None
 
 
 class PassportCriterionOutcome(BaseModel):
@@ -145,11 +150,15 @@ class PassportDecisionRecord(BaseModel):
     reviewer_user_id: UUID | None = None
     reviewer_display_name: str
     actor_role: str = "REVIEWER"
+    methodology_version: str | None = None
+    methodology_criteria_version: str | None = None
+    methodology_criteria_hash: str | None = None
     decision: str
     reason: str
     qualifications: list[str] = Field(default_factory=list)
     evidence_snapshot_ids: list[str] = Field(default_factory=list)
     criterion_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    use_case_decisions: list[dict[str, Any]] = Field(default_factory=list)
     acknowledged_gaps: list[str] = Field(default_factory=list)
     decided_at: datetime | None = None
     published_by_user_id: UUID | None = None
@@ -192,7 +201,7 @@ class AssetPassportResponse(BaseModel):
     why_this_status: str
     official_sc_malaysia_reference: dict[str, Any] = Field(default_factory=dict)
     hilalmarkets_factual_information_profile: dict[str, Any] = Field(default_factory=dict)
-    separate_use_status: dict[str, str] = Field(default_factory=dict)
+    separate_use_status: dict[str, Any] = Field(default_factory=dict)
     reviewed_dimensions: list[dict[str, Any]]
     methodology_result: dict[str, Any]
     evidence_sources: list[EvidenceSourceResponse]
@@ -202,6 +211,8 @@ class AssetPassportResponse(BaseModel):
     identity: PassportIdentity | None = None
     freshness: str = "current"
     next_review_at: datetime | None = None
+    evidence_expires_at: datetime | None = None
+    source_scan_frequency_hours: int | None = None
     decision_date: datetime | None = None
     publication_date: datetime | None = None
     last_verified_at: datetime | None = None
@@ -230,6 +241,8 @@ class PassportQuickViewResponse(BaseModel):
     main_qualification: str | None = None
     freshness: str
     next_review_at: datetime | None = None
+    evidence_expires_at: datetime | None = None
+    source_scan_frequency_hours: int | None = None
     review_authority: str
     decision_date: datetime | None = None
     publication_date: datetime | None = None
@@ -406,10 +419,17 @@ class MethodologyCreateRequest(BaseModel):
     rules: dict[str, Any] = Field(default_factory=dict)
     evidence_requirements: dict[str, Any] = Field(default_factory=dict)
     effective_from: datetime | None = None
+    effective_to: datetime | None = None
     status: ShariaMethodologyStatus = ShariaMethodologyStatus.DRAFT
 
     @model_validator(mode="after")
     def validate_activation_governance(self) -> "MethodologyCreateRequest":
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to <= self.effective_from
+        ):
+            raise ValueError("methodology effective_to must be after effective_from")
         if self.status == ShariaMethodologyStatus.ACTIVE and (
             not self.governing_body
             or not self.reviewer_group
@@ -546,7 +566,25 @@ class WatchlistResponse(BaseModel):
     updated_at: datetime
 
 
-def _default_compliance_channels() -> list[Literal["telegram", "discord", "web"]]:
+class WatchlistAffectedPlan(BaseModel):
+    strategy_id: UUID
+    name: str
+    status: str
+    strategy_version_id: UUID
+    strategy_version_number: int
+
+
+class WatchlistAssetRemovalImpact(BaseModel):
+    watchlist_id: UUID
+    watchlist_name: str
+    canonical_asset: str
+    affected_watch_plans: list[WatchlistAffectedPlan]
+    requires_confirmation: bool
+
+
+def _default_compliance_channels() -> list[
+    Literal["telegram", "whatsapp", "discord", "web"]
+]:
     return ["web"]
 
 
@@ -561,7 +599,9 @@ class ShariaPreferenceUpdateRequest(BaseModel):
     )
     compliance_change_behavior: ComplianceChangeBehavior = ComplianceChangeBehavior.PAUSE_ASSET
     compliance_alerts_enabled: bool = True
-    compliance_alert_channels: list[Literal["telegram", "discord", "web"]] = Field(
+    compliance_alert_channels: list[
+        Literal["telegram", "whatsapp", "discord", "web"]
+    ] = Field(
         default_factory=_default_compliance_channels, max_length=3
     )
     compliance_alert_digest: Literal["immediate", "daily"] = "immediate"

@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,7 @@ from ai_market_monitor.db.models import (
     AssetShariaStatusHistory,
     AuditEvent,
     ComplianceChange,
+    PublishedAssetAssessment,
     ShariaEvidenceSource,
     ShariaMethodology,
 )
@@ -33,6 +35,10 @@ from ai_market_monitor.schemas.sharia import (
     MethodologySummary,
     ScreenedAssetListResponse,
     StatusHistoryResponse,
+)
+from ai_market_monitor.schemas.sharia_methodology import (
+    MethodologyEvidenceRequirements,
+    MethodologyRulesDefinition,
 )
 
 DEFAULT_ALLOWED_STATUSES = {
@@ -140,13 +146,14 @@ class ShariaScreeningService:
         """Return only methodologies that may power user-facing screening."""
         effective_at = _as_utc(as_of or datetime.now(UTC))
         rows = await self.methodologies(include_non_active=False)
-        return [
-            row
-            for row in rows
-            if row.effective_from is not None
-            and _as_utc(row.effective_from) <= effective_at
-            and not methodology_is_development_only(row)
-        ]
+        executable: list[ShariaMethodology] = []
+        for row in rows:
+            try:
+                self._assert_effective(row, effective_at)
+            except ShariaScreeningError:
+                continue
+            executable.append(row)
+        return executable
 
     def development_methodologies_enabled(self) -> bool:
         """Return whether development-only methodologies may be shown in local UI."""
@@ -200,6 +207,10 @@ class ShariaScreeningService:
             ShariaMethodology.status == ShariaMethodologyStatus.ACTIVE,
             ShariaMethodology.effective_from.is_not(None),
             ShariaMethodology.effective_from <= as_of,
+            or_(
+                ShariaMethodology.effective_to.is_(None),
+                ShariaMethodology.effective_to > as_of,
+            ),
             ShariaMethodology.code.not_like(f"{DEVELOPMENT_METHODOLOGY_PREFIX}%"),
         )
         configured_code = (
@@ -347,15 +358,30 @@ class ShariaScreeningService:
             )
         assessments = await self.effective_assessments(methodology.id)
         readiness_warning = None
-        if not assessments:
-            readiness_warning = (
-                f"{methodology.name}, version {methodology.version}, is active, but no "
-                "reviewed asset assessments have been published under it yet. The screener "
-                "and passports will remain empty until an authenticated governance review "
-                "publishes evidence-backed asset records."
-            )
         safety_holds = await self.safety_hold_assets(assets=set(assessments))
         values = list(assessments.values())
+        if self.settings and self.settings.is_deployed:
+            assessment_ids = [row.id for row in values]
+            if assessment_ids:
+                published_ids = set(
+                    (
+                        await self.session.scalars(
+                            select(PublishedAssetAssessment.asset_assessment_id).where(
+                                PublishedAssetAssessment.asset_assessment_id.in_(assessment_ids),
+                                PublishedAssetAssessment.is_active.is_(True),
+                                PublishedAssetAssessment.publication_state == "published",
+                            )
+                        )
+                    ).all()
+                )
+            else:
+                published_ids = set()
+            values = [row for row in values if row.id in published_ids]
+        if not values:
+            readiness_warning = (
+                f"{methodology.name}, version {methodology.version}, has no active published "
+                "Passports available for the Screened Market."
+            )
         if asset_scope is not None:
             normalized_scope = {canonical_asset(asset) for asset in asset_scope}
             values = [row for row in values if row.canonical_asset in normalized_scope]
@@ -464,7 +490,7 @@ class ShariaScreeningService:
             snapshot.get("hilalmarkets_factual_information_profile") or {}
         )
         separate_use_status = {
-            str(key): str(value)
+            str(key): value
             for key, value in dict(snapshot.get("separate_use_status") or {}).items()
         }
         return AssetPassportResponse(
@@ -511,29 +537,39 @@ class ShariaScreeningService:
         results: list[MethodologyComparisonItem] = []
         for methodology in methodologies:
             assessment = await self.effective_assessment(methodology.id, asset)
-            evidence_count = 0
-            if assessment is not None:
-                evidence_count = len(
-                    (
-                        await self.session.scalars(
-                            select(ShariaEvidenceSource.id).where(
-                                ShariaEvidenceSource.assessment_id == assessment.id
-                            )
-                        )
-                    ).all()
+            if assessment is None:
+                continue
+            if self.settings and self.settings.is_deployed:
+                publication_id = await self.session.scalar(
+                    select(PublishedAssetAssessment.id).where(
+                        PublishedAssetAssessment.asset_assessment_id == assessment.id,
+                        PublishedAssetAssessment.is_active.is_(True),
+                        PublishedAssetAssessment.publication_state == "published",
+                    )
                 )
-            snapshot = assessment.evidence_snapshot if assessment else {}
+                if publication_id is None:
+                    continue
+            evidence_count = len(
+                (
+                    await self.session.scalars(
+                        select(ShariaEvidenceSource.id).where(
+                            ShariaEvidenceSource.assessment_id == assessment.id
+                        )
+                    )
+                ).all()
+            )
+            snapshot = assessment.evidence_snapshot or {}
             results.append(
                 MethodologyComparisonItem(
                     methodology=self.methodology_summary(methodology),
-                    status=assessment.status if assessment else None,
-                    review_date=assessment.reviewed_at if assessment else None,
+                    status=assessment.status,
+                    review_date=assessment.reviewed_at,
                     key_reasons=list((snapshot or {}).get("key_reasons") or []),
-                    qualifications=list(assessment.qualifications if assessment else []),
+                    qualifications=list(assessment.qualifications),
                     evidence_completeness=(
                         "documented" if evidence_count > 0 else "insufficient_information"
                     ),
-                    assessment_id=assessment.id if assessment else None,
+                    assessment_id=assessment.id,
                 )
             )
         return MethodologyComparisonResponse(
@@ -562,7 +598,9 @@ class ShariaScreeningService:
         if existing is not None:
             raise ShariaScreeningError(
                 "methodology_version_exists", "This methodology version already exists."
-            )
+        )
+        if payload.status == ShariaMethodologyStatus.ACTIVE:
+            self.validate_methodology_contract(payload.rules, payload.evidence_requirements)
         now = datetime.now(UTC)
         methodology = ShariaMethodology(
             code=payload.code,
@@ -574,6 +612,7 @@ class ShariaScreeningService:
             reviewer_group=payload.reviewer_group,
             published_at=now if payload.status == ShariaMethodologyStatus.ACTIVE else None,
             effective_from=payload.effective_from,
+            effective_to=payload.effective_to,
             rules_json=payload.rules,
             evidence_requirements_json=payload.evidence_requirements,
         )
@@ -703,6 +742,7 @@ class ShariaScreeningService:
             reviewer_group=methodology.reviewer_group,
             published_at=methodology.published_at,
             effective_from=methodology.effective_from,
+            effective_to=methodology.effective_to,
             is_development_only=methodology_is_development_only(methodology),
         )
 
@@ -783,9 +823,56 @@ class ShariaScreeningService:
             raise ShariaScreeningError(
                 "methodology_not_effective", "The selected methodology is not yet effective."
             )
+        if methodology.effective_to is not None and _as_utc(methodology.effective_to) <= _as_utc(
+            as_of
+        ):
+            raise ShariaScreeningError(
+                "methodology_expired",
+                "The selected methodology version has expired and cannot power screening.",
+            )
         if methodology_is_development_only(methodology):
             raise ShariaScreeningError(
                 "development_methodology_not_executable",
                 "The development/test methodology is not a religious ruling and cannot power "
                 "production screened scans.",
             )
+        ShariaScreeningService.validate_methodology_contract(
+            methodology.rules_json,
+            methodology.evidence_requirements_json,
+        )
+
+    @staticmethod
+    def validate_methodology_contract(
+        rules_json: dict,
+        evidence_requirements_json: dict,
+    ) -> tuple[MethodologyRulesDefinition, MethodologyEvidenceRequirements]:
+        try:
+            rules = MethodologyRulesDefinition.model_validate(rules_json)
+            requirements = MethodologyEvidenceRequirements.model_validate(
+                evidence_requirements_json
+            )
+        except ValidationError as exc:
+            raise ShariaScreeningError(
+                "methodology_contract_invalid",
+                "The methodology does not define a complete versioned review contract.",
+            ) from exc
+        if not rules.executable:
+            raise ShariaScreeningError(
+                "methodology_not_executable",
+                "The methodology contract is not approved for screening execution.",
+            )
+        criterion_categories = {
+            category
+            for criterion in rules.required_criteria
+            if criterion.required
+            for category in criterion.evidence_categories
+        }
+        missing_categories = criterion_categories.difference(
+            requirements.mandatory_source_categories
+        )
+        if missing_categories:
+            raise ShariaScreeningError(
+                "methodology_evidence_contract_incomplete",
+                "Mandatory evidence categories do not cover every required criterion.",
+            )
+        return rules, requirements

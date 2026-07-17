@@ -1,6 +1,6 @@
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from pathlib import Path
 import os
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 os.chdir(root)

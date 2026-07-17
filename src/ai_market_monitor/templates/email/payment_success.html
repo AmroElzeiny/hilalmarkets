@@ -22,7 +22,7 @@
             <tr><td style="padding:10px 0;color:#667a74">Billing</td><td align="right" style="padding:10px 0">{{ billing_frequency|title }}</td></tr>
             {% if amount %}<tr><td style="padding:10px 0;color:#667a74">Amount</td><td align="right" style="padding:10px 0">{{ amount }} {{ currency }}</td></tr>{% endif %}
             <tr><td style="padding:10px 0;color:#667a74">Paid</td><td align="right" style="padding:10px 0">{{ payment_date }}</td></tr>
-            {% if renewal_date %}<tr><td style="padding:10px 0;color:#667a74">Next renewal</td><td align="right" style="padding:10px 0">{{ renewal_date }}</td></tr>{% endif %}
+            {% if renewal_date %}<tr><td style="padding:10px 0;color:#667a74">Next automatic renewal</td><td align="right" style="padding:10px 0">{{ renewal_date }}</td></tr>{% elif access_until %}<tr><td style="padding:10px 0;color:#667a74">Access through</td><td align="right" style="padding:10px 0">{{ access_until }}</td></tr>{% endif %}
           </table>
           {% if limits %}<h2 style="margin:26px 0 12px;font-size:18px">Main plan limits</h2>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0">{% for limit in limits %}<tr><td style="padding:8px 0;border-bottom:1px solid #eee9dd;color:#526b63">{{ limit.label }}</td><td align="right" style="padding:8px 0;border-bottom:1px solid #eee9dd;font-weight:700">{{ limit.value }}</td></tr>{% endfor %}</table>{% endif %}
@@ -31,7 +31,7 @@
           {% if receipt_url %}<p style="margin:18px 0 0"><a href="{{ receipt_url }}" style="color:#0f6a52">Open receipt or invoice</a></p>{% endif %}
         </td></tr>
         <tr><td style="background:#f1eee6;padding:20px 32px;color:#6a7772;font-size:12px;line-height:1.6">
-          Your plan renews under the agreement shown at checkout. HilalMarkets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. <a href="{{ terms_url }}" style="color:#49655c">Terms</a> | <a href="{{ risk_url }}" style="color:#49655c">Risk Disclosure</a><br>
+          {% if renews_automatically %}Your plan renews automatically under the agreement shown at checkout.{% else %}This payment provides 30-day access and does not renew automatically.{% endif %} HilalMarkets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. <a href="{{ terms_url }}" style="color:#49655c">Terms</a> | <a href="{{ risk_url }}" style="color:#49655c">Risk Disclosure</a><br>
           {{ legal_name }}{% if company_address %}, {{ company_address }}{% endif %}
         </td></tr>
       </table>

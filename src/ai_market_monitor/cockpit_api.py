@@ -58,7 +58,7 @@ class FeedbackRequest(BaseModel):
         "good_idea_weak_proof",
     ]
     comment: str | None = Field(default=None, max_length=2000)
-    source: Literal["dashboard", "telegram", "discord"] = "dashboard"
+    source: Literal["dashboard", "telegram", "whatsapp", "discord"] = "dashboard"
 
 
 class UniversePreviewRequest(BaseModel):

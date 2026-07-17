@@ -438,7 +438,7 @@ class ComplianceWatchService:
                 state.policy_decision = ShariaPolicyDecision.PAUSED_FOR_COMPLIANCE
                 state.policy_reason = (
                     f"Screening status changed to {new_status.value}; the asset no longer "
-                    "meets this Watchlist's selected policy."
+                    "meets this Watch Plan's selected policy."
                 )
                 if behavior == ComplianceChangeBehavior.PAUSE_MONITOR_IF_ANY_ASSET_CHANGES:
                     strategy.status = StrategyStatus.PAUSED
@@ -591,12 +591,28 @@ class ComplianceWatchService:
             return
         status_label = new_status.value.replace("_", " ").title()
         title = f"{change.canonical_asset} moved to {status_label}"
-        impact = (
-            f"It is now {monitor_impact.replace('_', ' ')} in {strategy.name}."
-            if strategy
-            else "Its approved-watchlist status has been updated."
+        automatic_action = monitor_impact.replace("_", " ")
+        affected_watch_plans = [strategy.name] if strategy else []
+        next_user_action = (
+            "Review the updated Passport and the affected Watch Plan before resuming."
+            if new_status
+            in {
+                ShariaAssetStatus.UNDER_REVIEW,
+                ShariaAssetStatus.DISPUTED,
+                ShariaAssetStatus.EXCLUDED,
+            }
+            else "Review the updated Passport before relying on the restored status."
         )
-        body = f"Reason: {change.summary}\n\nImpact: {impact}"
+        body = (
+            f"Status: {(previous_status.value if previous_status else 'not recorded')} -> "
+            f"{new_status.value}\n"
+            f"Methodology: {methodology_name} v{methodology_version}\n"
+            f"Reason: {change.summary}\n"
+            f"Review state: {change.status.value}\n"
+            f"Automatic Watch Plan action: {automatic_action}\n"
+            f"Affected Watch Plans: {', '.join(affected_watch_plans) or 'none'}\n"
+            f"Next: {next_user_action}"
+        )
         proof = {
             "event_type": "sharia.status_changed",
             "canonical_asset": change.canonical_asset,
@@ -614,6 +630,11 @@ class ComplianceWatchService:
             "reviewed_at": reviewed_at.isoformat(),
             "behavior": behavior.value,
             "monitor_impact": monitor_impact,
+            "automatic_watch_plan_action": automatic_action,
+            "affected_watch_plans": affected_watch_plans,
+            "review_state": change.status.value,
+            "reason": change.summary,
+            "next_user_action": next_user_action,
             "evidence_passport_path": f"/dashboard/market/{change.canonical_asset.lower()}",
             "authoritative_source": event_source,
             "provisional_safety_hold": provisional_safety_hold,
@@ -677,7 +698,13 @@ class ComplianceWatchService:
         )
         channels = [DeliveryChannel.WEB]
         if external_enabled and not defer_external:
-            channels.extend([DeliveryChannel.TELEGRAM, DeliveryChannel.DISCORD])
+            channels.extend(
+                [
+                    DeliveryChannel.TELEGRAM,
+                    DeliveryChannel.WHATSAPP,
+                    DeliveryChannel.DISCORD,
+                ]
+            )
         await NotificationDispatcher(self.session).enqueue_user_alert(
             alert,
             channels=channels,
@@ -839,7 +866,7 @@ class ComplianceDigestService:
                     body=(
                         "Your daily Sharia screening summary:\n\n"
                         + "\n".join(lines)
-                        + "\n\nOpen Activity to review the stored evidence and Watchlist impact."
+                        + "\n\nOpen Activity to review the stored evidence and Watch Plan impact."
                     ),
                     proof_receipt={
                         "event_type": "sharia.compliance_daily_digest",

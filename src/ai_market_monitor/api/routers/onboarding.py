@@ -10,6 +10,7 @@ from ai_market_monitor.api.dependencies import (
     get_market_previewer,
     get_onboarding_principal,
 )
+from ai_market_monitor.api.route_security import public_api
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import Strategy, StrategyVersion
@@ -53,6 +54,7 @@ def require_matching_session(session_id: UUID, principal: OnboardingPrincipal) -
 
 
 @router.post("/start", response_model=OnboardingSessionResponse, status_code=201)
+@public_api("Creates a bounded onboarding session before customer authentication exists.")
 async def start_onboarding(
     request: StartOnboardingRequest,
     session: AsyncSession = Depends(get_db_session),
@@ -65,6 +67,7 @@ async def start_onboarding(
 
 
 @router.post("/resume", response_model=OnboardingSessionResponse)
+@public_api("Resumes onboarding only through a server-issued, expiring continuation token.")
 async def resume_onboarding(
     request: ContinuationRequest,
     session: AsyncSession = Depends(get_db_session),

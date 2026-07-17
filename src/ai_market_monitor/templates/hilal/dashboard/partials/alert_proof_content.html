@@ -18,7 +18,7 @@
         {% endif %}
 
         <section class="alert-proof-summary">
-          <article><span data-icon="radar" data-icon-class="icon"></span><span>Watchlist</span><strong>{{ proof.strategy_name or (strategy.name if strategy else 'Historical Watchlist') }}</strong></article>
+          <article><span data-icon="radar" data-icon-class="icon"></span><span>Watch Plan</span><strong>{{ proof.strategy_name or (strategy.name if strategy else 'Historical Watch Plan') }}</strong></article>
           <article><span data-icon="version" data-icon-class="icon"></span><span>Rule version</span><strong>{% if version %}Version {{ version.version_number }}{% else %}Legacy reference{% endif %}</strong></article>
           <article><span data-icon="coins" data-icon-class="icon"></span><span>Market</span><strong>{{ proof.symbol or 'Not recorded' }}</strong></article>
           <article><span data-icon="clock" data-icon-class="icon"></span><span>Timeframe</span><strong>{{ proof.timeframe or 'Not recorded' }}</strong></article>

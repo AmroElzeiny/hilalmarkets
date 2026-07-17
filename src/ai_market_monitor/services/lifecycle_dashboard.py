@@ -84,14 +84,14 @@ async def lifecycle_cards(
     )
     if monitor_id is not None:
         query = query.where(Strategy.id == monitor_id)
-    setup_rows = (
+    raw_setup_rows = (
         await session.execute(
             query.order_by(SetupInstance.last_evaluated_at.desc()).limit(limit)
         )
     ).all()
-    setup_rows = [
+    setup_rows: list[tuple[SetupInstance, str, int]] = [
         (setup, strategy_name, version_number)
-        for setup, strategy_name, version_number in setup_rows
+        for setup, strategy_name, version_number in raw_setup_rows
         if str(setup.id) not in muted_setup_ids
     ]
     if not setup_rows:

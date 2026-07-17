@@ -5,6 +5,7 @@ from time import perf_counter
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
+from ai_market_monitor.api.request_guards import apply_request_guards
 from ai_market_monitor.api.routers import (
     activity_router,
     admin_router,
@@ -20,8 +21,9 @@ from ai_market_monitor.api.routers import (
     status_router,
     system_brain_router,
     telegram_router,
+    whatsapp_router,
 )
-from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.logging import configure_logging
 from ai_market_monitor.core.startup import validate_runtime_configuration
 
@@ -41,11 +43,14 @@ async def lifespan(_: FastAPI):
     finally:
         from ai_market_monitor.api.dependencies import get_market_data_provider
 
-        await get_market_data_provider().close()
+        provider = get_market_data_provider()
+        close = getattr(provider, "close", None)
+        if close is not None:
+            await close()
 
 
-def create_app() -> FastAPI:
-    settings = get_settings()
+def create_app(settings_override: Settings | None = None) -> FastAPI:
+    settings = settings_override or get_settings()
     application = FastAPI(
         title=settings.app_name,
         version="0.1.0",
@@ -62,6 +67,12 @@ def create_app() -> FastAPI:
     @application.middleware("http")
     async def add_process_time_header(request: Request, call_next):
         started = perf_counter()
+        guarded = await apply_request_guards(request, settings)
+        if guarded is not None:
+            guarded.headers["X-Process-Time-Ms"] = (
+                f"{(perf_counter() - started) * 1000:.3f}"
+            )
+            return guarded
         response = await call_next(request)
         response.headers["X-Process-Time-Ms"] = f"{(perf_counter() - started) * 1000:.3f}"
         return response
@@ -77,6 +88,7 @@ def create_app() -> FastAPI:
     application.include_router(discord_router, prefix="/api/v1")
     application.include_router(status_router, prefix="/api/v1")
     application.include_router(telegram_router, prefix="/api/v1")
+    application.include_router(whatsapp_router, prefix="/api/v1")
     application.include_router(admin_router, prefix="/api/v1")
     application.include_router(sharia_router, prefix="/api/v1")
     application.include_router(system_brain_router)

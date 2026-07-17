@@ -211,14 +211,30 @@
         {% elif case.state == 'ready_for_review' %}
         <form method="post" action="/system-brain/reviews/{{ case.id }}/decision" data-decision-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {% if detail.methodology_contract_error %}<div class="brain-terminal danger"><i data-icon="warning"></i><strong>Approval blocked</strong><small>{{ detail.methodology_contract_error }}</small></div>{% endif %}
           <div class="brain-criterion-list">
             {% for criterion in detail.review_criteria %}
             <fieldset>
-              <legend>{{ criterion.label }}</legend>
+              <legend>{{ criterion.label }}{% if criterion.required %} · Required{% endif %}</legend>
+              <p>{{ criterion.description }}</p>
+              <small>Evidence: {{ criterion.evidence_categories|join(', ') }}{% if criterion.blocking_outcomes %} · Blocking outcomes: {{ criterion.blocking_outcomes|join(', ')|replace('_', ' ') }}{% endif %}</small>
               <input type="hidden" name="criterion_key" value="{{ criterion.key }}">
               <input type="hidden" name="criterion_label" value="{{ criterion.label }}">
-              <select name="criterion_outcome" aria-label="Outcome for {{ criterion.label }}">{% for value in ['pass','qualification','fail','not_applicable','needs_evidence'] %}<option value="{{ value }}" {{ 'selected' if criterion.outcome == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select>
-              <textarea name="criterion_reason" minlength="3" maxlength="1200" required>{{ criterion.reviewer_explanation or '' }}</textarea>
+              <select name="criterion_outcome" aria-label="Outcome for {{ criterion.label }}" required><option value="" {{ 'selected' if not criterion.outcome else '' }} disabled>Choose an explicit outcome</option>{% for value in criterion.allowed_outcomes %}<option value="{{ value }}" {{ 'selected' if criterion.outcome == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select>
+              <textarea name="criterion_reason" minlength="10" maxlength="1200" required placeholder="Record what you reviewed and why.">{{ criterion.reviewer_explanation or '' }}</textarea>
+            </fieldset>
+            {% endfor %}
+          </div>
+          <div class="brain-section-head compact"><div><p class="brain-kicker">USE-SPECIFIC REVIEW</p><h4>Decide each use separately</h4><p>The official asset-level reference does not automatically approve staking, lending, spot use, or other products.</p></div></div>
+          <div class="brain-criterion-list">
+            {% for use_case in detail.review_use_cases %}
+            <fieldset>
+              <legend>{{ use_case.label }}{% if use_case.required %} · Required{% endif %}</legend>
+              <p>{{ use_case.description }}</p>
+              <input type="hidden" name="use_key" value="{{ use_case.key }}">
+              <select name="use_decision" aria-label="Decision for {{ use_case.label }}" required><option value="" {{ 'selected' if not use_case.decision else '' }} disabled>Choose an explicit decision</option>{% for value in use_case.allowed_decisions %}<option value="{{ value }}" {{ 'selected' if use_case.decision == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select>
+              <textarea name="use_reason" minlength="10" maxlength="1200" required placeholder="Explain what the evidence does or does not cover.">{{ use_case.reason or '' }}</textarea>
+              <label>Reviewed scope</label><input type="text" name="use_scope" minlength="3" maxlength="1000" required value="{{ use_case.scope or use_case.default_scope }}">
             </fieldset>
             {% endfor %}
           </div>
@@ -231,8 +247,8 @@
           <label for="requested-evidence">Specific evidence requested <small>Required only when requesting evidence</small></label>
           <textarea id="requested-evidence" name="requested_evidence" placeholder="One evidence request per line"></textarea>
           <div class="brain-decision-actions">
-            <button name="action" value="approve" data-confirm="Record this approval without publishing it?" class="approve"><i data-icon="check"></i>Approve</button>
-            <button name="action" value="approve_with_qualification" data-confirm="Record a qualified approval without publishing it?" class="approve qualified"><i data-icon="compliance"></i>Approve with qualification</button>
+            <button name="action" value="approve" data-confirm="Record this approval without publishing it?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}><i data-icon="check"></i>Approve</button>
+            <button name="action" value="approve_with_qualification" data-confirm="Record a qualified approval without publishing it?" class="approve qualified" {{ 'disabled' if detail.methodology_contract_error else '' }}><i data-icon="compliance"></i>Approve with qualification</button>
             <button name="action" value="reject_and_store" data-confirm="Store this rejection and keep the asset off customer surfaces?" class="danger"><i data-icon="database"></i>Reject</button>
             <button name="action" value="request_more_evidence" class="secondary"><i data-icon="search"></i>Request evidence</button>
             <button name="action" value="return_to_research" class="secondary"><i data-icon="scan"></i>Return to research</button>
@@ -306,7 +322,7 @@
     <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">PRIVATE RETAINED EVIDENCE</p><h2>Rejected / Stored Assets</h2><p>Rejected means not approved for publication. It is not displayed as a religious ruling.</p></div></div>{% set data = {'recent_cases': cases} %}{% include 'system_brain_case_table.html' %}</section>
 
     {% elif section == 'methodologies' %}
-    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">VERSIONED GOVERNANCE</p><h2>Methodologies</h2></div></div><div class="brain-card-list">{% for item in methodologies %}<article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} | Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">Effective {{ item.effective_from.strftime('%d %b %Y') }}</span></div></div></article>{% else %}<p class="brain-empty">No methodology is configured.</p>{% endfor %}</div></section>
+    <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">VERSIONED GOVERNANCE</p><h2>Methodologies</h2></div></div><div class="brain-card-list">{% for item in methodologies %}<article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} | Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">Effective {{ item.effective_from.strftime('%d %b %Y') }}{% if item.effective_to %} to {{ item.effective_to.strftime('%d %b %Y') }}{% endif %}</span></div></div></article>{% else %}<p class="brain-empty">No methodology is configured.</p>{% endfor %}</div></section>
 
     {% elif section == 'source-registry' %}
     <section class="brain-section brain-reveal"><div class="brain-section-head"><div><p class="brain-kicker">VERIFIED INPUTS ONLY</p><h2>Official Source Registry</h2><p>AI cannot add or invent these URLs.</p></div><input class="brain-search" data-filter-target="source-table" placeholder="Filter source or asset" aria-label="Filter source registry"></div><div class="brain-table-wrap"><table id="source-table"><thead><tr><th>Asset</th><th>Category</th><th>Source</th><th>Verification</th><th>Priority</th></tr></thead><tbody>{% for item in sources %}<tr><td><strong>{{ item.asset.symbol }}</strong><small>{{ item.asset.name }}</small></td><td>{{ item.source.category.replace('_',' ').title() }}</td><td><a href="{{ item.source.source_url }}" target="_blank" rel="noopener">{{ item.source.title }}</a></td><td><span class="brain-status {{ item.source.verification_state }}">{{ item.source.verification_state }}</span></td><td>{{ item.source.priority }}</td></tr>{% else %}<tr><td colspan="5" class="brain-empty">No verified source registry entries exist yet.</td></tr>{% endfor %}</tbody></table></div></section>

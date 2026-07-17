@@ -1,10 +1,90 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
-<div class="page-header"><div><span class="eyebrow">Saved Assets</span><h1>Your approved assets, kept together.</h1><p>Every saved asset links back to its real evidence passport. Screening labels are never recreated in the browser.</p></div><div class="page-actions"><a class="btn btn-primary" href="/dashboard/market"><span data-icon="plus" data-icon-class="icon"></span>Add screened assets</a></div></div>
+<div class="page-header">
+  <div>
+    <span class="eyebrow">My Screened Watchlist</span>
+    <h1>Your screened assets, kept together.</h1>
+    <p>Use this list to choose a market universe and follow Sharia-status changes. Saving an asset never overrides the current screening policy.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-primary" href="/dashboard/market"><span data-icon="plus" data-icon-class="icon"></span>Add screened assets</a>
+  </div>
+</div>
+
 <section class="grid grid-3">
-  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="watchlist" data-icon-class="icon"></span></div></div><div class="value">{{ watchlist_assets|length }}</div><div class="caption">Saved assets</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box is-gold"><span data-icon="database" data-icon-class="icon"></span></div></div><div class="value">{{ watchlists|length }}</div><div class="caption">Asset collections</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="shield" data-icon-class="icon"></span></div></div><div class="value">100%</div><div class="caption">Linked to stored evidence</div></article>
+  <article class="stat-card">
+    <div class="stat-head"><div class="icon-box"><span data-icon="watchlist" data-icon-class="icon"></span></div></div>
+    <div class="value">{{ watchlist_assets|length }}</div><div class="caption">Saved assets</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-head"><div class="icon-box is-gold"><span data-icon="database" data-icon-class="icon"></span></div></div>
+    <div class="value">{{ watchlists|length }}</div><div class="caption">Asset collections</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-head"><div class="icon-box"><span data-icon="shield" data-icon-class="icon"></span></div></div>
+    <div class="value">100%</div><div class="caption">Linked to stored evidence</div>
+  </article>
 </section>
-<article class="panel" style="margin-top:18px"><div class="panel-head"><div><span class="kicker">Saved passports</span><h2>Assets you chose to follow</h2><p>Open a passport to review the latest stored status, methodology, qualifications, and dated sources.</p></div></div>{% if watchlist_assets %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Asset</th><th>Collection</th><th>Added</th><th>Evidence</th></tr></thead><tbody>{% for asset in watchlist_assets %}<tr><td><div class="coin"><div class="coin-logo">{{ asset.canonical_asset[:3] }}</div><strong>{{ asset.canonical_asset }}</strong></div></td><td>{{ asset.watchlist_name }}</td><td>{{ asset.added_at|short_dt(user.timezone) }}</td><td><div class="row wrap"><button class="btn btn-secondary btn-sm" type="button" data-passport-quick-view data-passport-asset="{{ asset.canonical_asset }}">Quick View</button><a class="link-arrow" href="/dashboard/market/{{ asset.canonical_asset }}">Full Passport <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><div class="icon-box"><span data-icon="watchlist" data-icon-class="icon"></span></div><h3>No saved assets yet</h3><p>Browse the screened market and save assets after reviewing their evidence passport.</p><a class="btn btn-primary btn-sm" href="/dashboard/market">Explore Screened Market</a></div>{% endif %}</article>
+
+<article class="panel" style="margin-top:18px">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">Saved Passports</span>
+      <h2>Assets you chose to follow</h2>
+      <p>Open a Passport to review its status, methodology, qualifications, and dated sources.</p>
+    </div>
+  </div>
+  {% if watchlist_assets %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Asset</th><th>Collection</th><th>Added</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for asset in watchlist_assets %}
+        <tr data-saved-asset-row>
+          <td><div class="coin"><div class="coin-logo">{{ asset.canonical_asset[:3] }}</div><strong>{{ asset.canonical_asset }}</strong></div></td>
+          <td>{{ asset.watchlist_name }}</td>
+          <td>{{ asset.added_at|short_dt(user.timezone) }}</td>
+          <td>
+            <div class="row wrap">
+              <button class="btn btn-secondary btn-sm" type="button" data-passport-quick-view data-passport-asset="{{ asset.canonical_asset }}">Quick View</button>
+              <a class="link-arrow" href="/dashboard/market/{{ asset.canonical_asset }}">Full Passport <span data-icon="arrow" data-icon-class="icon-sm"></span></a>
+              <button
+                class="btn btn-secondary btn-sm"
+                type="button"
+                data-remove-saved-asset
+                data-watchlist-id="{{ asset.watchlist_id }}"
+                data-asset="{{ asset.canonical_asset }}"
+              >Remove</button>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-box"><span data-icon="watchlist" data-icon-class="icon"></span></div>
+    <h3>No saved assets yet</h3>
+    <p>Browse the Screened Market and save assets after reviewing their evidence Passport.</p>
+    <a class="btn btn-primary btn-sm" href="/dashboard/market">Explore Screened Market</a>
+  </div>
+  {% endif %}
+</article>
+
+<dialog class="asset-removal-dialog" data-asset-removal-dialog aria-labelledby="asset-removal-title">
+  <div class="asset-removal-shell">
+    <button class="btn btn-icon asset-removal-close" type="button" data-asset-removal-close aria-label="Close removal review">x</button>
+    <span class="kicker">Removal impact</span>
+    <h2 id="asset-removal-title">Review affected Watch Plans</h2>
+    <p data-asset-removal-summary></p>
+    <div class="asset-removal-plans" data-asset-removal-plans></div>
+    <p class="notice notice-warning asset-removal-warning">Removing the asset changes the selected universe for these Watch Plans. Their saved versions and historical evidence remain unchanged.</p>
+    <p class="notice notice-error" data-asset-removal-error hidden></p>
+    <div class="row wrap asset-removal-actions">
+      <button class="btn btn-secondary" type="button" data-asset-removal-cancel>Keep asset</button>
+      <button class="btn btn-danger" type="button" data-asset-removal-confirm>Remove asset</button>
+    </div>
+  </div>
+</dialog>
 {% endblock %}

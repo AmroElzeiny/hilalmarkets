@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, date, datetime, timedelta
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +13,8 @@ from ai_market_monitor.db.models import (
     AssetShariaAssessment,
     AuditEvent,
     CanonicalAsset,
+    DashboardPreference,
+    ExchangeMarket,
     ExternalAssessment,
     PublishedAssetAssessment,
     ReviewCase,
@@ -27,8 +30,10 @@ from ai_market_monitor.db.models.enums import (
     IdentityProvider,
     ShariaAssetStatus,
     ShariaMethodologyStatus,
+    ShariaUniverseMode,
     UserRole,
 )
+from ai_market_monitor.schemas.strategy import ShariaPolicyDefinition
 from ai_market_monitor.services.sc_malaysia_import import (
     FetchedSource,
     SCMalaysiaImporter,
@@ -50,14 +55,19 @@ from ai_market_monitor.services.sharia_research import (
     AIAnalysisResult,
     ShariaFactualAnalysis,
 )
-from ai_market_monitor.services.sharia_screening import ShariaScreeningService
+from ai_market_monitor.services.sharia_screening import (
+    ShariaScreeningError,
+    ShariaScreeningService,
+)
 from ai_market_monitor.services.sharia_source_monitoring import (
     ShariaSourceMonitoringService,
 )
+from ai_market_monitor.services.sharia_universe import ShariaUniverseResolver
 from ai_market_monitor.telegram.adapter import (
     TelegramDeliveryError,
     TelegramDeliveryResult,
 )
+from tests.factories import load_strategy
 
 SC_HTML = """
 <html><body><table>
@@ -71,6 +81,232 @@ SC_HTML = """
   </tbody>
 </table></body></html>
 """
+
+TEST_CRITERIA = [
+    {
+        "key": key,
+        "label": label,
+        "description": description,
+        "required": True,
+        "allowed_outcomes": [
+            "pass",
+            "qualification",
+            "fail",
+            "not_applicable",
+            "needs_evidence",
+        ],
+        "evidence_categories": categories,
+        "qualification_rules": {"written_reason_required": True},
+        "blocking_outcomes": ["fail", "not_applicable", "needs_evidence"],
+    }
+    for key, label, description, categories in [
+        (
+            "canonical_asset_identity",
+            "Canonical asset identity",
+            "Verify the exact asset, network, and retained identity mapping evidence.",
+            ["canonical_identity"],
+        ),
+        (
+            "official_methodology_reference",
+            "Official asset-level reference",
+            "Verify the official wording, source authority, date, and retained snapshot.",
+            ["official_sc_reference"],
+        ),
+        (
+            "evidence_completeness",
+            "Evidence completeness and freshness",
+            "Verify that the factual dossier is complete, current, and contradiction-free.",
+            ["factual_dossier"],
+        ),
+    ]
+]
+
+TEST_USE_CASES = [
+    {
+        "key": key,
+        "label": label,
+        "description": description,
+        "required": True,
+        "allowed_decisions": [
+            "covered",
+            "qualified",
+            "not_covered",
+            "not_applicable",
+            "under_review",
+            "excluded",
+        ],
+        "criterion_keys": [criterion],
+        "evidence_categories": categories,
+        "default_scope": scope,
+        "execution_blocking_decisions": blocked,
+    }
+    for key, label, description, criterion, categories, scope, blocked in [
+        (
+            "asset_level_sc_reference",
+            "Asset-level SC Malaysia reference",
+            "The exact status stated by the official asset-level external source.",
+            "official_methodology_reference",
+            ["official_sc_reference"],
+            "SC Malaysia regulated digital-assets framework.",
+            ["not_covered", "not_applicable", "under_review", "excluded"],
+        ),
+        (
+            "spot_ownership_and_monitoring",
+            "Spot ownership and market monitoring",
+            "HilalMarkets spot-only ownership and non-execution monitoring scope.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Spot ownership and research monitoring only.",
+            ["not_covered", "not_applicable", "under_review", "excluded"],
+        ),
+        (
+            "native_staking",
+            "Native staking",
+            "Native protocol staking where applicable to this exact asset.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Native staking only.",
+            [],
+        ),
+        (
+            "third_party_lending",
+            "Third-party lending",
+            "Third-party lending or borrowing products.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Third-party lending products.",
+            [],
+        ),
+        (
+            "yield_products",
+            "Yield products",
+            "Yield or reward products beyond native asset ownership.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Third-party and protocol yield products.",
+            [],
+        ),
+        (
+            "leveraged_products",
+            "Leveraged products",
+            "Products that introduce borrowing or leveraged exposure.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Outside the spot-only platform scope.",
+            [],
+        ),
+        (
+            "futures_perpetuals_derivatives",
+            "Futures, perpetuals, and derivatives",
+            "Derivative exposure rather than reviewed spot-asset ownership.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Outside the spot-only platform scope.",
+            [],
+        ),
+        (
+            "wrapped_bridged_representations",
+            "Wrapped and bridged representations",
+            "Separate token identities requiring their own review.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Separate identity and review required.",
+            [],
+        ),
+        (
+            "other_material_uses",
+            "Other material uses",
+            "Any other material use not covered by the named categories.",
+            "evidence_completeness",
+            ["factual_dossier"],
+            "Any unlisted use requires separate review.",
+            [],
+        ),
+    ]
+]
+
+
+def _methodology_rules() -> dict:
+    return {
+        "schema_version": "1",
+        "criteria_version": "test.criteria.1",
+        "source_family": "sc_malaysia_sac",
+        "source_adapter": "sc_malaysia",
+        "executable": True,
+        "required_criteria": TEST_CRITERIA,
+        "use_cases": TEST_USE_CASES,
+    }
+
+
+def _evidence_requirements() -> dict:
+    return {
+        "schema_version": "1",
+        "mandatory_source_categories": [
+            "canonical_identity",
+            "official_sc_reference",
+            "factual_dossier",
+        ],
+        "minimum_evidence_completeness": 1.0,
+        "maximum_source_age_days": 90,
+        "critical_missing_fields": [
+            "canonical_asset.identity_hash",
+            "external_assessment.exact_status_wording",
+            "dossier.evidence_package_hash",
+        ],
+        "contradiction_policy": "block_any_unresolved",
+        "review_cadence_days": 90,
+    }
+
+
+def _criterion_decisions() -> list[dict]:
+    return [
+        {
+            "key": item["key"],
+            "outcome": "pass",
+            "reviewer_explanation": "The retained evidence was reviewed for this criterion.",
+        }
+        for item in TEST_CRITERIA
+    ]
+
+
+def _use_case_decisions() -> list[dict]:
+    statuses = {
+        "asset_level_sc_reference": "covered",
+        "spot_ownership_and_monitoring": "qualified",
+        "native_staking": "not_applicable",
+    }
+    return [
+        {
+            "key": item["key"],
+            "decision": statuses.get(item["key"], "not_covered"),
+            "reason": (
+                "The reviewer explicitly assessed this use against the retained factual evidence."
+            ),
+            "scope": item["default_scope"],
+        }
+        for item in TEST_USE_CASES
+    ]
+
+
+async def _approve_then_publish(
+    service: ShariaGovernanceService,
+    case_id: UUID,
+    *,
+    admin_user_id: UUID,
+    reason: str,
+) -> PublishedAssetAssessment:
+    await service.approve_for_publication(
+        case_id,
+        admin_user_id=admin_user_id,
+        reason=reason,
+        criterion_decisions=_criterion_decisions(),
+        use_case_decisions=_use_case_decisions(),
+    )
+    return await service.publish_approved(
+        case_id,
+        admin_user_id=admin_user_id,
+        reason=reason,
+    )
 
 
 class StaticSCFetcher:
@@ -203,8 +439,8 @@ async def _ready_case(session):
         reviewer_group="HilalMarkets authenticated administrators",
         published_at=datetime.now(UTC),
         effective_from=datetime.now(UTC),
-        rules_json={"requires_admin_publication": True},
-        evidence_requirements_json={"official_sc_row": True},
+        rules_json=_methodology_rules(),
+        evidence_requirements_json=_evidence_requirements(),
     )
     session.add(methodology)
     await session.flush()
@@ -298,6 +534,254 @@ async def _ready_case(session):
     return case, methodology
 
 
+async def test_deployed_passport_requires_an_active_publication(test_context):
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        deployed_settings = test_context["settings"].model_copy(
+            update={"app_env": "staging"}
+        )
+        with pytest.raises(ShariaScreeningError) as unpublished:
+            await ShariaPassportReadService(session, deployed_settings).current(
+                "BTC",
+                methodology_id=methodology.id,
+            )
+        assert unpublished.value.code == "passport_not_published"
+
+        admin = User(display_name="Passport publisher", role=UserRole.ADMIN)
+        session.add(admin)
+        await session.flush()
+        await _approve_then_publish(
+            ShariaGovernanceService(session, test_context["settings"]),
+            case.id,
+            admin_user_id=admin.id,
+            reason="The retained assessment is approved for the published Passport.",
+        )
+        published = await ShariaPassportReadService(session, deployed_settings).current(
+            "BTC",
+            methodology_id=methodology.id,
+        )
+
+        assert published.passport_version_id is not None
+        assert published.can_create_watch_plan is True
+
+
+@pytest.mark.parametrize(
+    ("criteria", "uses", "expected_code"),
+    [
+        (None, _use_case_decisions(), "criterion_decisions_required"),
+        (_criterion_decisions()[:-1], _use_case_decisions(), "criterion_decisions_incomplete"),
+        (_criterion_decisions(), None, "use_case_decisions_required"),
+        (_criterion_decisions(), _use_case_decisions()[:-1], "use_case_decisions_incomplete"),
+    ],
+)
+async def test_approval_requires_every_explicit_criterion_and_use_scope(
+    test_context,
+    criteria,
+    uses,
+    expected_code,
+):
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = User(display_name="Strict reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="Every required decision must be explicit before approval.",
+                criterion_decisions=criteria,
+                use_case_decisions=uses,
+            )
+
+        assert error.value.code == expected_code
+        assert case.state == "ready_for_review"
+
+
+@pytest.mark.parametrize("outcome", ["fail", "not_applicable", "needs_evidence"])
+async def test_blocking_criterion_outcomes_cannot_be_approved(test_context, outcome):
+    decisions = _criterion_decisions()
+    decisions[0] = {
+        **decisions[0],
+        "outcome": outcome,
+        "reviewer_explanation": "This required criterion is not satisfied by the evidence.",
+    }
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = User(display_name="Blocking reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="The blocking criterion must stop this approval.",
+                criterion_decisions=decisions,
+                use_case_decisions=_use_case_decisions(),
+            )
+
+        assert error.value.code == "criteria_not_approvable"
+        assert case.state == "ready_for_review"
+
+
+async def test_non_pass_criterion_requires_written_reason(test_context):
+    decisions = _criterion_decisions()
+    decisions[0] = {
+        **decisions[0],
+        "outcome": "qualification",
+        "reviewer_explanation": "",
+    }
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = User(display_name="Reason reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="A qualification without reasoning is not reviewable.",
+                criterion_decisions=decisions,
+                use_case_decisions=_use_case_decisions(),
+            )
+
+        assert error.value.code == "criterion_reason_required"
+
+
+async def test_blocking_use_scope_cannot_be_approved(test_context):
+    decisions = _use_case_decisions()
+    for row in decisions:
+        if row["key"] == "spot_ownership_and_monitoring":
+            row["decision"] = "not_covered"
+            row["reason"] = "The reviewed evidence does not cover spot ownership and monitoring."
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = User(display_name="Use scope reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="A blocking use decision must stop the publication review.",
+                criterion_decisions=_criterion_decisions(),
+                use_case_decisions=decisions,
+            )
+
+        assert error.value.code == "use_scope_not_approvable"
+
+
+async def test_stale_required_evidence_blocks_approval(test_context):
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        external = await session.get(ExternalAssessment, case.external_assessment_id)
+        assert external is not None
+        snapshot = await session.get(SourceSnapshot, external.source_snapshot_id)
+        assert snapshot is not None
+        snapshot.retrieved_at = datetime.now(UTC) - timedelta(days=91)
+        reviewer = User(display_name="Freshness reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="Stale mandatory evidence cannot support approval.",
+                criterion_decisions=_criterion_decisions(),
+                use_case_decisions=_use_case_decisions(),
+            )
+
+        assert error.value.code == "required_evidence_stale"
+
+
+async def test_expired_methodology_blocks_governance_approval(test_context):
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        methodology.effective_to = datetime.now(UTC) - timedelta(seconds=1)
+        reviewer = User(display_name="Expiry reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="An expired methodology cannot authorize a new publication.",
+                criterion_decisions=_criterion_decisions(),
+                use_case_decisions=_use_case_decisions(),
+            )
+
+        assert error.value.code == "methodology_expired"
+        assert case.state == "ready_for_review"
+
+
+async def test_source_family_mismatch_blocks_approval(test_context):
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        rules = dict(methodology.rules_json)
+        rules["source_family"] = "unrelated_source_family"
+        methodology.rules_json = rules
+        reviewer = User(display_name="Source reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="A mismatched source family must not be approved.",
+                criterion_decisions=_criterion_decisions(),
+                use_case_decisions=_use_case_decisions(),
+            )
+
+        assert error.value.code == "methodology_source_mismatch"
+
+
+async def test_analysis_must_match_exact_reviewed_snapshot_version(test_context):
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        analysis = await session.scalar(
+            select(AIAnalysisSnapshot).where(AIAnalysisSnapshot.dossier_id == case.dossier_id)
+        )
+        assert analysis is not None
+        analysis.input_snapshot_ids = []
+        reviewer = User(display_name="Version reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        with pytest.raises(ShariaGovernanceError) as error:
+            await ShariaGovernanceService(
+                session, test_context["settings"]
+            ).approve_for_publication(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason="The analysis must match the exact evidence version.",
+                criterion_decisions=_criterion_decisions(),
+                use_case_decisions=_use_case_decisions(),
+            )
+
+        assert error.value.code == "analysis_evidence_version_mismatch"
+
+
 async def test_only_admin_can_publish_and_passport_keeps_two_layers(test_context):
     settings = test_context["settings"]
     settings.sharia_admin_telegram_chat_id = "1261328718"
@@ -310,18 +794,44 @@ async def test_only_admin_can_publish_and_passport_keeps_two_layers(test_context
 
         assert await session.scalar(select(func.count(AssetShariaAssessment.id))) == 0
         with pytest.raises(ShariaGovernanceError, match="Administrator"):
-            await ShariaGovernanceService(session, settings).approve_and_publish(
+            await _approve_then_publish(
+                ShariaGovernanceService(session, settings),
                 case.id,
                 admin_user_id=ordinary.id,
                 reason="This user must not be allowed to publish anything.",
             )
 
-        publication = await ShariaGovernanceService(
-            session, settings
-        ).approve_and_publish(
+        publication = await _approve_then_publish(
+            ShariaGovernanceService(session, settings),
             case.id,
             admin_user_id=admin.id,
             reason="Official row, canonical identity, evidence, and limitations were reviewed.",
+        )
+        passport_reader = ShariaPassportReadService(session, settings)
+        default_policy_passport = await passport_reader.current(
+            "BTC",
+            methodology_id=methodology.id,
+            user_id=admin.id,
+        )
+        session.add(
+            DashboardPreference(
+                user_id=admin.id,
+                theme="light",
+                default_timezone="UTC",
+                default_dashboard_path="/dashboard",
+                notification_preferences={
+                    "sharia": {
+                        "allowed_statuses": [ShariaAssetStatus.UNDER_REVIEW.value],
+                        "advanced_override_acknowledged": True,
+                    }
+                },
+            )
+        )
+        await session.flush()
+        restricted_policy_passport = await passport_reader.current(
+            "BTC",
+            methodology_id=methodology.id,
+            user_id=admin.id,
         )
         await session.commit()
         passport = await ShariaScreeningService(session, settings).passport(
@@ -338,9 +848,19 @@ async def test_only_admin_can_publish_and_passport_keeps_two_layers(test_context
     assert "not SC Malaysia's unpublished reasoning" in (
         passport.hilalmarkets_factual_information_profile["notice"]
     )
-    assert passport.separate_use_status["third_party_lending"] == (
-        "not_covered_by_asset_reference"
-    )
+    assert passport.separate_use_status["third_party_lending"]["decision"] == "not_covered"
+    assert passport.separate_use_status["native_staking"]["decision"] == "not_applicable"
+    assert default_policy_passport.can_create_watch_plan is True
+    assert default_policy_passport.main_reasons == [
+        "Official row, canonical identity, evidence, and limitations were reviewed."
+    ]
+    assert {item.key for item in default_policy_passport.use_coverage} == {
+        item["key"] for item in TEST_USE_CASES
+    }
+    assert "spot_trading" not in {
+        item.key for item in default_policy_passport.use_coverage
+    }
+    assert restricted_policy_passport.can_create_watch_plan is False
     assert attempt_count == 1
 
 
@@ -371,6 +891,8 @@ async def test_review_publication_hold_and_restore_are_separate_immutable_action
             case.id,
             admin_user_id=admin.id,
             reason="The complete evidence package and every criterion were reviewed.",
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_use_case_decisions(),
         )
         assert case.state == "approved"
         assert case.publication_state == "approved_not_published"
@@ -420,6 +942,8 @@ async def test_review_publication_hold_and_restore_are_separate_immutable_action
             case.id,
             admin_user_id=admin.id,
             reason="The fresh evidence and prior safety concern were reviewed again.",
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_use_case_decisions(),
             with_qualifications=True,
             qualifications=[
                 "The restored record includes a new use-specific qualification."
@@ -565,6 +1089,8 @@ async def test_optional_four_eyes_requires_a_different_publisher(test_context):
             case.id,
             admin_user_id=reviewer.id,
             reason="The first reviewer completed and recorded the evidence decision.",
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_use_case_decisions(),
         )
         assert case.publication_state == "awaiting_second_approval"
 
@@ -869,15 +1395,86 @@ async def _publish_for_monitoring(test_context, session):
     admin = User(display_name="Monitoring admin", role=UserRole.ADMIN)
     session.add(admin)
     await session.flush()
-    publication = await ShariaGovernanceService(
-        session, test_context["settings"]
-    ).approve_and_publish(
+    publication = await _approve_then_publish(
+        ShariaGovernanceService(session, test_context["settings"]),
         case.id,
         admin_user_id=admin.id,
         reason="The evidence was reviewed before enabling source monitoring.",
     )
     await session.flush()
     return publication
+
+
+class BTCUniverseProvider:
+    async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
+        return ["BTC/USDT"]
+
+
+async def test_deployed_universe_requires_publication_verified_identity_and_active_market(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        publication = await _publish_for_monitoring(test_context, session)
+        assessment = await session.get(AssetShariaAssessment, publication.asset_assessment_id)
+        assert assessment is not None
+        settings = test_context["settings"].model_copy(
+            update={
+                "app_env": "staging",
+                "sharia_screening_enforced": True,
+                "sharia_allow_legacy_unscreened_local": False,
+                "sharia_test_market_enabled": False,
+            }
+        )
+        definition = load_strategy()
+        definition = definition.model_copy(
+            update={
+                "universe": definition.universe.model_copy(
+                    update={
+                        "exchange": "binance",
+                        "quote_currencies": ["USDT"],
+                        "include_symbols": ["BTC/USDT"],
+                        "exclude_symbols": [],
+                        "sharia_policy": ShariaPolicyDefinition(
+                            universe_mode=ShariaUniverseMode.ELIGIBLE_MARKET,
+                            methodology_id=assessment.methodology_id,
+                        ),
+                    }
+                )
+            }
+        )
+        resolver = ShariaUniverseResolver(session, BTCUniverseProvider(), settings)
+        baseline = await resolver.resolve(definition, persist_snapshot=False)
+        assert baseline.included_symbols == ["BTC/USDT"]
+
+        market = await session.scalar(
+            select(ExchangeMarket).where(
+                ExchangeMarket.canonical_asset_id == publication.canonical_asset_id,
+                ExchangeMarket.exchange == "binance",
+                ExchangeMarket.market_symbol == "BTC/USDT",
+            )
+        )
+        asset = await session.get(CanonicalAsset, publication.canonical_asset_id)
+        assert market is not None and asset is not None
+
+        market.is_active = False
+        await session.flush()
+        unavailable = await resolver.resolve(definition, persist_snapshot=False)
+        assert unavailable.included_symbols == []
+        assert unavailable.excluded[0].reason_code == "eligible_market_unavailable"
+
+        market.is_active = True
+        asset.mapping_state = "unverified"
+        await session.flush()
+        unverified = await resolver.resolve(definition, persist_snapshot=False)
+        assert unverified.included_symbols == []
+        assert unverified.excluded[0].reason_code == "canonical_identity_unverified"
+
+        asset.mapping_state = "verified"
+        publication.is_active = False
+        await session.flush()
+        unpublished = await resolver.resolve(definition, persist_snapshot=False)
+        assert unpublished.included_symbols == []
+        assert unpublished.excluded[0].reason_code == "passport_version_unavailable"
 
 
 async def test_unchanged_published_sources_use_no_ai_and_run_once_per_window(test_context):

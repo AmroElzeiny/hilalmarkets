@@ -12,9 +12,9 @@
       <div class="trust-row"><span><span data-icon="check" data-icon-class="icon"></span>Crypto spot only</span><span><span data-icon="check" data-icon-class="icon"></span>No execution</span><span><span data-icon="check" data-icon-class="icon"></span>Methodology-specific status</span><span><span data-icon="check" data-icon-class="icon"></span>Evidence-led monitoring</span></div>
     </div>
     <div class="hero-art reveal">
-      <img src="{{ url_for('static', path='/hilal/screening-flow.svg') }}" alt="A screened asset moving through evidence review, a Watchlist, and an explainable alert">
+      <img src="{{ url_for('static', path='/hilal/screening-flow.svg') }}" alt="A screened asset moving through evidence review, a Watch Plan, and an explainable alert">
       <div class="hero-art-card top"><strong>Screened before monitoring</strong><br><span class="muted">Methodology and version stay visible</span></div>
-      <div class="hero-art-card bottom"><strong>You approve every Watchlist</strong><br><span class="muted">No automatic trading</span></div>
+      <div class="hero-art-card bottom"><strong>You approve every Watch Plan</strong><br><span class="muted">No automatic trading</span></div>
     </div>
   </div>
 </header>
@@ -37,7 +37,7 @@
   <div class="flow-line flow-line-six reveal">
     <div class="flow-step"><div class="flow-number">1</div><div><h3>Screened Market</h3><p>Browse policy-eligible assets.</p></div></div>
     <div class="flow-step"><div class="flow-number">2</div><div><h3>Evidence Passport</h3><p>Read why each status exists.</p></div></div>
-    <div class="flow-step"><div class="flow-number">3</div><div><h3>Guided Watchlist</h3><p>Describe measurable behavior.</p></div></div>
+    <div class="flow-step"><div class="flow-number">3</div><div><h3>Guided Watch Plan</h3><p>Describe measurable behavior.</p></div></div>
     <div class="flow-step"><div class="flow-number">4</div><div><h3>Market check</h3><p>Run the rules once first.</p></div></div>
     <div class="flow-step"><div class="flow-number">5</div><div><h3>Continuous watch</h3><p>Follow forming opportunities.</p></div></div>
     <div class="flow-step"><div class="flow-number">6</div><div><h3>Evidence and drift</h3><p>Review alerts and status changes.</p></div></div>
@@ -48,10 +48,10 @@
   <div class="section-heading reveal"><span class="eyebrow">Main capabilities</span><h2>One place to discover, watch, and understand.</h2></div>
   <div class="feature-bento reveal">
     <article class="bento-card large"><div class="icon-box is-gold"><span data-icon="market" data-icon-class="icon"></span></div><h2>Screened Market and Evidence Passports</h2><p>Explore assets through a disclosed methodology, then inspect the approved evidence, qualifications, review date, and status history.</p><a class="btn btn-gold" href="{{ url_for('public_features') }}#discover">Explore discovery</a></article>
-    <article class="bento-card"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div><h3>Guided Watchlists</h3><p>Start with plain market behavior and reveal exact mechanics only when you need them.</p></article>
+    <article class="bento-card"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div><h3>Guided Watch Plans</h3><p>Start with plain market behavior and reveal exact mechanics only when you need them.</p></article>
     <article class="bento-card"><div class="icon-box is-gold"><span data-icon="scan" data-icon-class="icon"></span></div><h3>Check the Market Now</h3><p>Run approved rules once before deciding whether continuous monitoring is useful.</p></article>
     <article class="bento-card"><div class="icon-box is-amber"><span data-icon="activity" data-icon-class="icon"></span></div><h3>Opportunity evidence</h3><p>See what passed, what is missing, and which data was used.</p></article>
-    <article class="bento-card wide"><div class="row-between"><div><div class="icon-box"><span data-icon="bell" data-icon-class="icon"></span></div><h3>Compliance Watch</h3><p>Connect material screening changes to affected Watchlists and the policy action taken.</p></div><a class="link-arrow" href="{{ url_for('public_features') }}">All features <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div></article>
+    <article class="bento-card wide"><div class="row-between"><div><div class="icon-box"><span data-icon="bell" data-icon-class="icon"></span></div><h3>Compliance Watch</h3><p>Connect material screening changes to affected Watch Plans and the policy action taken.</p></div><a class="link-arrow" href="{{ url_for('public_features') }}">All features <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div></article>
   </div>
 </div></section>
 
@@ -61,7 +61,7 @@
 </div></section>
 
 <section class="section section-gold"><div class="container compliance-stage">
-  <div class="reveal"><span class="eyebrow">Compliance Watch</span><h2>A project can change. Your screening record should show it.</h2><p>Material changes enter an evidence and qualified-review workflow. The selected policy can protect affected Watchlists while preserving an audit trail.</p><a class="btn btn-primary" href="{{ url_for('public_features') }}#trust"><span data-icon="compliance" data-icon-class="icon"></span>Explore compliance monitoring</a></div>
+  <div class="reveal"><span class="eyebrow">Compliance Watch</span><h2>A project can change. Your screening record should show it.</h2><p>Material changes enter an evidence and qualified-review workflow. The selected policy can protect affected Watch Plans while preserving an audit trail.</p><a class="btn btn-primary" href="{{ url_for('public_features') }}#trust"><span data-icon="compliance" data-icon-class="icon"></span>Explore compliance monitoring</a></div>
   <article class="drift-card reveal"><span class="badge badge-review">Change under review</span><h3>Policy impact remains explicit</h3><div class="timeline"><div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-copy"><strong>Evidence change captured</strong><small>Source and timestamp are preserved</small></div></div><div class="timeline-item is-alert"><span class="timeline-dot"></span><div class="timeline-copy"><strong>Affected assets protected</strong><small>The user's selected drift behavior is applied</small></div></div><div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-copy"><strong>Qualified review required</strong><small>No AI religious ruling is issued</small></div></div></div></article>
 </div></section>
 
@@ -81,5 +81,5 @@
   <div class="accordion reveal">{% for item in purchase_faqs %}<div class="accordion-item {{ 'is-open' if loop.first else '' }}"><h3><button class="accordion-button" type="button" data-accordion-button aria-expanded="{{ 'true' if loop.first else 'false' }}">{{ item.question }} <span data-icon="chevron" data-icon-class="icon"></span></button></h3><div class="accordion-content"><p>{{ item.answer }}</p></div></div>{% endfor %}</div>
 </div></section>
 
-<section class="section-sm"><div class="container"><div class="cta-panel reveal"><span class="eyebrow">Start with a screened market</span><h2>Follow what matters without watching every chart.</h2><p>Create a free account, review the evidence, and approve your first guided Watchlist before any monitoring begins.</p><div class="hero-actions"><a class="btn btn-gold" href="{{ url_for('signup_page') }}"><span data-icon="market" data-icon-class="icon"></span>Start free</a><a class="btn btn-secondary" href="{{ dashboard_entry_url }}"><span data-icon="arrow" data-icon-class="icon"></span>Open dashboard</a></div></div></div></section>
+<section class="section-sm"><div class="container"><div class="cta-panel reveal"><span class="eyebrow">Start with a screened market</span><h2>Follow what matters without watching every chart.</h2><p>Create a free account, review the evidence, and approve your first guided Watch Plan before any monitoring begins.</p><div class="hero-actions"><a class="btn btn-gold" href="{{ url_for('signup_page') }}"><span data-icon="market" data-icon-class="icon"></span>Start free</a><a class="btn btn-secondary" href="{{ dashboard_entry_url }}"><span data-icon="arrow" data-icon-class="icon"></span>Open dashboard</a></div></div></div></section>
 {% endblock %}

@@ -72,7 +72,7 @@ async def test_context() -> AsyncIterator[dict]:
         async with session_factory() as session:
             yield session
 
-    app = create_app()
+    app = create_app(settings)
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_market_previewer] = lambda: SuccessfulPreviewer()

@@ -54,6 +54,7 @@ from ai_market_monitor.db.models import (
     User,
     UserExportJob,
     UserIdentity,
+    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     AlertType,
@@ -72,6 +73,7 @@ from ai_market_monitor.schemas.ai_setup_chat import (
     MarketSnapshotResponse,
     SetupChatApprovalRequest,
     SetupChatMessageRequest,
+    SetupChatMessageResponse,
     SetupChatSessionResponse,
 )
 from ai_market_monitor.schemas.on_demand import (
@@ -220,7 +222,7 @@ class ScanPromptInterpretRequest(BaseModel):
     exchange: str = Field(default="binance", min_length=2, max_length=40)
     quote_currency: str = Field(default="USDT", min_length=2, max_length=10)
     timeframe: str = Field(default="15m", min_length=2, max_length=16)
-    trigger_mode: str = Field(default="candle_close", pattern="^(candle_close|intrabar)$")
+    trigger_mode: Literal["candle_close", "intrabar"] = "candle_close"
     symbols: list[str] = Field(default_factory=list, max_length=5000)
     maximum_stop_percent: float | None = Field(default=None, gt=0, le=100)
     minimum_reward_to_risk: float | None = Field(default=None, gt=0, le=50)
@@ -237,7 +239,7 @@ class StrategyBuilderInterpretRequest(BaseModel):
     quote_currency: str = Field(default="USDT", min_length=2, max_length=10)
     symbols: list[str] = Field(default_factory=list, max_length=100000)
     timeframe: str = Field(default="15m", min_length=2, max_length=16)
-    trigger_mode: str = Field(default="candle_close", pattern="^(candle_close|intrabar)$")
+    trigger_mode: Literal["candle_close", "intrabar"] = "candle_close"
     builder_mode: str = Field(default="prompt", max_length=40)
     user_preferences: dict[str, Any] = Field(default_factory=dict)
     plan_limits: dict[str, Any] = Field(default_factory=dict)
@@ -451,6 +453,19 @@ async def _has_active_notification_channel(session: AsyncSession, user_id: UUID)
         )
     )
     if telegram is not None:
+        return True
+    whatsapp = await session.scalar(
+        select(WhatsAppConnection.id).where(
+            WhatsAppConnection.user_id == user_id,
+            WhatsAppConnection.status == ConnectionStatus.ACTIVE,
+            WhatsAppConnection.alerts_enabled.is_(True),
+            WhatsAppConnection.verified_at.is_not(None),
+            WhatsAppConnection.opt_in_at.is_not(None),
+            WhatsAppConnection.opt_out_at.is_(None),
+            WhatsAppConnection.revoked_at.is_(None),
+        )
+    )
+    if whatsapp is not None:
         return True
     discord = await session.scalar(
         select(DiscordConnection.id).where(
@@ -982,22 +997,26 @@ async def _setup_chat_response(
     )
     blocking_lint = any(item.get("severity") == "critical" for item in (chat.lint_warnings or []))
     chat_context = chat.context_json or {}
-    setup_mode = "scanner" if chat_context.get("setup_mode") == "scanner" else "monitor"
+    setup_mode: Literal["scanner", "monitor"] = (
+        "scanner" if chat_context.get("setup_mode") == "scanner" else "monitor"
+    )
     return SetupChatSessionResponse(
         id=chat.id,
         status=chat.status,
         title=chat.title,
         original_idea=chat.original_idea,
         messages=[
-            {
-                "id": item.id,
-                "role": item.role,
-                "message_type": item.message_type,
-                "content": item.content,
-                "payload": item.payload,
-                "client_message_id": item.client_message_id,
-                "created_at": item.created_at,
-            }
+            SetupChatMessageResponse.model_validate(
+                {
+                    "id": item.id,
+                    "role": item.role,
+                    "message_type": item.message_type,
+                    "content": item.content,
+                    "payload": item.payload,
+                    "client_message_id": item.client_message_id,
+                    "created_at": item.created_at,
+                }
+            )
             for item in messages
         ],
         draft_strategy=definition,
@@ -3137,7 +3156,7 @@ async def dashboard_scan_now(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "notification_channel_required",
-                "message": "Connect Telegram or Discord before running Scanner.",
+                "message": "Connect Telegram, WhatsApp, or Discord before running Scanner.",
             },
         )
     try:
@@ -3182,10 +3201,15 @@ async def dashboard_scan_prompt_interpret(
     if (
         isinstance(preferred_channels, list)
         and preferred_channels
-        and not any(channel in prompt_text for channel in ("telegram", "discord", "web"))
+        and not any(
+            channel in prompt_text
+            for channel in ("telegram", "whatsapp", "discord", "web")
+        )
     ):
         strategy.alerts.channels = [
-            channel for channel in preferred_channels if channel in {"telegram", "discord", "web"}
+            channel
+            for channel in preferred_channels
+            if channel in {"telegram", "whatsapp", "discord", "web"}
         ] or strategy.alerts.channels
         applied_preferences.append("alert channels: " + ", ".join(strategy.alerts.channels))
     typical_maximum = preference.preferences.get("typical_max_alerts_per_hour")
@@ -3287,7 +3311,7 @@ async def dashboard_light_scan(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "notification_channel_required",
-                "message": "Connect Telegram or Discord before running Scanner.",
+                "message": "Connect Telegram, WhatsApp, or Discord before running Scanner.",
             },
         )
     preview = await configured_strategy_interpreter(settings).interpret(
@@ -3930,6 +3954,11 @@ async def integrations(
     discord = await session.scalar(
         select(DiscordConnection).where(DiscordConnection.user_id == principal.user_id)
     )
+    whatsapp = await session.scalar(
+        select(WhatsAppConnection).where(
+            WhatsAppConnection.user_id == principal.user_id
+        )
+    )
     destinations = (
         await session.scalars(
             select(DiscordDeliveryDestination).where(
@@ -3947,6 +3976,7 @@ async def integrations(
     ).all()
     return {
         "telegram": _telegram_payload(telegram),
+        "whatsapp": _whatsapp_payload(whatsapp),
         "discord": _discord_payload(discord),
         "discord_destinations": [
             {
@@ -4245,6 +4275,14 @@ def _telegram_payload(connection: TelegramConnection | None) -> dict[str, Any] |
         "last_delivery_at": connection.last_delivery_at,
         "last_error_code": connection.last_error_code,
     }
+
+
+def _whatsapp_payload(connection: WhatsAppConnection | None) -> dict[str, Any] | None:
+    if connection is None:
+        return None
+    from ai_market_monitor.whatsapp.service import connection_payload
+
+    return connection_payload(connection)
 
 
 def _discord_payload(connection: DiscordConnection | None) -> dict[str, Any] | None:

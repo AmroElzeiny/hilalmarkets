@@ -11,6 +11,7 @@ from ai_market_monitor.schemas.sharia import (
     MethodologyCreateRequest,
 )
 from ai_market_monitor.services.sharia_screening import ShariaScreeningService
+from tests.factories import methodology_evidence_requirements, methodology_rules
 
 
 class ApiQuoteProvider:
@@ -109,8 +110,8 @@ async def test_local_test_market_does_not_hide_selected_executable_methodology(t
                 governing_body="Qualified test governance",
                 reviewer_group="Qualified test reviewers",
                 effective_from=now - timedelta(days=1),
-                rules={"versioned": True},
-                evidence_requirements={"minimum_sources": 1},
+                rules=methodology_rules(source_family="sc_malaysia_selection_test"),
+                evidence_requirements=methodology_evidence_requirements(),
             ),
             actor_user_id=user.id,
             actor_identity="test-admin",
@@ -218,8 +219,8 @@ async def test_active_methodology_without_publications_has_clear_readiness_state
                 governing_body="Qualified test governance",
                 reviewer_group="Qualified test reviewers",
                 effective_from=now - timedelta(days=1),
-                rules={"versioned": True},
-                evidence_requirements={"minimum_sources": 1},
+                rules=methodology_rules(source_family="empty_sc_malaysia_test"),
+                evidence_requirements=methodology_evidence_requirements(),
             ),
             actor_user_id=user.id,
             actor_identity="test-admin",

@@ -50,7 +50,7 @@
         <a href="/" class="logo" style="margin-bottom:38px"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt=""><span>HilalMarkets</span></a>
         <span class="eyebrow">{{ 'Create your account' if page in ['signup', 'signup_verify'] else 'Secure dashboard access' }}</span>
         <h1>{{ title }}</h1>
-        <p>{{ 'Choose your screening policy and create your first Watchlist.' if page in ['signup', 'signup_verify'] else 'Return to your screened market, Watchlists, and latest evidence.' }}</p>
+        <p>{{ 'Choose your screening policy and create your first Watch Plan.' if page in ['signup', 'signup_verify'] else 'Return to your screened market, Watch Plans, and latest evidence.' }}</p>
     {% if message == 'code_sent' and page == 'signup_verify' %}
       <div class="dash-flash success">A six-digit code was sent to your email. Enter it below to create your dashboard account.</div>
     {% elif message == 'code_sent' %}

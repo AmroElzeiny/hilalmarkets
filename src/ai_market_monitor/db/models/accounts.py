@@ -203,13 +203,15 @@ class IdentityLinkToken(UUIDPrimaryKeyMixin, Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    onboarding_session_id: Mapped[UUID] = mapped_column(
-        ForeignKey("onboarding_sessions.id", ondelete="CASCADE"), nullable=False
+    onboarding_session_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("onboarding_sessions.id", ondelete="CASCADE")
     )
     token_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     target_channel: Mapped[str] = mapped_column(String(32), default="web", nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

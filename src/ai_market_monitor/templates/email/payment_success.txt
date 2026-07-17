@@ -6,7 +6,8 @@ Plan: {{ plan_name }}
 Billing: {{ billing_frequency|title }}
 {% if amount %}Amount: {{ amount }} {{ currency }}
 {% endif %}Payment date: {{ payment_date }}
-{% if renewal_date %}Next renewal: {{ renewal_date }}
+{% if renewal_date %}Next automatic renewal: {{ renewal_date }}
+{% elif access_until %}Access through: {{ access_until }}
 {% endif %}{% if receipt_url %}Receipt or invoice: {{ receipt_url }}
 {% endif %}
 Your main limits:
@@ -17,7 +18,7 @@ Create a Watch Plan: {{ create_watch_plan_url }}
 Manage billing: {{ billing_url }}
 Support: {{ support_url }}
 
-Your plan renews according to the billing agreement shown at checkout. Use Plan and Billing to review or manage it.
+{% if renews_automatically %}Your plan renews automatically according to the billing agreement shown at checkout. Use Plan and Billing to manage it.{% else %}This payment provides 30-day access and does not renew automatically. Make another verified payment before the access period ends to continue the paid plan.{% endif %}
 
 HilalMarkets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. Review the Terms ({{ terms_url }}) and Risk Disclosure ({{ risk_url }}).
 

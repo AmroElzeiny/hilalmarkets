@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from threading import RLock
 from typing import Any
@@ -43,7 +44,7 @@ class CapabilityIndex:
 
     def install_alias_artifact(
         self,
-        aliases: dict[str, list[str] | tuple[str, ...]],
+        aliases: Mapping[str, Sequence[str]],
         *,
         registry_version: str | None = None,
     ) -> CapabilityIndexSnapshot:
@@ -63,7 +64,7 @@ class CapabilityIndex:
         *,
         registry_hash: str,
         model: str,
-        embeddings: dict[str, list[float] | tuple[float, ...]],
+        embeddings: Mapping[str, Sequence[float]],
     ) -> bool:
         with self._lock:
             current = self._snapshot

@@ -8,7 +8,10 @@ from ai_market_monitor.db.models import (
     PaymentEmailDelivery,
     Plan,
     Subscription,
+    User,
+    UserIdentity,
 )
+from ai_market_monitor.db.models.enums import UserRole
 
 
 async def _signup(test_context, email: str = "checkout@example.com") -> None:
@@ -50,6 +53,18 @@ async def _review_form(test_context, plan_code: str = "trader") -> dict[str, str
         "terms_accepted": "true",
         "csrf_token": csrf.group(1),
     }
+
+
+async def _make_admin(test_context, email: str) -> None:
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        user.role = UserRole.ADMIN
+        await session.commit()
 
 
 async def test_checkout_uses_server_price_and_deduplicates_attempt(test_context):
@@ -140,9 +155,31 @@ async def test_checkout_requires_terms_and_valid_csrf(test_context):
 
 async def test_payment_email_preview_is_rendered_in_development(test_context):
     await _signup(test_context, "preview@example.com")
+    forbidden = await test_context["client"].get(
+        "/dashboard/admin/payment-email-preview?plan_code=pro"
+    )
+    assert forbidden.status_code == 403
+
+    await _make_admin(test_context, "preview@example.com")
     response = await test_context["client"].get(
         "/dashboard/admin/payment-email-preview?plan_code=pro"
     )
     assert response.status_code == 200
     assert "Your Pro plan is active" in response.text
+    assert "30-day access" in response.text
+    assert "does not renew automatically" in response.text
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+async def test_payment_email_preview_is_not_exposed_in_production(test_context):
+    await _signup(test_context, "production-preview@example.com")
+    await _make_admin(test_context, "production-preview@example.com")
+    original_environment = test_context["settings"].app_env
+    test_context["settings"].app_env = "production"
+    try:
+        response = await test_context["client"].get(
+            "/dashboard/admin/payment-email-preview?plan_code=pro"
+        )
+    finally:
+        test_context["settings"].app_env = original_environment
+    assert response.status_code == 404

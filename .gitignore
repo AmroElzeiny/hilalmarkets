@@ -53,6 +53,7 @@ test-results/
 reports/
 exports/
 screenshots/
+PLAYWRIGHT_E2E_REPORT.md
 *.log
 cloudflared.log
 

@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 UNLIMITED_SYMBOL_CAP = 100_000
-PURCHASABLE_PLAN_CODES = ("demo", "trader", "pro")
+PUBLIC_PLAN_CODES = ("demo", "trader", "pro")
+PURCHASABLE_PLAN_CODES = ("trader", "pro")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +22,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         code="demo",
         name="Free",
         monthly_price=Decimal("0.00"),
-        description="Explore screened assets and create one guided Watchlist.",
+        description="Explore screened assets and create one guided Watch Plan.",
         limits={
             "saved_strategies": 1,
             "active_strategies": 1,
@@ -76,7 +77,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         code="pro",
         name="Pro",
         monthly_price=Decimal("29.00"),
-        description="More Watchlists, deeper diagnostics, and advanced controls.",
+        description="More Watch Plans, deeper diagnostics, and advanced controls.",
         limits={
             "saved_strategies": 50,
             "active_strategies": 10,

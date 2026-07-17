@@ -1,7 +1,7 @@
 import html
 import re
 
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import (
     DASHBOARD_NAVIGATION,
     FOOTER_NAVIGATION,
@@ -103,10 +103,10 @@ async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
     assert "Disallow: /api/" in robots.text
 
 
-async def test_pricing_and_billing_share_the_purchasable_plan_catalog(test_context):
+async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     pricing = await test_context["client"].get("/pricing")
     assert pricing.status_code == 200
-    for code in PURCHASABLE_PLAN_CODES:
+    for code in PUBLIC_PLAN_CODES:
         plan = PLAN_DEFINITIONS[code]
         assert plan.name in pricing.text
         assert f"${int(plan.monthly_price)}" in pricing.text
@@ -116,7 +116,7 @@ async def test_pricing_and_billing_share_the_purchasable_plan_catalog(test_conte
     await _signup(test_context, "catalog-parity@example.com")
     billing = await test_context["client"].get("/dashboard/billing")
     assert billing.status_code == 200
-    for code in PURCHASABLE_PLAN_CODES:
+    for code in PUBLIC_PLAN_CODES:
         assert PLAN_DEFINITIONS[code].name in billing.text
         if code == "demo":
             assert "Current plan" in billing.text

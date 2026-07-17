@@ -5,6 +5,7 @@ from enum import StrEnum
 class Platform(StrEnum):
     DASHBOARD = "dashboard"
     TELEGRAM = "telegram"
+    WHATSAPP = "whatsapp"
     DISCORD = "discord"
 
 
@@ -89,6 +90,46 @@ PLATFORM_CAPABILITY_MATRIX: dict[Platform, dict[PlatformCapability, PlatformCapa
         ),
         PlatformCapability.ADMIN_CONTROLS: PlatformCapabilityRule(
             Platform.TELEGRAM, PlatformCapability.ADMIN_CONTROLS, False, Platform.DASHBOARD
+        ),
+    },
+    Platform.WHATSAPP: {
+        PlatformCapability.QUICK_MONITOR_CREATE: PlatformCapabilityRule(
+            Platform.WHATSAPP,
+            PlatformCapability.QUICK_MONITOR_CREATE,
+            True,
+            Platform.DASHBOARD,
+            "Setup descriptions are interpreted in WhatsApp; approval and advanced editing "
+            "use Dashboard.",
+        ),
+        PlatformCapability.ALERT_DELIVERY: PlatformCapabilityRule(
+            Platform.WHATSAPP, PlatformCapability.ALERT_DELIVERY, True
+        ),
+        PlatformCapability.BILLING_STATUS: PlatformCapabilityRule(
+            Platform.WHATSAPP,
+            PlatformCapability.BILLING_STATUS,
+            True,
+            Platform.DASHBOARD,
+            "WhatsApp shows account status and an authenticated Dashboard handoff.",
+        ),
+        PlatformCapability.PROOF_SUMMARY: PlatformCapabilityRule(
+            Platform.WHATSAPP,
+            PlatformCapability.PROOF_SUMMARY,
+            True,
+            Platform.DASHBOARD,
+            "Complete immutable proof opens in Dashboard.",
+        ),
+        PlatformCapability.FULL_BILLING: PlatformCapabilityRule(
+            Platform.WHATSAPP,
+            PlatformCapability.FULL_BILLING,
+            False,
+            Platform.DASHBOARD,
+            "Payment collection stays in Dashboard.",
+        ),
+        PlatformCapability.FULL_ANALYTICS: PlatformCapabilityRule(
+            Platform.WHATSAPP, PlatformCapability.FULL_ANALYTICS, False, Platform.DASHBOARD
+        ),
+        PlatformCapability.ADMIN_CONTROLS: PlatformCapabilityRule(
+            Platform.WHATSAPP, PlatformCapability.ADMIN_CONTROLS, False, Platform.DASHBOARD
         ),
     },
     Platform.DISCORD: {

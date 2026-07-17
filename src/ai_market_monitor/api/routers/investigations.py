@@ -1,7 +1,8 @@
 from dataclasses import asdict
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ai_market_monitor.api.dependencies import UserPrincipal, get_user_principal
 from ai_market_monitor.db.models.enums import StrategyStatus
 from ai_market_monitor.engine.forensics import AlertEvidence, ForensicInvestigationService
 from ai_market_monitor.schemas.investigation import WhyNoAlertRequest, WhyNoAlertResponse
@@ -11,7 +12,10 @@ router = APIRouter(prefix="/investigations", tags=["investigations"])
 
 
 @router.post("/why-no-alert", response_model=WhyNoAlertResponse)
-async def why_no_alert(request: WhyNoAlertRequest) -> WhyNoAlertResponse:
+async def why_no_alert(
+    request: WhyNoAlertRequest,
+    _: UserPrincipal = Depends(get_user_principal),
+) -> WhyNoAlertResponse:
     candle_sets = {
         timeframe: [
             Candle(

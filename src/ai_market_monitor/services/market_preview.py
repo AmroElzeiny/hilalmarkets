@@ -236,9 +236,18 @@ class CcxtMarketDataProvider:
             ticker_info = ticker.get("info") if isinstance(ticker.get("info"), dict) else {}
             bid = _number(ticker.get("bid"))
             ask = _number(ticker.get("ask"))
-            midpoint = ((bid + ask) / 2) if bid and ask and bid > 0 and ask > 0 else None
+            midpoint = (
+                (bid + ask) / 2
+                if bid is not None and ask is not None and bid > 0 and ask > 0
+                else None
+            )
             spread_bps = (
-                ((ask - bid) / midpoint) * 10_000 if midpoint is not None and ask >= bid else None
+                ((ask - bid) / midpoint) * 10_000
+                if midpoint is not None
+                and bid is not None
+                and ask is not None
+                and ask >= bid
+                else None
             )
             quote = symbol.partition("/")[2].upper()
             percentage = _number(ticker.get("percentage"))
@@ -359,7 +368,7 @@ class CcxtMarketDataProvider:
             abs(midpoint - largest_bid[0]) / midpoint * 100,
             abs(largest_ask[0] - midpoint) / midpoint * 100,
         )
-        trade_values = [
+        trade_values: list[dict[str, Any]] = [
             {
                 "side": str(item.get("side") or "").lower(),
                 "quote": float(item.get("cost") or 0)
@@ -578,7 +587,8 @@ def _number(value: Any) -> float | None:
 
 
 def _listing_datetime(market: dict[str, Any]) -> datetime | None:
-    info = market.get("info") if isinstance(market.get("info"), dict) else {}
+    raw_info = market.get("info")
+    info: dict[str, Any] = raw_info if isinstance(raw_info, dict) else {}
     for key in (
         "onboardDate",
         "launchTime",

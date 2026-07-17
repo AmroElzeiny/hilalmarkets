@@ -131,7 +131,7 @@ DASHBOARD_NAVIGATION = (
         "Watch",
         (
             NavigationItem(
-                "Watchlists",
+                "Watch Plans",
                 "watchlists_page",
                 "watchlists",
                 "radar",
@@ -208,7 +208,7 @@ PUBLIC_PAGES = (
         "/features",
         "Features",
         (
-            "Explore Sharia-screened discovery, guided Watchlists, evidence, "
+            "Explore Sharia-screened discovery, guided Watch Plans, evidence, "
             "and compliance monitoring."
         ),
         "hilal/public/features.html",
@@ -220,7 +220,7 @@ PUBLIC_PAGES = (
         "How It Works",
         (
             "See how HilalMarkets turns a screened market idea into an approved, "
-            "explainable Watchlist."
+            "explainable Watch Plan."
         ),
         "hilal/public/how_it_works.html",
     ),
@@ -252,7 +252,7 @@ PUBLIC_PAGES = (
         "/help",
         "Help Center",
         (
-            "Get clear answers about screened markets, Watchlists, alerts, evidence, "
+            "Get clear answers about screened markets, Watch Plans, alerts, evidence, "
             "billing, and account safety."
         ),
         "hilal/public/help.html",
@@ -387,20 +387,20 @@ HELP_CATEGORIES: tuple[HelpCategory, ...] = (
                 "question": "Why can a screening status change?",
                 "answer": (
                     "Projects, evidence, and methodologies can change. Compliance Watch "
-                    "preserves the change and shows its effect on your Watchlists."
+                    "preserves the change and shows its effect on your Watch Plans."
                 ),
             },
         ),
     },
     {
         "slug": "watch-plans",
-        "title": "Watchlists and market checks",
+        "title": "Watch Plans and market checks",
         "icon": "radar",
         "articles": (
             {
-                "question": "What is a Watchlist?",
+                "question": "What is a Watch Plan?",
                 "answer": (
-                    "A Watchlist is your approved set of measurable market conditions, "
+                    "A Watch Plan is your approved set of measurable market conditions, "
                     "screened universe, alert timing, and compliance-change behavior."
                 ),
             },

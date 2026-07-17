@@ -1,7 +1,5 @@
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from ai_market_monitor.engine.indicators import IndicatorRegistry
 from ai_market_monitor.engine.price_action import evaluate_price_action
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest

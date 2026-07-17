@@ -56,15 +56,17 @@ class DashboardJobService:
         self.context = ProviderContextService(provider, settings)
 
     async def process_replay_jobs(self, *, limit: int = 5) -> list[SetupReplayJob]:
-        jobs = (
-            await self.session.scalars(
-                select(SetupReplayJob)
-                .where(SetupReplayJob.status == "queued")
-                .order_by(SetupReplayJob.created_at.asc())
-                .limit(limit)
-                .with_for_update(skip_locked=True)
-            )
-        ).all()
+        jobs = list(
+            (
+                await self.session.scalars(
+                    select(SetupReplayJob)
+                    .where(SetupReplayJob.status == "queued")
+                    .order_by(SetupReplayJob.created_at.asc())
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
         for job in jobs:
             await self.run_replay_job(job.id)
         return jobs
@@ -224,14 +226,16 @@ class DashboardJobService:
             return result
 
     async def process_backtest_jobs(self, *, limit: int = 3) -> list[BacktestJob]:
-        jobs = (
-            await self.session.scalars(
-                select(BacktestJob)
-                .where(BacktestJob.status == "queued")
-                .order_by(BacktestJob.created_at.asc())
-                .limit(limit)
-            )
-        ).all()
+        jobs = list(
+            (
+                await self.session.scalars(
+                    select(BacktestJob)
+                    .where(BacktestJob.status == "queued")
+                    .order_by(BacktestJob.created_at.asc())
+                    .limit(limit)
+                )
+            ).all()
+        )
         for job in jobs:
             await self.run_backtest_job(job.id)
         return jobs
@@ -494,14 +498,16 @@ class DashboardJobService:
             return result
 
     async def process_export_jobs(self, *, limit: int = 3) -> list[UserExportJob]:
-        jobs = (
-            await self.session.scalars(
-                select(UserExportJob)
-                .where(UserExportJob.status == "queued")
-                .order_by(UserExportJob.created_at.asc())
-                .limit(limit)
-            )
-        ).all()
+        jobs = list(
+            (
+                await self.session.scalars(
+                    select(UserExportJob)
+                    .where(UserExportJob.status == "queued")
+                    .order_by(UserExportJob.created_at.asc())
+                    .limit(limit)
+                )
+            ).all()
+        )
         for job in jobs:
             await self.run_export_job(job.id)
         return jobs

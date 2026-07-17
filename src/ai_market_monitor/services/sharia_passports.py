@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -15,6 +15,7 @@ from ai_market_monitor.db.models import (
     AssetShariaStatusHistory,
     AuditEvent,
     CanonicalAsset,
+    DashboardPreference,
     ExchangeMarket,
     PublishedAssetAssessment,
     ReviewCase,
@@ -49,20 +50,6 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
 )
 
-USE_CASES = (
-    ("spot_holding", "Spot holding", "spot_ownership_and_monitoring"),
-    ("spot_trading", "Spot trading", "spot_ownership_and_monitoring"),
-    ("native_staking", "Native staking", "native_staking"),
-    ("delegated_staking", "Delegated staking", "native_staking"),
-    ("third_party_yield", "Third-party yield", "yield_products"),
-    ("lending_borrowing", "Lending or borrowing", "third_party_lending"),
-    ("margin", "Margin", "leveraged_products"),
-    ("futures_derivatives", "Futures and derivatives", "futures_perpetuals_derivatives"),
-    ("wrapped_bridged", "Wrapped or bridged asset", "wrapped_bridged_representations"),
-    ("exchange_earn", "Exchange earn products", "yield_products"),
-    ("other_material_uses", "Other material uses", "other_material_uses"),
-)
-
 
 class ShariaPassportReadService:
     """Build the single customer-facing Passport read model from immutable records."""
@@ -80,12 +67,27 @@ class ShariaPassportReadService:
         user_id: UUID | None = None,
     ) -> AssetPassportResponse:
         base = await self.screening.passport(asset, methodology_id=methodology_id)
-        publication = await self.session.scalar(
-            select(PublishedAssetAssessment)
-            .where(PublishedAssetAssessment.asset_assessment_id == base.assessment.id)
-            .order_by(PublishedAssetAssessment.version.desc())
-            .limit(1)
+        publication_query = select(PublishedAssetAssessment).where(
+            PublishedAssetAssessment.asset_assessment_id == base.assessment.id
         )
+        if self.settings.is_deployed:
+            publication_query = publication_query.where(
+                or_(
+                    and_(
+                        PublishedAssetAssessment.is_active.is_(True),
+                        PublishedAssetAssessment.publication_state == "published",
+                    ),
+                    PublishedAssetAssessment.publication_state == "safety_hold",
+                )
+            )
+        publication = await self.session.scalar(
+            publication_query.order_by(PublishedAssetAssessment.version.desc()).limit(1)
+        )
+        if self.settings.is_deployed and publication is None:
+            raise ShariaScreeningError(
+                "passport_not_published",
+                "No published Passport record is available for this asset and methodology.",
+            )
         return await self._enrich(base, publication=publication, user_id=user_id)
 
     async def historical(
@@ -153,7 +155,20 @@ class ShariaPassportReadService:
             user_id=user_id,
         )
         current_status = enriched.historical.current_status
-        enriched.can_create_watch_plan = current_status in DEFAULT_ALLOWED_STATUSES
+        current_passport = (
+            await self.current(
+                current.canonical_asset,
+                methodology_id=current.methodology_id,
+                user_id=user_id,
+            )
+            if current is not None and current_publication is not None
+            else None
+        )
+        enriched.can_create_watch_plan = bool(
+            current_status in DEFAULT_ALLOWED_STATUSES
+            and current_passport is not None
+            and current_passport.can_create_watch_plan
+        )
         if not enriched.can_create_watch_plan:
             enriched.restriction_explanation = (
                 "The historical version remains available as evidence, but a new Watch Plan "
@@ -218,6 +233,8 @@ class ShariaPassportReadService:
             main_qualification=passport.main_qualification,
             freshness=passport.freshness,
             next_review_at=passport.next_review_at,
+            evidence_expires_at=passport.evidence_expires_at,
+            source_scan_frequency_hours=passport.source_scan_frequency_hours,
             review_authority=passport.assessment.reviewed_by,
             decision_date=passport.decision_date,
             publication_date=passport.publication_date,
@@ -396,7 +413,7 @@ class ShariaPassportReadService:
                 snapshot.get("hilalmarkets_factual_information_profile") or {}
             ),
             separate_use_status={
-                str(key): str(value)
+                str(key): value
                 for key, value in dict(snapshot.get("separate_use_status") or {}).items()
             },
             reviewed_dimensions=list(snapshot.get("reviewed_dimensions") or []),
@@ -482,11 +499,18 @@ class ShariaPassportReadService:
         identity = self._identity(base, asset, markets)
         profile = dict(base.hilalmarkets_factual_information_profile or {})
         official = dict(base.official_sc_malaysia_reference or {})
-        next_review = _parse_datetime(profile.get("next_review_date"))
+        next_review = _parse_datetime(
+            profile.get("next_governance_review_at") or profile.get("next_review_date")
+        )
+        evidence_expires_at = _parse_datetime(profile.get("evidence_expires_at"))
+        source_scan_frequency_hours = profile.get("source_monitor_scan_frequency_hours")
         last_verified = _parse_datetime(profile.get("last_evidence_verification"))
         freshness = _freshness(
             status=base.assessment.status,
-            next_review_at=next_review,
+            next_review_at=min(
+                [value for value in (next_review, evidence_expires_at) if value is not None],
+                default=None,
+            ),
             valid_until=base.assessment.valid_until,
         )
         reasons = list(snapshot.get("key_reasons") or [])
@@ -509,10 +533,37 @@ class ShariaPassportReadService:
         )
         timeline = self._timeline(base, publication, decision_record)
         references = await self._historical_references(publication, user_id=user_id)
-        can_create = base.assessment.status in DEFAULT_ALLOWED_STATUSES
+        spot_scope = dict(base.separate_use_status or {}).get(
+            "spot_ownership_and_monitoring"
+        )
+        spot_scope_decision = (
+            str(spot_scope.get("decision") or "")
+            if isinstance(spot_scope, dict)
+            else ""
+        )
+        user_allowed_statuses = await self._user_allowed_statuses(user_id)
+        active_spot_market = any(
+            row.is_active and row.market_type.casefold() == "spot" for row in markets
+        )
+        identity_verified = bool(identity and identity.identity_state == "verified")
+        can_create = bool(
+            base.assessment.status in DEFAULT_ALLOWED_STATUSES
+            and base.assessment.status in user_allowed_statuses
+            and publication is not None
+            and publication.is_active
+            and identity_verified
+            and active_spot_market
+            and spot_scope_decision in {"covered", "qualified"}
+        )
         base.identity = identity
         base.freshness = freshness
         base.next_review_at = next_review
+        base.evidence_expires_at = evidence_expires_at
+        base.source_scan_frequency_hours = (
+            int(source_scan_frequency_hours)
+            if isinstance(source_scan_frequency_hours, int | float)
+            else None
+        )
         base.last_verified_at = last_verified or base.assessment.reviewed_at
         base.decision_date = (
             _parse_datetime(official.get("decision_date"))
@@ -536,12 +587,39 @@ class ShariaPassportReadService:
             None
             if can_create
             else (
-                "A Watch Plan cannot be created while this asset is under review, excluded, "
-                "disputed, or missing required information. Existing affected Watch Plans "
-                "follow the user's configured safety policy."
+                "A Watch Plan requires an allowed current status, an active exact spot-market "
+                "mapping, explicit reviewed spot-use coverage, permission under your selected "
+                "screening policy, and no safety hold."
             )
         )
         return base
+
+    async def _user_allowed_statuses(
+        self,
+        user_id: UUID | None,
+    ) -> set[ShariaAssetStatus]:
+        if user_id is None:
+            return set(DEFAULT_ALLOWED_STATUSES)
+        preference = await self.session.scalar(
+            select(DashboardPreference).where(DashboardPreference.user_id == user_id)
+        )
+        if preference is None:
+            return set(DEFAULT_ALLOWED_STATUSES)
+        values = dict(preference.notification_preferences or {})
+        nested = values.get("sharia")
+        policy = nested if isinstance(nested, dict) else {}
+        raw = policy.get("allowed_statuses", values.get("allowed_sharia_statuses"))
+        if raw is None:
+            return set(DEFAULT_ALLOWED_STATUSES)
+        if not isinstance(raw, list):
+            return set()
+        allowed: set[ShariaAssetStatus] = set()
+        for value in raw:
+            try:
+                allowed.add(ShariaAssetStatus(str(value)))
+            except ValueError:
+                continue
+        return allowed
 
     async def _historical_references(
         self,
@@ -647,19 +725,50 @@ class ShariaPassportReadService:
     ) -> list[PassportUseCoverage]:
         raw = dict(base.separate_use_status or {})
         rows: list[PassportUseCoverage] = []
-        for key, label, source_key in USE_CASES:
-            value = str(raw.get(source_key) or "not_covered_by_this_decision")
-            status, reason = _coverage_status(value)
+        for key, value in raw.items():
+            normalized_key = str(key)
+            supporting_reference: str | None
+            if isinstance(value, dict):
+                status = str(value.get("decision") or "under_review")
+                reason = str(value.get("reason") or "No reviewer reason was retained.")
+                label = str(
+                    value.get("label")
+                    or normalized_key.replace("_", " ").title()
+                )
+                supporting_reference = "Reviewer-approved use decision"
+                row_verified_at = _parse_datetime(value.get("verified_at"))
+                source_ids = [str(item) for item in value.get("source_snapshot_ids", [])]
+                criterion_ids = [str(item) for item in value.get("criterion_keys", [])]
+                scope = str(value.get("scope") or "") or None
+                try:
+                    reviewer_user_id = UUID(str(value["reviewer_user_id"]))
+                except (KeyError, TypeError, ValueError):
+                    reviewer_user_id = None
+            else:
+                status, reason = _coverage_status(
+                    str(value or "not_covered_by_this_decision")
+                )
+                label = normalized_key.replace("_", " ").title()
+                supporting_reference = "Legacy retained use decision"
+                row_verified_at = None
+                source_ids = []
+                criterion_ids = []
+                scope = None
+                reviewer_user_id = None
             rows.append(
                 PassportUseCoverage(
-                    key=key,
+                    key=normalized_key,
                     label=label,
                     status=status,
                     reason=reason,
-                    supporting_reference=(
-                        "Asset-level methodology decision" if source_key in raw else None
+                    supporting_reference=supporting_reference,
+                    last_verified_at=(
+                        row_verified_at or verified_at or base.assessment.reviewed_at
                     ),
-                    last_verified_at=verified_at or base.assessment.reviewed_at,
+                    source_ids=source_ids,
+                    criterion_ids=criterion_ids,
+                    scope=scope,
+                    reviewer_user_id=reviewer_user_id,
                 )
             )
         return rows
@@ -744,11 +853,15 @@ class ShariaPassportReadService:
                 else base.assessment.reviewed_by
             ),
             actor_role=decision.actor_role,
+            methodology_version=decision.methodology_version,
+            methodology_criteria_version=decision.methodology_criteria_version,
+            methodology_criteria_hash=decision.methodology_criteria_hash,
             decision=decision.decision,
             reason=decision.reason,
             qualifications=list(decision.qualifications or base.assessment.qualifications),
             evidence_snapshot_ids=list(decision.evidence_snapshot_ids or []),
             criterion_decisions=list(decision.criterion_decisions or []),
+            use_case_decisions=list(decision.use_case_decisions or []),
             acknowledged_gaps=list(decision.acknowledged_gaps or []),
             decided_at=decision.created_at,
             published_by_user_id=publication.published_by_user_id,
@@ -840,7 +953,11 @@ def _coverage_status(value: str) -> tuple[str, str]:
     normalized = value.casefold()
     if normalized in {"included", "covered", "shariah_compliant"}:
         return "covered", "Included within the recorded decision scope."
-    if "qualification" in normalized or "information_only" in normalized:
+    if (
+        normalized == "qualified"
+        or "qualification" in normalized
+        or "information_only" in normalized
+    ):
         return "covered_with_qualification", "Separate terms or evidence still require review."
     if "under_review" in normalized:
         return "under_review", "This use is currently under review."

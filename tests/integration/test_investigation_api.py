@@ -1,11 +1,18 @@
+from ai_market_monitor.db.models import User
 from tests.factories import candle_sets, load_strategy
 
 
 async def test_why_no_alert_endpoint_returns_deterministic_reconstruction(test_context):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Forensic user")
+        session.add(user)
+        await session.commit()
+        user_id = user.id
     strategy = load_strategy()
     sets = candle_sets(volume_multiplier=1.0)
     response = await test_context["client"].post(
         "/api/v1/investigations/why-no-alert",
+        headers={"X-User-ID": str(user_id)},
         json={
             "user_id": "user-1",
             "strategy_id": "strategy-1",
@@ -47,3 +54,11 @@ async def test_why_no_alert_endpoint_returns_deterministic_reconstruction(test_c
     assert body["evaluated"] is True
     assert "relative_volume" in body["conditions_failed"]
     assert body["proof"]["conditions"][0]["actual_value"] is not None
+
+
+async def test_why_no_alert_endpoint_rejects_unauthenticated_requests(test_context):
+    response = await test_context["client"].post(
+        "/api/v1/investigations/why-no-alert",
+        json={},
+    )
+    assert response.status_code == 401

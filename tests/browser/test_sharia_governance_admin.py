@@ -86,6 +86,20 @@ def test_sharia_governance_workspace_visual_qa(
     assert animation_duration in {"0s", "1e-05s"}
     page.emulate_media(reduced_motion="no-preference")
     page.set_viewport_size({"width": 900, "height": 1000})
+    for select_box in page.locator('select[name="criterion_outcome"]').all():
+        select_box.select_option("pass")
+    for explanation in page.locator('textarea[name="criterion_reason"]').all():
+        explanation.fill("The retained evidence was reviewed for this required criterion.")
+    use_statuses = {
+        "asset_level_sc_reference": "covered",
+        "spot_ownership_and_monitoring": "qualified",
+        "native_staking": "not_applicable",
+    }
+    for fieldset in page.locator('select[name="use_decision"]').all():
+        key = fieldset.locator("xpath=preceding-sibling::input[@name='use_key']").input_value()
+        fieldset.select_option(use_statuses.get(key, "not_covered"))
+    for explanation in page.locator('textarea[name="use_reason"]').all():
+        explanation.fill("This use was explicitly reviewed against the retained evidence.")
     page.get_by_label("Final written reasoning").fill(
         "The retained source, identity mapping, dossier, and criteria were reviewed."
     )

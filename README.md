@@ -1,10 +1,11 @@
 # HilalMarkets
 
 HilalMarkets is a screened-market intelligence and monitoring platform for crypto spot
-traders. Users describe a Watchlist, approve its structured interpretation, preview it against
-recent market data, and receive evidence-backed Telegram or Discord alerts. Version one never places trades.
+traders. Users describe a Watch Plan, approve its structured interpretation, preview it against
+recent market data, and receive evidence-backed in-app, Telegram, WhatsApp, or Discord alerts.
+Version one never places trades.
 
-The web Watchlist Builder starts with AI Setup Chat. The server-side interviewer keeps a durable
+The guided Watch Plan builder starts with AI Setup Chat. The server-side interviewer keeps a durable
 conversation, asks for measurable definitions, compiles only into the validated strategy DSL, shows
 confidence/lint/assumption evidence, and creates an immutable approved strategy version only after
 explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
@@ -18,7 +19,7 @@ in application services; the model never receives approval or activation tools. 
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
-persistent Watchlists, workers, opportunity evidence, and alerts share one versioned methodology
+persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
 and universe resolver. The SC Malaysia workflow imports only explicit asset-level source rows,
 verifies canonical identity, builds a factual evidence dossier, and creates an administrator review
 case. No asset is customer-visible until an application `ADMIN` approves publication. AI cannot set
@@ -38,6 +39,9 @@ Public Pricing and authenticated Billing read the same plan catalog. Optional an
 by default; Consent Mode v2 denied defaults execute before the optional GTM loader, and users can
 withdraw consent through Cookie Settings. See
 [docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
+The current closed-beta correction status, including verification blockers and required staging
+evidence, is recorded in
+[docs/LAUNCH_READINESS_CORRECTION_REPORT.md](docs/LAUNCH_READINESS_CORRECTION_REPORT.md).
 
 If a user confirms a candle-computable mechanic that is not in the registry, HilalMarkets can create a
 user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
@@ -85,7 +89,15 @@ The production page map, exact prototype asset mapping, and UI verification comm
 component, UX, and QA references are preserved under [docs/hilalmarkets-ui](docs/hilalmarkets-ui/README.md).
 
 Current beta infrastructure includes idempotent scheduled scans, shared CCXT REST clients,
-deterministic proof persistence, setup lifecycle records, Telegram webhook delivery, Discord HTTP
-delivery/interactions, and Stripe checkout/webhook support. See
+deterministic proof persistence, setup lifecycle records, Telegram webhook delivery, official Meta
+WhatsApp Cloud API delivery, Discord HTTP delivery/interactions, and provider-capability-aware
+billing. WhatsApp is disabled by default and market-opportunity messages require both an explicit
+feature flag and a configured approved template. See
+[docs/WHATSAPP_CLOUD_API_RUNBOOK.md](docs/WHATSAPP_CLOUD_API_RUNBOOK.md). The selected NOWPayments launch path
+uses one-time 30-day access with manual renewal; Stripe recurring support remains optional. See
 [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) for the required fail-closed
 configuration.
+
+The `.github/workflows/release-gate.yml` workflow is the release authority for automated checks.
+Committed Markdown reports are explanatory records, not test proof. Require every workflow job in
+branch protection before merging a release candidate.

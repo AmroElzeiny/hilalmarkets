@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.api.dependencies import AdminPrincipal, get_admin_principal
+from ai_market_monitor.api.route_security import public_api
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import Incident, IntegrationHealth, MarketDataHealth
 from ai_market_monitor.db.models.enums import IncidentStatus
@@ -11,6 +13,7 @@ router = APIRouter(prefix="/status", tags=["status"])
 
 
 @router.get("/summary")
+@public_api("Exposes a coarse service-status summary without user or provider internals.")
 async def status_summary(session: AsyncSession = Depends(get_db_session)) -> dict:
     summary = await ReliabilityService(session).status_summary()
     return {
@@ -24,7 +27,10 @@ async def status_summary(session: AsyncSession = Depends(get_db_session)) -> dic
 
 
 @router.get("/market-data")
-async def market_data_status(session: AsyncSession = Depends(get_db_session)) -> dict:
+async def market_data_status(
+    _: AdminPrincipal = Depends(get_admin_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
     rows = (
         await session.scalars(
             select(MarketDataHealth).order_by(MarketDataHealth.checked_at.desc()).limit(100)
@@ -51,7 +57,10 @@ async def market_data_status(session: AsyncSession = Depends(get_db_session)) ->
 
 
 @router.get("/integrations")
-async def integration_status(session: AsyncSession = Depends(get_db_session)) -> dict:
+async def integration_status(
+    _: AdminPrincipal = Depends(get_admin_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
     rows = (
         await session.scalars(
             select(IntegrationHealth).order_by(IntegrationHealth.checked_at.desc()).limit(100)
@@ -74,7 +83,10 @@ async def integration_status(session: AsyncSession = Depends(get_db_session)) ->
 
 
 @router.get("/incidents")
-async def incidents(session: AsyncSession = Depends(get_db_session)) -> dict:
+async def incidents(
+    _: AdminPrincipal = Depends(get_admin_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
     rows = (
         await session.scalars(
             select(Incident)

@@ -202,6 +202,7 @@ class IntegrationTestResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     integration: Mapped[str] = mapped_column(String(40), nullable=False)
     connection_id: Mapped[str | None] = mapped_column(String(80))
     destination: Mapped[str | None] = mapped_column(String(160))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(80))
     error_detail: Mapped[str | None] = mapped_column(Text)

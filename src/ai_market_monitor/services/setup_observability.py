@@ -34,6 +34,7 @@ from ai_market_monitor.db.models import (
     StrategyCondition,
     StrategyVersion,
     TelegramConnection,
+    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     ConditionOutcome,
@@ -654,14 +655,20 @@ class SetupObservabilityService:
                 technical_causes.append(
                     {
                         "code": "cycle_incomplete",
-                        "message": f"{cycle.symbols_scanned}/{cycle.symbols_expected} symbols were evaluated in the latest cycle.",
+                        "message": (
+                            f"{cycle.symbols_scanned}/{cycle.symbols_expected} symbols "
+                            "were evaluated in the latest cycle."
+                        ),
                     }
                 )
             if cycle.provider_errors:
                 technical_causes.append(
                     {
                         "code": "provider_errors",
-                        "message": f"{cycle.provider_errors} provider errors occurred in the latest cycle.",
+                        "message": (
+                            f"{cycle.provider_errors} provider errors occurred in the "
+                            "latest cycle."
+                        ),
                     }
                 )
             if cycle.stale_candles or cycle.missing_candles:
@@ -686,7 +693,10 @@ class SetupObservabilityService:
             technical_causes.append(
                 {
                     "code": "unsupported_rules",
-                    "message": f"{unsupported} unsupported rule{'s' if unsupported != 1 else ''} block reliable monitoring.",
+                    "message": (
+                        f"{unsupported} unsupported rule"
+                        f"{'s' if unsupported != 1 else ''} block reliable monitoring."
+                    ),
                 }
             )
         if not channels:
@@ -701,7 +711,10 @@ class SetupObservabilityService:
             technical_causes.append(
                 {
                     "code": "operational",
-                    "message": "Worker, provider coverage, and notification configuration are operating normally.",
+                    "message": (
+                        "Worker, provider coverage, and notification configuration are "
+                        "operating normally."
+                    ),
                 }
             )
 
@@ -744,7 +757,10 @@ class SetupObservabilityService:
             strategy_causes.append(
                 {
                     "code": "unsupported_conditions",
-                    "message": "The approved version contains unsupported or provider-limited conditions.",
+                    "message": (
+                        "The approved version contains unsupported or provider-limited "
+                        "conditions."
+                    ),
                 }
             )
         elif unavailable and evaluations and unavailable / evaluations >= 0.2:
@@ -752,7 +768,10 @@ class SetupObservabilityService:
             strategy_causes.append(
                 {
                     "code": "provider_limited",
-                    "message": f"{round(unavailable / evaluations * 100)}% of condition evaluations lacked required data.",
+                    "message": (
+                        f"{round(unavailable / evaluations * 100)}% of condition "
+                        "evaluations lacked required data."
+                    ),
                 }
             )
         elif int(scan_count or 0) < self.settings.observability_minimum_sample_size:
@@ -760,7 +779,11 @@ class SetupObservabilityService:
             strategy_causes.append(
                 {
                     "code": "low_sample",
-                    "message": f"Only {int(scan_count or 0)} evaluations are available; {self.settings.observability_minimum_sample_size} are needed for a stable classification.",
+                    "message": (
+                        f"Only {int(scan_count or 0)} evaluations are available; "
+                        f"{self.settings.observability_minimum_sample_size} are needed "
+                        "for a stable classification."
+                    ),
                 }
             )
         elif not int(confirmed_count or 0) and int(near_miss_count or 0) >= 3:
@@ -769,7 +792,11 @@ class SetupObservabilityService:
             strategy_causes.append(
                 {
                     "code": "no_confirmations",
-                    "message": f"No confirmations in 14 days; {top.condition_label if top else 'one required rule'} blocked most near-misses.",
+                    "message": (
+                        "No confirmations in 14 days; "
+                        f"{top.condition_label if top else 'one required rule'} blocked "
+                        "most near-misses."
+                    ),
                 }
             )
         elif int(scan_count or 0) and int(confirmed_count or 0) / int(scan_count) >= 0.25:
@@ -777,7 +804,10 @@ class SetupObservabilityService:
             strategy_causes.append(
                 {
                     "code": "high_confirmation_rate",
-                    "message": f"{round(int(confirmed_count or 0) / int(scan_count) * 100)}% of evaluated candidates confirmed in the last 14 days.",
+                    "message": (
+                        f"{round(int(confirmed_count or 0) / int(scan_count) * 100)}% "
+                        "of evaluated candidates confirmed in the last 14 days."
+                    ),
                 }
             )
         elif alerts >= 50:
@@ -792,7 +822,10 @@ class SetupObservabilityService:
             strategy_causes.append(
                 {
                     "code": "balanced_observation",
-                    "message": "Observed completion, near-miss, and alert rates are within current deterministic guardrails.",
+                    "message": (
+                        "Observed completion, near-miss, and alert rates are within "
+                        "current deterministic guardrails."
+                    ),
                 }
             )
         actions = [
@@ -1036,16 +1069,28 @@ class SetupObservabilityService:
             reason = f"The setup confirmed, but {failed_delivery.channel.value} delivery failed."
         elif suppressed:
             category = "cooldown_or_exclusion"
-            reason = f"The setup confirmed, but notification rules suppressed it: {suppressed.reason_code.replace('_', ' ')}."
+            reason = (
+                "The setup confirmed, but notification rules suppressed it: "
+                f"{suppressed.reason_code.replace('_', ' ')}."
+            )
         elif unavailable:
             category = "data_provider_issue"
-            reason = f"No alert was sent because required data was unavailable for {unavailable[0][1].label}."
+            reason = (
+                "No alert was sent because required data was unavailable for "
+                f"{unavailable[0][1].label}."
+            )
         elif failed_required:
             category = "strategy_condition_failure"
-            reason = f"No alert was sent because {len(failed_required)} required condition{'s' if len(failed_required) != 1 else ''} did not pass."
+            reason = (
+                f"No alert was sent because {len(failed_required)} required condition"
+                f"{'s' if len(failed_required) != 1 else ''} did not pass."
+            )
         elif not alerts:
             category = "completed_without_alert"
-            reason = "No notification record exists for this lifecycle. The retained evidence does not show a completed required rule set."
+            reason = (
+                "No notification record exists for this lifecycle. The retained evidence "
+                "does not show a completed required rule set."
+            )
         elif successful:
             category = "alert_delivered"
             reason = "A notification was delivered successfully for this lifecycle."
@@ -1137,7 +1182,9 @@ class SetupObservabilityService:
                 "view_full_lifecycle": f"/dashboard/lifecycles?setup={setup.id}",
                 "open_canvas": f"/dashboard/strategies/{strategy.id}/builder",
                 "refine_chat": f"/dashboard/strategies/new?refine={strategy.id}",
-                "view_monitor_health": f"/dashboard/lifecycles?monitor={strategy.id}#monitor-health",
+                "view_monitor_health": (
+                    f"/dashboard/lifecycles?monitor={strategy.id}#monitor-health"
+                ),
                 "retry_delivery_id": str(failed_delivery.id)
                 if failed_delivery and not successful
                 else None,
@@ -1199,7 +1246,24 @@ class SetupObservabilityService:
                 DiscordConnection.status == ConnectionStatus.ACTIVE,
             )
         )
-        return [name for name, present in (("telegram", telegram), ("discord", discord)) if present]
+        whatsapp = await self.session.scalar(
+            select(WhatsAppConnection.id).where(
+                WhatsAppConnection.user_id == user_id,
+                WhatsAppConnection.status == ConnectionStatus.ACTIVE,
+                WhatsAppConnection.alerts_enabled.is_(True),
+                WhatsAppConnection.verified_at.is_not(None),
+                WhatsAppConnection.opt_out_at.is_(None),
+            )
+        )
+        return [
+            name
+            for name, present in (
+                ("telegram", telegram),
+                ("whatsapp", whatsapp),
+                ("discord", discord),
+            )
+            if present
+        ]
 
     async def _latest_aggregates(self, version_id: UUID) -> list[ConditionObservabilityAggregate]:
         latest = await self.session.scalar(
@@ -1404,7 +1468,10 @@ class GroundedObservabilityExplainer:
                 response = await client.post(
                     "/responses",
                     headers={
-                        "Authorization": f"Bearer {self.settings.openai_api_key.get_secret_value()}",
+                        "Authorization": (
+                            "Bearer "
+                            f"{self.settings.openai_api_key.get_secret_value()}"
+                        ),
                         "Content-Type": "application/json",
                     },
                     json=request,
@@ -1417,8 +1484,12 @@ class GroundedObservabilityExplainer:
 
     @staticmethod
     def _fallback(payload: dict[str, Any]) -> str:
+        primary_reason = payload.get(
+            "primary_reason",
+            "The retained evidence does not show why no alert was sent.",
+        )
         return (
-            f"{payload.get('primary_reason', 'The retained evidence does not show why no alert was sent.')} "
+            f"{primary_reason} "
             f"The monitor evaluated {payload.get('symbol', 'this symbol')} on "
             f"{payload.get('timeframe', 'the configured timeframe')}. "
             "This explanation describes monitoring evidence only, not a trading recommendation."

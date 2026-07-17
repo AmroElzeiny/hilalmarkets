@@ -453,6 +453,30 @@ strong{color:var(--ink)}
 .integration-card{padding:24px;border:1px solid var(--line);border-radius:21px;background:#fff}
 .integration-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 .integration-details{padding:14px;background:#f5f8f6;border-radius:14px;margin:18px 0}
+.whatsapp-integration-card{grid-column:span 1}
+.whatsapp-connect-form,.whatsapp-connected-panel{display:grid;gap:16px;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.whatsapp-category-fieldset{margin:0;padding:0;border:0;min-width:0}
+.whatsapp-category-fieldset legend{margin-bottom:10px;font-size:.88rem;font-weight:700;color:var(--ink)}
+.whatsapp-category-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.whatsapp-category-grid.compact{display:flex;flex-wrap:wrap}
+.whatsapp-category-option{display:flex;align-items:flex-start;gap:10px;min-width:0;padding:12px;border:1px solid #d3ded9;border-radius:13px;background:#fff;cursor:pointer;transition:border-color .2s,background .2s,box-shadow .2s}
+.whatsapp-category-option:hover,.whatsapp-category-option:has(input:checked){border-color:var(--emerald-600);background:var(--emerald-50);box-shadow:0 8px 22px rgba(8,47,41,.06)}
+.whatsapp-category-option input{margin-top:4px;accent-color:var(--emerald-700)}
+.whatsapp-category-option span{display:grid;min-width:0}
+.whatsapp-category-option strong{font-size:.84rem}
+.whatsapp-category-option small{color:var(--muted);font-size:.72rem;line-height:1.35}
+.whatsapp-category-option.is-disabled,.chip.is-disabled{opacity:.58;cursor:not-allowed}
+.whatsapp-consent{display:flex;align-items:flex-start;gap:11px;padding:14px;border:1px solid #cfe0da;border-radius:14px;background:var(--emerald-50);font-size:.79rem;line-height:1.5;color:var(--muted)}
+.whatsapp-consent input{margin-top:4px;accent-color:var(--emerald-700)}
+.whatsapp-consent a{color:var(--emerald-700);font-weight:700;text-decoration:underline;text-underline-offset:2px}
+.whatsapp-link-result{display:grid;gap:10px;padding:16px;border:1px solid #b9d8cd;border-radius:15px;background:var(--emerald-50)}
+.whatsapp-link-result p{margin:0;font-size:.84rem}
+.whatsapp-link-result .btn{justify-self:start}
+.whatsapp-link-result small{color:var(--muted)}
+.whatsapp-actions{align-items:stretch}
+.danger-link{color:var(--red)}
+.danger-link:hover{background:var(--red-bg)}
+.integration-details [data-whatsapp-error-row] strong{color:var(--red);overflow-wrap:anywhere}
 .plan-current{padding:26px;border-radius:24px;background:var(--emerald-900);color:#fff;display:grid;grid-template-columns:1fr auto;align-items:center;gap:25px}
 .plan-current p{color:#bed0ca}
 .usage-row{display:grid;grid-template-columns:170px 1fr 80px;align-items:center;gap:14px;padding:11px 0}
@@ -550,6 +574,8 @@ strong{color:var(--ink)}
   .choice-grid{grid-template-columns:1fr}
   .onboarding-main{padding:24px 14px}.onboarding-card{padding:24px}
   .auth-form-wrap{padding:35px 20px}
+  .whatsapp-category-grid{grid-template-columns:1fr}
+  .whatsapp-actions .btn{flex:1 1 145px}
 }
 @media(max-width:480px){
   .hero h1{font-size:2.55rem}.hero-copy>p{font-size:1rem}
@@ -779,6 +805,16 @@ body.hilal-dashboard .readiness-candidate.state-forming{
 .market-passport-prices span{margin-top:3px}
 .passport-quick-dialog{width:min(800px,calc(100% - 28px));max-height:calc(100vh - 28px);padding:0;border:0;border-radius:26px;background:transparent;box-shadow:var(--shadow-lg);overflow:auto}
 .passport-quick-dialog::backdrop{background:rgba(8,47,41,.58);backdrop-filter:blur(5px)}
+.asset-removal-dialog{width:min(620px,calc(100% - 28px));padding:0;border:0;border-radius:24px;background:transparent;box-shadow:var(--shadow-lg)}
+.asset-removal-dialog::backdrop{background:rgba(8,47,41,.58);backdrop-filter:blur(5px)}
+.asset-removal-shell{position:relative;padding:26px;border:1px solid rgba(255,255,255,.7);border-radius:24px;background:var(--ivory-2)}
+.asset-removal-shell h2{margin:6px 42px 8px 0}.asset-removal-shell>p{color:var(--muted)}
+.asset-removal-close{position:absolute;top:16px;right:16px;background:var(--white)}
+.asset-removal-plans{display:grid;gap:8px;margin:18px 0}
+.asset-removal-plan{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 14px;border:1px solid var(--line);border-radius:14px;background:var(--white)}
+.asset-removal-plan strong,.asset-removal-plan small{display:block}.asset-removal-plan small{margin-top:2px;color:var(--muted)}
+.asset-removal-warning{margin:16px 0}.asset-removal-actions{justify-content:flex-end;margin-top:18px}
+.btn-danger{border-color:var(--red);background:var(--red);color:var(--white)}.btn-danger:hover{filter:brightness(.94)}
 .passport-quick-shell{position:relative;min-height:290px;padding:26px;border:1px solid rgba(255,255,255,.7);border-radius:26px;background:var(--ivory-2)}
 .passport-quick-close{position:absolute;z-index:3;top:16px;right:16px;background:rgba(255,255,255,.9)}
 .passport-quick-loading{display:grid;gap:13px;padding:20px 0}
@@ -817,6 +853,8 @@ body.hilal-dashboard .readiness-candidate.state-forming{
   .market-passport-hero>.badge{grid-column:1/-1;justify-self:start}
   .market-passport-facts,.market-passport-prices{grid-template-columns:1fr 1fr}
   .passport-quick-dialog{width:100%;max-width:none;max-height:100%;height:100%;margin:0;border-radius:0}
+  .asset-removal-dialog{width:100%;max-width:none;height:100%;max-height:100%;margin:0;border-radius:0}
+  .asset-removal-shell{min-height:100%;padding:20px;border-radius:0}.asset-removal-actions{display:grid;grid-template-columns:1fr}.asset-removal-actions .btn{width:100%}
   .passport-quick-shell{min-height:100%;padding:18px;border-radius:0}
   .passport-quick-hero{align-items:flex-start;flex-direction:column;padding:20px 46px 20px 16px}
   .passport-quick-state{align-items:flex-start}
@@ -829,5 +867,6 @@ body.hilal-dashboard .readiness-candidate.state-forming{
 @media (prefers-reduced-motion:reduce){
   .live-market-skeleton i{animation:none}
   .passport-quick-skeleton{animation:none}
+  .asset-removal-dialog,.asset-removal-plan{transition:none}
   .live-quote,.live-market-row{transition:none}
 }

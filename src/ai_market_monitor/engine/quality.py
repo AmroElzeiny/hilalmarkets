@@ -83,7 +83,7 @@ def market_coverage_score(
     failures = max(0, data_failures)
     coverage_ratio = (scanned / eligible) if eligible else 0
     data_quality_ratio = max(0, scanned - failures) / scanned if scanned else 0
-    timeframe_ratio = 0
+    timeframe_ratio = 0.0
     if scanned:
         timeframe_ratio = (
             max(0, min(timeframes_covered, timeframes_required)) / timeframes_required

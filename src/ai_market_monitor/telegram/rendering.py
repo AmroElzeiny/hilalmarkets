@@ -65,8 +65,13 @@ def render_confirmed_alert(result: EvaluationResult) -> str:
             f"Targets: {', '.join(str(round(price, 6)) for price in target_prices)}\n"
             f"R:R: {risk.reward_to_risk:.2f}\n"
         )
-    required_completion = float(
-        proof.get("required_completion_percent", proof["setup_completion_score"])
+    required_completion_value = proof.get(
+        "required_completion_percent", proof["setup_completion_score"]
+    )
+    required_completion = (
+        float(required_completion_value)
+        if isinstance(required_completion_value, (int, float, str))
+        else 0.0
     )
     return (
         f"Research match confirmed: {escape(result.symbol)}\n"

@@ -163,6 +163,11 @@ from ai_market_monitor.db.models.verified_strategy import (
     StrategyTestRun,
     StrategyVersionVerification,
 )
+from ai_market_monitor.db.models.whatsapp import (
+    WhatsAppConnection,
+    WhatsAppConversationState,
+    WhatsAppWebhookReceipt,
+)
 
 __all__ = [
     "AIAnalysisSnapshot",
@@ -300,4 +305,7 @@ __all__ = [
     "UniverseOptimizationSnapshot",
     "UserStrategyPreference",
     "WebSession",
+    "WhatsAppConnection",
+    "WhatsAppConversationState",
+    "WhatsAppWebhookReceipt",
 ]

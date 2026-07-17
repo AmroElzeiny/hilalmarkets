@@ -44,6 +44,18 @@ app.conf.update(
             "task": "ai_market_monitor.retry_telegram_deliveries",
             "schedule": 60,
         },
+        "process-pending-whatsapp-webhooks": {
+            "task": "ai_market_monitor.process_pending_whatsapp_webhooks",
+            "schedule": 10,
+        },
+        "retry-whatsapp-deliveries-every-minute": {
+            "task": "ai_market_monitor.retry_whatsapp_deliveries",
+            "schedule": 60,
+        },
+        "cleanup-whatsapp-webhook-receipts-nightly": {
+            "task": "ai_market_monitor.cleanup_whatsapp_webhook_receipts",
+            "schedule": 24 * 60 * 60,
+        },
         "poll-telegram-updates": {
             "task": "ai_market_monitor.poll_telegram_updates",
             "schedule": settings.telegram_polling_interval_seconds,
@@ -111,6 +123,10 @@ app.conf.update(
         "retry-payment-emails-every-minute": {
             "task": "ai_market_monitor.retry_payment_emails",
             "schedule": 60,
+        },
+        "expire-ended-paid-access-every-five-minutes": {
+            "task": "ai_market_monitor.expire_ended_paid_access",
+            "schedule": 5 * 60,
         },
         "monitor-published-sharia-sources": {
             "task": "ai_market_monitor.monitor_published_sharia_sources",
@@ -185,6 +201,26 @@ def retry_telegram_deliveries() -> dict:
 @app.task(name="ai_market_monitor.poll_telegram_updates")
 def poll_telegram_updates() -> dict:
     return _run_async_task(_poll_telegram_updates())
+
+
+@app.task(name="ai_market_monitor.process_whatsapp_webhook_event")
+def process_whatsapp_webhook_event(receipt_id: str) -> dict:
+    return _run_async_task(_process_whatsapp_webhook_event(receipt_id))
+
+
+@app.task(name="ai_market_monitor.process_pending_whatsapp_webhooks")
+def process_pending_whatsapp_webhooks() -> dict:
+    return _run_async_task(_process_pending_whatsapp_webhooks())
+
+
+@app.task(name="ai_market_monitor.retry_whatsapp_deliveries")
+def retry_whatsapp_deliveries() -> dict:
+    return _run_async_task(_retry_whatsapp_deliveries())
+
+
+@app.task(name="ai_market_monitor.cleanup_whatsapp_webhook_receipts")
+def cleanup_whatsapp_webhook_receipts() -> dict:
+    return _run_async_task(_cleanup_whatsapp_webhook_receipts())
 
 
 @app.task(name="ai_market_monitor.process_discord_role_sync")
@@ -266,6 +302,11 @@ def send_sharia_review_reminders() -> dict:
 @app.task(name="ai_market_monitor.retry_payment_emails")
 def retry_payment_emails() -> dict:
     return _run_async_task(_retry_payment_emails())
+
+
+@app.task(name="ai_market_monitor.expire_ended_paid_access")
+def expire_ended_paid_access() -> dict:
+    return _run_async_task(_expire_ended_paid_access())
 
 
 @app.task(name="ai_market_monitor.retry_sharia_admin_telegram")
@@ -416,6 +457,106 @@ async def _poll_telegram_updates() -> dict:
         return {"processed": processed, "failed": failed}
     finally:
         await provider.close()
+
+
+async def _process_whatsapp_webhook_event(receipt_id: str) -> dict:
+    if not settings.whatsapp_enabled:
+        return {"receipt_id": receipt_id, "status": "disabled"}
+    if settings.whatsapp_adapter != "http" or settings.whatsapp_access_token is None:
+        return {
+            "receipt_id": receipt_id,
+            "status": "disabled",
+            "reason": "whatsapp_http_not_configured",
+        }
+    from uuid import UUID
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.whatsapp.adapter import WhatsAppCloudAdapter
+    from ai_market_monitor.whatsapp.service import WhatsAppWebhookProcessor
+
+    async with SessionFactory() as session:
+        result = await WhatsAppWebhookProcessor(
+            session, settings, WhatsAppCloudAdapter(settings)
+        ).process(UUID(receipt_id))
+        await session.commit()
+        return {"receipt_id": receipt_id, "status": result}
+
+
+async def _process_pending_whatsapp_webhooks() -> dict:
+    if not settings.whatsapp_enabled:
+        return {"processed": 0, "disabled": True}
+    from datetime import UTC, datetime
+
+    from sqlalchemy import or_, select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import WhatsAppWebhookReceipt
+
+    now = datetime.now(UTC)
+    async with SessionFactory() as session:
+        receipt_ids = list(
+            (
+                await session.scalars(
+                    select(WhatsAppWebhookReceipt.id)
+                    .where(
+                        WhatsAppWebhookReceipt.processing_status.in_(
+                            {"pending", "ready", "failed_retryable"}
+                        ),
+                        or_(
+                            WhatsAppWebhookReceipt.next_retry_at.is_(None),
+                            WhatsAppWebhookReceipt.next_retry_at <= now,
+                        ),
+                    )
+                    .order_by(WhatsAppWebhookReceipt.received_at.asc())
+                    .limit(50)
+                )
+            ).all()
+        )
+    results: dict[str, int] = {}
+    for receipt_id in receipt_ids:
+        outcome = await _process_whatsapp_webhook_event(str(receipt_id))
+        state = str(outcome.get("status") or "unknown")
+        results[state] = results.get(state, 0) + 1
+    return {"processed": len(receipt_ids), "outcomes": results}
+
+
+async def _retry_whatsapp_deliveries() -> dict:
+    if not settings.whatsapp_enabled:
+        return {"processed": 0, "disabled": True}
+    if settings.whatsapp_adapter != "http" or settings.whatsapp_access_token is None:
+        return {
+            "processed": 0,
+            "disabled": True,
+            "reason": "whatsapp_http_not_configured",
+        }
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.whatsapp.adapter import WhatsAppCloudAdapter
+    from ai_market_monitor.whatsapp.service import WhatsAppDeliveryService
+
+    async with SessionFactory() as session:
+        processed = await WhatsAppDeliveryService(
+            session, settings, WhatsAppCloudAdapter(settings)
+        ).process_due()
+        await session.commit()
+        return {"processed": len(processed)}
+
+
+async def _cleanup_whatsapp_webhook_receipts() -> dict:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import delete
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import WhatsAppWebhookReceipt
+
+    async with SessionFactory() as session:
+        result = await session.execute(
+            delete(WhatsAppWebhookReceipt).where(
+                WhatsAppWebhookReceipt.retain_until <= datetime.now(UTC)
+            )
+        )
+        await session.commit()
+        return {"deleted": int(result.rowcount or 0)}
 
 
 async def _process_discord_role_sync() -> dict:
@@ -718,6 +859,16 @@ async def _retry_payment_emails() -> dict:
 
     async with SessionFactory() as session:
         return await PaymentEmailOutboxService(session, settings).process_due()
+
+
+async def _expire_ended_paid_access() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.billing import BillingService
+
+    async with SessionFactory() as session:
+        expired = await BillingService(session, settings).expire_ended_access()
+        await session.commit()
+        return {"expired": expired}
 
 
 async def _monitor_published_sharia_sources() -> dict:

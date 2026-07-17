@@ -50,6 +50,17 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.services.interfaces import Candle
 
 
+def _operand_parameter(
+    operand: Operand,
+    key: str,
+    default: int | float | str | bool,
+) -> int | float | str | bool:
+    value = operand.parameters.get(key, default)
+    if isinstance(value, list):
+        raise ValueError(f"Operand parameter {key!r} must be a scalar value")
+    return value
+
+
 class StrategyRuleEngine:
     def __init__(
         self,
@@ -626,12 +637,12 @@ class StrategyRuleEngine:
         )
         if len(points) < confirmation_bars:
             return EvaluationState.PENDING, 0.0, {"confirmed_bars": 0}
-        evaluations: list[ConditionTreeEvaluation] = []
+        confirmation_results: list[ConditionTreeEvaluation] = []
         if isinstance(child, ConditionRule) and child.comparator in {
             Comparator.CROSSES_ABOVE,
             Comparator.CROSSES_BELOW,
         }:
-            evaluations.append(
+            confirmation_results.append(
                 self._node_at_time(
                     child,
                     strategy,
@@ -649,7 +660,7 @@ class StrategyRuleEngine:
                     )
                 }
             )
-            evaluations.extend(
+            confirmation_results.extend(
                 self._node_at_time(
                     steady,
                     strategy,
@@ -660,7 +671,7 @@ class StrategyRuleEngine:
                 for point in points[1:]
             )
         else:
-            evaluations = [
+            confirmation_results = [
                 self._node_at_time(
                     child,
                     strategy,
@@ -670,11 +681,11 @@ class StrategyRuleEngine:
                 )
                 for point in points
             ]
-        passed_count = sum(result.passed for result in evaluations)
+        passed_count = sum(result.passed for result in confirmation_results)
         state = (
             EvaluationState.PASSED
             if passed_count == confirmation_bars
-            else self._aggregate_failure_state(tuple(evaluations))
+            else self._aggregate_failure_state(tuple(confirmation_results))
         )
         return state, (passed_count / confirmation_bars) * 100, {"confirmed_bars": passed_count}
 
@@ -916,13 +927,13 @@ class StrategyRuleEngine:
             if operand.name == "historical_candles":
                 return len(candles)
             if operand.name == "average_volume":
-                period = int(operand.parameters.get("period", min(20, len(candles))))
+                period = int(_operand_parameter(operand, "period", min(20, len(candles))))
                 return sum(candle.volume for candle in candles[-period:]) / period
             if operand.name in {"volume_multiplier", "volume_ratio"}:
-                period = int(operand.parameters.get("period", 20))
+                period = int(_operand_parameter(operand, "period", 20))
                 return volume_ratio(candles, period=period)
             if operand.name in {"average_candle_volume", "min_average_candle_volume"}:
-                period = int(operand.parameters.get("period", min(20, len(candles))))
+                period = int(_operand_parameter(operand, "period", min(20, len(candles))))
                 return sum(candle.volume for candle in candles[-period:]) / period
             return context_metric(
                 operand.name or "",
@@ -941,7 +952,7 @@ class StrategyRuleEngine:
         raise KeyError(f"Unsupported operand: {operand.kind.value}:{operand.name}")
 
     @staticmethod
-    def _price_action(operand: Operand, candles: list[Candle]) -> bool:
+    def _price_action(operand: Operand, candles: list[Candle]) -> bool | float:
         search_parameters = StrategyRuleEngine._search_parameters(operand)
         if search_parameters:
             candidate = operand.model_copy(
@@ -959,7 +970,7 @@ class StrategyRuleEngine:
                 search_parameters,
                 StrategyRuleEngine._price_action,
             )
-        lookback = int(operand.parameters.get("lookback", 20))
+        lookback = int(_operand_parameter(operand, "lookback", 20))
         if len(candles) < lookback + 1:
             raise IndicatorWarmupError(f"{operand.name} requires {lookback + 1} candles")
         current = candles[-1]
@@ -997,7 +1008,7 @@ class StrategyRuleEngine:
             "change_of_character_bearish",
         }:
             return current.close < min(candle.low for candle in prior)
-        tolerance = float(operand.parameters.get("tolerance_percent", 0.2)) / 100
+        tolerance = float(_operand_parameter(operand, "tolerance_percent", 0.2)) / 100
         if operand.name == "breakout_retest":
             resistance = max(candle.high for candle in prior)
             return current.low <= resistance * (1 + tolerance) and current.close > resistance
@@ -1018,7 +1029,9 @@ class StrategyRuleEngine:
             touches = sum(1 for candle in prior if abs(candle.low - low) / low <= tolerance)
             return touches >= 2 and current.low <= low * (1 + tolerance)
         if operand.name == "consolidation_range":
-            maximum_range_percent = float(operand.parameters.get("maximum_range_percent", 5))
+            maximum_range_percent = float(
+                _operand_parameter(operand, "maximum_range_percent", 5)
+            )
             high = max(candle.high for candle in prior)
             low = min(candle.low for candle in prior)
             midpoint = (high + low) / 2
@@ -1026,7 +1039,7 @@ class StrategyRuleEngine:
                 raise IndicatorWarmupError("consolidation midpoint is zero")
             return ((high - low) / midpoint) * 100 <= maximum_range_percent
         if operand.name == "impulse_candle":
-            multiplier = float(operand.parameters.get("range_multiplier", 1.5))
+            multiplier = float(_operand_parameter(operand, "range_multiplier", 1.5))
             average_range = sum(candle.high - candle.low for candle in prior) / lookback
             if average_range <= 0:
                 raise IndicatorWarmupError("average candle range is zero")
@@ -1037,26 +1050,26 @@ class StrategyRuleEngine:
             return candle_range >= average_range * multiplier and closes_well
         if operand.name == "ma_retest":
             average = str(operand.parameters.get("average", "ema"))
-            period = int(operand.parameters.get("period", 20))
+            period = int(_operand_parameter(operand, "period", 20))
             value = ema(candles, period=period) if average == "ema" else sma(candles, period=period)
             direction = str(operand.parameters.get("direction", "long"))
             if direction == "short":
                 return current.high >= value * (1 - tolerance) and current.close < value
             return current.low <= value * (1 + tolerance) and current.close > value
         if operand.name == "vwap_retest":
-            period = int(operand.parameters.get("period", 20))
+            period = int(_operand_parameter(operand, "period", 20))
             value = vwap(candles, period=period)
             direction = str(operand.parameters.get("direction", "long"))
             if direction == "short":
                 return current.high >= value * (1 - tolerance) and current.close < value
             return current.low <= value * (1 + tolerance) and current.close > value
         if operand.name == "bollinger_squeeze":
-            period = int(operand.parameters.get("period", 20))
-            threshold = float(operand.parameters.get("max_bandwidth_percent", 5))
+            period = int(_operand_parameter(operand, "period", 20))
+            threshold = float(_operand_parameter(operand, "max_bandwidth_percent", 5))
             width_percent = bollinger_band(candles, period=period, component="width") * 100
             return width_percent <= threshold
         if operand.name == "bollinger_reentry":
-            period = int(operand.parameters.get("period", 20))
+            period = int(_operand_parameter(operand, "period", 20))
             if len(candles) < period + 1:
                 raise IndicatorWarmupError(f"bollinger_reentry requires {period + 1} candles")
             previous = candles[-2]
@@ -1068,7 +1081,7 @@ class StrategyRuleEngine:
             current_inside = current_lower <= current.close <= current_upper
             return previous_outside and current_inside
         if operand.name in {"percent_change_up", "percent_change_down"}:
-            threshold = float(operand.parameters.get("threshold_percent", 1))
+            threshold = float(_operand_parameter(operand, "threshold_percent", 1))
             reference = candles[-lookback - 1].close
             if reference == 0:
                 raise IndicatorWarmupError("percent change reference close is zero")
@@ -1079,8 +1092,8 @@ class StrategyRuleEngine:
         if operand.name == "time_window":
             timezone = ZoneInfo(str(operand.parameters.get("timezone", "UTC")))
             timestamp = ensure_aware(current.timestamp).astimezone(timezone)
-            start_hour = float(operand.parameters.get("start_hour", 0))
-            end_hour = float(operand.parameters.get("end_hour", 24))
+            start_hour = float(_operand_parameter(operand, "start_hour", 0))
+            end_hour = float(_operand_parameter(operand, "end_hour", 24))
             hour_value = timestamp.hour + timestamp.minute / 60
             if start_hour <= end_hour:
                 return start_hour <= hour_value <= end_hour
@@ -1112,7 +1125,7 @@ class StrategyRuleEngine:
                 search_parameters,
                 StrategyRuleEngine._candle_pattern,
             )
-        offset = int(operand.parameters.get("offset", 0))
+        offset = int(_operand_parameter(operand, "offset", 0))
         if offset:
             if len(candles) <= offset:
                 raise IndicatorWarmupError(f"{operand.name} requires at least {offset + 1} candles")
@@ -1167,7 +1180,7 @@ class StrategyRuleEngine:
             if candle.open == 0:
                 raise IndicatorWarmupError("candle change reference open is zero")
             change = ((candle.close - candle.open) / candle.open) * 100
-            threshold = float(operand.parameters.get("threshold_percent", 1))
+            threshold = float(_operand_parameter(operand, "threshold_percent", 1))
             direction = str(operand.parameters.get("direction", "absolute"))
             if direction == "up":
                 return change >= threshold
@@ -1179,7 +1192,9 @@ class StrategyRuleEngine:
         if operand.name == "shooting_star":
             return upper_wick >= body * 2 and body / range_size <= 0.35
         if operand.name == "doji":
-            maximum_body_percent = float(operand.parameters.get("maximum_body_percent", 10))
+            maximum_body_percent = float(
+                _operand_parameter(operand, "maximum_body_percent", 10)
+            )
             return (body / range_size) * 100 <= maximum_body_percent
         if operand.name in {"inside_bar", "outside_bar"}:
             if len(candles) < 2:
@@ -1189,14 +1204,18 @@ class StrategyRuleEngine:
                 return candle.high < previous.high and candle.low > previous.low
             return candle.high > previous.high and candle.low < previous.low
         if operand.name == "strong_close_near_high":
-            minimum_close_percent = float(operand.parameters.get("minimum_close_percent", 75))
+            minimum_close_percent = float(
+                _operand_parameter(operand, "minimum_close_percent", 75)
+            )
             return ((candle.close - candle.low) / range_size) * 100 >= minimum_close_percent
         if operand.name == "strong_close_near_low":
-            maximum_close_percent = float(operand.parameters.get("maximum_close_percent", 25))
+            maximum_close_percent = float(
+                _operand_parameter(operand, "maximum_close_percent", 25)
+            )
             return ((candle.close - candle.low) / range_size) * 100 <= maximum_close_percent
         if operand.name == "range_expansion_candle":
-            period = int(operand.parameters.get("period", 20))
-            multiplier = float(operand.parameters.get("range_multiplier", 1.5))
+            period = int(_operand_parameter(operand, "period", 20))
+            multiplier = float(_operand_parameter(operand, "range_multiplier", 1.5))
             if len(candles) < period + 1:
                 raise IndicatorWarmupError(f"range_expansion_candle requires {period + 1} candles")
             average_range = sum(c.high - c.low for c in candles[-period - 1 : -1]) / period
@@ -1211,6 +1230,8 @@ class StrategyRuleEngine:
             key: value
             for key, value in operand.parameters.items()
             if key in {"search_lookback", "search_start", "search_end"}
+            and isinstance(value, (int, str))
+            and not isinstance(value, bool)
         }
 
     @staticmethod
@@ -1631,6 +1652,7 @@ class StrategyRuleEngine:
         obstacle = obstacles[0] if obstacles else None
         if obstacle is not None and stop_distance > 0:
             distance = abs(obstacle - calculation.entry_price)
+            target_price = _first_target_price(calculation)
             values.update(
                 {
                     "target_distance_next_resistance": (
@@ -1641,17 +1663,17 @@ class StrategyRuleEngine:
                     ),
                     "r_multiple_before_obstacle": distance / stop_distance,
                     "liquidity_obstacle_before_target": bool(
-                        calculation.targets
+                        target_price is not None
                         and (
-                            obstacle < float(calculation.targets[0]["price"])
+                            obstacle < target_price
                             if strategy.direction != StrategyDirection.SHORT
-                            else obstacle > float(calculation.targets[0]["price"])
+                            else obstacle > target_price
                         )
                     ),
                     "minimum_clean_path_to_target": distance / stop_distance,
                     "target_overlaps_obstacle": bool(
-                        calculation.targets
-                        and abs(float(calculation.targets[0]["price"]) - obstacle)
+                        target_price is not None
+                        and abs(target_price - obstacle)
                         <= max(atr_value, stop_distance * 0.1)
                     ),
                 }
@@ -1715,9 +1737,10 @@ def _net_reward_to_risk(
     total_cost_bps: float,
 ) -> float:
     risk = abs(calculation.entry_price - calculation.stop_price)
-    if risk <= 0 or not calculation.targets:
+    target_price = _first_target_price(calculation)
+    if risk <= 0 or target_price is None:
         return 0
-    gross_reward = abs(float(calculation.targets[0]["price"]) - calculation.entry_price)
+    gross_reward = abs(target_price - calculation.entry_price)
     estimated_cost = calculation.entry_price * total_cost_bps / 10_000
     return max(0, gross_reward - estimated_cost) / (risk + estimated_cost)
 
@@ -1726,12 +1749,27 @@ def _target_matches_fibonacci_extension(
     candles: list[Candle],
     calculation: RiskCalculation,
 ) -> bool:
-    if len(candles) < 10 or not calculation.targets:
+    target_price = _first_target_price(calculation)
+    if len(candles) < 10 or target_price is None:
         return False
     recent = candles[-min(50, len(candles)) :]
     swing = max(candle.high for candle in recent) - min(candle.low for candle in recent)
     if swing <= 0:
         return False
-    target_distance = abs(float(calculation.targets[0]["price"]) - calculation.entry_price)
+    target_distance = abs(target_price - calculation.entry_price)
     ratio = target_distance / swing
     return any(abs(ratio - extension) <= 0.08 for extension in (0.618, 1.0, 1.272, 1.618, 2.0))
+
+
+def _first_target_price(calculation: RiskCalculation) -> float | None:
+    if not calculation.targets:
+        return None
+    value = calculation.targets[0].get("price")
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except ValueError:
+        return None

@@ -1,8 +1,25 @@
+import re
 from functools import lru_cache
 from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+WHATSAPP_TEMPLATE_EVENTS = frozenset(
+    {
+        "connection_confirmation",
+        "connection_test",
+        "account_notice",
+        "trial_update",
+        "subscription_update",
+        "compliance_change",
+        "evidence_update",
+        "watchlist_paused",
+        "integration_failure",
+        "lifecycle_update",
+        "confirmed_research_event",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -40,6 +57,8 @@ class Settings(BaseSettings):
     sharia_live_quote_cache_seconds: float = Field(default=0.75, ge=0.5, le=10)
     sharia_default_methodology_code: str | None = None
     sharia_universe_cache_ttl_seconds: int = Field(default=300, ge=30, le=86400)
+    sharia_abnormal_exclusion_rate_threshold: float = Field(default=0.8, ge=0, le=1)
+    sharia_abnormal_exclusion_minimum_assets: int = Field(default=10, ge=1, le=10_000)
     sharia_compliance_safety_under_review: bool = True
     sharia_compliance_digest_local_hour: int = Field(default=8, ge=0, le=23)
     sharia_admin_telegram_chat_id: str | None = None
@@ -69,14 +88,34 @@ class Settings(BaseSettings):
     market_data_exchange: str = "binance"
     telegram_enabled: bool = False
     telegram_adapter: Literal["none", "http"] = "none"
+    whatsapp_enabled: bool = False
+    whatsapp_adapter: Literal["none", "http"] = "none"
     discord_enabled: bool = False
     discord_adapter: Literal["noop", "http"] = "noop"
     billing_enabled: bool = False
     billing_provider: Literal["static", "stripe", "nowpayments"] = "static"
     billing_checkout_ttl_minutes: int = Field(default=30, ge=5, le=1440)
     billing_terms_version: str = "2026-07"
+    billing_payment_amount_tolerance_percent: float = Field(default=0, ge=0, le=5)
+    billing_allow_overpayment: bool = False
     payment_email_max_attempts: int = Field(default=5, ge=1, le=20)
     payment_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
+    api_rate_limiting_enabled: bool = True
+    api_rate_limit_fail_closed: bool = True
+    api_rate_limits: dict[str, dict[str, int]] = Field(
+        default_factory=lambda: {
+            "authentication": {"limit": 10, "window_seconds": 900},
+            "ai_chat": {"limit": 30, "window_seconds": 60},
+            "market_check": {"limit": 20, "window_seconds": 60},
+            "checkout": {"limit": 5, "window_seconds": 300},
+            "portal": {"limit": 10, "window_seconds": 300},
+            "support": {"limit": 5, "window_seconds": 3600},
+            "passport_report": {"limit": 5, "window_seconds": 3600},
+            "telegram_test": {"limit": 5, "window_seconds": 300},
+            "whatsapp_test": {"limit": 5, "window_seconds": 300},
+            "admin_mutation": {"limit": 30, "window_seconds": 60},
+        }
+    )
 
     telegram_bot_username: str | None = None
     telegram_bot_token: SecretStr | None = None
@@ -85,6 +124,21 @@ class Settings(BaseSettings):
     telegram_polling_interval_seconds: int = Field(default=5, ge=3, le=300)
     telegram_polling_limit: int = Field(default=20, ge=1, le=100)
     telegram_polling_clear_webhook: bool = True
+    whatsapp_graph_api_version: str = ""
+    whatsapp_access_token: SecretStr | None = None
+    whatsapp_app_secret: SecretStr | None = None
+    whatsapp_verify_token: SecretStr | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_business_account_id: str | None = None
+    whatsapp_business_phone_e164: str | None = None
+    whatsapp_default_language: str = "en_US"
+    whatsapp_http_timeout_seconds: int = Field(default=15, ge=1, le=120)
+    whatsapp_max_delivery_attempts: int = Field(default=5, ge=1, le=20)
+    whatsapp_opportunity_alerts_enabled: bool = False
+    whatsapp_template_names: dict[str, str | dict[str, str]] = Field(default_factory=dict)
+    whatsapp_opt_in_version: str = "2026-07"
+    whatsapp_mark_inbound_read: bool = True
+    whatsapp_webhook_receipt_retention_days: int = Field(default=30, ge=1, le=365)
     discord_client_id: str | None = None
     discord_client_secret: SecretStr | None = None
     discord_bot_token: SecretStr | None = None
@@ -284,6 +338,49 @@ class Settings(BaseSettings):
             )
         if not self.sharia_pilot_symbol_set:
             raise ValueError("SHARIA_PILOT_SYMBOLS must include at least one reviewed symbol")
+        required_rate_limits = {
+            "authentication",
+            "ai_chat",
+            "market_check",
+            "checkout",
+            "portal",
+            "support",
+            "passport_report",
+            "telegram_test",
+            "whatsapp_test",
+            "admin_mutation",
+        }
+        if set(self.api_rate_limits) != required_rate_limits:
+            raise ValueError("API_RATE_LIMITS must define exactly the supported security scopes")
+        for scope, values in self.api_rate_limits.items():
+            if set(values) != {"limit", "window_seconds"}:
+                raise ValueError(f"API rate limit {scope} has an invalid shape")
+            if values["limit"] < 1 or values["window_seconds"] < 1:
+                raise ValueError(f"API rate limit {scope} must use positive values")
+        if self.whatsapp_graph_api_version and not re.fullmatch(
+            r"v[1-9]\d*\.\d+", self.whatsapp_graph_api_version
+        ):
+            raise ValueError("WHATSAPP_GRAPH_API_VERSION must use a value such as v23.0")
+        if self.whatsapp_business_phone_e164 and not re.fullmatch(
+            r"\+[1-9]\d{7,14}", self.whatsapp_business_phone_e164
+        ):
+            raise ValueError("WHATSAPP_BUSINESS_PHONE_E164 must be a normalized E.164 number")
+        if not re.fullmatch(r"[a-z]{2}(?:_[A-Z]{2})?", self.whatsapp_default_language):
+            raise ValueError("WHATSAPP_DEFAULT_LANGUAGE must use a locale such as en_US")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,40}", self.whatsapp_opt_in_version):
+            raise ValueError("WHATSAPP_OPT_IN_VERSION contains unsupported characters")
+        for event_type, configured in self.whatsapp_template_names.items():
+            if event_type not in WHATSAPP_TEMPLATE_EVENTS:
+                raise ValueError("WHATSAPP_TEMPLATE_NAMES contains an unknown event key")
+            if isinstance(configured, dict) and any(
+                locale != "default"
+                and not re.fullmatch(r"[a-z]{2}(?:_[A-Z]{2})?", str(locale))
+                for locale in configured
+            ):
+                raise ValueError("WHATSAPP_TEMPLATE_NAMES contains an invalid locale key")
+            names = configured.values() if isinstance(configured, dict) else [configured]
+            if any(not re.fullmatch(r"[a-z0-9_]{1,512}", str(name)) for name in names):
+                raise ValueError("WHATSAPP_TEMPLATE_NAMES contains an invalid template name")
         return self
 
     @field_validator(

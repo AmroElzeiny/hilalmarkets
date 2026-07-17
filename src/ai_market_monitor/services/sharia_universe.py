@@ -1,8 +1,12 @@
 import hashlib
 import json
+from collections import Counter
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from time import monotonic
 from uuid import UUID
 
+import structlog
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +18,7 @@ from ai_market_monitor.db.models import (
     CanonicalAsset,
     ExchangeMarket,
     MonitorShariaAssetState,
+    OperationalMetric,
     PublishedAssetAssessment,
     ShariaUniverseSnapshot,
     Strategy,
@@ -22,6 +27,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
+    HealthStatus,
     MonitorShariaAssetStatus,
     ShariaAssetStatus,
     ShariaPolicyDecision,
@@ -41,6 +47,8 @@ from ai_market_monitor.services.sharia_screening import (
     canonical_asset,
     canonical_symbol,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class ShariaUniverseError(ValueError):
@@ -72,6 +80,55 @@ class ShariaUniverseResolver:
         maximum_symbols: int | None = None,
         persist_snapshot: bool = True,
     ) -> ShariaUniverseResolutionResponse:
+        started = monotonic()
+        try:
+            resolution = await self._resolve(
+                definition,
+                user_id=user_id,
+                strategy_version_id=strategy_version_id,
+                maximum_symbols=maximum_symbols,
+                persist_snapshot=persist_snapshot,
+            )
+        except ShariaUniverseError as exc:
+            elapsed = monotonic() - started
+            self._queue_failure_metrics(reason=exc.code, elapsed=elapsed)
+            logger.warning(
+                "sharia_universe_resolution_failed_closed",
+                reason=exc.code,
+                duration_seconds=round(elapsed, 6),
+            )
+            raise
+        except Exception as exc:
+            elapsed = monotonic() - started
+            reason = (
+                "universe_dependency_timeout"
+                if isinstance(exc, TimeoutError)
+                else "universe_dependency_unavailable"
+            )
+            self._queue_failure_metrics(reason=reason, elapsed=elapsed)
+            logger.error(
+                "sharia_universe_dependency_failed_closed",
+                reason=reason,
+                error_type=type(exc).__name__,
+                duration_seconds=round(elapsed, 6),
+            )
+            raise ShariaUniverseError(
+                reason,
+                "The screened market could not be verified, so no asset was made eligible.",
+            ) from exc
+
+        self._queue_resolution_metrics(resolution, elapsed=monotonic() - started)
+        return resolution
+
+    async def _resolve(
+        self,
+        definition: StrategyDefinition,
+        *,
+        user_id: UUID | None = None,
+        strategy_version_id: UUID | None = None,
+        maximum_symbols: int | None = None,
+        persist_snapshot: bool = True,
+    ) -> ShariaUniverseResolutionResponse:
         now = datetime.now(UTC)
         considered = await self._technical_symbols(definition)
         policy = definition.universe.sharia_policy
@@ -83,7 +140,7 @@ class ShariaUniverseResolver:
         ):
             raise ShariaUniverseError(
                 "explicit_assets_required",
-                "Choose at least one specific eligible asset for this Watchlist.",
+                "Choose at least one specific eligible asset for this Watch Plan.",
             )
 
         try:
@@ -204,7 +261,7 @@ class ShariaUniverseResolver:
                         reason_code=ShariaPolicyDecision.EXCLUDED_STATUS.value,
                         reason=(
                             f"Current screening status {effective_status.value!r} is not "
-                            "included by this Watchlist's policy."
+                            "included by this Watch Plan's policy."
                         ),
                         status=effective_status,
                         assessment_id=assessment.id,
@@ -266,7 +323,7 @@ class ShariaUniverseResolver:
                         symbol=item.symbol,
                         canonical_asset=item.canonical_asset,
                         reason_code="symbol_limit",
-                        reason="The current plan or Watchlist symbol limit was reached.",
+                        reason="The current plan or Watch Plan symbol limit was reached.",
                         status=item.status,
                         assessment_id=item.assessment_id,
                     )
@@ -336,6 +393,110 @@ class ShariaUniverseResolver:
             resolved_at=now,
             monitor_paused_for_compliance=monitor_paused_for_compliance,
         )
+
+    def _queue_failure_metrics(self, *, reason: str, elapsed: float) -> None:
+        measured_at = datetime.now(UTC)
+        self.session.add_all(
+            [
+                OperationalMetric(
+                    component="sharia_universe",
+                    metric_name="sharia_fail_closed_total",
+                    status=HealthStatus.DOWN,
+                    value=Decimal("1"),
+                    unit="resolution",
+                    dimensions={"reason": reason},
+                    measured_at=measured_at,
+                ),
+                OperationalMetric(
+                    component="sharia_universe",
+                    metric_name="sharia_universe_resolution_seconds",
+                    status=HealthStatus.DOWN,
+                    value=Decimal(str(elapsed)),
+                    unit="seconds",
+                    dimensions={"outcome": "failed_closed", "reason": reason},
+                    measured_at=measured_at,
+                ),
+            ]
+        )
+
+    def _queue_resolution_metrics(
+        self,
+        resolution: ShariaUniverseResolutionResponse,
+        *,
+        elapsed: float,
+    ) -> None:
+        measured_at = datetime.now(UTC)
+        excluded_count = len(resolution.excluded)
+        considered_count = resolution.considered_count
+        exclusion_rate = excluded_count / considered_count if considered_count else 0.0
+        abnormal = (
+            considered_count >= self.settings.sharia_abnormal_exclusion_minimum_assets
+            and exclusion_rate >= self.settings.sharia_abnormal_exclusion_rate_threshold
+        )
+        status = HealthStatus.DEGRADED if abnormal else HealthStatus.HEALTHY
+        dimensions = {
+            "methodology_code": resolution.methodology_code or "legacy_local",
+            "methodology_version": resolution.methodology_version or "none",
+        }
+        metrics = [
+            OperationalMetric(
+                component="sharia_universe",
+                metric_name="sharia_universe_resolution_seconds",
+                status=status,
+                value=Decimal(str(elapsed)),
+                unit="seconds",
+                dimensions={**dimensions, "outcome": "resolved"},
+                measured_at=measured_at,
+            ),
+            OperationalMetric(
+                component="sharia_universe",
+                metric_name="sharia_universe_included_count",
+                status=status,
+                value=Decimal(resolution.included_count),
+                unit="assets",
+                dimensions=dimensions,
+                measured_at=measured_at,
+            ),
+            OperationalMetric(
+                component="sharia_universe",
+                metric_name="sharia_universe_excluded_count",
+                status=status,
+                value=Decimal(excluded_count),
+                unit="assets",
+                dimensions=dimensions,
+                measured_at=measured_at,
+            ),
+            OperationalMetric(
+                component="sharia_universe",
+                metric_name="sharia_universe_exclusion_rate",
+                status=status,
+                value=Decimal(str(exclusion_rate)),
+                unit="ratio",
+                dimensions={**dimensions, "abnormal": abnormal},
+                measured_at=measured_at,
+            ),
+        ]
+        for reason, count in Counter(item.reason_code for item in resolution.excluded).items():
+            metrics.append(
+                OperationalMetric(
+                    component="sharia_universe",
+                    metric_name="sharia_fail_closed_total",
+                    status=HealthStatus.DEGRADED,
+                    value=Decimal(count),
+                    unit="assets",
+                    dimensions={**dimensions, "reason": reason},
+                    measured_at=measured_at,
+                )
+            )
+        self.session.add_all(metrics)
+        if abnormal:
+            logger.warning(
+                "sharia_universe_abnormal_exclusion_rate",
+                included_count=resolution.included_count,
+                excluded_count=excluded_count,
+                considered_count=considered_count,
+                exclusion_rate=round(exclusion_rate, 6),
+            )
 
     async def _active_publications(
         self,
@@ -443,7 +604,7 @@ class ShariaUniverseResolver:
             if not considered:
                 raise ShariaUniverseError(
                     "explicit_assets_required",
-                    "Choose at least one specific eligible asset for this Watchlist.",
+                    "Choose at least one specific eligible asset for this Watch Plan.",
                 )
             return considered, []
         if user_id is None or policy.approved_watchlist_id is None:

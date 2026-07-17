@@ -1210,7 +1210,7 @@ class AISetupChatService:
                 (
                     "Screened monitoring is not available yet because no real approved "
                     "methodology is active. The development/test methodology is not a "
-                    "religious ruling and cannot be used for scans or Watchlists."
+                    "religious ruling and cannot be used for scans or Watch Plans."
                 ),
                 message_type="screening_unavailable",
                 payload={"can_approve": False, "can_scan": False},
@@ -1491,7 +1491,7 @@ class AISetupChatService:
         context.pop("awaiting_clarification_key", None)
         chat.context_json = context
         chat.status = "interviewing"
-        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watchlist"
+        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watch Plan"
         await self._assistant(
             session,
             chat,
@@ -2662,10 +2662,26 @@ def _active_clarification_for_ai(
 def _capability_query_text(value: str) -> str:
     cleaned = " ".join(value.split()).strip(" ?.!:")
     patterns = (
-        r"^(?:do|does)\s+(?:you|hilalmarkets|traceedge|the\s+system)\s+(?:have|support|recognize|understand|identify)\s+",
-        r"^(?:can|could)\s+(?:you|hilalmarkets|traceedge|the\s+system)\s+(?:support|recognize|identify|detect|explain)\s+",
-        r"^(?:is|are)\s+(.+?)\s+(?:supported|available|registered|identified)(?:\s+in\s+(?:hilalmarkets|traceedge|the\s+system))?$",
-        r"^(?:what|how)\s+(?:does|do)\s+(?:hilalmarkets|traceedge|the\s+system)\s+(?:call|detect|measure)\s+",
+        (
+            r"^(?:do|does)\s+"
+            r"(?:you|hilalmarkets|traceedge|the\s+system)\s+"
+            r"(?:have|support|recognize|understand|identify)\s+"
+        ),
+        (
+            r"^(?:can|could)\s+"
+            r"(?:you|hilalmarkets|traceedge|the\s+system)\s+"
+            r"(?:support|recognize|identify|detect|explain)\s+"
+        ),
+        (
+            r"^(?:is|are)\s+(.+?)\s+"
+            r"(?:supported|available|registered|identified)"
+            r"(?:\s+in\s+(?:hilalmarkets|traceedge|the\s+system))?$"
+        ),
+        (
+            r"^(?:what|how)\s+(?:does|do)\s+"
+            r"(?:hilalmarkets|traceedge|the\s+system)\s+"
+            r"(?:call|detect|measure)\s+"
+        ),
     )
     for pattern in patterns:
         match = re.match(pattern, cleaned, flags=re.IGNORECASE)
@@ -2715,7 +2731,8 @@ def _looks_like_question(value: str) -> bool:
     return (
         value.rstrip().endswith("?")
         or re.match(
-            r"^(?:what|why|how|which|where|when|who|do|does|did|is|are|can|could|would|will|have|has)\b",
+            r"^(?:what|why|how|which|where|when|who|do|does|did|is|are|can|could|"
+            r"would|will|have|has)\b",
             normalized,
         )
         is not None
@@ -2837,7 +2854,7 @@ def _fallback_turn_classification(
         intent = "out_of_scope"
         category = "out_of_scope"
         assistant_message = (
-            "I’m focused on HilalMarkets crypto spot monitoring and product help. Tell me a setup "
+            "I'm focused on HilalMarkets crypto spot monitoring and product help. Tell me a setup "
             "condition or ask how a HilalMarkets feature works."
         )
         technical_fragments = []
@@ -3402,7 +3419,7 @@ def translation_sheet(
                 f"{definition.universe.market_type.value}"
             ),
         },
-        {"label": "Watchlist", "value": watchlist},
+        {"label": "Market universe", "value": watchlist},
         {"label": "Timeframes", "value": ", ".join(timeframes)},
         {"label": "Direction", "value": definition.direction.value.replace("_", " ").title()},
         {"label": "Primary trigger", "value": trigger.label if trigger else "Not defined"},

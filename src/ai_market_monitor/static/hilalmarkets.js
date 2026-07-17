@@ -160,7 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const entries = Object.entries(result.preferences || {});
     preferencesTarget.replaceChildren();
     if (!entries.length) {
-      preferencesTarget.textContent = "No personal Watchlist preferences are stored yet.";
+      preferencesTarget.textContent = "No personal Watch Plan preferences are stored yet.";
       return;
     }
     const list = document.createElement("ul");
@@ -172,7 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
       list.append(item);
     });
     const evidence = document.createElement("small");
-    evidence.textContent = `Derived from ${result.evidence?.strategy_versions_reviewed || 0} saved Watchlist versions.`;
+    evidence.textContent = `Derived from ${result.evidence?.strategy_versions_reviewed || 0} saved Watch Plan versions.`;
     preferencesTarget.append(list, evidence);
   };
   if (preferencesTarget) {
@@ -182,12 +182,123 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   preferenceButton?.addEventListener("click", async () => {
-    if (!window.confirm("Clear the Watchlist preferences derived for this account?")) return;
+    if (!window.confirm("Clear the Watch Plan preferences derived for this account?")) return;
     try {
       await preferenceRequest({ method: "DELETE" });
-      if (preferencesTarget) preferencesTarget.textContent = "Your personal Watchlist preferences were cleared.";
+      if (preferencesTarget) preferencesTarget.textContent = "Your personal Watch Plan preferences were cleared.";
     } catch (error) {
       if (preferencesTarget) preferencesTarget.textContent = error.message;
+    }
+  });
+
+  const removalDialog = document.querySelector("[data-asset-removal-dialog]");
+  const removalSummary = removalDialog?.querySelector("[data-asset-removal-summary]");
+  const removalPlans = removalDialog?.querySelector("[data-asset-removal-plans]");
+  const removalWarning = removalDialog?.querySelector(".asset-removal-warning");
+  const removalError = removalDialog?.querySelector("[data-asset-removal-error]");
+  const removalConfirm = removalDialog?.querySelector("[data-asset-removal-confirm]");
+  let pendingAssetRemoval = null;
+
+  const removalErrorMessage = (payload, fallback) => {
+    const detail = payload?.detail;
+    if (typeof detail === "string") return detail;
+    return detail?.message || payload?.message || fallback;
+  };
+  const closeRemovalDialog = () => {
+    removalDialog?.close();
+    pendingAssetRemoval?.button?.removeAttribute("disabled");
+    pendingAssetRemoval = null;
+  };
+  removalDialog?.querySelectorAll("[data-asset-removal-close], [data-asset-removal-cancel]")
+    .forEach((button) => button.addEventListener("click", closeRemovalDialog));
+  removalDialog?.addEventListener("cancel", () => {
+    pendingAssetRemoval?.button?.removeAttribute("disabled");
+    pendingAssetRemoval = null;
+  });
+
+  document.querySelectorAll("[data-remove-saved-asset]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (pendingAssetRemoval) return;
+      button.setAttribute("disabled", "disabled");
+      const watchlistId = button.dataset.watchlistId || "";
+      const asset = button.dataset.asset || "";
+      const basePath = `/api/v1/sharia/watchlists/${encodeURIComponent(watchlistId)}/assets/${encodeURIComponent(asset)}`;
+      try {
+        const response = await fetch(`${basePath}/removal-impact`, {
+          credentials: "same-origin",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(removalErrorMessage(payload, "The removal impact could not be loaded."));
+        }
+        pendingAssetRemoval = {
+          asset,
+          basePath,
+          button,
+          row: button.closest("[data-saved-asset-row]"),
+        };
+        if (removalSummary) {
+          const count = payload.affected_watch_plans?.length || 0;
+          removalSummary.textContent = count
+            ? `${asset} is currently selected by ${count} Watch Plan${count === 1 ? "" : "s"}.`
+            : `${asset} is not selected by a Watch Plan.`;
+        }
+        if (removalPlans) {
+          removalPlans.replaceChildren();
+          (payload.affected_watch_plans || []).forEach((plan) => {
+            const item = document.createElement("div");
+            item.className = "asset-removal-plan";
+            const copy = document.createElement("div");
+            const name = document.createElement("strong");
+            const detail = document.createElement("small");
+            const status = document.createElement("span");
+            name.textContent = plan.name;
+            detail.textContent = `Active version ${plan.strategy_version_number}`;
+            status.className = "badge badge-soft";
+            status.textContent = String(plan.status || "active").replaceAll("_", " ");
+            copy.append(name, detail);
+            item.append(copy, status);
+            removalPlans.append(item);
+          });
+        }
+        if (removalWarning) removalWarning.hidden = !payload.requires_confirmation;
+        if (removalError) removalError.hidden = true;
+        removalDialog?.showModal();
+      } catch (error) {
+        button.removeAttribute("disabled");
+        const toast = document.getElementById("dash-toast");
+        if (toast) {
+          toast.textContent = error.message;
+          toast.hidden = false;
+          window.setTimeout(() => { toast.hidden = true; }, 4000);
+        }
+      }
+    });
+  });
+
+  removalConfirm?.addEventListener("click", async () => {
+    if (!pendingAssetRemoval) return;
+    removalConfirm.setAttribute("disabled", "disabled");
+    if (removalError) removalError.hidden = true;
+    try {
+      const response = await fetch(`${pendingAssetRemoval.basePath}?confirmed=true`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": document.body.dataset.csrfToken || "" },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(removalErrorMessage(payload, "The asset could not be removed."));
+      }
+      pendingAssetRemoval.row?.remove();
+      closeRemovalDialog();
+    } catch (error) {
+      if (removalError) {
+        removalError.textContent = error.message;
+        removalError.hidden = false;
+      }
+    } finally {
+      removalConfirm.removeAttribute("disabled");
     }
   });
 });

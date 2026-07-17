@@ -3,11 +3,11 @@
   <article class="price-card {{ 'is-featured' if code == 'trader' else '' }}">
     {% if code == 'trader' %}<span class="badge badge-dark">Most suitable</span>{% endif %}
     <span class="kicker">{{ plan.name }}</span>
-    <div class="price"><strong>${{ plan.monthly_price | int }}</strong><span>/month</span></div>
+    <div class="price"><strong>${{ plan.monthly_price | int }}</strong><span>{% if plan.monthly_price == 0 %} free{% elif billing_capabilities.supports_recurring_billing %}/month{% else %}/30 days{% endif %}</span></div>
     <p>{{ plan.description }}</p>
     <ul class="feature-list">
-      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.active_strategies }} active Watchlist{{ '' if plan.limits.active_strategies == 1 else 's' }}</li>
-      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.symbols_per_strategy | plan_limit }} symbols per plan</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.active_strategies }} active Watch Plan{{ '' if plan.limits.active_strategies == 1 else 's' }}</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.symbols_per_strategy | plan_limit }} markets per Watch Plan</li>
       <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.on_demand_scans_per_month }} market check{{ '' if plan.limits.on_demand_scans_per_month == 1 else 's' }} per month</li>
       <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram delivery' if plan.features.telegram else 'Dashboard delivery' }}</li>
     </ul>
@@ -15,3 +15,4 @@
   </article>
   {% endfor %}
 </div>
+{% if not billing_capabilities.supports_recurring_billing %}<p class="pricing-provider-note">Paid access is purchased for 30 days and renewed manually. No automatic charge or cancellation portal is offered.</p>{% endif %}

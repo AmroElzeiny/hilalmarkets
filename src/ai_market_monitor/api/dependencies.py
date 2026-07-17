@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
@@ -15,6 +15,7 @@ from ai_market_monitor.db.models import User
 from ai_market_monitor.db.models.enums import UserRole, UserStatus
 from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
 from ai_market_monitor.services.market_preview import CcxtMarketDataProvider, MarketPreviewService
+from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +94,20 @@ async def get_admin_principal(
 
 
 async def get_user_principal(
+    request: Request,
     x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> UserPrincipal:
+    session_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_token:
+        user = await WebAuthService(session, settings).current_user(session_token)
+        if user is not None:
+            if user.status == UserStatus.SUSPENDED:
+                raise HTTPException(status_code=403, detail="User account is suspended")
+            return UserPrincipal(user_id=user.id, role=user.role)
     if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing user principal")
+        raise HTTPException(status_code=401, detail="Authenticated user session required")
     if settings.app_env not in {"development", "test"}:
         raise HTTPException(
             status_code=401,

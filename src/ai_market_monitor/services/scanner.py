@@ -903,7 +903,7 @@ class ScanPersistenceService:
         if trial_service is not None:
             await trial_service.record_alert_generated(alert)
         deliveries = await NotificationDispatcher(self.session).enqueue(alert, definition)
-        alert._enqueued_delivery_count = len(deliveries)
+        alert.__dict__["_enqueued_delivery_count"] = len(deliveries)
         return alert
 
     async def _create_trial_limit_notice(
@@ -1114,7 +1114,7 @@ class ScanOrchestrator:
             await self._cancel_job(
                 job,
                 "monitor_paused_for_compliance",
-                "The Watchlist was paused because a previously included asset left its "
+                "The Watch Plan was paused because a previously included asset left its "
                 "screened-market policy.",
             )
             return self._summary(job, failures=0)

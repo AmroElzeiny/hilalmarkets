@@ -246,7 +246,7 @@ class ProviderContextService:
                 "btc_return_percent": btc_return,
                 "eth_return_percent": eth_return,
             }
-        result = {
+        result: dict[str, Any] = {
             key: value for key, value in values.items() if key in requests or key == "_metrics"
         }
         self._cache[cache_key] = result
@@ -651,28 +651,40 @@ def _order_book_condition(
     parameters: dict[str, Any],
 ) -> bool | None:
     threshold = float(parameters.get("threshold", 10))
-    mapping = {
-        "spread_below_threshold": lambda: raw.get("spread_bps") <= threshold,
-        "spread_above_threshold": lambda: raw.get("spread_bps") >= threshold,
-        "order_book_depth_above": lambda: raw.get("total_depth_quote") >= threshold,
-        "bid_ask_depth_imbalance": lambda: abs(raw.get("depth_imbalance", 0)) >= threshold,
-        "large_wall_above_price": lambda: bool(raw.get("large_wall_above")),
-        "large_wall_below_price": lambda: bool(raw.get("large_wall_below")),
-        "liquidity_wall_pulled": lambda: bool(raw.get("liquidity_wall_pulled")),
-        "liquidity_wall_added": lambda: bool(raw.get("liquidity_wall_added")),
-        "approaching_liquidity_wall": lambda: bool(raw.get("approaching_liquidity_wall")),
-        "slippage_below_threshold": lambda: raw.get("slippage_bps") <= threshold,
-        "trade_count_spike": lambda: raw.get("trade_count_ratio") >= threshold,
-        "average_trade_size_spike": lambda: raw.get("average_trade_size_ratio") >= threshold,
-        "aggressive_buy_volume_proxy": lambda: raw.get("buy_volume_ratio") >= threshold,
-        "aggressive_sell_volume_proxy": lambda: raw.get("sell_volume_ratio") >= threshold,
-        "trade_buy_sell_imbalance": lambda: abs(raw.get("trade_imbalance", 0)) >= threshold,
-        "volume_burst_seconds": lambda: raw.get("recent_trade_volume") >= threshold,
+    boolean_fields = {
+        "large_wall_above_price": "large_wall_above",
+        "large_wall_below_price": "large_wall_below",
+        "liquidity_wall_pulled": "liquidity_wall_pulled",
+        "liquidity_wall_added": "liquidity_wall_added",
+        "approaching_liquidity_wall": "approaching_liquidity_wall",
     }
-    try:
-        return mapping[key]()
-    except (KeyError, TypeError):
+    if key in boolean_fields:
+        return bool(raw.get(boolean_fields[key]))
+    numeric_fields = {
+        "spread_below_threshold": ("spread_bps", "below"),
+        "spread_above_threshold": ("spread_bps", "above"),
+        "order_book_depth_above": ("total_depth_quote", "above"),
+        "bid_ask_depth_imbalance": ("depth_imbalance", "absolute"),
+        "slippage_below_threshold": ("slippage_bps", "below"),
+        "trade_count_spike": ("trade_count_ratio", "above"),
+        "average_trade_size_spike": ("average_trade_size_ratio", "above"),
+        "aggressive_buy_volume_proxy": ("buy_volume_ratio", "above"),
+        "aggressive_sell_volume_proxy": ("sell_volume_ratio", "above"),
+        "trade_buy_sell_imbalance": ("trade_imbalance", "absolute"),
+        "volume_burst_seconds": ("recent_trade_volume", "above"),
+    }
+    field_and_mode = numeric_fields.get(key)
+    if field_and_mode is None:
         return None
+    field, mode = field_and_mode
+    value = _float(raw.get(field))
+    if value is None:
+        return None
+    if mode == "below":
+        return value <= threshold
+    if mode == "absolute":
+        return abs(value) >= threshold
+    return value >= threshold
 
 
 def _derivatives_condition(
@@ -691,14 +703,26 @@ def _derivatives_condition(
         return funding < 0
     if key == "funding_rate_extreme" and funding is not None:
         return abs(funding) >= float(parameters.get("absolute_threshold", 0.0005))
-    if key == "open_interest_rising" and None not in {current_oi, previous_oi}:
+    if (
+        key == "open_interest_rising"
+        and current_oi is not None
+        and previous_oi is not None
+    ):
         return current_oi > previous_oi
-    if key == "open_interest_falling" and None not in {current_oi, previous_oi}:
+    if (
+        key == "open_interest_falling"
+        and current_oi is not None
+        and previous_oi is not None
+    ):
         return current_oi < previous_oi
     if key in {"long_liquidation_spike", "short_liquidation_spike"}:
         value = _float(raw.get(key.removesuffix("_spike") + "_value"))
         return value >= threshold if value is not None else None
-    if None not in {price_change, current_oi, previous_oi}:
+    if (
+        price_change is not None
+        and current_oi is not None
+        and previous_oi is not None
+    ):
         oi_up = current_oi > previous_oi
         price_up = price_change > 0
         return {

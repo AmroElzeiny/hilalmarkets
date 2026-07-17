@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import (
     COOKIE_CONSENT_VERSION,
     FOOTER_NAVIGATION,
@@ -25,6 +25,7 @@ from ai_market_monitor.core.site_content import (
     HelpArticle,
     PurchaseFaq,
 )
+from ai_market_monitor.services.billing import billing_provider_capabilities
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
@@ -187,7 +188,9 @@ def _public_context(
             if telegram_username
             else None
         ),
-        "plans": {code: PLAN_DEFINITIONS[code] for code in PURCHASABLE_PLAN_CODES},
+        "plans": {code: PLAN_DEFINITIONS[code] for code in PUBLIC_PLAN_CODES},
+        "billing_provider": settings.billing_provider,
+        "billing_capabilities": billing_provider_capabilities(settings.billing_provider),
         "purchase_faqs": PURCHASE_FAQS,
         "help_categories": HELP_CATEGORIES,
         "cookie_consent_version": (

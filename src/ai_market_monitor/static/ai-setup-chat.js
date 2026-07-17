@@ -377,7 +377,7 @@
       {label: "Monitor name", value: sheet.monitor_name},
       {label: "Market", value: `${sheet.exchange || "-"} ${sheet.market_type || "spot"}`},
       {label: "Direction", value: sheet.direction || "both"},
-      {label: "Watchlist", value: (sheet.symbols_watchlist || []).join(", ") || `All eligible ${(sheet.quote_currencies || []).join(", ")} pairs`},
+      {label: "Market universe", value: (sheet.symbols_watchlist || []).join(", ") || `All eligible ${(sheet.quote_currencies || []).join(", ")} pairs`},
       {label: "Timeframes", value: (sheet.timeframes || []).join(", ")},
       {label: "Alert timing", value: (sheet.alert_timing?.trigger_mode || "candle_close").replaceAll("_", " ")},
       {label: "Delivery", value: (sheet.delivery_channels || []).join(", ")},

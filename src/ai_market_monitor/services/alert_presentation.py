@@ -178,7 +178,7 @@ class AlertPresentation:
                     *(
                         [
                             AlertActionPresentation(
-                                "View affected Watchlists",
+                                "View affected Watch Plans",
                                 f"compliance_activity:{alert.id}",
                                 activity_url,
                             )

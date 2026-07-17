@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -8,6 +9,7 @@ from ai_market_monitor.db.models import (
     AlertDelivery,
     CandidateReadinessSnapshot,
     MonitorHealthSummary,
+    NearMissSnapshot,
     ScanJob,
     ScanResult,
     SetupConditionResult,
@@ -27,8 +29,11 @@ from ai_market_monitor.db.models.enums import (
     ScanJobStatus,
     ScanOutcome,
     SetupLifecycleState,
+    ShariaAssetStatus,
     StrategyVersionStatus,
 )
+from ai_market_monitor.schemas.sharia import AssetAssessmentSummary
+from ai_market_monitor.services.opportunity_cards import OpportunityCardReadService
 from ai_market_monitor.services.setup_observability import (
     GroundedObservabilityExplainer,
     SetupObservabilityService,
@@ -150,6 +155,95 @@ async def _seed_lifecycle(session, user, strategy, version):
     )
     await session.flush()
     return condition, job, scan, setup, result
+
+
+async def test_opportunity_card_uses_retained_conditions_and_prior_score(test_context):
+    async with test_context["session_factory"]() as session:
+        user, strategy, version = await _seed_monitor(session)
+        _, _, scan, setup, _ = await _seed_lifecycle(session, user, strategy, version)
+        passed_definition = StrategyCondition(
+            strategy_version_id=version.id,
+            condition_key="price_above_ema",
+            label="Price above EMA 200",
+            node_type="condition",
+            condition_type=ConditionType.INDICATOR,
+            timeframe="15m",
+            comparator="gt",
+            left_operand={"kind": "price", "field": "close"},
+            right_operand={"kind": "indicator", "name": "ema", "period": 200},
+            required_value=Decimal("100"),
+            weight=Decimal("1"),
+            sequence=1,
+            is_required=True,
+        )
+        session.add(passed_definition)
+        await session.flush()
+        session.add_all(
+            [
+                SetupConditionResult(
+                    setup_instance_id=setup.id,
+                    scan_result_id=scan.id,
+                    strategy_condition_id=passed_definition.id,
+                    condition_key=passed_definition.condition_key,
+                    outcome=ConditionOutcome.PASSED,
+                    required_value={"value": 100},
+                    actual_value={"value": 102},
+                    distance_to_pass=Decimal("0"),
+                    contribution_score=Decimal("100"),
+                    candle_timestamp=setup.last_evaluated_at,
+                    evaluated_at=setup.last_evaluated_at,
+                    data_freshness_ms=None,
+                ),
+                NearMissSnapshot(
+                    scan_result_id=scan.id,
+                    setup_instance_id=setup.id,
+                    strategy_version_id=version.id,
+                    exchange=setup.exchange,
+                    symbol=setup.symbol,
+                    timeframe=setup.timeframe,
+                    completion_score=Decimal("80"),
+                    previous_score=Decimal("70"),
+                    trend="improving",
+                    passed_condition_keys=["price_above_ema"],
+                    missing_conditions=[{"condition_id": "volume_ratio"}],
+                    captured_at=setup.last_evaluated_at,
+                ),
+            ]
+        )
+        await session.flush()
+        assessment = AssetAssessmentSummary(
+            id=uuid4(),
+            canonical_asset="SOL",
+            asset_name="Solana",
+            methodology_id=uuid4(),
+            methodology_name="Reviewed method",
+            methodology_version="1.0",
+            status=ShariaAssetStatus.ELIGIBLE,
+            status_label="Eligible",
+            summary="Reviewer-approved asset summary.",
+            qualifications=[],
+            reviewed_by="Qualified reviewer",
+            reviewed_at=datetime.now(UTC),
+            valid_from=datetime.now(UTC) - timedelta(days=1),
+            valid_until=None,
+        )
+
+        card = await OpportunityCardReadService(session).for_setup(
+            setup=setup,
+            assessment=assessment,
+            strategy_name=strategy.name,
+        )
+
+        assert card["present_conditions"] == ("Price above EMA 200",)
+        assert card["missing_requirement"] == (
+            "Still missing: Volume confirmation - Current 1.27 - Required 1.5"
+        )
+        assert card["direction"] == "Getting closer"
+        assert card["data_freshness"] == (
+            "Partial freshness: 0.3s at evaluation; 1 condition unavailable"
+        )
+        assert card["market_availability"] == "Exact active spot mapping unavailable"
+        assert card["can_create_watch_plan"] is False
 
 
 async def test_radar_is_tenant_isolated_and_filterable(test_context):

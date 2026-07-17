@@ -413,9 +413,15 @@ class AlertDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         enum_type(DeliveryStatus, name="delivery_status"), nullable=False
     )
     provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    provider_status: Mapped[str | None] = mapped_column(String(40))
+    provider_status_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(80))
     last_error_detail: Mapped[str | None] = mapped_column(String(500))

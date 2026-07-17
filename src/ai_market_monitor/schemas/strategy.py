@@ -324,7 +324,9 @@ class AlertPolicy(BaseModel):
 
     forming_alerts: bool = True
     near_miss_threshold: float = Field(default=70, ge=1, le=100)
-    channels: list[Literal["telegram", "discord", "web"]] = Field(min_length=1)
+    channels: list[Literal["telegram", "whatsapp", "discord", "web"]] = Field(
+        min_length=1
+    )
     cooldown_seconds: int = Field(default=900, ge=0, le=86400)
     maximum_alerts_per_hour: int = Field(default=50, ge=1, le=1000)
     daily_alert_budget: int | None = Field(default=None, ge=1, le=10000)

@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY_DIR = PROJECT_ROOT / "src" / "ai_market_monitor" / "static" / "charting_library"
 REQUIRED_FILE = LIBRARY_DIR / "charting_library.js"

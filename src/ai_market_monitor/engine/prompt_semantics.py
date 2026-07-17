@@ -47,6 +47,8 @@ TIMEFRAME_MINUTES = {
     "1d": 1440,
 }
 
+OperandParameterValue = int | float | str | bool | list[int | float | str | bool]
+
 
 @dataclass(frozen=True, slots=True)
 class SemanticMatch:
@@ -330,9 +332,9 @@ def _condition_from_group(
         return None
     semantic_intent = str(group.get("canonical_intent") or "")
     if semantic_intent.startswith("candle_direction_"):
-        parameters: dict[str, int] = {}
+        candle_parameters: dict[str, OperandParameterValue] = {}
         if _previous_candle_context(prompt, start, end):
-            parameters["offset"] = 1
+            candle_parameters["offset"] = 1
         return _candle_condition(
             key=str(group["operand_name"]),
             label=str(group.get("default_label") or source_fragment),
@@ -341,7 +343,7 @@ def _condition_from_group(
             source_fragment=source_fragment,
             required=required,
             negated=negated,
-            parameters=parameters,
+            parameters=candle_parameters,
         )
     if semantic_intent.startswith("candle_body_percent_"):
         threshold = _threshold_percent_near(prompt, start, end)
@@ -349,13 +351,13 @@ def _condition_from_group(
             return None
         direction = str(group.get("direction") or "absolute")
         offset = 1 if _previous_candle_context(prompt, start, end) else 0
-        parameters: dict[str, int | float | str] = {
+        body_parameters: dict[str, OperandParameterValue] = {
             "threshold_percent": threshold,
             "direction": direction,
             **_event_search_parameters(prompt, timeframe),
         }
         if offset:
-            parameters["offset"] = offset
+            body_parameters["offset"] = offset
         return _candle_condition(
             key=f"candle_move_{str(threshold).replace('.', '_')}pct",
             label=(
@@ -367,7 +369,7 @@ def _condition_from_group(
             source_fragment=source_fragment,
             required=required,
             negated=negated,
-            parameters=parameters,
+            parameters=body_parameters,
             confidence=0.9,
         )
     if semantic_intent.startswith("price_percent_change_"):
@@ -465,7 +467,7 @@ def _condition_from_group(
             confidence=0.9,
         )
     if semantic_intent.endswith("_session_filter"):
-        parameters = dict(group.get("default_parameters") or {})
+        parameters = _parameter_dict(group.get("default_parameters"))
         return ConditionRule(
             key="time_window_new_york" if "new_york" in semantic_intent else "time_window",
             label=str(group.get("default_label") or "Session time filter"),
@@ -488,7 +490,7 @@ def _condition_from_group(
             name=operand_name,
             source_fragment=source_fragment,
             required=required,
-            parameters=dict(group.get("default_parameters") or {}),
+            parameters=_parameter_dict(group.get("default_parameters")),
             confidence=float(group.get("confidence", 0.86)),
         )
     if condition_type == "indicator" and operand_name:
@@ -505,10 +507,27 @@ def _condition_from_group(
             threshold=threshold,
             source_fragment=source_fragment,
             required=required,
-            parameters=dict(group.get("default_parameters") or {}),
+            parameters=_parameter_dict(group.get("default_parameters")),
             confidence=float(group.get("confidence", 0.86)),
         )
     return None
+
+
+def _parameter_dict(raw: object) -> dict[str, OperandParameterValue]:
+    if not isinstance(raw, dict):
+        return {}
+    parameters: dict[str, OperandParameterValue] = {}
+    for raw_key, value in raw.items():
+        if not isinstance(raw_key, str):
+            continue
+        if isinstance(value, (bool, int, float, str)):
+            parameters[raw_key] = value
+            continue
+        if isinstance(value, list) and all(
+            isinstance(item, (bool, int, float, str)) for item in value
+        ):
+            parameters[raw_key] = value
+    return parameters
 
 
 def _provider_required_issue(
@@ -551,7 +570,7 @@ def _candle_condition(
     source_fragment: str,
     required: bool,
     negated: bool = False,
-    parameters: dict[str, int | float | str] | None = None,
+    parameters: dict[str, OperandParameterValue] | None = None,
     confidence: float = 0.92,
 ) -> ConditionRule:
     return ConditionRule(
@@ -578,7 +597,7 @@ def _price_action_condition(
     name: str,
     source_fragment: str,
     required: bool,
-    parameters: dict[str, int | float | str] | None = None,
+    parameters: dict[str, OperandParameterValue] | None = None,
     confidence: float = 0.9,
 ) -> ConditionRule:
     return ConditionRule(
@@ -608,7 +627,7 @@ def _indicator_constant(
     threshold: float,
     source_fragment: str,
     required: bool,
-    parameters: dict[str, int | float | str] | None = None,
+    parameters: dict[str, OperandParameterValue] | None = None,
     confidence: float = 0.9,
     forming_tolerance_percent: float | None = None,
 ) -> ConditionRule:

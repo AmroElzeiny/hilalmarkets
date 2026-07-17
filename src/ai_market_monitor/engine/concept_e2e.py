@@ -136,7 +136,10 @@ def matrix_markdown(rows: list[dict[str, Any]] | None = None) -> str:
     lines = [
         "# Trading Concept End-to-End Matrix",
         "",
-        "Generated from `condition_registry_payload(include_provider_required=True)` and compatibility/schema checks.",
+        (
+            "Generated from `condition_registry_payload(include_provider_required=True)` "
+            "and compatibility/schema checks."
+        ),
         "",
         "## Summary",
         "",

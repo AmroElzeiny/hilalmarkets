@@ -3,13 +3,24 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from ai_market_monitor.db.models import SetupInstance, Strategy, StrategyVersion, User
+from ai_market_monitor.core.csrf import csrf_token
+from ai_market_monitor.db.models import (
+    ApprovedWatchlist,
+    ApprovedWatchlistAsset,
+    SetupInstance,
+    Strategy,
+    StrategyUniverse,
+    StrategyVersion,
+    User,
+)
 from ai_market_monitor.db.models.enums import (
+    MarketType,
     SetupLifecycleState,
     ShariaAssetStatus,
     ShariaMethodologyStatus,
     StrategyStatus,
     StrategyVersionStatus,
+    TriggerMode,
 )
 from ai_market_monitor.schemas.sharia import (
     AssessmentCreateRequest,
@@ -20,7 +31,11 @@ from ai_market_monitor.services.sharia_screening import (
     DEVELOPMENT_METHODOLOGY_PREFIX,
     ShariaScreeningService,
 )
-from tests.factories import load_strategy
+from tests.factories import (
+    load_strategy,
+    methodology_evidence_requirements,
+    methodology_rules,
+)
 
 
 async def _signup(test_context, email: str) -> None:
@@ -62,8 +77,8 @@ def _methodology_payload(
         governing_body="Qualified test governance" if active else None,
         reviewer_group="Qualified test reviewers" if active else None,
         effective_from=datetime.now(UTC) - timedelta(days=1) if active else None,
-        rules={"versioned": True} if active else {},
-        evidence_requirements={"minimum_sources": 1} if active else {},
+        rules=methodology_rules(source_family=code.casefold()) if active else {},
+        evidence_requirements=methodology_evidence_requirements() if active else {},
     )
 
 
@@ -253,3 +268,93 @@ async def test_screened_market_opportunity_filter_uses_persisted_user_lifecycle(
     assert forming.json()["items"][0]["canonical_asset"] == "SOL"
     assert ended.status_code == 200
     assert ended.json()["total"] == 0
+
+
+async def test_saved_asset_removal_requires_review_of_active_watch_plans(test_context):
+    await _signup(test_context, "saved-asset-impact@example.com")
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User))
+        assert user is not None
+        watchlist = ApprovedWatchlist(
+            user_id=user.id,
+            name="Core screened assets",
+            is_default=True,
+        )
+        session.add(watchlist)
+        await session.flush()
+        saved_asset = ApprovedWatchlistAsset(
+            watchlist_id=watchlist.id,
+            canonical_asset="SOL",
+            added_at=datetime.now(UTC),
+        )
+        strategy = Strategy(
+            user_id=user.id,
+            name="SOL structure Watch Plan",
+            status=StrategyStatus.ACTIVE,
+        )
+        session.add_all([saved_asset, strategy])
+        await session.flush()
+        version = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=3,
+            status=StrategyVersionStatus.ACTIVE,
+            source_type="test",
+            source_text="watch SOL structure",
+            schema_json=load_strategy().model_dump(mode="json"),
+            schema_hash="saved-asset-removal-impact",
+        )
+        session.add(version)
+        await session.flush()
+        strategy.active_version_id = version.id
+        session.add(
+            StrategyUniverse(
+                strategy_version_id=version.id,
+                exchange="binance",
+                market_type=MarketType.SPOT,
+                quote_currencies=["USDT"],
+                include_symbols=[],
+                exclude_symbols=[],
+                timeframes=["15m"],
+                trigger_mode=TriggerMode.CANDLE_CLOSE,
+                approved_watchlist_id=watchlist.id,
+            )
+        )
+        await session.commit()
+        watchlist_id = watchlist.id
+        token = csrf_token(test_context["settings"], user.id)
+
+    endpoint = f"/api/v1/sharia/watchlists/{watchlist_id}/assets/SOL"
+    impact = await test_context["client"].get(f"{endpoint}/removal-impact")
+    missing_csrf = await test_context["client"].delete(endpoint)
+    unconfirmed = await test_context["client"].delete(
+        endpoint,
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert impact.status_code == 200
+    assert impact.json()["requires_confirmation"] is True
+    assert impact.json()["affected_watch_plans"] == [
+        {
+            "strategy_id": str(strategy.id),
+            "name": "SOL structure Watch Plan",
+            "status": "active",
+            "strategy_version_id": str(version.id),
+            "strategy_version_number": 3,
+        }
+    ]
+    assert missing_csrf.status_code == 403
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.json()["detail"]["code"] == "watchlist_asset_in_use"
+
+    removed = await test_context["client"].delete(
+        f"{endpoint}?confirmed=true",
+        headers={"X-CSRF-Token": token},
+    )
+    assert removed.status_code == 204
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(
+            select(ApprovedWatchlistAsset.id).where(
+                ApprovedWatchlistAsset.watchlist_id == watchlist_id,
+                ApprovedWatchlistAsset.canonical_asset == "SOL",
+            )
+        ) is None

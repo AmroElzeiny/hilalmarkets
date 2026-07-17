@@ -7,8 +7,8 @@ from ai_market_monitor.db.models import (
     AttributionTouch,
     DashboardPreference,
     Strategy,
-    TelegramConnection,
     TelegramCallbackReceipt,
+    TelegramConnection,
     TelegramConversationState,
     TelegramDashboardLink,
     Trial,
@@ -17,8 +17,8 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, StrategyStatus
-from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.services.interfaces import Candle
+from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.telegram.service import TelegramBotService
 from ai_market_monitor.telegram.types import (
     NearMissListItem,
@@ -171,7 +171,9 @@ async def test_telegram_trial_button_hands_off_to_dashboard_signup(test_context)
             )
         )
         assert "Open this secure Dashboard link" in blocked.text
-        assert any(button.url and "/signup?telegram_link=" in button.url for button in blocked.buttons)
+        assert any(
+            button.url and "/signup?telegram_link=" in button.url for button in blocked.buttons
+        )
         assert await db.scalar(select(func.count(Trial.id))) == 0
 
 
@@ -281,7 +283,9 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
         )
         assert await db.scalar(select(func.count(UserFeedback.id))) == 1
         assert "Support" in support_response.text
-        assert any(button.url and "/dashboard/support" in button.url for button in support_response.buttons)
+        assert any(
+            button.url and "/dashboard/support" in button.url for button in support_response.buttons
+        )
 
 
 async def test_telegram_dashboard_actions_handoff_to_signup_when_unlinked(test_context):
@@ -446,7 +450,9 @@ async def test_telegram_my_monitors_links_to_dashboard_management(test_context):
         assert "Live monitor" in monitors.text
         assert "Status: Active" in monitors.text
         assert not any(button.text == "Active Monitors" for button in monitors.buttons)
-        manage_button = next(button for button in monitors.buttons if button.text.startswith("Manage "))
+        manage_button = next(
+            button for button in monitors.buttons if button.text.startswith("Manage ")
+        )
         assert "#1" not in manage_button.text
         assert not any(button.text.startswith("Edit #") for button in monitors.buttons)
         assert not any(button.text.startswith("Delete #") for button in monitors.buttons)
@@ -712,5 +718,7 @@ async def test_telegram_approve_before_interpretation_points_to_dashboard(test_c
 
         assert "Action needed" in response.text
         assert "Complete strategy interpretation" in response.text
-        assert any(button.url and "/dashboard/strategies/new" in button.url for button in response.buttons)
+        assert any(
+            button.url and "/dashboard/strategies/new" in button.url for button in response.buttons
+        )
         assert not any(button.text == "Create Monitor" for button in response.buttons)

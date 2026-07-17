@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -1341,10 +1342,10 @@ class StrategyCockpitService:
 
     def _health_components(
         self,
-        scans: list[ScanResult],
-        alerts: list[Alert],
-        setups: list[SetupInstance],
-        feedback: list[UserFeedback],
+        scans: Sequence[ScanResult],
+        alerts: Sequence[Alert],
+        setups: Sequence[SetupInstance],
+        feedback: Sequence[UserFeedback],
         bottlenecks: dict[str, Any],
         regime: dict[str, Any],
         now: datetime,
@@ -1699,7 +1700,7 @@ class StrategyCockpitService:
 
     async def _period_metrics(
         self,
-        version_ids: list[UUID],
+        version_ids: Sequence[UUID],
         start: datetime,
         end: datetime,
     ) -> dict[str, Any]:
@@ -1730,6 +1731,7 @@ class StrategyCockpitService:
                 )
             )
         ).all()
+        last_alert_at = max((_aware(alert.created_at) for alert in alerts), default=None)
         return {
             "scan_count": len(scans),
             "confirmed_count": sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED),
@@ -1739,11 +1741,7 @@ class StrategyCockpitService:
                 1 for setup in setups if setup.state == SetupLifecycleState.INVALIDATED
             ),
             "universe_size": len({scan.symbol for scan in scans}),
-            "last_alert_at": (
-                max((_aware(alert.created_at) for alert in alerts), default=None).isoformat()
-                if alerts
-                else None
-            ),
+            "last_alert_at": last_alert_at.isoformat() if last_alert_at is not None else None,
         }
 
     async def _inbox_exists(

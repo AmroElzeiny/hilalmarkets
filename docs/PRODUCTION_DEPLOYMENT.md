@@ -19,6 +19,8 @@ MARKET_DATA_EXCHANGE=binance
 AI_INTERPRETER_PROVIDER=openai
 TELEGRAM_ENABLED=true
 TELEGRAM_ADAPTER=http
+WHATSAPP_ENABLED=false
+WHATSAPP_ADAPTER=none
 DISCORD_ENABLED=true
 DISCORD_ADAPTER=http
 BILLING_ENABLED=true
@@ -33,6 +35,14 @@ permissions for the v1 monitoring-only product. For NOWPayments, set
 `NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_BASE_URL`, and `BILLING_WEBHOOK_SECRET` for IPN signature
 verification. Stripe remains behind the billing-provider abstraction, but it is not the configured
 payment path for this build.
+
+WhatsApp is an optional official Meta Cloud API channel. Follow
+[`WHATSAPP_CLOUD_API_RUNBOOK.md`](WHATSAPP_CLOUD_API_RUNBOOK.md), provide every required
+`WHATSAPP_*` value through the deployment secret store, and change the adapter to `http` only after
+the signed callback and registered phone are verified. Keep
+`WHATSAPP_OPPORTUNITY_ALERTS_ENABLED=false` until Meta has approved the configured research-event
+templates and the policy review is recorded. Code completion does not establish Meta business,
+phone, template, legal, or policy approval.
 
 Passwordless login and password reset use short-lived email codes. Configure an SMTP account
 before enabling those actions in production:
@@ -163,8 +173,21 @@ produces an intentionally empty, clearly labelled screener.
 
 Review and publication are separate audited actions. With the default one-owner policy, the same
 account can perform both. Set `REQUIRE_SECOND_REVIEWER=true` only after a second active publisher is
-provisioned and the four-eyes staging test passes. Apply migration `e7f8a9b0c1d2` before using the
-new Passport history, assignment, checkout, or payment-email flow.
+provisioned and the four-eyes staging test passes. Apply `alembic upgrade head`, including
+`e7f8a9b0c1d2` and `f8a9b0c1d2e3`, before using Passport history, assignments, checkout,
+payment email, methodology expiry, or explicit criteria/use decisions.
+
+After upgrading to Alembic head, provision the verified active owner explicitly before opening
+System Brain mutations:
+
+```bash
+python scripts/bootstrap_governance_owner.py \
+  --email "owner@example.com" \
+  --reason "Initial accountable production governance owner"
+```
+
+Retain the resulting audit records. Application `ADMIN` alone does not imply governance authority
+in staging or production.
 
 Protect `/system-brain*` with Cloudflare Access and application ADMIN authentication. Restrict the
 origin with Cloudflare Tunnel or firewall rules; Access headers are not trustworthy if arbitrary

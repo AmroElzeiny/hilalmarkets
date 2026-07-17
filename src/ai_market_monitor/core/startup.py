@@ -44,6 +44,10 @@ def validate_runtime_configuration(settings: Settings) -> None:
             errors.append("DATABASE_URL must not contain placeholder credentials")
         if settings.database_url.startswith("sqlite"):
             errors.append("DATABASE_URL must use PostgreSQL in staging and production")
+        if not settings.api_rate_limiting_enabled:
+            errors.append("API_RATE_LIMITING_ENABLED must be true in staging and production")
+        if not settings.api_rate_limit_fail_closed:
+            errors.append("API_RATE_LIMIT_FAIL_CLOSED must be true in staging and production")
         if not str(settings.public_base_url).startswith("https://"):
             errors.append("PUBLIC_BASE_URL must use HTTPS in staging and production")
         if settings.app_base_url is not None and not str(settings.app_base_url).startswith(
@@ -137,6 +141,31 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 )
             if _looks_like_placeholder(settings.telegram_webhook_secret):
                 errors.append("TELEGRAM_WEBHOOK_SECRET must not use a placeholder value")
+        if settings.whatsapp_enabled:
+            if settings.whatsapp_adapter != "http":
+                errors.append("WHATSAPP_ADAPTER=http is required when WhatsApp is enabled")
+            required_whatsapp_values = {
+                "WHATSAPP_GRAPH_API_VERSION": settings.whatsapp_graph_api_version,
+                "WHATSAPP_ACCESS_TOKEN": settings.whatsapp_access_token,
+                "WHATSAPP_APP_SECRET": settings.whatsapp_app_secret,
+                "WHATSAPP_VERIFY_TOKEN": settings.whatsapp_verify_token,
+                "WHATSAPP_PHONE_NUMBER_ID": settings.whatsapp_phone_number_id,
+                "WHATSAPP_BUSINESS_ACCOUNT_ID": settings.whatsapp_business_account_id,
+                "WHATSAPP_BUSINESS_PHONE_E164": settings.whatsapp_business_phone_e164,
+            }
+            for name, value in required_whatsapp_values.items():
+                if value is None or not _secret_value(value) or not _secret_value(value).strip():
+                    errors.append(f"{name} is required when WhatsApp is enabled")
+                elif _looks_like_placeholder(value):
+                    errors.append(f"{name} must not use a placeholder value")
+            if (
+                settings.whatsapp_opportunity_alerts_enabled
+                and "confirmed_research_event" not in settings.whatsapp_template_names
+            ):
+                errors.append(
+                    "WHATSAPP_TEMPLATE_NAMES must configure confirmed_research_event when "
+                    "WhatsApp opportunity alerts are enabled"
+                )
         if settings.discord_enabled:
             if settings.discord_adapter == "noop":
                 errors.append("NoopDiscordGateway is forbidden when Discord is enabled")

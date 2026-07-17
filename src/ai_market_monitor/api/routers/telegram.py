@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import get_market_data_provider, get_market_previewer
+from ai_market_monitor.api.route_security import signed_webhook
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import TelegramUpdateReceipt
@@ -39,6 +40,7 @@ def get_telegram_adapter_factory() -> TelegramAdapterFactory:
 
 
 @router.post("/webhook")
+@signed_webhook("Authenticates Telegram updates with the configured webhook secret token.")
 async def telegram_webhook(
     request: Request,
     session: AsyncSession = Depends(get_db_session),

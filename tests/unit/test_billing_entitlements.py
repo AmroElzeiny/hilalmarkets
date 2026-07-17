@@ -41,7 +41,12 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.services.admin import AdminCommercialService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
-from ai_market_monitor.services.billing import BillingError, BillingService, BillingWebhookVerifier
+from ai_market_monitor.services.billing import (
+    BillingError,
+    BillingService,
+    BillingWebhookVerifier,
+    billing_provider_capabilities,
+)
 from ai_market_monitor.services.entitlements import (
     EntitlementError,
     EntitlementService,
@@ -495,27 +500,46 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         billing_webhook_secret="secret",
+        billing_provider="nowpayments",
     )
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="monthly",
+            request_key="nowpayments-finished",
+            terms_accepted=True,
+        )
         payload = {
             "payment_id": "pay_456",
             "payment_status": "finished",
-            "order_id": f"amm|{user.id}|pro|abc123",
+            "order_id": f"hm|{prepared.attempt.id}|pro",
+            "price_amount": "29.00",
+            "price_currency": "USD",
+            "pay_amount": "100.00",
+            "actually_paid": "100.00",
+            "pay_currency": "USDT",
         }
         body = json.dumps(payload).encode()
         signed_body = json.dumps(
             {
+                "actually_paid": payload["actually_paid"],
                 "order_id": payload["order_id"],
+                "pay_amount": payload["pay_amount"],
+                "pay_currency": payload["pay_currency"],
                 "payment_id": payload["payment_id"],
                 "payment_status": payload["payment_status"],
+                "price_amount": payload["price_amount"],
+                "price_currency": payload["price_currency"],
             },
             separators=(",", ":"),
         ).encode()
         from hashlib import sha512
 
         signature = hmac.new(b"secret", signed_body, sha512).hexdigest()
-        result = await BillingService(session, settings).process_verified_webhook(
+        result = await service.process_verified_webhook(
             provider="nowpayments",
             body=body,
             signature=signature,
@@ -527,6 +551,251 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
         assert subscription is not None
         assert subscription.provider == "nowpayments"
         assert subscription.status == SubscriptionStatus.ACTIVE
+        assert subscription.cancel_at_period_end is True
+        assert subscription.current_period_end is not None
+
+        with pytest.raises(BillingError) as duplicate:
+            await service.process_event(
+                provider="nowpayments",
+                payload={
+                    "id": "evt-second-payment-for-one-checkout",
+                    "type": "payment.finished",
+                    "data": {
+                        "checkout_attempt_id": str(prepared.attempt.id),
+                        "provider_subscription_id": "nowpayments_second_payment",
+                        "status": "active",
+                        "amount": "29.00",
+                        "currency": "USD",
+                        "settlement_expected_amount": "100.00",
+                        "settlement_actual_amount": "100.00",
+                        "settlement_currency": "USDT",
+                    },
+                },
+            )
+        assert duplicate.value.code == "checkout_already_completed"
+
+
+async def test_nowpayments_partial_payment_never_grants_access(test_context):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_provider="nowpayments",
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Partial payment user")
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="one_time_30_day",
+            request_key="nowpayments-partial",
+            terms_accepted=True,
+        )
+
+        result = await service.process_event(
+            provider="nowpayments",
+            payload={
+                "id": "evt-nowpayments-partial",
+                "type": "payment.partially_paid",
+                "data": {
+                    "checkout_attempt_id": str(prepared.attempt.id),
+                    "provider_subscription_id": "nowpayments_partial",
+                    "status": "partially_paid",
+                    "amount": "29.00",
+                    "currency": "USD",
+                },
+            },
+        )
+
+        assert result.processing_status == "processed"
+        assert prepared.attempt.status == "partially_paid"
+        assert await session.scalar(
+            select(Subscription).where(Subscription.user_id == user.id)
+        ) is None
+
+
+@pytest.mark.parametrize(
+    ("actually_paid", "expected_code"),
+    [
+        ("99.99", "payment_underpaid"),
+        ("100.01", "payment_overpaid"),
+    ],
+)
+async def test_nowpayments_settlement_uses_actual_crypto_received(
+    test_context,
+    actually_paid,
+    expected_code,
+):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_provider="nowpayments",
+        billing_payment_amount_tolerance_percent=0,
+        billing_allow_overpayment=False,
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, f"Settlement {expected_code}")
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="one_time_30_day",
+            request_key=f"settlement-{expected_code}",
+            terms_accepted=True,
+        )
+        payload = {
+            "id": f"evt-settlement-{expected_code}",
+            "type": "payment.finished",
+            "data": {
+                "checkout_attempt_id": str(prepared.attempt.id),
+                "provider_subscription_id": f"sub-settlement-{expected_code}",
+                "status": "active",
+                "amount": "29.00",
+                "currency": "USD",
+                "settlement_expected_amount": "100.00",
+                "settlement_actual_amount": actually_paid,
+                "settlement_currency": "USDT",
+            },
+        }
+
+        with pytest.raises(BillingError) as error:
+            await service.process_event(provider="nowpayments", payload=payload)
+
+        assert error.value.code == expected_code
+
+
+def test_billing_provider_capabilities_match_real_provider_semantics():
+    stripe = billing_provider_capabilities("stripe")
+    nowpayments = billing_provider_capabilities("nowpayments")
+
+    assert stripe.supports_recurring_billing is True
+    assert stripe.supports_customer_portal is True
+    assert stripe.supports_automatic_cancellation is True
+    assert stripe.supports_refunds is True
+    assert nowpayments.supports_recurring_billing is False
+    assert nowpayments.supports_customer_portal is False
+    assert nowpayments.supports_automatic_cancellation is False
+    assert nowpayments.supports_refunds is False
+    assert nowpayments.supports_invoice_receipts is True
+
+
+async def test_one_time_access_expires_at_verified_period_end(test_context):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_provider="nowpayments",
+    )
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Expired access")
+        plan = await PlanCatalogService(session).get_or_sync("pro")
+        subscription = Subscription(
+            user_id=user.id,
+            plan_id=plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            provider="nowpayments",
+            provider_subscription_id="nowpayments_expired_access",
+            current_period_start=now - timedelta(days=31),
+            current_period_end=now - timedelta(seconds=1),
+            cancel_at_period_end=True,
+        )
+        session.add(subscription)
+        await session.flush()
+
+        expired = await BillingService(session, settings).expire_ended_access(now=now)
+
+        assert expired == 1
+        assert subscription.status == SubscriptionStatus.EXPIRED
+        entitlement = await EntitlementService(session).current(user.id)
+        assert entitlement.plan.code == "demo"
+
+
+@pytest.mark.parametrize(
+    ("amount", "currency", "expected_code"),
+    [
+        ("28.99", "USD", "payment_underpaid"),
+        ("29.01", "USD", "payment_overpaid"),
+        ("29.00", "EUR", "payment_currency_mismatch"),
+    ],
+)
+async def test_verified_payment_must_match_checkout_amount_and_currency(
+    test_context,
+    amount,
+    currency,
+    expected_code,
+):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_provider="nowpayments",
+        billing_payment_amount_tolerance_percent=0,
+        billing_allow_overpayment=False,
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, f"Mismatch {expected_code}")
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="one_time_30_day",
+            request_key=f"mismatch-{expected_code}",
+            terms_accepted=True,
+        )
+        payload = {
+            "id": f"evt-{expected_code}",
+            "type": "payment.finished",
+            "data": {
+                "checkout_attempt_id": str(prepared.attempt.id),
+                "user_id": str(user.id),
+                "plan_code": "pro",
+                "provider_subscription_id": f"sub-{expected_code}",
+                "status": "active",
+                "amount": amount,
+                "currency": currency,
+            },
+        }
+
+        with pytest.raises(BillingError) as error:
+            await service.process_event(provider="nowpayments", payload=payload)
+
+        assert error.value.code == expected_code
+
+
+async def test_refund_revokes_an_active_subscription(test_context):
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Refunded user")
+        service = BillingService(session, test_context["settings"])
+        common = {
+            "user_id": str(user.id),
+            "plan_code": "pro",
+            "provider_customer_id": "cus_refund",
+            "provider_subscription_id": "sub_refund",
+        }
+        await service.process_event(
+            provider="stripe",
+            payload={
+                "id": "evt_refund_create",
+                "type": "customer.subscription.created",
+                "data": {**common, "status": "active"},
+            },
+        )
+        await service.process_event(
+            provider="stripe",
+            payload={
+                "id": "evt_refund",
+                "type": "payment.refunded",
+                "data": common,
+            },
+        )
+
+        subscription = await session.scalar(
+            select(Subscription).where(
+                Subscription.provider_subscription_id == "sub_refund"
+            )
+        )
+        assert subscription is not None
+        assert subscription.status == SubscriptionStatus.CANCELED
+        assert subscription.canceled_at is not None
 
 
 async def test_nowpayments_webhook_sends_single_admin_payment_notification(
@@ -575,19 +844,43 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
                 profile_data={},
             )
         )
+        nowpayments_settings = Settings(
+            app_env="test",
+            app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+            billing_webhook_secret="secret",
+            billing_provider="nowpayments",
+        )
+        prepared = await BillingService(session, nowpayments_settings).prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="monthly",
+            request_key="admin-payment-notice",
+            terms_accepted=True,
+        )
+        attempt_id = prepared.attempt.id
         await session.commit()
 
     payload = {
         "payment_id": "pay_admin_notice",
         "payment_status": "finished",
-        "order_id": f"amm|{user.id}|pro|adminnotice",
+        "order_id": f"hm|{attempt_id}|pro",
+        "price_amount": "29.00",
+        "price_currency": "USD",
+        "pay_amount": "100.00",
+        "actually_paid": "100.00",
+        "pay_currency": "USDT",
     }
     body = json.dumps(payload).encode()
     signed_body = json.dumps(
         {
+            "actually_paid": payload["actually_paid"],
             "order_id": payload["order_id"],
+            "pay_amount": payload["pay_amount"],
+            "pay_currency": payload["pay_currency"],
             "payment_id": payload["payment_id"],
             "payment_status": payload["payment_status"],
+            "price_amount": payload["price_amount"],
+            "price_currency": payload["price_currency"],
         },
         separators=(",", ":"),
     ).encode()

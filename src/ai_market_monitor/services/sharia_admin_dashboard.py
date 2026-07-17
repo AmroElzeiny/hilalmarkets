@@ -2,6 +2,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ from ai_market_monitor.db.models import (
     User,
 )
 from ai_market_monitor.db.models.enums import ShariaMethodologyStatus, UserRole
+from ai_market_monitor.schemas.sharia_methodology import MethodologyRulesDefinition
 
 
 class ShariaAdminDashboardService:
@@ -465,40 +467,45 @@ class ShariaAdminDashboardService:
             ).all()
         ) if asset else []
         latest_decision = decisions[-1] if decisions else None
+        methodology_contract_error = None
+        try:
+            methodology_rules = (
+                MethodologyRulesDefinition.model_validate(methodology.rules_json)
+                if methodology
+                else None
+            )
+        except ValidationError:
+            methodology_rules = None
+            methodology_contract_error = (
+                "This methodology has no valid required-criteria contract. Approval is blocked."
+            )
         review_criteria = (
             list(latest_decision.criterion_decisions or [])
-            if latest_decision and latest_decision.criterion_decisions
+            if case.state != "ready_for_review"
+            and latest_decision
+            and latest_decision.criterion_decisions
             else [
                 {
-                    "key": "canonical_asset_identity",
-                    "label": "Canonical asset identity",
-                    "outcome": (
-                        "pass"
-                        if asset and asset.mapping_state == "verified"
-                        else "needs_evidence"
-                    ),
-                    "reviewer_explanation": (
-                        "Confirm identity, chain, contract, and exchange mapping."
-                    ),
-                },
+                    **item.model_dump(mode="json"),
+                    "outcome": "",
+                    "reviewer_explanation": "",
+                }
+                for item in (methodology_rules.required_criteria if methodology_rules else [])
+            ]
+        )
+        review_use_cases = (
+            list(latest_decision.use_case_decisions or [])
+            if case.state != "ready_for_review"
+            and latest_decision
+            and latest_decision.use_case_decisions
+            else [
                 {
-                    "key": "official_methodology_reference",
-                    "label": "Official methodology reference",
-                    "outcome": "pass" if external else "needs_evidence",
-                    "reviewer_explanation": (
-                        "Confirm exact official wording and retained source snapshot."
-                    ),
-                },
-                {
-                    "key": "evidence_completeness",
-                    "label": "Evidence completeness",
-                    "outcome": (
-                        "pass"
-                        if dossier and dossier.missing_information_count == 0
-                        else "qualification"
-                    ),
-                    "reviewer_explanation": "Review gaps and contradictions before deciding.",
-                },
+                    **item.model_dump(mode="json"),
+                    "decision": "",
+                    "reason": "",
+                    "scope": item.default_scope,
+                }
+                for item in (methodology_rules.use_cases if methodology_rules else [])
             ]
         )
         return {
@@ -539,6 +546,8 @@ class ShariaAdminDashboardService:
             ],
             "decisions": decisions,
             "review_criteria": review_criteria,
+            "review_use_cases": review_use_cases,
+            "methodology_contract_error": methodology_contract_error,
             "reviewers": reviewers,
             "assignments": assignments,
             "active_publication": publication,

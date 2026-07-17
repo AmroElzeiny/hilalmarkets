@@ -52,6 +52,7 @@ class ShariaMethodology(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reviewer_group: Mapped[str | None] = mapped_column(String(240))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rules_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     evidence_requirements_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, default=dict, nullable=False

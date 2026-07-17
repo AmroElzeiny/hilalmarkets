@@ -1,5 +1,5 @@
-from ai_market_monitor.engine.condition_registry import condition_registry_payload
 from ai_market_monitor.engine.concept_e2e import concept_e2e_rows
+from ai_market_monitor.engine.condition_registry import condition_registry_payload
 from ai_market_monitor.engine.evaluator import StrategyRuleEngine
 from ai_market_monitor.engine.models import EvaluationState
 from ai_market_monitor.schemas.strategy import ConditionGroup, ConditionRule, LogicalOperator

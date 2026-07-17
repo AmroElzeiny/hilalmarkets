@@ -41,7 +41,11 @@ templates without replacing persisted models or approval boundaries.
 10. **Discord is optional delivery and community infrastructure.** OAuth linking, destinations,
     role synchronization, setup threads, slash-command shortcuts and support context are modeled
     without making Discord the primary onboarding surface.
-11. **Registry keys are the AI execution boundary.** Natural-language retrieval produces a compact
+11. **WhatsApp is an opt-in delivery and navigation channel.** The official Meta Cloud API adapter
+    accepts only verified inbound-linked recipients. Free-form replies require an open service
+    window; business-initiated delivery outside it requires an explicitly configured template.
+    Strategy approval and activation remain authenticated dashboard actions.
+12. **Registry keys are the AI execution boundary.** Natural-language retrieval produces a compact
     capability shortlist. AI may rerank those keys and extract schema-defined parameters, but every
     AI condition must carry an immutable `capability_key`. The backend rejects unknown keys and
     rebuilds operands from the registry before coverage audit, approval, or scanning. Unknown terms
@@ -58,9 +62,10 @@ templates without replacing persisted models or approval boundaries.
 | Services | `services/` | Onboarding, identity, approval, preview, activation, billing, entitlements |
 | Engine | `engine/` | Deterministic indicators, rule evaluation, Near-Miss, risk, proofs, forensics |
 | Telegram | `telegram/` | Async command/callback application service and alert rendering |
+| WhatsApp | `whatsapp/` | Signed Meta webhooks, verified opt-in linking, interactive navigation, template/session delivery, and status reconciliation |
 | Discord | `discord/` | OAuth linking, destination validation, embeds, threads, roles, support, moderation |
 | Workers | `worker.py` | Idempotent scan scheduling, scan execution, expiry, delivery and health jobs |
-| Web | `templates/hilal/`, `static/hilalmarkets*` | Shared public/dashboard shells, production read models, guided Watchlist UI, consent, and accessibility behavior |
+| Web | `templates/hilal/`, `static/hilalmarkets*` | Shared public/dashboard shells, production read models, guided Watch Plan UI, consent, and accessibility behavior |
 | Reliability | `services/reliability.py` | Market-data health, incidents, delivery failure state, metrics |
 | Admin | `api/routers/admin.py`, `services/admin_dashboard.py` | RBAC dashboard APIs and audited admin actions |
 
@@ -129,6 +134,22 @@ Current Telegram capabilities:
 - Secret-validated `/api/v1/telegram/webhook`, update-idempotency receipts, real Bot API
   send/edit/photo/callback methods and bounded delivery retries.
 
+## WhatsApp Cloud API Layer
+
+`whatsapp/` implements the official Meta WhatsApp Cloud API without a BSP or WhatsApp Web
+automation. Dashboard consent creates a short-lived, digest-only `IdentityLinkToken`; an inbound
+signed `LINK <token>` message verifies the sender `wa_id` and E.164 number before a
+`WhatsAppConnection` becomes active. Raw Meta webhook bodies are authenticated before parsing,
+expanded across every batch entry, reduced to bounded event records, and processed asynchronously.
+
+Outbound alerts reuse `AlertDelivery` with `wa:<wa_id>` destinations. The dispatcher applies the
+same schedule, mute, entitlement, and compliance preferences as other channels, plus WhatsApp
+category consent and service-window/template policy. API acceptance stores the Meta `wamid`;
+separate sent, delivered, read, and failed receipts update delivery state monotonically. STOP-style
+commands opt out immediately and cancel unsent WhatsApp rows. Interactive menus expose safe account
+and Watch Plan navigation, while strategy interpretation, approval, activation, and sensitive
+account work use short-lived authenticated dashboard links. See `docs/WHATSAPP_CLOUD_API_RUNBOOK.md`.
+
 ## Commercial Layer
 
 `core/plans.py` is the single plan catalog for Demo, Trader, Pro, Creator, Community and the
@@ -137,9 +158,12 @@ current entitlement from subscription/trial/default state, enforces active-strat
 timeframe and Discord-access limits, snapshots entitlement decisions, records idempotent usage, and
 pauses excess strategies after downgrades without deleting user data.
 
-`services/billing.py` provides a billing-provider protocol, a real Stripe Checkout/Portal adapter,
-Stripe timestamped signature verification, payload redaction, idempotent `BillingEvent` processing, subscription
-upserts, trial conversion, entitlement snapshots, downgrade pauses and Discord role-sync enqueueing.
+`services/billing.py` provides a capability-declared billing-provider protocol. Stripe supports
+automatic subscription renewal and its customer portal; the configured NOWPayments launch path
+uses signed one-time invoices for 30-day access and no cancellation portal. The service validates
+checkout ownership, plan, amount, and currency before an idempotent `BillingEvent` can change an
+entitlement. It also handles access expiry, refunds, payload redaction, trial conversion, downgrade
+pauses, and Discord role-sync enqueueing.
 `services/trials.py`, `services/referrals.py` and `services/admin.py` cover trial eligibility,
 monitoring cycles, qualifying-alert attribution, no-alert renewal decisions, reminder state,
 referral foundations and audited commercial overrides.
@@ -296,7 +320,7 @@ reasoning, service tier, usage, cost estimate, candidate rate and delivered-noti
 
 `ShariaScreeningService` is the authority for approved methodology versions, effective-dated asset
 assessments, evidence, history, passports, and comparison. `ShariaUniverseResolver` is the single
-fail-closed boundary used by one-time Scanner mode, persistent Watchlists, preview/validation, and
+fail-closed boundary used by one-time Scanner mode, persistent Watch Plans, preview/validation, and
 the worker. It intersects the technical spot universe with one approved methodology, selected
 statuses, exchange/quote filters, explicit symbols or an owner-scoped approved watchlist. Missing
 evidence is `insufficient_information` and never becomes an ordinary technical non-match.

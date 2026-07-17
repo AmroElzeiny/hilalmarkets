@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from ai_market_monitor.engine.capability_compatibility import compatibility_report
 from ai_market_monitor.engine.capability_index import get_capability_index
@@ -12,7 +13,12 @@ def capability_quality_snapshot(
     report_path: Path = Path("reports/capability_prompt_coverage.json"),
 ) -> dict:
     index = get_capability_index()
-    retrieval = {"passed": 0, "total": 0, "percent": None, "current": False}
+    retrieval: dict[str, Any] = {
+        "passed": 0,
+        "total": 0,
+        "percent": None,
+        "current": False,
+    }
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, TypeError, ValueError, json.JSONDecodeError):

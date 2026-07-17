@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.api.dependencies import UserPrincipal, get_user_principal
+from ai_market_monitor.api.route_security import public_api, signed_webhook
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
@@ -39,10 +41,7 @@ router = APIRouter(prefix="/discord", tags=["discord"])
 
 
 class OAuthStateRequest(BaseModel):
-    user_id: UUID
-    redirect_url: str = Field(min_length=1, max_length=1000)
-    scopes: list[str] = Field(default_factory=lambda: ["identify", "email", "guilds"])
-    metadata: dict = Field(default_factory=dict)
+    model_config = {"extra": "forbid"}
 
 
 class OAuthCompleteRequest(BaseModel):
@@ -57,6 +56,7 @@ def get_discord_oauth_client(
 
 
 @router.post("/interactions")
+@signed_webhook("Authenticates each Discord interaction with the Ed25519 request signature.")
 async def discord_interactions(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
@@ -210,7 +210,8 @@ def _verify_discord_signature(
 
 
 class DestinationRequest(BaseModel):
-    user_id: UUID
+    model_config = {"extra": "forbid"}
+
     mode: str
     permissions: DiscordPermissionSet
     discord_user_id: str | None = None
@@ -220,7 +221,8 @@ class DestinationRequest(BaseModel):
 
 
 class SupportTicketRequest(BaseModel):
-    user_id: UUID
+    model_config = {"extra": "forbid"}
+
     category: str
     description: str = Field(min_length=1, max_length=4000)
     strategy_id: UUID | None = None
@@ -235,21 +237,24 @@ class ModerationRequest(BaseModel):
 
 @router.post("/oauth/state")
 async def create_oauth_state(
-    request: OAuthStateRequest,
+    _request: OAuthStateRequest,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
     state = await DiscordConnectionService(session, settings).generate_oauth_state(
-        user_id=request.user_id,
-        redirect_url=request.redirect_url,
-        scopes=request.scopes,
-        metadata=request.metadata,
+        user_id=principal.user_id,
+        redirect_url=f"{base_url}/dashboard/integrations",
+        scopes=["identify", "email", "guilds"],
+        metadata={},
     )
     await session.commit()
     return {"state": state}
 
 
 @router.post("/oauth/complete")
+@public_api("Consumes a single-use expiring OAuth state and Discord authorization code.")
 async def complete_oauth(
     request: OAuthCompleteRequest,
     session: AsyncSession = Depends(get_db_session),
@@ -291,12 +296,13 @@ async def complete_oauth(
 @router.post("/destinations")
 async def select_destination(
     request: DestinationRequest,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     try:
         destination = await DiscordConnectionService(session, settings).select_destination(
-            user_id=request.user_id,
+            user_id=principal.user_id,
             mode=request.mode,
             permissions=request.permissions,
             discord_user_id=request.discord_user_id,
@@ -321,10 +327,11 @@ async def select_destination(
 @router.post("/support")
 async def create_support_ticket(
     request: SupportTicketRequest,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     ticket = await DiscordSupportService(session).create_ticket(
-        user_id=request.user_id,
+        user_id=principal.user_id,
         category=request.category,
         description=request.description,
         strategy_id=request.strategy_id,
@@ -336,7 +343,10 @@ async def create_support_ticket(
 
 
 @router.post("/moderation/check")
-async def check_moderation(request: ModerationRequest) -> dict:
+async def check_moderation(
+    request: ModerationRequest,
+    _: UserPrincipal = Depends(get_user_principal),
+) -> dict:
     result = DiscordModerationService().assess(
         content=request.content,
         attachment_names=request.attachment_names,

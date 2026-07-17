@@ -26,11 +26,11 @@
       <span class="icon-box is-gold"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
     </div>
     <dl class="checkout-facts">
-      <div><dt>Billing frequency</dt><dd>Monthly</dd></div>
+      <div><dt>Access type</dt><dd>{{ 'Monthly subscription' if billing_capabilities.supports_recurring_billing else 'One-time 30-day access' }}</dd></div>
       <div><dt>Price</dt><dd>{{ plan.price_monthly }} {{ plan.currency }}</dd></div>
       <div><dt>Tax</dt><dd>Shown by the payment provider where applicable</dd></div>
-      <div><dt>Renewal</dt><dd>Renews monthly until cancelled</dd></div>
-      <div><dt>Cancellation</dt><dd>Manage from Plan and Billing; provider and legal terms apply</dd></div>
+      <div><dt>Renewal</dt><dd>{{ 'Renews monthly until cancelled' if billing_capabilities.supports_recurring_billing else 'Manual renewal; no automatic charge' }}</dd></div>
+      <div><dt>Cancellation</dt><dd>{{ 'Manage through the provider portal' if billing_capabilities.supports_customer_portal else 'No subscription cancellation is needed' }}</dd></div>
     </dl>
     <div class="checkout-limit-grid">
       <article><span data-icon="watchlist" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>Active Watch Plans</span></article>
@@ -54,9 +54,9 @@
       <form class="checkout-confirm-form" method="post" action="/dashboard/billing/checkout">
         <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
         <input type="hidden" name="plan_code" value="{{ plan.code }}">
-        <input type="hidden" name="billing_cycle" value="monthly">
+        <input type="hidden" name="billing_cycle" value="{{ billing_cycle }}">
         <input type="hidden" name="checkout_request_id" value="{{ checkout_request_id }}">
-        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, and recurring monthly payment.</span></label>
+        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>{% if billing_capabilities.supports_recurring_billing %}, including recurring monthly payment{% else %}, for this one-time 30-day access payment{% endif %}.</span></label>
         <button class="btn btn-primary" type="submit"><span data-icon="shield" data-icon-class="icon-sm"></span>Continue to secure payment</button>
       </form>
     {% endif %}

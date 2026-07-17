@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
+from typing import Any, Literal, cast
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -19,11 +20,12 @@ from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
-from ai_market_monitor.core.site_content import (
-    DASHBOARD_NAVIGATION,
-    SHARIA_STATUS_PRESENTATION,
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PUBLIC_PLAN_CODES,
+    PURCHASABLE_PLAN_CODES,
 )
+from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -37,6 +39,7 @@ from ai_market_monitor.db.models import (
     DiscordConnection,
     MonitorShariaAssetState,
     NearMissSnapshot,
+    PaymentEmailDelivery,
     Plan,
     PublishedAssetAssessment,
     ReferralRelationship,
@@ -52,6 +55,7 @@ from ai_market_monitor.db.models import (
     Trial,
     User,
     UserIdentity,
+    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
@@ -77,6 +81,7 @@ from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
 )
+from ai_market_monitor.services.opportunity_cards import OpportunityCardReadService
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
@@ -501,7 +506,10 @@ async def _builder_screening_context(
         select(DashboardPreference).where(DashboardPreference.user_id == user.id)
     )
     values = dict(preference.notification_preferences or {}) if preference else {}
-    stored_policy = values.get("sharia") if isinstance(values.get("sharia"), dict) else {}
+    raw_stored_policy = values.get("sharia")
+    stored_policy: dict[str, Any] = (
+        raw_stored_policy if isinstance(raw_stored_policy, dict) else {}
+    )
     screening = ShariaScreeningService(session, settings)
     methodology = None
     configured_id = stored_policy.get("default_methodology_id") or values.get(
@@ -1055,6 +1063,9 @@ async def dashboard_home(
     discord = await session.scalar(
         select(DiscordConnection).where(DiscordConnection.user_id == user.id)
     )
+    whatsapp = await session.scalar(
+        select(WhatsAppConnection).where(WhatsAppConnection.user_id == user.id)
+    )
     coverage = await market_coverage_for_user(session, user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
     entitlement = await EntitlementService(session).current(user.id)
@@ -1101,6 +1112,15 @@ async def dashboard_home(
         "latest_alert": _alert_view(latest_alert) if latest_alert else None,
         "coverage": coverage,
         "telegram_connected": telegram is not None,
+        "whatsapp_connected": bool(
+            whatsapp is not None
+            and whatsapp.status.value == "active"
+            and whatsapp.alerts_enabled
+            and whatsapp.verified_at is not None
+            and whatsapp.opt_in_at is not None
+            and whatsapp.opt_out_at is None
+            and whatsapp.revoked_at is None
+        ),
         "discord_connected": discord is not None,
         "eligible_market_count": screened_home.total,
         "screening_methodology": screened_home.methodology,
@@ -1161,8 +1181,9 @@ async def screened_market_page(
     )
     raw_preference_values = preference.notification_preferences if preference else None
     preference_values = dict(raw_preference_values or {})
-    stored_policy = (
-        preference_values.get("sharia") if isinstance(preference_values.get("sharia"), dict) else {}
+    raw_stored_policy = preference_values.get("sharia")
+    stored_policy: dict[str, Any] = (
+        raw_stored_policy if isinstance(raw_stored_policy, dict) else {}
     )
     preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
         "default_sharia_methodology_id"
@@ -1299,70 +1320,30 @@ async def screened_market_page(
             if asset in visible_assets:
                 latest_by_asset.setdefault(asset, (setup, strategy_id, strategy_name))
     opportunity_cards = []
+    opportunity_reader = OpportunityCardReadService(session)
     for assessment in screened.items:
         latest = latest_by_asset.get(assessment.canonical_asset)
         setup, strategy_id, strategy_name = latest if latest else (None, None, None)
-        readiness = round(float(setup.completion_score)) if setup else 0
-        status_presentation = SHARIA_STATUS_PRESENTATION[assessment.status.value]
+        if setup is None or strategy_name is None:
+            continue
+        presentation = await opportunity_reader.for_setup(
+            setup=setup,
+            assessment=assessment,
+            strategy_name=strategy_name,
+        )
         opportunity_cards.append(
             {
                 "assessment": assessment,
                 "setup": setup,
                 "strategy_id": strategy_id,
                 "strategy_name": strategy_name,
-                "readiness": max(0, min(100, readiness)),
-                "direction": (
-                    "Getting closer"
-                    if readiness >= 70
-                    else "Stable"
-                    if readiness > 0
-                    else "Not started"
-                ),
-                "summary": "Custom Watchlist" if setup else "Screened asset",
-                "still_missing": (
-                    setup.close_reason
-                    if setup and setup.close_reason
-                    else "Open the journey to inspect the next required market check."
-                    if setup
-                    else "Create a Watchlist to define what market change matters to you."
-                ),
-                "presentation": {
-                    "asset": assessment.canonical_asset,
-                    "symbol": f"{assessment.canonical_asset}/{quote_asset}",
-                    "name": assessment.asset_name or "Crypto spot asset",
-                    "status_label": status_presentation["label"],
-                    "status_badge": status_presentation["badge"],
-                    "methodology_name": assessment.methodology_name,
-                    "methodology_version": assessment.methodology_version,
-                    "methodology_id": assessment.methodology_id,
-                    "passport_version_id": (setup.sharia_passport_version_id if setup else None),
-                    "event_time": setup.last_evaluated_at if setup else None,
-                    "reviewed_at": assessment.reviewed_at,
-                    "opportunity_type": strategy_name if setup else None,
-                    "readiness": max(0, min(100, readiness)) if setup else None,
-                    "direction": (
-                        "Getting closer"
-                        if readiness >= 70
-                        else "Stable"
-                        if readiness > 0
-                        else "Not started"
-                    )
-                    if setup
-                    else None,
-                    "present_conditions": (),
-                    "missing_requirement": (
-                        setup.close_reason
-                        if setup and setup.close_reason
-                        else "Open the journey to inspect the next required market check."
-                        if setup
-                        else None
-                    ),
-                    "summary": assessment.summary,
-                    "qualifications": tuple(assessment.qualifications[:3]),
-                },
+                "readiness": presentation["readiness"],
+                "direction": presentation["direction"],
+                "summary": "Stored Watch Plan evidence",
+                "still_missing": presentation["missing_requirement"],
+                "presentation": presentation,
             }
         )
-    opportunity_cards = [card for card in opportunity_cards if card["setup"] is not None]
     active_watch_plans = int(
         await session.scalar(
             select(func.count(Strategy.id)).where(
@@ -1652,6 +1633,7 @@ async def approved_watchlist_page(
     )
     watchlist_assets = [
         {
+            "watchlist_id": asset.watchlist_id,
             "canonical_asset": asset.canonical_asset,
             "added_at": asset.added_at,
             "watchlist_name": watchlist_name,
@@ -1791,7 +1773,7 @@ async def monitors_page(
             settings=settings,
             user=user,
             page="watchlists",
-            title="Watchlists",
+            title="Watch Plans",
             monitor_cards=await _monitor_cards_context(session, user),
         ),
     )
@@ -1855,10 +1837,13 @@ async def strategy_detail_page(
     ).all()
     setups_count = 0
     if versions:
-        setups_count = await session.scalar(
-            select(func.count(SetupInstance.id)).where(
-                SetupInstance.strategy_version_id.in_([version.id for version in versions])
+        setups_count = int(
+            await session.scalar(
+                select(func.count(SetupInstance.id)).where(
+                    SetupInstance.strategy_version_id.in_([version.id for version in versions])
+                )
             )
+            or 0
         )
     cockpit_service = StrategyCockpitService(session)
     monitor_health = await cockpit_service.edge_health(strategy, persist=False)
@@ -2177,9 +2162,18 @@ async def lifecycles_page(
         "compliance_changes",
         "investigations",
     }
-    activity_tab = request.query_params.get("tab", "forming")
-    if activity_tab not in allowed_tabs:
-        activity_tab = "forming"
+    requested_tab = request.query_params.get("tab", "forming")
+    activity_tab = cast(
+        Literal[
+            "all",
+            "forming",
+            "alerts",
+            "ended",
+            "compliance_changes",
+            "investigations",
+        ],
+        requested_tab if requested_tab in allowed_tabs else "forming",
+    )
     try:
         activity_page = max(1, int(request.query_params.get("page", "1") or 1))
     except ValueError:
@@ -2459,6 +2453,36 @@ async def billing_page(
     await PlanCatalogService(session).sync_defaults()
     entitlement = await EntitlementService(session).current(user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
+    billing = BillingService(session, settings)
+    attempts = list(
+        (
+            await session.scalars(
+                select(BillingCheckoutAttempt)
+                .where(BillingCheckoutAttempt.user_id == user.id)
+                .order_by(BillingCheckoutAttempt.created_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+    plan_ids = {attempt.plan_id for attempt in attempts}
+    history_plans = {
+        plan.id: plan
+        for plan in (
+            list((await session.scalars(select(Plan).where(Plan.id.in_(plan_ids)))).all())
+            if plan_ids
+            else []
+        )
+    }
+    receipts = list(
+        (
+            await session.scalars(
+                select(PaymentEmailDelivery)
+                .where(PaymentEmailDelivery.user_id == user.id)
+                .order_by(PaymentEmailDelivery.created_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
     await session.commit()
     return templates.TemplateResponse(
         request,
@@ -2472,9 +2496,42 @@ async def billing_page(
             title="Subscription and Billing",
             entitlement=entitlement,
             trial=trial,
-            purchase_plans={code: PLAN_DEFINITIONS[code] for code in PURCHASABLE_PLAN_CODES},
+            purchase_plans={code: PLAN_DEFINITIONS[code] for code in PUBLIC_PLAN_CODES},
+            billing_provider=billing.provider.provider_name,
+            billing_capabilities=billing.provider_capabilities,
+            billing_cycle_code=billing.billing_cycle_code,
+            billing_history=[
+                {
+                    "attempt": attempt,
+                    "plan_name": plan.name
+                    if (plan := history_plans.get(attempt.plan_id)) is not None
+                    else "Unavailable plan",
+                }
+                for attempt in attempts
+            ],
+            payment_receipts=receipts,
         ),
     )
+
+
+@router.post("/dashboard/billing/portal", include_in_schema=False)
+async def dashboard_billing_portal(
+    csrf_token_value: str = Form(..., alias="csrf_token"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token")
+    try:
+        base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
+        result = await BillingService(session, settings).billing_portal(
+            user_id=user.id,
+            return_url=f"{base_url}/dashboard/billing",
+        )
+    except BillingError as exc:
+        return _redirect(f"/dashboard/billing?error={exc.code}")
+    return _redirect(result.portal_url)
 
 
 @router.get(
@@ -2507,6 +2564,7 @@ async def billing_checkout_review(
         if checkout_attempt is None or checkout_attempt.user_id != user.id:
             raise HTTPException(status_code=404, detail="Checkout not found")
     entitlement = await EntitlementService(session).current(user.id)
+    billing = BillingService(session, settings)
     await session.commit()
     features = dict(plan.features or {})
     response = templates.TemplateResponse(
@@ -2522,7 +2580,9 @@ async def billing_checkout_review(
             plan=plan,
             plan_limits=dict(features.get("limits") or {}),
             plan_features=dict(features.get("features") or {}),
-            billing_cycle="monthly",
+            billing_cycle=billing.billing_cycle_code,
+            billing_provider=billing.provider.provider_name,
+            billing_capabilities=billing.provider_capabilities,
             checkout_request_id=uuid4().hex,
             checkout_attempt=checkout_attempt,
             checkout_state=state,
@@ -2549,7 +2609,7 @@ async def billing_checkout(
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
     base = str(settings.public_base_url).rstrip("/")
-    if plan_code not in PURCHASABLE_PLAN_CODES:
+    if plan_code not in PUBLIC_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
     try:
         plan = await PlanCatalogService(session).get_or_sync(plan_code)
@@ -2640,10 +2700,13 @@ async def billing_success(
                             "checkout_attempt_id": str(checkout_attempt.id),
                             "provider_subscription_id": static_session,
                             "provider_payment_reference": static_session,
+                            "user_id": str(user.id),
+                            "amount": str(checkout_attempt.amount),
+                            "currency": checkout_attempt.currency,
                             "status": "active",
                             "current_period_start": now.isoformat(),
                             "current_period_end": (now + timedelta(days=30)).isoformat(),
-                            "cancel_at_period_end": False,
+                            "cancel_at_period_end": True,
                         },
                     },
                 )
@@ -2656,6 +2719,7 @@ async def billing_success(
                 checkout_attempt = await session.get(BillingCheckoutAttempt, checkout_attempt.id)
             except BillingError:
                 await session.rollback()
+                checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id)
     status = checkout_attempt.status if checkout_attempt else "processing"
     state_content = {
         "completed": ("Plan activated", "payment_successful"),
@@ -2757,21 +2821,29 @@ async def payment_email_preview(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    if user.role != UserRole.ADMIN and settings.app_env not in {"development", "test"}:
+    if settings.app_env == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+    if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Administrator role required")
     plan = await PlanCatalogService(session).get_or_sync(plan_code)
     await session.commit()
     features = dict(plan.features or {})
     now = datetime.now(UTC)
+    billing = BillingService(session, settings)
     first_name = ((user.display_name or "").strip().split() or ["there"])[0]
     rendered = PaymentEmailRenderer(settings).render(
         first_name=first_name,
         plan_name=plan.name,
-        billing_frequency="monthly",
+        billing_frequency=(
+            "monthly auto-renewal"
+            if billing.provider_capabilities.supports_recurring_billing
+            else "30-day access"
+        ),
         amount=plan.price_monthly,
         currency=plan.currency,
         payment_date=now,
-        renewal_date=now + timedelta(days=30),
+        period_end_date=now + timedelta(days=30),
+        renews_automatically=billing.provider_capabilities.supports_recurring_billing,
         receipt_url=None,
         plan_limits=dict(features.get("limits") or {}),
     )
@@ -2795,6 +2867,20 @@ async def connections_page(
     discord = await session.scalar(
         select(DiscordConnection).where(DiscordConnection.user_id == user.id)
     )
+    whatsapp = await session.scalar(
+        select(WhatsAppConnection).where(WhatsAppConnection.user_id == user.id)
+    )
+    from ai_market_monitor.whatsapp.service import connection_payload
+
+    whatsapp_public = connection_payload(whatsapp)
+    whatsapp_locales = {settings.whatsapp_default_language}
+    if whatsapp is not None:
+        whatsapp_locales.add(whatsapp.preferred_locale)
+    for configured_templates in settings.whatsapp_template_names.values():
+        if isinstance(configured_templates, dict):
+            whatsapp_locales.update(
+                locale for locale in configured_templates if locale != "default"
+            )
     telegram_connect_url = None
     telegram_start_command = None
     try:
@@ -2820,9 +2906,17 @@ async def connections_page(
             page="integrations",
             title="Integrations",
             telegram=telegram,
+            whatsapp=whatsapp,
+            whatsapp_public=whatsapp_public,
+            whatsapp_locales=sorted(whatsapp_locales),
             discord=discord,
             telegram_connect_url=telegram_connect_url,
             telegram_start_command=telegram_start_command,
+            whatsapp_enabled=settings.whatsapp_enabled,
+            whatsapp_opportunity_alerts_enabled=(
+                settings.whatsapp_opportunity_alerts_enabled
+                and "confirmed_research_event" in settings.whatsapp_template_names
+            ),
         ),
     )
 
@@ -2912,7 +3006,7 @@ async def settings_submit(
 ) -> RedirectResponse:
     if timezone not in SUPPORTED_TIMEZONES:
         return _redirect("/dashboard/settings?error=unsupported_timezone")
-    allowed_channels = {"telegram", "discord"}
+    allowed_channels = {"telegram", "whatsapp", "discord"}
     channels = [channel for channel in alert_channels if channel in allowed_channels]
     if not channels:
         channels = ["telegram"]
@@ -2957,7 +3051,7 @@ async def settings_submit(
     selected_compliance_channels = [
         channel
         for channel in dict.fromkeys(compliance_alert_channels)
-        if channel in {"web", "telegram", "discord"}
+        if channel in {"web", "telegram", "whatsapp", "discord"}
     ]
     if "web" not in selected_compliance_channels:
         selected_compliance_channels.insert(0, "web")
@@ -3000,7 +3094,7 @@ async def settings_submit(
                 else "immediate"
             ),
             "qualification_change_alerts": qualification_change_alerts == "true",
-            # Active Watchlists must retain at least in-app notices for these events.
+            # Active Watch Plans must retain at least in-app notices for these events.
             "under_review_alerts": True,
             "exclusion_alerts": True,
             "advanced_sharia_override_acknowledged": advanced_ack,

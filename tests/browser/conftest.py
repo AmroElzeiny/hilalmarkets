@@ -122,7 +122,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         "artifacts": REPORTS["artifacts"],
         "tests": tests,
         "remaining_browser_side_risks": [
-            "Live Telegram/Discord message delivery is not exercised without real test tokens.",
+            (
+                "Live Telegram/WhatsApp/Discord delivery is not exercised without "
+                "dedicated staging credentials."
+            ),
             (
                 "Quick Scan interpretation is mocked for browser determinism; light-scan "
                 "submission uses the backend fixture market-data provider."
@@ -497,7 +500,11 @@ def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]
             StrategyStatus,
             StrategyVersionStatus,
         )
-        from tests.factories import load_strategy
+        from tests.factories import (
+            load_strategy,
+            methodology_evidence_requirements,
+            methodology_rules,
+        )
 
         engine = create_async_engine(database_url)
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -523,8 +530,8 @@ def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]
                 reviewer_group="Qualified browser-test reviewers",
                 published_at=now - timedelta(days=2),
                 effective_from=now - timedelta(days=2),
-                rules_json={"test_only": True, "versioned_rules": True},
-                evidence_requirements_json={"minimum_sources": 1},
+                rules_json=methodology_rules(source_family="browser_approved_test"),
+                evidence_requirements_json=methodology_evidence_requirements(),
             )
             session.add(methodology)
             await session.flush()
@@ -1127,8 +1134,8 @@ App command: `{summary['app_command']}`
   evolves.
 - Keep Quick Scan browser coverage on fixture market data; add a staging-only live-provider smoke
   test before using real exchange candles in browser E2E.
-- Run controlled provider-sandbox checkout, SMTP, and Telegram delivery tests in staging; CI
-  remains fake/no-send.
+- Run controlled provider-sandbox checkout, SMTP, Telegram, and WhatsApp delivery tests in
+  staging; CI remains fake/no-send.
 - Run the same browser suite in CI after installing Chromium with
   `.venv\\Scripts\\python.exe -m playwright install chromium`.
 """
@@ -1187,7 +1194,10 @@ def _html_report(summary: dict[str, Any]) -> str:
   </section>
   <section class="card">
     <h2>Tests</h2>
-    <table><thead><tr><th>Test</th><th>Outcome</th><th>Seconds</th></tr></thead><tbody>{rows}</tbody></table>
+    <table>
+      <thead><tr><th>Test</th><th>Outcome</th><th>Seconds</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
   </section>
   <section class="card">
     <h2>Artifacts</h2>

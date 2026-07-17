@@ -341,10 +341,16 @@ class ReviewDecision(UUIDPrimaryKeyMixin, Base):
     methodology_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("sharia_methodologies.id", ondelete="RESTRICT")
     )
+    methodology_version: Mapped[str | None] = mapped_column(String(32))
+    methodology_criteria_version: Mapped[str | None] = mapped_column(String(80))
+    methodology_criteria_hash: Mapped[str | None] = mapped_column(String(64))
     decision: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_snapshot_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     criterion_decisions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    use_case_decisions: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, default=list, nullable=False
     )
     qualifications: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)

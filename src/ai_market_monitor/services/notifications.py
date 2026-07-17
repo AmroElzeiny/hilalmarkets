@@ -3,13 +3,14 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
     CandidateReadinessSnapshot,
     DiscordDeliveryDestination,
     TelegramConnection,
+    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     ConnectionStatus,
@@ -22,11 +23,17 @@ from ai_market_monitor.services.notification_preferences import NotificationPref
 from ai_market_monitor.services.trials import TrialLifecycleService
 from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
 from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMessage
+from ai_market_monitor.whatsapp.rendering import (
+    WHATSAPP_OPPORTUNITY_EVENTS,
+    WhatsAppAlertRenderer,
+    WhatsAppTemplateRegistry,
+)
 
 
 class NotificationDispatcher:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, settings: Settings | None = None):
         self.session = session
+        self.settings = settings or get_settings()
 
     async def enqueue(
         self,
@@ -63,6 +70,10 @@ class NotificationDispatcher:
                         f"chat:{connection.chat_id}",
                     )
                 )
+        if DeliveryChannel.WHATSAPP in requested:
+            delivery = await self._enqueue_whatsapp(alert)
+            if delivery is not None:
+                deliveries.append(delivery)
         if DeliveryChannel.DISCORD in requested:
             destinations = (
                 await self.session.scalars(
@@ -99,7 +110,12 @@ class NotificationDispatcher:
         *,
         channels: list[DeliveryChannel] | None = None,
     ) -> list[AlertDelivery]:
-        requested = set(channels or [DeliveryChannel.TELEGRAM])
+        if channels is None:
+            requested = (
+                await NotificationPreferenceService(self.session).current(alert.user_id)
+            ).channels
+        else:
+            requested = set(channels)
         requested = await NotificationPreferenceService(self.session).allowed_channels(
             alert.user_id,
             requested,
@@ -123,6 +139,10 @@ class NotificationDispatcher:
                         f"chat:{connection.chat_id}",
                     )
                 )
+        if DeliveryChannel.WHATSAPP in requested:
+            delivery = await self._enqueue_whatsapp(alert)
+            if delivery is not None:
+                deliveries.append(delivery)
         if DeliveryChannel.DISCORD in requested:
             destinations = (
                 await self.session.scalars(
@@ -151,6 +171,57 @@ class NotificationDispatcher:
             )
         await self.session.flush()
         return deliveries
+
+    async def _enqueue_whatsapp(self, alert: Alert) -> AlertDelivery | None:
+        if not self.settings.whatsapp_enabled:
+            return None
+        connection = await self.session.scalar(
+            select(WhatsAppConnection).where(
+                WhatsAppConnection.user_id == alert.user_id,
+                WhatsAppConnection.status == ConnectionStatus.ACTIVE,
+                WhatsAppConnection.alerts_enabled.is_(True),
+                WhatsAppConnection.verified_at.is_not(None),
+                WhatsAppConnection.opt_in_at.is_not(None),
+                WhatsAppConnection.opt_out_at.is_(None),
+                WhatsAppConnection.revoked_at.is_(None),
+            )
+        )
+        if connection is None:
+            return None
+        presentation = AlertPresentation.from_alert(
+            alert, public_base_url=str(self.settings.public_base_url)
+        )
+        rendered = WhatsAppAlertRenderer.render(
+            presentation,
+            dashboard_url=str(self.settings.public_base_url).rstrip("/") + "/dashboard",
+        )
+        if rendered.category not in set(connection.opt_in_categories or []):
+            return None
+        registry = WhatsAppTemplateRegistry(self.settings)
+        template_name = registry.template_name(
+            rendered.event_type, connection.preferred_locale
+        )
+        now = datetime.now(UTC)
+        window_open = bool(
+            connection.service_window_expires_at is not None
+            and (
+                connection.service_window_expires_at.replace(tzinfo=UTC)
+                if connection.service_window_expires_at.tzinfo is None
+                else connection.service_window_expires_at
+            )
+            > now
+        )
+        if rendered.event_type in WHATSAPP_OPPORTUNITY_EVENTS and (
+            not self.settings.whatsapp_opportunity_alerts_enabled or template_name is None
+        ):
+            return None
+        if not window_open and template_name is None:
+            return None
+        return await self._enqueue_one(
+            alert,
+            DeliveryChannel.WHATSAPP,
+            f"wa:{connection.wa_id}",
+        )
 
     async def _enqueue_one(
         self,

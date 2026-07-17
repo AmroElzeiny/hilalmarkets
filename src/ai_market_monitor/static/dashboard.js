@@ -13,14 +13,20 @@
     }, 6000);
   }
 
-  async function api(path, options = {}) {
-    const response = await fetch(`${apiBase}${path}`, {
+  async function requestJson(url, options = {}) {
+    const { headers = {}, ...requestOptions } = options;
+    const method = String(requestOptions.method || "GET").toUpperCase();
+    const csrfToken = root?.dataset.csrfToken;
+    const response = await fetch(url, {
       credentials: "same-origin",
+      ...requestOptions,
       headers: {
         "Content-Type": "application/json",
-        ...(options.headers || {}),
+        ...headers,
+        ...(!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken
+          ? { "X-CSRF-Token": csrfToken }
+          : {}),
       },
-      ...options,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -30,9 +36,17 @@
     return payload;
   }
 
+  async function api(path, options = {}) {
+    return requestJson(`${apiBase}${path}`, options);
+  }
+
+  async function whatsappApi(path, options = {}) {
+    return requestJson(`/api/v1/whatsapp${path}`, options);
+  }
+
   function friendlyApiError(detail) {
     if (detail === "notification_channel_required") {
-      return "Connect Telegram or Discord before starting monitoring.";
+      return "Connect Telegram, WhatsApp, or Discord before starting monitoring.";
     }
     const verifiedMessages = {
       interpretation_approval_required: "Review and approve the interpretation first.",
@@ -85,7 +99,12 @@
   function connectedNotificationChannel(payload) {
     const channelActive = (channel) =>
       Boolean(channel && channel.status === "active" && channel.alerts_enabled !== false);
-    return channelActive(payload?.telegram) || channelActive(payload?.discord);
+    const whatsappActive = Boolean(
+      channelActive(payload?.whatsapp)
+      && payload.whatsapp.verified !== false
+      && payload.whatsapp.opted_in !== false,
+    );
+    return channelActive(payload?.telegram) || whatsappActive || channelActive(payload?.discord);
   }
 
   async function hasNotificationChannel() {
@@ -1236,7 +1255,7 @@
         if (shouldPublish && id && version) {
           if (!(await hasNotificationChannel())) {
             savePendingMonitorPublish(id, version);
-            showToast("Connect Telegram or Discord before starting monitoring.", "error");
+            showToast("Connect Telegram, WhatsApp, or Discord before starting monitoring.", "error");
             window.location.href = pendingMonitorPublishUrl();
             return;
           }
@@ -1324,7 +1343,7 @@
       const screening = loadBuilderScreeningContext();
       if (screening.enforced && !schema.universe?.sharia_policy?.methodology_id) {
         blocking.push(
-          "An approved screening methodology is required before this Watchlist can run.",
+          "An approved screening methodology is required before this Watch Plan can run.",
         );
       }
       if (!safeArray(schema.alerts?.channels).length) blocking.push("Choose at least one alert destination.");
@@ -2412,7 +2431,7 @@
           content: `
             <fieldset class="drawer-channel-picker">
               <legend>Alert channels</legend>
-              ${["telegram", "discord"].map((channel) => `<label><input type="checkbox" data-alert-channel value="${channel}" ${safeArray(schema.alerts?.channels).includes(channel) ? "checked" : ""}><span>${titleize(channel)}</span></label>`).join("")}
+              ${["telegram", "whatsapp", "discord"].map((channel) => `<label><input type="checkbox" data-alert-channel value="${channel}" ${safeArray(schema.alerts?.channels).includes(channel) ? "checked" : ""}><span>${titleize(channel)}</span></label>`).join("")}
             </fieldset>
             <div class="drawer-field-grid">
               <label>Forming alerts<select data-section-field="forming_alerts">${optionMarkup([{value: "true", label: "On"}, {value: "false", label: "Off"}], String(schema.alerts?.forming_alerts !== false))}</select></label>
@@ -2983,10 +3002,10 @@
           if (!(await hasNotificationChannel())) {
             savePendingMonitorPublish(id, version);
             setBuilderActionStatus(
-              "Connect Telegram or Discord before starting monitoring. Opening Integrations...",
+              "Connect Telegram, WhatsApp, or Discord before starting monitoring. Opening Integrations...",
               "error",
             );
-            showToast("Connect Telegram or Discord before starting monitoring.", "error");
+            showToast("Connect Telegram, WhatsApp, or Discord before starting monitoring.", "error");
             window.location.href = pendingMonitorPublishUrl();
             return;
           }
@@ -3887,7 +3906,7 @@
       event.preventDefault();
       const result = document.getElementById("scan-result");
       if (!(await hasNotificationChannel())) {
-        showToast("Connect Telegram or Discord before running Quick Scan.", "error");
+        showToast("Connect Telegram, WhatsApp, or Discord before running Scanner.", "error");
         window.location.href = notificationChannelRequiredUrl("quick_scan_channel_required");
         return;
       }
@@ -5772,14 +5791,46 @@
     const rootElement = document.querySelector("[data-integrations-auto-refresh]");
     if (!rootElement) return;
     const status = rootElement.querySelector("[data-telegram-status]");
-    const summaryStatus = rootElement.querySelector("[data-telegram-summary-status]");
+    const summaryStatus = document.querySelector("[data-telegram-summary-status]");
     const username = rootElement.querySelector("[data-telegram-username]");
     const delivery = rootElement.querySelector("[data-telegram-delivery]");
     const connectLink = rootElement.querySelector("[data-telegram-connect-link]");
     const connectedButton = rootElement.querySelector("[data-telegram-connected-button]");
     const disconnectButton = rootElement.querySelector("[data-telegram-disconnect]");
     const webFallback = rootElement.querySelector("[data-telegram-web-fallback]");
+    const whatsappEnabled = rootElement.dataset.whatsappEnabled === "true";
+    const whatsapp = {
+      status: rootElement.querySelector("[data-whatsapp-status]"),
+      summaryStatus: document.querySelector("[data-whatsapp-summary-status]"),
+      number: rootElement.querySelector("[data-whatsapp-number]"),
+      optIn: rootElement.querySelector("[data-whatsapp-opt-in]"),
+      delivery: rootElement.querySelector("[data-whatsapp-delivery]"),
+      testState: rootElement.querySelector("[data-whatsapp-test-state]"),
+      error: rootElement.querySelector("[data-whatsapp-error]"),
+      errorRow: rootElement.querySelector("[data-whatsapp-error-row]"),
+      connectForm: rootElement.querySelector("[data-whatsapp-connect-form]"),
+      phone: rootElement.querySelector("[data-whatsapp-phone]"),
+      consent: rootElement.querySelector("[data-whatsapp-consent]"),
+      locale: rootElement.querySelector("[data-whatsapp-locale]"),
+      preferenceLocale: rootElement.querySelector("[data-whatsapp-preference-locale]"),
+      linkOutput: rootElement.querySelector("[data-whatsapp-link-output]"),
+      linkAnchor: rootElement.querySelector("[data-whatsapp-link-anchor]"),
+      linkExpiry: rootElement.querySelector("[data-whatsapp-link-expiry]"),
+      connectedControls: rootElement.querySelector("[data-whatsapp-connected-controls]"),
+      test: rootElement.querySelector("[data-whatsapp-test]"),
+      pause: rootElement.querySelector("[data-whatsapp-pause]"),
+      resume: rootElement.querySelector("[data-whatsapp-resume]"),
+      save: rootElement.querySelector("[data-whatsapp-save]"),
+      clearError: rootElement.querySelector("[data-whatsapp-clear-error]"),
+      disconnect: rootElement.querySelector("[data-whatsapp-disconnect]"),
+      categories: Array.from(rootElement.querySelectorAll("[data-whatsapp-category]")),
+      preferenceCategories: Array.from(
+        rootElement.querySelectorAll("[data-whatsapp-preference-category]"),
+      ),
+    };
     let pendingPublishInFlight = false;
+    let whatsappPreferencesDirty = false;
+    let previousWhatsAppActive = null;
 
     function titleize(value) {
       return String(value || "not connected")
@@ -5787,16 +5838,20 @@
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
     }
 
-    function render(payload) {
-      const telegram = payload?.telegram;
+    function setConnectionBadge(element, text, connected) {
+      if (!element) return;
+      element.textContent = text;
+      element.classList.toggle("badge-eligible", connected);
+      element.classList.toggle("badge-neutral", !connected);
+      element.classList.toggle("connected", connected);
+      element.classList.toggle("pending", !connected);
+    }
+
+    function renderTelegram(telegram) {
       const connected = connectedNotificationChannel({ telegram });
       const statusText = connected ? titleize(telegram.status) : "Not Connected";
-      if (status) {
-        status.textContent = statusText;
-        status.classList.toggle("connected", connected);
-        status.classList.toggle("pending", !connected);
-      }
-      if (summaryStatus) summaryStatus.textContent = statusText;
+      setConnectionBadge(status, statusText, connected);
+      setConnectionBadge(summaryStatus, statusText, connected);
       if (username) username.textContent = telegram?.username ? `@${telegram.username}` : "Username not set";
       if (delivery) {
         delivery.textContent = telegram?.last_delivery_at
@@ -5818,6 +5873,84 @@
       if (webFallback) {
         webFallback.hidden = connected;
       }
+    }
+
+    function whatsappBound(connection) {
+      return Boolean(
+        connection
+        && connection.verified
+        && connection.status !== "revoked"
+        && !connection.revoked_at,
+      );
+    }
+
+    function whatsappOptedIn(connection) {
+      return Boolean(whatsappBound(connection) && connection.opted_in);
+    }
+
+    function whatsappActive(connection) {
+      return Boolean(
+        whatsappOptedIn(connection)
+        && connection.status === "active"
+        && connection.alerts_enabled !== false,
+      );
+    }
+
+    function renderWhatsApp(connection, recentTests = []) {
+      const bound = whatsappBound(connection);
+      const optedIn = whatsappOptedIn(connection);
+      const active = whatsappEnabled && whatsappActive(connection);
+      const stateText = !whatsappEnabled
+        ? "Unavailable"
+        : active
+          ? "Connected"
+          : bound && optedIn
+            ? "Paused"
+            : bound
+              ? "Consent required"
+              : "Not connected";
+      setConnectionBadge(whatsapp.status, stateText, active);
+      setConnectionBadge(whatsapp.summaryStatus, stateText, active);
+      if (whatsapp.number) whatsapp.number.textContent = bound ? connection.phone : "Not linked";
+      if (whatsapp.optIn) whatsapp.optIn.textContent = optedIn ? "Active" : "Required";
+      if (whatsapp.delivery) {
+        whatsapp.delivery.textContent = connection?.last_delivery_at
+          ? new Date(connection.last_delivery_at).toLocaleString()
+          : "No delivery recorded";
+      }
+      const latestTest = safeArray(recentTests).find((item) => item.integration === "whatsapp");
+      if (whatsapp.testState) {
+        whatsapp.testState.textContent = latestTest
+          ? `${titleize(latestTest.status)}${latestTest.created_at ? ` - ${new Date(latestTest.created_at).toLocaleString()}` : ""}`
+          : "No test recorded";
+      }
+      const errorCode = connection?.last_error_code || latestTest?.error_code || "";
+      if (whatsapp.error) whatsapp.error.textContent = errorCode ? titleize(errorCode) : "None";
+      if (whatsapp.errorRow) whatsapp.errorRow.hidden = !errorCode;
+      if (whatsapp.clearError) whatsapp.clearError.hidden = !connection?.last_error_code;
+      if (whatsapp.connectForm) whatsapp.connectForm.hidden = !whatsappEnabled || (bound && optedIn);
+      if (whatsapp.connectedControls) whatsapp.connectedControls.hidden = !(bound && optedIn);
+      if (whatsapp.test) whatsapp.test.disabled = !active;
+      if (whatsapp.pause) whatsapp.pause.hidden = !active;
+      if (whatsapp.resume) whatsapp.resume.hidden = !(bound && optedIn && !active);
+      if (!whatsappPreferencesDirty && bound) {
+        const categories = new Set(safeArray(connection.opt_in_categories));
+        whatsapp.preferenceCategories.forEach((input) => {
+          if (!input.disabled) input.checked = categories.has(input.value);
+        });
+        if (whatsapp.preferenceLocale && connection.preferred_locale) {
+          whatsapp.preferenceLocale.value = connection.preferred_locale;
+        }
+      }
+      if (previousWhatsAppActive === false && active) {
+        showToast("WhatsApp connected and verified.");
+      }
+      previousWhatsAppActive = active;
+    }
+
+    function render(payload) {
+      renderTelegram(payload?.telegram);
+      renderWhatsApp(payload?.whatsapp, payload?.recent_tests);
     }
 
     async function maybeCompletePendingPublish(payload) {
@@ -5846,7 +5979,7 @@
         showToast("Monitor is active.");
         window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
       } catch (error) {
-        if (!/Telegram|Discord|notification channel/i.test(error.message)) {
+        if (!/Telegram|WhatsApp|Discord|notification channel/i.test(error.message)) {
           window.localStorage.removeItem(pendingMonitorPublishKey);
         }
         showToast(error.message, "error");
@@ -5881,12 +6014,146 @@
       disconnectButton.disabled = true;
       try {
         await api("/integrations/telegram", { method: "DELETE" });
-        render({ telegram: null });
+        renderTelegram(null);
         showToast("Telegram connection removed.");
       } catch (error) {
         showToast(error.message, "error");
       } finally {
         disconnectButton.disabled = false;
+      }
+    });
+
+    whatsapp.preferenceCategories.forEach((input) => {
+      input.addEventListener("change", () => {
+        whatsappPreferencesDirty = true;
+      });
+    });
+    whatsapp.preferenceLocale?.addEventListener("change", () => {
+      whatsappPreferencesDirty = true;
+    });
+
+    whatsapp.connectForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const categories = whatsapp.categories
+        .filter((input) => input.checked && !input.disabled)
+        .map((input) => input.value);
+      if (!categories.length) {
+        showToast("Choose at least one WhatsApp message category.", "error");
+        return;
+      }
+      if (!whatsapp.consent?.checked) {
+        showToast("Confirm WhatsApp consent before creating the link.", "error");
+        whatsapp.consent?.focus();
+        return;
+      }
+      const submit = whatsapp.connectForm.querySelector("[data-whatsapp-create-link]");
+      if (submit) submit.disabled = true;
+      try {
+        const result = await whatsappApi("/link", {
+          method: "POST",
+          body: JSON.stringify({
+            phone_e164: whatsapp.phone?.value.trim(),
+            consent: true,
+            categories,
+            locale: whatsapp.locale?.value || "en_US",
+          }),
+        });
+        if (whatsapp.linkAnchor) whatsapp.linkAnchor.href = result.link_url;
+        if (whatsapp.linkExpiry) {
+          whatsapp.linkExpiry.textContent = result.expires_at
+            ? `This one-time link expires ${new Date(result.expires_at).toLocaleString()}.`
+            : "This one-time link expires shortly.";
+        }
+        if (whatsapp.linkOutput) {
+          whatsapp.linkOutput.hidden = false;
+          whatsapp.linkOutput.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+        showToast("Secure link created. Send the prefilled message from WhatsApp.");
+      } catch (error) {
+        showToast(error.message, "error");
+      } finally {
+        if (submit) submit.disabled = false;
+      }
+    });
+
+    async function mutateWhatsApp(button, path, successMessage, options = {}) {
+      if (button) button.disabled = true;
+      try {
+        const result = await whatsappApi(path, { method: "POST", ...options });
+        renderWhatsApp(result.connection, []);
+        showToast(successMessage);
+        return result;
+      } catch (error) {
+        showToast(error.message, "error");
+        return null;
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    whatsapp.test?.addEventListener("click", async () => {
+      whatsapp.test.disabled = true;
+      try {
+        const result = await whatsappApi("/test", { method: "POST" });
+        if (whatsapp.testState) whatsapp.testState.textContent = titleize(result.test?.status || "sent");
+        showToast("WhatsApp test accepted. Delivery status will update from Meta's webhook.");
+      } catch (error) {
+        showToast(error.message, "error");
+      } finally {
+        whatsapp.test.disabled = false;
+      }
+    });
+    whatsapp.pause?.addEventListener("click", () => {
+      void mutateWhatsApp(whatsapp.pause, "/pause", "WhatsApp alerts paused.");
+    });
+    whatsapp.resume?.addEventListener("click", () => {
+      void mutateWhatsApp(whatsapp.resume, "/resume", "WhatsApp alerts resumed.");
+    });
+    whatsapp.clearError?.addEventListener("click", () => {
+      void mutateWhatsApp(whatsapp.clearError, "/clear-error", "WhatsApp error cleared.");
+    });
+    whatsapp.save?.addEventListener("click", async () => {
+      const categories = whatsapp.preferenceCategories
+        .filter((input) => input.checked && !input.disabled)
+        .map((input) => input.value);
+      if (!categories.length) {
+        showToast("Keep at least one WhatsApp message category selected.", "error");
+        return;
+      }
+      whatsapp.save.disabled = true;
+      try {
+        const result = await whatsappApi("/preferences", {
+          method: "PATCH",
+          body: JSON.stringify({
+            categories,
+            locale: whatsapp.preferenceLocale?.value || "en_US",
+          }),
+        });
+        whatsappPreferencesDirty = false;
+        renderWhatsApp(result.connection, []);
+        showToast("WhatsApp categories updated.");
+      } catch (error) {
+        showToast(error.message, "error");
+      } finally {
+        whatsapp.save.disabled = false;
+      }
+    });
+    whatsapp.disconnect?.addEventListener("click", async () => {
+      if (!window.confirm("Disconnect WhatsApp from this account? Unsent WhatsApp alerts will be canceled, and reconnecting will require fresh consent.")) return;
+      whatsapp.disconnect.disabled = true;
+      try {
+        const result = await whatsappApi("/connection", { method: "DELETE" });
+        whatsappPreferencesDirty = false;
+        renderWhatsApp(result.connection, []);
+        if (whatsapp.phone) whatsapp.phone.value = "";
+        if (whatsapp.consent) whatsapp.consent.checked = false;
+        whatsapp.categories.forEach((input) => { input.checked = false; });
+        if (whatsapp.linkOutput) whatsapp.linkOutput.hidden = true;
+        showToast("WhatsApp disconnected.");
+      } catch (error) {
+        showToast(error.message, "error");
+      } finally {
+        whatsapp.disconnect.disabled = false;
       }
     });
   }
@@ -5919,6 +6186,7 @@
     if (!rootElement) return;
     const buttons = {
       telegram: rootElement.querySelector('[data-overview-channel="telegram"]'),
+      whatsapp: rootElement.querySelector('[data-overview-channel="whatsapp"]'),
       discord: rootElement.querySelector('[data-overview-channel="discord"]'),
     };
 
@@ -5926,9 +6194,13 @@
       const button = buttons[channel];
       if (!button) return;
       button.classList.toggle("connected", connected);
-      const label = button.querySelector("span");
-      if (label) {
-        label.textContent = `${channel === "telegram" ? "Telegram" : "Discord"} ${connected ? "connected" : "not connected"}`;
+      const detail = button.querySelector("small");
+      const badge = button.querySelector(".badge");
+      if (detail) detail.textContent = connected ? "Connected" : "Not connected";
+      if (badge) {
+        badge.textContent = connected ? "Ready" : "Set up";
+        badge.classList.toggle("badge-eligible", connected);
+        badge.classList.toggle("badge-neutral", !connected);
       }
     }
 
@@ -5937,6 +6209,7 @@
       try {
         const payload = await api("/integrations");
         updateButton("telegram", connectedNotificationChannel({ telegram: payload.telegram }));
+        updateButton("whatsapp", connectedNotificationChannel({ whatsapp: payload.whatsapp }));
         updateButton("discord", connectedNotificationChannel({ discord: payload.discord }));
       } catch {
         return;

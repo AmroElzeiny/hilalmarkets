@@ -1,8 +1,8 @@
 {% macro watch_plan_card(item) -%}
 {% set strategy = item.strategy %}
 <article class="watch-plan-card">
-  <div class="row-between"><div><span class="kicker">Watchlist</span><h3>{{ strategy.name }}</h3></div><span class="badge badge-{{ 'eligible' if strategy.status.value == 'active' else 'neutral' }}">{{ strategy.status.value.replace('_', ' ').title() }}</span></div>
+  <div class="row-between"><div><span class="kicker">Watch Plan</span><h3>{{ strategy.name }}</h3></div><span class="badge badge-{{ 'eligible' if strategy.status.value == 'active' else 'neutral' }}">{{ strategy.status.value.replace('_', ' ').title() }}</span></div>
   <div class="watch-plan-meta"><span>{{ item.methodology.name ~ ' v' ~ item.methodology.version if item.methodology else 'Methodology unavailable' }}</span><span>{{ item.eligible_asset_count }} eligible assets</span><span>{{ item.latency_label }}</span></div>
-  <div class="opportunity-actions"><a class="btn btn-secondary btn-sm" href="/dashboard/strategies/{{ strategy.id }}">View Watchlist</a><a class="btn btn-secondary btn-sm" href="/dashboard/strategies/{{ strategy.id }}/edit">Edit</a></div>
+  <div class="opportunity-actions"><a class="btn btn-secondary btn-sm" href="/dashboard/strategies/{{ strategy.id }}">View Watch Plan</a><a class="btn btn-secondary btn-sm" href="/dashboard/strategies/{{ strategy.id }}/edit">Edit</a></div>
 </article>
 {%- endmacro %}

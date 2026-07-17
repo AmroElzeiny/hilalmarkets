@@ -289,11 +289,13 @@ async def test_telegram_delivery_is_not_sent_without_provider_message_id(test_co
         assert len(deliveries) == 2
         assert {delivery.status for delivery in deliveries} == {DeliveryStatus.FAILED_RETRYABLE}
         assert all(delivery.provider_message_id is None for delivery in deliveries)
-        assert {
-            delivery.last_error_code for delivery in deliveries
-        } == {"telegram_message_id_missing"}
+        assert {delivery.last_error_code for delivery in deliveries} == {
+            "telegram_message_id_missing"
+        }
         connection = await session.scalar(
-            select(TelegramConnection).where(TelegramConnection.chat_id == "missing-message-id-chat")
+            select(TelegramConnection).where(
+                TelegramConnection.chat_id == "missing-message-id-chat"
+            )
         )
         assert connection.last_error_code == "telegram_message_id_missing"
 
@@ -399,9 +401,7 @@ async def test_dry_run_experiment_schedules_variants_and_persists_evidence_only(
         )
         assert (
             await session.scalar(
-                select(func.count(Alert.id)).where(
-                    Alert.strategy_version_id == variant.id
-                )
+                select(func.count(Alert.id)).where(Alert.strategy_version_id == variant.id)
             )
             == 0
         )

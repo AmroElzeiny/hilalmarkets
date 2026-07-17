@@ -45,8 +45,8 @@
 
   function coverageClass(status) {
     if (status === "covered") return "passport-use-status is-covered";
-    if (status === "covered_with_qualification") return "passport-use-status is-qualified";
-    if (["excluded", "not_covered_by_this_decision"].includes(status)) return "passport-use-status is-not-covered";
+    if (["qualified", "covered_with_qualification"].includes(status)) return "passport-use-status is-qualified";
+    if (["excluded", "not_covered", "not_covered_by_this_decision"].includes(status)) return "passport-use-status is-not-covered";
     return "passport-use-status";
   }
 

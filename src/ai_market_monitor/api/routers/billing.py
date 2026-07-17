@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -6,9 +7,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.api.dependencies import UserPrincipal, get_user_principal
+from ai_market_monitor.api.route_security import public_api, signed_webhook
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.db.models import BillingEvent, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
@@ -31,22 +34,33 @@ PAYMENT_SUCCESS_EVENT_TYPES = {
 
 
 class CheckoutRequest(BaseModel):
-    user_id: UUID
+    model_config = {"extra": "forbid"}
+
     plan_code: str = Field(min_length=1, max_length=50)
-    success_url: str
-    cancel_url: str
 
 
 class PortalRequest(BaseModel):
-    user_id: UUID
-    return_url: str
+    model_config = {"extra": "forbid"}
 
 
 @router.get("/plans")
-async def list_plans(session: AsyncSession = Depends(get_db_session)) -> dict:
+@public_api("Publishes only the explicitly allowlisted customer pricing catalog.")
+async def list_plans(
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
     await PlanCatalogService(session).sync_defaults()
     await session.commit()
+    billing = BillingService(session, settings)
+    capabilities = billing.provider_capabilities
     return {
+        "provider": billing.provider.provider_name,
+        "provider_capabilities": asdict(capabilities),
+        "billing_mode": (
+            "monthly_auto_renewal"
+            if capabilities.supports_recurring_billing
+            else "manual_30_day_access"
+        ),
         "plans": [
             {
                 "code": plan.code,
@@ -57,7 +71,8 @@ async def list_plans(session: AsyncSession = Depends(get_db_session)) -> dict:
                 "limits": plan.limits,
                 "features": plan.features,
             }
-            for plan in PLAN_DEFINITIONS.values()
+            for code in PUBLIC_PLAN_CODES
+            for plan in [PLAN_DEFINITIONS[code]]
         ]
     }
 
@@ -65,9 +80,12 @@ async def list_plans(session: AsyncSession = Depends(get_db_session)) -> dict:
 @router.get("/users/{user_id}/entitlement")
 async def get_entitlement(
     user_id: UUID,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    context = await EntitlementService(session).current(user_id)
+    if user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Entitlement access denied")
+    context = await EntitlementService(session).current(principal.user_id)
     return {
         "plan": context.plan.code,
         "plan_name": context.plan.name,
@@ -81,12 +99,15 @@ async def get_entitlement(
 @router.get("/users/{user_id}/usage")
 async def get_usage(
     user_id: UUID,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
+    if user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Usage access denied")
     now = datetime.now(UTC)
     period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     summary = await UsageService(session).summary(
-        user_id, period_start, period_start + timedelta(days=32)
+        principal.user_id, period_start, period_start + timedelta(days=32)
     )
     return {"period_start": period_start, "usage": summary}
 
@@ -94,15 +115,17 @@ async def get_usage(
 @router.post("/checkout")
 async def create_checkout(
     request: CheckoutRequest,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
     try:
         result = await BillingService(session, settings).checkout_session(
-            user_id=request.user_id,
+            user_id=principal.user_id,
             plan_code=request.plan_code,
-            success_url=request.success_url,
-            cancel_url=request.cancel_url,
+            success_url=f"{base_url}/billing/success",
+            cancel_url=f"{base_url}/billing/cancel",
         )
         await session.commit()
         return {
@@ -110,7 +133,7 @@ async def create_checkout(
             "checkout_url": result.checkout_url,
             "provider_session_id": result.provider_session_id,
         }
-    except EntitlementError as exc:
+    except (BillingError, EntitlementError) as exc:
         raise HTTPException(
             status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
@@ -118,17 +141,26 @@ async def create_checkout(
 
 @router.post("/portal")
 async def create_portal(
-    request: PortalRequest,
+    _request: PortalRequest,
+    principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    result = await BillingService(session, settings).billing_portal(
-        user_id=request.user_id, return_url=request.return_url
-    )
-    return {"provider": result.provider, "portal_url": result.portal_url}
+    base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
+    try:
+        result = await BillingService(session, settings).billing_portal(
+            user_id=principal.user_id,
+            return_url=f"{base_url}/dashboard/billing",
+        )
+        return {"provider": result.provider, "portal_url": result.portal_url}
+    except BillingError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
 
 
 @router.post("/webhooks/{provider}")
+@signed_webhook("Authenticates billing events with the configured provider signature.")
 async def receive_billing_webhook(
     provider: str,
     request: Request,

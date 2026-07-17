@@ -317,6 +317,10 @@ async def system_brain_review_decision(
     criterion_label: list[str] = Form(default=[]),
     criterion_outcome: list[str] = Form(default=[]),
     criterion_reason: list[str] = Form(default=[]),
+    use_key: list[str] = Form(default=[]),
+    use_decision: list[str] = Form(default=[]),
+    use_reason: list[str] = Form(default=[]),
+    use_scope: list[str] = Form(default=[]),
     csrf_token: str = Form(...),
     principal: UserPrincipal = Depends(_require_application_admin),
     session: AsyncSession = Depends(get_db_session),
@@ -328,11 +332,10 @@ async def system_brain_review_decision(
         criteria = [
             {
                 "key": key,
-                "label": label,
                 "outcome": outcome,
                 "reviewer_explanation": explanation.strip(),
             }
-            for key, label, outcome, explanation in zip(
+            for key, _label, outcome, explanation in zip(
                 criterion_key,
                 criterion_label,
                 criterion_outcome,
@@ -341,13 +344,30 @@ async def system_brain_review_decision(
             )
             if key and outcome
         ]
+        use_cases = [
+            {
+                "key": key,
+                "decision": decision,
+                "reason": use_reason_text.strip(),
+                "scope": scope.strip() or None,
+            }
+            for key, decision, use_reason_text, scope in zip(
+                use_key,
+                use_decision,
+                use_reason,
+                use_scope,
+                strict=False,
+            )
+            if key and decision
+        ]
         gap_rows = [line.strip() for line in acknowledged_gaps.splitlines() if line.strip()]
         if action == "approve":
             await service.approve_for_publication(
                 case_id,
                 admin_user_id=principal.user_id,
                 reason=reason,
-                criterion_decisions=criteria or None,
+                criterion_decisions=criteria,
+                use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
             )
         elif action == "approve_with_qualification":
@@ -360,7 +380,8 @@ async def system_brain_review_decision(
                 reason=reason,
                 with_qualifications=True,
                 qualifications=qualification_rows,
-                criterion_decisions=criteria or None,
+                criterion_decisions=criteria,
+                use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
             )
         elif action == "publish":

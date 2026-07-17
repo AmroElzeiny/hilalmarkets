@@ -179,24 +179,31 @@ def evaluate_time_condition(
             "time_since_setup_detected": "setup_first_detected_at",
             "time_since_condition_true": "condition_first_true_at",
         }[name]
-        value = context.get(key)
+        raw_timestamp: Any = context.get(key)
         if name == "time_since_condition_true":
             condition_key = str(
                 parameters.get("condition_key") or context.get("current_condition_key") or ""
             )
             first_true_by_condition = context.get("condition_first_true_at_by_key", {})
             if condition_key and isinstance(first_true_by_condition, dict):
-                value = first_true_by_condition.get(condition_key, value)
-            if value is None and isinstance(first_true_by_condition, dict):
-                available = list(first_true_by_condition.values())
-                value = max(available) if available else None
-        if value is None:
+                raw_timestamp = first_true_by_condition.get(condition_key, raw_timestamp)
+            if raw_timestamp is None and isinstance(first_true_by_condition, dict):
+                available = [
+                    ensure_aware(datetime.fromisoformat(item))
+                    if isinstance(item, str)
+                    else ensure_aware(item)
+                    for item in first_true_by_condition.values()
+                    if isinstance(item, (str, datetime))
+                ]
+                raw_timestamp = max(available) if available else None
+        if raw_timestamp is None:
             raise ContextDataUnavailable(f"{key} unavailable")
-        parsed = (
-            ensure_aware(datetime.fromisoformat(value))
-            if isinstance(value, str)
-            else ensure_aware(value)
-        )
+        if isinstance(raw_timestamp, str):
+            parsed = ensure_aware(datetime.fromisoformat(raw_timestamp))
+        elif isinstance(raw_timestamp, datetime):
+            parsed = ensure_aware(raw_timestamp)
+        else:
+            raise ContextDataUnavailable(f"{key} is not a timestamp")
         return (timestamp - parsed).total_seconds() / 60
     if name in {
         "condition_before_timestamp",

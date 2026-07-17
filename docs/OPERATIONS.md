@@ -16,6 +16,14 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `TELEGRAM_BOT_USERNAME` | Telegram bot username for landing-page deep links. |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token. Keep secret. |
 | `TELEGRAM_WEBHOOK_SECRET` | Secret used to protect Telegram webhook endpoints. |
+| `WHATSAPP_ENABLED` / `WHATSAPP_ADAPTER` | Enable official Meta Cloud API delivery only when set to `true` / `http`. |
+| `WHATSAPP_GRAPH_API_VERSION` | Explicit deploy-time Graph API version, for example `v23.0`; no version is embedded in code. |
+| `WHATSAPP_ACCESS_TOKEN` | Server-side Meta system-user access token. Keep secret and rotate through deployment secrets. |
+| `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` | POST signature secret and independent GET webhook challenge token. Keep secret. |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_BUSINESS_ACCOUNT_ID` | Meta phone-number and WABA identifiers used to bind webhook authority. |
+| `WHATSAPP_BUSINESS_PHONE_E164` | Registered HilalMarkets WhatsApp business number in normalized E.164 form. |
+| `WHATSAPP_TEMPLATE_NAMES` | JSON event/locale map containing only templates actually approved in the configured WABA. |
+| `WHATSAPP_OPPORTUNITY_ALERTS_ENABLED` | Separate default-off gate for lifecycle and confirmed research-event messaging. |
 | `DISCORD_CLIENT_ID` | Discord application client id. |
 | `DISCORD_CLIENT_SECRET` | Discord OAuth client secret. Keep secret. |
 | `DISCORD_WEBHOOK_PUBLIC_KEY` | Discord interaction public key. Keep secret. |
@@ -211,6 +219,7 @@ Scheduled tasks currently wired:
 - Stale/retryable scan-job recovery.
 - Setup-instance expiration.
 - Telegram delivery retries.
+- WhatsApp webhook processing, bounded delivery retries, and receipt retention cleanup.
 - Discord delivery retries.
 - Discord role-sync retries.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
@@ -236,6 +245,20 @@ artifact remains a bounded deterministic expression and must pass normal user ap
 
 The HTTP adapter validates the webhook secret, deduplicates Telegram update ids, sends and edits
 messages, answers callbacks, and records bounded delivery retries.
+
+## WhatsApp Cloud API Setup
+
+WhatsApp uses signed webhooks only; do not add polling. Configure the callback as
+`https://<public-host>/api/v1/whatsapp/webhook`, subscribe the WABA to message events, and keep
+`WHATSAPP_ENABLED=false` until the registered phone, token permissions, callback verification, and
+required templates have been validated in staging. Complete setup, rotation, smoke tests, event
+categories, template variables, and troubleshooting are in
+[`WHATSAPP_CLOUD_API_RUNBOOK.md`](WHATSAPP_CLOUD_API_RUNBOOK.md).
+
+The API records accepted work quickly and Celery processes inbound events. The scheduler retries
+due receipts and WhatsApp `AlertDelivery` rows, then removes expired bounded receipts. There is no
+free-form fallback outside Meta's customer-service window. Market-opportunity delivery remains off
+unless `WHATSAPP_OPPORTUNITY_ALERTS_ENABLED=true` and its approved template is configured.
 
 ## Discord Setup
 
@@ -272,6 +295,20 @@ the ADMIN/development preview route for authenticated rendering. Confirm SMTP do
 sender identity, links, and provider logs in staging.
 
 ## System Brain Edge Protection
+
+Before the first staging or production governance action, make the owner an existing verified,
+active application `ADMIN`, then provision explicit grants once:
+
+```powershell
+.venv\Scripts\python.exe scripts\bootstrap_governance_owner.py `
+  --email "owner@example.com" `
+  --reason "Initial accountable governance owner provisioning"
+```
+
+The command is idempotent and records one audit event for each newly activated `SYSTEM_ADMIN`,
+`RESEARCHER`, `REVIEWER`, and `PUBLISHER` grant. In staging/production an ADMIN without an explicit
+grant cannot perform governance mutations. `REQUIRE_SECOND_REVIEWER=false` keeps approval and
+publication separate while allowing the current one-owner operation.
 
 Application ADMIN authentication and scoped CSRF validation are always authoritative. In
 production, also set `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true` and place `/system-brain*`
@@ -312,7 +349,7 @@ Track at minimum:
 - Scan duration and failures.
 - Queue depth and failed Celery jobs.
 - Chart generation failures.
-- Telegram and Discord delivery failures.
+- Telegram, WhatsApp, and Discord delivery failures.
 - Billing webhook failures.
 - Database and Redis health.
 - API latency and error rate.

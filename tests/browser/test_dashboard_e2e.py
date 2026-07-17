@@ -775,14 +775,18 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     assert_no_raw_traceback(page)
 
 
-def test_telegram_discord_handoff_links_smoke(page: Page, base_url: str) -> None:
+def test_notification_channel_handoff_links_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("integrations-smoke"))
     page.goto(f"{base_url}/dashboard/integrations", wait_until="domcontentloaded")
     expect(page.get_by_test_id("integrations-root")).to_be_visible()
     expect(page.get_by_test_id("telegram-integration-card")).to_contain_text("Telegram")
+    expect(page.get_by_test_id("whatsapp-integration-card")).to_contain_text("WhatsApp")
     expect(page.get_by_test_id("discord-integration-card")).to_contain_text("Discord")
     body = page.locator("body").inner_text(timeout=10_000).lower()
     assert "telegram_bot_token" not in body
+    assert "whatsapp_access_token" not in body
+    assert "whatsapp_app_secret" not in body
+    assert "whatsapp_verify_token" not in body
     assert "discord_bot_token" not in body
     assert "bot token" not in body
     assert_no_raw_traceback(page)

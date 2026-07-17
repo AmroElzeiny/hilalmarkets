@@ -17,10 +17,14 @@ from ai_market_monitor.db.models import (
     DashboardPreference,
     SetupInstance,
     ShariaMethodology,
+    Strategy,
+    StrategyUniverse,
+    StrategyVersion,
 )
 from ai_market_monitor.db.models.enums import (
     SetupLifecycleState,
     ShariaAssetStatus,
+    StrategyStatus,
     UserRole,
 )
 from ai_market_monitor.schemas.sharia import (
@@ -40,6 +44,8 @@ from ai_market_monitor.schemas.sharia import (
     ScreenedAssetListResponse,
     ShariaPreferenceUpdateRequest,
     StatusHistoryResponse,
+    WatchlistAffectedPlan,
+    WatchlistAssetRemovalImpact,
     WatchlistCreateRequest,
     WatchlistResponse,
 )
@@ -48,6 +54,10 @@ from ai_market_monitor.services.compliance_watch import (
     ComplianceWatchService,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.sharia_governance import (
+    ShariaGovernanceError,
+    ShariaGovernanceService,
+)
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
@@ -97,6 +107,96 @@ def _screening_error(exc: ShariaScreeningError | ComplianceWatchError) -> HTTPEx
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={"code": exc.code, "message": str(exc)},
+    )
+
+
+def _governance_error(exc: ShariaGovernanceError) -> HTTPException:
+    status_code = 403 if exc.code.endswith("required") else status.HTTP_409_CONFLICT
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": str(exc)},
+    )
+
+
+async def _require_governance_mutation(
+    *,
+    principal: UserPrincipal,
+    session: AsyncSession,
+    settings: Settings,
+    permission: str,
+    csrf_value: str | None,
+) -> None:
+    _admin(principal)
+    if not csrf_token_matches(settings, principal.user_id, csrf_value):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    try:
+        await ShariaGovernanceService(session, settings).require_permission(
+            principal.user_id,
+            permission,
+        )
+    except ShariaGovernanceError as exc:
+        raise _governance_error(exc) from exc
+
+
+async def _watchlist_asset_removal_impact(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    watchlist_id: UUID,
+    asset_id: str,
+) -> WatchlistAssetRemovalImpact:
+    watchlist = await session.get(ApprovedWatchlist, watchlist_id)
+    if watchlist is None or watchlist.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Saved asset collection not found.")
+    asset = canonical_asset(asset_id)
+    saved_asset_id = await session.scalar(
+        select(ApprovedWatchlistAsset.id).where(
+            ApprovedWatchlistAsset.watchlist_id == watchlist.id,
+            ApprovedWatchlistAsset.canonical_asset == asset,
+        )
+    )
+    if saved_asset_id is None:
+        raise HTTPException(status_code=404, detail="Saved asset not found in this collection.")
+    rows = list(
+        (
+            await session.execute(
+                select(
+                    Strategy.id,
+                    Strategy.name,
+                    Strategy.status,
+                    StrategyVersion.id,
+                    StrategyVersion.version_number,
+                )
+                .join(StrategyVersion, Strategy.active_version_id == StrategyVersion.id)
+                .join(
+                    StrategyUniverse,
+                    StrategyUniverse.strategy_version_id == StrategyVersion.id,
+                )
+                .where(
+                    Strategy.user_id == user_id,
+                    Strategy.status != StrategyStatus.ARCHIVED,
+                    StrategyUniverse.approved_watchlist_id == watchlist.id,
+                )
+                .order_by(Strategy.name.asc(), StrategyVersion.version_number.desc())
+            )
+        ).all()
+    )
+    affected = [
+        WatchlistAffectedPlan(
+            strategy_id=strategy_id,
+            name=name,
+            status=strategy_status.value,
+            strategy_version_id=version_id,
+            strategy_version_number=version_number,
+        )
+        for strategy_id, name, strategy_status, version_id, version_number in rows
+    ]
+    return WatchlistAssetRemovalImpact(
+        watchlist_id=watchlist.id,
+        watchlist_name=watchlist.name,
+        canonical_asset=asset,
+        affected_watch_plans=affected,
+        requires_confirmation=bool(affected),
     )
 
 
@@ -605,20 +705,57 @@ async def create_watchlist(
     )
 
 
-@router.delete("/watchlists/{watchlist_id}/assets/{asset_id}", status_code=204)
-async def remove_watchlist_asset(
+@router.get(
+    "/watchlists/{watchlist_id}/assets/{asset_id}/removal-impact",
+    response_model=WatchlistAssetRemovalImpact,
+)
+async def watchlist_asset_removal_impact(
     watchlist_id: UUID,
     asset_id: str,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+) -> WatchlistAssetRemovalImpact:
+    return await _watchlist_asset_removal_impact(
+        session,
+        user_id=principal.user_id,
+        watchlist_id=watchlist_id,
+        asset_id=asset_id,
+    )
+
+
+@router.delete("/watchlists/{watchlist_id}/assets/{asset_id}", status_code=204)
+async def remove_watchlist_asset(
+    watchlist_id: UUID,
+    asset_id: str,
+    confirmed: bool = Query(default=False),
+    x_csrf_token: str | None = Header(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> None:
-    watchlist = await session.get(ApprovedWatchlist, watchlist_id)
-    if watchlist is None or watchlist.user_id != principal.user_id:
-        raise HTTPException(status_code=404, detail="Watchlist not found.")
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    impact = await _watchlist_asset_removal_impact(
+        session,
+        user_id=principal.user_id,
+        watchlist_id=watchlist_id,
+        asset_id=asset_id,
+    )
+    if impact.requires_confirmation and not confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "watchlist_asset_in_use",
+                "message": (
+                    "Review the affected Watch Plans before removing this saved asset."
+                ),
+                "impact": impact.model_dump(mode="json"),
+            },
+        )
     await session.execute(
         delete(ApprovedWatchlistAsset).where(
-            ApprovedWatchlistAsset.watchlist_id == watchlist.id,
-            ApprovedWatchlistAsset.canonical_asset == canonical_asset(asset_id),
+            ApprovedWatchlistAsset.watchlist_id == impact.watchlist_id,
+            ApprovedWatchlistAsset.canonical_asset == impact.canonical_asset,
         )
     )
     await session.commit()
@@ -678,11 +815,18 @@ async def update_sharia_preferences(
 @router.post("/admin/methodologies", response_model=MethodologyDetail, status_code=201)
 async def create_methodology(
     payload: MethodologyCreateRequest,
+    x_csrf_token: str | None = Header(default=None),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> MethodologyDetail:
-    _admin(principal)
+    await _require_governance_mutation(
+        principal=principal,
+        session=session,
+        settings=settings,
+        permission="SYSTEM_ADMIN",
+        csrf_value=x_csrf_token,
+    )
     service = ShariaScreeningService(session, settings)
     try:
         row = await service.create_methodology(
@@ -700,11 +844,29 @@ async def create_methodology(
 @router.post("/admin/assessments", response_model=AssetAssessmentSummary, status_code=201)
 async def create_assessment(
     payload: AssessmentCreateRequest,
+    x_csrf_token: str | None = Header(default=None),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> AssetAssessmentSummary:
-    _admin(principal)
+    await _require_governance_mutation(
+        principal=principal,
+        session=session,
+        settings=settings,
+        permission="PUBLISHER",
+        csrf_value=x_csrf_token,
+    )
+    if settings.is_deployed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "governance_publication_required",
+                "message": (
+                    "Initial production assessments must use System Brain research, review, "
+                    "approval, and publication."
+                ),
+            },
+        )
     service = ShariaScreeningService(session, settings)
     try:
         current = await service.effective_assessment(
@@ -730,11 +892,18 @@ async def create_assessment(
 @router.post("/admin/compliance-changes", status_code=201)
 async def ingest_compliance_change(
     payload: ComplianceChangeIngestRequest,
+    x_csrf_token: str | None = Header(default=None),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    _admin(principal)
+    await _require_governance_mutation(
+        principal=principal,
+        session=session,
+        settings=settings,
+        permission="RESEARCHER",
+        csrf_value=x_csrf_token,
+    )
     row, created = await ComplianceWatchService(session, settings).ingest_change(
         payload,
         actor_user_id=principal.user_id,
@@ -747,11 +916,18 @@ async def ingest_compliance_change(
 async def review_compliance_change(
     change_id: UUID,
     payload: ComplianceReviewRequest,
+    x_csrf_token: str | None = Header(default=None),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    _admin(principal)
+    await _require_governance_mutation(
+        principal=principal,
+        session=session,
+        settings=settings,
+        permission="REVIEWER",
+        csrf_value=x_csrf_token,
+    )
     try:
         review, assessment_id, affected = await ComplianceWatchService(
             session, settings

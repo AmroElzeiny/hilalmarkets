@@ -16,6 +16,7 @@ class UserRole(StrEnum):
 class IdentityProvider(StrEnum):
     EMAIL = "email"
     TELEGRAM = "telegram"
+    WHATSAPP = "whatsapp"
     DISCORD = "discord"
 
 
@@ -369,6 +370,7 @@ class AlertType(StrEnum):
 
 class DeliveryChannel(StrEnum):
     TELEGRAM = "telegram"
+    WHATSAPP = "whatsapp"
     DISCORD = "discord"
     WEB = "web"
 

@@ -12,6 +12,7 @@ from ai_market_monitor.api.routers.sharia import router as sharia_router
 from ai_market_monitor.api.routers.status import router as status_router
 from ai_market_monitor.api.routers.system_brain import router as system_brain_router
 from ai_market_monitor.api.routers.telegram import router as telegram_router
+from ai_market_monitor.api.routers.whatsapp import router as whatsapp_router
 
 __all__ = [
     "activity_router",
@@ -28,4 +29,5 @@ __all__ = [
     "status_router",
     "system_brain_router",
     "telegram_router",
+    "whatsapp_router",
 ]

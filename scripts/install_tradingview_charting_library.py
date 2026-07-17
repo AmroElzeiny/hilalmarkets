@@ -6,7 +6,6 @@ import shutil
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = PROJECT_ROOT / "src" / "ai_market_monitor" / "static"
 DESTINATION = STATIC_ROOT / "charting_library"

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,6 @@ from ai_market_monitor.db.models.enums import (
     UserStatus,
 )
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
-
 
 DEFAULT_EMAILS = ("amroelzene@gmail.com", "uxui.fa@gmail.com")
 
