@@ -55,7 +55,7 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `AI_SETUP_LOW_CAPABILITY_CONFIDENCE` | Resolver-confidence threshold for complex routing. Default: `0.72`. |
 | `AI_AGENT_CONTROL_ENABLED` | Bounded Setup Chat coordinator kill switch. Default: `false`. |
 | `AI_AGENT_SHADOW_MODE` | Records proposed agent tool selection but executes no agent tools. Default: `false`. |
-| `AI_AGENT_ROLLOUT_PERCENT` | Stable authenticated-user cohort allowed to execute agent tools outside shadow mode. Default: `0`. |
+| `AI_AGENT_ROLLOUT_PERCENT` | Live authenticated-user percentage. Application default: `0`; controlled beta requires `100`. |
 | `AI_AGENT_MAX_STEPS` | Maximum Responses loop steps per turn. Default: `4`. |
 | `AI_AGENT_MAX_TOOL_CALLS_PER_TURN` | Maximum validated function calls per turn. Default: `4`. |
 | `AI_AGENT_MAX_REPEATED_CALLS` | Retry allowance for retryable unavailable/validation results. Default: `1`. |
@@ -69,7 +69,7 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `CAPABILITY_EXTENSION_IMPLEMENTATION_MODEL` | Implementation-only repair model. Default: `gpt-5.4-nano`. |
 | `CAPABILITY_EXTENSION_REVIEW_MODEL` | Independent escalation model. Default: `gpt-5.4-mini`. |
 | `CAPABILITY_EXTENSION_REPAIR_SERVICE_TIER` | `flex` for review/repair work or `default`. |
-| `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Private beta keeps this disabled and set to `binance`. |
+| `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Controlled beta requires `binance`. |
 | `SHARIA_ADMIN_TELEGRAM_CHAT_ID` | Admin-only destination for review notifications. Required when deployed screening is enforced. |
 | `SC_MALAYSIA_DIGITAL_ASSETS_URL` | Authoritative SC Malaysia digital-assets page imported by the governance worker. |
 | `SHARIA_AI_MODEL` | Model used for bounded factual dossier/change analysis. Default: `gpt-5.4-nano`. |
@@ -102,6 +102,12 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `STRIPE_PRICE_IDS` | Optional Stripe price-id map if the provider is switched later. |
 | `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED` | Requires Access headers in addition to application ADMIN auth. Enable only after origin access is restricted. |
 | `PUBLIC_CHAT_ENABLED` | Enables the separate public product-information assistant. |
+| `PUBLIC_CHAT_AI_ENABLED` | Enables grounded multi-turn AI support. Deployed public chat requires `true`. |
+| `PUBLIC_CHAT_AI_MODEL` / `PUBLIC_CHAT_AI_REASONING_EFFORT` | Configurable support model and effort; defaults to the main model and `low`. |
+| `PUBLIC_CHAT_AI_TIMEOUT_SECONDS` / `PUBLIC_CHAT_AI_PROVIDER_ATTEMPTS` | Bounded provider timeout and retry count. |
+| `PUBLIC_CHAT_AI_MAX_OUTPUT_TOKENS` / `PUBLIC_CHAT_AI_MAX_ESTIMATED_COST_USD_PER_TURN` | Output and cost ceilings enforced before and after provider calls. |
+| `PUBLIC_CHAT_AI_MIN_CONFIDENCE` | Below this threshold, the bot clarifies or offers a human inquiry instead of guessing. |
+| `PUBLIC_CHAT_AI_MAX_HISTORY_MESSAGES` / `PUBLIC_CHAT_SESSION_MAX_TURNS` | Bounded server-side conversation memory and per-session abuse limit. |
 | `PUBLIC_CHAT_INQUIRY_EMAIL` | Office recipient for consented public inquiries. |
 | `PUBLIC_CHAT_PROFILE_VERSION` | Invalidates stale local-only visitor profile consent when changed. |
 | `PUBLIC_CHAT_MESSAGE_MAX_LENGTH` / `PUBLIC_CHAT_INQUIRY_MAX_LENGTH` | Server-enforced public input bounds. |
@@ -114,11 +120,11 @@ an inquiry-enabled deployment from accepting questions into an outbox that canno
 
 ## Private-Beta Locked Profile
 
-The initial private beta is invite-only and free. Production examples intentionally enforce BTC,
+The controlled private beta is invite-only and free. Production examples intentionally enforce BTC,
 ETH and SOL on Binance spot, one approved methodology, in-app and Telegram delivery, paid checkout
-off, WhatsApp off, Discord retired, capability extensions off, and Bounded Agent shadow mode with a
-zero-percent live cohort. Changing any of those values is a separate release decision and must pass
-the release invariant plus staging review.
+off, WhatsApp off, Discord retired, certified user-scoped OHLCV extensions on, and the Bounded Agent
+live for every authenticated beta user. Deployed startup and release invariants require shadow mode
+off and rollout at 100 percent. Live OpenAI/Binance/SMTP proof remains a separate staging gate.
 
 ## Database Migration
 
@@ -137,7 +143,10 @@ Check for model/migration drift:
 Never run destructive schema changes without a tested backup and rollback plan.
 
 Migration `b4c5d6e7f8a9` adds redacted bounded-agent run and tool-call traces. Apply it before enabling
-shadow mode.
+the live coordinator.
+
+Migration `2bdce3f40516` adds bounded public-support conversations, idempotent turns, authenticated
+ownership references, model usage, latency, grounding, and validation audit fields.
 
 Migration `d6e7f8a9b0c1` adds the SC Malaysia governance workflow. It seeds only the versioned
 methodology family/version and never seeds or publishes an asset.
@@ -167,25 +176,22 @@ python -m pytest
 
 ### Bounded-agent rollout
 
-Deploy with `AI_AGENT_CONTROL_ENABLED=false`. For staging comparison, set:
+The controlled-beta release profile is:
 
 ```dotenv
 AI_AGENT_CONTROL_ENABLED=true
-AI_AGENT_SHADOW_MODE=true
-AI_AGENT_ROLLOUT_PERCENT=0
+AI_AGENT_SHADOW_MODE=false
+AI_AGENT_ROLLOUT_PERCENT=100
+CAPABILITY_EXTENSION_ENABLED=true
+CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE=binance
+PUBLIC_CHAT_ENABLED=true
+PUBLIC_CHAT_AI_ENABLED=true
 ```
 
-Shadow mode does not execute agent-selected tools. The existing legacy chat flow still answers the
-user, and `/system-brain#agent-control` compares the proposed first tool with the resulting legacy
-action. Review tool-selection agreement, invalid/forbidden attempts, contained ungrounded claims,
-fallback rate, latency, calls, tokens, cost, compiler success, and clarification evidence. Do not
-enable execution until forbidden executions and unsupported-condition leakage remain zero and the
-messy-request corpus shows no safety regression.
-
-For live rollout, turn shadow mode off and begin with `AI_AGENT_ROLLOUT_PERCENT=1`. Cohort assignment
-is deterministic by authenticated user ID, so the same users remain in the cohort across restarts.
-Increase gradually while monitoring System Brain; set the percentage back to `0` to halt live
-execution without disabling ongoing shadow evaluation.
+Before opening access, verify zero forbidden executions and unsupported-condition leakage, inspect
+fallbacks and clause gaps, and complete the live staging matrix in
+`docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md`. System Brain is the operational evidence view;
+committed reports are not runtime proof.
 
 To roll back, set `AI_AGENT_CONTROL_ENABLED=false` and restart the API. No schema rollback is needed.
 The full catalog, policy, limits, and safe tool-addition checklist are documented in

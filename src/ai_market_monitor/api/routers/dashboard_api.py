@@ -2,7 +2,7 @@ import base64
 import binascii
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 import structlog
@@ -454,9 +454,7 @@ async def _has_active_notification_channel(session: AsyncSession, user_id: UUID)
             TelegramConnection.alerts_enabled.is_(True),
         )
     )
-    if telegram is not None:
-        return True
-    return False
+    return telegram is not None
 
 
 async def _owned_version(
@@ -791,7 +789,18 @@ def _guided_from_strategy_builder(
         maximum_spread_bps=current.universe.max_spread_bps if current else None,
         forming_alerts=current.alerts.forming_alerts if current else True,
         near_miss_threshold=current.alerts.near_miss_threshold if current else 70,
-        delivery_channels=current.alerts.channels if current else ["web"],
+        delivery_channels=(
+            cast(
+                list[Literal["telegram", "whatsapp", "web"]],
+                [
+                    channel
+                    for channel in current.alerts.channels
+                    if channel in {"telegram", "whatsapp", "web"}
+                ],
+            )
+            if current
+            else ["web"]
+        ),
         maximum_alerts_per_hour=current.alerts.maximum_alerts_per_hour if current else 50,
     )
 

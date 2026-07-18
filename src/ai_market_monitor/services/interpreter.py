@@ -334,7 +334,7 @@ class RuleBasedStrategyInterpreter:
             alerts=AlertPolicy(
                 forming_alerts=guided_setup.forming_alerts,
                 near_miss_threshold=guided_setup.near_miss_threshold,
-                channels=guided_setup.delivery_channels,
+                channels=[channel for channel in guided_setup.delivery_channels],
                 maximum_alerts_per_hour=guided_setup.maximum_alerts_per_hour,
                 alert_on_one_condition_remaining=True,
             ),
@@ -1323,10 +1323,12 @@ class RuleBasedStrategyInterpreter:
         number_pattern = r"\$?\s*([0-9][0-9,]*(?:\.\d+)?)\s*(?:usd|usdt|dollars?|\$)?"
         field_pattern = r"(price|close|closing price|current price|last price|high|low|open)"
         patterns = [
-            rf"\b{field_pattern}\b[^.?,;]{{0,35}}?\b({relation_pattern})\b[^.?,;]{{0,20}}?{number_pattern}",
+            rf"\b{field_pattern}\b[^.?,;]{{0,35}}?\b({relation_pattern})\b"
+            rf"[^.?,;]{{0,20}}?{number_pattern}",
             rf"\b({relation_pattern})\b[^.?,;]{{0,20}}?{number_pattern}"
             r"[^.?,;]{0,25}?\b(price|close|current price|last price|usd|usdt|dollars?)\b",
-            rf"\b(?:symbols|coins|pairs|markets)\b[^.?,;]{{0,35}}?\b({relation_pattern})\b[^.?,;]{{0,20}}?{number_pattern}",
+            rf"\b(?:symbols|coins|pairs|markets)\b[^.?,;]{{0,35}}?"
+            rf"\b({relation_pattern})\b[^.?,;]{{0,20}}?{number_pattern}",
         ]
         for pattern in patterns:
             for match in re.finditer(pattern, text):
@@ -2438,6 +2440,20 @@ class RuleBasedStrategyInterpreter:
     def _timeframe_reference_is_condition_context(text: str, start: int, end: int) -> bool:
         before = text[max(0, start - 32) : start]
         after = text[end : end + 36]
+        reference_period = text[start:end].casefold() in {
+            "daily",
+            "weekly",
+            "monthly",
+            "day",
+            "week",
+            "month",
+        }
+        reference_level = bool(
+            re.search(r"\b(?:previous|prior|last)\s*$", before)
+            and re.match(r"\s*(?:candle\s+)?(?:high|low|level)\b", after)
+        )
+        if reference_period and reference_level:
+            return True
         indicator_after = re.search(
             r"\b(?:ema|sma|ma|rsi|macd|vwap|bollinger|stochastic|atr|adx)\b",
             after,

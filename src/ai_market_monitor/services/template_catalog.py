@@ -50,7 +50,8 @@ class StrategyTemplateSpec:
             {
                 condition.timeframe
                 for condition in conditions
-                if condition.timeframe != self.base_timeframe
+                if isinstance(condition, ConditionRule)
+                and condition.timeframe != self.base_timeframe
             }
         )
         return StrategyDefinition(

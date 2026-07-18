@@ -1048,7 +1048,7 @@ async def test_dashboard_support_ticket_api_creates_thread_message(test_context)
     outbox = test_context["settings"].email_test_outbox
     assert len(outbox) == 1
     assert outbox[0]["purpose"] == "support_ticket"
-    assert outbox[0]["recipient"] == "contact@trace-edge.com"
+    assert outbox[0]["recipient"] == test_context["settings"].support_inbox_email
     assert outbox[0]["subject"] == "HilalMarkets support ticket: Missing SOL alert"
     assert "dashboard-support@example.com" in outbox[0]["body"]
     assert "Please investigate the 15m candle." in outbox[0]["body"]

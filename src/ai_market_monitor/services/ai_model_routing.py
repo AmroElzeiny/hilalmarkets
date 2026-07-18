@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from difflib import SequenceMatcher
+from typing import Any
 
 from ai_market_monitor.core.config import Settings
 
@@ -16,6 +18,28 @@ _CLARIFICATION_FRICTION_RE = re.compile(
     r"i don't understand)\b",
     re.IGNORECASE,
 )
+_ROUTING_TECHNICAL_TERMS = frozenset(
+    {
+        "above",
+        "average",
+        "below",
+        "breakout",
+        "candle",
+        "close",
+        "confirmation",
+        "daily",
+        "high",
+        "invalidated",
+        "low",
+        "optional",
+        "previous",
+        "required",
+        "retest",
+        "sweep",
+        "volume",
+        "weekly",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +49,7 @@ class AISetupModelRoute:
     tier: str
     reasons: tuple[str, ...]
     condition_count: int
+    correction_count: int
 
     def usage_metadata(self) -> dict[str, Any]:
         return {
@@ -33,6 +58,7 @@ class AISetupModelRoute:
             "_traceedge_route_tier": self.tier,
             "_traceedge_route_reasons": list(self.reasons),
             "_traceedge_condition_count": self.condition_count,
+            "_traceedge_correction_count": self.correction_count,
         }
 
 
@@ -89,6 +115,10 @@ def select_setup_model(
         reasons.append("custom_terminology")
     if any(ord(character) > 127 for character in combined):
         reasons.append("multilingual_or_mixed_language")
+    elif _looks_like_arabizi(combined):
+        reasons.append("arabizi_or_transliterated_language")
+    if _looks_like_technical_typo(combined):
+        reasons.append("possible_typographical_error")
 
     unique_reasons = tuple(dict.fromkeys(reasons))
     complex_route = bool(unique_reasons)
@@ -106,6 +136,7 @@ def select_setup_model(
         tier="complex" if complex_route else "simple",
         reasons=unique_reasons or ("simple_clear_request",),
         condition_count=condition_count,
+        correction_count=correction_count,
     )
 
 
@@ -138,20 +169,51 @@ def _looks_contradictory(value: str) -> bool:
 
 def _capability_confidences(context: dict[str, Any]) -> list[float]:
     values: list[float] = []
-
-    def visit(item: Any) -> None:
-        if isinstance(item, dict):
-            confidence = item.get("confidence")
+    fragments = context.get("fragments")
+    if isinstance(fragments, list):
+        for fragment in fragments:
+            if not isinstance(fragment, dict):
+                continue
+            selected = fragment.get("selection_confidence")
+            candidates = fragment.get("candidates")
+            top = (
+                candidates[0].get("confidence")
+                if candidates and isinstance(candidates[0], dict)
+                else None
+            )
+            confidence = selected if selected is not None else top
             if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
                 values.append(float(confidence))
-            for value in item.values():
-                visit(value)
-        elif isinstance(item, list | tuple):
-            for value in item:
-                visit(value)
-
-    visit(context)
+    else:
+        candidates = context.get("candidates")
+        if candidates and isinstance(candidates, list) and isinstance(candidates[0], dict):
+            confidence = candidates[0].get("confidence")
+            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+                values.append(float(confidence))
     return [value for value in values if 0 <= value <= 1]
+
+
+def _looks_like_arabizi(value: str) -> bool:
+    for token in re.findall(r"[a-z0-9]+", value.casefold()):
+        if re.fullmatch(r"\d+(?:\.\d+)?(?:m|h|d|w|x)?", token):
+            continue
+        if re.search(r"[a-z]\d|\d[a-z]", token):
+            return True
+    return False
+
+
+def _looks_like_technical_typo(value: str) -> bool:
+    tokens = {
+        token
+        for token in re.findall(r"[a-z]{4,}", value.casefold())
+        if token not in _ROUTING_TECHNICAL_TERMS
+    }
+    return any(
+        abs(len(token) - len(term)) <= 2
+        and SequenceMatcher(None, token, term).ratio() >= 0.78
+        for token in tokens
+        for term in _ROUTING_TECHNICAL_TERMS
+    )
 
 
 def _unknown_terms(context: dict[str, Any]) -> list[str]:

@@ -11,11 +11,13 @@ confidence/lint/assumption evidence, and creates an immutable approved strategy 
 explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
 to `gpt-5.4-nano` with low reasoning.
 
-An optional Bounded Agent Control coordinator can select among a small server-offered tool set for
-messy, multi-intent chat turns. The private beta runs it only in no-execution shadow mode with a
-zero-percent live cohort. Registry,
-compiler, provider, scanner, ownership, entitlement, hash, approval, and activation authority remain
-in application services; the model never receives approval or activation tools. See
+Bounded Agent Control selects among a small server-offered tool set for messy, multi-intent chat
+turns. The controlled-beta deployment profile serves the live coordinator to all authenticated
+beta users (`AI_AGENT_SHADOW_MODE=false`, `AI_AGENT_ROLLOUT_PERCENT=100`). Registry, compiler,
+provider, scanner, ownership, entitlement, hash, approval, and activation authority remain in
+application services; the model never receives approval or activation tools. Setting
+`AI_AGENT_CONTROL_ENABLED=false` returns users to the durable guided flow without a database
+rollback. See
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
@@ -40,21 +42,24 @@ free invite access and rejects paid checkout while billing is disabled. Optional
 by default; Consent Mode v2 denied defaults execute before the optional GTM loader, and users can
 withdraw consent through Cookie Settings. See
 [docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
-The landing-page product assistant is a separate public, non-executing boundary. It answers only
-from the server-owned public catalog, cannot inspect accounts or Watch Plans, and routes unknown
-questions into a CSRF-protected, rate-limited, idempotent inquiry flow. The inquiry stores bounded
-contact data, queues one visitor email and one office email, supports token-bound feedback/deletion,
-and never exposes the authenticated Setup Chat tools.
+The landing-page product assistant is a separate public, non-executing boundary. It generates
+multi-turn answers only from server-owned product knowledge and bounded read-only tools. Anonymous
+visitors cannot inspect accounts; a signed-in user may read only their own account, Telegram,
+Watch Plan, alert, entitlement, usage, Screened Watchlist, and published Passport state. Unknown
+questions enter a CSRF-protected, rate-limited, idempotent inquiry flow. The inquiry commits exactly
+one customer and one office email outbox row before returning, supports token-bound
+feedback/deletion, and never exposes Setup Chat mutation tools.
 The current private-beta correction status, including verification blockers and required staging
 evidence, is recorded in
 [docs/PRIVATE_BETA_READINESS_REPORT.md](docs/PRIVATE_BETA_READINESS_REPORT.md).
 
-Outside the private beta, a confirmed candle-computable mechanic that is not in the registry can be
-prepared as a
-user-scoped, versioned mechanic through a bounded JSON expression DSL. The worker validates it,
-tests it against the configured spot provider, independently reviews it, and requires the normal
-strategy approval flow before activation. It never executes AI-generated Python or fabricates
-provider data. See
+During the controlled beta, an explicitly confirmed candle-computable mechanic that is not in the
+registry can be prepared as a user-scoped, versioned mechanic through a bounded JSON expression
+DSL. The worker validates it, tests it against Binance spot, independently reviews it, and requires
+the normal strategy approval flow before activation. Provider-only requests are rejected before
+queueing. Certified artifacts remain fail-closed during approval and scheduled scans, and owner
+quarantine/restore/repair-discard controls never replace an active version silently. The pipeline
+never executes AI-generated Python or fabricates provider data. See
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md).
 
 ## Local development
@@ -99,11 +104,15 @@ component, UX, and QA references are preserved under [docs/hilalmarkets-ui](docs
 Current beta infrastructure includes idempotent scheduled scans, shared CCXT REST clients,
 deterministic proof persistence, setup lifecycle records, and Telegram webhook delivery. WhatsApp
 code remains dormant pending Meta onboarding and controlled tests; it is not mounted or shown when
-disabled. Custom capability creation and paid billing are also disabled for beta users. See
+disabled. Certified user-scoped OHLCV capability creation is enabled; paid billing remains disabled.
+See
 [docs/WHATSAPP_CLOUD_API_RUNBOOK.md](docs/WHATSAPP_CLOUD_API_RUNBOOK.md). Retained payment providers
 remain covered by tests for a later explicit rollout. See
 [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) for the required fail-closed
 configuration.
+
+The current live-AI code and verification status is recorded in
+[docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md](docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md).
 
 The `.github/workflows/release-gate.yml` workflow is the release authority for automated checks.
 Committed Markdown reports are explanatory records, not test proof. Require every workflow job in

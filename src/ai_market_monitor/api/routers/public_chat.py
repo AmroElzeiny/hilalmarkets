@@ -18,16 +18,28 @@ from ai_market_monitor.schemas.public_chat import (
     PublicInquiryRequest,
     PublicInquiryResponse,
 )
+from ai_market_monitor.services.agent_control import (
+    AgentResponsesClient,
+    OpenAIAgentResponsesClient,
+)
 from ai_market_monitor.services.public_chat import (
     PUBLIC_CHAT_CSRF_COOKIE,
     PUBLIC_CHAT_PROFILE_STORAGE_KEY,
     PublicChatService,
+    PublicChatSessionLimitExceeded,
     issue_public_chat_csrf,
     mask_email,
     public_chat_csrf_matches,
 )
+from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 router = APIRouter(prefix="/public-chat", tags=["public-chat"])
+
+
+def get_public_support_ai_client(
+    settings: Settings = Depends(get_settings),
+) -> AgentResponsesClient:
+    return OpenAIAgentResponsesClient(settings)
 
 
 @router.get("/bootstrap", response_model=PublicChatBootstrapResponse)
@@ -56,6 +68,7 @@ async def public_chat_bootstrap(
         privacy_url="/privacy",
         max_message_length=settings.public_chat_message_max_length,
         max_inquiry_length=settings.public_chat_inquiry_max_length,
+        conversation_retention_days=settings.public_chat_session_retention_days,
     )
 
 
@@ -72,16 +85,37 @@ async def validate_public_chat_profile(
 
 
 @router.post("/answers", response_model=PublicChatAnswerResponse)
-@public_api("Answers only from the server-owned public product knowledge catalog.")
+@public_api("Generates a validated AI answer from server-owned product sources and read tools.")
 async def answer_public_chat_question(
     payload: PublicChatAnswerRequest,
     request: Request,
     x_csrf_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    ai_client: AgentResponsesClient = Depends(get_public_support_ai_client),
 ) -> PublicChatAnswerResponse:
     _require_public_chat_request(request, settings, x_csrf_token)
-    result = await PublicChatService(session, settings).answer(payload)
+    user = await WebAuthService(session, settings).current_user(
+        request.cookies.get(SESSION_COOKIE_NAME)
+    )
+    if user is not None and user.status.value == "suspended":
+        user = None
+    try:
+        result = await PublicChatService(
+            session,
+            settings,
+            ai_client=ai_client,
+        ).answer(payload, user_id=user.id if user is not None else None)
+    except PublicChatSessionLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "conversation_limit_reached", "message": str(exc)},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "message_id_conflict", "message": str(exc)},
+        ) from exc
     await session.commit()
     return result
 
@@ -99,14 +133,12 @@ async def submit_public_chat_inquiry(
     service = PublicChatService(session, settings)
     inquiry = await service.submit_inquiry(payload)
     await session.commit()
-    await service.process_due(inquiry_id=inquiry.id, limit=2)
-    delivery_state = await service.email_delivery_state(inquiry.id)
     return PublicInquiryResponse(
         reference=inquiry.reference,
         status="received",
         masked_email=mask_email(inquiry.normalized_email),
         feedback_token=service.feedback_token(inquiry),
-        email_delivery_status=delivery_state,
+        email_delivery_status="queued",
         message="Your message was sent successfully 🎉",
     )
 

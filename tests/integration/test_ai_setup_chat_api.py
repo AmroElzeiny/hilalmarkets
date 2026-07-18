@@ -217,6 +217,7 @@ async def test_legacy_quick_scan_page_redirects_to_chat_scanner(test_context):
 async def test_unknown_fragment_can_enter_certified_mechanic_queue(test_context):
     await _signup(test_context, "ai-chat-extension@example.com")
     test_context["settings"].openai_api_key = SecretStr("test-key")
+    test_context["settings"].capability_extension_enabled = True
     service = AISetupChatService(
         test_context["settings"],
         SnapshotProvider(),

@@ -2,12 +2,15 @@ from typing import Any
 from uuid import uuid4
 
 from pydantic import SecretStr
+from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.db.models import AISetupChatSession
+from ai_market_monitor.db.models import AISetupChatSession, CapabilityExtension
 from ai_market_monitor.schemas.agent_control import (
     CompileStrategyDraftArgs,
     GetMarketSnapshotArgs,
+    GetRecentScannerResultArgs,
+    RequestCustomCapabilityArgs,
     ResolveTradingCapabilitiesArgs,
     RunOneTimeScanArgs,
     ValidateCapabilitySelectionArgs,
@@ -316,6 +319,28 @@ async def test_market_snapshot_is_evidence_backed_or_explicitly_unavailable(test
     assert unavailable.evidence_refs == []
 
 
+async def test_custom_capability_tool_does_not_queue_provider_only_data(test_context):
+    service = _service(ToolHarness())
+    runtime = _runtime(request_text="Use whale wallets and liquidation heatmaps")
+    async with test_context["session_factory"]() as session:
+        result = await service.execute(
+            session,
+            runtime,
+            call_id="custom-provider-only-1",
+            tool_name="request_custom_capability",
+            arguments=RequestCustomCapabilityArgs(
+                source_fragment="Use whale wallets and liquidation heatmaps",
+                confirmed_by_user=True,
+            ),
+        )
+        queued = int(await session.scalar(select(func.count(CapabilityExtension.id))) or 0)
+
+    assert result.status == "validation_error"
+    assert result.data["queued"] is False
+    assert result.data["dependency_category"] in {"on_chain_or_wallets", "derivatives"}
+    assert queued == 0
+
+
 async def test_scanner_reuses_same_draft_result_without_second_execution(test_context):
     harness = ToolHarness()
     draft_hash = "c" * 64
@@ -341,6 +366,30 @@ async def test_scanner_reuses_same_draft_result_without_second_execution(test_co
     assert result.data == existing
     assert harness.scan_calls == 0
     assert "already scanned" in result.warnings[0]
+
+
+async def test_recent_scanner_result_preserves_authoritative_evidence_refs(test_context):
+    runtime = _runtime(
+        setup_mode="scanner",
+        context_json={
+            "scanner_result": {
+                "status": "succeeded",
+                "evidence_refs": ["scan:job:one", "scan:proof:two"],
+                "results": [],
+            }
+        },
+    )
+    async with test_context["session_factory"]() as session:
+        result = await _service(ToolHarness()).execute(
+            session,
+            runtime,
+            call_id="recent-scan-1",
+            tool_name="get_recent_scanner_result",
+            arguments=GetRecentScannerResultArgs(),
+        )
+
+    assert result.status == "success"
+    assert result.evidence_refs == ["scan:job:one", "scan:proof:two"]
 
 
 def test_openai_tool_schemas_are_strict_and_redaction_does_not_store_prompt_text() -> None:

@@ -121,31 +121,38 @@ async def apply_request_guards(
     rule = matching_rate_limit_rule(request.method, request.url.path, settings)
     if rule is None:
         return None
-    fingerprint = _request_fingerprint(request, settings)
-    key = f"hm:rate:{rule.scope}:{fingerprint}"
-    try:
-        if settings.app_env == "test":
-            raise RedisError("Tests use the isolated in-memory limiter.")
-        count, retry_after = await _redis_increment(settings.redis_url, key, rule.window_seconds)
-    except RedisError:
-        if settings.is_deployed and settings.api_rate_limit_fail_closed:
-            return _safe_error(
-                503,
-                "rate_limit_unavailable",
-                "This action is temporarily unavailable. Please try again shortly.",
+    fingerprints = {_request_fingerprint(request, settings)}
+    if rule.scope == "public_chat":
+        fingerprints.add(_request_ip_fingerprint(request, settings))
+    for fingerprint in fingerprints:
+        key = f"hm:rate:{rule.scope}:{fingerprint}"
+        try:
+            if settings.app_env == "test":
+                raise RedisError("Tests use the isolated in-memory limiter.")
+            count, retry_after = await _redis_increment(
+                settings.redis_url,
+                key,
+                rule.window_seconds,
             )
-        count, retry_after = await _memory_increment(
-            f"{id(settings)}:{key}", rule.window_seconds
-        )
-    if count <= rule.limit:
-        return None
-    response = _safe_error(
-        429,
-        "rate_limit_exceeded",
-        "Too many requests. Wait a moment and try again.",
-    )
-    response.headers["Retry-After"] = str(max(1, retry_after))
-    return response
+        except RedisError:
+            if settings.is_deployed and settings.api_rate_limit_fail_closed:
+                return _safe_error(
+                    503,
+                    "rate_limit_unavailable",
+                    "This action is temporarily unavailable. Please try again shortly.",
+                )
+            count, retry_after = await _memory_increment(
+                f"{id(settings)}:{key}", rule.window_seconds
+            )
+        if count > rule.limit:
+            response = _safe_error(
+                429,
+                "rate_limit_exceeded",
+                "Too many requests. Wait a moment and try again.",
+            )
+            response.headers["Retry-After"] = str(max(1, retry_after))
+            return response
+    return None
 
 
 def same_origin_failure(request: Request, settings: Settings) -> JSONResponse | None:
@@ -238,6 +245,12 @@ def _request_fingerprint(request: Request, settings: Settings) -> str:
         principal_hint if principal_hint and not settings.is_deployed else remote
     )
     material = f"{settings.app_secret_key.get_secret_value()}:{raw}".encode()
+    return hashlib.sha256(material).hexdigest()[:32]
+
+
+def _request_ip_fingerprint(request: Request, settings: Settings) -> str:
+    remote = request.client.host if request.client else "unknown"
+    material = f"{settings.app_secret_key.get_secret_value()}:ip:{remote}".encode()
     return hashlib.sha256(material).hexdigest()[:32]
 
 

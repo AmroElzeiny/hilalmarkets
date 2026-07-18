@@ -10,6 +10,8 @@ from sqlalchemy import func, select
 
 from ai_market_monitor.api.routers.whatsapp import (
     get_whatsapp_receipt_enqueuer,
+)
+from ai_market_monitor.api.routers.whatsapp import (
     router as whatsapp_router,
 )
 from ai_market_monitor.core.config import Settings, get_settings

@@ -24,9 +24,12 @@ WHATSAPP_ADAPTER=none
 BILLING_ENABLED=false
 BILLING_PROVIDER=static
 AI_AGENT_CONTROL_ENABLED=true
-AI_AGENT_SHADOW_MODE=true
-AI_AGENT_ROLLOUT_PERCENT=0
-CAPABILITY_EXTENSION_ENABLED=false
+AI_AGENT_SHADOW_MODE=false
+AI_AGENT_ROLLOUT_PERCENT=100
+CAPABILITY_EXTENSION_ENABLED=true
+CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE=binance
+PUBLIC_CHAT_ENABLED=true
+PUBLIC_CHAT_AI_ENABLED=true
 EMAIL_ADAPTER=smtp
 ```
 
@@ -117,8 +120,8 @@ docker compose up -d api worker scheduler
 docker compose ps
 ```
 
-The current migration head includes `email_auth_challenges`, which is required for one-time-code
-login and password reset.
+The current migration head includes the email-auth tables and bounded public-support conversation
+state. Apply the full Alembic chain before enabling public AI support.
 
 Verify `/health`, `/api/v1/status/summary`, worker ping, scheduled `ScanJob` rows, provider webhook
 delivery, and one deterministic staging strategy before opening registrations.

@@ -65,6 +65,7 @@ from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
     ShariaUniverseResolver,
 )
+from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.strategy_hashes import ensure_current_approved_schema_hash
 from ai_market_monitor.services.trials import TrialLifecycleService
 
@@ -1077,6 +1078,18 @@ class ScanOrchestrator:
                 "Strategy schema hash no longer matches the approved version.",
             )
             return self._summary(job, failures=0)
+        settings = self.settings or Settings()
+        try:
+            await StrategyService(
+                self.session,
+                settings.disclaimer_version,
+            ).assert_dynamic_capability_artifacts(
+                definition,
+                user_id=strategy.user_id,
+            )
+        except StrategyGateError as exc:
+            await self._cancel_job(job, exc.code, str(exc))
+            return self._summary(job, failures=0)
         preferences = await NotificationPreferenceService(self.session).current(strategy.user_id)
         if definition.universe.exchange.lower() not in (preferences.providers or set()):
             await self._cancel_job(
@@ -1095,7 +1108,6 @@ class ScanOrchestrator:
             await self._cancel_job(job, exc.code, str(exc))
             return self._summary(job, failures=0)
         maximum_symbols = int(entitlement.limit("symbols_per_strategy") or 0)
-        settings = self.settings or Settings()
         try:
             screening = await ShariaUniverseResolver(
                 self.session,

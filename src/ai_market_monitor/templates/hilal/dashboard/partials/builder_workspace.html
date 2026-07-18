@@ -588,7 +588,21 @@
                     <form method="post" action="/dashboard/capability-extensions/{{ item.pending_repair.id }}/prepare-repair">
                       <button class="button button-primary" type="submit">Review certified repair</button>
                     </form>
+                    <form method="post" action="/dashboard/capability-extensions/{{ item.pending_repair.id }}/discard-repair" onsubmit="return confirm('Discard this pending repair? The active certified mechanic will remain unchanged.');">
+                      <button class="button button-secondary" type="submit">Discard repair</button>
+                    </form>
                   {% endif %}
+                  {% for extension in item.dynamic_extensions %}
+                    {% if extension.paused_at %}
+                      <form method="post" action="/dashboard/capability-extensions/{{ extension.id }}/restore">
+                        <button class="button button-secondary" type="submit">Restore custom mechanic</button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="/dashboard/capability-extensions/{{ extension.id }}/quarantine" onsubmit="return confirm('Quarantine this custom mechanic now? Scheduled scans using it will stop safely until you restore it.');">
+                        <button class="button button-secondary danger-button" type="submit">Quarantine mechanic</button>
+                      </form>
+                    {% endif %}
+                  {% endfor %}
                   <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}">View</a>
                   <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit</a>
                   <form method="post" action="/dashboard/monitors/{{ strategy.id }}/{{ 'resume' if strategy.status.value == 'paused' else 'pause' }}">

@@ -38,9 +38,10 @@ def render_near_miss_detail(item: NearMissListItem) -> str:
 def render_confirmed_alert(result: EvaluationResult) -> str:
     proof = result.proof_receipt()
     trust = proof.get("alert_trust_score") or {}
+    trust_score = trust.get("score")
     trust_label = (
-        f"{trust.get('grade', 'n/a')} ({float(trust.get('score')):.0f}%)"
-        if isinstance(trust.get("score"), (int, float))
+        f"{trust.get('grade', 'n/a')} ({float(trust_score):.0f}%)"
+        if isinstance(trust_score, (int, float))
         else str(trust.get("grade", "n/a"))
     )
     risk = result.risk

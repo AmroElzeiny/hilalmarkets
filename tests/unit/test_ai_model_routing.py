@@ -24,6 +24,7 @@ def test_clear_single_condition_uses_configured_simple_tier() -> None:
     assert route.reasoning_effort == "low"
     assert route.tier == "simple"
     assert route.reasons == ("simple_clear_request",)
+    assert route.correction_count == 0
 
 
 def test_complex_logic_and_multiple_timeframes_use_configured_complex_tier() -> None:
@@ -56,6 +57,30 @@ def test_repeated_corrections_and_low_confidence_escalate_without_changing_autho
     assert route.tier == "complex"
     assert "repeated_corrections" in route.reasons
     assert "low_capability_confidence" in route.reasons
+    assert route.correction_count == 2
+    assert route.usage_metadata()["_traceedge_correction_count"] == 2
+
+
+def test_exact_selected_capability_is_not_downgraded_by_weak_alternates() -> None:
+    route = select_setup_model(
+        _settings(),
+        current_message="Sweep the previous daily low on 5m",
+        capability_context={
+            "fragments": [
+                {
+                    "selection_confidence": 0.99,
+                    "candidates": [
+                        {"capability_key": "previous_daily_low_sweep", "confidence": 0.99},
+                        {"capability_key": "reference_period_sweep", "confidence": 0.72},
+                        {"capability_key": "previous_low_swept", "confidence": 0.31},
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert route.tier == "simple"
+    assert "low_capability_confidence" not in route.reasons
 
 
 def test_multilingual_turn_uses_complex_tier_without_hard_coding_a_trade_rule() -> None:

@@ -16,9 +16,9 @@ This contains model errors; it does not claim that hallucinations are eliminated
 
 ## Request Path
 
-When `AI_AGENT_CONTROL_ENABLED=true` and the authenticated user falls inside the deterministic
-`AI_AGENT_ROLLOUT_PERCENT` cohort, a typed Setup Chat turn follows this path. Shadow mode evaluates
-all eligible typed turns regardless of the live percentage, but never executes a tool:
+With the controlled-beta profile (`AI_AGENT_CONTROL_ENABLED=true`,
+`AI_AGENT_SHADOW_MODE=false`, `AI_AGENT_ROLLOUT_PERCENT=100`), every authenticated user's typed
+Setup Chat turn follows this path:
 
 1. Existing authentication, ownership, message idempotency, and safety checks run first.
 2. `AgentPolicyService` builds server context and a small allowed-tool list from current state.
@@ -61,10 +61,17 @@ Scheduled scan evaluation remains deterministic and LLM-free.
 | `run_one_time_scan` | Confirmation required | Runs one idempotent Scanner-mode request only after an explicit current-turn request, entitlement check, and exact draft hash. |
 | `inspect_current_draft` | Safe | Reads the current persisted draft, lint, unresolved issues, confidence, and approval eligibility. |
 | `get_monitor_status` | Guarded | Reads only a monitor ID offered from the authenticated user's owned set. |
+| `list_watch_plans` | Guarded | Lists bounded status metadata for the authenticated user's own Watch Plans. |
+| `inspect_screened_watchlist` | Guarded | Reads the authenticated user's saved screened assets without overriding current policy. |
+| `get_recent_scanner_result` | Guarded | Reads an authoritative recent Scanner result for the current draft/session. |
+| `request_custom_capability` | Confirmation required | Queues only the exact unresolved user-authored fragment after explicit current-turn consent and an OHLCV-only scope check. |
+| `get_custom_capability_status` | Guarded | Reads only the extension bound to the current authenticated chat. |
 
 Approval, activation, billing, entitlements, notifications, registry mutation, dynamic-mechanic
-creation/repair, arbitrary HTTP, SQL, Python, shell, filesystem, and trade tools are not exposed.
-The model cannot add tools to its own catalog.
+repair/application, arbitrary HTTP, SQL, Python, shell, filesystem, and trade tools are not
+exposed. The model cannot add tools to its own catalog. A custom-capability request calls the
+existing certification service; it does not execute model-authored code or make the model the
+certification authority.
 
 ## Grounding and Failure Rules
 
@@ -87,21 +94,23 @@ The model cannot add tools to its own catalog.
 
 ## Limits
 
-Defaults are conservative and cannot be changed by the model:
+Application defaults remain conservative. The controlled-beta environment profile deliberately
+overrides only the three rollout fields and enables certified extensions:
 
-| Setting | Default |
-|---|---:|
-| `AI_AGENT_CONTROL_ENABLED` | `false` |
-| `AI_AGENT_SHADOW_MODE` | `false` |
-| `AI_AGENT_ROLLOUT_PERCENT` | `0` |
-| `AI_AGENT_MAX_STEPS` | `4` |
-| `AI_AGENT_MAX_TOOL_CALLS_PER_TURN` | `4` |
-| `AI_AGENT_MAX_REPEATED_CALLS` | `1` |
-| `AI_AGENT_TIMEOUT_SECONDS` | `45` |
-| `AI_AGENT_TOOL_TIMEOUT_SECONDS` | `30` |
-| `AI_AGENT_MAX_OUTPUT_TOKENS` | `1800` |
-| `AI_AGENT_MAX_ESTIMATED_COST_USD_PER_TURN` | `0.02` |
-| `AI_AGENT_PARALLEL_TOOL_CALLS` | `false` (enforced) |
+| Setting | Application default | Controlled beta |
+|---|---:|---:|
+| `AI_AGENT_CONTROL_ENABLED` | `false` | `true` |
+| `AI_AGENT_SHADOW_MODE` | `false` | `false` |
+| `AI_AGENT_ROLLOUT_PERCENT` | `0` | `100` |
+| `CAPABILITY_EXTENSION_ENABLED` | `false` | `true` |
+| `AI_AGENT_MAX_STEPS` | `4` | `4` |
+| `AI_AGENT_MAX_TOOL_CALLS_PER_TURN` | `4` | `4` |
+| `AI_AGENT_MAX_REPEATED_CALLS` | `1` | `1` |
+| `AI_AGENT_TIMEOUT_SECONDS` | `45` | `45` |
+| `AI_AGENT_TOOL_TIMEOUT_SECONDS` | `30` | `30` |
+| `AI_AGENT_MAX_OUTPUT_TOKENS` | `1800` | `1800` |
+| `AI_AGENT_MAX_ESTIMATED_COST_USD_PER_TURN` | `0.02` | `0.02` |
+| `AI_AGENT_PARALLEL_TOOL_CALLS` | `false` | `false` (enforced) |
 
 No database transaction is intentionally held during an OpenAI or market-provider network call.
 Before each Responses call, the server estimates the maximum possible call cost from the serialized
@@ -119,29 +128,32 @@ step/call counts, token usage, estimated cost, budget/timeout outcomes, redacted
 decision, argument hash, redacted arguments, evidence references, and shadow comparison. They do not
 store hidden reasoning, credentials, raw provider payloads, or raw setup fragments in tool arguments.
 
-System Brain shows rollout state, first-tool agreement in labeled shadow turns, completion/fallback
-rates, contained ungrounded claims, rejected calls, deterministic compile success, clarification
-turns, unsupported-condition leakage, tool success/latency, calls per turn, tokens, and estimated
-cost. Tool-result summaries contain counts and states only, not prompt text or raw provider payloads.
+System Brain shows live rollout state, completion/fallback rates, contained ungrounded claims,
+rejected calls, deterministic compile success, approval conversion, correction and clause-gap
+counts, provider-limited turns, custom certification/repair/quarantine state, tool success/latency,
+calls per turn, tokens, and estimated cost. Public-support source coverage, validation failures,
+inquiries, email state, ratings, latency, cost, and knowledge gaps appear in the same protected
+owner console. Tool-result summaries contain counts and states only, not prompt text or raw
+provider payloads.
 
 ## Rollout and Rollback
 
-1. Apply migrations and deploy with both feature flags `false`.
-2. Set `AI_AGENT_CONTROL_ENABLED=true` and `AI_AGENT_SHADOW_MODE=true` for staging. The model may
-   propose one first action, but no agent-selected tool executes; users continue through legacy.
-3. Exercise `tests/fixtures/agent_control_corpus.jsonl` and normal beta traffic. The corpus covers
+1. Apply migrations and exercise `tests/fixtures/agent_control_corpus.jsonl`, the Setup Chat
+   regressions, and the public-support corpus before deployment. The corpora cover
    messy multi-intent, vague, corrective, adversarial, unsupported-data, idempotency, injection,
-   monitor-status, greeting, and provider-unavailable turns.
-4. Review System Brain for tool-selection agreement, forbidden attempts, invalid calls, latency,
+   monitor-status, greeting, provider-unavailable, multilingual, typo, account, refusal, and
+   escalation turns.
+2. Run a controlled staging proof with the exact release profile: agent enabled, shadow disabled,
+   rollout 100, capability extensions enabled, and public AI support enabled.
+3. Review System Brain for forbidden attempts, invalid calls, latency,
    estimated cost, fallback rate, clarification evidence, compiler success, and any ungrounded claim.
-5. Require zero forbidden executions and zero unsupported-condition leakage. Investigate every
+4. Require zero forbidden executions and zero unsupported-condition leakage. Investigate every
    ungrounded final claim even though it was contained.
-6. Disable shadow mode and set `AI_AGENT_ROLLOUT_PERCENT` to a small value such as `1` or `5` only
-   after shadow evidence improves over legacy without safety regression. Membership is a stable
-   server-side hash of the authenticated user ID; the model cannot select or expand its cohort.
-   Raise the percentage in measured stages while watching the same safety and quality metrics.
-7. Roll back immediately by setting `AI_AGENT_CONTROL_ENABLED=false`. No database rollback is
-   required; the legacy path remains intact.
+5. Open the private beta only after the live OpenAI, Binance, worker, Scanner, Watch Plan, public
+   multi-turn, multilingual, inquiry-outbox, and SMTP delivery checks succeed.
+6. Roll back immediately by setting `AI_AGENT_CONTROL_ENABLED=false` and restarting the API. No
+   database rollback is required; persisted drafts remain available to the guided flow. Do not use
+   shadow mode or a partial cohort as the deployed private-beta posture.
 
 ## Adding a Tool Safely
 

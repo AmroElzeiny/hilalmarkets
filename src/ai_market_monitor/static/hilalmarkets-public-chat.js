@@ -19,6 +19,8 @@
     input: panel.querySelector("[data-public-chat-input]"),
     send: panel.querySelector("[data-public-chat-send]"),
     inquiry: panel.querySelector("[data-public-chat-inquiry]"),
+    inquiryName: panel.querySelector("[data-public-chat-inquiry-name]"),
+    inquiryEmail: panel.querySelector("[data-public-chat-inquiry-email]"),
     inquiryError: panel.querySelector("[data-public-chat-inquiry-error]"),
     inquiryCancel: panel.querySelector("[data-public-chat-inquiry-cancel]"),
     success: panel.querySelector("[data-public-chat-success]"),
@@ -41,6 +43,7 @@
     lastQuestion: "",
     knowledgeGap: "unverified_product_question",
     inquiryKey: null,
+    inquiryQuestion: null,
     inquiryResult: null,
   };
 
@@ -188,10 +191,16 @@
   }
 
   async function openChat() {
+    if (!panel.hidden) {
+      view.input?.focus();
+      return;
+    }
     launcher.classList.add("was-opened");
     state.previousFocus = document.activeElement;
     panel.hidden = false;
     backdrop.hidden = false;
+    panel.setAttribute("aria-hidden", "false");
+    backdrop.setAttribute("aria-hidden", "false");
     launcher.setAttribute("aria-expanded", "true");
     document.body.classList.add("public-chat-open");
     updateConnectivity();
@@ -216,6 +225,8 @@
     panel.classList.remove("is-open");
     backdrop.classList.remove("is-open");
     launcher.setAttribute("aria-expanded", "false");
+    panel.setAttribute("aria-hidden", "true");
+    backdrop.setAttribute("aria-hidden", "true");
     document.body.classList.remove("public-chat-open");
     window.setTimeout(() => {
       panel.hidden = true;
@@ -242,6 +253,30 @@
       });
       wrapper.append(links);
     }
+    if (options.clarification) {
+      const clarification = document.createElement("p");
+      clarification.className = "public-chat-clarification";
+      clarification.textContent = options.clarification;
+      wrapper.append(clarification);
+    }
+    if (options.followUps?.length) {
+      const actions = document.createElement("div");
+      actions.className = "public-chat-follow-ups";
+      actions.setAttribute("aria-label", "Suggested follow-up questions");
+      options.followUps.forEach((label) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chip";
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          if (state.sending) return;
+          actions.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+          sendQuestion(label);
+        });
+        actions.append(button);
+      });
+      wrapper.append(actions);
+    }
     if (options.retry) {
       const retry = document.createElement("button");
       retry.type = "button";
@@ -250,7 +285,11 @@
       retry.addEventListener("click", () => {
         if (state.sending) return;
         retry.disabled = true;
-        sendQuestion(options.retry, { appendUser: false, retryNode: wrapper });
+        sendQuestion(options.retry, {
+          appendUser: false,
+          retryNode: wrapper,
+          clientMessageId: options.clientMessageId,
+        });
       });
       wrapper.append(retry);
     }
@@ -288,18 +327,25 @@
     setHidden(view.starters, true);
     setHidden(view.inquiry, true);
     const typing = appendTyping();
+    const clientMessageId = options.clientMessageId || `public-chat:${state.sessionId}:${Date.now()}`;
     try {
       const result = await request("/api/v1/public-chat/answers", {
         method: "POST",
         body: JSON.stringify({
           question,
           session_id: state.sessionId,
+          client_message_id: clientMessageId,
           source_page: `${location.pathname}${location.search}`.slice(0, 240),
+          profile: state.profile,
         }),
       });
       typing.remove();
       options.retryNode?.remove();
-      appendMessage("assistant", result.message, { links: result.related_links });
+      appendMessage("assistant", result.message, {
+        links: result.related_links,
+        clarification: result.clarification_question,
+        followUps: result.suggested_follow_ups,
+      });
       state.knowledgeGap = result.knowledge_gap_category || "unverified_product_question";
       if (result.show_inquiry_form) showInquiry(question);
     } catch (error) {
@@ -308,7 +354,11 @@
         options.retryNode.querySelector(".public-chat-bubble").textContent = error.message;
         options.retryNode.querySelector(".public-chat-retry").disabled = false;
       } else {
-        appendMessage("assistant", error.message, { error: true, retry: question });
+        appendMessage("assistant", error.message, {
+          error: true,
+          retry: question,
+          clientMessageId,
+        });
       }
     } finally {
       state.sending = false;
@@ -318,7 +368,12 @@
   }
 
   function showInquiry(question) {
-    state.inquiryKey = state.inquiryKey || `public-inquiry:${state.sessionId}:${Date.now()}`;
+    if (state.inquiryQuestion !== question) {
+      state.inquiryKey = `public-inquiry:${state.sessionId}:${Date.now()}`;
+      state.inquiryQuestion = question;
+    }
+    view.inquiryName.value = state.profile?.name || "";
+    view.inquiryEmail.value = state.profile?.email || "";
     view.inquiry.querySelector("textarea[name='details']").value = question;
     setHidden(view.inquiry, false);
     view.inquiry.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -351,10 +406,15 @@
     button.disabled = true;
     const data = new FormData(view.inquiry);
     try {
+      const editedProfile = {
+        name: String(data.get("name") || "").trim(),
+        email: String(data.get("email") || "").trim(),
+        remember_on_device: Boolean(state.profile?.remember_on_device),
+      };
       const result = await request("/api/v1/public-chat/inquiries", {
         method: "POST",
         body: JSON.stringify({
-          profile: state.profile,
+          profile: editedProfile,
           details: data.get("details"),
           category: data.get("category"),
           source_page: `${location.pathname}${location.search}`.slice(0, 240),
@@ -365,6 +425,8 @@
           company_website: data.get("company_website") || "",
         }),
       });
+      state.profile = editedProfile;
+      rememberProfile();
       state.inquiryResult = result;
       resetRating();
       setHidden(view.inquiry, true);
@@ -372,7 +434,7 @@
       const emailCopy = result.email_delivery_status === "sent"
         ? `We also sent a confirmation to ${result.masked_email}.`
         : `A confirmation email is queued for ${result.masked_email}.`;
-      view.successCopy.textContent = `Your message was sent successfully 🎉 Reference ${result.reference}. ${emailCopy}`;
+      view.successCopy.textContent = `${result.message} Reference ${result.reference}. ${emailCopy}`;
       setHidden(view.success, false);
       view.success.focus();
     } catch (error) {
@@ -415,6 +477,7 @@
 
   function resetForAnotherQuestion() {
     state.inquiryKey = null;
+    state.inquiryQuestion = null;
     state.inquiryResult = null;
     state.knowledgeGap = "unverified_product_question";
     setHidden(view.success, true);
@@ -430,6 +493,7 @@
     state.started = false;
     state.lastQuestion = "";
     state.inquiryKey = null;
+    state.inquiryQuestion = null;
     state.inquiryResult = null;
     state.knowledgeGap = "unverified_product_question";
     state.sending = false;
@@ -496,7 +560,11 @@
     button.addEventListener("click", () => sendQuestion(button.dataset.publicChatQuestion));
   });
   view.inquiry.addEventListener("submit", submitInquiry);
-  view.inquiryCancel.addEventListener("click", () => setHidden(view.inquiry, true));
+  view.inquiryCancel.addEventListener("click", () => {
+    state.inquiryKey = null;
+    state.inquiryQuestion = null;
+    setHidden(view.inquiry, true);
+  });
   view.another.addEventListener("click", resetForAnotherQuestion);
   view.successClose.addEventListener("click", closeChat);
   view.forget.addEventListener("click", forgetSavedDetails);

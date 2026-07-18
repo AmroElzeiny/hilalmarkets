@@ -598,7 +598,7 @@ def _listing_datetime(market: dict[str, Any]) -> datetime | None:
         "listingTime",
     ):
         raw = info.get(key) or market.get(key)
-        if raw in (None, ""):
+        if raw is None or raw == "":
             continue
         try:
             numeric = float(raw)

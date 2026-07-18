@@ -76,6 +76,9 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
     assert "Published Assets" in dashboard.text
     assert "Telegram / Delivery" in dashboard.text
     assert "Import SC Malaysia now" in dashboard.text
+    assert 'data-testid="ai-operations-overview"' in dashboard.text
+    assert "Live coordinator and public support" in dashboard.text
+    assert "Forbidden executed" in dashboard.text
     assert "governance@example.com" in dashboard.text
     assert "<pre" not in dashboard.text
     assert "tojson" not in dashboard.text

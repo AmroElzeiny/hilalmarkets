@@ -236,6 +236,7 @@ class Settings(BaseSettings):
     capability_extension_min_candidate_rate: float = Field(default=0.0005, ge=0, le=0.1)
     capability_extension_max_candidate_rate: float = Field(default=0.35, ge=0.01, le=1)
     capability_extension_certification_score: float = Field(default=85, ge=0, le=100)
+    capability_extension_daily_limit: int = Field(default=3, ge=1, le=50)
     capability_extension_max_expression_nodes: int = Field(default=80, ge=5, le=500)
     capability_extension_max_expression_depth: int = Field(default=12, ge=2, le=30)
     market_metadata_api_url: AnyHttpUrl | None = None
@@ -273,6 +274,7 @@ class Settings(BaseSettings):
     auth_test_fixed_code: str | None = None
     email_test_outbox: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
     public_chat_enabled: bool = True
+    public_chat_ai_enabled: bool = False
     public_chat_inquiry_email: str = "office@hilalmarkets.com"
     public_chat_profile_version: int = Field(default=1, ge=1, le=1000)
     public_chat_message_max_length: int = Field(default=800, ge=100, le=4000)
@@ -282,6 +284,25 @@ class Settings(BaseSettings):
     public_chat_email_max_attempts: int = Field(default=5, ge=1, le=20)
     public_chat_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
     public_chat_email_claim_timeout_minutes: int = Field(default=10, ge=1, le=120)
+    public_chat_ai_model: str | None = None
+    public_chat_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "low"
+    public_chat_ai_timeout_seconds: int = Field(default=30, ge=3, le=120)
+    public_chat_ai_max_output_tokens: int = Field(default=1200, ge=256, le=4000)
+    public_chat_ai_max_estimated_cost_usd_per_turn: float = Field(
+        default=0.015,
+        gt=0,
+        le=1,
+    )
+    public_chat_ai_min_confidence: float = Field(default=0.55, ge=0, le=1)
+    public_chat_ai_max_history_messages: int = Field(default=12, ge=2, le=30)
+    public_chat_ai_max_read_tools: int = Field(default=3, ge=0, le=6)
+    public_chat_session_max_turns: int = Field(default=40, ge=5, le=200)
+    public_chat_ai_provider_attempts: int = Field(default=2, ge=1, le=3)
+    public_chat_ai_circuit_failure_threshold: int = Field(default=5, ge=1, le=20)
+    public_chat_ai_circuit_reset_seconds: int = Field(default=60, ge=10, le=900)
+    public_chat_session_retention_days: int = Field(default=30, ge=1, le=365)
     system_brain_admin_username: str | None = None
     system_brain_admin_password_hash: SecretStr | None = None
     system_brain_otp_ttl_minutes: int = Field(default=10, ge=2, le=30)

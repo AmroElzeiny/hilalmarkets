@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -28,7 +29,6 @@ from ai_market_monitor.schemas.agent_control import (
     AgentToolResult,
     AgentUsageTotals,
 )
-from ai_market_monitor.services.ai_model_routing import AISetupModelRoute, select_setup_model
 from ai_market_monitor.services.agent_policy import (
     AgentPolicyService,
     AgentPolicyViolation,
@@ -40,6 +40,7 @@ from ai_market_monitor.services.agent_tools import (
     redact_agent_arguments,
     strict_json_schema,
 )
+from ai_market_monitor.services.ai_model_routing import AISetupModelRoute, select_setup_model
 from ai_market_monitor.services.system_brain import (
     CapabilityCoverageService,
     estimate_usage_cost,
@@ -110,7 +111,7 @@ class AgentControlService:
         self.settings = settings
         self.tools = tool_service
         self.client = client or OpenAIAgentResponsesClient(settings)
-        self.policy = policy or AgentPolicyService()
+        self.policy = policy or AgentPolicyService(settings)
 
     async def run_turn(
         self,
@@ -161,6 +162,7 @@ class AgentControlService:
                     "tier": model_route.tier,
                     "reasons": list(model_route.reasons),
                     "condition_count": model_route.condition_count,
+                    "correction_count": model_route.correction_count,
                 },
             },
         )
@@ -211,6 +213,9 @@ class AgentControlService:
                             "owned_monitor_ids": [
                                 str(item) for item in sorted(context.owned_monitor_ids, key=str)
                             ],
+                            "conversation_state": dict(
+                                (chat.context_json or {}).get("conversation_state") or {}
+                            ),
                         },
                     },
                     sort_keys=True,
@@ -443,7 +448,7 @@ class AgentControlService:
                     continue
 
                 try:
-                    final = AgentFinalResponse.model_validate_json(_response_output_text(response))
+                    final = _parse_agent_final(_response_output_text(response))
                 except (ValidationError, ValueError, json.JSONDecodeError) as exc:
                     run.error_type = type(exc).__name__
                     stop_reason = "invalid_final_response"
@@ -494,6 +499,36 @@ class AgentControlService:
         run.final_response_status = final.status if final else None
         if stop_reason and not run.error_type:
             run.error_type = stop_reason
+        if final is not None:
+            comparison = dict(run.comparison or {})
+            comparison["conversation_stage"] = final.stage
+            comparison["user_intent"] = final.user_intent
+            comparison["confidence"] = final.confidence
+            coverage_counts: Counter[str] = Counter(
+                item.status for item in final.source_clause_coverage
+            )
+            comparison["source_clause_coverage"] = {
+                status: coverage_counts[status]
+                for status in (
+                    "COVERED",
+                    "NEEDS_CLARIFICATION",
+                    "PROVIDER_UNAVAILABLE",
+                    "INTENTIONALLY_OPTIONAL",
+                    "NON_EXECUTABLE_CONTEXT",
+                    "REJECTED_BY_USER",
+                    "CONFLICTING",
+                )
+                if coverage_counts[status]
+            }
+            comparison["clause_coverage_failures"] = sum(
+                coverage_counts[status]
+                for status in (
+                    "NEEDS_CLARIFICATION",
+                    "PROVIDER_UNAVAILABLE",
+                    "CONFLICTING",
+                )
+            )
+            run.comparison = comparison
         await session.commit()
         return AgentTurnOutcome(
             handled=handled,
@@ -672,6 +707,8 @@ def validate_grounded_final(
     }
     if not set(final.evidence_refs).issubset(available_evidence):
         return "unknown_evidence_reference"
+    if not set(final.proposed_tool_calls).issubset(attempted):
+        return "unrecorded_proposed_tool_call"
     required_tool = {
         "draft_ready": "compile_strategy_draft",
         "scan_result": "run_one_time_scan",
@@ -783,6 +820,12 @@ def validate_grounded_final(
         snapshot = successful.get("get_market_snapshot")
         if snapshot is None or not snapshot.evidence_refs:
             return "market_claim_without_evidence"
+    if final.stage == "CREATE_CUSTOM_CAPABILITY":
+        extension = attempted.get("request_custom_capability")
+        if extension is None and not final.requires_user_confirmation:
+            return "custom_capability_stage_without_confirmation_or_tool"
+        if extension is not None and extension.status != "success" and final.status == "completed":
+            return "custom_capability_claim_despite_failed_tool"
     allowed_ids = {str(item) for item in context.owned_monitor_ids}
     allowed_ids.update(
         reference.split(":", 1)[1]
@@ -836,6 +879,14 @@ def _record_tool_result_summary(run: AgentRun, result: AgentToolResult) -> None:
                 "confirmed_count": (
                     max(0, confirmed_count) if type(confirmed_count) is int else 0
                 ),
+            }
+        )
+    elif result.tool_name == "request_custom_capability":
+        summary.update(
+            {
+                "status": result.data.get("status"),
+                "stage": result.data.get("stage"),
+                "certified": bool(result.data.get("certified")),
             }
         )
     summaries.append(summary)
@@ -986,6 +1037,43 @@ def _response_output_text(payload: dict[str, Any]) -> str:
     raise ValueError("OpenAI response did not contain a final text item")
 
 
+def _parse_agent_final(value: str) -> AgentFinalResponse:
+    payload = json.loads(value)
+    if not isinstance(payload, dict):
+        raise ValueError("Agent final response must be an object")
+    # Older fake transports and in-flight beta conversations used the compact v1 shape.
+    # Live OpenAI receives the strict v2 schema, while this server-side normalization keeps
+    # rollout and fallback backward compatible without weakening tool validation.
+    message = str(payload.get("message") or payload.get("assistant_message") or "").strip()
+    payload.setdefault("message", message)
+    payload.setdefault("assistant_message", message)
+    payload.setdefault("stage", _stage_for_intent(str(payload.get("intent") or "explain")))
+    payload.setdefault("user_intent", str(payload.get("intent") or "unknown"))
+    payload.setdefault("proposed_tool_calls", [])
+    payload.setdefault("clarification", None)
+    payload.setdefault("assumptions", [])
+    payload.setdefault("unresolved_conflicts", [])
+    payload.setdefault("referenced_user_message_ids", [])
+    payload.setdefault("source_clause_coverage", [])
+    payload.setdefault("can_continue", payload.get("status") not in {"blocked", "failed"})
+    payload.setdefault("refusal_reason", None)
+    payload.setdefault("confidence", 0.5)
+    return AgentFinalResponse.model_validate(payload)
+
+
+def _stage_for_intent(intent: str) -> str:
+    return {
+        "clarify": "CLARIFY_SETUP",
+        "draft_ready": "REVIEW_TRANSLATION",
+        "scan_result": "EXPLAIN_RESULTS",
+        "market_snapshot": "GENERAL_PRODUCT_HELP",
+        "monitor_status": "MANAGE_EXISTING_PLAN",
+        "refusal": "RECOVER_FROM_FAILURE",
+        "unavailable": "RECOVER_FROM_FAILURE",
+        "error": "RECOVER_FROM_FAILURE",
+    }.get(intent, "DISCOVER_INTENT")
+
+
 def _raw_argument_hash(tool_name: str, raw_arguments: Any) -> str:
     return hashlib.sha256(
         json.dumps(
@@ -1015,7 +1103,11 @@ def _request_cost_upper_bound(
 
 def _coordinator_instructions() -> str:
     return (
-        "You are HilalMarkets' bounded orchestration layer for crypto spot monitoring. Select only "
+        "You are HilalMarkets' bounded orchestration layer for crypto spot monitoring. Your "
+        "current stage must be exactly one of DISCOVER_INTENT, CLARIFY_SETUP, "
+        "RESOLVE_CAPABILITIES, BUILD_DRAFT, REVIEW_TRANSLATION, RUN_MARKET_CHECK, "
+        "EXPLAIN_RESULTS, REQUEST_APPROVAL, MANAGE_EXISTING_PLAN, CREATE_CUSTOM_CAPABILITY, "
+        "RECOVER_FROM_FAILURE, or GENERAL_PRODUCT_HELP. Select only "
         "from tools supplied in the current request. A tool not supplied does not exist. Never "
         "invent a tool, capability, market value, tool result, strategy status, or completed "
         "action. Use tools for market facts, monitor facts, strategy compilation, capability "
@@ -1029,11 +1121,19 @@ def _coordinator_instructions() -> str:
         "produce clarification or a transparent unsupported result. Never silently replace a "
         "requested condition with a similar supported condition. You may prepare a validated "
         "draft, but you cannot approve or activate it. Approval and activation require an explicit "
-        "user action outside this loop. If data is missing, stale, unavailable, conflicting, or "
+        "user action outside this loop. Custom capability creation is allowed only when its tool "
+        "is offered after explicit user consent; a queued build is not certified or executable. "
+        "If data is missing, stale, unavailable, conflicting, or "
         "blocked, say so. Never estimate or invent market values. Prefer the fewest tool calls "
         "needed. Stop when the request is answered or the next step requires user input. For tool "
         "fragments, copy exact text from the current user request; do not paraphrase it. Return "
         "only the strict final-response JSON when you are not requesting a tool. Never include "
         "URLs, endpoint names, JavaScript actions, executable payloads, or private identifiers in "
-        "the final message."
+        "the final message. Preserve every confirmed requirement unless the user explicitly "
+        "changes it. Treat corrections as field-level changes, never as permission to discard "
+        "unrelated rules. Ask one important question at a time and never repeat a resolved one. "
+        "Account for every meaningful user clause using only the allowed coverage statuses. "
+        "assistant_message and message must carry the same concise user-facing answer. Include "
+        "only recorded tool names in proposed_tool_calls and only real user message IDs supplied "
+        "in conversation history."
     )

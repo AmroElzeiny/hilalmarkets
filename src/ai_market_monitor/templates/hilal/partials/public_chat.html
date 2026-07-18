@@ -1,10 +1,10 @@
-<button class="public-chat-launcher" type="button" data-public-chat-launcher aria-haspopup="dialog" aria-controls="public-product-chat" aria-expanded="false">
+<button class="public-chat-launcher" type="button" data-public-chat-launcher aria-haspopup="dialog" aria-controls="public-product-chat" aria-expanded="false" aria-label="Open HilalMarkets product assistant" data-tooltip="Ask HilalMarkets">
   <span class="public-chat-launcher-icon" data-icon="bot" aria-hidden="true"></span>
-  <span>Ask HilalMarkets</span>
+  <span class="sr-only">Ask HilalMarkets</span>
 </button>
 
-<div class="public-chat-backdrop" data-public-chat-backdrop hidden></div>
-<section class="public-chat-panel" id="public-product-chat" data-public-chat-panel role="dialog" aria-modal="true" aria-labelledby="public-chat-title" aria-describedby="public-chat-description" hidden>
+<div class="public-chat-backdrop" data-public-chat-backdrop aria-hidden="true" hidden></div>
+<section class="public-chat-panel" id="public-product-chat" data-public-chat-panel role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="public-chat-title" aria-describedby="public-chat-description" hidden>
   <header class="public-chat-head">
     <div class="public-chat-brand">
       <span class="public-chat-brand-icon" data-icon="bot" aria-hidden="true"></span>
@@ -34,7 +34,7 @@
     <form class="public-chat-profile" data-public-chat-profile hidden>
       <div class="public-chat-intro">
         <span class="badge badge-neutral">Product assistant</span>
-        <h3>Let’s make this useful.</h3>
+        <h3>Let's make this useful.</h3>
         <p>Share your name and email so we can keep the conversation personal and send a reply if the verified help library does not cover your question.</p>
       </div>
       <div class="field">
@@ -69,6 +69,16 @@
           <div>
             <strong>Send this to the team</strong>
             <p>We will email a copy to you and route the question to HilalMarkets.</p>
+          </div>
+        </div>
+        <div class="public-chat-contact-grid">
+          <div class="field">
+            <label for="public-chat-inquiry-name">Name</label>
+            <input class="input" id="public-chat-inquiry-name" name="name" data-public-chat-inquiry-name autocomplete="name" maxlength="120" required>
+          </div>
+          <div class="field">
+            <label for="public-chat-inquiry-email">Email</label>
+            <input class="input" id="public-chat-inquiry-email" name="email" data-public-chat-inquiry-email type="email" autocomplete="email" maxlength="320" required>
           </div>
         </div>
         <div class="field">

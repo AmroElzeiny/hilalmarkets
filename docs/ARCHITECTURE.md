@@ -272,15 +272,20 @@ entitlement, state, canonical-hash, duplicate, timeout, token, step, call, and e
 run before domain execution. Parallel calls are disabled.
 
 The coordinator cannot approve or activate a strategy, modify billing/entitlements, send arbitrary
-notifications, execute code, mutate the registry, call arbitrary URLs, or create/repair a dynamic
-mechanic. Final prose is separately checked against successful tool evidence; invalid or unavailable
-agent turns fall back to the unchanged legacy flow without duplicating chat messages. Scheduled scan
-evaluation remains deterministic and LLM-free.
+notifications, execute code, mutate the global registry, call arbitrary URLs, or install an
+uncertified dynamic mechanic. With exact user-fragment consent it may request the existing bounded
+capability-certification pipeline and read its status. Certification, user ownership, artifact
+hashes, quarantine, strategy revision, approval, activation, and scheduled execution remain
+application-owned. Final prose is separately checked against successful tool evidence; invalid or
+unavailable agent turns fall back to the unchanged guided flow without duplicating chat messages.
+Scheduled scan evaluation remains deterministic and LLM-free.
 
 `agent_runs` and `agent_tool_calls` store redacted decisions, results, evidence, timings, usage,
-budgets, and shadow comparisons, never hidden reasoning or credentials. Live execution is gated by
-a deterministic authenticated-user percentage cohort; shadow mode bypasses cohort selection but
-executes no tools. System Brain exposes rollout and safety metrics. See
+budgets, clause-coverage counts, and optional comparison evidence, never hidden reasoning or
+credentials. The controlled-beta release profile uses live execution for 100% of authenticated
+users and rejects shadow mode at deployed startup. `AI_AGENT_CONTROL_ENABLED=false` is the emergency
+kill switch. System Brain exposes live tool, grounding, compilation, approval, correction,
+capability, support, latency, and cost metrics. See
 `docs/BOUNDED_AGENT_CONTROL.md`.
 
 ### Certified Capability Extensions
@@ -291,11 +296,13 @@ and reviews strict schemas; `engine/dynamic_mechanics.py` is the only compiler a
 bounded JSON expression. It rejects arbitrary code, unknown operations, unsafe parameters,
 nondeterminism and missing proof evidence.
 
-The pipeline performs Bybit spot preflight testing, independent failure classification and bounded
+The pipeline performs Binance spot preflight testing, independent failure classification and bounded
 AI escalation. A market candidate does not prove correctness, and no-candidate evidence does not
 permit silent logic relaxation. Live five-scan reviews distinguish implementation, user logic,
 market data and delivery failures. Certified repairs become pending immutable strategy revisions;
-the active monitor remains unchanged until the user approves and activates the revision.
+the active monitor remains unchanged until the user approves and activates the revision. Provider-
+only source fragments are rejected before queueing, and a quarantined artifact cannot pass approval
+or scheduled-scan execution until its owner explicitly restores it.
 
 `services/capability_registry.py` initializes a process-wide search index at startup, keyed by a
 deterministic registry hash. Versioned approved aliases and optional embeddings contribute only to

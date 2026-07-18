@@ -34,6 +34,10 @@ from ai_market_monitor.db.models import (
     CapabilityExtension,
     CapabilityExtensionAttempt,
     CapabilityResolutionEvent,
+    PublicChatAnswerEvent,
+    PublicInquiry,
+    PublicInquiryEmailDelivery,
+    PublicInquiryRating,
     ScanJob,
     Strategy,
     SystemBrainAuthChallenge,
@@ -935,6 +939,231 @@ class CapabilityCoverageService:
             "quality_metrics": quality_metrics,
             "agent_control": agent_control,
             "setup_model_routing": setup_model_routing,
+        }
+
+    async def operations_summary(self, session: AsyncSession) -> dict[str, Any]:
+        """Return bounded aggregate chatbot telemetry for the owner console."""
+
+        runs = list(
+            (
+                await session.scalars(
+                    select(AgentRun).order_by(AgentRun.started_at.desc()).limit(5000)
+                )
+            ).all()
+        )
+        calls = list(
+            (
+                await session.scalars(
+                    select(AgentToolCall)
+                    .order_by(AgentToolCall.created_at.desc())
+                    .limit(10000)
+                )
+            ).all()
+        )
+        extensions = list(
+            (
+                await session.scalars(
+                    select(CapabilityExtension)
+                    .order_by(CapabilityExtension.updated_at.desc())
+                    .limit(1000)
+                )
+            ).all()
+        )
+        public_events = list(
+            (
+                await session.scalars(
+                    select(PublicChatAnswerEvent)
+                    .order_by(PublicChatAnswerEvent.created_at.desc())
+                    .limit(10000)
+                )
+            ).all()
+        )
+        inquiries = list(
+            (
+                await session.scalars(
+                    select(PublicInquiry)
+                    .order_by(PublicInquiry.submitted_at.desc())
+                    .limit(5000)
+                )
+            ).all()
+        )
+        email_deliveries = list(
+            (
+                await session.scalars(
+                    select(PublicInquiryEmailDelivery)
+                    .order_by(PublicInquiryEmailDelivery.created_at.desc())
+                    .limit(10000)
+                )
+            ).all()
+        )
+        ratings = list(
+            (
+                await session.scalars(
+                    select(PublicInquiryRating)
+                    .order_by(PublicInquiryRating.created_at.desc())
+                    .limit(5000)
+                )
+            ).all()
+        )
+        chats = list((await session.scalars(select(AISetupChatSession))).all())
+
+        agent = _agent_control_summary(runs, calls)
+        for rate_name in (
+            "completion_rate",
+            "fallback_rate",
+            "contained_rate",
+            "invalid_call_rate",
+            "correct_tool_selection_rate",
+            "draft_compilation_success_rate",
+        ):
+            if agent[rate_name] is None:
+                agent[rate_name] = 0.0
+        correction_count = sum(
+            int(
+                dict((run.comparison or {}).get("model_route") or {}).get(
+                    "correction_count"
+                )
+                or 0
+            )
+            for run in runs
+        )
+        approval_ready = sum(chat.status == "ready_for_approval" for chat in chats)
+        approved = sum(chat.status == "approved" for chat in chats)
+        tool_summaries = [
+            item
+            for run in runs
+            for item in (run.comparison or {}).get("tool_result_summaries", [])
+            if isinstance(item, dict)
+        ]
+        provider_limited_turns = sum(
+            int(item.get("provider_requirement_count") or 0) > 0
+            for item in tool_summaries
+        )
+        agent.update(
+            {
+                "configured_enabled": self.settings.ai_agent_control_enabled,
+                "shadow_enabled": self.settings.ai_agent_shadow_mode,
+                "rollout_percent": self.settings.ai_agent_rollout_percent,
+                "kill_switch_active": not self.settings.ai_agent_control_enabled,
+                "user_corrections": correction_count,
+                "tool_calls": len(calls),
+                "tool_success_rate": _percentage(
+                    sum(call.result_status == "success" for call in calls),
+                    len(calls),
+                )
+                or 0.0,
+                "tool_failure_rate": _percentage(
+                    sum(
+                        call.result_status
+                        in {"blocked", "validation_error", "unavailable", "error"}
+                        for call in calls
+                    ),
+                    len(calls),
+                )
+                or 0.0,
+                "approval_ready_chats": approval_ready,
+                "approved_chats": approved,
+                "approval_conversion_rate": _percentage(
+                    approved,
+                    approval_ready + approved,
+                )
+                or 0.0,
+                "clause_coverage_failures": sum(
+                    int((run.comparison or {}).get("clause_coverage_failures") or 0)
+                    for run in runs
+                ),
+                "unsupported_provider_turns": provider_limited_turns,
+            }
+        )
+
+        extension_statuses = Counter(item.status for item in extensions)
+        public_outcomes = Counter(item.outcome for item in public_events)
+        public_stages = Counter(item.stage for item in public_events)
+        delivery_states = Counter(item.status for item in email_deliveries)
+        knowledge_gaps = Counter(
+            item.knowledge_gap_category
+            for item in inquiries
+            if item.knowledge_gap_category
+        )
+        latencies = sorted(max(0, item.latency_ms) for item in public_events)
+        p95_index = max(0, round((len(latencies) - 1) * 0.95)) if latencies else 0
+        numeric_ratings = [item.rating for item in ratings if item.rating is not None]
+        helpful_ratings = [item.helpful for item in ratings if item.helpful is not None]
+        grounded_answers = sum(bool(item.source_ids) for item in public_events)
+
+        return {
+            "generated_at": datetime.now(UTC),
+            "agent": agent,
+            "custom_capabilities": {
+                "requests": len(extensions),
+                "certified": sum(
+                    extension_statuses[state]
+                    for state in {"certified_user", "approved_global"}
+                ),
+                "failed": extension_statuses["failed"],
+                "repair_ready": extension_statuses["repair_ready"],
+                "quarantined": sum(item.paused_at is not None for item in extensions),
+                "certification_success_rate": _percentage(
+                    sum(
+                        extension_statuses[state]
+                        for state in {"certified_user", "approved_global"}
+                    ),
+                    len(extensions),
+                )
+                or 0.0,
+                "repairs": sum(item.repair_generation > 0 for item in extensions),
+                "repair_rate": _percentage(
+                    sum(item.repair_generation > 0 for item in extensions),
+                    len(extensions),
+                )
+                or 0.0,
+            },
+            "public_support": {
+                "questions": len(public_events),
+                "answered": public_outcomes["answered"],
+                "clarifications": public_stages["CLARIFY"],
+                "unsupported": public_outcomes["unsupported"],
+                "refusals": public_outcomes["refused"],
+                "inquiries": len(inquiries),
+                "inquiry_conversion_percent": _percentage(
+                    len(inquiries),
+                    len(public_events),
+                ),
+                "source_coverage_percent": _percentage(
+                    grounded_answers,
+                    len(public_events),
+                ),
+                "validation_failures": sum(
+                    bool(item.validation_failure) for item in public_events
+                ),
+                "email_states": [
+                    {"state": state, "count": count}
+                    for state, count in delivery_states.most_common()
+                ],
+                "rating_count": len(ratings),
+                "average_rating": (
+                    round(sum(numeric_ratings) / len(numeric_ratings), 2)
+                    if numeric_ratings
+                    else None
+                ),
+                "helpful_percent": _percentage(
+                    sum(bool(value) for value in helpful_ratings),
+                    len(helpful_ratings),
+                ),
+                "average_latency_ms": round(
+                    sum(latencies) / max(1, len(latencies)),
+                    1,
+                ),
+                "p95_latency_ms": latencies[p95_index] if latencies else 0,
+                "estimated_cost_usd": sum(
+                    (item.estimated_cost_usd for item in public_events),
+                    Decimal("0"),
+                ),
+                "knowledge_gaps": [
+                    {"category": category, "count": count}
+                    for category, count in knowledge_gaps.most_common(10)
+                ],
+            },
         }
 
 

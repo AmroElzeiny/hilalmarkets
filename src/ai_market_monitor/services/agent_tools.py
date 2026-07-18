@@ -9,17 +9,31 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.db.models import AISetupChatSession, Strategy, StrategyVersion
+from ai_market_monitor.db.models import (
+    AISetupChatSession,
+    ApprovedWatchlist,
+    ApprovedWatchlistAsset,
+    CapabilityExtension,
+    Strategy,
+    StrategyVersion,
+)
+from ai_market_monitor.db.models.enums import StrategyStatus
 from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.schemas.agent_control import (
     AgentToolResult,
     CompileStrategyDraftArgs,
+    GetCustomCapabilityStatusArgs,
     GetMarketSnapshotArgs,
     GetMonitorStatusArgs,
+    GetRecentScannerResultArgs,
     InspectCurrentDraftArgs,
+    InspectScreenedWatchlistArgs,
+    ListWatchPlansArgs,
+    RequestCustomCapabilityArgs,
     ResolveTradingCapabilitiesArgs,
     RunOneTimeScanArgs,
     ValidateCapabilitySelectionArgs,
@@ -29,6 +43,8 @@ from ai_market_monitor.services.agent_policy import (
     AgentRuntimePolicyState,
     AgentServerContext,
 )
+from ai_market_monitor.services.capability_extension_scope import CapabilityExtensionScopeError
+from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.setup_observability import SetupObservabilityService
 
 CompileDraftCallback = Callable[
@@ -100,6 +116,11 @@ class AgentToolService:
             "run_one_time_scan": self._run_one_time_scan,
             "inspect_current_draft": self._inspect_current_draft,
             "get_monitor_status": self._get_monitor_status,
+            "list_watch_plans": self._list_watch_plans,
+            "inspect_screened_watchlist": self._inspect_screened_watchlist,
+            "get_recent_scanner_result": self._get_recent_scanner_result,
+            "request_custom_capability": self._request_custom_capability,
+            "get_custom_capability_status": self._get_custom_capability_status,
         }
         handler = dispatch.get(tool_name)
         if handler is None:
@@ -644,6 +665,284 @@ class AgentToolService:
             allowed_next_actions=["open_monitor"],
         )
 
+    async def _request_custom_capability(
+        self,
+        session: AsyncSession,
+        runtime: AgentToolRuntime,
+        call_id: str,
+        raw: BaseModel,
+    ) -> AgentToolResult:
+        args = RequestCustomCapabilityArgs.model_validate(raw.model_dump())
+        try:
+            extension = await CapabilityExtensionService(self.settings).request(
+                session,
+                user_id=runtime.context.user_id,
+                chat_session_id=runtime.chat.id,
+                source_prompt=args.source_fragment,
+                conversation_history=runtime.history,
+            )
+        except CapabilityExtensionScopeError as exc:
+            return AgentToolResult(
+                status="validation_error",
+                tool_name="request_custom_capability",
+                call_id=call_id,
+                data={
+                    "source_fragment": args.source_fragment,
+                    "dependency_category": exc.dependency.category,
+                    "matched_term": exc.dependency.matched_term,
+                    "queued": False,
+                },
+                warnings=[str(exc)],
+                allowed_next_actions=["answer_clarification"],
+            )
+        context = dict(runtime.chat.context_json or {})
+        context["capability_extension_id"] = str(extension.id)
+        context["capability_extension_status"] = extension.status
+        context["capability_extension_source_fragment"] = args.source_fragment
+        runtime.chat.context_json = context
+        certified = bool(extension.certified_at and extension.artifact_hash)
+        if not certified:
+            runtime.chat.status = "building_mechanic"
+        return AgentToolResult(
+            status="success",
+            tool_name="request_custom_capability",
+            call_id=call_id,
+            data={
+                "extension_id": str(extension.id),
+                "capability_key": extension.capability_key,
+                "capability_version": extension.capability_version,
+                "status": extension.status,
+                "stage": extension.stage,
+                "source_fragment": args.source_fragment,
+                "certified": certified,
+                "activation_is_external": True,
+            },
+            evidence_refs=[f"capability-extension:{extension.id}"],
+            warnings=(
+                []
+                if certified
+                else [
+                    "The mechanic is queued for deterministic certification and is not "
+                    "executable yet."
+                ]
+            ),
+            allowed_next_actions=["review_custom_capability"],
+        )
+
+    async def _list_watch_plans(
+        self,
+        session: AsyncSession,
+        runtime: AgentToolRuntime,
+        call_id: str,
+        raw: BaseModel,
+    ) -> AgentToolResult:
+        args = ListWatchPlansArgs.model_validate(raw.model_dump())
+        query = select(Strategy).where(
+            Strategy.user_id == runtime.context.user_id,
+            Strategy.archived_at.is_(None),
+        )
+        status_map = {
+            "draft": StrategyStatus.DRAFT,
+            "active": StrategyStatus.ACTIVE,
+            "paused": StrategyStatus.PAUSED,
+        }
+        if args.status != "all":
+            query = query.where(Strategy.status == status_map[args.status])
+        plans = list(
+            (
+                await session.scalars(
+                    query.order_by(Strategy.updated_at.desc(), Strategy.id).limit(50)
+                )
+            ).all()
+        )
+        return AgentToolResult(
+            status="success",
+            tool_name="list_watch_plans",
+            call_id=call_id,
+            data={
+                "filter": args.status,
+                "count": len(plans),
+                "watch_plans": [
+                    {
+                        "monitor_id": str(item.id),
+                        "name": item.name,
+                        "status": item.status.value,
+                        "active_version_id": (
+                            str(item.active_version_id) if item.active_version_id else None
+                        ),
+                        "activated_at": item.activated_at,
+                        "paused_at": item.paused_at,
+                    }
+                    for item in plans
+                ],
+                "truncated": len(plans) == 50,
+            },
+            evidence_refs=[f"watch-plans:user:{runtime.context.user_id}"],
+            allowed_next_actions=["open_monitor"],
+        )
+
+    async def _inspect_screened_watchlist(
+        self,
+        session: AsyncSession,
+        runtime: AgentToolRuntime,
+        call_id: str,
+        raw: BaseModel,
+    ) -> AgentToolResult:
+        InspectScreenedWatchlistArgs.model_validate(raw.model_dump())
+        watchlists = list(
+            (
+                await session.scalars(
+                    select(ApprovedWatchlist)
+                    .where(ApprovedWatchlist.user_id == runtime.context.user_id)
+                    .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name)
+                    .limit(20)
+                )
+            ).all()
+        )
+        watchlist_ids = [item.id for item in watchlists]
+        assets = (
+            list(
+                (
+                    await session.scalars(
+                        select(ApprovedWatchlistAsset)
+                        .where(ApprovedWatchlistAsset.watchlist_id.in_(watchlist_ids))
+                        .order_by(ApprovedWatchlistAsset.added_at.desc())
+                        .limit(500)
+                    )
+                ).all()
+            )
+            if watchlist_ids
+            else []
+        )
+        assets_by_watchlist: dict[UUID, list[str]] = {}
+        for asset in assets:
+            assets_by_watchlist.setdefault(asset.watchlist_id, []).append(
+                asset.canonical_asset
+            )
+        return AgentToolResult(
+            status="success",
+            tool_name="inspect_screened_watchlist",
+            call_id=call_id,
+            data={
+                "watchlists": [
+                    {
+                        "watchlist_id": str(item.id),
+                        "name": item.name,
+                        "is_default": item.is_default,
+                        "assets": assets_by_watchlist.get(item.id, []),
+                    }
+                    for item in watchlists
+                ],
+                "watchlist_count": len(watchlists),
+                "asset_count": len(assets),
+                "truncated": len(assets) == 500,
+                "policy_note": (
+                    "Saved assets remain subject to the current Sharia policy and exact "
+                    "exchange-market availability."
+                ),
+            },
+            evidence_refs=[f"screened-watchlist:user:{runtime.context.user_id}"],
+        )
+
+    async def _get_recent_scanner_result(
+        self,
+        session: AsyncSession,
+        runtime: AgentToolRuntime,
+        call_id: str,
+        raw: BaseModel,
+    ) -> AgentToolResult:
+        del session
+        GetRecentScannerResultArgs.model_validate(raw.model_dump())
+        result = dict((runtime.chat.context_json or {}).get("scanner_result") or {})
+        if not result:
+            return AgentToolResult(
+                status="unavailable",
+                tool_name="get_recent_scanner_result",
+                call_id=call_id,
+                warnings=["This chat has no persisted Scanner result to explain."],
+                allowed_next_actions=["run_scan"],
+            )
+        bounded = dict(result)
+        bounded["results"] = list(result.get("results") or [])[:30]
+        bounded["common_missing_reasons"] = list(
+            result.get("common_missing_reasons") or []
+        )[:10]
+        evidence_refs = [
+            str(reference)[:300]
+            for reference in list(result.get("evidence_refs") or [])[:30]
+            if str(reference).strip()
+        ]
+        if not evidence_refs and result.get("evidence_ref"):
+            evidence_refs = [str(result["evidence_ref"])[:300]]
+        if not evidence_refs:
+            evidence_refs = [f"scanner-chat:{runtime.chat.id}"]
+        return AgentToolResult(
+            status="success",
+            tool_name="get_recent_scanner_result",
+            call_id=call_id,
+            data=bounded,
+            evidence_refs=evidence_refs,
+            allowed_next_actions=["review_draft", "run_scan"],
+        )
+
+    async def _get_custom_capability_status(
+        self,
+        session: AsyncSession,
+        runtime: AgentToolRuntime,
+        call_id: str,
+        raw: BaseModel,
+    ) -> AgentToolResult:
+        args = GetCustomCapabilityStatusArgs.model_validate(raw.model_dump())
+        extension = await session.get(CapabilityExtension, UUID(args.extension_id))
+        if extension is None or extension.user_id != runtime.context.user_id:
+            return AgentToolResult(
+                status="blocked",
+                tool_name="get_custom_capability_status",
+                call_id=call_id,
+                warnings=["Custom capability status is unavailable for this user."],
+            )
+        report = dict(extension.validation_report or {})
+        return AgentToolResult(
+            status="success",
+            tool_name="get_custom_capability_status",
+            call_id=call_id,
+            data={
+                "extension_id": str(extension.id),
+                "capability_key": extension.capability_key,
+                "capability_version": extension.capability_version,
+                "status": extension.status,
+                "stage": extension.stage,
+                "certified": bool(extension.certified_at and extension.artifact_hash),
+                "validation_score": extension.validation_score,
+                "failure_classification": extension.failure_classification,
+                "validation_summary": {
+                    key: report.get(key)
+                    for key in (
+                        "passed",
+                        "candidate_rate",
+                        "symbols_scanned",
+                        "holdout_passed",
+                        "replay_consistent",
+                    )
+                    if key in report
+                },
+                "pending_strategy_version_id": (
+                    str(extension.pending_strategy_version_id)
+                    if extension.pending_strategy_version_id
+                    else None
+                ),
+                "requires_user_approval": bool(extension.pending_strategy_version_id),
+                "last_error": extension.last_error[:500] if extension.last_error else None,
+            },
+            evidence_refs=[f"capability-extension:{extension.id}"],
+            warnings=(
+                []
+                if extension.certified_at and extension.artifact_hash
+                else ["This capability is not executable unless certification succeeds."]
+            ),
+            allowed_next_actions=["review_custom_capability"],
+        )
+
     def _openai_tool(
         self,
         name: str,
@@ -656,6 +955,10 @@ class AgentToolService:
             schema["properties"]["monitor_id"]["enum"] = sorted(
                 str(item) for item in context.owned_monitor_ids
             )
+        if name == "get_custom_capability_status" and context.current_capability_extension_id:
+            schema["properties"]["extension_id"]["enum"] = [
+                str(context.current_capability_extension_id)
+            ]
         return {
             "type": "function",
             "name": name,
@@ -700,6 +1003,32 @@ _TOOL_MODELS_AND_DESCRIPTIONS: dict[str, tuple[type[BaseModel], str]] = {
         GetMonitorStatusArgs,
         "Read persisted status and health for one monitor from the authenticated user's offered "
         "monitor IDs.",
+    ),
+    "list_watch_plans": (
+        ListWatchPlansArgs,
+        "List the authenticated user's persisted Watch Plans with a server-enforced status "
+        "filter. This tool is read-only and cannot activate, pause, edit, or delete a plan.",
+    ),
+    "inspect_screened_watchlist": (
+        InspectScreenedWatchlistArgs,
+        "Read the authenticated user's My Screened Watchlist assets. Saved assets do not "
+        "override current Sharia policy or market availability.",
+    ),
+    "get_recent_scanner_result": (
+        GetRecentScannerResultArgs,
+        "Read the latest authoritative Scanner result already persisted in this setup chat. "
+        "This never runs a new scan.",
+    ),
+    "request_custom_capability": (
+        RequestCustomCapabilityArgs,
+        "After explicit current-turn user consent, enqueue one unresolved OHLCV-computable "
+        "fragment in the existing deterministic certification pipeline. This does not certify, "
+        "approve, activate, or execute the mechanic.",
+    ),
+    "get_custom_capability_status": (
+        GetCustomCapabilityStatusArgs,
+        "Read the current deterministic certification status for the authenticated chat's "
+        "custom capability request. This cannot approve, activate, repair, or execute it.",
     ),
 }
 

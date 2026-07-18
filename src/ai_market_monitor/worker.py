@@ -544,7 +544,7 @@ async def _cleanup_whatsapp_webhook_receipts() -> dict:
             )
         )
         await session.commit()
-        return {"deleted": int(result.rowcount or 0)}
+        return {"deleted": int(getattr(result, "rowcount", 0) or 0)}
 
 
 async def _record_database_health() -> dict:

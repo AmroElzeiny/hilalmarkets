@@ -13,8 +13,8 @@ from ai_market_monitor.schemas.strategy import (
     InterpretationPreview,
     StrategyDefinition,
 )
-from ai_market_monitor.services.interfaces import StrategyInterpreter
 from ai_market_monitor.services.ai_model_routing import select_setup_model
+from ai_market_monitor.services.interfaces import StrategyInterpreter
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 
 

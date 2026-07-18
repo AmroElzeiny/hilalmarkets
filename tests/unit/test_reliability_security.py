@@ -179,7 +179,11 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
         telegram_enabled=False,
         billing_enabled=False,
         sharia_test_market_enabled=False,
+        ai_agent_control_enabled=False,
+        capability_extension_enabled=False,
         public_chat_enabled=True,
+        public_chat_ai_enabled=True,
+        openai_api_key="production-openai-key",
         email_adapter="smtp",
         smtp_host="smtp.example.com",
         smtp_username="production-smtp-user",
@@ -200,8 +204,17 @@ def test_deployed_public_chat_requires_real_smtp_configuration():
         ai_interpreter_provider="rules",
         telegram_enabled=False,
         billing_enabled=False,
+        sharia_test_market_enabled=False,
+        ai_agent_control_enabled=False,
+        capability_extension_enabled=False,
         public_chat_enabled=True,
+        public_chat_ai_enabled=True,
+        openai_api_key="production-openai-key",
         email_adapter="none",
+        smtp_host=None,
+        smtp_username=None,
+        smtp_password=None,
+        smtp_from_email=None,
     )
 
     with pytest.raises(RuntimeConfigurationError) as error:
@@ -213,6 +226,28 @@ def test_deployed_public_chat_requires_real_smtp_configuration():
     assert "SMTP_USERNAME" in message
     assert "SMTP_PASSWORD" in message
     assert "SMTP_FROM_EMAIL" in message
+
+
+def test_agent_kill_switch_keeps_certified_capabilities_bootable() -> None:
+    settings = Settings(
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        billing_enabled=False,
+        sharia_test_market_enabled=False,
+        public_chat_enabled=False,
+        ai_agent_control_enabled=False,
+        capability_extension_enabled=True,
+        capability_extension_preflight_exchange="binance",
+        openai_api_key="production-openai-key",
+    )
+
+    validate_runtime_configuration(settings)
 
 
 def test_deployed_runtime_rejects_test_sharia_market():

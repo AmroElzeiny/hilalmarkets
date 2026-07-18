@@ -290,7 +290,21 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
         elif latest_scan:
             latency_label = latest_scan.status.value.replace("_", " ").title()
         pending_repair = None
+        dynamic_extensions = []
         if strategy.active_version_id:
+            dynamic_extensions = list(
+                (
+                    await session.scalars(
+                        select(CapabilityExtension)
+                        .where(
+                            CapabilityExtension.strategy_version_id
+                            == strategy.active_version_id,
+                            CapabilityExtension.artifact_hash.is_not(None),
+                        )
+                        .order_by(CapabilityExtension.created_at)
+                    )
+                ).all()
+            )
             pending_repair = await session.scalar(
                 select(CapabilityExtension).where(
                     CapabilityExtension.strategy_version_id == strategy.active_version_id,
@@ -333,6 +347,7 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
                 "latest_scan": latest_scan,
                 "latency_label": latency_label,
                 "pending_repair": pending_repair,
+                "dynamic_extensions": dynamic_extensions,
                 "sharia_universe": sharia_universe,
                 "methodology": methodology,
                 "eligible_asset_count": eligible_asset_count,
@@ -2070,6 +2085,77 @@ async def prepare_capability_repair(
         await session.rollback()
         return _redirect("/dashboard/strategies/new?error=repair_revision_unavailable#monitors")
     return _redirect(f"/dashboard/strategies/{strategy.id}/builder?message=repair_revision_ready")
+
+
+@router.post(
+    "/dashboard/capability-extensions/{extension_id}/discard-repair",
+    include_in_schema=False,
+)
+async def discard_capability_repair(
+    extension_id: UUID,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    extension = await session.get(CapabilityExtension, extension_id)
+    if extension is None or extension.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Certified repair not found")
+    try:
+        await CapabilityExtensionService(settings).discard_pending_repair(
+            session,
+            extension=extension,
+            user_id=user.id,
+        )
+        await session.commit()
+    except ValueError:
+        await session.rollback()
+        return _redirect("/dashboard/strategies/new?error=repair_revision_unavailable#monitors")
+    return _redirect("/dashboard/strategies/new?message=repair_discarded#monitors")
+
+
+@router.post(
+    "/dashboard/capability-extensions/{extension_id}/quarantine",
+    include_in_schema=False,
+)
+async def quarantine_capability_extension(
+    extension_id: UUID,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    extension = await session.get(CapabilityExtension, extension_id)
+    if extension is None or extension.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Custom mechanic not found")
+    await CapabilityExtensionService(settings).quarantine(
+        session,
+        extension=extension,
+        user_id=user.id,
+        reason="Owner requested immediate quarantine from the Watch Plan dashboard.",
+    )
+    await session.commit()
+    return _redirect("/dashboard/strategies/new?message=mechanic_quarantined#monitors")
+
+
+@router.post(
+    "/dashboard/capability-extensions/{extension_id}/restore",
+    include_in_schema=False,
+)
+async def restore_capability_extension(
+    extension_id: UUID,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    extension = await session.get(CapabilityExtension, extension_id)
+    if extension is None or extension.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Custom mechanic not found")
+    await CapabilityExtensionService(settings).restore_from_quarantine(
+        session,
+        extension=extension,
+        user_id=user.id,
+    )
+    await session.commit()
+    return _redirect("/dashboard/strategies/new?message=mechanic_restored#monitors")
 
 
 @router.get("/dashboard/create-monitor", response_class=HTMLResponse, include_in_schema=False)

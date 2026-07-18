@@ -8,6 +8,9 @@ from ai_market_monitor.services.agent_policy import (
     AgentPolicyViolation,
     AgentRuntimePolicyState,
     AgentServerContext,
+    _custom_capability_consent_source,
+    _has_explicit_custom_capability_consent,
+    _looks_like_setup_language,
 )
 
 
@@ -223,3 +226,127 @@ def test_approved_chat_never_receives_draft_mutation_tools() -> None:
     )
     assert "validate_capability_selection" not in offered
     assert "compile_strategy_draft" not in offered
+
+
+def test_custom_capability_requires_live_scope_consent_limit_and_exact_fragment() -> None:
+    policy = AgentPolicyService()
+    fragment = "moon-wobble closed candle on 15m"
+    context = _context(
+        request_text="Yes, build this custom mechanic",
+        capability_extension_enabled=True,
+        explicit_custom_capability_consent=True,
+        custom_capability_source_fragments=frozenset({fragment}),
+        custom_capability_requests_today=1,
+        custom_capability_daily_limit=3,
+    )
+    runtime = AgentRuntimePolicyState()
+
+    offered = policy.allowed_tools(context, runtime)
+    assert "request_custom_capability" in offered
+    decision = policy.validate_call(
+        tool_name="request_custom_capability",
+        raw_arguments={"source_fragment": fragment, "confirmed_by_user": True},
+        offered_tools=offered,
+        context=context,
+        runtime=runtime,
+    )
+    assert decision.classification == "confirmation_required"
+
+    with pytest.raises(AgentPolicyViolation) as mismatch:
+        policy.validate_call(
+            tool_name="request_custom_capability",
+            raw_arguments={
+                "source_fragment": "a different model-invented mechanic",
+                "confirmed_by_user": True,
+            },
+            offered_tools=offered,
+            context=context,
+            runtime=runtime,
+        )
+    assert mismatch.value.code == "custom_capability_source_mismatch"
+
+    exhausted = _context(
+        capability_extension_enabled=True,
+        explicit_custom_capability_consent=True,
+        custom_capability_source_fragments=frozenset({fragment}),
+        custom_capability_requests_today=3,
+        custom_capability_daily_limit=3,
+    )
+    assert "request_custom_capability" not in policy.allowed_tools(exhausted, runtime)
+
+
+def test_multilingual_setup_and_custom_build_consent_are_recognized() -> None:
+    assert _looks_like_setup_language(
+        "\u0639\u0627\u064a\u0632 \u0623\u0631\u0627\u0642\u0628 \u0643\u0633\u0631 "
+        "\u0627\u0644\u0645\u0642\u0627\u0648\u0645\u0629 \u0639\u0644\u0649 15m"
+    )
+    assert _looks_like_setup_language("3ayez ara2eb kasr el moqawma 15m")
+    assert _has_explicit_custom_capability_consent("\u0646\u0639\u0645")
+    assert _has_explicit_custom_capability_consent("ah ebniha")
+    assert not _has_explicit_custom_capability_consent("Please explain this mechanic")
+
+
+def test_short_custom_consent_is_bound_to_exact_active_build_question() -> None:
+    fragment = "moon-wobble closed candle on 15m"
+    key = "capability_meaning_moon_wobble_closed_candle_on_15m"
+    resolution = {
+        "fragments": [{"fragment": fragment, "status": "unknown"}],
+        "unsupported_fragments": [fragment],
+    }
+    custom_pending = {
+        "key": key,
+        "clarification": {
+            "key": key,
+            "question": "Should I build and test that exact rule?",
+            "reason": "It must pass deterministic certification.",
+            "options": [
+                {
+                    "key": key,
+                    "label": "Build and test this rule",
+                    "value": "__build_mechanic__",
+                    "action": "build_mechanic",
+                }
+            ],
+        },
+    }
+    unrelated_pending = {
+        "key": "rsi_timeframe",
+        "clarification": {
+            "key": "rsi_timeframe",
+            "question": "Which timeframe should RSI use?",
+            "reason": "The timeframe is required.",
+            "options": [
+                {
+                    "key": "rsi_timeframe",
+                    "label": "Use trigger timeframe",
+                    "value": "Use the trigger timeframe",
+                    "action": "answer",
+                }
+            ],
+        },
+    }
+
+    assert (
+        _custom_capability_consent_source(
+            "yes",
+            pending=custom_pending,
+            capability_resolution=resolution,
+        )
+        == fragment
+    )
+    assert (
+        _custom_capability_consent_source(
+            "yes",
+            pending=unrelated_pending,
+            capability_resolution=resolution,
+        )
+        is None
+    )
+    assert (
+        _custom_capability_consent_source(
+            "yes",
+            pending={},
+            capability_resolution=resolution,
+        )
+        is None
+    )

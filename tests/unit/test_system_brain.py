@@ -12,7 +12,12 @@ from ai_market_monitor.db.models import (
     AISetupChatSession,
     AIUsageEvent,
     CapabilityAliasProposal,
+    CapabilityExtension,
     CapabilityResolutionEvent,
+    PublicChatAnswerEvent,
+    PublicInquiry,
+    PublicInquiryEmailDelivery,
+    PublicInquiryRating,
     SystemBrainSession,
 )
 from ai_market_monitor.db.models.accounts import User
@@ -297,3 +302,175 @@ async def test_system_brain_reports_persisted_setup_model_routes(test_context):
         "configured-simple",
         "configured-complex",
     }
+
+
+async def test_system_brain_reports_live_ai_and_public_support_operations(test_context):
+    settings = test_context["settings"]
+    settings.ai_agent_control_enabled = True
+    settings.ai_agent_shadow_mode = False
+    settings.ai_agent_rollout_percent = 100
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="AI operations owner")
+        session.add(user)
+        await session.flush()
+        chat = AISetupChatSession(
+            user_id=user.id,
+            status="approved",
+            title="Certified candle monitor",
+        )
+        session.add(chat)
+        await session.flush()
+        run = AgentRun(
+            user_id=user.id,
+            chat_session_id=chat.id,
+            model="configured-live-model",
+            reasoning_effort="low",
+            started_at=now - timedelta(milliseconds=180),
+            ended_at=now,
+            status="completed",
+            step_count=2,
+            tool_call_count=1,
+            input_tokens=90,
+            cached_input_tokens=10,
+            output_tokens=30,
+            reasoning_tokens=4,
+            estimated_cost_usd=Decimal("0.00020000"),
+            correlation_id="live-agent-operations-test",
+            shadow_mode=False,
+            fallback_used=False,
+            final_intent="draft_ready",
+            final_response_status="completed",
+            comparison={
+                "model_route": {"correction_count": 2},
+                "clause_coverage_failures": 1,
+                "tool_result_summaries": [
+                    {
+                        "tool_name": "compile_strategy_draft",
+                        "status": "success",
+                        "approval_eligible": True,
+                        "unsupported_count": 0,
+                    },
+                    {
+                        "tool_name": "resolve_trading_capabilities",
+                        "status": "success",
+                        "provider_requirement_count": 1,
+                    },
+                ],
+            },
+        )
+        session.add(run)
+        await session.flush()
+        session.add(
+            AgentToolCall(
+                agent_run_id=run.id,
+                openai_call_id="live-agent-tool-call",
+                tool_name="compile_strategy_draft",
+                argument_hash="b" * 64,
+                redacted_arguments={},
+                policy_decision="allowed",
+                result_status="success",
+                evidence_refs=["chat:draft:test"],
+                duration_ms=35,
+                retry_count=0,
+                created_at=now,
+            )
+        )
+        session.add(
+            CapabilityExtension(
+                user_id=user.id,
+                chat_session_id=chat.id,
+                request_fingerprint="c" * 64,
+                capability_key="custom_body_ratio_test",
+                capability_version="0.1.0",
+                registry_hash="d" * 64,
+                artifact_hash="e" * 64,
+                source_prompt="Candle body exceeds seventy percent of its range",
+                conversation_history=[],
+                status="certified_user",
+                stage="monitoring",
+                validation_score=92,
+                repair_generation=1,
+                certified_at=now,
+            )
+        )
+        inquiry = PublicInquiry(
+            reference="HM-OPS-TEST-001",
+            name="Operations Visitor",
+            normalized_email="visitor@example.com",
+            category="product",
+            details="Please clarify this product limitation.",
+            source_page="/help",
+            attribution={},
+            knowledge_gap_category="product_limitation",
+            idempotency_key="public-inquiry:operations:test",
+            status="received",
+            submitted_at=now,
+            retain_until=now + timedelta(days=30),
+        )
+        session.add(inquiry)
+        await session.flush()
+        session.add_all(
+            [
+                PublicChatAnswerEvent(
+                    session_key_hash="f" * 64,
+                    conversation_id=None,
+                    user_id=None,
+                    question_hash="1" * 64,
+                    outcome="answered",
+                    stage="ANSWER",
+                    intent="product_help",
+                    model="configured-live-model",
+                    input_tokens=80,
+                    output_tokens=24,
+                    reasoning_tokens=2,
+                    latency_ms=140,
+                    estimated_cost_usd=Decimal("0.00010000"),
+                    coverage_score=Decimal("0.95000"),
+                    source_ids=["product-overview:v1"],
+                    related_route_ids=["home"],
+                    created_at=now,
+                    retain_until=now + timedelta(days=30),
+                ),
+                PublicInquiryEmailDelivery(
+                    inquiry_id=inquiry.id,
+                    event_key="public-inquiry:operations:test:customer",
+                    recipient_kind="customer",
+                    recipient="visitor@example.com",
+                    status="sent",
+                    attempt_count=1,
+                    provider_message_id="provider-test-message",
+                    sent_at=now,
+                    created_at=now,
+                ),
+                PublicInquiryRating(
+                    inquiry_id=inquiry.id,
+                    rating=5,
+                    helpful=True,
+                    feedback="Clear answer.",
+                    created_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+        data = await CapabilityCoverageService(settings).operations_summary(session)
+
+    assert data["agent"]["configured_enabled"] is True
+    assert data["agent"]["shadow_enabled"] is False
+    assert data["agent"]["rollout_percent"] == 100
+    assert data["agent"]["tool_success_rate"] == 100
+    assert data["agent"]["draft_compilation_success_rate"] == 100
+    assert data["agent"]["approval_conversion_rate"] == 100
+    assert data["agent"]["user_corrections"] == 2
+    assert data["agent"]["clause_coverage_failures"] == 1
+    assert data["agent"]["unsupported_provider_turns"] == 1
+    assert data["custom_capabilities"]["certified"] == 1
+    assert data["custom_capabilities"]["certification_success_rate"] == 100
+    assert data["custom_capabilities"]["repair_rate"] == 100
+    assert data["public_support"]["answered"] == 1
+    assert data["public_support"]["source_coverage_percent"] == 100
+    assert data["public_support"]["email_states"] == [{"state": "sent", "count": 1}]
+    assert data["public_support"]["average_rating"] == 5
+    assert data["public_support"]["knowledge_gaps"] == [
+        {"category": "product_limitation", "count": 1}
+    ]

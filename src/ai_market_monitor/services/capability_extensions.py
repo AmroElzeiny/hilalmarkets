@@ -23,7 +23,12 @@ from ai_market_monitor.db.models import (
     StrategyVersion,
     TelegramConnection,
 )
-from ai_market_monitor.db.models.enums import ConnectionStatus, LogicalOperator, TriggerMode
+from ai_market_monitor.db.models.enums import (
+    ConnectionStatus,
+    LogicalOperator,
+    StrategyVersionStatus,
+    TriggerMode,
+)
 from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.dynamic_mechanics import (
     DynamicMechanicValidationError,
@@ -51,6 +56,9 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.services.capability_extension_ai import (
     CapabilityExtensionAI,
     CapabilityExtensionAIError,
+)
+from ai_market_monitor.services.capability_extension_scope import (
+    require_ohlcv_computable_scope,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.strategy import StrategyService
@@ -87,6 +95,7 @@ class CapabilityExtensionService:
         source_prompt: str,
         conversation_history: list[dict[str, str]],
     ) -> CapabilityExtension:
+        require_ohlcv_computable_scope(source_prompt)
         normalized = " ".join(source_prompt.casefold().split())
         request_fingerprint = hashlib.sha256(f"{user_id}:{normalized}".encode()).hexdigest()
         existing = await session.scalar(
@@ -147,7 +156,11 @@ class CapabilityExtensionService:
         await self._status(
             session,
             extension,
-            "I'll test it against Bybit spot-market data. This can take a couple of minutes.",
+            (
+                "I'll test it against "
+                f"{self.settings.capability_extension_preflight_exchange.title()} spot-market "
+                "data. This can take a couple of minutes."
+            ),
             stage="queued",
             telegram=True,
         )
@@ -156,6 +169,8 @@ class CapabilityExtensionService:
     async def process(
         self, session: AsyncSession, extension: CapabilityExtension, provider: MarketDataProvider
     ) -> None:
+        if extension.paused_at is not None:
+            return
         if extension.status not in {"queued", "repair_queued"}:
             return
         try:
@@ -164,18 +179,44 @@ class CapabilityExtensionService:
             else:
                 await self._process_initial(session, extension, provider)
         except (CapabilityExtensionAIError, DynamicMechanicValidationError, ValueError) as exc:
-            extension.status = "failed"
-            extension.stage = "failed"
             extension.last_error = str(exc)[:2000]
-            _append_log(extension, "failed", str(exc))
-            await self._status(
-                session,
-                extension,
-                "I couldn't certify this mechanic safely. The exact failure is available "
-                "for review.",
-                stage="failed",
-                telegram=True,
-            )
+            if (
+                extension.certified_at is not None
+                and extension.artifact_hash
+                and extension.strategy_version_id is not None
+            ):
+                report = dict(extension.validation_report or {})
+                extension.status = str(report.get("pre_repair_status") or "certified_user")
+                extension.stage = "monitoring"
+                extension.validation_report = {
+                    **report,
+                    "rejected_repair": {
+                        "reason": "repair_processing_failed",
+                        "error_type": type(exc).__name__,
+                        "recorded_at": datetime.now(UTC).isoformat(),
+                    },
+                }
+                _append_log(extension, "repair_failed", str(exc))
+                await self._status(
+                    session,
+                    extension,
+                    "The repair could not be certified, so it was discarded and your current "
+                    "approved mechanic remains unchanged.",
+                    stage="monitoring",
+                    telegram=True,
+                )
+            else:
+                extension.status = "failed"
+                extension.stage = "failed"
+                _append_log(extension, "failed", str(exc))
+                await self._status(
+                    session,
+                    extension,
+                    "I couldn't certify this mechanic safely. The exact failure is available "
+                    "for review.",
+                    stage="failed",
+                    telegram=True,
+                )
 
     async def _process_initial(
         self,
@@ -335,7 +376,10 @@ class CapabilityExtensionService:
             operation=f"live_{reason}_review",
         )
         if review.failure_source != "implementation" or review.verdict != "repair":
-            extension.status = "certified_user"
+            extension.status = str(
+                (extension.validation_report or {}).get("pre_repair_status")
+                or "certified_user"
+            )
             extension.stage = "monitoring"
             extension.failure_classification = review.failure_source
             message = {
@@ -365,7 +409,10 @@ class CapabilityExtensionService:
             return
         repair = await self._repair_attempt(session, extension, draft, review)
         if repair.user_logic_changed or not repair.changed_implementation_only:
-            extension.status = "certified_user"
+            extension.status = str(
+                (extension.validation_report or {}).get("pre_repair_status")
+                or "certified_user"
+            )
             extension.stage = "monitoring"
             extension.validation_report = {
                 **extension.validation_report,
@@ -394,7 +441,10 @@ class CapabilityExtensionService:
         )
         certification = self._certify(candidate, candidate_report, verification)
         if not certification.passed:
-            extension.status = "certified_user"
+            extension.status = str(
+                (extension.validation_report or {}).get("pre_repair_status")
+                or "certified_user"
+            )
             extension.stage = "monitoring"
             extension.validation_report = {
                 **extension.validation_report,
@@ -492,10 +542,12 @@ class CapabilityExtensionService:
             )
         )
         if reason:
+            prior_status = extension.status
             extension.status = "repair_queued"
             extension.stage = "live_review_queued"
             extension.validation_report = {
                 **(extension.validation_report or {}),
+                "pre_repair_status": prior_status,
                 "repair_reason": reason,
                 "live_window": {
                     "scan_count": extension.scan_count,
@@ -596,7 +648,8 @@ class CapabilityExtensionService:
             source_text=extension.source_prompt,
             reason=(
                 "A deterministic implementation repair passed independent AI review and a "
-                "second Bybit market test. User approval is still required."
+                f"second {self.settings.capability_extension_preflight_exchange.title()} "
+                "market test. User approval is still required."
             ),
         )
         extension.pending_strategy_version_id = version.id
@@ -617,6 +670,144 @@ class CapabilityExtensionService:
             telegram=True,
         )
         return strategy, version
+
+    async def quarantine(
+        self,
+        session: AsyncSession,
+        *,
+        extension: CapabilityExtension,
+        user_id: UUID,
+        reason: str,
+    ) -> CapabilityExtension:
+        if extension.user_id != user_id:
+            raise ValueError("Capability extension was not found")
+        if extension.paused_at is not None:
+            return extension
+        now = datetime.now(UTC)
+        report = dict(extension.validation_report or {})
+        previous_stage = extension.stage
+        extension.paused_at = now
+        extension.stage = "quarantined"
+        extension.validation_report = {
+            **report,
+            "quarantine": {
+                "reason": " ".join(reason.split())[:500] or "Quarantined by the owner.",
+                "quarantined_at": now.isoformat(),
+                "previous_stage": previous_stage,
+            },
+        }
+        _append_log(
+            extension,
+            "quarantined",
+            "Owner quarantined this mechanic; scheduled execution now fails closed.",
+        )
+        await self._status(
+            session,
+            extension,
+            "This custom mechanic is quarantined. Watch Plans using it will not scan until "
+            "you restore it.",
+            stage="quarantined",
+        )
+        await session.flush()
+        return extension
+
+    async def restore_from_quarantine(
+        self,
+        session: AsyncSession,
+        *,
+        extension: CapabilityExtension,
+        user_id: UUID,
+    ) -> CapabilityExtension:
+        if extension.user_id != user_id:
+            raise ValueError("Capability extension was not found")
+        if extension.paused_at is None:
+            return extension
+        report = dict(extension.validation_report or {})
+        quarantine = dict(report.get("quarantine") or {})
+        extension.paused_at = None
+        extension.stage = (
+            "awaiting_user_approval"
+            if extension.status == "repair_ready"
+            else "monitoring"
+            if extension.certified_at and extension.artifact_hash
+            else str(quarantine.get("previous_stage") or "requested")
+        )
+        extension.validation_report = {
+            **report,
+            "quarantine": {
+                **quarantine,
+                "restored_at": datetime.now(UTC).isoformat(),
+            },
+        }
+        _append_log(
+            extension,
+            "quarantine_restored",
+            "Owner restored the existing certified artifact without changing its hash.",
+        )
+        await self._status(
+            session,
+            extension,
+            "The existing certified mechanic has been restored. Its immutable artifact did "
+            "not change.",
+            stage=extension.stage,
+        )
+        await session.flush()
+        return extension
+
+    async def discard_pending_repair(
+        self,
+        session: AsyncSession,
+        *,
+        extension: CapabilityExtension,
+        user_id: UUID,
+    ) -> CapabilityExtension:
+        if extension.user_id != user_id:
+            raise ValueError("Capability extension was not found")
+        report = dict(extension.validation_report or {})
+        pending = dict(report.get("pending_revision") or {})
+        if extension.status != "repair_ready" or not pending:
+            raise ValueError("No certified repair is waiting for review")
+        pending_version = (
+            await session.get(StrategyVersion, extension.pending_strategy_version_id)
+            if extension.pending_strategy_version_id is not None
+            else None
+        )
+        if pending_version is not None:
+            strategy = await session.get(Strategy, pending_version.strategy_id)
+            if strategy is not None and strategy.active_version_id == pending_version.id:
+                raise ValueError("An active strategy revision cannot be discarded")
+            pending_version.status = StrategyVersionStatus.REJECTED
+            pending_version.approved_at = None
+            pending_version.approved_by_user_id = None
+            pending_version.approved_schema_hash = None
+        discarded = list(report.get("discarded_revisions") or [])
+        discarded.append(
+            {
+                **pending,
+                "discarded_at": datetime.now(UTC).isoformat(),
+                "discarded_by_user_id": str(user_id),
+            }
+        )
+        extension.pending_strategy_version_id = None
+        extension.status = str(report.get("pre_repair_status") or "certified_user")
+        extension.stage = "monitoring"
+        extension.validation_report = {
+            **{key: value for key, value in report.items() if key != "pending_revision"},
+            "discarded_revisions": discarded[-20:],
+        }
+        _append_log(
+            extension,
+            "repair_discarded",
+            "Owner discarded the pending repair; the active artifact was not changed.",
+        )
+        await self._status(
+            session,
+            extension,
+            "The pending repair was discarded. Your current approved mechanic remains active.",
+            stage="monitoring",
+        )
+        await session.flush()
+        return extension
 
     async def _draft_attempt(
         self,
@@ -1029,12 +1220,20 @@ class CapabilityExtensionService:
                 existing_definition = None
         known_rules = self._known_rules(chat, excluding=extension.source_prompt)
         if existing_definition is not None:
+            existing_children = [
+                child
+                for child in existing_definition.conditions.children
+                if not (
+                    isinstance(child, ConditionRule)
+                    and child.capability_key == extension.capability_key
+                )
+            ]
             definition = existing_definition.model_copy(
                 update={
                     "conditions": existing_definition.conditions.model_copy(
                         update={
                             "children": [
-                                *existing_definition.conditions.children,
+                                *existing_children,
                                 rule,
                             ]
                         }
@@ -1131,6 +1330,7 @@ class CapabilityExtensionService:
         context["capability_extension_id"] = str(extension.id)
         context["capability_extension_status"] = extension.status
         chat.context_json = context
+        await session.flush()
 
     @staticmethod
     def _known_rules(

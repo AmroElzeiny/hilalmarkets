@@ -200,9 +200,13 @@ def test_public_product_chat_consent_grounding_inquiry_and_returning_profile(
     page.goto(base_url, wait_until="domcontentloaded")
 
     page.locator("[data-cookie-customize]").first.click()
-    page.locator("[data-consent-functional]").check()
+    page.locator("input[data-consent-functional]").check()
     page.locator("[data-cookie-save]").click()
     launcher = page.locator("[data-public-chat-launcher]")
+    launcher_box = launcher.bounding_box()
+    assert launcher_box is not None
+    assert round(launcher_box["width"]) == 56
+    assert round(launcher_box["height"]) == 56
     page.emulate_media(reduced_motion="reduce")
     expect(launcher).to_have_css("animation-name", "none")
     page.emulate_media(reduced_motion="no-preference")
@@ -212,8 +216,8 @@ def test_public_product_chat_consent_grounding_inquiry_and_returning_profile(
     expect(launcher).to_have_class(re.compile("was-opened"))
     expect(page.locator("[data-public-chat-profile]")).to_be_visible()
 
-    page.get_by_label("Name", exact=True).fill("Amina Beta")
-    page.get_by_label("Email", exact=True).fill("AMINA@EXAMPLE.COM")
+    page.locator("#public-chat-name").fill("Amina Beta")
+    page.locator("#public-chat-email").fill("AMINA@EXAMPLE.COM")
     page.get_by_text("Remember me on this device").click()
     page.get_by_role("button", name="Start conversation").click()
     expect(page.locator("[data-public-chat-messages]")).to_contain_text("Hi Amina")
@@ -223,6 +227,14 @@ def test_public_product_chat_consent_grounding_inquiry_and_returning_profile(
         timeout=10_000,
     )
     page.screenshot(path=str(output / "public-chat-desktop-1440.png"), full_page=False)
+    for width, height in ((1024, 900), (768, 900)):
+        page.set_viewport_size({"width": width, "height": height})
+        expect(panel).to_be_visible()
+        page.screenshot(
+            path=str(output / f"public-chat-desktop-{width}.png"),
+            full_page=False,
+        )
+    page.set_viewport_size({"width": 1440, "height": 1000})
 
     page.locator("[data-public-chat-close]").click()
     expect(launcher).to_be_focused()
@@ -271,8 +283,8 @@ def test_public_product_chat_session_profile_offline_and_focus_containment(
     page.locator("[data-cookie-essential]").first.click()
     launcher = page.locator("[data-public-chat-launcher]")
     launcher.click()
-    page.get_by_label("Name", exact=True).fill("Session Visitor")
-    page.get_by_label("Email", exact=True).fill("session@example.com")
+    page.locator("#public-chat-name").fill("Session Visitor")
+    page.locator("#public-chat-email").fill("session@example.com")
     page.get_by_role("button", name="Start conversation").click()
 
     assert page.evaluate(
@@ -563,7 +575,7 @@ def test_ai_setup_chat_visual_qa_states(
     assert notification_box is not None and notification_box["width"] <= 60
     assert create_plan_box is not None and create_plan_box["width"] <= 220
     expect(page.locator(".topbar-right > .sidebar-create-quick")).to_contain_text(
-        "New Watchlist"
+        "New Watch Plan"
     )
     page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
 
@@ -813,7 +825,7 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
 def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("monitor-lifecycle-smoke"))
     page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("Watchlists")
+    expect(page.locator("body")).to_contain_text("Watch Plans")
     expect(page.locator("body")).not_to_contain_text("Alert Quality Inbox")
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
     expect(page.locator("body")).to_contain_text("Follow every market journey.")

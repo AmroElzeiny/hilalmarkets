@@ -87,10 +87,11 @@ def main() -> int:
         "WHATSAPP_ENABLED": "false",
         "WHATSAPP_OPPORTUNITY_ALERTS_ENABLED": "false",
         "AI_AGENT_CONTROL_ENABLED": "true",
-        "AI_AGENT_SHADOW_MODE": "true",
-        "AI_AGENT_ROLLOUT_PERCENT": "0",
-        "CAPABILITY_EXTENSION_ENABLED": "false",
+        "AI_AGENT_SHADOW_MODE": "false",
+        "AI_AGENT_ROLLOUT_PERCENT": "100",
+        "CAPABILITY_EXTENSION_ENABLED": "true",
         "PUBLIC_CHAT_ENABLED": "true",
+        "PUBLIC_CHAT_AI_ENABLED": "true",
         "PUBLIC_CHAT_INQUIRY_EMAIL": "office@hilalmarkets.com",
         "EMAIL_ADAPTER": "smtp",
         "API_RATE_LIMITING_ENABLED": "true",
@@ -134,7 +135,10 @@ def main() -> int:
     for source in ACTIVE_DISCORD_SCAN_ROOTS:
         candidates = source.rglob("*") if source.is_dir() else (source,)
         for candidate in candidates:
-            if not candidate.is_file() or candidate.suffix.casefold() not in ACTIVE_DISCORD_SUFFIXES:
+            if (
+                not candidate.is_file()
+                or candidate.suffix.casefold() not in ACTIVE_DISCORD_SUFFIXES
+            ):
                 continue
             if "discord" in candidate.read_text(encoding="utf-8").casefold():
                 failures.append(

@@ -960,3 +960,31 @@ The focused model-routing, Setup Chat, Bounded Agent, System Brain, public-chat,
 dashboard feedback selection passed before the local Python 3.12 installation became unavailable.
 The complete post-patch backend/browser/static result is intentionally reported only in
 `docs/PRIVATE_BETA_READINESS_REPORT.md`; the historical counts above do not prove this later patch.
+
+## Controlled-Beta Live Agent and Certified Mechanic Boundary
+
+Date: 2026-07-18
+
+- The release profile now runs Bounded Agent Control live for every authenticated beta user:
+  control enabled, shadow disabled, and rollout at 100 percent. The control flag remains the single
+  rollback switch to the durable guided flow.
+- The coordinator exposes authenticated Watch Plan, Screened Watchlist, recent Scanner result, and
+  exact-fragment custom-capability request/status tools. Approval, activation, arbitrary delivery,
+  registry mutation, and repair application remain outside the model tool surface.
+- Custom capability requests require explicit current-turn consent and must match the unresolved
+  user-authored fragment exactly. Provider-only concepts are rejected before queueing. Certified
+  artifacts are rechecked during strategy approval and every scheduled scan; quarantine blocks
+  both. Restore and repair-discard actions are owner-scoped and never replace the active revision.
+- Final agent traces now retain stage, routing, correction count, and clause-coverage counts without
+  retaining hidden reasoning or raw provider payloads. System Brain combines live-agent,
+  certification, public-support grounding, inquiry, email, rating, latency, and cost evidence.
+- The separate public assistant is now structured, multi-turn, AI-generated, and grounded by
+  server-owned product documents plus optional read-only current-user tools. Unknown sources,
+  routes, tools, and ungrounded factual answers fail closed into retry/handoff. Anonymous account
+  lookup remains blocked.
+- `tests/fixtures/public_support_question_corpus.json` records 250 reviewed answer, authenticated
+  tool, refusal, and escalation expectations across English, Arabic, Egyptian Arabic, Arabizi,
+  mixed-language, typo, account, safety, and product cases.
+
+The authoritative implementation and current verification status, including unperformed live
+provider checks, is in `docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md`.

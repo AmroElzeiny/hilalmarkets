@@ -14,6 +14,11 @@ AgentToolName = Literal[
     "run_one_time_scan",
     "inspect_current_draft",
     "get_monitor_status",
+    "list_watch_plans",
+    "inspect_screened_watchlist",
+    "get_recent_scanner_result",
+    "request_custom_capability",
+    "get_custom_capability_status",
 ]
 AgentToolStatus = Literal[
     "success",
@@ -41,6 +46,32 @@ AgentActionType = Literal[
     "open_monitor",
     "retry",
     "start_revision",
+    "review_custom_capability",
+]
+
+AgentConversationStage = Literal[
+    "DISCOVER_INTENT",
+    "CLARIFY_SETUP",
+    "RESOLVE_CAPABILITIES",
+    "BUILD_DRAFT",
+    "REVIEW_TRANSLATION",
+    "RUN_MARKET_CHECK",
+    "EXPLAIN_RESULTS",
+    "REQUEST_APPROVAL",
+    "MANAGE_EXISTING_PLAN",
+    "CREATE_CUSTOM_CAPABILITY",
+    "RECOVER_FROM_FAILURE",
+    "GENERAL_PRODUCT_HELP",
+]
+
+ClauseCoverageStatus = Literal[
+    "COVERED",
+    "NEEDS_CLARIFICATION",
+    "PROVIDER_UNAVAILABLE",
+    "INTENTIONALLY_OPTIONAL",
+    "NON_EXECUTABLE_CONTEXT",
+    "REJECTED_BY_USER",
+    "CONFLICTING",
 ]
 
 
@@ -126,6 +157,47 @@ class GetMonitorStatusArgs(StrictAgentModel):
         return str(UUID(value))
 
 
+class ListWatchPlansArgs(StrictAgentModel):
+
+    status: Literal["all", "draft", "active", "paused"]
+
+
+class InspectScreenedWatchlistArgs(StrictAgentModel):
+    pass
+
+
+class GetRecentScannerResultArgs(StrictAgentModel):
+    pass
+
+
+class RequestCustomCapabilityArgs(StrictAgentModel):
+
+    source_fragment: str = Field(min_length=3, max_length=1000)
+    confirmed_by_user: Literal[True]
+
+    @field_validator("source_fragment")
+    @classmethod
+    def clean_source_fragment(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class GetCustomCapabilityStatusArgs(StrictAgentModel):
+
+    extension_id: str = Field(
+        min_length=36,
+        max_length=36,
+        pattern=(
+            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+            r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        ),
+    )
+
+    @field_validator("extension_id")
+    @classmethod
+    def canonicalize_extension_id(cls, value: str) -> str:
+        return str(UUID(value))
+
+
 class AgentToolResult(StrictAgentModel):
 
     status: AgentToolStatus
@@ -144,6 +216,67 @@ class AgentSuggestedAction(StrictAgentModel):
     label: str = Field(min_length=1, max_length=120)
 
 
+class AgentClarification(StrictAgentModel):
+
+    key: str = Field(min_length=1, max_length=120)
+    question: str = Field(min_length=1, max_length=500)
+    options: list[str] = Field(default_factory=list, max_length=8)
+    allows_free_text: bool = True
+
+
+class AgentClauseCoverage(StrictAgentModel):
+
+    source_fragment: str = Field(min_length=1, max_length=1000)
+    source_message_id: str | None = Field(default=None, max_length=64)
+    status: ClauseCoverageStatus
+    compiled_field: str | None = Field(default=None, max_length=160)
+    capability_key: str | None = Field(default=None, max_length=120)
+    capability_version: str | None = Field(default=None, max_length=32)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    required: bool | None = None
+    explanation: str = Field(min_length=1, max_length=500)
+
+
+class SetupConversationRequirement(StrictAgentModel):
+
+    field: str = Field(min_length=1, max_length=160)
+    value: Any
+    source_message_ids: list[str] = Field(default_factory=list, max_length=20)
+    confirmed: bool = False
+
+
+class SetupChatConversationState(StrictAgentModel):
+    """Application-owned memory; executable authority remains StrategyDefinition."""
+
+    version: int = 1
+    original_request: str = Field(default="", max_length=5000)
+    confirmed_requirements: list[SetupConversationRequirement] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    rejected_interpretations: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    latest_correction_by_field: dict[str, Any] = Field(default_factory=dict)
+    required_conditions: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    optional_conditions: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    exclusion_conditions: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    logical_structure: dict[str, Any] = Field(default_factory=dict)
+    timeframes: list[str] = Field(default_factory=list, max_length=20)
+    direction: str | None = Field(default=None, max_length=40)
+    universe: dict[str, Any] = Field(default_factory=dict)
+    selected_methodology: dict[str, Any] = Field(default_factory=dict)
+    delivery_preferences: list[str] = Field(default_factory=list, max_length=20)
+    alert_timing: dict[str, Any] = Field(default_factory=dict)
+    invalidation_rules: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    setup_mode: Literal["scanner", "monitor"] = "monitor"
+    custom_terminology: dict[str, str] = Field(default_factory=dict)
+    unresolved_contradictions: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    capability_bindings: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    user_message_ids: list[str] = Field(default_factory=list, max_length=200)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    draft_version: dict[str, Any] = Field(default_factory=dict)
+    clause_coverage: list[AgentClauseCoverage] = Field(default_factory=list, max_length=100)
+
+
 class AgentFinalResponse(StrictAgentModel):
 
     message: str = Field(min_length=1, max_length=1800)
@@ -152,10 +285,32 @@ class AgentFinalResponse(StrictAgentModel):
     evidence_refs: list[str] = Field(default_factory=list, max_length=100)
     suggested_actions: list[AgentSuggestedAction] = Field(default_factory=list, max_length=6)
     requires_user_confirmation: bool
+    stage: AgentConversationStage = "DISCOVER_INTENT"
+    user_intent: str = Field(default="unknown", min_length=1, max_length=120)
+    assistant_message: str = Field(default="", max_length=1800)
+    proposed_tool_calls: list[AgentToolName] = Field(default_factory=list, max_length=8)
+    clarification: AgentClarification | None = None
+    assumptions: list[str] = Field(default_factory=list, max_length=30)
+    unresolved_conflicts: list[str] = Field(default_factory=list, max_length=30)
+    referenced_user_message_ids: list[str] = Field(default_factory=list, max_length=30)
+    source_clause_coverage: list[AgentClauseCoverage] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    can_continue: bool = True
+    refusal_reason: str | None = Field(default=None, max_length=500)
+    confidence: float = Field(default=0.0, ge=0, le=1)
 
     @field_validator("message")
     @classmethod
     def disallow_model_authored_urls(cls, value: str) -> str:
+        if re.search(r"(?:https?://|www\.)", value, flags=re.IGNORECASE):
+            raise ValueError("Agent messages cannot contain model-authored URLs")
+        return value.strip()
+
+    @field_validator("assistant_message")
+    @classmethod
+    def disallow_urls_in_assistant_message(cls, value: str) -> str:
         if re.search(r"(?:https?://|www\.)", value, flags=re.IGNORECASE):
             raise ValueError("Agent messages cannot contain model-authored URLs")
         return value.strip()
@@ -196,4 +351,9 @@ AGENT_TOOL_ARGUMENT_MODELS: dict[str, type[BaseModel]] = {
     "run_one_time_scan": RunOneTimeScanArgs,
     "inspect_current_draft": InspectCurrentDraftArgs,
     "get_monitor_status": GetMonitorStatusArgs,
+    "list_watch_plans": ListWatchPlansArgs,
+    "inspect_screened_watchlist": InspectScreenedWatchlistArgs,
+    "get_recent_scanner_result": GetRecentScannerResultArgs,
+    "request_custom_capability": RequestCustomCapabilityArgs,
+    "get_custom_capability_status": GetCustomCapabilityStatusArgs,
 }

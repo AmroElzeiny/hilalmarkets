@@ -29,7 +29,12 @@ from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.capability_resolver import (
     CapabilityResolutionReport,
 )
-from ai_market_monitor.schemas.agent_control import AgentToolResult
+from ai_market_monitor.schemas.agent_control import (
+    AgentClauseCoverage,
+    AgentToolResult,
+    SetupChatConversationState,
+    SetupConversationRequirement,
+)
 from ai_market_monitor.schemas.ai_setup_chat import (
     MarketSnapshotAssetStatus,
     MarketSnapshotMover,
@@ -302,7 +307,11 @@ class AISetupChatService:
             user_id=user_id,
             status="interviewing",
             title="New monitor",
-            context_json={"setup_fragments": [], "resolved_ambiguities": {}},
+            context_json={
+                "setup_fragments": [],
+                "resolved_ambiguities": {},
+                "conversation_state": SetupChatConversationState().model_dump(mode="json"),
+            },
         )
         session.add(chat)
         await session.flush()
@@ -1953,12 +1962,14 @@ class AISetupChatService:
             if _setup_mode(chat) == "scanner"
             else "ready_for_approval"
         )
-        context["intent_state"] = _structured_intent_state(
+        intent_state = _structured_intent_state(
             definition,
             context=context,
             preview=preview,
             lint=lint,
         )
+        context["intent_state"] = intent_state
+        context["conversation_state"] = intent_state
         for key in (
             "awaiting_clarification",
             "awaiting_clarification_key",
@@ -2341,7 +2352,7 @@ class AISetupChatService:
                 "The bounded agent did not produce a safe response.",
                 status_code=502,
             )
-        await self._append_message(
+        user_message = await self._append_message(
             session,
             chat,
             role="user",
@@ -2353,6 +2364,28 @@ class AISetupChatService:
         context = dict(chat.context_json or {})
         context["last_agent_run_id"] = str(outcome.run_id)
         context["last_agent_evidence_refs"] = final.evidence_refs
+        fragment_records = list(context.get("setup_fragment_records") or [])
+        setup_fragments = list(context.get("setup_fragments") or [])
+        if any(
+            " ".join(str(fragment).casefold().split())
+            == " ".join(message.casefold().split())
+            for fragment in setup_fragments
+        ):
+            fragment_records.append(
+                {
+                    "fragment": message[:500],
+                    "user_message_id": str(user_message.id),
+                    "user_message_sequence": user_message.sequence,
+                    "user_text": message[:1000],
+                }
+            )
+            context["setup_fragment_records"] = fragment_records[-100:]
+        context["conversation_state"] = _refresh_conversation_state(
+            chat,
+            context=context,
+            user_message=user_message,
+            tool_results=outcome.tool_results,
+        )
         chat.context_json = context
         result_by_name: dict[str, AgentToolResult] = {}
         for item in outcome.tool_results:
@@ -2428,6 +2461,22 @@ class AISetupChatService:
             "evidence_refs": final.evidence_refs,
             "suggested_actions": [item.model_dump(mode="json") for item in final.suggested_actions],
             "requires_user_confirmation": final.requires_user_confirmation,
+            "conversation_stage": final.stage,
+            "user_intent": final.user_intent,
+            "clarification": (
+                final.clarification.model_dump(mode="json")
+                if final.clarification is not None
+                else None
+            ),
+            "assumptions": final.assumptions,
+            "unresolved_conflicts": final.unresolved_conflicts,
+            "referenced_user_message_ids": final.referenced_user_message_ids,
+            "source_clause_coverage": [
+                item.model_dump(mode="json") for item in final.source_clause_coverage
+            ],
+            "can_continue": final.can_continue,
+            "refusal_reason": final.refusal_reason,
+            "confidence": final.confidence,
         }
         compile_result = result_by_name.get("compile_strategy_draft")
         if compile_result and compile_result.status == "success":
@@ -2694,7 +2743,15 @@ def _conversation_history(
         if identity in seen:
             continue
         seen.add(identity)
-        history.append({"role": item.role, "content": content})
+        history.append(
+            {
+                "role": item.role,
+                "content": content,
+                "message_id": str(item.id),
+                "sequence": str(item.sequence),
+                "message_type": item.message_type,
+            }
+        )
     return history[-limit:]
 
 
@@ -3563,7 +3620,10 @@ def translation_sheet(
             issue.model_dump(mode="json") for issue in preview.unsupported_conditions
         ],
         "clause_coverage": [
-            _beginner_clause_coverage(item)
+            _beginner_clause_coverage(
+                item,
+                rules_by_key={rule.key: rule for rule in rules},
+            )
             for item in coverage.get("mapping_table", [])
             if isinstance(item, dict)
         ],
@@ -3580,34 +3640,89 @@ def _prompt_coverage_report(preview: InterpretationPreview) -> dict[str, Any]:
     return dict(report) if isinstance(report, dict) else {}
 
 
-def _beginner_clause_coverage(item: dict[str, Any]) -> dict[str, Any]:
+def _beginner_clause_coverage(
+    item: dict[str, Any],
+    *,
+    rules_by_key: dict[str, ConditionRule] | None = None,
+    fragment_records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     bucket = str(item.get("bucket") or "unclassified")
     status_map = {
-        "executable_condition": ("covered", "Included as a required rule.", False),
+        "executable_condition": (
+            "covered",
+            "COVERED",
+            "Included as a required rule.",
+            False,
+        ),
         "optional_condition": (
             "intentionally_optional",
+            "INTENTIONALLY_OPTIONAL",
             "Included as an optional confirmation.",
             False,
         ),
-        "ambiguity": ("needs_clarification", "Needs one clear definition.", True),
-        "unsupported": ("unsupported", "Cannot run with the configured data.", True),
-        "assumption": ("covered_as_assumption", "Shown openly as an assumption.", False),
-        "ignored_filler": ("not_executable", "Conversational wording only.", False),
+        "ambiguity": (
+            "needs_clarification",
+            "NEEDS_CLARIFICATION",
+            "Needs one clear definition.",
+            True,
+        ),
+        "unsupported": (
+            "unsupported",
+            "PROVIDER_UNAVAILABLE",
+            "Cannot run with the configured data.",
+            True,
+        ),
+        "assumption": (
+            "covered_as_assumption",
+            "NON_EXECUTABLE_CONTEXT",
+            "Shown openly as an assumption.",
+            False,
+        ),
+        "ignored_filler": (
+            "not_executable",
+            "NON_EXECUTABLE_CONTEXT",
+            "Conversational wording only.",
+            False,
+        ),
         "unclassified": (
             "needs_clarification",
+            "NEEDS_CLARIFICATION",
             "This instruction is not represented in the current rules.",
             True,
         ),
     }
-    status, explanation, blocking = status_map.get(
+    status, status_code, explanation, blocking = status_map.get(
         bucket,
-        ("needs_clarification", "This instruction needs review.", True),
+        (
+            "needs_clarification",
+            "NEEDS_CLARIFICATION",
+            "This instruction needs review.",
+            True,
+        ),
     )
+    condition_key = item.get("condition_id")
+    rule = (rules_by_key or {}).get(str(condition_key)) if condition_key else None
+    source_fragment = str(item.get("fragment") or "")[:1000]
+    source_message_id = None
+    normalized = " ".join(source_fragment.casefold().split())
+    for record in reversed(fragment_records or []):
+        candidate = " ".join(
+            str(record.get("fragment") or record.get("user_text") or "").casefold().split()
+        )
+        if normalized and candidate and (normalized in candidate or candidate in normalized):
+            source_message_id = record.get("user_message_id")
+            break
     return {
-        "source_fragment": str(item.get("fragment") or "")[:1000],
+        "source_fragment": source_fragment,
+        "source_message_id": source_message_id,
         "status": status,
+        "status_code": status_code,
         "explanation": explanation,
-        "condition_key": item.get("condition_id"),
+        "condition_key": condition_key,
+        "capability_key": rule.capability_key if rule else None,
+        "capability_version": rule.capability_version if rule else None,
+        "parameters": {},
+        "required": rule.required if rule else None,
         "blocking": blocking,
     }
 
@@ -3663,48 +3778,167 @@ def _structured_intent_state(
         for item in lint
         if item.get("severity") == "critical"
     ]
-    return {
-        "version": 1,
-        "confirmed_requirements": [
-            item for item in rule_records if item["required"]
+    coverage_rows = [
+        _beginner_clause_coverage(
+            item,
+            rules_by_key={rule.key: rule for rule in rules},
+            fragment_records=fragment_records,
+        )
+        for item in _prompt_coverage_report(preview).get("mapping_table", [])
+        if isinstance(item, dict)
+    ]
+    state = SetupChatConversationState(
+        version=1,
+        original_request=str(context.get("original_request") or ""),
+        confirmed_requirements=[
+            SetupConversationRequirement(
+                field=str(item["rule_key"]),
+                value=item,
+                source_message_ids=[
+                    str(reference["message_id"])
+                    for reference in item.get("message_references") or []
+                    if reference.get("message_id")
+                ],
+                confirmed=True,
+            )
+            for item in rule_records
         ],
-        "rejected_interpretations": list(context.get("correction_history") or [])[-50:],
-        "required_conditions": [item for item in rule_records if item["required"]],
-        "optional_conditions": [item for item in rule_records if not item["required"]],
-        "timeframes": list(
+        rejected_interpretations=list(context.get("correction_history") or [])[-50:],
+        latest_correction_by_field=dict(context.get("latest_correction_by_field") or {}),
+        required_conditions=[item for item in rule_records if item["required"]],
+        optional_conditions=[item for item in rule_records if not item["required"]],
+        exclusion_conditions=[
+            item
+            for item in rule_records
+            if re.search(
+                r"\b(?:avoid|exclude|without|not|no)\b",
+                str(item["source_fragment"]),
+                re.I,
+            )
+        ],
+        logical_structure={
+            "operator": definition.conditions.operator.value,
+            "condition_keys": [item["rule_key"] for item in rule_records],
+        },
+        timeframes=list(
             dict.fromkeys(
                 [str(definition.base_timeframe), *map(str, definition.supporting_timeframes)]
             )
         ),
-        "universe": {
+        direction=definition.direction.value,
+        universe={
             "exchange": definition.universe.exchange,
             "market_type": definition.universe.market_type.value,
             "symbols": list(definition.universe.include_symbols),
             "quote_currencies": list(definition.universe.quote_currencies),
             "screened_universe_mode": context.get("screened_universe_mode"),
         },
-        "alert_timing": {
+        selected_methodology={
+            "id": context.get("sharia_methodology_id"),
+            "code": context.get("sharia_methodology_code"),
+            "name": context.get("sharia_methodology_name"),
+            "version": context.get("sharia_methodology_version"),
+        },
+        alert_timing={
             "trigger_mode": definition.trigger_mode.value,
             "cooldown_seconds": definition.alerts.cooldown_seconds,
             "forming_alerts": definition.alerts.forming_alerts,
         },
-        "invalidation": {
-            "enabled": definition.risk.enabled,
-            "stop_method": definition.risk.stop_method,
-            "maximum_stop_percent": definition.risk.maximum_stop_percent,
-        },
-        "delivery_choices": list(definition.alerts.channels),
-        "unresolved_conflicts": unresolved,
-        "latest_correction_by_field": dict(
-            context.get("latest_correction_by_field") or {}
+        delivery_preferences=list(definition.alerts.channels),
+        invalidation_rules=[
+            {
+                "enabled": definition.risk.enabled,
+                "stop_method": definition.risk.stop_method,
+                "maximum_stop_percent": definition.risk.maximum_stop_percent,
+            }
+        ] if definition.risk.enabled else [],
+        setup_mode=(
+            "scanner" if context.get("setup_mode") == "scanner" else "monitor"
         ),
-        "resolved_clarifications": dict(context.get("resolved_ambiguities") or {}),
-        "clause_coverage": [
-            _beginner_clause_coverage(item)
-            for item in _prompt_coverage_report(preview).get("mapping_table", [])
-            if isinstance(item, dict)
+        custom_terminology={
+            str(key): str(value)
+            for key, value in dict(context.get("resolved_ambiguities") or {}).items()
+        },
+        unresolved_contradictions=unresolved,
+        capability_bindings=list(context.get("capability_bindings") or [])[-100:],
+        user_message_ids=list(
+            dict.fromkeys(
+                str(item.get("user_message_id"))
+                for item in fragment_records
+                if item.get("user_message_id")
+            )
+        )[-200:],
+        tool_results=list(
+            dict(context.get("conversation_state") or {}).get("tool_results") or []
+        )[-50:],
+        draft_version={
+            "canonical_hash": definition.canonical_hash(),
+            "schema_version": definition.schema_version,
+            "monitor_name": definition.name,
+        },
+        clause_coverage=[
+            AgentClauseCoverage.model_validate(
+                {
+                    "source_fragment": item["source_fragment"],
+                    "source_message_id": item.get("source_message_id"),
+                    "status": item["status_code"],
+                    "compiled_field": item.get("condition_key"),
+                    "capability_key": item.get("capability_key"),
+                    "capability_version": item.get("capability_version"),
+                    "parameters": item.get("parameters") or {},
+                    "required": item.get("required"),
+                    "explanation": item["explanation"],
+                }
+            )
+            for item in coverage_rows
         ],
+    )
+    return state.model_dump(mode="json")
+
+
+def _refresh_conversation_state(
+    chat: AISetupChatSession,
+    *,
+    context: dict[str, Any],
+    user_message: AISetupChatMessage | None,
+    tool_results: list[AgentToolResult],
+) -> dict[str, Any]:
+    raw_state = context.get("conversation_state") or {}
+    try:
+        state = SetupChatConversationState.model_validate(raw_state)
+    except ValidationError:
+        state = SetupChatConversationState()
+    message_ids = list(state.user_message_ids)
+    if user_message is not None:
+        message_ids.append(str(user_message.id))
+    summaries = list(state.tool_results)
+    summaries.extend(
+        {
+            "tool_name": result.tool_name,
+            "status": result.status,
+            "evidence_refs": list(result.evidence_refs),
+            "data_fields": sorted(str(key) for key in result.data)[:40],
+        }
+        for result in tool_results
+    )
+    updates: dict[str, Any] = {
+        "original_request": state.original_request or chat.original_idea or "",
+        "setup_mode": "scanner" if context.get("setup_mode") == "scanner" else "monitor",
+        "latest_correction_by_field": dict(context.get("latest_correction_by_field") or {}),
+        "capability_bindings": list(context.get("capability_bindings") or [])[-100:],
+        "custom_terminology": {
+            str(key): str(value)
+            for key, value in dict(context.get("resolved_ambiguities") or {}).items()
+        },
+        "user_message_ids": list(dict.fromkeys(message_ids))[-200:],
+        "tool_results": summaries[-50:],
     }
+    if context.get("schema_hash"):
+        updates["draft_version"] = {
+            **dict(state.draft_version),
+            "canonical_hash": context.get("schema_hash"),
+        }
+    return state.model_copy(update=updates).model_dump(mode="json")
 
 
 def _improvement_suggestions(definition: StrategyDefinition) -> list[str]:

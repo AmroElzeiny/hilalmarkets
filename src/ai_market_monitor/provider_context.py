@@ -486,7 +486,7 @@ class ProviderContextService:
         values = payload.get("values", {}) if isinstance(payload, dict) else {}
         if not isinstance(values, dict):
             return {}
-        result = {
+        result: dict[str, Any] = {
             name: value
             for name, value in values.items()
             if name in requested_keys and isinstance(value, (bool, int, float, str))

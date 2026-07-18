@@ -2,12 +2,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
     AISetupChatSession,
+    CapabilityExtension,
     CapabilityExtensionAttempt,
     CapabilityExtensionScan,
     Strategy,
@@ -31,9 +32,11 @@ from ai_market_monitor.schemas.capability_extensions import (
 from ai_market_monitor.schemas.strategy import (
     AlertPolicy,
     ConditionGroup,
+    ConditionRule,
     StrategyDefinition,
     UniverseDefinition,
 )
+from ai_market_monitor.services.capability_extension_scope import CapabilityExtensionScopeError
 from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
@@ -197,11 +200,32 @@ def _settings(**changes) -> Settings:
         app_secret_key=SecretStr("extension-test-secret-at-least-thirty-two-characters"),
         openai_api_key=SecretStr("test-key"),
         capability_extension_preflight_max_symbols=10,
+        capability_extension_preflight_exchange="bybit",
         capability_extension_candle_limit=100,
         capability_extension_empty_scan_threshold=2,
         capability_extension_no_notification_threshold=2,
         **changes,
     )
+
+
+async def test_provider_only_mechanic_is_rejected_before_queueing(test_context):
+    user_id, chat_id = await _user_and_chat(test_context)
+    service = CapabilityExtensionService(_settings(), ai=PassingExtensionAI())
+    async with test_context["session_factory"]() as session:
+        with pytest.raises(CapabilityExtensionScopeError) as exc_info:
+            await service.request(
+                session,
+                user_id=user_id,
+                chat_session_id=chat_id,
+                source_prompt="Alert when liquidation heatmaps and open interest rise",
+                conversation_history=[],
+            )
+
+        queued = int(await session.scalar(select(func.count(CapabilityExtension.id))) or 0)
+
+    assert exc_info.value.code == "custom_capability_provider_required"
+    assert exc_info.value.dependency.category == "derivatives"
+    assert queued == 0
 
 
 async def _user_and_chat(test_context):
@@ -267,6 +291,26 @@ async def test_extension_is_market_tested_certified_and_installed_in_chat(test_c
         assert rule.capability_version == "0.1.0"
         assert rule.capability_artifact_hash == extension.artifact_hash
 
+        chat.status = "interviewing"
+        reused = await service.request(
+            session,
+            user_id=user_id,
+            chat_session_id=chat_id,
+            source_prompt="Find a candle whose body is over 70% of its range on 15m",
+            conversation_history=[{"role": "user", "content": "Build that mechanic again."}],
+        )
+        await session.refresh(chat)
+        reused_definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        matching_rules = [
+            item
+            for item in reused_definition.conditions.children
+            if isinstance(item, ConditionRule)
+            and item.capability_key == extension.capability_key
+        ]
+        assert reused.id == extension.id
+        assert chat.status == "ready_for_approval"
+        assert len(matching_rules) == 1
+
         strategy = Strategy(user_id=user_id, name="Certified monitor", status=StrategyStatus.DRAFT)
         session.add(strategy)
         await session.flush()
@@ -286,6 +330,132 @@ async def test_extension_is_market_tested_certified_and_installed_in_chat(test_c
             expected_schema_hash=version.schema_hash,
         )
         assert approved.status == StrategyVersionStatus.APPROVED
+
+
+async def test_quarantine_blocks_certified_artifact_until_owner_restores_it(test_context):
+    user_id, chat_id = await _user_and_chat(test_context)
+    service = CapabilityExtensionService(_settings(), ai=PassingExtensionAI())
+    async with test_context["session_factory"]() as session:
+        extension = await service.request(
+            session,
+            user_id=user_id,
+            chat_session_id=chat_id,
+            source_prompt="Find a candle whose body is over 70% of its range on 15m",
+            conversation_history=[],
+        )
+        await service.process(session, extension, BalancedProvider())
+        chat = await session.get(AISetupChatSession, chat_id)
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        strategy = Strategy(user_id=user_id, name="Quarantine test", status=StrategyStatus.DRAFT)
+        session.add(strategy)
+        await session.flush()
+        version = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=1,
+            status=StrategyVersionStatus.DRAFT,
+            source_type="test",
+            schema_json=definition.model_dump(mode="json"),
+            schema_hash=definition.canonical_hash(),
+        )
+        session.add(version)
+        await session.flush()
+
+        await service.quarantine(
+            session,
+            extension=extension,
+            user_id=user_id,
+            reason="Owner observed an unexpected runtime result.",
+        )
+        with pytest.raises(StrategyGateError) as exc_info:
+            await StrategyService(session, "test").approve(
+                version,
+                user_id=user_id,
+                expected_schema_hash=version.schema_hash,
+            )
+        assert exc_info.value.code == "dynamic_artifact_quarantined"
+
+        await service.restore_from_quarantine(
+            session,
+            extension=extension,
+            user_id=user_id,
+        )
+        approved = await StrategyService(session, "test").approve(
+            version,
+            user_id=user_id,
+            expected_schema_hash=version.schema_hash,
+        )
+
+    assert extension.paused_at is None
+    assert approved.status == StrategyVersionStatus.APPROVED
+
+
+async def test_discard_pending_repair_rejects_revision_and_keeps_active_version(test_context):
+    user_id, _chat_id = await _user_and_chat(test_context)
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        strategy = Strategy(user_id=user_id, name="Repair rollback", status=StrategyStatus.ACTIVE)
+        session.add(strategy)
+        await session.flush()
+        active = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=1,
+            status=StrategyVersionStatus.ACTIVE,
+            source_type="test",
+            schema_json={},
+            schema_hash="a" * 64,
+            approved_schema_hash="a" * 64,
+            approved_at=now,
+            approved_by_user_id=user_id,
+        )
+        pending = StrategyVersion(
+            strategy_id=strategy.id,
+            version_number=2,
+            status=StrategyVersionStatus.DRAFT,
+            source_type="system_repair",
+            schema_json={},
+            schema_hash="b" * 64,
+        )
+        session.add_all([active, pending])
+        await session.flush()
+        strategy.active_version_id = active.id
+        extension = CapabilityExtension(
+            user_id=user_id,
+            strategy_version_id=active.id,
+            pending_strategy_version_id=pending.id,
+            request_fingerprint="c" * 64,
+            capability_key="custom_repair_rollback",
+            capability_version="0.1.0",
+            registry_hash="d" * 64,
+            artifact_hash="e" * 64,
+            source_prompt="A custom closed-candle condition",
+            conversation_history=[],
+            status="repair_ready",
+            stage="awaiting_user_approval",
+            certified_at=now,
+            validation_report={
+                "passed": True,
+                "pre_repair_status": "certified_user",
+                "pending_revision": {
+                    "artifact_hash": "f" * 64,
+                    "requires_user_approval": True,
+                },
+            },
+        )
+        session.add(extension)
+        await session.flush()
+
+        await CapabilityExtensionService(_settings()).discard_pending_repair(
+            session,
+            extension=extension,
+            user_id=user_id,
+        )
+
+    assert strategy.active_version_id == active.id
+    assert active.status == StrategyVersionStatus.ACTIVE
+    assert pending.status == StrategyVersionStatus.REJECTED
+    assert extension.pending_strategy_version_id is None
+    assert extension.status == "certified_user"
+    assert extension.validation_report["discarded_revisions"]
 
 
 async def test_five_scan_threshold_queues_independent_repair_review(test_context):

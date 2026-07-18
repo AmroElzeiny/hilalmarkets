@@ -249,7 +249,7 @@ class StrategyService:
                 "strategy_changed", "The strategy changed since it was displayed; review it again"
             )
         definition = StrategyDefinition.model_validate(version.schema_json)
-        await self._assert_dynamic_capability_artifacts(definition, user_id=user_id)
+        await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
         return strategy
 
     async def run_preview(
@@ -266,7 +266,7 @@ class StrategyService:
         self._assert_approval_intact(version)
         version.status = StrategyVersionStatus.PREVIEWING
         definition = StrategyDefinition.model_validate(version.schema_json)
-        await self._assert_dynamic_capability_artifacts(definition, user_id=user_id)
+        await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
         preview_definition = definition
         settings = get_settings()
         if settings.sharia_screening_enforced:
@@ -342,7 +342,7 @@ class StrategyService:
                 "disclaimer_required", "Accept the current risk disclaimer before activation"
             )
         definition = StrategyDefinition.model_validate(version.schema_json)
-        await self._assert_dynamic_capability_artifacts(definition, user_id=user_id)
+        await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
         try:
             await EntitlementService(self.session).enforce_strategy_activation(
                 user_id,
@@ -513,7 +513,7 @@ class StrategyService:
                 },
             ][-500:]
 
-    async def _assert_dynamic_capability_artifacts(
+    async def assert_dynamic_capability_artifacts(
         self,
         definition: StrategyDefinition,
         *,
@@ -570,6 +570,11 @@ class StrategyService:
                 raise StrategyGateError(
                     "dynamic_artifact_owner_mismatch",
                     "This generated mechanic belongs to a different account",
+                )
+            if extension.paused_at is not None:
+                raise StrategyGateError(
+                    "dynamic_artifact_quarantined",
+                    f"Generated mechanic {rule.label} is quarantined and cannot execute",
                 )
             if not snapshot["certified"]:
                 raise StrategyGateError(

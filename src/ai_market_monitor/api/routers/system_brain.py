@@ -27,6 +27,7 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
+from ai_market_monitor.services.system_brain import CapabilityCoverageService
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
@@ -144,7 +145,11 @@ async def system_brain_home(
     context = await _base_context(
         request, session, settings, principal, section="overview"
     )
-    context["data"] = await ShariaAdminDashboardService(session).overview()
+    data = await ShariaAdminDashboardService(session).overview()
+    data["ai_operations"] = await CapabilityCoverageService(
+        settings
+    ).operations_summary(session)
+    context["data"] = data
     return _protect(
         templates.TemplateResponse(
             request=request,

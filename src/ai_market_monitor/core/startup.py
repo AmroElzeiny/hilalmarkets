@@ -126,7 +126,37 @@ def validate_runtime_configuration(settings: Settings) -> None:
             settings.openai_api_key
         ):
             errors.append("OPENAI_API_KEY must not use a placeholder value")
+        if settings.ai_agent_control_enabled:
+            if settings.ai_agent_shadow_mode:
+                errors.append(
+                    "AI_AGENT_SHADOW_MODE must be false when live agent control is enabled"
+                )
+            if settings.ai_agent_rollout_percent != 100:
+                errors.append(
+                    "AI_AGENT_ROLLOUT_PERCENT must be 100 when live agent control is enabled"
+                )
+            if not settings.capability_extension_enabled:
+                errors.append(
+                    "CAPABILITY_EXTENSION_ENABLED must be true when live agent control is enabled"
+                )
+            if settings.openai_api_key is None:
+                errors.append("OPENAI_API_KEY is required when live agent control is enabled")
+        if (
+            settings.capability_extension_enabled
+            and settings.capability_extension_preflight_exchange != "binance"
+        ):
+            errors.append(
+                "CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE must be binance for private beta"
+            )
         if settings.public_chat_enabled:
+            if not settings.public_chat_ai_enabled:
+                errors.append(
+                    "PUBLIC_CHAT_AI_ENABLED must be true when deployed public chat is enabled"
+                )
+            if settings.openai_api_key is None:
+                errors.append("OPENAI_API_KEY is required when the public chat is enabled")
+            elif _looks_like_placeholder(settings.openai_api_key):
+                errors.append("OPENAI_API_KEY must not use a placeholder value")
             if settings.email_adapter != "smtp":
                 errors.append("EMAIL_ADAPTER=smtp is required when the public chat is enabled")
             required_public_chat_email = {
@@ -170,7 +200,8 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 "WHATSAPP_BUSINESS_PHONE_E164": settings.whatsapp_business_phone_e164,
             }
             for name, value in required_whatsapp_values.items():
-                if value is None or not _secret_value(value) or not _secret_value(value).strip():
+                secret_value = _secret_value(value)
+                if not secret_value or not secret_value.strip():
                     errors.append(f"{name} is required when WhatsApp is enabled")
                 elif _looks_like_placeholder(value):
                     errors.append(f"{name} must not use a placeholder value")

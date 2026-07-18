@@ -93,6 +93,8 @@ from ai_market_monitor.db.models.observability import (
 )
 from ai_market_monitor.db.models.public_chat import (
     PublicChatAnswerEvent,
+    PublicChatConversation,
+    PublicChatTurn,
     PublicInquiry,
     PublicInquiryEmailDelivery,
     PublicInquiryRating,
@@ -253,6 +255,8 @@ __all__ = [
     "Plan",
     "PublishedAssetAssessment",
     "PublicChatAnswerEvent",
+    "PublicChatConversation",
+    "PublicChatTurn",
     "PublicInquiry",
     "PublicInquiryEmailDelivery",
     "PublicInquiryRating",
