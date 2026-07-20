@@ -52,6 +52,33 @@ def test_smtp_from_name_is_used_in_from_header(monkeypatch):
     assert FakeSMTP.sent_message["From"] == "TraceEdge <no-reply@trace-edge.com>"
 
 
+def test_smtp_transactional_email_supports_bcc(monkeypatch):
+    FakeSMTP.sent_message = None
+    monkeypatch.setattr(email_delivery.smtplib, "SMTP", FakeSMTP)
+    settings = Settings(
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        email_adapter="smtp",
+        smtp_host="smtp.example.com",
+        smtp_from_email="office@hilalmarkets.com",
+        smtp_from_name="Hilal Markets",
+        smtp_use_tls=False,
+        ai_interpreter_provider="rules",
+    )
+
+    AuthEmailService(settings)._send_smtp(
+        recipient="customer@example.com",
+        subject="Support confirmation",
+        body="We received your request.",
+        reply_to="office@hilalmarkets.com",
+        bcc=["office@hilalmarkets.com"],
+    )
+
+    assert FakeSMTP.sent_message is not None
+    assert FakeSMTP.sent_message["To"] == "customer@example.com"
+    assert FakeSMTP.sent_message["Bcc"] == "office@hilalmarkets.com"
+    assert FakeSMTP.sent_message["Reply-To"] == "office@hilalmarkets.com"
+
+
 @pytest.mark.asyncio
 async def test_disabled_email_adapter_reports_actionable_code():
     settings = Settings(

@@ -141,6 +141,7 @@ class AuthEmailService:
         sender_email: str | None = None,
         sender_name: str | None = None,
         reply_to: str | None = None,
+        bcc: list[str] | None = None,
     ) -> str:
         message_id = make_msgid(
             idstring=idempotency_key[:48],
@@ -154,6 +155,7 @@ class AuthEmailService:
                     "recipient": recipient,
                     "sender": sender_email or self.settings.smtp_from_email,
                     "reply_to": reply_to,
+                    "bcc": list(bcc or []),
                     "subject": subject,
                     "body": text_body,
                     "html_body": html_body,
@@ -182,6 +184,7 @@ class AuthEmailService:
             sender_email=sender_email,
             sender_name=sender_name,
             reply_to=reply_to,
+            bcc=bcc,
         )
 
     def _send_smtp(
@@ -196,6 +199,7 @@ class AuthEmailService:
         sender_email: str | None = None,
         sender_name: str | None = None,
         reply_to: str | None = None,
+        bcc: list[str] | None = None,
     ) -> str:
         host = self.settings.smtp_host
         if not host:
@@ -212,6 +216,8 @@ class AuthEmailService:
         message["Subject"] = subject
         if reply_to:
             message["Reply-To"] = reply_to
+        if bcc:
+            message["Bcc"] = ", ".join(bcc)
         if message_id:
             message["Message-ID"] = message_id
         message.set_content(body)

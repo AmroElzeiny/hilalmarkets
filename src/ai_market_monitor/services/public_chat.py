@@ -12,7 +12,7 @@ from time import monotonic
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1459,6 +1459,22 @@ class PublicChatService:
         limit: int = 25,
     ) -> dict[str, int]:
         now = datetime.now(UTC)
+        legacy_delivery_cleanup = update(PublicInquiryEmailDelivery).where(
+                PublicInquiryEmailDelivery.recipient_kind == "office",
+                PublicInquiryEmailDelivery.status.not_in({"sent", "cancelled"}),
+        )
+        if inquiry_id is not None:
+            legacy_delivery_cleanup = legacy_delivery_cleanup.where(
+                PublicInquiryEmailDelivery.inquiry_id == inquiry_id
+            )
+        await self.session.execute(
+            legacy_delivery_cleanup.values(
+                status="cancelled",
+                next_retry_at=None,
+                last_error=None,
+            )
+        )
+        await self.session.flush()
         abandoned_before = now - timedelta(
             minutes=self.settings.public_chat_email_claim_timeout_minutes
         )
@@ -1508,11 +1524,8 @@ class PublicChatService:
                     purpose=f"public_inquiry_{row.recipient_kind}",
                     sender_email=self.settings.public_chat_inquiry_email,
                     sender_name="Hilal Markets",
-                    reply_to=(
-                        inquiry.normalized_email
-                        if row.recipient_kind == "office"
-                        else self.settings.public_chat_inquiry_email
-                    ),
+                    reply_to=self.settings.public_chat_inquiry_email,
+                    bcc=[self.settings.public_chat_inquiry_email],
                 )
             except EmailDeliveryError as exc:
                 refreshed = await self.session.get(PublicInquiryEmailDelivery, row.id)
@@ -1623,15 +1636,17 @@ class PublicChatService:
         return hmac.compare_digest(self.feedback_token(inquiry), supplied)
 
     async def email_delivery_state(self, inquiry_id: UUID) -> str:
-        states = list(
-            (
+        states = [
+            state
+            for state in (
                 await self.session.scalars(
                     select(PublicInquiryEmailDelivery.status).where(
                         PublicInquiryEmailDelivery.inquiry_id == inquiry_id
                     )
                 )
             ).all()
-        )
+            if state != "cancelled"
+        ]
         if states and all(state == "sent" for state in states):
             return "sent"
         if any(state == "sent" for state in states):
@@ -1641,10 +1656,7 @@ class PublicChatService:
         return "queued"
 
     async def _ensure_email_deliveries(self, inquiry: PublicInquiry) -> None:
-        recipients = (
-            ("customer", inquiry.normalized_email),
-            ("office", self.settings.public_chat_inquiry_email),
-        )
+        recipients = (("customer", inquiry.normalized_email),)
         now = datetime.now(UTC)
         for kind, recipient in recipients:
             event_key = f"public-inquiry:{inquiry.id}:{kind}"
@@ -1675,14 +1687,21 @@ class PublicChatService:
         recipient_kind: str,
     ) -> tuple[str, str, str]:
         if recipient_kind == "customer":
-            first_name = inquiry.name.split()[0]
-            subject = f"Hilal Markets received your inquiry {inquiry.reference}"
+            subject = f"We received your Hilal Markets inquiry {inquiry.reference}"
             text = (
-                f"Hello {first_name},\n\n"
-                "We received your Hilal Markets inquiry. A team member will review it; "
-                "response timing depends on the question and does not imply a fixed SLA.\n\n"
+                f"Assalamu Alaikum {inquiry.name},\n\n"
+                "JazakAllahu khayran for reaching out to Hilal Markets. Your message "
+                "has reached our team safely, and a real person will review it with care.\n\n"
+                "We know that asking for help often comes after spending time trying to "
+                "work something out. We do not want to leave you wondering what happens "
+                "next: in sha Allah, you can expect a reply in less than 24 hours.\n\n"
                 f"Reference: {inquiry.reference}\n"
-                f"Your question: {inquiry.details}\n"
+                f"Your message:\n{inquiry.details}\n\n"
+                "If there is anything important you would like to add, simply reply to "
+                "this email and it will reach our team.\n\n"
+                "May Allah place barakah in your time and make matters easy for you.\n\n"
+                "Warmly,\n"
+                "Hilal Markets Support\n"
             )
         else:
             subject = f"Public inquiry {inquiry.reference}: {inquiry.category.replace('_', ' ')}"

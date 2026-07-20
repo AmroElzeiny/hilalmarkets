@@ -925,7 +925,7 @@ async def test_inquiry_requires_explicit_negative_answer_feedback(test_context):
     assert rejected.json()["detail"]["code"] == "support_handoff_required"
 
 
-async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipients(
+async def test_public_inquiry_is_sanitized_idempotent_and_queued_once_with_office_bcc(
     test_context,
 ):
     client = test_context["client"]
@@ -964,33 +964,24 @@ async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipi
     async with test_context["session_factory"]() as session:
         processed = await PublicChatService(session, settings).process_due(limit=10)
         await session.commit()
-        assert processed == {"processed": 2, "sent": 2, "retryable": 0, "failed": 0}
+        assert processed == {"processed": 1, "sent": 1, "retryable": 0, "failed": 0}
 
-    assert len(settings.email_test_outbox) == 2
-    assert {item["recipient"] for item in settings.email_test_outbox} == {
-        "alice@example.com",
-        "office@hilalmarkets.com",
-    }
-    customer_email = next(
-        item for item in settings.email_test_outbox
-        if item["recipient"] == "alice@example.com"
-    )
-    office_email = next(
-        item for item in settings.email_test_outbox
-        if item["recipient"] == "office@hilalmarkets.com"
-    )
+    assert len(settings.email_test_outbox) == 1
+    customer_email = settings.email_test_outbox[0]
+    assert customer_email["recipient"] == "alice@example.com"
+    assert customer_email["bcc"] == ["office@hilalmarkets.com"]
     assert "https://" not in customer_email["body"]
+    assert customer_email["body"].startswith("Assalamu Alaikum Alice Example,")
+    assert "in less than 24 hours" in customer_email["body"]
+    assert "JazakAllahu khayran" in customer_email["body"]
+    assert "May Allah place barakah" in customer_email["body"]
     assert "Reference:" in customer_email["body"]
+    assert customer_email["subject"].startswith(
+        "We received your Hilal Markets inquiry"
+    )
     assert customer_email["sender"] == "office@hilalmarkets.com"
     assert customer_email["reply_to"] == "office@hilalmarkets.com"
-    assert "Knowledge gap:" in office_email["body"]
-    assert "Summary" in office_email["body"]
-    assert "Source page:" in office_email["body"]
-    assert "Attribution:" in office_email["body"]
-    assert office_email["sender"] == "office@hilalmarkets.com"
-    assert office_email["reply_to"] == "alice@example.com"
     assert "<script>" not in customer_email["html_body"]
-    assert "<script>" not in office_email["html_body"]
 
     async with test_context["session_factory"]() as session:
         inquiry = await session.scalar(select(PublicInquiry))
@@ -1007,7 +998,7 @@ async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipi
         assert await session.scalar(select(func.count(PublicInquiry.id))) == 1
         assert await session.scalar(
             select(func.count(PublicInquiryEmailDelivery.id))
-        ) == 2
+        ) == 1
 
 
 async def test_public_inquiry_rating_and_token_bound_redaction(test_context):
@@ -1120,7 +1111,7 @@ async def test_public_inquiry_email_retry_and_abandoned_claim_recovery(
         inquiry = await service.submit_inquiry(payload)
         await session.commit()
         first = await service.process_due(inquiry_id=inquiry.id, limit=2)
-        assert first == {"processed": 2, "sent": 1, "retryable": 1, "failed": 0}
+        assert first == {"processed": 1, "sent": 0, "retryable": 1, "failed": 0}
 
         rows = list(
             (
@@ -1164,8 +1155,51 @@ async def test_public_inquiry_email_retry_and_abandoned_claim_recovery(
         recovery_row.sent_at = None
         await session.commit()
         recovered = await service.process_due(inquiry_id=recovery_inquiry.id, limit=2)
-        assert recovered == {"processed": 2, "sent": 2, "retryable": 0, "failed": 0}
+        assert recovered == {"processed": 1, "sent": 1, "retryable": 0, "failed": 0}
         await session.refresh(recovery_row)
         assert recovery_row.status == "sent"
         assert recovery_row.attempt_count == 2
         assert calls.count("recovery@example.com") == 1
+
+
+async def test_public_inquiry_cancels_unsent_legacy_office_copy(test_context):
+    settings = test_context["settings"]
+    async with test_context["session_factory"]() as session:
+        service = PublicChatService(session, settings)
+        payload = await _service_inquiry_payload(
+            service,
+            session_id="public_legacy_delivery_session_123456",
+            message_id="public-legacy-delivery-answer-1",
+            key="public-inquiry:test:legacy-delivery1",
+        )
+        payload.profile.email = "legacy@example.com"
+        inquiry = await service.submit_inquiry(payload)
+        session.add(
+            PublicInquiryEmailDelivery(
+                inquiry_id=inquiry.id,
+                event_key=f"public-inquiry:{inquiry.id}:office",
+                recipient_kind="office",
+                recipient="office@hilalmarkets.com",
+                status="pending",
+                attempt_count=0,
+                next_retry_at=datetime.now(UTC),
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+        processed = await service.process_due(inquiry_id=inquiry.id, limit=10)
+        assert processed == {"processed": 1, "sent": 1, "retryable": 0, "failed": 0}
+        legacy = await session.scalar(
+            select(PublicInquiryEmailDelivery).where(
+                PublicInquiryEmailDelivery.inquiry_id == inquiry.id,
+                PublicInquiryEmailDelivery.recipient_kind == "office",
+            )
+        )
+        assert legacy is not None
+        assert legacy.status == "cancelled"
+        assert await service.email_delivery_state(inquiry.id) == "sent"
+
+    assert len(settings.email_test_outbox) == 1
+    assert settings.email_test_outbox[0]["recipient"] == "legacy@example.com"
+    assert settings.email_test_outbox[0]["bcc"] == ["office@hilalmarkets.com"]
