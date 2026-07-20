@@ -35,6 +35,7 @@ from ai_market_monitor.db.models import (
     CapabilityExtensionAttempt,
     CapabilityResolutionEvent,
     PublicChatAnswerEvent,
+    PublicChatAnswerFeedback,
     PublicInquiry,
     PublicInquiryEmailDelivery,
     PublicInquiryRating,
@@ -978,6 +979,15 @@ class CapabilityCoverageService:
                 )
             ).all()
         )
+        public_feedback = list(
+            (
+                await session.scalars(
+                    select(PublicChatAnswerFeedback)
+                    .order_by(PublicChatAnswerFeedback.created_at.desc())
+                    .limit(10000)
+                )
+            ).all()
+        )
         inquiries = list(
             (
                 await session.scalars(
@@ -1079,6 +1089,7 @@ class CapabilityCoverageService:
         extension_statuses = Counter(item.status for item in extensions)
         public_outcomes = Counter(item.outcome for item in public_events)
         public_stages = Counter(item.stage for item in public_events)
+        public_modes = Counter(item.mode for item in public_events)
         delivery_states = Counter(item.status for item in email_deliveries)
         knowledge_gaps = Counter(
             item.knowledge_gap_category
@@ -1088,8 +1099,34 @@ class CapabilityCoverageService:
         latencies = sorted(max(0, item.latency_ms) for item in public_events)
         p95_index = max(0, round((len(latencies) - 1) * 0.95)) if latencies else 0
         numeric_ratings = [item.rating for item in ratings if item.rating is not None]
-        helpful_ratings = [item.helpful for item in ratings if item.helpful is not None]
-        grounded_answers = sum(bool(item.source_ids) for item in public_events)
+        factual_events = [
+            item
+            for item in public_events
+            if item.mode in {"PRODUCT_FACT", "ACCOUNT_SUPPORT"}
+        ]
+        grounded_answers = sum(bool(item.source_ids) for item in factual_events)
+        support_requests = sum(item.support_form_requested for item in public_feedback)
+        helpful_answers = sum(item.helpful for item in public_feedback)
+        greeting_misclassifications = sum(
+            item.is_greeting
+            and (
+                item.mode != "PRODUCT_CONVERSATION"
+                or item.stage not in {"GREETING_AND_PROFILE", "FOLLOW_UP", "ANSWER"}
+                or item.outcome != "answered"
+            )
+            for item in public_events
+        )
+        dissatisfied_topics = Counter(
+            item.intent for item in public_feedback if not item.helpful
+        )
+        unanswered_topics = Counter(
+            item.knowledge_gap_reason or item.intent
+            for item in public_events
+            if item.outcome == "unsupported" or item.validation_failure
+        )
+        model_events: dict[str, list[PublicChatAnswerEvent]] = {}
+        for event in public_events:
+            model_events.setdefault(event.model or "fallback", []).append(event)
 
         return {
             "generated_at": datetime.now(UTC),
@@ -1124,6 +1161,11 @@ class CapabilityCoverageService:
                 "clarifications": public_stages["CLARIFY"],
                 "unsupported": public_outcomes["unsupported"],
                 "refusals": public_outcomes["refused"],
+                "out_of_scope": public_modes["OUT_OF_SCOPE"],
+                "ai_unavailable": sum(
+                    bool(item.validation_failure) or item.intent == "provider_unavailable"
+                    for item in public_events
+                ),
                 "inquiries": len(inquiries),
                 "inquiry_conversion_percent": _percentage(
                     len(inquiries),
@@ -1131,7 +1173,7 @@ class CapabilityCoverageService:
                 ),
                 "source_coverage_percent": _percentage(
                     grounded_answers,
-                    len(public_events),
+                    len(factual_events),
                 ),
                 "validation_failures": sum(
                     bool(item.validation_failure) for item in public_events
@@ -1147,9 +1189,19 @@ class CapabilityCoverageService:
                     else None
                 ),
                 "helpful_percent": _percentage(
-                    sum(bool(value) for value in helpful_ratings),
-                    len(helpful_ratings),
+                    helpful_answers,
+                    len(public_feedback),
                 ),
+                "answer_feedback_count": len(public_feedback),
+                "support_form_request_percent": _percentage(
+                    support_requests,
+                    len(public_feedback),
+                ),
+                "support_form_completion_percent": _percentage(
+                    sum(item.inquiry_id is not None for item in public_feedback),
+                    support_requests,
+                ),
+                "greeting_misclassification_count": greeting_misclassifications,
                 "average_latency_ms": round(
                     sum(latencies) / max(1, len(latencies)),
                     1,
@@ -1162,6 +1214,29 @@ class CapabilityCoverageService:
                 "knowledge_gaps": [
                     {"category": category, "count": count}
                     for category, count in knowledge_gaps.most_common(10)
+                ],
+                "dissatisfied_topics": [
+                    {"topic": topic, "count": count}
+                    for topic, count in dissatisfied_topics.most_common(10)
+                ],
+                "unanswered_topics": [
+                    {"topic": topic, "count": count}
+                    for topic, count in unanswered_topics.most_common(10)
+                ],
+                "models": [
+                    {
+                        "model": model,
+                        "answers": len(events),
+                        "average_latency_ms": round(
+                            sum(item.latency_ms for item in events) / len(events),
+                            1,
+                        ),
+                        "estimated_cost_usd": sum(
+                            (item.estimated_cost_usd for item in events),
+                            Decimal("0"),
+                        ),
+                    }
+                    for model, events in sorted(model_events.items())
                 ],
             },
         }

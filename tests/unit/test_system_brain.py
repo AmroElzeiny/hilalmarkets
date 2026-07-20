@@ -15,6 +15,7 @@ from ai_market_monitor.db.models import (
     CapabilityExtension,
     CapabilityResolutionEvent,
     PublicChatAnswerEvent,
+    PublicChatAnswerFeedback,
     PublicInquiry,
     PublicInquiryEmailDelivery,
     PublicInquiryRating,
@@ -402,6 +403,7 @@ async def test_system_brain_reports_live_ai_and_public_support_operations(test_c
             details="Please clarify this product limitation.",
             source_page="/help",
             attribution={},
+            support_metadata={},
             knowledge_gap_category="product_limitation",
             idempotency_key="public-inquiry:operations:test",
             status="received",
@@ -410,27 +412,45 @@ async def test_system_brain_reports_live_ai_and_public_support_operations(test_c
         )
         session.add(inquiry)
         await session.flush()
+        answer_event = PublicChatAnswerEvent(
+            session_key_hash="f" * 64,
+            conversation_id=None,
+            user_id=None,
+            question_hash="1" * 64,
+            outcome="answered",
+            stage="ANSWER",
+            mode="PRODUCT_FACT",
+            intent="product_help",
+            model="configured-live-model",
+            input_tokens=80,
+            output_tokens=24,
+            reasoning_tokens=2,
+            latency_ms=140,
+            estimated_cost_usd=Decimal("0.00010000"),
+            coverage_score=Decimal("0.95000"),
+            source_ids=["product-overview:v1"],
+            related_route_ids=["home"],
+            created_at=now,
+            retain_until=now + timedelta(days=30),
+        )
+        session.add(answer_event)
+        await session.flush()
         session.add_all(
             [
-                PublicChatAnswerEvent(
-                    session_key_hash="f" * 64,
+                PublicChatAnswerFeedback(
+                    answer_event_id=answer_event.id,
                     conversation_id=None,
                     user_id=None,
-                    question_hash="1" * 64,
-                    outcome="answered",
+                    session_key_hash="f" * 64,
+                    helpful=False,
+                    support_form_requested=True,
                     stage="ANSWER",
+                    mode="PRODUCT_FACT",
                     intent="product_help",
                     model="configured-live-model",
-                    input_tokens=80,
-                    output_tokens=24,
-                    reasoning_tokens=2,
-                    latency_ms=140,
-                    estimated_cost_usd=Decimal("0.00010000"),
-                    coverage_score=Decimal("0.95000"),
+                    confidence=Decimal("0.95000"),
                     source_ids=["product-overview:v1"],
-                    related_route_ids=["home"],
-                    created_at=now,
-                    retain_until=now + timedelta(days=30),
+                    inquiry_id=inquiry.id,
                 ),
                 PublicInquiryEmailDelivery(
                     inquiry_id=inquiry.id,
@@ -471,6 +491,10 @@ async def test_system_brain_reports_live_ai_and_public_support_operations(test_c
     assert data["public_support"]["source_coverage_percent"] == 100
     assert data["public_support"]["email_states"] == [{"state": "sent", "count": 1}]
     assert data["public_support"]["average_rating"] == 5
+    assert data["public_support"]["answer_feedback_count"] == 1
+    assert data["public_support"]["support_form_request_percent"] == 100
+    assert data["public_support"]["support_form_completion_percent"] == 100
+    assert data["public_support"]["greeting_misclassification_count"] == 0
     assert data["public_support"]["knowledge_gaps"] == [
         {"category": "product_limitation", "count": 1}
     ]

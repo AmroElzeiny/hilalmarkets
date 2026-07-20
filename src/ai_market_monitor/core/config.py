@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     google_tag_manager_container_id: str | None = None
     optional_analytics_enabled: bool = False
     marketing_consent_enabled: bool = False
+    vite_analytics_enabled: bool = False
+    vite_gtm_id: str | None = None
+    vite_ga4_measurement_id: str | None = None
+    vite_meta_pixel_id: str | None = None
+    vite_meta_pixel_enabled: bool = False
+    vite_site_url: AnyHttpUrl | None = None
+    vite_analytics_debug: bool = False
     log_level: str = "INFO"
     allow_mock_providers: bool = True
     scanning_enabled: bool = False
@@ -113,6 +120,8 @@ class Settings(BaseSettings):
             "whatsapp_test": {"limit": 5, "window_seconds": 300},
             "public_chat": {"limit": 20, "window_seconds": 60},
             "public_inquiry": {"limit": 5, "window_seconds": 3600},
+            "public_waitlist": {"limit": 5, "window_seconds": 3600},
+            "public_contact": {"limit": 5, "window_seconds": 3600},
             "admin_mutation": {"limit": 30, "window_seconds": 60},
         }
     )
@@ -303,6 +312,24 @@ class Settings(BaseSettings):
     public_chat_ai_circuit_failure_threshold: int = Field(default=5, ge=1, le=20)
     public_chat_ai_circuit_reset_seconds: int = Field(default=60, ge=10, le=900)
     public_chat_session_retention_days: int = Field(default=30, ge=1, le=365)
+    public_chat_notion_enabled: bool = True
+    public_chat_notion_root: str = "./Notion"
+    public_chat_notion_max_documents: int = Field(default=6, ge=1, le=12)
+    public_chat_notion_max_characters: int = Field(default=12000, ge=1000, le=50000)
+    public_chat_notion_max_file_bytes: int = Field(default=262144, ge=1024, le=2_000_000)
+    public_forms_enabled: bool = True
+    contact_form_sender_email: str = "office@hilalmarkets.com"
+    contact_form_recipient_email: str = "office@hilalmarkets.com"
+    public_form_email_max_attempts: int = Field(default=5, ge=1, le=20)
+    public_form_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
+    public_form_delivery_claim_timeout_minutes: int = Field(default=10, ge=1, le=120)
+    waitlist_google_sheets_enabled: bool = False
+    waitlist_google_sheets_webhook_url: SecretStr | None = None
+    waitlist_google_sheets_webhook_secret: SecretStr | None = None
+    waitlist_google_sheets_timeout_seconds: int = Field(default=15, ge=2, le=60)
+    waitlist_google_sheets_max_attempts: int = Field(default=8, ge=1, le=30)
+    waitlist_google_sheets_retry_minutes: int = Field(default=15, ge=1, le=1440)
+    waitlist_trust_cloudflare_country_header: bool = False
     system_brain_admin_username: str | None = None
     system_brain_admin_password_hash: SecretStr | None = None
     system_brain_otp_ttl_minutes: int = Field(default=10, ge=2, le=30)
@@ -388,6 +415,8 @@ class Settings(BaseSettings):
             "whatsapp_test",
             "public_chat",
             "public_inquiry",
+            "public_waitlist",
+            "public_contact",
             "admin_mutation",
         }
         if set(self.api_rate_limits) != required_rate_limits:
@@ -427,6 +456,7 @@ class Settings(BaseSettings):
         "market_metadata_api_url",
         "app_base_url",
         "public_og_image_url",
+        "vite_site_url",
         "crypto_index_api_url",
         "macro_market_api_url",
         "event_feed_api_url",
@@ -437,6 +467,17 @@ class Settings(BaseSettings):
     @classmethod
     def blank_optional_url(cls, value):
         return None if value in {"", None} else value
+
+    @field_validator("api_rate_limits")
+    @classmethod
+    def include_public_form_rate_limits(
+        cls,
+        value: dict[str, dict[str, int]],
+    ) -> dict[str, dict[str, int]]:
+        merged = dict(value)
+        merged.setdefault("public_waitlist", {"limit": 5, "window_seconds": 3600})
+        merged.setdefault("public_contact", {"limit": 5, "window_seconds": 3600})
+        return merged
 
     @property
     def is_production(self) -> bool:
@@ -449,6 +490,18 @@ class Settings(BaseSettings):
     @property
     def support_inbox_email(self) -> str:
         return (self.support_email or "contact@trace-edge.com").strip()
+
+    @property
+    def public_analytics_enabled(self) -> bool:
+        return bool(self.vite_analytics_enabled or self.optional_analytics_enabled)
+
+    @property
+    def public_gtm_id(self) -> str | None:
+        return (self.vite_gtm_id or self.google_tag_manager_container_id or "").strip() or None
+
+    @property
+    def public_site_url(self) -> str:
+        return str(self.vite_site_url or self.public_base_url).rstrip("/")
 
     @property
     def sharia_pilot_symbol_set(self) -> set[str]:

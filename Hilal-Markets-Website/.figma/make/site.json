@@ -1,0 +1,14 @@
+{
+  "title": "Hilal Markets — Strategy monitoring for Muslim crypto traders",
+  "description": "Build trading strategies, explore Shariah-screened assets, and monitor every setup in one place.",
+  "language": "en",
+  "icons": {
+    "icon": "/favicon-dark.png"
+  },
+  "robots": {
+    "index": true
+  },
+  "accessibility": {
+    "addBypassLinks": true
+  }
+}

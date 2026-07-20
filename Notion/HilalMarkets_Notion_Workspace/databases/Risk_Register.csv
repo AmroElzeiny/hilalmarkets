@@ -1,0 +1,11 @@
+﻿Risk,Category,Likelihood,Impact,Current Control,Next Action,Owner,Status
+Unqualified public screening claim,Governance,Medium,Critical,Fail-closed software and cautious copy,Appoint qualified authority,Founder,Open
+Wrong canonical asset identity,Data,Low,Critical,Exact identity and exchange mapping,Operational pilot review,Governance,Open
+Source licensing issue,Legal/Data,Medium,High,Registered-source policy,Obtain written rights review,Founder,Open
+Cloudflare bypass through origin IP,Security,Medium,Critical,Optional Access support,Firewall/tunnel origin,Engineering,Open
+Incomplete market data causes wrong alert,Reliability,Medium,High,Data-health gates and proof,Staging provider SLO test,Engineering,Open
+AI fabricates evidence or action,AI,Low,Critical,"Registered URLs, strict schemas, no authority",Red-team and production monitoring,Engineering,Monitoring
+Founder bottleneck,Operations,High,High,"Roles, assignments, audit",Recruit advisers/ops support,Founder,Open
+Low activation due to complexity,Product,Medium,High,Guided flow and progressive disclosure,Run beta funnel study,Product,Open
+Weak retention after screening,Business,Medium,High,"Watchlists, drift, evidence",Cohort experiment,Product,Open
+Billing entitlement error,Commercial,Low,High,"Server catalog, verified webhooks, idempotency",Sandbox golden path,Engineering,Open

@@ -187,10 +187,11 @@ Still pending: controlled material-source change, safety hold, affected-plan cal
 notification, review, superseding publication, restoration, rate-limit/retry/permanent-failure
 matrix, and one real staging Telegram delivery.
 
-## 9. Internal AI Setup Chat And Shadow Agent
+## 9. Internal AI Setup Chat And Live Bounded Agent
 
-- `AI_AGENT_CONTROL_ENABLED=true`, `AI_AGENT_SHADOW_MODE=true`, and
-  `AI_AGENT_ROLLOUT_PERCENT=0` are release invariants.
+- `AI_AGENT_CONTROL_ENABLED=true`, `AI_AGENT_SHADOW_MODE=false`,
+  `AI_AGENT_ROLLOUT_PERCENT=100`, and `CAPABILITY_EXTENSION_ENABLED=true` are the controlled-beta
+  release profile. `AI_AGENT_CONTROL_ENABLED=false` remains the immediate kill switch.
 - Agent proposals remain non-authoritative; deterministic compiler, registry, provider gates,
   canonical hash, approval, activation, and evaluation remain authoritative.
 - `AISetupModelRoute` selects only configured simple/complex models and efforts.
@@ -205,8 +206,8 @@ matrix, and one real staging Telegram delivery.
 - Interpretation feedback is auditable and never auto-promotes a production capability.
 - The reviewed corpus contains 18 cases across English, Arabic, Egyptian Arabic, Arabizi,
   mixed Arabic/English, and common misspellings. Three clear English cases are deterministic;
-  15 multilingual/typo cases remain explicitly shadow-reviewed. No false semantic-accuracy claim
-  is made.
+  the multilingual/typo cases still require live-provider staging evidence. Local fake-provider
+  tests are not presented as semantic-accuracy proof.
 
 ## 10. Public Landing-Page Chatbot Architecture And UX
 
@@ -223,8 +224,8 @@ Implemented UX:
 - Functional-consent device memory with version, consent version, and timestamp;
 - session-only profile persistence when Functional consent is absent;
 - explicit Forget action clearing both session and device storage;
-- grounded answer links, knowledge-gap inquiry, masked-email success, rating, and another-question
-  flow.
+- grounded answer links, one answer-feedback bar, explicit user-controlled Support form,
+  masked-email success, rating, Cancel, and another-question flow.
 
 No transcript, inquiry, token, or authentication state is written to browser profile storage.
 
@@ -237,11 +238,13 @@ No transcript, inquiry, token, or authentication state is written to browser pro
 - `PURCHASE_FAQS`
 - `PLAN_DEFINITIONS` constrained by public plan allowlists
 - versioned product-boundary and private-beta scope entries
+- bounded context-only retrieval from project-owned Notion exports
 
 Answers record source IDs and coverage; links are resolved from server-owned route IDs. Advice,
-religious rulings, secret requests, prompt injection, private account lookup, unsupported knowledge,
-and unavailable coverage fail to refusal or the inquiry handoff. There is no external browsing and
-no model-created URL or authoritative market value.
+religious rulings, secret requests, prompt injection, and private account lookup fail closed.
+Unsupported or unavailable facts remain transparent chat responses. Only the visitor's explicit
+No choice or contact request can start the inquiry flow. Notion snippets cannot prove current
+product state. There is no external browsing and no model-created URL or authoritative market value.
 
 ## 12. Inquiry, Email, Rating, Consent, And Security
 
@@ -251,7 +254,9 @@ no model-created URL or authoritative market value.
 - Mutations require an anonymous same-site CSRF boundary and reject foreign origins.
 - Public chat has a separate rate-limit bucket and bounded lengths.
 - Inquiry honeypot, Pydantic extra-field rejection, text sanitization, stable reference, timestamp,
-  category, source page, bounded attribution, and knowledge-gap category are implemented.
+  category, source page, bounded attribution, and server-owned answer metadata are implemented.
+- One session-bound feedback record is allowed per answer event. The inquiry endpoint requires a
+  negative feedback choice and binds the resulting inquiry back to that exact answer.
 - Referrer and UTM attribution require an explicit analytics-consent flag and are cleared again by
   server validation when consent is absent; client code alone cannot override that rule.
 - Raw visitor HTML is escaped in email; raw model prompts, stack traces, and secrets are excluded.

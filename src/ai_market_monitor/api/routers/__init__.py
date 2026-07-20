@@ -8,6 +8,7 @@ from ai_market_monitor.api.routers.on_demand import router as on_demand_router
 from ai_market_monitor.api.routers.onboarding import router as onboarding_router
 from ai_market_monitor.api.routers.public import router as public_router
 from ai_market_monitor.api.routers.public_chat import router as public_chat_router
+from ai_market_monitor.api.routers.public_forms import router as public_forms_router
 from ai_market_monitor.api.routers.sharia import router as sharia_router
 from ai_market_monitor.api.routers.status import router as status_router
 from ai_market_monitor.api.routers.system_brain import router as system_brain_router
@@ -25,6 +26,7 @@ __all__ = [
     "onboarding_router",
     "public_router",
     "public_chat_router",
+    "public_forms_router",
     "sharia_router",
     "status_router",
     "system_brain_router",

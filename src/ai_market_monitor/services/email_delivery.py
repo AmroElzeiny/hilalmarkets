@@ -138,15 +138,22 @@ class AuthEmailService:
         html_body: str,
         idempotency_key: str,
         purpose: str,
+        sender_email: str | None = None,
+        sender_name: str | None = None,
+        reply_to: str | None = None,
     ) -> str:
         message_id = make_msgid(
             idstring=idempotency_key[:48],
-            domain=(self.settings.smtp_from_email or "hilalmarkets.local").split("@")[-1],
+            domain=(sender_email or self.settings.smtp_from_email or "hilalmarkets.local").split(
+                "@"
+            )[-1],
         )
         if self.settings.email_adapter == "memory":
             self.settings.email_test_outbox.append(
                 {
                     "recipient": recipient,
+                    "sender": sender_email or self.settings.smtp_from_email,
+                    "reply_to": reply_to,
                     "subject": subject,
                     "body": text_body,
                     "html_body": html_body,
@@ -172,6 +179,9 @@ class AuthEmailService:
             body=text_body,
             html_body=html_body,
             message_id=message_id,
+            sender_email=sender_email,
+            sender_name=sender_name,
+            reply_to=reply_to,
         )
 
     def _send_smtp(
@@ -183,6 +193,9 @@ class AuthEmailService:
         attachments: list[tuple[str, str, bytes]] | None = None,
         html_body: str | None = None,
         message_id: str | None = None,
+        sender_email: str | None = None,
+        sender_name: str | None = None,
+        reply_to: str | None = None,
     ) -> str:
         host = self.settings.smtp_host
         if not host:
@@ -191,9 +204,14 @@ class AuthEmailService:
                 code="smtp_required_fields_missing",
             )
         message = EmailMessage()
-        message["From"] = self._from_header()
+        message["From"] = self._from_header(
+            sender_email=sender_email,
+            sender_name=sender_name,
+        )
         message["To"] = recipient
         message["Subject"] = subject
+        if reply_to:
+            message["Reply-To"] = reply_to
         if message_id:
             message["Message-ID"] = message_id
         message.set_content(body)
@@ -235,12 +253,19 @@ class AuthEmailService:
     def _uses_implicit_ssl(self) -> bool:
         return self.settings.smtp_use_ssl or self.settings.smtp_port in {465, 2465}
 
-    def _from_header(self) -> str:
-        from_email = self.settings.smtp_from_email
+    def _from_header(
+        self,
+        *,
+        sender_email: str | None = None,
+        sender_name: str | None = None,
+    ) -> str:
+        from_email = sender_email or self.settings.smtp_from_email
         if not from_email:
             raise EmailDeliveryError(
                 "SMTP_FROM_EMAIL is required.",
                 code="smtp_required_fields_missing",
             )
-        from_name = (self.settings.smtp_from_name or "").strip()
+        from_name = (
+            sender_name if sender_name is not None else self.settings.smtp_from_name or ""
+        ).strip()
         return formataddr((from_name, from_email)) if from_name else from_email

@@ -93,11 +93,18 @@ from ai_market_monitor.db.models.observability import (
 )
 from ai_market_monitor.db.models.public_chat import (
     PublicChatAnswerEvent,
+    PublicChatAnswerFeedback,
     PublicChatConversation,
     PublicChatTurn,
     PublicInquiry,
     PublicInquiryEmailDelivery,
     PublicInquiryRating,
+)
+from ai_market_monitor.db.models.public_forms import (
+    ContactEmailDelivery,
+    ContactSubmission,
+    WaitlistSheetDelivery,
+    WaitlistSignup,
 )
 from ai_market_monitor.db.models.sharia import (
     ApprovedWatchlist,
@@ -254,12 +261,15 @@ __all__ = [
     "PaymentEmailDelivery",
     "Plan",
     "PublishedAssetAssessment",
+    "PublicChatAnswerFeedback",
     "PublicChatAnswerEvent",
     "PublicChatConversation",
     "PublicChatTurn",
     "PublicInquiry",
     "PublicInquiryEmailDelivery",
     "PublicInquiryRating",
+    "ContactEmailDelivery",
+    "ContactSubmission",
     "ReferralCode",
     "ReferralRelationship",
     "ScanJob",
@@ -322,4 +332,6 @@ __all__ = [
     "WhatsAppConnection",
     "WhatsAppConversationState",
     "WhatsAppWebhookReceipt",
+    "WaitlistSheetDelivery",
+    "WaitlistSignup",
 ]

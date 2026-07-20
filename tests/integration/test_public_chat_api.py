@@ -1,11 +1,13 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from ai_market_monitor.db.models import (
     PublicChatAnswerEvent,
+    PublicChatAnswerFeedback,
     PublicChatConversation,
     PublicChatTurn,
     PublicInquiry,
@@ -13,7 +15,11 @@ from ai_market_monitor.db.models import (
     PublicInquiryRating,
     User,
 )
-from ai_market_monitor.schemas.public_chat import PublicChatAnswerRequest
+from ai_market_monitor.schemas.public_chat import (
+    PublicChatAnswerFeedbackRequest,
+    PublicChatAnswerRequest,
+    PublicInquiryRequest,
+)
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 from ai_market_monitor.services.public_chat import PublicChatService
 
@@ -28,6 +34,12 @@ class FakePublicSupportResponses:
         return self.responses.pop(0)
 
 
+class TimeoutPublicSupportResponses:
+    async def create(self, payload, *, timeout_seconds):
+        del payload, timeout_seconds
+        raise TimeoutError("simulated public-support timeout")
+
+
 def _ai_answer(
     answer: str,
     *,
@@ -37,24 +49,31 @@ def _ai_answer(
     requested_tools: list[str] | None = None,
     route_ids: list[str] | None = None,
     confidence: float = 0.92,
+    mode: str = "PRODUCT_FACT",
+    clarification_question: str | None = None,
+    answer_complete: bool = True,
+    support_handoff_available: bool = False,
+    support_handoff_reason: str | None = None,
+    safety_boundary: str = "product_scope_only",
 ) -> dict:
     return {
         "output_text": json.dumps(
             {
                 "stage": stage,
+                "mode": mode,
                 "intent": intent,
                 "answer": answer,
-                "tone": "friendly",
-                "clarification_question": None,
+                "clarification_question": clarification_question,
                 "source_ids": source_ids,
-                "related_route_ids": route_ids or ["how_it_works"],
+                "related_route_ids": (
+                    route_ids if route_ids is not None else ["how_it_works"]
+                ),
                 "requested_tools": requested_tools or [],
                 "confidence": confidence,
-                "answer_complete": True,
-                "show_inquiry_form": False,
-                "inquiry_category": None,
-                "handoff_reason": None,
-                "safety_boundary": "product_scope_only",
+                "answer_complete": answer_complete,
+                "support_handoff_available": support_handoff_available,
+                "support_handoff_reason": support_handoff_reason,
+                "safety_boundary": safety_boundary,
                 "suggested_follow_ups": ["How do I create a Watch Plan?"],
             }
         ),
@@ -78,13 +97,52 @@ async def _bootstrap(client):
     return payload["csrf_token"]
 
 
-def _inquiry_payload(*, key: str = "public-inquiry:test:123456") -> dict:
+async def _answer_and_request_support(
+    client,
+    token: str,
+    *,
+    session_id: str,
+    message_id: str,
+) -> str:
+    answer = await client.post(
+        "/api/v1/public-chat/answers",
+        headers={"X-CSRF-Token": token},
+        json={
+            "question": "Please explain private-beta access.",
+            "session_id": session_id,
+            "client_message_id": message_id,
+            "source_page": "/features",
+        },
+    )
+    assert answer.status_code == 200
+    answer_event_id = answer.json()["answer_event_id"]
+    feedback = await client.post(
+        f"/api/v1/public-chat/answers/{answer_event_id}/feedback",
+        headers={"X-CSRF-Token": token},
+        json={
+            "session_id": session_id,
+            "helpful": False,
+            "support_form_requested": True,
+        },
+    )
+    assert feedback.status_code == 200
+    return answer_event_id
+
+
+def _inquiry_payload(
+    *,
+    session_id: str,
+    answer_event_id: str,
+    key: str = "public-inquiry:test:123456",
+) -> dict:
     return {
         "profile": {
             "name": "<b>Alice</b> Example",
             "email": "Alice@Example.com",
             "remember_on_device": False,
         },
+        "session_id": session_id,
+        "answer_event_id": answer_event_id,
         "details": "<script>alert(1)</script> Please explain your private-beta access.",
         "category": "product",
         "source_page": "/features",
@@ -93,10 +151,42 @@ def _inquiry_payload(*, key: str = "public-inquiry:test:123456") -> dict:
         "utm_source": "private-beta",
         "utm_medium": "referral",
         "utm_campaign": "pilot",
-        "knowledge_gap_category": "beta_access",
         "idempotency_key": key,
         "company_website": "",
     }
+
+
+async def _service_inquiry_payload(
+    service: PublicChatService,
+    *,
+    session_id: str,
+    message_id: str,
+    key: str,
+) -> PublicInquiryRequest:
+    answer = await service.answer(
+        PublicChatAnswerRequest(
+            question="Please explain private-beta access.",
+            session_id=session_id,
+            client_message_id=message_id,
+            source_page="/features",
+        )
+    )
+    assert answer.answer_event_id is not None
+    await service.record_answer_feedback(
+        answer.answer_event_id,
+        PublicChatAnswerFeedbackRequest(
+            session_id=session_id,
+            helpful=False,
+            support_form_requested=True,
+        ),
+    )
+    return PublicInquiryRequest.model_validate(
+        _inquiry_payload(
+            session_id=session_id,
+            answer_event_id=str(answer.answer_event_id),
+            key=key,
+        )
+    )
 
 
 async def test_public_chat_requires_bootstrap_csrf_and_rejects_foreign_origin(test_context):
@@ -216,7 +306,7 @@ async def test_public_chat_answer_is_grounded_and_stores_only_redacted_audit(tes
     payload = response.json()
     assert payload["status"] == "answered"
     assert payload["source_ids"] == ["beta-scope:v1"]
-    assert payload["related_links"][0]["path"] == "/how-it-works"
+    assert payload["related_links"] == []
 
     async with test_context["session_factory"]() as session:
         event = await session.scalar(select(PublicChatAnswerEvent))
@@ -229,6 +319,209 @@ async def test_public_chat_answer_is_grounded_and_stores_only_redacted_audit(tes
         assert conversation is not None and conversation.message_count == 2
         assert turn is not None and turn.status == "completed"
         assert turn.client_message_id == "public-chat-grounded-1"
+
+
+@pytest.mark.parametrize(
+    ("question", "stage"),
+    [
+        ("hi", "GREETING_AND_PROFILE"),
+        ("hello", "GREETING_AND_PROFILE"),
+        ("how are you?", "FOLLOW_UP"),
+        ("thanks", "FOLLOW_UP"),
+    ],
+)
+async def test_public_support_greetings_are_ai_conversation_without_handoff(
+    test_context,
+    question,
+    stage,
+):
+    settings = test_context["settings"]
+    settings.public_chat_ai_enabled = True
+    settings.openai_api_key = SecretStr("test-openai-key")
+    fake = FakePublicSupportResponses(
+        [
+            _ai_answer(
+                "Hi! How can I help you with Hilal Markets today?",
+                source_ids=[],
+                route_ids=[],
+                stage=stage,
+                mode="PRODUCT_CONVERSATION",
+                intent="greeting",
+            )
+        ]
+    )
+    slug = "".join(character if character.isalnum() else "_" for character in question)
+    async with test_context["session_factory"]() as session:
+        result = await PublicChatService(session, settings, ai_client=fake).answer(
+            PublicChatAnswerRequest(
+                question=question,
+                session_id=f"public_greeting_{slug}_123456",
+                client_message_id=f"public-greeting-{slug}-1",
+                source_page="/",
+            )
+        )
+        await session.commit()
+
+    assert result.status == "answered"
+    assert result.mode == "PRODUCT_CONVERSATION"
+    assert result.source_ids == []
+    assert result.support_handoff_explicitly_requested is False
+    assert result.support_handoff_available is False
+    assert result.answer_event_id is not None
+
+
+async def test_public_support_modes_cover_education_out_of_scope_and_safety(test_context):
+    settings = test_context["settings"]
+    settings.public_chat_ai_enabled = True
+    settings.openai_api_key = SecretStr("test-openai-key")
+    fake = FakePublicSupportResponses(
+        [
+            _ai_answer(
+                "RSI compares recent upward and downward price movement on a 0-100 scale.",
+                source_ids=[],
+                route_ids=[],
+                mode="GENERAL_TRADING_EDUCATION",
+                intent="explain_rsi",
+            ),
+            _ai_answer(
+                "I'm here for HilalMarkets, crypto spot monitoring, screening evidence, and "
+                "general trading concepts.",
+                source_ids=[],
+                route_ids=[],
+                stage="REFUSAL",
+                mode="OUT_OF_SCOPE",
+                intent="cupcake_recipe",
+                safety_boundary="out_of_scope",
+            ),
+        ]
+    )
+    async with test_context["session_factory"]() as session:
+        service = PublicChatService(session, settings, ai_client=fake)
+        education = await service.answer(
+            PublicChatAnswerRequest(
+                question="What is RSI?",
+                session_id="public_education_session_123456",
+                client_message_id="public-education-1",
+                source_page="/help",
+            )
+        )
+        out_of_scope = await service.answer(
+            PublicChatAnswerRequest(
+                question="Give me a cupcake recipe.",
+                session_id="public_outscope_session_123456",
+                client_message_id="public-outscope-1",
+                source_page="/help",
+            )
+        )
+        safety = await service.answer(
+            PublicChatAnswerRequest(
+                question="Should I buy SOL now?",
+                session_id="public_safety_session_123456",
+                client_message_id="public-safety-1",
+                source_page="/help",
+            )
+        )
+        await session.commit()
+
+    assert education.status == "answered"
+    assert education.mode == "GENERAL_TRADING_EDUCATION"
+    assert education.source_ids == []
+    assert out_of_scope.status == "unsupported"
+    assert out_of_scope.mode == "OUT_OF_SCOPE"
+    assert out_of_scope.support_handoff_available is False
+    assert safety.status == "refused"
+    assert safety.mode == "SAFETY_REFUSAL"
+    assert safety.support_handoff_available is False
+    assert len(fake.payloads) == 2
+
+
+async def test_low_confidence_and_invalid_ai_output_never_authorize_form(test_context):
+    settings = test_context["settings"]
+    settings.public_chat_ai_enabled = True
+    settings.openai_api_key = SecretStr("test-openai-key")
+    low_confidence = FakePublicSupportResponses(
+        [
+            _ai_answer(
+                "I could not verify that product detail.",
+                source_ids=["product:overview:v1"],
+                confidence=0.2,
+                answer_complete=False,
+                support_handoff_available=True,
+                support_handoff_reason="human_help_may_be_useful",
+            )
+        ]
+    )
+    async with test_context["session_factory"]() as session:
+        low = await PublicChatService(
+            session, settings, ai_client=low_confidence
+        ).answer(
+            PublicChatAnswerRequest(
+                question="Is an undocumented beta feature available?",
+                session_id="public_low_confidence_session_123456",
+                client_message_id="public-low-confidence-1",
+                source_page="/help",
+            )
+        )
+        await session.commit()
+
+    invalid = FakePublicSupportResponses([{"output": []}, {"output": []}])
+    async with test_context["session_factory"]() as session:
+        failed = await PublicChatService(session, settings, ai_client=invalid).answer(
+            PublicChatAnswerRequest(
+                question="Tell me an unverified feature state.",
+                session_id="public_invalid_ai_session_123456",
+                client_message_id="public-invalid-ai-1",
+                source_page="/help",
+            )
+        )
+        await session.commit()
+
+    assert low.stage == "KNOWLEDGE_GAP"
+    assert low.support_handoff_available is True
+    assert low.support_handoff_explicitly_requested is False
+    assert not hasattr(low, "show_inquiry_form")
+    assert failed.status == "unsupported"
+    assert failed.support_handoff_explicitly_requested is False
+    assert not hasattr(failed, "show_inquiry_form")
+
+
+async def test_public_support_timeout_returns_retry_without_form_authority(test_context):
+    settings = test_context["settings"]
+    settings.public_chat_ai_enabled = True
+    settings.openai_api_key = SecretStr("test-openai-key")
+    async with test_context["session_factory"]() as session:
+        service = PublicChatService(
+            session,
+            settings,
+            ai_client=TimeoutPublicSupportResponses(),
+        )
+        greeting = await service.answer(
+            PublicChatAnswerRequest(
+                question="hi",
+                session_id="public_timeout_greeting_session_123456",
+                client_message_id="public-timeout-greeting-1",
+                source_page="/help",
+            )
+        )
+        result = await service.answer(
+            PublicChatAnswerRequest(
+                question="What is the current private-beta scope?",
+                session_id="public_timeout_session_123456",
+                client_message_id="public-timeout-1",
+                source_page="/help",
+            )
+        )
+        await session.commit()
+
+    assert greeting.status == "answered"
+    assert greeting.mode == "PRODUCT_CONVERSATION"
+    assert greeting.support_handoff_available is False
+    assert greeting.support_handoff_explicitly_requested is False
+    assert result.status == "unsupported"
+    assert result.intent == "provider_unavailable"
+    assert result.support_handoff_explicitly_requested is False
+    assert result.answer_event_id is not None
+    assert not hasattr(result, "show_inquiry_form")
 
 
 async def test_public_support_ai_uses_bounded_multi_turn_history(test_context):
@@ -276,6 +569,8 @@ async def test_public_support_ai_uses_bounded_multi_turn_history(test_context):
     history = second_evidence["conversation_history"]
     assert any(item["content"] == "What about Telegram?" for item in history)
     assert any("notification channel" in item["content"] for item in history)
+    assert second_evidence["conversation_state"]["last_question"] == "What about Telegram?"
+    assert second_evidence["conversation_state"]["last_answer_event_id"]
 
 
 async def test_public_support_ai_rejects_hallucinated_source_ids(test_context):
@@ -306,6 +601,53 @@ async def test_public_support_ai_rejects_hallucinated_source_ids(test_context):
     assert event.validation_failure == "PublicSupportAIUnavailable"
 
 
+async def test_notion_context_cannot_authorize_current_product_facts(
+    test_context,
+    tmp_path,
+):
+    settings = test_context["settings"]
+    settings.public_chat_ai_enabled = True
+    settings.openai_api_key = SecretStr("test-openai-key")
+    notion_root = tmp_path / "Notion"
+    notion_root.mkdir()
+    (notion_root / "Roadmap.md").write_text(
+        "# Roadmap\n\nA possible future channel is described here.",
+        encoding="utf-8",
+    )
+    settings.public_chat_notion_root = str(notion_root)
+    async with test_context["session_factory"]() as session:
+        service = PublicChatService(session, settings)
+        notion_source = service.notion_knowledge.retrieve("future channel")[0][
+            "source_id"
+        ]
+        fake = FakePublicSupportResponses(
+            [
+                _ai_answer(
+                    "The future channel is currently enabled.",
+                    source_ids=[notion_source],
+                    route_ids=[],
+                    mode="PRODUCT_FACT",
+                )
+            ]
+        )
+        service.ai_client = fake
+        result = await service.answer(
+            PublicChatAnswerRequest(
+                question="Is that future channel enabled?",
+                session_id="public_notion_authority_session_123456",
+                client_message_id="public-notion-authority-1",
+                source_page="/help",
+            )
+        )
+        await session.commit()
+
+    evidence = json.loads(fake.payloads[0]["input"][0]["content"])
+    assert evidence["notion_workspace_context"]
+    assert result.status == "unsupported"
+    assert result.source_ids == []
+    assert result.support_handoff_explicitly_requested is False
+
+
 async def test_public_support_ai_rejects_hallucinated_route_ids(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
@@ -331,7 +673,7 @@ async def test_public_support_ai_rejects_hallucinated_route_ids(test_context):
         await session.commit()
 
     assert result.status == "unsupported"
-    assert result.related_links[-1].route_id == "contact"
+    assert result.related_links == []
 
 
 async def test_public_support_ai_uses_only_authenticated_server_owned_account_data(
@@ -346,6 +688,7 @@ async def test_public_support_ai_uses_only_authenticated_server_owned_account_da
                 "I will inspect your signed-in account state.",
                 source_ids=[],
                 stage="RETRIEVE_PRODUCT_DATA",
+                mode="ACCOUNT_SUPPORT",
                 intent="account_support",
                 requested_tools=["account_state"],
             ),
@@ -353,6 +696,7 @@ async def test_public_support_ai_uses_only_authenticated_server_owned_account_da
                 "Your signed-in account is active.",
                 source_ids=["support-tool:account_state:current-user"],
                 stage="AUTHENTICATED_ACCOUNT_SUPPORT",
+                mode="ACCOUNT_SUPPORT",
                 intent="account_support",
                 route_ids=["dashboard_entry"],
             ),
@@ -392,6 +736,7 @@ async def test_public_support_ai_rejects_account_tool_for_anonymous_visitor(test
                 "I will inspect that account.",
                 source_ids=[],
                 stage="RETRIEVE_PRODUCT_DATA",
+                mode="ACCOUNT_SUPPORT",
                 intent="private_account_lookup",
                 requested_tools=["account_state"],
             )
@@ -452,13 +797,151 @@ async def test_public_chat_session_limit_preserves_idempotent_retry(test_context
     assert blocked.json()["detail"]["code"] == "conversation_limit_reached"
 
 
+async def test_answer_feedback_is_session_bound_idempotent_and_user_controlled(
+    test_context,
+):
+    client = test_context["client"]
+    token = await _bootstrap(client)
+    session_id = "public_feedback_session_123456"
+    answer = await client.post(
+        "/api/v1/public-chat/answers",
+        headers={"X-CSRF-Token": token},
+        json={
+            "question": "What does HilalMarkets do?",
+            "session_id": session_id,
+            "client_message_id": "public-feedback-answer-1",
+            "source_page": "/",
+        },
+    )
+    assert answer.status_code == 200
+    answer_event_id = answer.json()["answer_event_id"]
+    endpoint = f"/api/v1/public-chat/answers/{answer_event_id}/feedback"
+    feedback_payload = {
+        "session_id": session_id,
+        "helpful": True,
+        "support_form_requested": False,
+    }
+    first = await client.post(
+        endpoint,
+        headers={"X-CSRF-Token": token},
+        json=feedback_payload,
+    )
+    retry = await client.post(
+        endpoint,
+        headers={"X-CSRF-Token": token},
+        json=feedback_payload,
+    )
+    conflicting = await client.post(
+        endpoint,
+        headers={"X-CSRF-Token": token},
+        json={
+            "session_id": session_id,
+            "helpful": False,
+            "support_form_requested": True,
+        },
+    )
+    wrong_session = await client.post(
+        endpoint,
+        headers={"X-CSRF-Token": token},
+        json={
+            "session_id": "wrong_feedback_session_123456",
+            "helpful": True,
+            "support_form_requested": False,
+        },
+    )
+
+    assert first.status_code == 200
+    assert first.json()["message"] == "Great! Ready when you are."
+    assert retry.status_code == 200
+    assert conflicting.status_code == 409
+    assert wrong_session.status_code == 409
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(
+            select(func.count(PublicChatAnswerFeedback.id))
+        ) == 1
+
+
+async def test_explicit_contact_request_is_the_only_server_handoff_shortcut(
+    test_context,
+):
+    settings = test_context["settings"]
+    settings.public_chat_ai_enabled = True
+    settings.openai_api_key = SecretStr("test-openai-key")
+    fake = FakePublicSupportResponses(
+        [
+            _ai_answer(
+                "I can help you send that question to the HilalMarkets team.",
+                source_ids=[],
+                route_ids=["contact"],
+                mode="PRODUCT_CONVERSATION",
+                intent="human_support_request",
+                support_handoff_available=True,
+                support_handoff_reason="user_requested_human_support",
+            )
+        ]
+    )
+    async with test_context["session_factory"]() as session:
+        result = await PublicChatService(session, settings, ai_client=fake).answer(
+            PublicChatAnswerRequest(
+                question="I want to contact the support team.",
+                session_id="public_explicit_support_session_123456",
+                client_message_id="public-explicit-support-1",
+                source_page="/contact",
+            )
+        )
+        await session.commit()
+
+    assert result.support_handoff_available is True
+    assert result.support_handoff_explicitly_requested is True
+    assert result.support_handoff_reason == "user_requested_human_support"
+
+
+async def test_inquiry_requires_explicit_negative_answer_feedback(test_context):
+    client = test_context["client"]
+    token = await _bootstrap(client)
+    session_id = "public_no_handoff_session_123456"
+    answer = await client.post(
+        "/api/v1/public-chat/answers",
+        headers={"X-CSRF-Token": token},
+        json={
+            "question": "What does HilalMarkets do?",
+            "session_id": session_id,
+            "client_message_id": "public-no-handoff-answer-1",
+            "source_page": "/",
+        },
+    )
+    payload = _inquiry_payload(
+        session_id=session_id,
+        answer_event_id=answer.json()["answer_event_id"],
+        key="public-inquiry:no-handoff:123456",
+    )
+    rejected = await client.post(
+        "/api/v1/public-chat/inquiries",
+        headers={"X-CSRF-Token": token},
+        json=payload,
+    )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"]["code"] == "support_handoff_required"
+
+
 async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipients(
     test_context,
 ):
     client = test_context["client"]
     settings = test_context["settings"]
     token = await _bootstrap(client)
-    payload = _inquiry_payload()
+    session_id = "public_inquiry_session_123456"
+    answer_event_id = await _answer_and_request_support(
+        client,
+        token,
+        session_id=session_id,
+        message_id="public-inquiry-answer-1",
+    )
+    payload = _inquiry_payload(
+        session_id=session_id,
+        answer_event_id=answer_event_id,
+    )
 
     first = await client.post(
         "/api/v1/public-chat/inquiries",
@@ -496,13 +979,16 @@ async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipi
         item for item in settings.email_test_outbox
         if item["recipient"] == "office@hilalmarkets.com"
     )
-    assert "Help Center:" in customer_email["body"]
-    assert "Support:" in customer_email["body"]
-    assert "Privacy:" in customer_email["body"]
+    assert "https://" not in customer_email["body"]
     assert "Reference:" in customer_email["body"]
+    assert customer_email["sender"] == "office@hilalmarkets.com"
+    assert customer_email["reply_to"] == "office@hilalmarkets.com"
     assert "Knowledge gap:" in office_email["body"]
+    assert "Summary" in office_email["body"]
     assert "Source page:" in office_email["body"]
     assert "Attribution:" in office_email["body"]
+    assert office_email["sender"] == "office@hilalmarkets.com"
+    assert office_email["reply_to"] == "alice@example.com"
     assert "<script>" not in customer_email["html_body"]
     assert "<script>" not in office_email["html_body"]
 
@@ -514,6 +1000,10 @@ async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipi
         assert "alert(1)" in inquiry.details
         assert inquiry.referrer == "https://example.com/referral"
         assert inquiry.attribution["utm_source"] == "private-beta"
+        assert inquiry.support_metadata["answer_event_id"] == answer_event_id
+        feedback = await session.scalar(select(PublicChatAnswerFeedback))
+        assert feedback is not None
+        assert feedback.inquiry_id == inquiry.id
         assert await session.scalar(select(func.count(PublicInquiry.id))) == 1
         assert await session.scalar(
             select(func.count(PublicInquiryEmailDelivery.id))
@@ -523,10 +1013,21 @@ async def test_public_inquiry_is_sanitized_idempotent_and_queued_for_both_recipi
 async def test_public_inquiry_rating_and_token_bound_redaction(test_context):
     client = test_context["client"]
     token = await _bootstrap(client)
+    session_id = "public_rating_session_123456"
+    answer_event_id = await _answer_and_request_support(
+        client,
+        token,
+        session_id=session_id,
+        message_id="public-rating-answer-1",
+    )
     submitted = await client.post(
         "/api/v1/public-chat/inquiries",
         headers={"X-CSRF-Token": token},
-        json=_inquiry_payload(key="public-inquiry:test:rating1"),
+        json=_inquiry_payload(
+            session_id=session_id,
+            answer_event_id=answer_event_id,
+            key="public-inquiry:test:rating1",
+        ),
     )
     assert submitted.status_code == 200
     item = submitted.json()
@@ -607,14 +1108,16 @@ async def test_public_inquiry_email_retry_and_abandoned_claim_recovery(
         return f"provider-{len(calls)}"
 
     monkeypatch.setattr(AuthEmailService, "send_transactional", flaky_send)
-    payload = _inquiry_payload(key="public-inquiry:test:retry1")
-    payload["profile"]["email"] = "retry@example.com"
-
     async with test_context["session_factory"]() as session:
         service = PublicChatService(session, settings)
-        from ai_market_monitor.schemas.public_chat import PublicInquiryRequest
-
-        inquiry = await service.submit_inquiry(PublicInquiryRequest.model_validate(payload))
+        payload = await _service_inquiry_payload(
+            service,
+            session_id="public_retry_session_123456",
+            message_id="public-retry-answer-1",
+            key="public-inquiry:test:retry1",
+        )
+        payload.profile.email = "retry@example.com"
+        inquiry = await service.submit_inquiry(payload)
         await session.commit()
         first = await service.process_due(inquiry_id=inquiry.id, limit=2)
         assert first == {"processed": 2, "sent": 1, "retryable": 1, "failed": 0}
@@ -637,11 +1140,14 @@ async def test_public_inquiry_email_retry_and_abandoned_claim_recovery(
         assert retry.status == "sent"
         assert retry.attempt_count == 2
 
-        recovery_payload = _inquiry_payload(key="public-inquiry:test:recovery1")
-        recovery_payload["profile"]["email"] = "recovery@example.com"
-        recovery_inquiry = await service.submit_inquiry(
-            PublicInquiryRequest.model_validate(recovery_payload)
+        recovery_payload = await _service_inquiry_payload(
+            service,
+            session_id="public_recovery_session_123456",
+            message_id="public-recovery-answer-1",
+            key="public-inquiry:test:recovery1",
         )
+        recovery_payload.profile.email = "recovery@example.com"
+        recovery_inquiry = await service.submit_inquiry(recovery_payload)
         await session.commit()
         recovery_row = await session.scalar(
             select(PublicInquiryEmailDelivery).where(

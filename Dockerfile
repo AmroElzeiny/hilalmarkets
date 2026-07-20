@@ -1,3 +1,11 @@
+FROM node:22.14-alpine AS landing-build
+
+WORKDIR /landing
+COPY Hilal-Markets-Website/package.json Hilal-Markets-Website/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY Hilal-Markets-Website ./
+RUN pnpm typecheck && pnpm build
+
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -10,7 +18,9 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY --from=landing-build /landing/dist ./src/ai_market_monitor/static/landing
 COPY scripts ./scripts
+COPY Notion ./Notion
 COPY alembic.ini ./
 COPY alembic ./alembic
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \

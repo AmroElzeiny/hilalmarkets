@@ -120,6 +120,10 @@ app.conf.update(
             "task": "ai_market_monitor.retry_public_inquiry_emails",
             "schedule": 60,
         },
+        "retry-public-form-deliveries-every-minute": {
+            "task": "ai_market_monitor.retry_public_form_deliveries",
+            "schedule": 60,
+        },
         "cleanup-public-chat-data-nightly": {
             "task": "ai_market_monitor.cleanup_public_chat_data",
             "schedule": 24 * 60 * 60,
@@ -297,6 +301,11 @@ def retry_payment_emails() -> dict:
 @app.task(name="ai_market_monitor.retry_public_inquiry_emails")
 def retry_public_inquiry_emails() -> dict:
     return _run_async_task(_retry_public_inquiry_emails())
+
+
+@app.task(name="ai_market_monitor.retry_public_form_deliveries")
+def retry_public_form_deliveries() -> dict:
+    return _run_async_task(_retry_public_form_deliveries())
 
 
 @app.task(name="ai_market_monitor.cleanup_public_chat_data")
@@ -843,6 +852,17 @@ async def _retry_public_inquiry_emails() -> dict:
 
     async with SessionFactory() as session:
         return await PublicChatService(session, settings).process_due()
+
+
+async def _retry_public_form_deliveries() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.public_forms import PublicFormsService
+
+    async with SessionFactory() as session:
+        service = PublicFormsService(session, settings)
+        contact = await service.process_contact_due()
+        waitlist = await service.process_waitlist_due()
+        return {"contact": contact, "waitlist": waitlist}
 
 
 async def _cleanup_public_chat_data() -> dict:

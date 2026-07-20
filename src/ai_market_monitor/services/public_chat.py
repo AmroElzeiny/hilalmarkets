@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import monotonic
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, delete, or_, select
@@ -21,23 +21,29 @@ from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import HELP_CATEGORIES, PUBLIC_PAGES, PURCHASE_FAQS
 from ai_market_monitor.db.models import (
     PublicChatAnswerEvent,
+    PublicChatAnswerFeedback,
     PublicChatConversation,
     PublicChatTurn,
     PublicInquiry,
     PublicInquiryEmailDelivery,
     PublicInquiryRating,
+    User,
 )
 from ai_market_monitor.schemas.public_chat import (
+    PublicChatAnswerFeedbackRequest,
+    PublicChatAnswerFeedbackResponse,
     PublicChatAnswerRequest,
     PublicChatAnswerResponse,
     PublicChatAnswerStatus,
     PublicChatRelatedLink,
     PublicInquiryRatingRequest,
     PublicInquiryRequest,
+    PublicSupportMode,
     PublicSupportStage,
 )
 from ai_market_monitor.services.agent_control import AgentResponsesClient
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
+from ai_market_monitor.services.notion_knowledge import NotionKnowledgeService
 from ai_market_monitor.services.public_support_ai import (
     PublicSupportAICall,
     PublicSupportAIService,
@@ -50,7 +56,7 @@ PUBLIC_CHAT_PROFILE_STORAGE_KEY = "hm-public-chat-profile-v1"
 PUBLIC_CHAT_CSRF_COOKIE = "hm_public_chat_csrf"
 
 PUBLIC_ROUTE_PATHS: dict[str, tuple[str, str]] = {
-    "home": ("HilalMarkets", "/"),
+    "home": ("Hilal Markets", "/"),
     "features": ("Features", "/features"),
     "how_it_works": ("How It Works", "/how-it-works"),
     "how_we_screen": ("How We Screen", "/how-we-screen"),
@@ -126,6 +132,30 @@ _INJECTION_PATTERNS = (
     re.compile(r"\b(ignore|reveal|override)\b.*\b(system|instructions|prompt|rules)\b", re.I),
     re.compile(r"\b(show|print|give)\b.*\b(secret|api key|credentials?)\b", re.I),
 )
+_GREETING_PATTERNS = (
+    re.compile(r"^\s*(?:hi|hello|hey)(?:\s+there)?[!.?\s]*$", re.I),
+    re.compile(r"^\s*good\s+(?:morning|afternoon|evening)[!.?\s]*$", re.I),
+    re.compile(r"^\s*how\s+are\s+you[!.?\s]*$", re.I),
+)
+_EXPLICIT_SUPPORT_PATTERNS = (
+    re.compile(
+        r"\b(?:contact|email|message|speak|talk)\s+(?:to\s+|with\s+)?"
+        r"(?:support|the\s+team|a\s+human|someone)\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:open|submit|send)\s+(?:a\s+)?support\s+(?:form|ticket|request)\b", re.I),
+    re.compile(
+        r"\bi\s+(?:want|need|would\s+like)\s+(?:to\s+)?"
+        r"(?:contact|email|message|speak|talk)\b",
+        re.I,
+    ),
+)
+_UNSAFE_EDUCATION_OUTPUT = (
+    re.compile(r"\b(?:you\s+should|i\s+recommend\s+you)\s+(?:buy|sell|trade)\b", re.I),
+    re.compile(r"\b(?:buy|sell)\s+now\b", re.I),
+    re.compile(r"\b(?:guaranteed|certain)\s+(?:profit|return|outcome)\b", re.I),
+    re.compile(r"\b(?:will|is\s+going\s+to)\s+(?:pump|moon|rise|fall)\b", re.I),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +168,16 @@ class PublicKnowledgeEntry:
 
     @property
     def tokens(self) -> set[str]:
-        return _tokens(" ".join((self.title, self.answer, *self.keywords)))
+        # The spaced brand name contains the domain word "Markets". Do not let
+        # that repeated boilerplate make every document look relevant to a
+        # market-scope question; explicit entry keywords still rank normally.
+        content = re.sub(
+            r"\bhilal\s+markets\b",
+            " ",
+            " ".join((self.title, self.answer)),
+            flags=re.IGNORECASE,
+        )
+        return _tokens(content) | _tokens(" ".join(self.keywords))
 
 
 class PublicKnowledgeService:
@@ -165,7 +204,7 @@ class PublicKnowledgeService:
         if any(pattern.search(cleaned) for pattern in _INJECTION_PATTERNS):
             return (
                 "refused",
-                "I can explain verified HilalMarkets product information, but I cannot reveal "
+                "I can explain verified Hilal Markets product information, but I cannot reveal "
                 "internal instructions, credentials, or private system details.",
                 1.0,
                 ["boundary:public-assistant-security"],
@@ -175,7 +214,7 @@ class PublicKnowledgeService:
         if any(pattern.search(cleaned) for pattern in _ADVICE_PATTERNS):
             return (
                 "refused",
-                "HilalMarkets does not tell you what to buy or sell, predict pumps, or provide "
+                "Hilal Markets does not tell you what to buy or sell, predict pumps, or provide "
                 "leverage advice. It helps you monitor your own crypto spot rules with evidence.",
                 1.0,
                 ["boundary:no-investment-advice"],
@@ -185,7 +224,7 @@ class PublicKnowledgeService:
         if any(pattern.search(cleaned) for pattern in _RELIGIOUS_RULING_PATTERNS):
             return (
                 "refused",
-                "HilalMarkets does not issue religious rulings. It shows the status, scope, "
+                "Hilal Markets does not issue religious rulings. It shows the status, scope, "
                 "methodology, evidence, and qualified human decision recorded for each asset.",
                 1.0,
                 ["boundary:no-religious-rulings"],
@@ -225,6 +264,7 @@ class PublicKnowledgeService:
                 "title": entry.title,
                 "content": entry.answer,
                 "route_id": entry.route_id,
+                "authority": "authoritative_product_fact",
             }
             size = len(entry.title) + len(entry.answer) + len(entry.source_id)
             if documents and used + size > character_budget:
@@ -263,7 +303,7 @@ class PublicKnowledgeService:
             return (
                 "unsupported",
                 "I don't have a verified answer for that yet, but I can send your question to "
-                "the HilalMarkets team.",
+                "the Hilal Markets team.",
                 best_score,
                 [],
                 ["contact"],
@@ -319,6 +359,7 @@ class PublicKnowledgeService:
                 "title": entry.title,
                 "content": entry.answer,
                 "route_id": entry.route_id,
+                "authority": "authoritative_product_fact",
                 "retrieval_score": round(min(1.0, score), 5),
             }
             for score, entry in selected
@@ -328,16 +369,16 @@ class PublicKnowledgeService:
         entries: list[PublicKnowledgeEntry] = [
             PublicKnowledgeEntry(
                 source_id="product:overview:v1",
-                title="HilalMarkets product overview",
+                title="Hilal Markets product overview",
                 answer=(
-                    "HilalMarkets is an explainable crypto spot research and monitoring product. "
+                    "Hilal Markets is an explainable crypto spot research and monitoring product. "
                     "It helps users screen eligible assets, describe their own market rules, "
                     "check those rules, follow opportunity journeys, and receive evidence-backed "
                     "alerts. It does not execute trades or promise outcomes."
                 ),
                 route_id="home",
                 keywords=(
-                    "what HilalMarkets does",
+                    "what Hilal Markets does",
                     "product overview",
                     "crypto spot monitoring",
                     "not an exchange",
@@ -347,7 +388,7 @@ class PublicKnowledgeService:
                 source_id="beta:account-access:v1",
                 title="Private-beta account and dashboard access",
                 answer=(
-                    "Create or sign in to a HilalMarkets account through the Dashboard entry. "
+                    "Create or sign in to a Hilal Markets account through the Dashboard entry. "
                     "Email verification protects account ownership. Password recovery, account "
                     "preferences, and authenticated support are available from the account flow; "
                     "private account details are never available to anonymous visitors."
@@ -361,6 +402,94 @@ class PublicKnowledgeService:
                     "private beta",
                     "dashboard access",
                 ),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:screened-market:v1",
+                title="Screened Market and My Screened Watchlist",
+                answer=(
+                    "Screened Market shows assets allowed by the active user policy and "
+                    "methodology. My Screened Watchlist saves assets to follow or use as a "
+                    "Watch Plan universe; saving an asset never overrides its current status."
+                ),
+                route_id="features",
+                keywords=("screened market", "saved assets", "screened watchlist"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:evidence-passport:v1",
+                title="Evidence Passports, methodology versions, and qualifications",
+                answer=(
+                    "An Evidence Passport is the immutable published record for one asset, "
+                    "methodology version, evidence set, review scope, use-case decisions, and "
+                    "qualifications. It reports the recorded decision; Hilal Markets does not "
+                    "issue an independent religious ruling."
+                ),
+                route_id="how_we_screen",
+                keywords=("passport", "methodology", "qualification", "use case"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:opportunity-journey:v1",
+                title="Opportunity Cards and Opportunity Journeys",
+                answer=(
+                    "Opportunity Cards summarize real evaluated Watch Plan evidence. An "
+                    "Opportunity Journey preserves how one occurrence moved through forming, "
+                    "confirmation, invalidation, expiry, policy holds, and delivery outcomes."
+                ),
+                route_id="features",
+                keywords=("opportunity card", "opportunity journey", "lifecycle"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:compliance-change:v1",
+                title="Compliance status changes and affected Watch Plans",
+                answer=(
+                    "When a published screening status changes, Hilal Markets preserves the old "
+                    "and current Passport versions, re-resolves affected Watch Plans, applies "
+                    "the selected fail-closed policy, and explains the impact."
+                ),
+                route_id="how_we_screen",
+                keywords=("compliance change", "status change", "hold", "restoration"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="beta:channel-state:v1",
+                title="Private-beta notification channel availability",
+                answer=(
+                    "The private beta supports in-app notifications and Telegram. WhatsApp and "
+                    "billing are disabled for the initial beta, and Discord is retired."
+                ),
+                route_id="features",
+                keywords=("telegram", "whatsapp", "discord", "notification channel"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:security-privacy:v1",
+                title="Account security, privacy, and cookies",
+                answer=(
+                    "Email verification and authenticated ownership protect private account "
+                    "data. Essential security storage remains enabled; optional functional and "
+                    "analytics cookies follow the visitor's choices and can be changed later."
+                ),
+                route_id="privacy",
+                keywords=("security", "privacy", "cookies", "account ownership"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:limitations-risk:v1",
+                title="Product limitations and risk disclosure",
+                answer=(
+                    "Hilal Markets is research and monitoring software for crypto spot. It does "
+                    "not execute trades, hold funds, promise returns, predict prices, provide "
+                    "personalized investment advice, or issue personal religious rulings."
+                ),
+                route_id="risk_disclosure",
+                keywords=("limitation", "risk", "financial advice", "trading execution"),
+            ),
+            PublicKnowledgeEntry(
+                source_id="product:support-partnerships:v1",
+                title="Product support and partnership inquiries",
+                answer=(
+                    "Visitors can ask the Support AI about Hilal Markets and choose the Support "
+                    "form when they want a human follow-up. Product, screening, technical, and "
+                    "partnership inquiries are routed to the Hilal Markets team by email."
+                ),
+                route_id="contact",
+                keywords=("support", "contact", "partnership", "email the team"),
             ),
         ]
         for category in HELP_CATEGORIES:
@@ -412,7 +541,7 @@ class PublicKnowledgeService:
             (
                 PublicKnowledgeEntry(
                     source_id="plan-catalog:public",
-                    title="How much does HilalMarkets cost during private beta?",
+                    title="How much does Hilal Markets cost during private beta?",
                     answer=pricing_answer,
                     route_id="pricing",
                     keywords=("price", "pricing", "cost", "free", "plan", "beta", "trial"),
@@ -487,6 +616,7 @@ class PublicChatService:
         self.session = session
         self.settings = settings
         self.knowledge = PublicKnowledgeService(settings)
+        self.notion_knowledge = NotionKnowledgeService(settings)
         self.ai_client = ai_client
 
     async def answer(
@@ -513,28 +643,67 @@ class PublicChatService:
         authenticated_context_used = False
         status: PublicChatAnswerStatus
         stage: PublicSupportStage
+        mode: PublicSupportMode
+        is_greeting = _is_greeting(payload.question)
+        explicit_support_request = _explicit_support_requested(payload.question)
+        support_handoff_available = False
+        support_handoff_reason: str | None = None
         if boundary is not None:
             status, message, score, source_ids, route_ids, gap = boundary
             stage = "REFUSAL"
+            mode = "SAFETY_REFUSAL"
             intent = gap or "safety_refusal"
             clarification = None
             answer_complete = True
-            follow_ups = ["What can HilalMarkets monitor for me?"]
-            show_inquiry = False
+            follow_ups = ["What can Hilal Markets monitor for me?"]
             safety_boundary = gap
         elif not self.settings.public_chat_ai_enabled:
-            status, message, score, source_ids, route_ids, gap = self.knowledge.answer(
-                payload.question
-            )
-            stage = "ANSWER" if status == "answered" else "KNOWLEDGE_GAP"
-            intent = "legacy_grounded_fallback"
+            if is_greeting:
+                status = "answered"
+                message = _safe_greeting(
+                    state,
+                    supplied_name=payload.profile.name if payload.profile else None,
+                )
+                score = 1.0
+                source_ids = []
+                route_ids = []
+                gap = None
+                stage = "GREETING_AND_PROFILE"
+                mode = "PRODUCT_CONVERSATION"
+                intent = "greeting"
+            else:
+                status, message, score, source_ids, route_ids, gap = (
+                    self.knowledge.answer(payload.question)
+                )
+                stage = "ANSWER" if status == "answered" else "KNOWLEDGE_GAP"
+                mode = "PRODUCT_FACT"
+                intent = "legacy_grounded_fallback"
             clarification = None
             answer_complete = status == "answered"
             follow_ups = []
-            show_inquiry = status == "unsupported"
+            support_handoff_available = status == "unsupported"
+            support_handoff_reason = gap if support_handoff_available else None
         else:
             documents = self.knowledge.documents_for_ai()
+            documents.extend(
+                self.notion_knowledge.retrieve(
+                    payload.question,
+                    previous_source_ids=list(state.get("previous_source_ids") or []),
+                )
+            )
             ai_state = _public_ai_state(state)
+            if payload.profile is not None:
+                ai_state["visitor_profile"] = {
+                    "name": payload.profile.name.split()[0][:80]
+                }
+            if user_id is not None and not (ai_state.get("visitor_profile") or {}).get(
+                "name"
+            ):
+                user = await self.session.get(User, user_id)
+                if user is not None and user.display_name:
+                    ai_state["visitor_profile"] = {
+                        "name": user.display_name.split()[0][:80]
+                    }
             allowed_tools = ["public_passport"]
             if user_id is not None:
                 allowed_tools.extend(
@@ -615,9 +784,10 @@ class PublicChatService:
                     generated = first.response
                 status = (
                     "refused"
-                    if generated.stage == "REFUSAL"
+                    if generated.mode == "SAFETY_REFUSAL"
                     else "unsupported"
-                    if generated.stage in {"KNOWLEDGE_GAP", "INQUIRY_FORM"}
+                    if generated.mode == "OUT_OF_SCOPE"
+                    or generated.stage in {"KNOWLEDGE_GAP", "INQUIRY_FORM"}
                     else "answered"
                 )
                 message = generated.answer
@@ -627,13 +797,19 @@ class PublicChatService:
                     generated.related_route_ids,
                     tool_results,
                 )
-                gap = generated.handoff_reason if generated.show_inquiry_form else None
+                gap = (
+                    generated.support_handoff_reason
+                    if generated.support_handoff_available
+                    else None
+                )
                 stage = generated.stage
+                mode = generated.mode
                 intent = generated.intent
                 clarification = generated.clarification_question
                 answer_complete = generated.answer_complete
                 follow_ups = generated.suggested_follow_ups
-                show_inquiry = generated.show_inquiry_form
+                support_handoff_available = generated.support_handoff_available
+                support_handoff_reason = generated.support_handoff_reason
                 safety_boundary = generated.safety_boundary
                 authenticated_context_used = bool(
                     user_id is not None
@@ -649,38 +825,39 @@ class PublicChatService:
                     else:
                         status = "unsupported"
                         stage = "KNOWLEDGE_GAP"
-                        show_inquiry = True
+                        answer_complete = False
                         gap = gap or "low_confidence"
             except PublicSupportAIUnavailable as exc:
                 validation_failure = type(exc).__name__
-                status = "unsupported"
-                message = (
-                    "I could not verify a grounded answer right now. Please retry, or send "
-                    "the question to the HilalMarkets team."
+                mode = "PRODUCT_CONVERSATION" if is_greeting else "PRODUCT_FACT"
+                status = "answered" if is_greeting else "unsupported"
+                message = _safe_greeting(
+                    state,
+                    supplied_name=payload.profile.name if payload.profile else None,
+                ) if is_greeting else (
+                    "I couldn't verify that answer just now. You can retry, ask it another "
+                    "way, or use the Support form below if you prefer."
                 )
                 score = 0.0
                 source_ids = []
-                route_ids = ["help", "contact"]
+                route_ids = [] if is_greeting else ["help", "contact"]
                 gap = "grounded_ai_unavailable"
-                stage = "KNOWLEDGE_GAP"
-                intent = "provider_unavailable"
+                stage = "GREETING_AND_PROFILE" if is_greeting else "KNOWLEDGE_GAP"
+                intent = "greeting" if is_greeting else "provider_unavailable"
                 clarification = None
-                answer_complete = False
+                answer_complete = is_greeting
                 follow_ups = ["Try that question again"]
-                show_inquiry = True
+                support_handoff_available = not is_greeting
+                support_handoff_reason = gap if support_handoff_available else None
                 safety_boundary = "product_scope_only"
 
-        self._update_conversation_state(
-            conversation,
-            payload=payload,
-            answer=message,
-            stage=stage,
-            intent=intent,
-            source_ids=source_ids,
-            clarification=clarification,
-            user_id=user_id,
-            tool_results=tool_results,
+        support_handoff_explicitly_requested = bool(
+            explicit_support_request
+            and mode not in {"OUT_OF_SCOPE", "SAFETY_REFUSAL"}
         )
+        if support_handoff_explicitly_requested:
+            support_handoff_available = True
+            support_handoff_reason = "user_requested_human_support"
         usage = self._combined_ai_usage(ai_calls)
         now = datetime.now(UTC)
         event = PublicChatAnswerEvent(
@@ -690,6 +867,7 @@ class PublicChatService:
             question_hash=self._hash(f"question:{payload.question.casefold()}"),
             outcome=status,
             stage=stage,
+            mode=mode,
             intent=intent,
             model=usage["model"],
             input_tokens=usage["input_tokens"],
@@ -702,6 +880,10 @@ class PublicChatService:
             ),
             estimated_cost_usd=Decimal(str(usage["estimated_cost_usd"])),
             validation_failure=validation_failure,
+            knowledge_gap_reason=gap,
+            is_greeting=is_greeting,
+            support_handoff_available=support_handoff_available,
+            support_handoff_reason=support_handoff_reason,
             coverage_score=Decimal(str(round(score, 5))),
             source_ids=source_ids,
             related_route_ids=route_ids,
@@ -710,15 +892,33 @@ class PublicChatService:
             + timedelta(days=self.settings.public_chat_answer_audit_retention_days),
         )
         self.session.add(event)
+        await self.session.flush()
+        self._update_conversation_state(
+            conversation,
+            payload=payload,
+            answer=message,
+            answer_event_id=event.id,
+            stage=stage,
+            mode=mode,
+            intent=intent,
+            source_ids=source_ids,
+            clarification=clarification,
+            user_id=user_id,
+            tool_results=tool_results,
+            support_handoff_available=support_handoff_available,
+        )
         response = PublicChatAnswerResponse(
             status=status,
             message=message,
             source_ids=source_ids,
-            related_links=[self._related_link(route_id) for route_id in route_ids],
+            # Route IDs remain in the private audit event for grounding, but the
+            # public assistant does not expose site links while those pages are
+            # under construction.
+            related_links=[],
             coverage_score=score,
-            show_inquiry_form=show_inquiry,
             knowledge_gap_category=gap,
             stage=stage,
+            mode=mode,
             intent=intent,
             clarification_question=clarification,
             confidence=score,
@@ -726,6 +926,12 @@ class PublicChatService:
             suggested_follow_ups=follow_ups,
             safety_boundary=safety_boundary,
             authenticated_context_used=authenticated_context_used,
+            support_handoff_available=support_handoff_available,
+            support_handoff_reason=support_handoff_reason,
+            support_handoff_explicitly_requested=(
+                support_handoff_explicitly_requested
+            ),
+            answer_event_id=event.id,
         )
         turn.status = "completed"
         turn.response_json = response.model_dump(mode="json")
@@ -791,18 +997,39 @@ class PublicChatService:
             if existing.request_hash != request_hash:
                 raise ValueError("A client message ID cannot be reused for different text.")
             if existing.status == "completed" and existing.response_json:
-                return existing, PublicChatAnswerResponse.model_validate(
-                    existing.response_json
-                )
+                cached = PublicChatAnswerResponse.model_validate(existing.response_json)
+                if cached.related_links:
+                    cached.related_links = []
+                    existing.response_json = cached.model_dump(mode="json")
+                if cached.answer_event_id is None:
+                    event = await self.session.scalar(
+                        select(PublicChatAnswerEvent)
+                        .where(
+                            PublicChatAnswerEvent.conversation_id == conversation.id,
+                            PublicChatAnswerEvent.question_hash
+                            == self._hash(f"question:{payload.question.casefold()}"),
+                        )
+                        .order_by(PublicChatAnswerEvent.created_at.desc())
+                        .limit(1)
+                    )
+                    if event is not None:
+                        cached.answer_event_id = event.id
+                        cached.mode = cast(PublicSupportMode, event.mode)
+                        cached.support_handoff_available = (
+                            event.support_handoff_available
+                        )
+                        cached.support_handoff_reason = event.support_handoff_reason
+                        existing.response_json = cached.model_dump(mode="json")
+                return existing, cached
             return existing, PublicChatAnswerResponse(
                 status="unsupported",
                 message="That message is still being processed. Please retry in a moment.",
                 source_ids=[],
                 related_links=[],
                 coverage_score=0,
-                show_inquiry_form=False,
                 knowledge_gap_category="turn_in_progress",
                 stage="FOLLOW_UP",
+                mode="PRODUCT_CONVERSATION",
                 intent="duplicate_in_progress",
                 confidence=1,
                 answer_complete=False,
@@ -829,12 +1056,15 @@ class PublicChatService:
         *,
         payload: PublicChatAnswerRequest,
         answer: str,
+        answer_event_id: UUID,
         stage: str,
+        mode: PublicSupportMode,
         intent: str,
         source_ids: list[str],
         clarification: str | None,
         user_id: UUID | None,
         tool_results: list[Any],
+        support_handoff_available: bool,
     ) -> None:
         state = dict(conversation.state_json or {})
         messages = list(state.get("messages") or [])
@@ -858,6 +1088,10 @@ class PublicChatService:
             {
                 "visitor_profile": profile,
                 "current_topic": intent,
+                "current_mode": mode,
+                "last_question": payload.question,
+                "last_answer": answer,
+                "last_answer_event_id": str(answer_event_id),
                 "messages": messages[-self.settings.public_chat_ai_max_history_messages :],
                 "previous_source_ids": list(dict.fromkeys(source_ids))[-20:],
                 "questions_answered": (
@@ -880,7 +1114,9 @@ class PublicChatService:
                     }
                     for item in tool_results
                 ][-10:],
-                "inquiry_state": "offered" if stage == "INQUIRY_FORM" else "none",
+                "support_handoff_available": support_handoff_available,
+                "support_form_state": "available" if support_handoff_available else "closed",
+                "inquiry_state": "none",
                 "rating_state": str(state.get("rating_state") or "none"),
             }
         )
@@ -900,6 +1136,11 @@ class PublicChatService:
         final_after_tools: bool,
     ) -> None:
         valid_sources = {str(item["source_id"]) for item in documents}
+        authoritative_sources = {
+            str(item["source_id"])
+            for item in documents
+            if item.get("authority") == "authoritative_product_fact"
+        }
         valid_sources.update(
             reference for item in tool_results for reference in item.evidence_refs
         )
@@ -912,22 +1153,47 @@ class PublicChatService:
         if final_after_tools and response.requested_tools:
             raise PublicSupportAIUnavailable("The assistant repeated a read tool request.")
         successful_tool = any(item.status == "success" for item in tool_results)
-        grounded_stage = response.stage not in {
-            "GREETING_AND_PROFILE",
-            "UNDERSTAND_QUESTION",
-            "CLARIFY",
-            "KNOWLEDGE_GAP",
-            "INQUIRY_FORM",
-            "REFUSAL",
-            "RETRIEVE_PRODUCT_DATA",
-        }
+        successful_account_tool = any(
+            item.status == "success" and item.tool_name != "public_passport"
+            for item in tool_results
+        )
+        cited_authoritative_source = bool(
+            set(response.source_ids) & authoritative_sources
+        )
         if (
-            grounded_stage
+            response.mode == "PRODUCT_FACT"
             and not response.requested_tools
-            and not response.source_ids
+            and not cited_authoritative_source
             and not successful_tool
         ):
-            raise PublicSupportAIUnavailable("The answer had no authoritative evidence.")
+            raise PublicSupportAIUnavailable(
+                "The product answer had no authoritative evidence."
+            )
+        if (
+            response.mode == "ACCOUNT_SUPPORT"
+            and not response.requested_tools
+            and not successful_account_tool
+        ):
+            raise PublicSupportAIUnavailable(
+                "The account answer had no successful authenticated tool result."
+            )
+        if response.mode == "GENERAL_TRADING_EDUCATION" and any(
+            pattern.search(response.answer) for pattern in _UNSAFE_EDUCATION_OUTPUT
+        ):
+            raise PublicSupportAIUnavailable(
+                "The educational answer crossed a product safety boundary."
+            )
+        if (
+            response.mode in {"OUT_OF_SCOPE", "SAFETY_REFUSAL"}
+            and response.support_handoff_available
+        ):
+            raise PublicSupportAIUnavailable(
+                "Refusals and out-of-scope answers cannot request a support handoff."
+            )
+        if response.mode == "PRODUCT_CONVERSATION" and response.requested_tools:
+            raise PublicSupportAIUnavailable(
+                "Normal product conversation cannot request account tools."
+            )
 
     @staticmethod
     def _authoritative_route_ids(
@@ -956,13 +1222,134 @@ class PublicChatService:
             "latency_ms": sum(item.latency_ms for item in calls),
         }
 
+    async def record_answer_feedback(
+        self,
+        answer_event_id: UUID,
+        payload: PublicChatAnswerFeedbackRequest,
+    ) -> PublicChatAnswerFeedbackResponse:
+        event = await self.session.get(PublicChatAnswerEvent, answer_event_id)
+        session_hash = self._hash(f"session:{payload.session_id}")
+        if event is None or not hmac.compare_digest(
+            event.session_key_hash, session_hash
+        ):
+            raise ValueError("The answer event is unavailable for this chat session.")
+        existing = await self.session.scalar(
+            select(PublicChatAnswerFeedback).where(
+                PublicChatAnswerFeedback.answer_event_id == answer_event_id
+            )
+        )
+        if existing is not None:
+            if (
+                existing.helpful != payload.helpful
+                or existing.support_form_requested != payload.support_form_requested
+            ):
+                raise ValueError(
+                    "Feedback was already recorded for this answer."
+                ) from None
+            return self._feedback_response(existing)
+
+        feedback = PublicChatAnswerFeedback(
+            answer_event_id=event.id,
+            conversation_id=event.conversation_id,
+            user_id=event.user_id,
+            session_key_hash=event.session_key_hash,
+            helpful=payload.helpful,
+            support_form_requested=payload.support_form_requested,
+            stage=event.stage,
+            mode=event.mode,
+            intent=event.intent,
+            model=event.model,
+            confidence=event.coverage_score,
+            source_ids=list(event.source_ids or []),
+            validation_failure=event.validation_failure,
+            knowledge_gap_reason=event.knowledge_gap_reason,
+        )
+        try:
+            async with self.session.begin_nested():
+                self.session.add(feedback)
+                await self.session.flush()
+        except IntegrityError:
+            existing = await self.session.scalar(
+                select(PublicChatAnswerFeedback).where(
+                    PublicChatAnswerFeedback.answer_event_id == answer_event_id
+                )
+            )
+            if existing is None:
+                raise ValueError(
+                    "Feedback could not be recorded for this answer."
+                ) from None
+            if (
+                existing.helpful != payload.helpful
+                or existing.support_form_requested != payload.support_form_requested
+            ):
+                raise ValueError(
+                    "Feedback was already recorded for this answer."
+                ) from None
+            return self._feedback_response(existing)
+        conversation = (
+            await self.session.get(PublicChatConversation, event.conversation_id)
+            if event.conversation_id
+            else None
+        )
+        if conversation is not None:
+            state = dict(conversation.state_json or {})
+            state["previous_feedback_result"] = (
+                "helpful" if payload.helpful else "support_requested"
+            )
+            state["support_form_state"] = (
+                "requested" if payload.support_form_requested else "closed"
+            )
+            conversation.state_json = state
+        await self.session.flush()
+        return self._feedback_response(feedback)
+
+    @staticmethod
+    def _feedback_response(
+        feedback: PublicChatAnswerFeedback,
+    ) -> PublicChatAnswerFeedbackResponse:
+        return PublicChatAnswerFeedbackResponse(
+            status="recorded",
+            message=(
+                "Great! Ready when you are."
+                if feedback.helpful
+                else "Thanks. The Support form is ready when you are."
+            ),
+            support_form_requested=feedback.support_form_requested,
+        )
+
     async def submit_inquiry(self, payload: PublicInquiryRequest) -> PublicInquiry:
+        event = await self.session.get(PublicChatAnswerEvent, payload.answer_event_id)
+        session_hash = self._hash(f"session:{payload.session_id}")
+        if event is None or not hmac.compare_digest(
+            event.session_key_hash, session_hash
+        ):
+            raise ValueError("The answer event is unavailable for this chat session.")
+        feedback = await self.session.scalar(
+            select(PublicChatAnswerFeedback).where(
+                PublicChatAnswerFeedback.answer_event_id == event.id
+            )
+        )
+        if feedback is None or not feedback.support_form_requested:
+            raise ValueError(
+                "Choose 'No. Submit a support form' before sending an inquiry."
+            )
+        if feedback.inquiry_id is not None:
+            linked = await self.session.get(PublicInquiry, feedback.inquiry_id)
+            if linked is not None:
+                return linked
         existing = await self.session.scalar(
             select(PublicInquiry).where(
                 PublicInquiry.idempotency_key == payload.idempotency_key
             )
         )
         if existing is not None:
+            if str((existing.support_metadata or {}).get("answer_event_id")) != str(
+                event.id
+            ):
+                raise ValueError(
+                    "The inquiry key belongs to a different answer."
+                ) from None
+            feedback.inquiry_id = existing.id
             return existing
         now = datetime.now(UTC)
         inquiry = PublicInquiry(
@@ -982,27 +1369,57 @@ class PublicChatService:
                 }.items()
                 if value
             },
+            support_metadata={
+                "answer_event_id": str(event.id),
+                "stage": event.stage,
+                "mode": event.mode,
+                "intent": event.intent,
+                "model": event.model,
+                "confidence": str(event.coverage_score),
+                "source_ids": list(event.source_ids or []),
+                "validation_failure": event.validation_failure,
+                "knowledge_gap_reason": event.knowledge_gap_reason,
+            },
             knowledge_gap_category=_clean_text(
-                payload.knowledge_gap_category, maximum=80
+                feedback.knowledge_gap_reason or "user_requested_support",
+                maximum=80,
             ),
             idempotency_key=payload.idempotency_key,
             status="received",
             submitted_at=now,
             retain_until=now + timedelta(days=self.settings.public_chat_inquiry_retention_days),
         )
-        self.session.add(inquiry)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(inquiry)
+                await self.session.flush()
         except IntegrityError:
-            await self.session.rollback()
             existing = await self.session.scalar(
                 select(PublicInquiry).where(
                     PublicInquiry.idempotency_key == payload.idempotency_key
                 )
             )
             if existing is None:
-                raise
+                raise ValueError("The inquiry could not be recorded.") from None
+            if str((existing.support_metadata or {}).get("answer_event_id")) != str(
+                event.id
+            ):
+                raise ValueError(
+                    "The inquiry key belongs to a different answer."
+                ) from None
+            feedback.inquiry_id = existing.id
             return existing
+        feedback.inquiry_id = inquiry.id
+        conversation = (
+            await self.session.get(PublicChatConversation, event.conversation_id)
+            if event.conversation_id
+            else None
+        )
+        if conversation is not None:
+            state = dict(conversation.state_json or {})
+            state["support_form_state"] = "submitted"
+            state["inquiry_state"] = "submitted"
+            conversation.state_json = state
         await self._ensure_email_deliveries(inquiry)
         return inquiry
 
@@ -1089,6 +1506,13 @@ class PublicChatService:
                     html_body=html_body,
                     idempotency_key=row.event_key,
                     purpose=f"public_inquiry_{row.recipient_kind}",
+                    sender_email=self.settings.public_chat_inquiry_email,
+                    sender_name="Hilal Markets",
+                    reply_to=(
+                        inquiry.normalized_email
+                        if row.recipient_kind == "office"
+                        else self.settings.public_chat_inquiry_email
+                    ),
                 )
             except EmailDeliveryError as exc:
                 refreshed = await self.session.get(PublicInquiryEmailDelivery, row.id)
@@ -1250,28 +1674,31 @@ class PublicChatService:
         inquiry: PublicInquiry,
         recipient_kind: str,
     ) -> tuple[str, str, str]:
-        base_url = str(self.settings.public_base_url).rstrip("/")
         if recipient_kind == "customer":
             first_name = inquiry.name.split()[0]
-            subject = f"HilalMarkets received your inquiry {inquiry.reference}"
+            subject = f"Hilal Markets received your inquiry {inquiry.reference}"
             text = (
                 f"Hello {first_name},\n\n"
-                "We received your HilalMarkets inquiry. A team member will review it; "
+                "We received your Hilal Markets inquiry. A team member will review it; "
                 "response timing depends on the question and does not imply a fixed SLA.\n\n"
                 f"Reference: {inquiry.reference}\n"
-                f"Your question: {inquiry.details}\n\n"
-                f"Help Center: {base_url}/help\n"
-                f"HilalMarkets: {base_url}/\n"
-                f"Support: {base_url}/contact\n"
-                f"Privacy: {base_url}/privacy\n"
+                f"Your question: {inquiry.details}\n"
             )
         else:
             subject = f"Public inquiry {inquiry.reference}: {inquiry.category.replace('_', ' ')}"
             attribution = ", ".join(
                 f"{key}={value}" for key, value in inquiry.attribution.items()
             ) or "not provided"
+            support_metadata = ", ".join(
+                f"{key}={value}"
+                for key, value in (inquiry.support_metadata or {}).items()
+                if value not in (None, "", [])
+            ) or "not provided"
             text = (
-                "A public HilalMarkets inquiry was received.\n\n"
+                "A public Hilal Markets inquiry was received.\n\n"
+                "Summary\n"
+                f"{inquiry.category.replace('_', ' ').title()} inquiry from {inquiry.name}: "
+                f"{inquiry.details[:280]}\n\n"
                 f"Reference: {inquiry.reference}\n"
                 f"Name: {inquiry.name}\n"
                 f"Email: {inquiry.normalized_email}\n"
@@ -1281,11 +1708,12 @@ class PublicChatService:
                 f"Referrer: {inquiry.referrer or 'not provided'}\n"
                 f"Attribution: {attribution}\n"
                 f"Knowledge gap: {inquiry.knowledge_gap_category}\n\n"
+                f"AI answer metadata: {support_metadata}\n\n"
                 f"Inquiry:\n{inquiry.details}\n"
             )
         escaped = html.escape(text).replace("\n", "<br>")
         html_body = (
-            '<div style="font-family:Arial,sans-serif;line-height:1.55;color:#16322c">'
+            '<div style="font-family:Arial,sans-serif;line-height:1.55;color:#2b2e35">'
             f"{escaped}</div>"
         )
         return subject, text, html_body
@@ -1389,16 +1817,44 @@ def _product_entities(value: str, *, previous: list[str]) -> list[str]:
     return list(dict.fromkeys(entities))[-20:]
 
 
+def _is_greeting(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _GREETING_PATTERNS)
+
+
+def _explicit_support_requested(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _EXPLICIT_SUPPORT_PATTERNS)
+
+
+def _safe_greeting(
+    state: dict[str, Any],
+    *,
+    supplied_name: str | None = None,
+) -> str:
+    profile = dict(state.get("visitor_profile") or {})
+    name = _clean_optional(
+        str(supplied_name or profile.get("name") or ""),
+        maximum=80,
+    )
+    salutation = f"Hi {name.split()[0]}!" if name else "Hi!"
+    return f"{salutation} How can I help you with Hilal Markets today?"
+
+
 def _public_ai_state(state: dict[str, Any]) -> dict[str, Any]:
     profile = dict(state.get("visitor_profile") or {})
     return {
         "visitor_profile": {"name": profile.get("name")} if profile.get("name") else None,
         "current_topic": state.get("current_topic"),
+        "current_mode": state.get("current_mode"),
+        "last_question": state.get("last_question"),
+        "last_answer": state.get("last_answer"),
+        "last_answer_event_id": state.get("last_answer_event_id"),
         "previous_source_ids": list(state.get("previous_source_ids") or [])[-20:],
         "product_entities": list(state.get("product_entities") or [])[-20:],
         "current_troubleshooting_step": state.get("current_troubleshooting_step"),
         "pending_clarification": state.get("pending_clarification"),
         "inquiry_state": state.get("inquiry_state"),
+        "support_form_state": state.get("support_form_state"),
+        "previous_feedback_result": state.get("previous_feedback_result"),
         "rating_state": state.get("rating_state"),
         "questions_answered": list(state.get("questions_answered") or [])[-10:],
     }

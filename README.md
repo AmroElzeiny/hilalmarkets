@@ -34,21 +34,32 @@ four-eyes enforcement. The first-party checkout uses the server Plan Catalog and
 successful-payment email outbox. See
 [docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md](docs/SHARIA_PASSPORT_GOVERNANCE_BILLING_IMPLEMENTATION_REPORT.md).
 
-The public product surface uses shared HilalMarkets Jinja shells, emerald/ivory/gold design
-tokens, and server-owned content sources. Dedicated routes cover Features, How It Works, How We
-Screen, Pricing, Help, Contact, About, Trust & Safety, Risk Disclosure, Privacy, Terms, and Cookies.
+The public landing and contact routes use the supplied `Hilal-Markets-Website/` React/Vite source,
+Geometria/Onest typography, responsive motion, and Hilal Markets brand assets. FastAPI provides a
+minimal metadata/consent shell and same-origin form APIs; the remaining public product pages keep
+the shared Jinja shell and server-owned content sources. Dedicated routes cover Features, How It
+Works, How We Screen, Pricing, Help, Contact, About, Trust & Safety, Risk Disclosure, Privacy,
+Terms, and Cookies.
 Public Pricing and authenticated Billing read the same plan catalog. The private beta exposes only
 free invite access and rejects paid checkout while billing is disabled. Optional analytics is disabled
-by default; Consent Mode v2 denied defaults execute before the optional GTM loader, and users can
-withdraw consent through Cookie Settings. See
+by default; Consent Mode denied defaults execute before the reusable GA4/GTM and Meta loaders, and
+users can withdraw consent through Cookie Settings. Waitlist signups are idempotent database
+records with optional server-only Google Apps Script delivery; contact messages produce one
+idempotent office-email event. See
 [docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md](docs/HILALMARKETS_EXPANSION_IMPLEMENTATION_REPORT.md).
+The landing/contact and analytics implementation is documented in
+[docs/LANDING_CONTACT_ANALYTICS_IMPLEMENTATION_REPORT.md](docs/LANDING_CONTACT_ANALYTICS_IMPLEMENTATION_REPORT.md).
 The landing-page product assistant is a separate public, non-executing boundary. It generates
 multi-turn answers only from server-owned product knowledge and bounded read-only tools. Anonymous
 visitors cannot inspect accounts; a signed-in user may read only their own account, Telegram,
 Watch Plan, alert, entitlement, usage, Screened Watchlist, and published Passport state. Unknown
-questions enter a CSRF-protected, rate-limited, idempotent inquiry flow. The inquiry commits exactly
-one customer and one office email outbox row before returning, supports token-bound
-feedback/deletion, and never exposes Setup Chat mutation tools.
+questions remain in chat unless the visitor explicitly chooses **No. Submit a support form** or
+asks to contact the team. Every completed answer has one session-bound, idempotent feedback record;
+the model can make a handoff available but cannot open the form. The inquiry commits exactly one
+customer and one office email outbox row before returning, supports token-bound feedback/deletion,
+and never exposes Setup Chat mutation tools. A bounded read-only index may retrieve Markdown, CSV,
+JSON, and text from the project `Notion/` export as conversational context. Notion content cannot by
+itself prove a current product fact or authorize a product-state claim.
 The current private-beta correction status, including verification blockers and required staging
 evidence, is recorded in
 [docs/PRIVATE_BETA_READINESS_REPORT.md](docs/PRIVATE_BETA_READINESS_REPORT.md).

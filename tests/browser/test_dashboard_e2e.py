@@ -139,11 +139,12 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
     output.mkdir(parents=True, exist_ok=True)
 
     page.goto(base_url, wait_until="domcontentloaded")
-    expect(page.locator(".public-nav .logo")).to_contain_text("HilalMarkets")
-    expect(page.locator(".landing-hero h1")).to_contain_text(
-        "Halal-conscious crypto monitoring"
+    expect(page.locator('header a[aria-label="Hilal Markets home"]')).to_be_visible()
+    expect(page.locator("main h1")).to_contain_text(
+        "A better way for Muslim crypto traders"
     )
-    expect(page.locator(".feature-bento")).to_contain_text("Evidence Passports")
+    expect(page.locator("#features")).to_be_attached()
+    expect(page.get_by_role("link", name="Join the waitlist").first).to_be_visible()
     assert "TODO_" not in page.content()
     page.evaluate(
         """async () => {
@@ -164,9 +165,139 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
             full_page=True,
         )
 
+    page.set_viewport_size({"width": 768, "height": 900})
+    faq_panel_box = page.locator("#faq > div").nth(1).bounding_box()
+    assert faq_panel_box is not None
+    reference_width = faq_panel_box["width"]
+
+    for card in page.locator('[data-name^="Step 0"]').all():
+        card_box = card.bounding_box()
+        assert card_box is not None
+        assert abs(card_box["width"] - reference_width) <= 1
+
+    first_feature_row = page.locator('[data-name="Feature row 1"]')
+    for content_name in ("Feature copy", "Product visual"):
+        content_box = first_feature_row.locator(
+            f'[data-name="{content_name}"]'
+        ).bounding_box()
+        assert content_box is not None
+        assert abs(content_box["width"] - reference_width) <= 1
+
+    for selector in (
+        '[data-name="Control flow"]',
+        '[data-name^="Trust card "]',
+        '[data-name="Hero flow"] > div',
+    ):
+        for item in page.locator(selector).all():
+            item_box = item.bounding_box()
+            assert item_box is not None
+            assert abs(item_box["width"] - reference_width) <= 1
+
+    for heading in (
+        "From your trading idea to continuous monitoring",
+        "Everything you need to build and monitor with confidence",
+    ):
+        assert page.get_by_text(heading, exact=True).evaluate(
+            "element => getComputedStyle(element).textAlign"
+        ) == "center"
+
+    control_flow = page.locator('[data-name="Control flow"]')
+    page.set_viewport_size({"width": 650, "height": 900})
+    expect(control_flow).to_be_visible()
+    assert control_flow.evaluate(
+        "element => getComputedStyle(element).flexDirection"
+    ) == "row"
+    page.set_viewport_size({"width": 649, "height": 900})
+    assert control_flow.evaluate(
+        "element => getComputedStyle(element).flexDirection"
+    ) == "column"
+
     page.set_viewport_size({"width": 390, "height": 844})
-    page.locator("[data-public-menu]").click()
-    expect(page.locator(".public-links")).to_be_visible()
+    expect(page.locator('header a[aria-label="Hilal Markets home"]')).to_be_visible()
+    expect(page.locator("header").get_by_text("Join the waitlist")).to_be_visible()
+
+    problem = page.locator('[data-name^="03 "]').first
+    corner_boxes = {}
+    for corner in (
+        "top-left",
+        "bottom-left",
+        "top-right",
+        "bottom-right",
+    ):
+        vector = problem.locator(f".problem-corner-vector--{corner}")
+        assert vector.evaluate("element => getComputedStyle(element).width") == "39px"
+        assert vector.evaluate(
+            "element => getComputedStyle(element).aspectRatio"
+        ) == "1 / 1"
+        corner_boxes[corner] = vector.bounding_box()
+        overlaps_text = vector.evaluate(
+            """element => {
+                const vectorRect = element.getBoundingClientRect();
+                const section = element.closest('[data-name^="03 "]');
+                return [...section.querySelectorAll('p')].some((text) => {
+                    const textRect = text.getBoundingClientRect();
+                    return !(
+                        vectorRect.right <= textRect.left ||
+                        vectorRect.left >= textRect.right ||
+                        vectorRect.bottom <= textRect.top ||
+                        vectorRect.top >= textRect.bottom
+                    );
+                });
+            }""",
+        )
+        assert overlaps_text is False
+
+    assert all(corner_boxes.values())
+    top_left = corner_boxes["top-left"]
+    bottom_left = corner_boxes["bottom-left"]
+    top_right = corner_boxes["top-right"]
+    bottom_right = corner_boxes["bottom-right"]
+    assert abs(top_left["x"] - bottom_left["x"]) <= 1
+    assert abs(top_right["x"] - bottom_right["x"]) <= 1
+    assert abs(top_left["y"] - top_right["y"]) <= 1
+    assert abs(bottom_left["y"] - bottom_right["y"]) <= 1
+
+    for row in page.locator('[data-name^="Feature row"]').all():
+        copy_box = row.locator('[data-name="Feature copy"]').bounding_box()
+        visual_box = row.locator('[data-name="Product visual"]').bounding_box()
+        assert copy_box is not None and visual_box is not None
+        assert copy_box["y"] < visual_box["y"]
+
+    for card in page.locator('[data-name^="Step 0"]').all():
+        card_box = card.bounding_box()
+        assert card_box is not None
+        for paragraph in card.locator("p").all():
+            paragraph_box = paragraph.bounding_box()
+            if paragraph_box is None:
+                continue
+            assert paragraph_box["x"] >= card_box["x"] - 1
+            assert (
+                paragraph_box["x"] + paragraph_box["width"]
+                <= card_box["x"] + card_box["width"] + 1
+            )
+
+    trust_cards_box = page.locator('[data-name="Trust cards"]').bounding_box()
+    control_flow_box = control_flow.bounding_box()
+    assert trust_cards_box is not None and control_flow_box is not None
+    assert abs(trust_cards_box["width"] - control_flow_box["width"]) <= 1
+
+    proof_bottom_gaps = []
+    for card in page.locator('[data-name^="Trust card "]').all():
+        card_box = card.bounding_box()
+        proof_box = card.locator('[data-name="Proof"]').bounding_box()
+        assert card_box is not None and proof_box is not None
+        proof_bottom_gaps.append(
+            card_box["y"] + card_box["height"] - proof_box["y"] - proof_box["height"]
+        )
+    assert max(proof_bottom_gaps) - min(proof_bottom_gaps) <= 1
+
+    footer_brand = page.locator('[data-name="Footer brand"]')
+    footer_copy_box = footer_brand.locator(":scope > p").bounding_box()
+    assert footer_copy_box is not None
+    logo_left = footer_brand.locator("svg path").evaluate_all(
+        "paths => Math.min(...paths.map(path => path.getBoundingClientRect().left))"
+    )
+    assert abs(logo_left - footer_copy_box["x"]) <= 1
     page.screenshot(path=str(output / "hilalmarkets-landing-390.png"), full_page=True)
 
     page.keyboard.press("Tab")
@@ -178,6 +309,17 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
         "window.matchMedia('(prefers-reduced-motion: reduce)').matches"
     )
     assert reduced_motion is True
+
+    page.goto(f"{base_url}/contact", wait_until="domcontentloaded")
+    expect(
+        page.get_by_role(
+            "heading", name="How can we help?"
+        )
+    ).to_be_visible()
+    expect(page.locator("[data-contact-form]")).to_be_visible()
+    page.screenshot(path=str(output / "hilalmarkets-contact-mobile-390.png"), full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.screenshot(path=str(output / "hilalmarkets-contact-desktop.png"), full_page=True)
 
     page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
     expect(page.locator(".auth-shell")).to_be_visible()
@@ -221,11 +363,32 @@ def test_public_product_chat_consent_grounding_inquiry_and_returning_profile(
     page.get_by_text("Remember me on this device").click()
     page.get_by_role("button", name="Start conversation").click()
     expect(page.locator("[data-public-chat-messages]")).to_contain_text("Hi Amina")
-    page.get_by_role("button", name="Private-beta markets").click()
+    inquiry = page.locator("[data-public-chat-inquiry]")
+    page.locator("[data-public-chat-input]").fill("Hi")
+    page.locator("[data-public-chat-send]").click()
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text(
+        "How can I help you with Hilal Markets today?",
+        timeout=10_000,
+    )
+    expect(inquiry).to_be_hidden()
+    feedback = page.locator("[data-public-chat-answer-feedback]")
+    expect(feedback).to_contain_text("Did AI answer your question?")
+    feedback.get_by_role("button", name="Yes", exact=True).click()
+    expect(feedback).to_contain_text("Great! Ready when you are.")
+
+    page.locator("[data-public-chat-input]").fill(
+        "Which markets are in the private beta?"
+    )
+    page.locator("[data-public-chat-send]").click()
     expect(page.locator("[data-public-chat-messages]")).to_contain_text(
         "BTC, ETH, and SOL",
         timeout=10_000,
     )
+    expect(feedback).to_contain_text("Did AI answer your question?")
+    expect(page.locator("[data-public-chat-input]")).to_have_attribute(
+        "placeholder", "Ask about Hilal Markets..."
+    )
+    expect(page.locator(".public-chat-links")).to_have_count(0)
     page.screenshot(path=str(output / "public-chat-desktop-1440.png"), full_page=False)
     for width, height in ((1024, 900), (768, 900)):
         page.set_viewport_size({"width": width, "height": height})
@@ -254,9 +417,28 @@ def test_public_product_chat_consent_grounding_inquiry_and_returning_profile(
     question = "Can your team certify my private satellite telemetry feed?"
     page.locator("[data-public-chat-input]").fill(question)
     page.locator("[data-public-chat-send]").click()
-    inquiry = page.locator("[data-public-chat-inquiry]")
+    expect(inquiry).to_be_hidden()
+    expect(feedback).to_contain_text("Did AI answer your question?", timeout=10_000)
+    page.wait_for_timeout(300)
+    page.screenshot(
+        path=str(output / "public-chat-mobile-feedback-390.png"),
+        full_page=False,
+    )
+    feedback.get_by_role("button", name="No. Submit a support form").click()
     expect(inquiry).to_be_visible(timeout=10_000)
+    expect(inquiry.locator("input[name='name']")).to_have_value("Amina Beta")
+    expect(inquiry.locator("input[name='email']")).to_have_value(
+        "amina@example.com"
+    )
     expect(inquiry.locator("textarea[name='details']")).to_have_value(question)
+    page.wait_for_timeout(300)
+    page.screenshot(
+        path=str(output / "public-chat-mobile-support-form-390.png"),
+        full_page=False,
+    )
+    inquiry.locator("input[name='name']").fill("Amina Follow Up")
+    inquiry.locator("input[name='email']").fill("followup@example.com")
+    inquiry.locator("textarea[name='details']").fill(f"{question} Please contact me.")
     inquiry.get_by_role("button", name="Send question").click()
     success = page.locator("[data-public-chat-success]")
     expect(success).to_be_visible(timeout=10_000)
@@ -315,12 +497,70 @@ def test_public_product_chat_session_profile_offline_and_focus_containment(
     expect(page.locator("[data-public-chat-connectivity]")).to_be_hidden()
     expect(page.locator("[data-public-chat-send]")).to_be_enabled()
 
+    question = "Can you explain Watch Plans?"
+    page.locator("[data-public-chat-input]").fill(question)
+    page.locator("[data-public-chat-send]").click()
+    feedback = page.locator("[data-public-chat-answer-feedback]")
+    expect(feedback).to_contain_text("Did AI answer your question?", timeout=10_000)
+    feedback.get_by_role("button", name="No. Submit a support form").click()
+    inquiry = page.locator("[data-public-chat-inquiry]")
+    expect(inquiry).to_be_visible(timeout=10_000)
+    inquiry.get_by_role("button", name="Not now").click()
+    expect(inquiry).to_be_hidden()
+    expect(page.locator("[data-public-chat-messages]")).to_contain_text(question)
+    expect(page.locator("[data-public-chat-composer]")).to_be_visible()
+    expect(page.locator("[data-public-chat-input]")).to_be_enabled()
+
     page.locator("[data-public-chat-forget]").click()
     assert page.evaluate(
         "sessionStorage.getItem('hm-public-chat-profile-v1')"
     ) is None
     page.keyboard.press("Escape")
     expect(launcher).to_be_focused()
+    assert_no_raw_traceback(page)
+
+
+def test_public_product_chat_renders_safe_bold_without_executable_html(
+    page: Page,
+    base_url: str,
+) -> None:
+    page.goto(base_url, wait_until="domcontentloaded")
+    page.locator("[data-cookie-essential]").first.click()
+    page.locator("[data-public-chat-launcher]").click()
+    page.locator("#public-chat-name").fill("Bold Visitor")
+    page.locator("#public-chat-email").fill("bold@example.com")
+    page.get_by_role("button", name="Start conversation").click()
+
+    page.route(
+        "**/api/v1/public-chat/answers",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "message": (
+                        "Use **verified evidence**. "
+                        '<img src="x" onerror="window.__chatInjected = true">'
+                    ),
+                    "clarification_question": None,
+                    "suggested_follow_ups": [],
+                    "answer_event_id": "00000000-0000-0000-0000-000000000001",
+                    "support_handoff_explicitly_requested": False,
+                }
+            ),
+        ),
+    )
+    page.locator("[data-public-chat-input]").fill("Explain the evidence")
+    page.locator("[data-public-chat-send]").click()
+
+    assistant_bubble = page.locator(
+        ".public-chat-message.is-assistant .public-chat-bubble"
+    ).last
+    expect(assistant_bubble.locator("strong")).to_have_text("verified evidence")
+    expect(assistant_bubble).to_contain_text('<img src="x"')
+    expect(assistant_bubble.locator("img")).to_have_count(0)
+    assert page.evaluate("window.__chatInjected === true") is False
+    assert "**" not in assistant_bubble.inner_text()
     assert_no_raw_traceback(page)
 
 
@@ -333,6 +573,9 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
     page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=10_000)
     expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
     expect(page.locator("[data-ai-chat-input]")).to_be_visible()
+    expect(page.locator("[data-ai-chat-input]")).to_have_attribute(
+        "placeholder", "Describe your setup…"
+    )
     expect(page.locator(".ai-chat-start-card.scanner")).to_be_visible()
     expect(page.locator(".ai-chat-start-card.monitor")).to_be_visible()
     assert page.locator('a[href="/dashboard/scan-now"]').count() == 0
@@ -632,8 +875,15 @@ def test_ai_setup_chat_visual_qa_states(
     page.locator("[data-ai-return-chat]").click()
 
     page.set_viewport_size({"width": 390, "height": 844})
-    if not page.locator("body").evaluate("node => node.classList.contains('sidebar-collapsed')"):
-        page.locator("[data-sidebar-toggle]").click()
+    legacy_toggle = page.locator("[data-sidebar-toggle]")
+    if legacy_toggle.count() and not page.locator("body").evaluate(
+        "node => node.classList.contains('sidebar-collapsed')"
+    ):
+        legacy_toggle.click()
+    else:
+        expect(page.locator("[data-hilal-sidebar]")).not_to_have_class(
+            re.compile("is-open")
+        )
     page.screenshot(path=str(output / "ai-setup-chat-mobile-390.png"), full_page=True)
     assert_no_raw_traceback(page)
 

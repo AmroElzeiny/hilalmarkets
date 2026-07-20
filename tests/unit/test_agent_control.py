@@ -85,6 +85,8 @@ def _settings(**updates) -> Settings:
         "app_env": "test",
         "app_secret_key": "test-secret-key-with-at-least-thirty-two-characters",
         "openai_api_key": SecretStr("test-key"),
+        "ai_setup_simple_model": None,
+        "ai_setup_complex_model": None,
         "ai_agent_control_enabled": True,
         "ai_agent_rollout_percent": 100,
         "ai_agent_max_steps": 4,

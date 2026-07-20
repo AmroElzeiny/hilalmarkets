@@ -1,0 +1,13 @@
+﻿Metric,Category,Definition,Source of Truth,Cadence,Target Status
+Watchlist Activation Rate,Activation,Verified users with approved active Watchlist and first scan / verified users,Application DB,Weekly,Set after beta baseline
+Median Time to Activation,Activation,Median minutes from verification to first successful Watchlist scan,Application DB,Weekly,Minimize
+Test Alert Success,Delivery,Successful test deliveries / test attempts,Delivery DB,Daily,≥95% before launch
+First Scan Success,Reliability,Successful first scheduled scans / activated Watchlists,Application DB,Daily,≥95% before launch
+D7 Active Watchlist Retention,Retention,Users with an active Watchlist on day 7 / activated cohort,Application DB,Weekly,Set after beta
+Useful Outcome Views,Engagement,"Opportunity, proof, investigation, or compliance views by active users",Application DB,Weekly,Increase
+Passport Engagement,Trust,Users opening Quick View or Full Passport / screened-market users,Application DB,Weekly,Increase
+Review SLA Compliance,Governance,Review cases completed within due time / completed cases,Governance DB,Weekly,≥90%
+Alert Delivery Success,Reliability,Successful external deliveries / attempted deliveries,Delivery DB,Daily,≥99% target
+Free-to-Core Conversion,Revenue,Core conversions / eligible free users,Billing DB,Monthly,Set after paid beta
+Monthly Churn,Revenue,Cancelled paid users / starting paid users,Billing DB,Monthly,Set after baseline
+MRR,Revenue,Recurring subscription revenue recognized for active plans,Billing DB,Monthly,Evidence only

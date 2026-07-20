@@ -76,12 +76,12 @@ async def test_public_header_and_footer_follow_the_central_navigation(test_conte
     assert ">Cookie Settings</button>" in content
 
 
-async def test_public_screening_uses_safe_empty_state_without_sample_claims(test_context):
+async def test_public_landing_is_available_without_screening_seed_data(test_context):
     response = await test_context["client"].get("/")
     assert response.status_code == 200
     content = response.text
-    assert "Screening preview is not available yet" in content
-    assert "No active screening methodology is published" in content
+    assert "/static/landing/assets/landing.js" in content
+    assert "Screening preview is not available yet" not in content
     assert "85% ready" not in content
     assert "Sample assessment" not in content
     assert "definitely halal" not in content.lower()
@@ -167,20 +167,18 @@ async def test_dashboard_navigation_matches_the_customer_information_architectur
     assert market_check.headers["location"] == "/dashboard/strategies/new?mode=scanner"
 
 
-def test_screened_opportunities_use_one_shared_component():
+def test_landing_and_contact_templates_delegate_to_the_supplied_react_site():
     with open(
         "src/ai_market_monitor/templates/hilal/public/index.html",
         encoding="utf-8",
     ) as handle:
         public_template = handle.read()
     with open(
-        "src/ai_market_monitor/templates/hilal/dashboard/market.html",
+        "src/ai_market_monitor/templates/hilal/public/contact.html",
         encoding="utf-8",
     ) as handle:
-        dashboard_template = handle.read()
+        contact_template = handle.read()
 
-    shared_import = 'from "hilal/macros/opportunity_card.html" import opportunity_card'
-    assert shared_import in public_template
-    assert shared_import in dashboard_template
-    assert "{{ opportunity_card(" in public_template
-    assert "{{ opportunity_card(" in dashboard_template
+    include = '{% include "hilal/public/react_site.html" %}'
+    assert public_template.strip() == include
+    assert contact_template.strip() == include

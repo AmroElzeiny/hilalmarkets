@@ -1,0 +1,662 @@
+@import 'tailwindcss';
+
+/* ---- Brand typefaces ---------------------------------------------------- */
+/* Geometria — headings (brand display). Onest — body & interface text. */
+
+@font-face {
+  font-family: 'Geometria';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/landing/fonts/Geometria-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Geometria';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/landing/fonts/Geometria-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Geometria';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/static/landing/fonts/Geometria-Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Onest';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Onest-Variable.ttf') format('truetype');
+}
+
+/* ---- Figma import font aliases ------------------------------------------ */
+/* Maps Figma-style font-family references to the real installed fonts.      */
+@font-face {
+  font-family: 'Geometria:Medium';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Geometria-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Geometria:Bold';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Geometria-Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Onest:Regular';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Onest-Variable.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Onest:Medium';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Onest-Variable.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Onest:SemiBold';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Onest-Variable.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Onest:Bold';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/landing/fonts/Onest-Variable.ttf') format('truetype');
+}
+
+@theme {
+  --font-sans: 'Onest', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Geometria', 'Onest', sans-serif;
+
+  /* Hilal Markets palette */
+  --color-ink: #2b2e35;         /* near-black primary text */
+  --color-ink-soft: #7a8089;    /* muted labels */
+  --color-canvas: #f5f8fb;      /* page ground (near-white) */
+  --color-surface: #ffffff;     /* cards */
+  --color-hairline: #e1e5ea;    /* light borders */
+  --color-apple: #cbfa4d;       /* apple green accent */
+  --color-apple-deep: #55712a;  /* accessible green for text/labels */
+  --color-accent-blue: #2a8fc3; /* rare secondary detail */
+}
+
+/* Geometria Medium as default weight for display headings */
+.font-display {
+  font-weight: 500;
+}
+
+:root {
+  --radius: 16px;
+}
+
+html {
+  scroll-behavior: smooth;
+  background-color: var(--color-canvas);
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+.figma-bypass-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2147483647;
+  transform: translateY(-150%);
+  border-radius: 6px;
+  background: #111827;
+  color: #fff;
+  padding: 8px 12px;
+  font: 600 14px/1.2 system-ui, sans-serif;
+  text-decoration: none;
+}
+
+.figma-bypass-link:focus {
+  transform: translateY(0);
+}
+
+/* Tabular numerals for financial data, per brand rules */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Branded, visible page scrollbar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #63716c transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #63716c;
+  border-radius: 8px;
+}
+body:hover *::-webkit-scrollbar-thumb {
+  background-color: #63716c;
+}
+
+::selection {
+  background: var(--color-apple);
+  color: var(--color-ink);
+}
+
+/* ---- Responsive shell for the preserved Figma sections ----------------- */
+/* The component internals remain the supplied prototype. Only their layout */
+/* dimensions adapt below the 1440px design canvas.                          */
+.prototype-frame {
+  container-type: inline-size;
+}
+
+.prototype-frame > [data-name^='03 '],
+.prototype-frame > [data-name^='04 '],
+.prototype-frame > [data-name^='06 '],
+.prototype-frame > [data-name^='07 '] {
+  width: 100%;
+  margin-inline: auto;
+}
+
+.prototype-frame > [data-name^='03 '] {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.prototype-frame > [data-name^='03 '] > div:not(:last-child) {
+  z-index: 1;
+}
+
+.prototype-frame > [data-name^='03 '] > div:last-child {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.problem-corner-vector {
+  position: absolute;
+  width: 10%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.problem-corner-vector--top-left {
+  top: 6%;
+  left: 6%;
+}
+
+.problem-corner-vector--bottom-left {
+  bottom: 6%;
+  left: 6%;
+}
+
+.problem-corner-vector--top-right {
+  top: 6%;
+  right: 6%;
+}
+
+.problem-corner-vector--bottom-right {
+  right: 6%;
+  bottom: 6%;
+}
+
+.prototype-frame > [data-name^='06 '] [data-name^='Feature row'] {
+  margin-inline: auto;
+}
+
+@media (max-width: 1439px) {
+  .prototype-frame > [data-name^='03 '],
+  .prototype-frame > [data-name^='04 '],
+  .prototype-frame > [data-name^='06 '],
+  .prototype-frame > [data-name^='07 '] {
+    padding-inline: 6.67% !important;
+  }
+
+  .prototype-frame > [data-name^='03 '] {
+    gap: 3.25vw !important;
+    padding-block: 13.9% !important;
+  }
+
+  .prototype-frame > [data-name^='03 '] > div:first-child,
+  .prototype-frame > [data-name^='03 '] > div:first-child > p {
+    width: min(100%, 800px) !important;
+    max-width: 100%;
+  }
+
+  .prototype-frame [data-name='Unified workflow'] {
+    max-width: 100%;
+  }
+
+  .prototype-frame > [data-name^='04 '] {
+    gap: 3.2vw !important;
+    padding-block: 6.12% !important;
+  }
+
+  .prototype-frame > [data-name^='04 '] > p {
+    width: min(100%, 484px) !important;
+  }
+
+  .prototype-frame [data-name='Steps'] {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.6% !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .prototype-frame [data-name^='Step 0'] {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  .prototype-frame [data-name^='Step 0'] > div:first-child {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .prototype-frame [data-name^='Step 0'] [data-name='Step header'],
+  .prototype-frame [data-name^='Step 0'] [data-name='Product example'],
+  .prototype-frame [data-name^='Step 0'] [data-name='Prompt'],
+  .prototype-frame [data-name^='Step 0'] [data-name='Asset top'],
+  .prototype-frame [data-name^='Step 0'] [data-name='Bars'] {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .prototype-frame [data-name^='Step 0'] p {
+    max-width: 100%;
+  }
+
+  .prototype-frame [data-name^='Step 0'] > div:first-child > p,
+  .prototype-frame [data-name^='Step 0'] [data-name='Product example'] p {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .prototype-frame > [data-name^='06 '] {
+    gap: 4.03vw !important;
+    padding-block: 7.22% !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] > p {
+    width: min(100%, 638px) !important;
+  }
+
+  .prototype-frame [data-name^='Feature row'] {
+    gap: 5.6% !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 430px;
+    overflow: visible !important;
+  }
+
+  .prototype-frame [data-name='Feature copy'] {
+    width: 43.27% !important;
+    min-width: 0;
+  }
+
+  .prototype-frame [data-name='Feature copy'] > p {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Product visual'] {
+    width: 51.12% !important;
+    max-width: 638px;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Asset header'],
+  .prototype-frame > [data-name^='06 '] [data-name^='Evidence row'],
+  .prototype-frame > [data-name^='06 '] [data-name='Evidence link'],
+  .prototype-frame > [data-name^='06 '] [data-name='Evidence card'],
+  .prototype-frame > [data-name^='06 '] [data-name='AI chatbot'],
+  .prototype-frame > [data-name^='06 '] [data-name='User prompt'],
+  .prototype-frame > [data-name^='06 '] [data-name='AI response'],
+  .prototype-frame > [data-name^='06 '] [data-name='Rule chips'],
+  .prototype-frame > [data-name^='06 '] [data-name='Approval row'],
+  .prototype-frame > [data-name^='06 '] [data-name='Lifecycle'],
+  .prototype-frame > [data-name^='06 '] [data-name='Setup card'],
+  .prototype-frame > [data-name^='06 '] [data-name='Top'],
+  .prototype-frame > [data-name^='06 '] [data-name='Condition bars'],
+  .prototype-frame > [data-name^='06 '] [data-name^='Check '],
+  .prototype-frame > [data-name^='06 '] [data-name$=' alert'] {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Notification text'] {
+    width: auto !important;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='User prompt'] > p,
+  .prototype-frame > [data-name^='06 '] [data-name='AI response'] > p {
+    width: 100% !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Rule chips'],
+  .prototype-frame > [data-name^='06 '] [data-name='Lifecycle'] {
+    flex-wrap: wrap;
+    overflow: visible !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Condition bars'] > div {
+    width: auto !important;
+    flex: 1 1 0;
+  }
+
+  .prototype-frame > [data-name^='07 '] {
+    gap: 3.34vw !important;
+    padding-block: 6.39% !important;
+  }
+
+  .prototype-frame > [data-name^='07 '] > p {
+    width: min(100%, 820px) !important;
+  }
+
+  .prototype-frame [data-name='Control flow'] {
+    width: 100% !important;
+  }
+
+  .prototype-frame [data-name='Trust cards'] {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.6% !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .prototype-frame [data-name^='Trust card '] {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  .prototype-frame [data-name^='Trust card '] [data-name='Top'],
+  .prototype-frame [data-name^='Trust card '] [data-name='Proof'],
+  .prototype-frame [data-name^='Trust card '] p {
+    width: 100% !important;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 1199px) {
+  .prototype-frame [data-name^='Feature row'] {
+    flex-direction: column;
+    align-items: center !important;
+    gap: 4vw !important;
+    min-height: 0;
+  }
+
+  .prototype-frame [data-name='Feature copy'],
+  .prototype-frame > [data-name^='06 '] [data-name='Product visual'] {
+    width: 100% !important;
+  }
+
+  .prototype-frame [data-name='Feature copy'] {
+    max-width: 540px;
+    margin-inline: auto;
+    order: 1;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Product visual'] {
+    margin-inline: auto;
+    order: 2;
+  }
+}
+
+@media (max-width: 899px) {
+  .prototype-frame > [data-name^='04 '],
+  .prototype-frame > [data-name^='06 '],
+  .prototype-frame > [data-name^='07 '] {
+    padding-inline: max(20px, calc(50% - 390px)) !important;
+  }
+
+  .prototype-frame > [data-name^='04 '] > p,
+  .prototype-frame > [data-name^='06 '] > p {
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .prototype-frame [data-name='Steps'],
+  .prototype-frame [data-name='Trust cards'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3.5vw !important;
+  }
+
+  .prototype-frame [data-name^='Step 0'] {
+    max-width: none;
+    justify-self: stretch;
+  }
+
+  .prototype-frame [data-name^='Feature row'] [data-name='Feature copy'],
+  .prototype-frame > [data-name^='06 '] [data-name='Product visual'] {
+    width: 100% !important;
+    max-width: none;
+  }
+
+  .prototype-frame [data-name='Trust cards'],
+  .prototype-frame [data-name^='Trust card '] {
+    max-width: none;
+    justify-self: stretch;
+  }
+
+}
+
+@media (max-width: 649px) {
+  .prototype-frame [data-name='Control flow'] {
+    flex-direction: column;
+    height: auto !important;
+    gap: 1.5vw;
+    padding: 5% !important;
+  }
+
+  .prototype-frame [data-name='Control flow'] > p {
+    rotate: 90deg;
+  }
+}
+
+@media (max-width: 639px) {
+  .prototype-frame > [data-name^='03 '] {
+    padding-inline: 5.13% !important;
+  }
+
+  .prototype-frame > [data-name^='04 '],
+  .prototype-frame > [data-name^='06 '],
+  .prototype-frame > [data-name^='07 '] {
+    padding-inline: 20px !important;
+  }
+
+  .prototype-frame > [data-name^='03 '] {
+    gap: 8% !important;
+    padding-block: 25.64% !important;
+  }
+
+  .prototype-frame > [data-name^='03 '] > div:first-child {
+    width: 92% !important;
+    margin-block: 2%;
+  }
+
+  .prototype-frame > [data-name^='03 '] > div:first-child > p:first-child,
+  .prototype-frame > [data-name^='04 '] > p,
+  .prototype-frame > [data-name^='06 '] > p,
+  .prototype-frame > [data-name^='07 '] > p {
+    font-size: clamp(30px, 9vw, 42px) !important;
+    letter-spacing: -0.04em !important;
+  }
+
+  .prototype-frame > [data-name^='03 '] > div:first-child > p:last-child {
+    font-size: 16px !important;
+  }
+
+  .prototype-frame [data-name='Unified workflow'] {
+    flex-direction: column;
+    gap: 10px !important;
+    width: min(88%, 420px) !important;
+    overflow: visible !important;
+  }
+
+  .prototype-frame [data-name='Unified workflow'] > [data-name$=' pill'] {
+    width: 100% !important;
+    min-height: 40px;
+    padding: 3.5% 8% !important;
+  }
+
+  .prototype-frame [data-name='Unified workflow'] > div:not([data-name]) {
+    rotate: 45deg;
+  }
+
+  .prototype-frame [data-name='Unified workflow'] > div[class*='h-0'] {
+    rotate: 90deg;
+    margin-block: 8px;
+  }
+
+  .prototype-frame > [data-name^='04 '],
+  .prototype-frame > [data-name^='06 '],
+  .prototype-frame > [data-name^='07 '] {
+    gap: 10.25vw !important;
+    padding-block: 18% !important;
+  }
+
+  .prototype-frame [data-name^='Step 0'] {
+    height: auto !important;
+    min-height: 440px;
+    padding: 6.15% !important;
+  }
+
+  .prototype-frame [data-name='Product example'] {
+    height: auto !important;
+    min-height: 126px;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Product visual'] > div:first-child {
+    gap: 4.62vw !important;
+    padding: 5.13% !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Feature copy'] {
+    gap: 5.13vw !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Feature copy'] > p:nth-of-type(1) {
+    font-size: clamp(28px, 8vw, 36px) !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Evidence card'] > div:first-child {
+    gap: 3.1vw !important;
+    padding: 5.13% !important;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name^='Evidence row'] {
+    gap: 12px;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name^='Evidence row'] > p:last-child {
+    text-align: right;
+    white-space: normal;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Approval row'] {
+    gap: 10px;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Approval row'] > p,
+  .prototype-frame > [data-name^='06 '] [data-name='Top'] > p,
+  .prototype-frame > [data-name^='06 '] [data-name='Notification text'] > p {
+    white-space: normal;
+  }
+
+  .prototype-frame > [data-name^='06 '] [data-name='Setup card'] > p {
+    font-size: clamp(18px, 5.7vw, 22px) !important;
+    white-space: normal;
+  }
+
+  .prototype-frame [data-name='Control flow'] {
+    gap: 2.56vw;
+    padding: 7.18% !important;
+  }
+
+  .prototype-frame [data-name^='Trust card '] {
+    height: 280px !important;
+    padding: 0 !important;
+  }
+
+  .prototype-frame [data-name^='Trust card '] > div:first-child {
+    padding: 6.15% !important;
+  }
+}
+
+/* ---- Scroll reveal ------------------------------------------------------ */
+.reveal,
+.scroll-reveal-block {
+  opacity: 0;
+  translate: 0 22px;
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    translate 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, translate;
+}
+.reveal.is-visible,
+.scroll-reveal-block.is-visible {
+  opacity: 1;
+  translate: 0 0;
+}
+
+.reveal-cascade > * > * {
+  opacity: 0;
+  translate: 0 18px;
+  transition:
+    opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    translate 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal-cascade.is-visible > * > * {
+  opacity: 1;
+  translate: 0 0;
+}
+.reveal-cascade.is-visible > * > :nth-child(2) {
+  transition-delay: 90ms;
+}
+.reveal-cascade.is-visible > * > :nth-child(3) {
+  transition-delay: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .reveal {
+    opacity: 1;
+    translate: none;
+    transition: none;
+  }
+  .scroll-reveal-block,
+  .reveal-cascade > * > * {
+    opacity: 1;
+    translate: none;
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

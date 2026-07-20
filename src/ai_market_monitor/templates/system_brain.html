@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>Sharia Governance | HilalMarkets</title>
-  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="icon" type="image/png" href="/static/favicon-dark.png">
   <link rel="stylesheet" href="/static/system-brain.css">
   <script src="/static/hilalmarkets-icons.js" defer></script>
   <script src="/static/system-brain.js" defer></script>
@@ -110,7 +110,13 @@
           ('Support answered', ai_ops.public_support.answered, 'Grounded product answers', 'support'),
           ('Support clarifications', ai_ops.public_support.clarifications, 'Turns needing one more detail', 'support'),
           ('Support refusals', ai_ops.public_support.refusals, 'Safety boundary responses', 'shield'),
+          ('Support out of scope', ai_ops.public_support.out_of_scope, 'Unrelated requests redirected', 'shield'),
+          ('Support AI unavailable', ai_ops.public_support.ai_unavailable, 'Provider or validation failures contained', 'alert'),
           ('Support inquiries', ai_ops.public_support.inquiries, 'Durable human handoffs', 'support'),
+          ('Answer Yes rate', (ai_ops.public_support.helpful_percent or 0) ~ '%', 'Helpful votes per answer event', 'check'),
+          ('Support-form rate', (ai_ops.public_support.support_form_request_percent or 0) ~ '%', 'Explicit No and handoff choices', 'support'),
+          ('Form completion', (ai_ops.public_support.support_form_completion_percent or 0) ~ '%', 'Requested forms that were submitted', 'check'),
+          ('Greeting errors', ai_ops.public_support.greeting_misclassification_count, 'Must remain zero', 'alert'),
           ('Source coverage', ai_ops.public_support.source_coverage_percent ~ '%', 'Answers with authoritative evidence IDs', 'database'),
           ('Validation failures', ai_ops.public_support.validation_failures, 'Contained source, route, or schema failures', 'alert'),
           ('Support p95 latency', ai_ops.public_support.p95_latency_ms ~ 'ms', 'Validated end-to-end AI latency', 'clock'),
@@ -136,6 +142,20 @@
           <div class="brain-bars">
             {% set maximum = (ai_ops.public_support.knowledge_gaps | map(attribute='count') | max) if ai_ops.public_support.knowledge_gaps else 0 %}
             {% for row in ai_ops.public_support.knowledge_gaps %}<div class="brain-bar-row"><span title="{{ row.category }}">{{ row.category.replace('_',' ').title() }}</span><div><i style="--bar:{{ ((row.count / maximum) * 100) if maximum else 0 }}%"></i></div><strong>{{ row.count }}</strong></div>{% else %}<p class="brain-empty">No knowledge-gap handoffs have been recorded.</p>{% endfor %}
+          </div>
+        </article>
+        <article class="brain-panel">
+          <h3>Dissatisfaction by topic</h3>
+          <div class="brain-bars">
+            {% set maximum = (ai_ops.public_support.dissatisfied_topics | map(attribute='count') | max) if ai_ops.public_support.dissatisfied_topics else 0 %}
+            {% for row in ai_ops.public_support.dissatisfied_topics %}<div class="brain-bar-row"><span title="{{ row.topic }}">{{ row.topic.replace('_',' ').title() }}</span><div><i style="--bar:{{ ((row.count / maximum) * 100) if maximum else 0 }}%"></i></div><strong>{{ row.count }}</strong></div>{% else %}<p class="brain-empty">No negative answer feedback has been recorded.</p>{% endfor %}
+          </div>
+        </article>
+        <article class="brain-panel">
+          <h3>Most common unanswered topics</h3>
+          <div class="brain-bars">
+            {% set maximum = (ai_ops.public_support.unanswered_topics | map(attribute='count') | max) if ai_ops.public_support.unanswered_topics else 0 %}
+            {% for row in ai_ops.public_support.unanswered_topics %}<div class="brain-bar-row"><span title="{{ row.topic }}">{{ row.topic.replace('_',' ').title() }}</span><div><i style="--bar:{{ ((row.count / maximum) * 100) if maximum else 0 }}%"></i></div><strong>{{ row.count }}</strong></div>{% else %}<p class="brain-empty">No unanswered product topics have been recorded.</p>{% endfor %}
           </div>
         </article>
       </div>

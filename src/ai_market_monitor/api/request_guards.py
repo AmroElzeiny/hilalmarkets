@@ -101,6 +101,18 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
             configured,
         ),
         _rule(
+            "public_waitlist",
+            {"POST"},
+            r"^/api/v1/public-forms/waitlist(?:/|$)",
+            configured,
+        ),
+        _rule(
+            "public_contact",
+            {"POST"},
+            r"^/api/v1/public-forms/contact(?:/|$)",
+            configured,
+        ),
+        _rule(
             "admin_mutation",
             {"POST", "PUT", "PATCH", "DELETE"},
             r"^(/api/v1/(admin|sharia/admin)|/system-brain)(/|$)",
@@ -122,7 +134,7 @@ async def apply_request_guards(
     if rule is None:
         return None
     fingerprints = {_request_fingerprint(request, settings)}
-    if rule.scope == "public_chat":
+    if rule.scope in {"public_chat", "public_waitlist", "public_contact"}:
         fingerprints.add(_request_ip_fingerprint(request, settings))
     for fingerprint in fingerprints:
         key = f"hm:rate:{rule.scope}:{fingerprint}"

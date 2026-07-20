@@ -1,0 +1,12 @@
+﻿Initiative,Horizon,Priority,Status,Dependency,Success Metric,Notes
+HilalMarkets.com production switch,0-30 days,P0,In progress,"DNS, VPS, secrets, redirects",Production golden path passes,Use HilalMarkets identity only
+Qualified methodology governance,0-30 days,P0,Not operational,Adviser/committee,Methodology published,No public screening before this
+Pilot asset publication,0-30 days,P0,Not operational,Governance + evidence,Pilot Passports published,Review individually
+Cloudflare Access and origin firewall,0-30 days,P0,Deployment task,Cloudflare/VPS,Origin bypass blocked,Defense in depth
+Private beta activation study,31-90 days,P0,Planned,Production pilot,20 complete activations,Interview every failed activation
+Compliance Drift case study,31-90 days,P1,Planned,Source monitoring,One end-to-end case,Use controlled staging first
+Arabic product quality,3-6 months,P1,Planned,Copy and RTL QA,Arabic activation parity,Not translation only
+Paid public launch,3-6 months,P1,Planned,Retention + billing,MRR and D30 retention,Scale acquisition gradually
+Hub71 application,Immediate,P0,Preparing,Deck + metrics + Abu Dhabi plan,Submit before current deadline,Recheck deadline
+US equity pilot,6-12 months,P2,Planned,Data licensing + screening,Pilot cohort,Delayed/EOD first
+One local market pilot,6-12 months,P2,Planned,Official list + chart data,Pilot cohort,One exchange only

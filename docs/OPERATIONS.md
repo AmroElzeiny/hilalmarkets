@@ -106,8 +106,10 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `PUBLIC_CHAT_AI_MODEL` / `PUBLIC_CHAT_AI_REASONING_EFFORT` | Configurable support model and effort; defaults to the main model and `low`. |
 | `PUBLIC_CHAT_AI_TIMEOUT_SECONDS` / `PUBLIC_CHAT_AI_PROVIDER_ATTEMPTS` | Bounded provider timeout and retry count. |
 | `PUBLIC_CHAT_AI_MAX_OUTPUT_TOKENS` / `PUBLIC_CHAT_AI_MAX_ESTIMATED_COST_USD_PER_TURN` | Output and cost ceilings enforced before and after provider calls. |
-| `PUBLIC_CHAT_AI_MIN_CONFIDENCE` | Below this threshold, the bot clarifies or offers a human inquiry instead of guessing. |
+| `PUBLIC_CHAT_AI_MIN_CONFIDENCE` | Below this threshold, the bot clarifies or reports that the fact is unverified. It never opens the Support form. |
 | `PUBLIC_CHAT_AI_MAX_HISTORY_MESSAGES` / `PUBLIC_CHAT_SESSION_MAX_TURNS` | Bounded server-side conversation memory and per-session abuse limit. |
+| `PUBLIC_CHAT_NOTION_ENABLED` / `PUBLIC_CHAT_NOTION_ROOT` | Enables bounded read-only retrieval from the project Notion export. Retrieved files are context-only, never current-product authority. |
+| `PUBLIC_CHAT_NOTION_MAX_DOCUMENTS` / `PUBLIC_CHAT_NOTION_MAX_CHARACTERS` / `PUBLIC_CHAT_NOTION_MAX_FILE_BYTES` | Per-turn and per-file limits for the Notion context index. |
 | `PUBLIC_CHAT_INQUIRY_EMAIL` | Office recipient for consented public inquiries. |
 | `PUBLIC_CHAT_PROFILE_VERSION` | Invalidates stale local-only visitor profile consent when changed. |
 | `PUBLIC_CHAT_MESSAGE_MAX_LENGTH` / `PUBLIC_CHAT_INQUIRY_MAX_LENGTH` | Server-enforced public input bounds. |
@@ -117,6 +119,13 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 When `PUBLIC_CHAT_ENABLED=true` in staging or production, startup requires `EMAIL_ADAPTER=smtp`
 plus non-placeholder SMTP host, username, password, and sender address. This deliberately prevents
 an inquiry-enabled deployment from accepting questions into an outbox that cannot be delivered.
+When `PUBLIC_CHAT_NOTION_ENABLED=true`, deployed startup also requires the configured Notion root
+to exist. The runtime image copies `Notion/`; no generic filesystem tool is exposed to either AI.
+
+The browser opens the Support form only after the visitor chooses **No. Submit a support form** or
+explicitly asks to contact the team. Low confidence, missing evidence, provider timeouts, schema
+failures, greetings, normal conversation, refusals, and out-of-scope turns never open it. The
+answer-feedback API is session-bound and accepts one idempotent choice per answer event.
 
 ## Private-Beta Locked Profile
 
@@ -147,6 +156,9 @@ the live coordinator.
 
 Migration `2bdce3f40516` adds bounded public-support conversations, idempotent turns, authenticated
 ownership references, model usage, latency, grounding, and validation audit fields.
+
+Migration `3cedf4051627` adds Support conversation modes, advisory handoff evidence, one
+session-bound answer-feedback record, server-owned inquiry metadata, and answer-to-inquiry linkage.
 
 Migration `d6e7f8a9b0c1` adds the SC Malaysia governance workflow. It seeds only the versioned
 methodology family/version and never seeds or publishes an asset.
@@ -243,6 +255,7 @@ Scheduled tasks currently wired:
 - Setup-instance expiration.
 - Telegram delivery retries.
 - Public-inquiry email retries and bounded public-chat retention cleanup.
+- Public waitlist Google Sheet and contact-office email delivery retries.
 - Dormant WhatsApp webhook/retry tasks only when the separately disabled WhatsApp feature is enabled.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
@@ -256,6 +269,42 @@ states. WebSocket ingestion and a durable candle store remain future production-
 Capability extension jobs additionally require a configured server-side OpenAI key. The generated
 artifact remains a bounded deterministic expression and must pass normal user approval. See
 `docs/CAPABILITY_EXTENSION_PIPELINE.md` for the escalation and failure behavior.
+
+## Public Landing, Contact, and Analytics
+
+The landing/contact source is `Hilal-Markets-Website/`. The Docker image runs its locked
+TypeScript and Vite build before packaging `dist/` as `static/landing/`. A failed frontend build
+therefore fails the application image build.
+
+Public forms are same-origin and CSRF-protected. `waitlist_signups` is the source of truth; Google
+Sheet delivery is a retryable projection. Contact creates one idempotent delivery from
+`CONTACT_FORM_SENDER_EMAIL` to `CONTACT_FORM_RECIPIENT_EMAIL`, with the visitor address only as
+`Reply-To`. Verify that the configured sender is authorized by the SMTP provider before deployment.
+
+To connect the waitlist Sheet:
+
+1. Add `scripts/google_apps_script/waitlist_webhook.gs` to an Apps Script project.
+2. Set Script Properties `WAITLIST_SPREADSHEET_ID`, `WAITLIST_WEBHOOK_SECRET`, and optionally
+   `WAITLIST_SHEET_NAME`.
+3. Deploy it as a Web App executing as the owner and retain the `/exec` URL.
+4. Set the same random secret in `WAITLIST_GOOGLE_SHEETS_WEBHOOK_SECRET`, set the URL in
+   `WAITLIST_GOOGLE_SHEETS_WEBHOOK_URL`, then enable `WAITLIST_GOOGLE_SHEETS_ENABLED`.
+5. Behind Cloudflare, enable `WAITLIST_TRUST_CLOUDFLARE_COUNTRY_HEADER` only after direct-origin
+   traffic is blocked. Otherwise country remains `unknown` instead of trusting a spoofable header.
+
+The receiver serializes writes with a script lock and keeps the visible worksheet business-facing:
+Email Address, Joined At (UTC), Country, Signup Source, Campaign, Status, and Notes. Status is an
+editable controlled list and Notes is free text for the beta team. Retry deduplication uses a final
+system column that Apps Script hides automatically. The first request after upgrading the script
+migrates rows written by the earlier technical layout. The endpoint, secret, and delivery metadata
+never enter HTML, browser JavaScript, analytics, or public form responses.
+
+Analytics is off by default. Configure either `VITE_GTM_ID` or `VITE_GA4_MEASUREMENT_ID`, then set
+`VITE_ANALYTICS_ENABLED=true`. Meta additionally requires `VITE_META_PIXEL_ID`,
+`VITE_META_PIXEL_ENABLED=true`, and `MARKETING_CONSENT_ENABLED=true`. GA initializes only after
+Analytics consent; Meta initializes only after Marketing consent. Do not configure the same GA tag
+both directly and through GTM. `VITE_ANALYTICS_DEBUG=true` enables sanitized console diagnostics
+and GA `debug_mode`; never enable it as routine production logging.
 
 ## Telegram Setup
 

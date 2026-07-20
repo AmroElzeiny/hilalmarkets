@@ -1,0 +1,15 @@
+﻿Area,Requirement,Priority,Status,Evidence,Owner
+Governance,Qualified authority appointed,P0,Open,,Founder
+Governance,Production methodology approved,P0,Open,,Sharia Reviewer
+Governance,Pilot assets reviewed and published,P0,Open,,Publisher
+Deployment,HilalMarkets domains configured,P0,Open,,Engineering
+Deployment,Cloudflare Access and origin firewall,P0,Open,,Engineering
+Reliability,Backup restore tested,P0,Open,,Engineering
+Providers,Market-data staging smoke,P0,Open,,Engineering
+Delivery,Telegram live test,P0,Open,,Operations
+Billing,Chosen provider sandbox golden path,P0,Open,,Engineering
+Legal,Terms/privacy/risk/cookies reviewed,P0,Open,,Legal
+Product,20 complete private-beta activations,P1,Open,,Product
+Analytics,Activation and retention events verified,P1,Open,,Growth
+Operations,Incident and support runbooks tested,P1,Open,,Operations
+Accelerator,Hub71 deck and Abu Dhabi plan complete,P0,Open,,Founder

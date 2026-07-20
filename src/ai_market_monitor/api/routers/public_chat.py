@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from ai_market_monitor.api.route_security import public_api
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.schemas.public_chat import (
+    PublicChatAnswerFeedbackRequest,
+    PublicChatAnswerFeedbackResponse,
     PublicChatAnswerRequest,
     PublicChatAnswerResponse,
     PublicChatBootstrapResponse,
@@ -120,6 +123,35 @@ async def answer_public_chat_question(
     return result
 
 
+@router.post(
+    "/answers/{answer_event_id}/feedback",
+    response_model=PublicChatAnswerFeedbackResponse,
+)
+@public_api("Records one session-bound helpful or Support-handoff choice per AI answer.")
+async def record_public_chat_answer_feedback(
+    answer_event_id: UUID,
+    payload: PublicChatAnswerFeedbackRequest,
+    request: Request,
+    x_csrf_token: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> PublicChatAnswerFeedbackResponse:
+    _require_public_chat_request(request, settings, x_csrf_token)
+    try:
+        result = await PublicChatService(session, settings).record_answer_feedback(
+            answer_event_id,
+            payload,
+        )
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "feedback_conflict", "message": str(exc)},
+        ) from exc
+    await session.commit()
+    return result
+
+
 @router.post("/inquiries", response_model=PublicInquiryResponse)
 @public_api("Persists a rate-limited public inquiry and queues two idempotent emails.")
 async def submit_public_chat_inquiry(
@@ -131,7 +163,14 @@ async def submit_public_chat_inquiry(
 ) -> PublicInquiryResponse:
     _require_public_chat_request(request, settings, x_csrf_token)
     service = PublicChatService(session, settings)
-    inquiry = await service.submit_inquiry(payload)
+    try:
+        inquiry = await service.submit_inquiry(payload)
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "support_handoff_required", "message": str(exc)},
+        ) from exc
     await session.commit()
     return PublicInquiryResponse(
         reference=inquiry.reference,

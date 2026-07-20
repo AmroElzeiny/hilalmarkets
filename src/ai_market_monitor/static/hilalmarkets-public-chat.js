@@ -18,6 +18,10 @@
     composer: panel.querySelector("[data-public-chat-composer]"),
     input: panel.querySelector("[data-public-chat-input]"),
     send: panel.querySelector("[data-public-chat-send]"),
+    answerFeedback: panel.querySelector("[data-public-chat-answer-feedback]"),
+    feedbackYes: panel.querySelector("[data-public-chat-feedback-yes]"),
+    feedbackNo: panel.querySelector("[data-public-chat-feedback-no]"),
+    feedbackStatus: panel.querySelector("[data-public-chat-feedback-status]"),
     inquiry: panel.querySelector("[data-public-chat-inquiry]"),
     inquiryName: panel.querySelector("[data-public-chat-inquiry-name]"),
     inquiryEmail: panel.querySelector("[data-public-chat-inquiry-email]"),
@@ -41,9 +45,12 @@
     started: false,
     previousFocus: null,
     lastQuestion: "",
-    knowledgeGap: "unverified_product_question",
+    lastAnswerEventId: null,
+    feedbackRecorded: false,
+    feedbackSending: false,
     inquiryKey: null,
     inquiryQuestion: null,
+    inquiryAnswerEventId: null,
     inquiryResult: null,
   };
 
@@ -166,11 +173,73 @@
     element.hidden = !message;
   }
 
+  function resetAnswerFeedback() {
+    state.lastAnswerEventId = null;
+    state.feedbackRecorded = false;
+    state.feedbackSending = false;
+    setHidden(view.answerFeedback, true);
+    setHidden(view.feedbackStatus, true);
+    view.feedbackStatus.textContent = "";
+    view.feedbackYes.disabled = false;
+    view.feedbackNo.disabled = false;
+    view.feedbackYes.hidden = false;
+    view.feedbackNo.hidden = false;
+  }
+
+  function showAnswerFeedback(answerEventId) {
+    state.lastAnswerEventId = answerEventId || null;
+    state.feedbackRecorded = false;
+    view.feedbackYes.disabled = !state.lastAnswerEventId;
+    view.feedbackNo.disabled = !state.lastAnswerEventId;
+    view.feedbackYes.hidden = false;
+    view.feedbackNo.hidden = false;
+    view.feedbackStatus.textContent = "";
+    setHidden(view.feedbackStatus, true);
+    setHidden(view.answerFeedback, false);
+  }
+
+  async function recordAnswerFeedback(helpful, supportFormRequested) {
+    if (!state.lastAnswerEventId || state.feedbackRecorded || state.feedbackSending) {
+      return false;
+    }
+    state.feedbackSending = true;
+    view.feedbackYes.disabled = true;
+    view.feedbackNo.disabled = true;
+    try {
+      const result = await request(
+        `/api/v1/public-chat/answers/${state.lastAnswerEventId}/feedback`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            session_id: state.sessionId,
+            helpful,
+            support_form_requested: supportFormRequested,
+          }),
+        },
+      );
+      state.feedbackRecorded = true;
+      view.feedbackYes.hidden = true;
+      view.feedbackNo.hidden = true;
+      view.feedbackStatus.textContent = result.message;
+      setHidden(view.feedbackStatus, false);
+      return true;
+    } catch (error) {
+      view.feedbackStatus.textContent = error.message;
+      setHidden(view.feedbackStatus, false);
+      view.feedbackYes.disabled = false;
+      view.feedbackNo.disabled = false;
+      return false;
+    } finally {
+      state.feedbackSending = false;
+    }
+  }
+
   function showProfile() {
     setHidden(view.loading, true);
     setHidden(view.profileForm, false);
     setHidden(view.conversation, true);
     setHidden(view.composer, true);
+    setHidden(view.answerFeedback, true);
     view.profileForm.querySelector("input[name='name']")?.focus();
   }
 
@@ -181,7 +250,7 @@
     setHidden(view.composer, false);
     if (!state.started) {
       state.started = true;
-      appendMessage("assistant", `Hi ${firstName(state.profile?.name)}. I can explain HilalMarkets, screening evidence, private-beta access, pricing, and product boundaries. What would you like to know?`);
+      appendMessage("assistant", `Hi ${firstName(state.profile?.name)}. I can explain Hilal Markets, screening evidence, private-beta access, pricing, and product boundaries. What would you like to know?`);
     }
     window.setTimeout(() => view.input?.focus(), 30);
   }
@@ -235,24 +304,33 @@
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 210);
   }
 
+  function appendSafeBoldText(container, text) {
+    const value = String(text || "");
+    const boldPattern = /\*\*([\s\S]+?)\*\*/g;
+    let cursor = 0;
+    let match;
+    while ((match = boldPattern.exec(value)) !== null) {
+      container.append(document.createTextNode(value.slice(cursor, match.index)));
+      if (match[1].trim()) {
+        const strong = document.createElement("strong");
+        strong.textContent = match[1];
+        container.append(strong);
+      } else {
+        container.append(document.createTextNode(match[0]));
+      }
+      cursor = boldPattern.lastIndex;
+    }
+    container.append(document.createTextNode(value.slice(cursor)));
+  }
+
   function appendMessage(role, text, options = {}) {
     const wrapper = document.createElement("article");
     wrapper.className = `public-chat-message is-${role}${options.error ? " is-error" : ""}`;
     const bubble = document.createElement("div");
     bubble.className = "public-chat-bubble";
-    bubble.textContent = text;
+    if (role === "assistant") appendSafeBoldText(bubble, text);
+    else bubble.textContent = text;
     wrapper.append(bubble);
-    if (options.links?.length) {
-      const links = document.createElement("div");
-      links.className = "public-chat-links";
-      options.links.forEach((item) => {
-        const anchor = document.createElement("a");
-        anchor.href = item.path;
-        anchor.textContent = item.label;
-        links.append(anchor);
-      });
-      wrapper.append(links);
-    }
     if (options.clarification) {
       const clarification = document.createElement("p");
       clarification.className = "public-chat-clarification";
@@ -295,7 +373,7 @@
     }
     const meta = document.createElement("span");
     meta.className = "public-chat-message-meta";
-    meta.textContent = role === "user" ? "You" : "HilalMarkets product help";
+    meta.textContent = role === "user" ? "You" : "Hilal Markets product help";
     wrapper.append(meta);
     view.messages.append(wrapper);
     view.messages.scrollTop = view.messages.scrollHeight;
@@ -305,7 +383,7 @@
   function appendTyping() {
     const wrapper = document.createElement("article");
     wrapper.className = "public-chat-message is-assistant";
-    wrapper.setAttribute("aria-label", "HilalMarkets is checking verified product information");
+    wrapper.setAttribute("aria-label", "Hilal Markets is checking verified product information");
     const bubble = document.createElement("div");
     bubble.className = "public-chat-bubble public-chat-typing";
     bubble.innerHTML = "<i></i><i></i><i></i>";
@@ -318,6 +396,7 @@
   async function sendQuestion(rawQuestion, options = {}) {
     const question = String(rawQuestion || "").trim();
     if (!question || state.sending) return;
+    resetAnswerFeedback();
     state.sending = true;
     state.lastQuestion = question;
     view.send.disabled = true;
@@ -342,12 +421,14 @@
       typing.remove();
       options.retryNode?.remove();
       appendMessage("assistant", result.message, {
-        links: result.related_links,
         clarification: result.clarification_question,
         followUps: result.suggested_follow_ups,
       });
-      state.knowledgeGap = result.knowledge_gap_category || "unverified_product_question";
-      if (result.show_inquiry_form) showInquiry(question);
+      showAnswerFeedback(result.answer_event_id);
+      if (result.support_handoff_explicitly_requested) {
+        const recorded = await recordAnswerFeedback(false, true);
+        if (recorded) showInquiry(question, result.answer_event_id);
+      }
     } catch (error) {
       typing.remove();
       if (options.retryNode) {
@@ -367,16 +448,19 @@
     }
   }
 
-  function showInquiry(question) {
-    if (state.inquiryQuestion !== question) {
+  function showInquiry(question, answerEventId = state.lastAnswerEventId) {
+    if (state.inquiryQuestion !== question || state.inquiryAnswerEventId !== answerEventId) {
       state.inquiryKey = `public-inquiry:${state.sessionId}:${Date.now()}`;
       state.inquiryQuestion = question;
+      state.inquiryAnswerEventId = answerEventId;
     }
     view.inquiryName.value = state.profile?.name || "";
     view.inquiryEmail.value = state.profile?.email || "";
     view.inquiry.querySelector("textarea[name='details']").value = question;
+    setHidden(view.answerFeedback, true);
     setHidden(view.inquiry, false);
     view.inquiry.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    window.setTimeout(() => view.inquiryName.focus(), 30);
   }
 
   function attribution() {
@@ -415,12 +499,13 @@
         method: "POST",
         body: JSON.stringify({
           profile: editedProfile,
+          session_id: state.sessionId,
+          answer_event_id: state.inquiryAnswerEventId,
           details: data.get("details"),
           category: data.get("category"),
           source_page: `${location.pathname}${location.search}`.slice(0, 240),
           referrer: analyticsConsent() ? (document.referrer || null) : null,
           ...attribution(),
-          knowledge_gap_category: state.knowledgeGap,
           idempotency_key: state.inquiryKey,
           company_website: data.get("company_website") || "",
         }),
@@ -478,13 +563,14 @@
   function resetForAnotherQuestion() {
     state.inquiryKey = null;
     state.inquiryQuestion = null;
+    state.inquiryAnswerEventId = null;
     state.inquiryResult = null;
-    state.knowledgeGap = "unverified_product_question";
+    resetAnswerFeedback();
     setHidden(view.success, true);
     resetRating();
     setHidden(view.inquiry, true);
     setHidden(view.composer, false);
-    appendMessage("assistant", "What else would you like to understand about HilalMarkets?");
+    appendMessage("assistant", "What else would you like to understand about Hilal Markets?");
     view.input.focus();
   }
 
@@ -494,9 +580,10 @@
     state.lastQuestion = "";
     state.inquiryKey = null;
     state.inquiryQuestion = null;
+    state.inquiryAnswerEventId = null;
     state.inquiryResult = null;
-    state.knowledgeGap = "unverified_product_question";
     state.sending = false;
+    resetAnswerFeedback();
     view.messages.replaceChildren();
     view.inquiry.reset();
     setHidden(view.success, true);
@@ -556,14 +643,25 @@
       view.composer.requestSubmit();
     }
   });
+  view.feedbackYes.addEventListener("click", () => {
+    recordAnswerFeedback(true, false);
+  });
+  view.feedbackNo.addEventListener("click", async () => {
+    const question = state.lastQuestion;
+    const answerEventId = state.lastAnswerEventId;
+    const recorded = await recordAnswerFeedback(false, true);
+    if (recorded) showInquiry(question, answerEventId);
+  });
   panel.querySelectorAll("[data-public-chat-question]").forEach((button) => {
     button.addEventListener("click", () => sendQuestion(button.dataset.publicChatQuestion));
   });
   view.inquiry.addEventListener("submit", submitInquiry);
   view.inquiryCancel.addEventListener("click", () => {
-    state.inquiryKey = null;
-    state.inquiryQuestion = null;
     setHidden(view.inquiry, true);
+    view.feedbackStatus.textContent = "Support form canceled. You can keep chatting.";
+    setHidden(view.feedbackStatus, false);
+    setHidden(view.answerFeedback, false);
+    view.input.focus();
   });
   view.another.addEventListener("click", resetForAnotherQuestion);
   view.successClose.addEventListener("click", closeChat);

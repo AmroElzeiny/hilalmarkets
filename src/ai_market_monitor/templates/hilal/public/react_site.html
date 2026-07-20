@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-consent-analytics="denied" data-consent-functional="denied" data-consent-marketing="denied">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ description }}">
+  <meta name="theme-color" content="#CBFA4D">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:title" content="{{ title }} | Hilal Markets">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ canonical_url }}">
+  {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
+  <meta name="twitter:card" content="summary{% if og_image_url %}_large_image{% endif %}">
+  <title>{{ title }} | Hilal Markets</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260719-react-shell">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260719-react-shell">
+  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260719">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260717-beta3">{% endif %}
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    window.gtag("consent", "default", {
+      ad_storage: "denied",
+      analytics_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+      functionality_storage: "denied",
+      personalization_storage: "denied",
+      security_storage: "granted",
+      wait_for_update: 500
+    });
+    window.__hmConsentDefaultSet = true;
+    window.HilalMarketsConsentConfig = {{ {
+      "version": cookie_consent_version,
+      "analyticsEnabled": public_analytics_enabled,
+      "marketingEnabled": marketing_consent_enabled,
+      "gtmContainerId": none
+    } | tojson }};
+    window.HilalMarketsRuntimeConfig = {{ {
+      "analytics": analytics_runtime_config,
+      "legal": {
+        "legalName": legal_name,
+        "companyAddress": company_address,
+        "governingLaw": governing_law,
+        "privacyEmail": privacy_email,
+        "supportEmail": support_email,
+        "reviewRequired": legal_review_required
+      }
+    } | tojson }};
+  </script>
+  {% for item in json_ld %}<script type="application/ld+json">{{ item | tojson }}</script>{% endfor %}
+</head>
+<body class="hm-react-site">
+  <a class="figma-bypass-link" href="#root">Skip to content</a>
+  <div id="root"></div>
+  {% include "hilal/partials/cookie_banner.html" %}
+  {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260719-analytics"></script>
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260717-beta3"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260719"></script>
+</body>
+</html>

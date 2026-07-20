@@ -1,0 +1,61 @@
+{
+  "workspace": "HilalMarkets Notion Workspace",
+  "updated": "2026-07-17",
+  "markdown_pages": [
+    "00_HilalMarkets_HQ.md",
+    "01_Company_Overview.md",
+    "02_Audience_and_JTBD.md",
+    "03_Product_System_and_Features.md",
+    "04_Customer_Journeys_and_UX.md",
+    "05_Sharia_Governance_and_Evidence.md",
+    "06_AI_and_Automation_Boundaries.md",
+    "07_Technology_Architecture.md",
+    "08_Business_Model_and_Pricing.md",
+    "09_Go_To_Market_and_Growth.md",
+    "10_Competitive_Landscape.md",
+    "11_Accelerator_and_Fundraising.md",
+    "12_Metrics_and_Experiments.md",
+    "13_Risk_Security_and_Legal.md",
+    "14_Operations_and_Launch.md",
+    "15_Partner_Onboarding.md",
+    "16_AI_Agent_Master_Context.md",
+    "17_Brand_Voice_and_Messaging.md",
+    "18_Roadmap_and_Priorities.md",
+    "19_Glossary.md",
+    "20_Sources_and_Evidence.md",
+    "README_IMPORT.md"
+  ],
+  "templates": [
+    "Accelerator_Application_Draft.md",
+    "Decision_Memo.md",
+    "Incident_Postmortem.md",
+    "Partner_Meeting_Notes.md",
+    "Product_Requirement_Brief.md",
+    "Sharia_Review_Case_Summary.md",
+    "User_Interview_Notes.md",
+    "Weekly_Operating_Review.md"
+  ],
+  "databases": [
+    "Accelerator_Tracker.csv",
+    "Competitor_Matrix.csv",
+    "Feature_Registry.csv",
+    "KPI_Dictionary.csv",
+    "Launch_Checklist.csv",
+    "Partner_Pipeline.csv",
+    "Responsibility_Matrix.csv",
+    "Risk_Register.csv",
+    "Roadmap.csv",
+    "Source_Register.csv"
+  ],
+  "assets": [
+    "Accelerator_Readiness.png",
+    "Activation_Funnel.png",
+    "Architecture_Map.png",
+    "Competitive_Positioning.png",
+    "HilalMarkets_Cover.png",
+    "HilalMarkets_Product_Journey.gif",
+    "Product_Pillars.png",
+    "Product_System_Map.png",
+    "Roadmap_Timeline.png"
+  ]
+}

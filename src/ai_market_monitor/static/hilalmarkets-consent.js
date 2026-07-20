@@ -81,6 +81,7 @@
     });
     document.documentElement.dataset.consentAnalytics = value.analytics ? "granted" : "denied";
     document.documentElement.dataset.consentFunctional = value.functional ? "granted" : "denied";
+    document.documentElement.dataset.consentMarketing = marketing ? "granted" : "denied";
     if (value.analytics) loadGtm();
     window.dispatchEvent(new CustomEvent("hm:consent-updated", {
       detail: {

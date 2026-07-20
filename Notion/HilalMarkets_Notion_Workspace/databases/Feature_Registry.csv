@@ -1,0 +1,16 @@
+﻿Feature,Area,Customer Outcome,Implementation Status,Operational Gate,Primary Metric,Owner
+Sharia-Screened Market,Discover,Browse policy-allowed assets,Implemented,Approved methodology + published assets,Asset-to-Passport conversion,Product
+Evidence Passport,Trust,Understand status and evidence,Implemented,Qualified review and source operations,Passport engagement,Governance
+Saved Assets,Discover,Follow assets and status,Implemented,Published assets,Saved asset return rate,Product
+Guided Watchlists,Watch,Convert intent into continuous monitoring,Implemented,Provider and policy configuration,Watchlist activation,Product
+Check the Market Now,Watch,Get immediate value before activation,Implemented,Market data + eligible universe,Scan completion,Engineering
+Opportunities & Evidence,Review,Follow forming and historical outcomes,Implemented,Live scans and evidence,Useful outcome views,Product
+Why didn’t this alert happen?,Review,Explain missed expectations,Implemented,Stored data and proof,Investigation completion,Engineering
+Compliance Changes,Trust,Know when screening evidence changes,Implemented,Source connectors + review operations,Drift engagement,Governance
+Methodology Comparison,Trust,Understand disagreement,Implemented,Multiple approved methodologies,Comparison views,Governance
+Telegram,Delivery,Receive alerts and tests,Implemented,Production bot and webhook,Delivery success,Operations
+Discord,Delivery,Receive personal/community alerts,Implemented,HTTP adapter and permissions,Delivery success,Operations
+Checkout and Billing,Commercial,Buy and manage plans,Implemented,Chosen provider sandbox/live config,Paid conversion,Commercial
+System Brain,Admin,"Review, publish, audit, and operate",Implemented,Cloudflare/origin deployment,Review SLA,Operations
+US equities,Expansion,Screen and monitor selected stocks,Planned,Licensed data + methodology,Pilot retention,Strategy
+Local market,Expansion,Screen and monitor one exchange,Planned,Official universe + data rights,Pilot activation,Strategy

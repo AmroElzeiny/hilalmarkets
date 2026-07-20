@@ -37,6 +37,7 @@ class PublicChatAnswerEvent(UUIDPrimaryKeyMixin, Base):
     question_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     stage: Mapped[str] = mapped_column(String(48), nullable=False, default="ANSWER")
+    mode: Mapped[str] = mapped_column(String(48), nullable=False, default="PRODUCT_FACT")
     intent: Mapped[str] = mapped_column(String(100), nullable=False, default="product_help")
     model: Mapped[str | None] = mapped_column(String(100))
     input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -47,6 +48,12 @@ class PublicChatAnswerEvent(UUIDPrimaryKeyMixin, Base):
         Numeric(12, 8), default=Decimal("0"), nullable=False
     )
     validation_failure: Mapped[str | None] = mapped_column(String(120))
+    knowledge_gap_reason: Mapped[str | None] = mapped_column(String(120))
+    is_greeting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    support_handoff_available: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    support_handoff_reason: Mapped[str | None] = mapped_column(String(500))
     coverage_score: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
     source_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     related_route_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
@@ -98,6 +105,43 @@ class PublicChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error_type: Mapped[str | None] = mapped_column(String(120))
 
 
+class PublicChatAnswerFeedback(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "public_chat_answer_feedback"
+    __table_args__ = (
+        UniqueConstraint("answer_event_id", name="uq_public_chat_feedback_answer_event"),
+        Index("ix_public_chat_feedback_created", "created_at"),
+        Index("ix_public_chat_feedback_helpful_created", "helpful", "created_at"),
+    )
+
+    answer_event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("public_chat_answer_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("public_chat_conversations.id", ondelete="SET NULL"), index=True
+    )
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    session_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    helpful: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    support_form_requested: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    stage: Mapped[str] = mapped_column(String(48), nullable=False)
+    mode: Mapped[str] = mapped_column(String(48), nullable=False)
+    intent: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(100))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    source_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    validation_failure: Mapped[str | None] = mapped_column(String(120))
+    knowledge_gap_reason: Mapped[str | None] = mapped_column(String(120))
+    inquiry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("public_inquiries.id", ondelete="SET NULL"), unique=True, index=True
+    )
+
+
 class PublicInquiry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "public_inquiries"
     __table_args__ = (
@@ -115,6 +159,9 @@ class PublicInquiry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_page: Mapped[str] = mapped_column(String(240), nullable=False)
     referrer: Mapped[str | None] = mapped_column(String(500))
     attribution: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    support_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
     knowledge_gap_category: Mapped[str] = mapped_column(String(80), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="received", nullable=False)

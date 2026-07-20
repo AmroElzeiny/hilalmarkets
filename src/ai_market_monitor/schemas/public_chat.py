@@ -1,5 +1,6 @@
 import re
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -29,6 +30,15 @@ PublicSupportStage = Literal[
     "REFUSAL",
 ]
 PublicChatAnswerStatus = Literal["answered", "unsupported", "refused"]
+
+PublicSupportMode = Literal[
+    "PRODUCT_FACT",
+    "PRODUCT_CONVERSATION",
+    "GENERAL_TRADING_EDUCATION",
+    "ACCOUNT_SUPPORT",
+    "OUT_OF_SCOPE",
+    "SAFETY_REFUSAL",
+]
 
 PublicSupportToolName = Literal[
     "account_state",
@@ -106,9 +116,9 @@ class PublicChatAnswerResponse(BaseModel):
     source_ids: list[str]
     related_links: list[PublicChatRelatedLink]
     coverage_score: float = Field(ge=0, le=1)
-    show_inquiry_form: bool
     knowledge_gap_category: str | None = None
     stage: PublicSupportStage = "ANSWER"
+    mode: PublicSupportMode = "PRODUCT_FACT"
     intent: str = "product_help"
     clarification_question: str | None = None
     confidence: float = Field(default=0.0, ge=0, le=1)
@@ -116,22 +126,25 @@ class PublicChatAnswerResponse(BaseModel):
     suggested_follow_ups: list[str] = Field(default_factory=list, max_length=4)
     safety_boundary: str | None = None
     authenticated_context_used: bool = False
+    support_handoff_available: bool = False
+    support_handoff_reason: str | None = None
+    support_handoff_explicitly_requested: bool = False
+    answer_event_id: UUID | None = None
 
 
 class PublicSupportAIResponse(StrictPublicChatModel):
     stage: PublicSupportStage
+    mode: PublicSupportMode
     intent: str = Field(min_length=1, max_length=100)
     answer: str = Field(min_length=1, max_length=1800)
-    tone: Literal["friendly", "concise", "supportive", "clear"]
     clarification_question: str | None = Field(max_length=500)
     source_ids: list[str] = Field(max_length=12)
     related_route_ids: list[str] = Field(max_length=8)
     requested_tools: list[PublicSupportToolName] = Field(max_length=6)
     confidence: float = Field(ge=0, le=1)
     answer_complete: bool
-    show_inquiry_form: bool
-    inquiry_category: InquiryCategory | None
-    handoff_reason: str | None = Field(max_length=500)
+    support_handoff_available: bool
+    support_handoff_reason: str | None = Field(max_length=500)
     safety_boundary: Literal[
         "none",
         "no_investment_advice",
@@ -139,6 +152,7 @@ class PublicSupportAIResponse(StrictPublicChatModel):
         "no_private_data",
         "product_scope_only",
         "security_boundary",
+        "out_of_scope",
     ]
     suggested_follow_ups: list[str] = Field(max_length=4)
 
@@ -155,7 +169,7 @@ class PublicSupportAIResponse(StrictPublicChatModel):
     @field_validator(
         "answer",
         "clarification_question",
-        "handoff_reason",
+        "support_handoff_reason",
         "safety_boundary",
     )
     @classmethod
@@ -163,6 +177,14 @@ class PublicSupportAIResponse(StrictPublicChatModel):
         if value and re.search(r"(?:https?://|www\.)", value, flags=re.IGNORECASE):
             raise ValueError("Public support responses cannot contain model-authored URLs")
         return value.strip() if value else value
+
+    @model_validator(mode="after")
+    def validate_support_handoff(self) -> "PublicSupportAIResponse":
+        if self.support_handoff_available and not self.support_handoff_reason:
+            raise ValueError("A support handoff reason is required when handoff is available")
+        if not self.support_handoff_available:
+            self.support_handoff_reason = None
+        return self
 
 
 class PublicSupportToolResult(StrictPublicChatModel):
@@ -174,10 +196,32 @@ class PublicSupportToolResult(StrictPublicChatModel):
     authoritative: bool = True
 
 
+class PublicChatAnswerFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    helpful: bool
+    support_form_requested: bool = False
+
+    @model_validator(mode="after")
+    def support_request_is_negative_feedback(self) -> "PublicChatAnswerFeedbackRequest":
+        if self.support_form_requested and self.helpful:
+            raise ValueError("A support-form request cannot be recorded as a helpful answer")
+        return self
+
+
+class PublicChatAnswerFeedbackResponse(BaseModel):
+    status: Literal["recorded"]
+    message: str
+    support_form_requested: bool
+
+
 class PublicInquiryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     profile: PublicChatProfile
+    session_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    answer_event_id: UUID
     details: str = Field(min_length=5, max_length=4000)
     category: InquiryCategory = "other"
     source_page: str = Field(default="/", min_length=1, max_length=240)
@@ -186,7 +230,6 @@ class PublicInquiryRequest(BaseModel):
     utm_source: str | None = Field(default=None, max_length=120)
     utm_medium: str | None = Field(default=None, max_length=120)
     utm_campaign: str | None = Field(default=None, max_length=120)
-    knowledge_gap_category: str = Field(default="unverified_product_question", max_length=80)
     idempotency_key: str = Field(min_length=16, max_length=160, pattern=r"^[A-Za-z0-9:_-]+$")
     company_website: str = Field(default="", max_length=300)
 

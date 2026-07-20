@@ -2942,16 +2942,14 @@ async def connections_page(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    telegram = await session.scalar(
-        select(TelegramConnection).where(TelegramConnection.user_id == user.id)
-    )
+    user_id = user.id
     telegram_connect_url = None
     telegram_start_command = None
     try:
         telegram_connect_url = await TelegramAccountLinkService(
             session,
             settings,
-        ).create_dashboard_start_link(user_id=user.id)
+        ).create_dashboard_start_link(user_id=user_id)
         if telegram_connect_url and "?start=" in telegram_connect_url:
             telegram_start_command = (
                 "/start " + telegram_connect_url.split("?start=", 1)[1].split("&", 1)[0]
@@ -2959,6 +2957,10 @@ async def connections_page(
         await session.commit()
     except TelegramAccountLinkError:
         await session.rollback()
+    await session.refresh(user)
+    telegram = await session.scalar(
+        select(TelegramConnection).where(TelegramConnection.user_id == user_id)
+    )
     return templates.TemplateResponse(
         request,
         "hilal/dashboard/integrations.html",

@@ -62,8 +62,13 @@ def test_named_sensitive_routes_have_rate_limit_scopes() -> None:
         "/api/v1/whatsapp/link": "whatsapp_test",
         "/api/v1/whatsapp/test": "whatsapp_test",
         "/api/v1/public-chat/answers": "public_chat",
+        "/api/v1/public-chat/answers/00000000-0000-0000-0000-000000000001/feedback": (
+            "public_chat"
+        ),
         "/api/v1/public-chat/ratings": "public_chat",
         "/api/v1/public-chat/inquiries": "public_inquiry",
+        "/api/v1/public-forms/waitlist": "public_waitlist",
+        "/api/v1/public-forms/contact": "public_contact",
         "/api/v1/admin/incidents": "admin_mutation",
         "/api/v1/sharia/admin/methodologies": "admin_mutation",
     }

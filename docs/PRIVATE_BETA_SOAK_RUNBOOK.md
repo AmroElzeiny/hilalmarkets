@@ -26,8 +26,9 @@ Observe continuously for seven complete UTC days:
 1. Record deployment commit, Alembic head, environment name, UTC start, approved methodology and
    Passport IDs, exact exchange mappings, enabled monitor IDs and worker/scheduler versions.
 2. Confirm `BILLING_ENABLED=false`, `WHATSAPP_ENABLED=false`,
-   `AI_AGENT_CONTROL_ENABLED=true`, `AI_AGENT_SHADOW_MODE=true`, and
-   `CAPABILITY_EXTENSION_ENABLED=false` from redacted runtime diagnostics.
+   `AI_AGENT_CONTROL_ENABLED=true`, `AI_AGENT_SHADOW_MODE=false`,
+   `AI_AGENT_ROLLOUT_PERCENT=100`, and `CAPABILITY_EXTENSION_ENABLED=true` from redacted runtime
+   diagnostics.
 3. Confirm only one scheduler instance is active.
 4. Capture the baseline:
 

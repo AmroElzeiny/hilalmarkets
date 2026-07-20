@@ -69,7 +69,7 @@ templates without replacing persisted models or approval boundaries.
 | Telegram | `telegram/` | Async command/callback application service and alert rendering |
 | WhatsApp | `whatsapp/` | Signed Meta webhooks, verified opt-in linking, interactive navigation, template/session delivery, and status reconciliation |
 | Workers | `worker.py` | Idempotent scan scheduling, scan execution, expiry, delivery and health jobs |
-| Web | `templates/hilal/`, `static/hilalmarkets*` | Shared public/dashboard shells, production read models, guided Watch Plan UI, consent, and accessibility behavior |
+| Web | `Hilal-Markets-Website/`, `templates/hilal/`, `static/hilalmarkets*` | Supplied React landing/contact, shared dashboard/public shells, production read models, guided Watch Plan UI, consent, and accessibility behavior |
 | Reliability | `services/reliability.py` | Market-data health, incidents, delivery failure state, metrics |
 | Admin | `api/routers/admin.py`, `services/admin_dashboard.py` | RBAC dashboard APIs and audited admin actions |
 | Public product assistant | `api/routers/public_chat.py`, `services/public_chat.py` | Grounded public answers, consented inquiry intake, bounded email outbox and feedback |
@@ -82,15 +82,24 @@ templates without replacing persisted models or approval boundaries.
 - `services/public_site.py` emits bounded public read models from active methodology and current
   assessment records. It never substitutes prototype assets or readiness values.
 - `api/routers/public.py` owns the public route set, canonical URLs, JSON-LD, sitemap, robots,
-  legacy redirects, and plan-catalog binding.
+  legacy redirects, plan-catalog binding, and the minimal React runtime shell for `/` and
+  `/contact`.
+- `Hilal-Markets-Website/` is the source of truth for the landing and contact presentation. Its
+  Docker-verified Vite build is packaged under `static/landing/`; no tracking or server endpoint
+  depends on section order, visible copy, or generated Figma class names.
 - `templates/hilal/base_public.html` and `base_dashboard.html` own their shells. Shared partials and
   macros render navigation, footer, consent, statuses, opportunity cards, evidence rows, and empty
   states.
 - Public Pricing and dashboard Billing expose only the free plan while billing is disabled.
   Internal, trial, and paid catalog entries remain available to entitlement/provider tests but
   cannot be purchased through a hidden form value.
-- `hilalmarkets-consent.js` stores a versioned first-party preference and is the only optional GTM
-  loader. Consent defaults are emitted before it, with analytics and advertising storage denied.
+- `hilalmarkets-consent.js` stores a versioned first-party preference. Consent defaults are emitted
+  before optional scripts, with analytics and advertising storage denied. On the React surface,
+  `analytics.ts` is the only GA4/GTM/Meta loader; the consent manager supplies live category
+  updates but receives no GTM ID, preventing duplicate initialization.
+- `api/routers/public_forms.py` and `services/public_forms.py` own anonymous CSRF, idempotent
+  waitlist/contact persistence, one office-email delivery, and optional retryable server-only
+  Google Apps Script delivery. Sheet endpoints and secrets are never rendered into browser state.
 - `/system-brain` is absent from customer navigation. Production can require Cloudflare Access
   headers before the existing application password, email OTP, database session, and CSRF gates.
 - `services/public_chat.py` builds its knowledge index from `site_content.py`, public-page metadata
@@ -235,6 +244,27 @@ roles; mutating actions require `ADMIN`.
 `services/security_review.py` codifies local security checks for SSRF-prone URLs, unsafe uploads,
 secret redaction and user strategy text that attempts code execution. It is a guardrail, not a
 replacement for CI dependency/container vulnerability scanning.
+
+### Public Support AI
+
+`services/public_chat.py` and `services/public_support_ai.py` keep the public Support assistant
+separate from Setup Chat. The model selects one of six validated modes: grounded product fact,
+normal product conversation, general trading education, authenticated read-only account support,
+out of scope, or safety refusal. Product facts require an authoritative server source or successful
+read tool; account facts require a successful server-owned user-scoped tool. Greetings and neutral
+education do not require fabricated citations.
+
+The AI may only advertise that human support is available. It cannot open the Support form. Each
+completed response creates an immutable answer event; the visitor then records exactly one
+session-bound Yes or **No. Submit a support form** choice. The inquiry endpoint rejects submissions
+without the negative choice and stores answer metadata separately from editable form fields.
+Provider failures, invalid model output, low confidence, knowledge gaps, clarification, refusals,
+and greetings remain in chat.
+
+`services/notion_knowledge.py` indexes only bounded `.md`, `.csv`, `.json`, and `.txt` files below
+the configured project `Notion/` root. It rejects symlinks and oversized files, redacts secret-like
+lines, and returns path-contained snippets as `context_only`. This corpus can improve wording and
+topic recall but cannot satisfy product-fact grounding. No generic filesystem tool is exposed.
 
 ## Security boundaries
 

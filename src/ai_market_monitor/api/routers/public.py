@@ -207,6 +207,16 @@ def _public_context(
         "gtm_container_id": settings.google_tag_manager_container_id,
         "optional_analytics_enabled": settings.optional_analytics_enabled,
         "marketing_consent_enabled": settings.marketing_consent_enabled,
+        "public_analytics_enabled": settings.public_analytics_enabled,
+        "analytics_runtime_config": {
+            "enabled": settings.public_analytics_enabled,
+            "gtmId": settings.public_gtm_id,
+            "ga4MeasurementId": settings.vite_ga4_measurement_id,
+            "metaPixelId": settings.vite_meta_pixel_id,
+            "metaPixelEnabled": settings.vite_meta_pixel_enabled,
+            "siteUrl": settings.public_site_url,
+            "debug": settings.vite_analytics_debug,
+        },
         "public_chat_enabled": settings.public_chat_enabled,
         **extra,
     }
@@ -246,10 +256,8 @@ async def _render_public_page(
 @router.get("/", response_class=HTMLResponse, include_in_schema=False, name="public_home")
 async def landing_page(
     request: Request,
-    session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    public_market = await PublicSiteReadService(session, settings).screened_market_preview()
     return templates.TemplateResponse(
         request=request,
         name="hilal/public/index.html",
@@ -257,10 +265,12 @@ async def landing_page(
             request,
             settings,
             page="landing",
-            title="Halal-conscious crypto monitoring, built around evidence",
-            description=SITE_DESCRIPTION,
+            title="Strategy monitoring for Muslim crypto traders",
+            description=(
+                "Build trading strategies, explore Shariah-screened assets, and "
+                "monitor every setup in one place."
+            ),
             path="/",
-            public_market=public_market,
         ),
     )
 
@@ -368,14 +378,20 @@ async def help_center(
 )
 async def contact(
     request: Request,
-    session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    return await _render_public_page(
+    metadata = PUBLIC_PAGE_BY_PAGE["contact"]
+    return templates.TemplateResponse(
         request=request,
-        session=session,
-        settings=settings,
-        page="contact",
+        name=metadata.template,
+        context=_public_context(
+            request,
+            settings,
+            page=metadata.page,
+            title=metadata.title,
+            description=metadata.description,
+            path=metadata.path,
+        ),
     )
 
 

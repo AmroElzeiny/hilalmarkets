@@ -1,3 +1,7 @@
+import re
+from pathlib import Path
+from urllib.parse import urlsplit
+
 from ai_market_monitor.core.config import Settings
 
 DEFAULT_SECRET = "development-only-change-me-32-characters"
@@ -172,6 +176,64 @@ def validate_runtime_configuration(settings: Settings) -> None:
                     errors.append(f"{name} must not use a placeholder value")
             if "@" not in settings.public_chat_inquiry_email:
                 errors.append("PUBLIC_CHAT_INQUIRY_EMAIL must be a valid delivery address")
+            if settings.public_chat_notion_enabled and not Path(
+                settings.public_chat_notion_root
+            ).is_dir():
+                errors.append(
+                    "PUBLIC_CHAT_NOTION_ROOT must be an existing directory when "
+                    "PUBLIC_CHAT_NOTION_ENABLED=true"
+                )
+        if settings.public_forms_enabled:
+            for name, value in {
+                "CONTACT_FORM_SENDER_EMAIL": settings.contact_form_sender_email,
+                "CONTACT_FORM_RECIPIENT_EMAIL": settings.contact_form_recipient_email,
+            }.items():
+                if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value.strip()):
+                    errors.append(f"{name} must be a valid email address")
+            if settings.email_adapter != "smtp":
+                errors.append("EMAIL_ADAPTER=smtp is required when public forms are enabled")
+        if settings.waitlist_google_sheets_enabled:
+            configured = settings.waitlist_google_sheets_webhook_url
+            endpoint = configured.get_secret_value().strip() if configured else ""
+            parsed = urlsplit(endpoint)
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname != "script.google.com"
+                or not parsed.path.startswith("/macros/s/")
+                or not parsed.path.endswith("/exec")
+            ):
+                errors.append(
+                    "WAITLIST_GOOGLE_SHEETS_WEBHOOK_URL must be an HTTPS "
+                    "Google Apps Script /exec URL"
+                )
+            secret = settings.waitlist_google_sheets_webhook_secret
+            if secret is None or not secret.get_secret_value().strip():
+                errors.append(
+                    "WAITLIST_GOOGLE_SHEETS_WEBHOOK_SECRET is required when "
+                    "Sheet delivery is enabled"
+                )
+        if settings.public_analytics_enabled:
+            if not settings.public_gtm_id and not settings.vite_ga4_measurement_id:
+                errors.append(
+                    "VITE_GTM_ID or VITE_GA4_MEASUREMENT_ID is required when analytics is enabled"
+                )
+            if settings.public_gtm_id and not re.fullmatch(
+                r"GTM-[A-Z0-9]+", settings.public_gtm_id
+            ):
+                errors.append("VITE_GTM_ID must be a valid GTM container ID")
+            if settings.vite_ga4_measurement_id and not re.fullmatch(
+                r"G-[A-Z0-9]+", settings.vite_ga4_measurement_id.strip()
+            ):
+                errors.append("VITE_GA4_MEASUREMENT_ID must be a valid GA4 measurement ID")
+        if settings.vite_meta_pixel_enabled:
+            if not settings.marketing_consent_enabled:
+                errors.append(
+                    "MARKETING_CONSENT_ENABLED must be true when Meta Pixel is enabled"
+                )
+            if not settings.vite_meta_pixel_id or not re.fullmatch(
+                r"[0-9]{5,32}", settings.vite_meta_pixel_id.strip()
+            ):
+                errors.append("VITE_META_PIXEL_ID must be a valid numeric Pixel ID")
         if settings.telegram_enabled:
             if settings.telegram_adapter != "http":
                 errors.append("TELEGRAM_ADAPTER=http is required when Telegram is enabled")

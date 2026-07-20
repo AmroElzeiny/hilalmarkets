@@ -1,16 +1,16 @@
-<button class="public-chat-launcher" type="button" data-public-chat-launcher aria-haspopup="dialog" aria-controls="public-product-chat" aria-expanded="false" aria-label="Open HilalMarkets product assistant" data-tooltip="Ask HilalMarkets">
-  <span class="public-chat-launcher-icon" data-icon="bot" aria-hidden="true"></span>
-  <span class="sr-only">Ask HilalMarkets</span>
+<button class="public-chat-launcher" type="button" data-public-chat-launcher aria-haspopup="dialog" aria-controls="public-product-chat" aria-expanded="false" aria-label="Open Hilal Markets product assistant" data-tooltip="Ask Hilal Markets">
+  <span class="public-chat-launcher-icon" data-icon="spark" aria-hidden="true"></span>
+  <span class="sr-only">Ask Hilal Markets</span>
 </button>
 
 <div class="public-chat-backdrop" data-public-chat-backdrop aria-hidden="true" hidden></div>
 <section class="public-chat-panel" id="public-product-chat" data-public-chat-panel role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="public-chat-title" aria-describedby="public-chat-description" hidden>
   <header class="public-chat-head">
     <div class="public-chat-brand">
-      <span class="public-chat-brand-icon" data-icon="bot" aria-hidden="true"></span>
+      <span class="public-chat-brand-icon" data-icon="spark" aria-hidden="true"></span>
       <div>
-        <h2 id="public-chat-title">Ask HilalMarkets</h2>
-        <p id="public-chat-description">Verified product help, without market advice.</p>
+        <h2 id="public-chat-title">Ask Hilal Markets</h2>
+        <p id="public-chat-description">Clear product help, without market advice.</p>
       </div>
     </div>
     <div class="public-chat-head-actions">
@@ -35,7 +35,7 @@
       <div class="public-chat-intro">
         <span class="badge badge-neutral">Product assistant</span>
         <h3>Let's make this useful.</h3>
-        <p>Share your name and email so we can keep the conversation personal and send a reply if the verified help library does not cover your question.</p>
+        <p>Share your name and email so we can make the conversation personal and send a copy if you choose to contact support.</p>
       </div>
       <div class="field">
         <label for="public-chat-name">Name</label>
@@ -49,7 +49,7 @@
         <input type="checkbox" name="remember_on_device">
         <span>Remember me on this device</span>
       </label>
-      <p class="field-help">Device memory is used only when Functional cookies are enabled. See our <a href="/privacy">Privacy notice</a>.</p>
+      <p class="field-help">Device memory is used only when Functional cookies are enabled. You can forget saved details at any time.</p>
       <p class="public-chat-form-error" data-public-chat-profile-error role="alert" hidden></p>
       <button class="btn btn-primary" type="submit">Start conversation</button>
     </form>
@@ -57,7 +57,7 @@
     <div class="public-chat-conversation" data-public-chat-conversation hidden>
       <div class="public-chat-messages" data-public-chat-messages role="log" aria-live="polite" aria-relevant="additions"></div>
       <div class="public-chat-starters" data-public-chat-starters aria-label="Suggested questions">
-        <button type="button" class="chip" data-public-chat-question="What does HilalMarkets do?">What does it do?</button>
+        <button type="button" class="chip" data-public-chat-question="What does Hilal Markets do?">What does it do?</button>
         <button type="button" class="chip" data-public-chat-question="How does Sharia screening work?">How screening works</button>
         <button type="button" class="chip" data-public-chat-question="Which markets are available in private beta?">Private-beta markets</button>
         <button type="button" class="chip" data-public-chat-question="How much does the private beta cost?">Pricing</button>
@@ -68,7 +68,7 @@
           <span class="public-chat-mini-icon" data-icon="support" aria-hidden="true"></span>
           <div>
             <strong>Send this to the team</strong>
-            <p>We will email a copy to you and route the question to HilalMarkets.</p>
+            <p>We will email a copy to you and send the full question to Hilal Markets support.</p>
           </div>
         </div>
         <div class="public-chat-contact-grid">
@@ -129,12 +129,21 @@
     </div>
   </div>
 
+  <div class="public-chat-answer-feedback" data-public-chat-answer-feedback role="group" aria-labelledby="public-chat-feedback-question" hidden>
+    <span id="public-chat-feedback-question">Did AI answer your question?</span>
+    <div class="public-chat-answer-feedback-actions">
+      <button class="btn btn-secondary btn-sm" type="button" data-public-chat-feedback-yes>Yes</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-public-chat-feedback-no>No. Submit a support form</button>
+    </div>
+    <span class="public-chat-answer-feedback-status" data-public-chat-feedback-status role="status" hidden></span>
+  </div>
+
   <form class="public-chat-composer" data-public-chat-composer hidden>
-    <label class="sr-only" for="public-chat-message">Ask a product question</label>
-    <textarea id="public-chat-message" data-public-chat-input rows="1" maxlength="800" placeholder="Ask about the product, screening, pricing, or private beta" required></textarea>
+    <label class="sr-only" for="public-chat-message">Ask about Hilal Markets</label>
+    <textarea id="public-chat-message" data-public-chat-input rows="1" maxlength="800" placeholder="Ask about Hilal Markets..." required></textarea>
     <button type="submit" data-public-chat-send aria-label="Send question">
       <span data-icon="arrow" aria-hidden="true"></span>
     </button>
   </form>
-  <footer class="public-chat-foot"><span>Verified product information only. No financial advice or religious rulings.</span><span class="public-chat-foot-actions"><a href="/privacy">Privacy</a><button type="button" data-public-chat-forget>Forget saved details</button></span></footer>
+  <footer class="public-chat-foot"><span>Verified product information only. No financial advice or religious rulings.</span><span class="public-chat-foot-actions"><button type="button" data-public-chat-forget>Forget saved details</button></span></footer>
 </section>
