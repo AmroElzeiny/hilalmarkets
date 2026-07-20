@@ -29,6 +29,16 @@ class FakeSMTP:
         FakeSMTP.sent_message = message
 
 
+class RejectingAuthSMTP(FakeSMTP):
+    def login(self, username, password):
+        raise email_delivery.smtplib.SMTPAuthenticationError(535, b"rejected")
+
+
+class DeferringSMTP(FakeSMTP):
+    def send_message(self, message):
+        raise email_delivery.smtplib.SMTPDataError(451, b"try later")
+
+
 def test_smtp_from_name_is_used_in_from_header(monkeypatch):
     FakeSMTP.sent_message = None
     monkeypatch.setattr(email_delivery.smtplib, "SMTP", FakeSMTP)
@@ -77,6 +87,54 @@ def test_smtp_transactional_email_supports_bcc(monkeypatch):
     assert FakeSMTP.sent_message["To"] == "customer@example.com"
     assert FakeSMTP.sent_message["Bcc"] == "office@hilalmarkets.com"
     assert FakeSMTP.sent_message["Reply-To"] == "office@hilalmarkets.com"
+
+
+def test_smtp_authentication_failure_is_classified_and_not_retryable(monkeypatch):
+    monkeypatch.setattr(email_delivery.smtplib, "SMTP", RejectingAuthSMTP)
+    settings = Settings(
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        email_adapter="smtp",
+        smtp_host="smtp.example.com",
+        smtp_username="configured-user",
+        smtp_password="configured-password",
+        smtp_from_email="office@hilalmarkets.com",
+        smtp_use_tls=False,
+        ai_interpreter_provider="rules",
+    )
+
+    with pytest.raises(EmailDeliveryError) as error:
+        AuthEmailService(settings)._send_smtp(
+            recipient="customer@example.com",
+            subject="Support confirmation",
+            body="We received your request.",
+        )
+
+    assert error.value.code == "smtp_authentication_failed"
+    assert error.value.provider_status == 535
+    assert error.value.retryable is False
+
+
+def test_smtp_temporary_provider_failure_remains_retryable(monkeypatch):
+    monkeypatch.setattr(email_delivery.smtplib, "SMTP", DeferringSMTP)
+    settings = Settings(
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        email_adapter="smtp",
+        smtp_host="smtp.example.com",
+        smtp_from_email="office@hilalmarkets.com",
+        smtp_use_tls=False,
+        ai_interpreter_provider="rules",
+    )
+
+    with pytest.raises(EmailDeliveryError) as error:
+        AuthEmailService(settings)._send_smtp(
+            recipient="customer@example.com",
+            subject="Support confirmation",
+            body="We received your request.",
+        )
+
+    assert error.value.code == "smtp_provider_temporary"
+    assert error.value.provider_status == 451
+    assert error.value.retryable is True
 
 
 @pytest.mark.asyncio

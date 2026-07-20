@@ -10,9 +10,18 @@ from ai_market_monitor.core.config import Settings
 
 
 class EmailDeliveryError(RuntimeError):
-    def __init__(self, message: str, code: str = "email_unavailable"):
+    def __init__(
+        self,
+        message: str,
+        code: str = "email_unavailable",
+        *,
+        retryable: bool = True,
+        provider_status: int | None = None,
+    ):
         super().__init__(message)
         self.code = code
+        self.retryable = retryable
+        self.provider_status = provider_status
 
 
 class AuthEmailService:
@@ -244,10 +253,58 @@ class AuthEmailService:
                         else "",
                     )
                 smtp.send_message(message)
+        except smtplib.SMTPAuthenticationError as exc:
+            raise EmailDeliveryError(
+                "The SMTP provider rejected the configured credentials.",
+                code="smtp_authentication_failed",
+                retryable=False,
+                provider_status=exc.smtp_code,
+            ) from exc
+        except smtplib.SMTPSenderRefused as exc:
+            raise EmailDeliveryError(
+                "The SMTP provider rejected the sender address.",
+                code="smtp_sender_refused",
+                retryable=False,
+                provider_status=exc.smtp_code,
+            ) from exc
+        except smtplib.SMTPRecipientsRefused as exc:
+            raise EmailDeliveryError(
+                "The SMTP provider rejected the recipient address.",
+                code="smtp_recipient_refused",
+                retryable=False,
+            ) from exc
+        except smtplib.SMTPDataError as exc:
+            retryable = 400 <= exc.smtp_code < 500
+            raise EmailDeliveryError(
+                (
+                    "The SMTP provider temporarily deferred the message."
+                    if retryable
+                    else "The SMTP provider did not accept the message."
+                ),
+                code=(
+                    "smtp_provider_temporary"
+                    if retryable
+                    else "smtp_message_rejected"
+                ),
+                retryable=retryable,
+                provider_status=exc.smtp_code,
+            ) from exc
+        except smtplib.SMTPNotSupportedError as exc:
+            raise EmailDeliveryError(
+                "The SMTP provider does not support the configured TLS or authentication mode.",
+                code="smtp_mode_not_supported",
+                retryable=False,
+            ) from exc
+        except smtplib.SMTPConnectError as exc:
+            raise EmailDeliveryError(
+                "The SMTP provider could not be reached.",
+                code="smtp_connection_failed",
+                provider_status=exc.smtp_code,
+            ) from exc
         except (OSError, smtplib.SMTPException) as exc:
             raise EmailDeliveryError(
-                "The verification email could not be sent.",
-                code="smtp_delivery_failed",
+                "The SMTP connection failed before the message was accepted.",
+                code="smtp_connection_failed",
             ) from exc
         return message_id or str(message.get("Message-ID") or "")
 

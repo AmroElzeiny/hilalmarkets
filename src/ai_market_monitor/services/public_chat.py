@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import logging
 import re
 import secrets
 from dataclasses import dataclass
@@ -51,6 +52,8 @@ from ai_market_monitor.services.public_support_ai import (
 )
 from ai_market_monitor.services.public_support_tools import PublicSupportReadTools
 from ai_market_monitor.services.web_auth import normalize_email
+
+logger = logging.getLogger(__name__)
 
 PUBLIC_CHAT_PROFILE_STORAGE_KEY = "hm-public-chat-profile-v1"
 PUBLIC_CHAT_CSRF_COOKIE = "hm_public_chat_csrf"
@@ -1532,14 +1535,31 @@ class PublicChatService:
                 if refreshed is None:
                     continue
                 row = refreshed
-                exhausted = row.attempt_count >= self.settings.public_chat_email_max_attempts
+                exhausted = (
+                    not exc.retryable
+                    or row.attempt_count >= self.settings.public_chat_email_max_attempts
+                )
                 row.status = "failed" if exhausted else "retryable"
-                row.last_error = f"{exc.code}: {str(exc)}"[:500]
+                provider_status = (
+                    f":smtp_status_{exc.provider_status}"
+                    if exc.provider_status is not None
+                    else ""
+                )
+                row.last_error = f"{exc.code}{provider_status}: {str(exc)}"[:500]
                 row.next_retry_at = (
                     None
                     if exhausted
                     else datetime.now(UTC)
                     + timedelta(minutes=self.settings.public_chat_email_retry_minutes)
+                )
+                logger.warning(
+                    "Public inquiry email delivery failed kind=%s code=%s "
+                    "provider_status=%s attempt=%s retryable=%s",
+                    row.recipient_kind,
+                    exc.code,
+                    exc.provider_status,
+                    row.attempt_count,
+                    not exhausted,
                 )
                 result["failed" if exhausted else "retryable"] += 1
             except Exception as exc:
