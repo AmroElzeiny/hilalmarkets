@@ -4,6 +4,8 @@ from ai_market_monitor.core.site_content import PROHIBITED_ANALYTICS_PROPERTIES
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "src/ai_market_monitor/templates/hilal/base_public.html"
+REACT_SHELL = ROOT / "src/ai_market_monitor/templates/hilal/public/react_site.html"
+LANDING_INDEX = ROOT / "Hilal-Markets-Website/index.html"
 CONSENT = ROOT / "src/ai_market_monitor/static/hilalmarkets-consent.js"
 BANNER = ROOT / "src/ai_market_monitor/templates/hilal/partials/cookie_banner.html"
 
@@ -12,6 +14,7 @@ def test_consent_mode_denied_defaults_precede_optional_analytics_loader():
     base = BASE.read_text(encoding="utf-8")
     consent_script = "hilalmarkets-consent.js"
     assert 'window.gtag("consent", "default"' in base
+    assert base.index('window.gtag("consent", "default"') < base.index("<!-- Google Tag Manager -->")
     assert base.index('window.gtag("consent", "default"') < base.index(consent_script)
     for setting in (
         "ad_storage",
@@ -23,7 +26,7 @@ def test_consent_mode_denied_defaults_precede_optional_analytics_loader():
     ):
         assert f'{setting}: "denied"' in base
     assert 'security_storage: "granted"' in base
-    assert "googletagmanager.com/gtm.js" not in base
+    assert "googletagmanager.com/gtm.js?id=" in base
 
 
 def test_consent_choice_is_versioned_persistent_and_withdrawable():
@@ -38,7 +41,7 @@ def test_consent_choice_is_versioned_persistent_and_withdrawable():
     assert 'analytics_storage: value.analytics ? "granted" : "denied"' in script
 
 
-def test_shared_public_shell_loads_gtm_only_after_analytics_consent():
+def test_shared_public_shell_preloads_gtm_once_and_consent_loader_reuses_it():
     base = BASE.read_text(encoding="utf-8")
     script = CONSENT.read_text(encoding="utf-8")
 
@@ -48,6 +51,24 @@ def test_shared_public_shell_loads_gtm_only_after_analytics_consent():
     assert '/^GTM-[A-Z0-9]+$/.test(containerId)' in script
     assert "googletagmanager.com/gtm.js?id=" in script
     assert 'script.dataset.hmProvider = "google-tag-manager"' in script
+    assert "const loadedContainer = Array.from(document.scripts)" in script
+    assert 'source.pathname === "/gtm.js"' in script
+
+
+def test_every_public_document_shell_has_gtm_head_and_immediate_body_fallback():
+    for path in (BASE, REACT_SHELL):
+        shell = path.read_text(encoding="utf-8")
+        assert shell.index("<!-- Google Tag Manager -->") < shell.index('<meta charset="utf-8">')
+        body = shell.index("<body")
+        body_close = shell.index(">", body) + 1
+        fallback = shell.index("<!-- Google Tag Manager (noscript) -->")
+        assert fallback > body_close
+        assert shell[body_close:fallback].strip() == "{% if analytics_runtime_config.gtmId %}"
+        assert "googletagmanager.com/ns.html?id={{ analytics_runtime_config.gtmId }}" in shell
+
+    standalone = LANDING_INDEX.read_text(encoding="utf-8")
+    assert "'dataLayer','GTM-KBBHH2FV'" in standalone
+    assert "googletagmanager.com/ns.html?id=GTM-KBBHH2FV" in standalone
 
 
 def test_first_visit_banner_has_equal_explicit_choices_and_preference_center():

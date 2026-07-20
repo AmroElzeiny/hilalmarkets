@@ -162,7 +162,18 @@ function loadGoogle() {
   const gtmId = String(config.gtmId ?? '').trim().toUpperCase()
   const ga4Id = String(config.ga4MeasurementId ?? '').trim().toUpperCase()
   if (VALID_GTM.test(gtmId)) {
+    const loadedContainer = Array.from(document.scripts).some((item) => {
+      try {
+        const source = new URL(item.src)
+        return source.hostname === 'www.googletagmanager.com'
+          && source.pathname === '/gtm.js'
+          && source.searchParams.get('id') === gtmId
+      } catch {
+        return false
+      }
+    })
     googleLoaded = true
+    if (loadedContainer) return
     window.dataLayer?.push({ 'gtm.start': Date.now(), event: 'gtm.js' })
     injectScript(
       `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(gtmId)}`,

@@ -88,7 +88,7 @@ async def test_public_landing_is_available_without_screening_seed_data(test_cont
     assert "universally halal" not in content.lower()
 
 
-async def test_every_public_shell_receives_consent_gated_gtm_configuration(test_context):
+async def test_every_public_shell_renders_gtm_in_head_and_after_body(test_context):
     settings = test_context["settings"]
     settings.vite_analytics_enabled = True
     settings.vite_gtm_id = "GTM-HILALTEST1"
@@ -100,7 +100,13 @@ async def test_every_public_shell_receives_consent_gated_gtm_configuration(test_
         content = response.text
         assert "GTM-HILALTEST1" in content, path
         assert 'analytics_storage: "denied"' in content, path
-        assert "googletagmanager.com/gtm.js?id=GTM-HILALTEST1" not in content, path
+        assert "'dataLayer','GTM-HILALTEST1'" in content, path
+        assert "googletagmanager.com/ns.html?id=GTM-HILALTEST1" in content, path
+        assert content.index("<!-- Google Tag Manager -->") < content.index('<meta charset="utf-8">'), path
+        body = content.index("<body")
+        body_close = content.index(">", body) + 1
+        fallback = content.index("<!-- Google Tag Manager (noscript) -->")
+        assert not content[body_close:fallback].strip(), path
 
 
 async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):

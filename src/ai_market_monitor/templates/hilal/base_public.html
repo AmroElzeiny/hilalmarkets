@@ -1,6 +1,29 @@
 <!doctype html>
 <html lang="en" data-consent-analytics="denied" data-consent-functional="denied" data-consent-marketing="denied">
 <head>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    window.gtag("consent", "default", {
+      ad_storage: "denied",
+      analytics_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+      functionality_storage: "denied",
+      personalization_storage: "denied",
+      security_storage: "granted",
+      wait_for_update: 500
+    });
+  </script>
+  {% if analytics_runtime_config.gtmId %}
+  <!-- Google Tag Manager -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','{{ analytics_runtime_config.gtmId }}');</script>
+  <!-- End Google Tag Manager -->
+  {% endif %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ description }}">
@@ -21,18 +44,6 @@
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260715-expansion">
   {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260720-brand4">{% endif %}
   <script>
-    window.dataLayer = window.dataLayer || [];
-    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
-    window.gtag("consent", "default", {
-      ad_storage: "denied",
-      analytics_storage: "denied",
-      ad_user_data: "denied",
-      ad_personalization: "denied",
-      functionality_storage: "denied",
-      personalization_storage: "denied",
-      security_storage: "granted",
-      wait_for_update: 500
-    });
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
       "analyticsEnabled": public_analytics_enabled,
@@ -45,6 +56,12 @@
   {% block page_styles %}{% endblock %}
 </head>
 <body class="public-page page-{{ page }}">
+  {% if analytics_runtime_config.gtmId %}
+  <!-- Google Tag Manager (noscript) -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{ analytics_runtime_config.gtmId }}"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- End Google Tag Manager (noscript) -->
+  {% endif %}
   <a class="skip-link" href="#main-content">Skip to content</a>
   {% include "hilal/partials/public_header.html" %}
   <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
@@ -53,7 +70,7 @@
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260715-expansion"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260720-ga4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260721-gtm"></script>
   {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260720-brand4"></script>{% endif %}
   {% block page_scripts %}{% endblock %}
 </body>

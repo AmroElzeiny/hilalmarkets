@@ -56,6 +56,23 @@
     const measurementId = String(config.ga4MeasurementId || "").trim();
     if (googleLoaded || !config.analyticsEnabled) return;
 
+    if (/^GTM-[A-Z0-9]+$/.test(containerId)) {
+      const loadedContainer = Array.from(document.scripts).some((item) => {
+        try {
+          const source = new URL(item.src);
+          return source.hostname === "www.googletagmanager.com"
+            && source.pathname === "/gtm.js"
+            && source.searchParams.get("id") === containerId;
+        } catch {
+          return false;
+        }
+      });
+      if (loadedContainer) {
+        googleLoaded = true;
+        return;
+      }
+    }
+
     const script = document.createElement("script");
     script.async = true;
     script.dataset.hmOptionalAnalytics = "true";
