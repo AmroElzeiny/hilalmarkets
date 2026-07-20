@@ -87,9 +87,9 @@ docker compose exec api alembic upgrade head
 ```
 
 Then restart the API container after setting the environment variables. The
-public route is `https://app.trace-edge.com/system-brain` when the application
+public route is `https://app.hilalmarkets.com/system-brain` when the application
 is served at that host. If the desired public host is exactly
-`https://trace-edge.com/system-brain`, route that path to the FastAPI service in
+`https://hilalmarkets.com/system-brain`, route that path to the FastAPI service in
 the reverse proxy.
 
 ## Operational Notes

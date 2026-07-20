@@ -8,13 +8,39 @@ import {
 } from 'react'
 import { trackCtaClick, trackSectionView } from '../analytics'
 
-export function useSectionTracking<T extends HTMLElement = HTMLElement>(name: string) {
-  const send = useCallback(() => trackSectionView(name), [name])
-  return useVisibilityTracking<T>(send)
+export type VisibilityMode = 'entry' | 'percentage'
+
+export type VisibilityTrackingOptions = {
+  visibilityMode?: VisibilityMode
+  dwellMs?: number
+  threshold?: number
 }
 
-export function useVisibilityTracking<T extends HTMLElement = HTMLElement>(send: () => boolean) {
+const DEFAULT_DWELL_MS = 1000
+const DEFAULT_PERCENTAGE_THRESHOLD = 0.5
+
+function normalizedVisibilityOptions(options: VisibilityTrackingOptions) {
+  return {
+    visibilityMode: options.visibilityMode ?? 'entry',
+    dwellMs: Math.max(0, options.dwellMs ?? DEFAULT_DWELL_MS),
+    threshold: Math.min(1, Math.max(0, options.threshold ?? DEFAULT_PERCENTAGE_THRESHOLD)),
+  }
+}
+
+export function useSectionTracking<T extends HTMLElement = HTMLElement>(
+  name: string,
+  options: VisibilityTrackingOptions = {},
+) {
+  const send = useCallback(() => trackSectionView(name), [name])
+  return useVisibilityTracking<T>(send, options)
+}
+
+export function useVisibilityTracking<T extends HTMLElement = HTMLElement>(
+  send: () => boolean,
+  options: VisibilityTrackingOptions = {},
+) {
   const ref = useRef<T>(null)
+  const { visibilityMode, dwellMs, threshold } = normalizedVisibilityOptions(options)
 
   useEffect(() => {
     const element = ref.current
@@ -25,35 +51,50 @@ export function useVisibilityTracking<T extends HTMLElement = HTMLElement>(send:
     const attempt = () => {
       if (!visible || completed) return
       completed = send()
-      if (!completed) timer = window.setTimeout(attempt, 1000)
+      if (!completed) timer = window.setTimeout(attempt, dwellMs)
     }
     const observer = new IntersectionObserver(
       ([entry]) => {
-        visible = Boolean(entry?.isIntersecting && entry.intersectionRatio >= 0.5)
+        visible = Boolean(
+          entry?.isIntersecting &&
+          (visibilityMode === 'entry' || entry.intersectionRatio >= threshold),
+        )
         if (timer !== null) window.clearTimeout(timer)
-        timer = visible && !completed ? window.setTimeout(attempt, 1000) : null
+        timer = visible && !completed ? window.setTimeout(attempt, dwellMs) : null
       },
-      { threshold: [0, 0.5, 1] },
+      visibilityMode === 'entry'
+        ? { rootMargin: '0px 0px -20% 0px', threshold: 0 }
+        : { threshold: [0, threshold, 1] },
     )
     observer.observe(element)
     return () => {
       if (timer !== null) window.clearTimeout(timer)
       observer.disconnect()
     }
-  }, [send])
+  }, [dwellMs, send, threshold, visibilityMode])
 
   return ref
 }
 
 export function TrackedSection({
   analyticsName,
+  visibilityMode = 'entry',
+  dwellMs = DEFAULT_DWELL_MS,
+  threshold = DEFAULT_PERCENTAGE_THRESHOLD,
   children,
 }: {
   analyticsName: string
+  visibilityMode?: VisibilityMode
+  dwellMs?: number
+  threshold?: number
   children: ReactNode
 }) {
-  const ref = useSectionTracking<HTMLDivElement>(analyticsName)
-  return <div ref={ref}>{children}</div>
+  const ref = useSectionTracking<HTMLDivElement>(analyticsName, {
+    visibilityMode,
+    dwellMs,
+    threshold,
+  })
+  return <div ref={ref} data-analytics-section={analyticsName}>{children}</div>
 }
 
 type TrackedCtaProps = AnchorHTMLAttributes<HTMLAnchorElement> & {

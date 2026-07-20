@@ -45,5 +45,5 @@ for path in ("/health", "/health/deep"):
 PY
 
 echo "Deployment finished."
-echo "Public site: https://trace-edge.com"
-echo "Dashboard:   https://app.trace-edge.com/dashboard"
+echo "Public site: https://hilalmarkets.com"
+echo "Dashboard:   https://app.hilalmarkets.com/dashboard"

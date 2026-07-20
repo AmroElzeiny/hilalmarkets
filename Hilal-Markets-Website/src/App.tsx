@@ -7,6 +7,7 @@ import Component06CoreFeatures from './imports/06CoreFeatures-1'
 import Component07TrustAndControl from './imports/07TrustAndControl'
 import {
   getFirstTouchAttribution,
+  trackFaqOpen,
   trackWaitlistError,
   trackWaitlistFormStart,
   trackWaitlistFormView,
@@ -168,46 +169,57 @@ function TrustControl() {
 function FAQ() {
   const faqs = [
     {
+      id: 'what_is_hilal',
       q: 'What is Hilal Markets?',
       a: 'Hilal Markets is a strategy-building and market-monitoring platform designed for Muslim traders. It helps users turn their own ideas into clear rules, explore Shariah-screened assets, monitor setups continuously, and understand the evidence behind every alert.',
     },
     {
+      id: 'target_audience',
       q: 'Who is Hilal Markets designed for?',
       a: 'Hilal Markets is designed for Muslim traders who already have strategies, indicators, or market conditions they want to monitor but do not want to watch charts continuously. No coding experience is required.',
     },
     {
+      id: 'is_broker',
       q: 'Is Hilal Markets a broker?',
       a: 'No. Hilal Markets does not provide brokerage accounts, hold funds, or execute transactions. Users continue to use their own broker or exchange separately.',
     },
     {
+      id: 'provides_signals',
       q: 'Does Hilal Markets provide buy and sell signals?',
       a: 'Hilal Markets does not distribute generic buy or sell calls. Users define their own strategies and conditions, and the platform monitors the market according to the rules they have reviewed and approved.',
     },
     {
+      id: 'supported_markets',
       q: 'Which markets and assets will be supported first?',
       a: 'Hilal Markets will initially focus on crypto spot markets and a selected universe of screened assets. Stocks, ETFs, and other asset classes may be added as the platform grows.',
     },
     {
+      id: 'shariah_screening',
       q: 'How does Shariah screening work?',
       a: 'Each supported asset is evaluated under a published screening methodology. Users can review the status, screening criteria, supporting sources, review date, relevant restrictions, and status history.',
     },
     {
+      id: 'halal_guarantee',
       q: 'Does Hilal Markets guarantee that every asset or strategy is halal?',
       a: 'Hilal Markets provides screening information based on its published methodology and qualified Shariah oversight. It does not replace a personal religious ruling or guarantee that every scholar will reach the same conclusion. Disputed or uncertain cases will be shown clearly.',
     },
     {
+      id: 'ai_strategy_builder',
       q: 'How does the AI chatbot help build my strategy?',
       a: 'The AI chatbot helps translate your description into structured and measurable conditions and asks clarifying questions when something is incomplete or ambiguous. You review and approve the rules before monitoring begins. No coding is required.',
     },
     {
+      id: 'ai_rule_changes',
       q: 'Can AI change my strategy automatically?',
       a: 'No. AI cannot silently change an approved strategy. Any change must be reviewed and confirmed before a new version becomes active.',
     },
     {
+      id: 'alert_delivery',
       q: 'How will alerts be delivered?',
       a: 'Users will be able to receive alerts without keeping the Hilal Markets dashboard open. Telegram, email, and WhatsApp will be available in the initial experience, with additional integrations added as the platform expands.',
     },
     {
+      id: 'strategy_privacy',
       q: 'Will my strategies remain private?',
       a: 'Yes. Your strategies, rules, watchlists, and monitoring history will remain private and will not be published or shared with other users without your permission.',
     },
@@ -230,7 +242,10 @@ function FAQ() {
                 <button
                   id={`faq-button-${i}`}
                   type="button"
-                  onClick={() => setOpen(isOpen ? null : i)}
+                  onClick={() => {
+                    if (!isOpen) trackFaqOpen(f.id)
+                    setOpen(isOpen ? null : i)
+                  }}
                   className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition-colors hover:bg-[#fafbfc]"
                   aria-expanded={isOpen}
                   aria-controls={`faq-panel-${i}`}
@@ -277,7 +292,11 @@ function Waitlist() {
   const [errorType, setErrorType] = useState<WaitlistErrorType>('unknown_error')
   const idempotencyKey = useRef(newWaitlistIdempotencyKey())
   const formVisible = useCallback(() => trackWaitlistFormView('landing_final'), [])
-  const waitlistRef = useVisibilityTracking<HTMLDivElement>(formVisible)
+  const waitlistRef = useVisibilityTracking<HTMLDivElement>(formVisible, {
+    visibilityMode: 'percentage',
+    dwellMs: 1000,
+    threshold: 0.5,
+  })
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -411,7 +430,7 @@ export default function App() {
         <TrackedSection analyticsName="hero"><Hero /></TrackedSection>
         <TrackedSection analyticsName="problem_solution"><ProblemSolution /></TrackedSection>
         <TrackedSection analyticsName="how_it_works"><HowItWorks /></TrackedSection>
-        <TrackedSection analyticsName="features"><Features /></TrackedSection>
+        <Features />
         <TrackedSection analyticsName="trust_control"><TrustControl /></TrackedSection>
         <TrackedSection analyticsName="faq"><FAQ /></TrackedSection>
         <Waitlist />

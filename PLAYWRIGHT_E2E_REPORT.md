@@ -1,17 +1,17 @@
 # Playwright E2E Report
 
-Generated: 2026-07-19T23:35:43.441773+00:00
+Generated: 2026-07-20T01:58:21.524231+00:00
 
-Base URL tested: http://127.0.0.1:64663
+Base URL tested: http://host.docker.internal:8000
 Browser: chromium
-App auto-started: True
-Command: `.venv\Scripts\python.exe -m pytest tests\browser\test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa tests\unit\test_landing_analytics.py -q`
-App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 64663`
+App auto-started: False
+Command: `/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission -q --browser-base-url http://host.docker.internal:8000`
+App command: `existing server at http://host.docker.internal:8000`
 
 ## Result
 
-- Tests run: 1
-- Passed: 1
+- Tests run: 4
+- Passed: 4
 - Failed: 0
 - Skipped: 0
 - Screenshots/traces/videos: `test-results/browser`
@@ -23,7 +23,10 @@ App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa` | passed | 11.659 |
+| `tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated` | passed | 8.178 |
+| `tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility` | passed | 4.249 |
+| `tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission` | passed | 1.858 |
+| `tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id` | passed | 14.484 |
 
 ## Runtime Checks
 

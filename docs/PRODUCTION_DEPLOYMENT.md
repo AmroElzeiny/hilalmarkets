@@ -1,6 +1,6 @@
 # Production Deployment
 
-For the current single-VPS live deployment path for `trace-edge.com` and `app.trace-edge.com`,
+For the current single-VPS live deployment path for `hilalmarkets.com` and `app.hilalmarkets.com`,
 use [`DEPLOY_TRACE_EDGE_LIVE.md`](../DEPLOY_TRACE_EDGE_LIVE.md). The notes below remain useful
 for integration-specific production settings.
 

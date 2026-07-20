@@ -21,6 +21,22 @@ def _meta_event_count(page: Page, event_name: str) -> int:
     )
 
 
+def _google_event_parameters(page: Page, event_name: str) -> list[dict]:
+    return page.evaluate(
+        """(name) => (window.dataLayer || []).flatMap((item) => {
+          if (item && item.event === name) {
+            const {event, ...parameters} = item;
+            return [parameters];
+          }
+          if (item && item[0] === 'event' && item[1] === name) {
+            return [item[2] || {}];
+          }
+          return [];
+        })""",
+        event_name,
+    )
+
+
 def _configure_fake_providers(page: Page) -> None:
     page.route(
         "https://www.googletagmanager.com/**",
@@ -51,10 +67,33 @@ def _configure_fake_providers(page: Page) -> None:
     )
 
 
+def _mock_waitlist_backend(page: Page) -> None:
+    submission_count = 0
+
+    def respond(route) -> None:
+        nonlocal submission_count
+        submission_count += 1
+        created = submission_count == 1
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            json={
+                "status": "created" if created else "already_registered",
+                "created": created,
+                "code": "waitlist_created" if created else "duplicate_email",
+                "sheet_delivery_status": "sent",
+                "message": "Request accepted.",
+            },
+        )
+
+    page.route("**/api/v1/public-forms/waitlist", respond)
+
+
 def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
     page: Page,
     base_url: str,
 ) -> None:
+    _mock_waitlist_backend(page)
     page.goto(base_url, wait_until="domcontentloaded")
     expect(page.locator("main h1")).to_be_visible()
     assert page.locator('script[data-hm-provider]').count() == 0
@@ -122,10 +161,107 @@ def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
     assert _meta_event_count(page, "Lead") == 1
 
 
+def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
+    page: Page,
+    base_url: str,
+) -> None:
+    page.goto(base_url, wait_until="domcontentloaded")
+    _configure_fake_providers(page)
+
+    page.wait_for_timeout(1200)
+    assert _event_count(page, "section_view") == 0
+    assert _event_count(page, "faq_open") == 0
+
+    page.locator("[data-cookie-accept-analytics]").click()
+    page.wait_for_timeout(1100)
+    assert any(
+        event.get("section_name") == "hero"
+        for event in _google_event_parameters(page, "section_view")
+    )
+
+    expected = [
+        "hero",
+        "problem_solution",
+        "how_it_works",
+        "feature_screen",
+        "feature_build",
+        "feature_monitor",
+        "feature_connect",
+        "trust_control",
+        "faq",
+    ]
+    for section_name in expected[1:]:
+        section = page.locator(f'[data-analytics-section="{section_name}"]')
+        section.scroll_into_view_if_needed()
+        page.wait_for_timeout(1100)
+
+    section_events = _google_event_parameters(page, "section_view")
+    section_names = [event.get("section_name") for event in section_events]
+    for section_name in expected:
+        assert section_names.count(section_name) == 1
+    assert "features" not in section_names
+
+    assert _event_count(page, "faq_open") == 0
+    target = page.get_by_role("button", name="Who is Hilal Markets designed for?")
+    target.click()
+    target.click()
+    target.click()
+    assert _event_count(page, "faq_open") == 1
+    faq_events = _google_event_parameters(page, "faq_open")
+    assert faq_events == [{"faq_id": "target_audience", "page_path": "/"}]
+    serialized = str(faq_events)
+    assert "Who is Hilal Markets designed for?" not in serialized
+    assert "@example.com" not in serialized
+
+
+def test_long_entry_section_and_percentage_waitlist_visibility(
+    page: Page,
+    base_url: str,
+) -> None:
+    page.goto(base_url, wait_until="domcontentloaded")
+    _configure_fake_providers(page)
+    page.locator("[data-cookie-accept-analytics]").click()
+
+    long_section = page.locator('[data-analytics-section="feature_screen"]')
+    long_section.evaluate("element => { element.style.height = '400vh'; }")
+    long_section.scroll_into_view_if_needed()
+    page.wait_for_timeout(1100)
+    section_names = [
+        event.get("section_name")
+        for event in _google_event_parameters(page, "section_view")
+    ]
+    assert section_names.count("feature_screen") == 1
+
+    waitlist = page.locator("#waitlist")
+    geometry = waitlist.evaluate(
+        """element => ({
+          top: element.getBoundingClientRect().top + window.scrollY,
+          height: element.getBoundingClientRect().height,
+          viewport: window.innerHeight,
+        })"""
+    )
+    page.evaluate(
+        "({top, height, viewport}) => window.scrollTo(0, top - viewport + height * 0.4)",
+        geometry,
+    )
+    page.wait_for_timeout(1100)
+    assert _event_count(page, "waitlist_form_view") == 0
+
+    page.evaluate(
+        "({top, height, viewport}) => window.scrollTo(0, top - viewport + height * 0.6)",
+        geometry,
+    )
+    page.wait_for_timeout(500)
+    assert _event_count(page, "waitlist_form_view") == 0
+    page.wait_for_timeout(600)
+    assert _event_count(page, "waitlist_form_view") == 1
+
+
 def test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission(
     page: Page,
     base_url: str,
 ) -> None:
+    _mock_waitlist_backend(page)
     page.route(
         "https://www.googletagmanager.com/**",
         lambda route: route.fulfill(

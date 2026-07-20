@@ -17,6 +17,7 @@ def test_landing_uses_one_provider_agnostic_consent_aware_analytics_module():
     for function_name in (
         "trackPageView",
         "trackSectionView",
+        "trackFaqOpen",
         "trackCtaClick",
         "trackWaitlistFormView",
         "trackWaitlistFormStart",
@@ -68,11 +69,78 @@ def test_every_page_shell_uses_the_root_dark_favicon():
 
 def test_section_and_form_visibility_use_the_required_threshold_and_dwell_time():
     tracking = TRACKING.read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
     assert "IntersectionObserver" in tracking
-    assert "entry.intersectionRatio >= 0.5" in tracking
-    assert "window.setTimeout(attempt, 1000)" in tracking
+    assert "visibilityMode?: VisibilityMode" in tracking
+    assert "visibilityMode: options.visibilityMode ?? 'entry'" in tracking
+    assert "visibilityMode === 'entry'" in tracking
+    assert "entry.intersectionRatio >= threshold" in tracking
+    assert "window.setTimeout(attempt, dwellMs)" in tracking
+    assert "rootMargin: '0px 0px -20% 0px'" in tracking
     assert "observer.disconnect()" in tracking
     assert "window.clearTimeout(timer)" in tracking
+    assert "visibilityMode: 'percentage'" in app
+    assert "threshold: 0.5" in app
+    assert "dwellMs: 1000" in app
+
+
+def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads():
+    app = APP.read_text(encoding="utf-8")
+    analytics = ANALYTICS.read_text(encoding="utf-8")
+    feature_source = (
+        FRONTEND / "imports" / "06CoreFeatures-1" / "index.tsx"
+    ).read_text(encoding="utf-8")
+    expected_sections = {
+        "hero",
+        "problem_solution",
+        "how_it_works",
+        "feature_screen",
+        "feature_build",
+        "feature_monitor",
+        "feature_connect",
+        "trust_control",
+        "faq",
+    }
+    for section in expected_sections - {
+        "feature_screen",
+        "feature_build",
+        "feature_monitor",
+        "feature_connect",
+    }:
+        assert f'analyticsName="{section}"' in app
+    for section in {
+        "feature_screen",
+        "feature_build",
+        "feature_monitor",
+        "feature_connect",
+    }:
+        assert f"useSectionTracking<HTMLDivElement>('{section}')" in feature_source
+        assert f'data-analytics-section="{section}"' in feature_source
+    assert 'analyticsName="features"' not in app
+
+    faq_ids = {
+        "what_is_hilal",
+        "target_audience",
+        "is_broker",
+        "provides_signals",
+        "supported_markets",
+        "shariah_screening",
+        "halal_guarantee",
+        "ai_strategy_builder",
+        "ai_rule_changes",
+        "alert_delivery",
+        "strategy_privacy",
+    }
+    for faq_id in faq_ids:
+        assert f"id: '{faq_id}'" in app
+    assert "if (!isOpen) trackFaqOpen(f.id)" in app
+    assert "emitGoogle('faq_open'" in analytics
+    assert "faq_id: normalized" in analytics
+    assert (
+        "emitOnce(`faq:${googlePageViewSequence}:${pagePath()}:${normalized}`"
+        in analytics
+    )
+    assert "trackFaqOpen," in analytics
 
 
 def test_waitlist_conversion_requires_a_new_server_confirmed_record():

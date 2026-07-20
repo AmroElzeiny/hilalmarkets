@@ -89,6 +89,7 @@ let metaLoaded = false
 let volatileAttribution: FirstTouchAttribution | null = null
 let lastGooglePageView = ''
 let lastMetaPageView = ''
+let googlePageViewSequence = 0
 const onceEvents = new Set<string>()
 const recentEvents = new Map<string, number>()
 
@@ -266,7 +267,10 @@ export function trackPageView(): boolean {
       page_path: pagePath(),
       page_title: document.title,
     })
-  if (googleSent) lastGooglePageView = key
+  if (googleSent) {
+    lastGooglePageView = key
+    googlePageViewSequence += 1
+  }
   const metaSent = lastMetaPageView !== key && emitMeta('PageView')
   if (metaSent) lastMetaPageView = key
   return googleSent || metaSent
@@ -275,9 +279,20 @@ export function trackPageView(): boolean {
 export function trackSectionView(sectionName: string): boolean {
   const normalized = sectionName.trim().slice(0, 80)
   if (!normalized) return false
-  return emitOnce(`section:${pagePath()}:${normalized}`, () =>
+  return emitOnce(`section:${googlePageViewSequence}:${pagePath()}:${normalized}`, () =>
     emitGoogle('section_view', {
       section_name: normalized,
+      page_path: pagePath(),
+    }),
+  )
+}
+
+export function trackFaqOpen(faqId: string): boolean {
+  const normalized = faqId.trim().slice(0, 80)
+  if (!normalized) return false
+  return emitOnce(`faq:${googlePageViewSequence}:${pagePath()}:${normalized}`, () =>
+    emitGoogle('faq_open', {
+      faq_id: normalized,
       page_path: pagePath(),
     }),
   )
@@ -462,6 +477,7 @@ export function initializeAnalytics() {
 const publicAnalyticsApi = {
   trackPageView,
   trackSectionView,
+  trackFaqOpen,
   trackCtaClick,
   trackWaitlistFormView,
   trackWaitlistFormStart,

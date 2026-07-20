@@ -1,5 +1,6 @@
 import svgPaths from "./svg-x3n5wkemla";
 import { imgGroup } from "./svg-zx5dq";
+import { useSectionTracking } from "../../components/Tracking";
 
 function AssetIdentity() {
   return (
@@ -128,8 +129,9 @@ function FeatureCopy() {
 }
 
 function FeatureRow() {
+  const trackingRef = useSectionTracking<HTMLDivElement>('feature_screen');
   return (
-    <div className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 1">
+    <div ref={trackingRef} data-analytics-section="feature_screen" className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 1">
       <ProductVisual />
       <FeatureCopy />
     </div>
@@ -257,8 +259,9 @@ function ProductVisual1() {
 }
 
 function FeatureRow1() {
+  const trackingRef = useSectionTracking<HTMLDivElement>('feature_build');
   return (
-    <div className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 2">
+    <div ref={trackingRef} data-analytics-section="feature_build" className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 2">
       <FeatureCopy1 />
       <ProductVisual1 />
     </div>
@@ -408,8 +411,9 @@ function FeatureCopy2() {
 }
 
 function FeatureRow2() {
+  const trackingRef = useSectionTracking<HTMLDivElement>('feature_monitor');
   return (
-    <div className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 3">
+    <div ref={trackingRef} data-analytics-section="feature_monitor" className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 3">
       <ProductVisual2 />
       <FeatureCopy2 />
     </div>
@@ -588,8 +592,9 @@ function ProductVisual3() {
 }
 
 function FeatureRow3() {
+  const trackingRef = useSectionTracking<HTMLDivElement>('feature_connect');
   return (
-    <div className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 4">
+    <div ref={trackingRef} data-analytics-section="feature_connect" className="content-stretch flex gap-[70px] h-[470px] items-center overflow-clip relative shrink-0 w-[1248px]" data-name="Feature row 4">
       <FeatureCopy3 />
       <ProductVisual3 />
     </div>

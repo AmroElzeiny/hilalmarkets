@@ -5,9 +5,9 @@ Docker Compose, Caddy, and Cloudflare DNS/proxy.
 
 Target URLs:
 
-- Public landing page: `https://trace-edge.com`
-- Dashboard/app: `https://app.trace-edge.com`
-- `https://www.trace-edge.com` redirects to `https://trace-edge.com`
+- Public landing page: `https://hilalmarkets.com`
+- Dashboard/app: `https://app.hilalmarkets.com`
+- `https://www.hilalmarkets.com` redirects to `https://hilalmarkets.com`
 
 This is not a Cloudflare Workers deployment and does not change the product into an automated
 trading bot.
@@ -31,7 +31,7 @@ Do not expose Postgres, Redis, or the FastAPI container directly.
 
 ## 2. Cloudflare DNS
 
-In Cloudflare DNS for `trace-edge.com`, add:
+In Cloudflare DNS for `hilalmarkets.com`, add:
 
 | Type | Name | Target | Proxy |
 | --- | --- | --- | --- |
@@ -85,8 +85,8 @@ Minimum required for the API to start in production:
 
 - `APP_ENV=production`
 - `APP_SECRET_KEY` with at least 32 random characters
-- `PUBLIC_BASE_URL=https://trace-edge.com`
-- `APP_BASE_URL=https://app.trace-edge.com`
+- `PUBLIC_BASE_URL=https://hilalmarkets.com`
+- `APP_BASE_URL=https://app.hilalmarkets.com`
 - `DATABASE_URL=postgresql+asyncpg://market_monitor:<same password>@db:5432/market_monitor`
 - `POSTGRES_PASSWORD=<same password>`
 - `REDIS_URL=redis://redis:6379/0`
@@ -136,29 +136,29 @@ From the VPS:
 
 ```bash
 curl -fsS http://127.0.0.1/health
-curl -fsS https://trace-edge.com/health
-curl -fsS https://app.trace-edge.com/health
+curl -fsS https://hilalmarkets.com/health
+curl -fsS https://app.hilalmarkets.com/health
 ```
 
 From a local Python environment with project dependencies installed:
 
 ```bash
-.venv/Scripts/python.exe scripts/deployment_smoke.py --base-url https://trace-edge.com
-.venv/Scripts/python.exe scripts/deployment_smoke.py --base-url https://app.trace-edge.com
+.venv/Scripts/python.exe scripts/deployment_smoke.py --base-url https://hilalmarkets.com
+.venv/Scripts/python.exe scripts/deployment_smoke.py --base-url https://app.hilalmarkets.com
 ```
 
 On Linux:
 
 ```bash
-python scripts/deployment_smoke.py --base-url https://trace-edge.com
-python scripts/deployment_smoke.py --base-url https://app.trace-edge.com
+python scripts/deployment_smoke.py --base-url https://hilalmarkets.com
+python scripts/deployment_smoke.py --base-url https://app.hilalmarkets.com
 ```
 
 Expected:
 
 - `/health` returns `status=ok`
 - `/health/deep` returns database and Redis status
-- Landing page renders `TraceEdge`
+- Landing page renders `Hilal Markets`
 - `/dashboard` redirects to sign-in or returns the dashboard for an authenticated user
 - `/static/styles.css` and `/static/app.js` are reachable
 
@@ -182,7 +182,7 @@ TELEGRAM_WEBHOOK_SECRET=<random secret>
 Then set the webhook with Telegram to:
 
 ```text
-https://app.trace-edge.com/api/v1/telegram/webhook
+https://app.hilalmarkets.com/api/v1/telegram/webhook
 ```
 
 and send header:
@@ -240,6 +240,6 @@ Backups to configure before inviting real users:
 
 ## 10. Current Architecture Note
 
-The same FastAPI app serves both `trace-edge.com` and `app.trace-edge.com`. Caddy routes both
+The same FastAPI app serves both `hilalmarkets.com` and `app.hilalmarkets.com`. Caddy routes both
 hostnames to the API container. The public landing page is at `/`; the dashboard is at
 `/dashboard` and sign-in/sign-up are under `/signin` and `/signup`.

@@ -1,4 +1,4 @@
-trace-edge.com {
+hilalmarkets.com {
 	encode zstd gzip
 
 	request_body {
@@ -13,11 +13,11 @@ trace-edge.com {
 	}
 }
 
-www.trace-edge.com {
-	redir https://trace-edge.com{uri} permanent
+www.hilalmarkets.com {
+	redir https://hilalmarkets.com{uri} permanent
 }
 
-app.trace-edge.com {
+app.hilalmarkets.com {
 	encode zstd gzip
 
 	request_body {
