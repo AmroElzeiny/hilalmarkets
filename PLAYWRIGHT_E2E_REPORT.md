@@ -1,17 +1,17 @@
 # Playwright E2E Report
 
-Generated: 2026-07-20T03:01:09.610048+00:00
+Generated: 2026-07-20T04:29:36.176249+00:00
 
-Base URL tested: http://127.0.0.1:37387
+Base URL tested: http://127.0.0.1:40801
 Browser: chromium
 App auto-started: True
-Command: `/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -q`
-App command: `/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 37387`
+Command: `/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -k consent_cta_sections_and_waitlist_funnel -q`
+App command: `/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 40801`
 
 ## Result
 
-- Tests run: 5
-- Passed: 5
+- Tests run: 1
+- Passed: 1
 - Failed: 0
 - Skipped: 0
 - Screenshots/traces/videos: `test-results/browser`
@@ -23,11 +23,7 @@ App command: `/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated` | passed | 8.294 |
-| `tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission` | passed | 1.774 |
-| `tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility` | passed | 4.31 |
-| `tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission` | passed | 1.92 |
-| `tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id` | passed | 12.871 |
+| `tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated` | passed | 8.55 |
 
 ## Runtime Checks
 

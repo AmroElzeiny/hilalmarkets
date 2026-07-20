@@ -121,3 +121,16 @@ def test_public_chat_uses_brand_surface_and_never_renders_site_links() -> None:
     assert 'role === "assistant"' in script
     for token in ("#2b2e35", "#cbfa4d", "#f5f8fb", "#e1e5ea", "#63716c"):
         assert token in styles
+
+
+def test_public_chat_assets_use_the_current_cache_key_in_both_page_shells() -> None:
+    root = Path(__file__).resolve().parents[2]
+    shells = (
+        root / "src/ai_market_monitor/templates/hilal/base_public.html",
+        root / "src/ai_market_monitor/templates/hilal/public/react_site.html",
+    )
+
+    for shell in shells:
+        content = shell.read_text(encoding="utf-8")
+        assert content.count("20260720-brand4") == 2
+        assert "20260717-beta3" not in content

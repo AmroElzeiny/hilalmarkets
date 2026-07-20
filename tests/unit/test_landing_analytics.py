@@ -151,6 +151,9 @@ def test_waitlist_conversion_requires_a_new_server_confirmed_record():
     assert created_branch < conversion < duplicate
     assert "trackWaitlistSubmitAttempt" in app
     assert "getFirstTouchAttribution()" in app
+    assert "This email is already on the waitlist. Please use a different email." in app
+    assert "status === 'duplicate' || status === 'error'" in app
+    assert "aria-invalid" in app
 
 
 def test_sheet_configuration_and_form_content_are_not_exposed_in_public_assets():

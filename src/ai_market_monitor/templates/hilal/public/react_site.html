@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260719-react-shell">
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260719-react-shell">
   <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260719">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260717-beta3">{% endif %}
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260720-brand4">{% endif %}
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -59,7 +59,7 @@
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
   <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260720-ga4"></script>
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260717-beta3"></script>{% endif %}
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260720-brand4"></script>{% endif %}
   <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260719"></script>
 </body>
 </html>

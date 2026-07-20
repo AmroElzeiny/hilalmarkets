@@ -196,7 +196,11 @@ def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
     page.wait_for_timeout(800)
     page.locator("#waitlist-email").fill(email)
     page.locator('#waitlist button[type="submit"]').click()
-    expect(page.get_by_text("You are already on the waitlist.")).to_be_visible()
+    duplicate_error = page.get_by_text(
+        "This email is already on the waitlist. Please use a different email."
+    )
+    expect(duplicate_error).to_be_visible()
+    expect(page.locator("#waitlist-email")).to_have_attribute("aria-invalid", "true")
     assert _event_count(page, "waitlist_submit_attempt") == 2
     assert _event_count(page, "generate_lead") == 1
     assert _meta_event_count(page, "Lead") == 1

@@ -351,11 +351,9 @@ function Waitlist() {
           <p className="mx-auto max-w-[480px] pt-4 text-[18px] leading-[24px] text-[#2b2e35]">
             Join the waitlist for early access and help shape a platform built around the real needs of Muslim traders.
           </p>
-          {status === 'success' || status === 'duplicate' ? (
+          {status === 'success' ? (
             <div className="mx-auto mt-8 max-w-[440px] rounded-[20px] border border-ink/10 bg-white/70 px-6 py-5" role="status">
-              <p className="font-display text-[20px] text-ink">
-                {status === 'success' ? 'You are on the waitlist.' : 'You are already on the waitlist.'}
-              </p>
+              <p className="font-display text-[20px] text-ink">You are on the waitlist.</p>
               <p className="mt-1 text-[14px] text-ink/65">
                 We will contact you as access becomes available.
               </p>
@@ -383,14 +381,21 @@ function Waitlist() {
                 required
                 autoComplete="email"
                 value={email}
+                aria-invalid={status === 'duplicate' || status === 'error' ? true : undefined}
+                aria-describedby={status === 'duplicate' || status === 'error' ? 'waitlist-email-error' : undefined}
                 onFocus={() => trackWaitlistFormStart('landing_final')}
                 onPaste={() => trackWaitlistFormStart('landing_final')}
                 onChange={(event) => {
                   trackWaitlistFormStart('landing_final')
                   setEmail(event.target.value)
+                  if (status === 'duplicate' || status === 'error') setStatus('idle')
                 }}
                 placeholder="you@email.com"
-                className="w-full rounded-full border border-ink/15 bg-white/70 px-5 py-3.5 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/40 focus:border-ink/50 focus:bg-white"
+                className={`w-full rounded-full border bg-white/70 px-5 py-3.5 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/40 focus:bg-white ${
+                  status === 'duplicate' || status === 'error'
+                    ? 'border-[#8d3029] focus:border-[#8d3029] focus:ring-4 focus:ring-[#8d3029]/10'
+                    : 'border-ink/15 focus:border-ink/50'
+                }`}
               />
               <button
                 type="submit"
@@ -402,11 +407,13 @@ function Waitlist() {
               </button>
             </form>
           )}
-          {status === 'error' && (
-            <p className="mt-3 text-[13px] font-semibold text-[#6c271f]" role="alert">
-              {errorType === 'rate_limited'
-                ? 'Please wait a moment before trying again.'
-                : 'We could not submit your email. Please try again.'}
+          {(status === 'duplicate' || status === 'error') && (
+            <p id="waitlist-email-error" className="mt-3 text-[13px] font-semibold text-[#6c271f]" role="alert">
+              {status === 'duplicate'
+                ? 'This email is already on the waitlist. Please use a different email.'
+                : errorType === 'rate_limited'
+                  ? 'Please wait a moment before trying again.'
+                  : 'We could not submit your email. Please try again.'}
             </p>
           )}
           <p className="pt-4 text-[14px] text-[#2b2e35]/55">

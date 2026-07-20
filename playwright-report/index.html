@@ -25,16 +25,16 @@
 <body>
   <h1>HilalMarkets Playwright E2E Report</h1>
   <section class="card">
-    <p><strong>Generated:</strong> 2026-07-20T03:01:09.610048+00:00</p>
-    <p><strong>Base URL:</strong> http://127.0.0.1:37387</p>
+    <p><strong>Generated:</strong> 2026-07-20T04:29:36.176249+00:00</p>
+    <p><strong>Base URL:</strong> http://127.0.0.1:40801</p>
     <p><strong>Browser:</strong> chromium</p>
     <p><strong>Auto-started:</strong> True</p>
-    <p><strong>Command:</strong> <code>/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -q</code></p>
-    <p><strong>App command:</strong> <code>/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 37387</code></p>
+    <p><strong>Command:</strong> <code>/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -k consent_cta_sections_and_waitlist_funnel -q</code></p>
+    <p><strong>App command:</strong> <code>/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 40801</code></p>
   </section>
   <section class="card">
     <h2>Summary</h2>
-    <p>Run 5 / passed 5 /
+    <p>Run 1 / passed 1 /
       failed 0 / skipped 0</p>
     <p>Console errors: 0;
       API/network errors: 0;
@@ -44,11 +44,7 @@
     <h2>Tests</h2>
     <table>
       <thead><tr><th>Test</th><th>Outcome</th><th>Seconds</th></tr></thead>
-      <tbody><tr><td>tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated</td><td>passed</td><td>8.294</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission</td><td>passed</td><td>1.774</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility</td><td>passed</td><td>4.31</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission</td><td>passed</td><td>1.92</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id</td><td>passed</td><td>12.871</td></tr></tbody>
+      <tbody><tr><td>tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated</td><td>passed</td><td>8.55</td></tr></tbody>
     </table>
   </section>
   <section class="card">
