@@ -38,17 +38,16 @@ def test_consent_choice_is_versioned_persistent_and_withdrawable():
     assert 'analytics_storage: value.analytics ? "granted" : "denied"' in script
 
 
-def test_shared_public_shell_loads_direct_ga4_only_after_analytics_consent():
+def test_shared_public_shell_loads_gtm_only_after_analytics_consent():
     base = BASE.read_text(encoding="utf-8")
     script = CONSENT.read_text(encoding="utf-8")
 
     assert '"analyticsEnabled": public_analytics_enabled' in base
-    assert '"ga4MeasurementId": analytics_runtime_config.ga4MeasurementId' in base
+    assert '"gtmContainerId": analytics_runtime_config.gtmId' in base
     assert 'if (value.analytics) loadGoogle()' in script
-    assert '/^G-[A-Z0-9]+$/.test(measurementId)' in script
-    assert "googletagmanager.com/gtag/js?id=" in script
-    assert 'window.gtag("config", measurementId)' in script
-    assert 'script.dataset.hmProvider = "google-analytics"' in script
+    assert '/^GTM-[A-Z0-9]+$/.test(containerId)' in script
+    assert "googletagmanager.com/gtm.js?id=" in script
+    assert 'script.dataset.hmProvider = "google-tag-manager"' in script
 
 
 def test_first_visit_banner_has_equal_explicit_choices_and_preference_center():

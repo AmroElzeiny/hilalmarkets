@@ -1339,6 +1339,7 @@ class PublicChatService:
         if feedback.inquiry_id is not None:
             linked = await self.session.get(PublicInquiry, feedback.inquiry_id)
             if linked is not None:
+                await self._ensure_email_deliveries(linked)
                 return linked
         existing = await self.session.scalar(
             select(PublicInquiry).where(
@@ -1353,6 +1354,7 @@ class PublicChatService:
                     "The inquiry key belongs to a different answer."
                 ) from None
             feedback.inquiry_id = existing.id
+            await self._ensure_email_deliveries(existing)
             return existing
         now = datetime.now(UTC)
         inquiry = PublicInquiry(
@@ -1411,6 +1413,7 @@ class PublicChatService:
                     "The inquiry key belongs to a different answer."
                 ) from None
             feedback.inquiry_id = existing.id
+            await self._ensure_email_deliveries(existing)
             return existing
         feedback.inquiry_id = inquiry.id
         conversation = (

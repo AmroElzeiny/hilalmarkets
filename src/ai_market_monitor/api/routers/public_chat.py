@@ -153,7 +153,7 @@ async def record_public_chat_answer_feedback(
 
 
 @router.post("/inquiries", response_model=PublicInquiryResponse)
-@public_api("Persists a rate-limited public inquiry and queues two idempotent emails.")
+@public_api("Persists a rate-limited public inquiry and queues one BCC-copied email.")
 async def submit_public_chat_inquiry(
     payload: PublicInquiryRequest,
     request: Request,
@@ -172,12 +172,13 @@ async def submit_public_chat_inquiry(
             detail={"code": "support_handoff_required", "message": str(exc)},
         ) from exc
     await session.commit()
+    delivery_status = await service.email_delivery_state(inquiry.id)
     return PublicInquiryResponse(
         reference=inquiry.reference,
         status="received",
         masked_email=mask_email(inquiry.normalized_email),
         feedback_token=service.feedback_token(inquiry),
-        email_delivery_status="queued",
+        email_delivery_status=delivery_status,
         message="Your message was sent successfully 🎉",
     )
 

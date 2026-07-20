@@ -21,6 +21,9 @@ git pull --ff-only
 echo "Building production images..."
 "${COMPOSE[@]}" build
 
+echo "Stopping application processes before the schema upgrade..."
+"${COMPOSE[@]}" stop api worker scheduler || true
+
 echo "Starting database and Redis..."
 "${COMPOSE[@]}" up -d db redis
 

@@ -52,6 +52,8 @@ services:
     restart: unless-stopped
     env_file: *tracedge_env
     depends_on:
+      api:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -65,6 +67,8 @@ services:
     restart: unless-stopped
     env_file: *tracedge_env
     depends_on:
+      api:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:

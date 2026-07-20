@@ -28,6 +28,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://market_monitor:market_monitor@db:5432/market_monitor
       REDIS_URL: redis://redis:6379/0
     depends_on:
+      api:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -47,6 +49,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://market_monitor:market_monitor@db:5432/market_monitor
       REDIS_URL: redis://redis:6379/0
     depends_on:
+      api:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
