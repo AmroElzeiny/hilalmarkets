@@ -1,17 +1,17 @@
 # Playwright E2E Report
 
-Generated: 2026-07-20T01:58:21.524231+00:00
+Generated: 2026-07-20T03:01:09.610048+00:00
 
-Base URL tested: http://host.docker.internal:8000
+Base URL tested: http://127.0.0.1:37387
 Browser: chromium
-App auto-started: False
-Command: `/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission -q --browser-base-url http://host.docker.internal:8000`
-App command: `existing server at http://host.docker.internal:8000`
+App auto-started: True
+Command: `/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -q`
+App command: `/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 37387`
 
 ## Result
 
-- Tests run: 4
-- Passed: 4
+- Tests run: 5
+- Passed: 5
 - Failed: 0
 - Skipped: 0
 - Screenshots/traces/videos: `test-results/browser`
@@ -23,10 +23,11 @@ App command: `existing server at http://host.docker.internal:8000`
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated` | passed | 8.178 |
-| `tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility` | passed | 4.249 |
-| `tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission` | passed | 1.858 |
-| `tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id` | passed | 14.484 |
+| `tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated` | passed | 8.294 |
+| `tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission` | passed | 1.774 |
+| `tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility` | passed | 4.31 |
+| `tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission` | passed | 1.92 |
+| `tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id` | passed | 12.871 |
 
 ## Runtime Checks
 

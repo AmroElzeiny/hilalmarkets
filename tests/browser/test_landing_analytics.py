@@ -37,6 +37,15 @@ def _google_event_parameters(page: Page, event_name: str) -> list[dict]:
     )
 
 
+def _google_config_count(page: Page, measurement_id: str) -> int:
+    return page.evaluate(
+        """(measurementId) => (window.dataLayer || []).filter((item) =>
+            item && item[0] === 'config' && item[1] === measurementId
+        ).length""",
+        measurement_id,
+    )
+
+
 def _configure_fake_providers(page: Page) -> None:
     page.route(
         "https://www.googletagmanager.com/**",
@@ -87,6 +96,38 @@ def _mock_waitlist_backend(page: Page) -> None:
         )
 
     page.route("**/api/v1/public-forms/waitlist", respond)
+
+
+def test_shared_public_shell_loads_direct_ga4_once_after_consent(
+    page: Page,
+    base_url: str,
+) -> None:
+    page.route(
+        "https://www.googletagmanager.com/**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/javascript",
+            body="/* analytics transport intentionally empty in browser tests */",
+        ),
+    )
+    page.goto(f"{base_url}/features", wait_until="domcontentloaded")
+    assert page.locator('script[data-hm-provider="google-analytics"]').count() == 0
+    assert _google_config_count(page, "G-HILALTEST1") == 0
+
+    page.locator("[data-cookie-accept-analytics]").click()
+    page.wait_for_selector(
+        'script[data-hm-provider="google-analytics"]',
+        state="attached",
+    )
+    assert _google_config_count(page, "G-HILALTEST1") == 1
+
+    page.evaluate(
+        """() => window.dispatchEvent(new CustomEvent('hm:consent-updated', {
+          detail: {analytics: true, marketing: false}
+        }))"""
+    )
+    assert page.locator('script[data-hm-provider="google-analytics"]').count() == 1
+    assert _google_config_count(page, "G-HILALTEST1") == 1
 
 
 def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(

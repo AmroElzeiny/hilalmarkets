@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-07-20T01:58:21.524231+00:00",
-  "started_at": "2026-07-20T01:57:48.077795+00:00",
-  "base_url": "http://host.docker.internal:8000",
+  "generated_at": "2026-07-20T03:01:09.610048+00:00",
+  "started_at": "2026-07-20T03:00:10.455696+00:00",
+  "base_url": "http://127.0.0.1:37387",
   "browser": "chromium",
-  "auto_started": false,
-  "command": "/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission -q --browser-base-url http://host.docker.internal:8000",
-  "app_command": "existing server at http://host.docker.internal:8000",
+  "auto_started": true,
+  "command": "/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -q",
+  "app_command": "/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 37387",
   "exitstatus": 0,
-  "tests_run": 4,
-  "passed": 4,
+  "tests_run": 5,
+  "passed": 5,
   "failed": 0,
   "skipped": 0,
   "console_errors": [],
@@ -18,27 +18,33 @@
     "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {},
     "tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id": {},
     "tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility": {},
-    "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {}
+    "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {},
+    "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {}
   },
   "tests": {
     "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {
       "outcome": "passed",
-      "duration_seconds": 8.178,
+      "duration_seconds": 8.294,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id": {
       "outcome": "passed",
-      "duration_seconds": 14.484,
+      "duration_seconds": 12.871,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility": {
       "outcome": "passed",
-      "duration_seconds": 4.249,
+      "duration_seconds": 4.31,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {
       "outcome": "passed",
-      "duration_seconds": 1.858,
+      "duration_seconds": 1.92,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {
+      "outcome": "passed",
+      "duration_seconds": 1.774,
       "longrepr": ""
     }
   },

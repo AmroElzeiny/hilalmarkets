@@ -1,22 +1,68 @@
-INFO:     Started server process [22872]
+INFO:     Started server process [10]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:64663 (Press CTRL+C to quit)
-INFO:     127.0.0.1:47260 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53286 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53286 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
-INFO:     127.0.0.1:2898 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:23220 - "GET /static/hilalmarkets-public-chat.css?v=20260717-beta3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:16911 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
-INFO:     127.0.0.1:24610 - "GET /static/hilalmarkets-consent.js?v=20260719-analytics HTTP/1.1" 200 OK
-INFO:     127.0.0.1:48450 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53286 - "GET /static/hilalmarkets-public-chat.js?v=20260717-beta3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:2898 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:24610 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:2898 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33777 - "GET /contact HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33777 - "GET /signup HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43742 - "GET /static/hilalmarkets-logo-mark.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33777 - "GET /static/hilalmarkets.css?v=20260714-prototype HTTP/1.1" 200 OK
-INFO:     127.0.0.1:46874 - "GET /static/hilalmarkets-icons.js?v=20260714-prototype HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33777 - "GET /static/hilalmarkets.js?v=20260714-production HTTP/1.1" 200 OK
+INFO:     Uvicorn running on http://127.0.0.1:37387 (Press CTRL+C to quit)
+INFO:     127.0.0.1:38420 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38422 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38442 - "GET /static/hilalmarkets-consent.js?v=20260719-analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38422 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38438 - "GET /static/hilalmarkets-public-chat.css?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38440 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38424 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38428 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38442 - "GET /static/hilalmarkets-public-chat.js?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38422 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38422 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38422 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50858 - "GET /api/v1/public-forms/bootstrap HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50870 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "GET /static/hilalmarkets-public-chat.css?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50908 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50870 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50922 - "GET /static/hilalmarkets-consent.js?v=20260719-analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50884 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50908 - "GET /static/hilalmarkets-public-chat.js?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57558 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57562 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57558 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57578 - "GET /static/hilalmarkets-public-chat.css?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57608 - "GET /static/hilalmarkets-consent.js?v=20260719-analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57594 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57576 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57578 - "GET /static/hilalmarkets-public-chat.js?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57562 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57562 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57562 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38400 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38400 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38446 - "GET /static/hilalmarkets-consent.js?v=20260719-analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38434 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38426 - "GET /static/hilalmarkets-public-chat.css?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38404 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38412 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38404 - "GET /static/hilalmarkets-public-chat.js?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38400 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38400 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38400 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38400 - "GET /api/v1/public-forms/bootstrap HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "GET /contact HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38504 - "GET /static/hilalmarkets-consent.js?v=20260719-analytics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38474 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38494 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38492 - "GET /static/hilalmarkets-public-chat.css?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38490 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38504 - "GET /static/hilalmarkets-public-chat.js?v=20260717-beta3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "GET /api/v1/public-forms/bootstrap HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38462 - "POST /api/v1/public-forms/contact HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [10]

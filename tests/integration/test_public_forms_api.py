@@ -42,6 +42,7 @@ def _waitlist_payload(
 
 
 async def test_waitlist_is_idempotent_and_drops_attribution_without_consent(test_context):
+    test_context["settings"].waitlist_google_sheets_enabled = False
     client = test_context["client"]
     token = await _csrf(client)
     first = await client.post(
@@ -61,7 +62,10 @@ async def test_waitlist_is_idempotent_and_drops_attribution_without_consent(test
     duplicate = await client.post(
         "/api/v1/public-forms/waitlist",
         headers={"X-CSRF-Token": token},
-        json=_waitlist_payload(key="waitlist:test:0987654321"),
+        json=_waitlist_payload(
+            email="VISITOR@EXAMPLE.COM",
+            key="waitlist:test:0987654321",
+        ),
     )
     assert duplicate.status_code == 200
     assert duplicate.json()["created"] is False

@@ -25,16 +25,16 @@
 <body>
   <h1>HilalMarkets Playwright E2E Report</h1>
   <section class="card">
-    <p><strong>Generated:</strong> 2026-07-20T01:58:21.524231+00:00</p>
-    <p><strong>Base URL:</strong> http://host.docker.internal:8000</p>
+    <p><strong>Generated:</strong> 2026-07-20T03:01:09.610048+00:00</p>
+    <p><strong>Base URL:</strong> http://127.0.0.1:37387</p>
     <p><strong>Browser:</strong> chromium</p>
-    <p><strong>Auto-started:</strong> False</p>
-    <p><strong>Command:</strong> <code>/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission -q --browser-base-url http://host.docker.internal:8000</code></p>
-    <p><strong>App command:</strong> <code>existing server at http://host.docker.internal:8000</code></p>
+    <p><strong>Auto-started:</strong> True</p>
+    <p><strong>Command:</strong> <code>/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -q</code></p>
+    <p><strong>App command:</strong> <code>/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 37387</code></p>
   </section>
   <section class="card">
     <h2>Summary</h2>
-    <p>Run 4 / passed 4 /
+    <p>Run 5 / passed 5 /
       failed 0 / skipped 0</p>
     <p>Console errors: 0;
       API/network errors: 0;
@@ -44,10 +44,11 @@
     <h2>Tests</h2>
     <table>
       <thead><tr><th>Test</th><th>Outcome</th><th>Seconds</th></tr></thead>
-      <tbody><tr><td>tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated</td><td>passed</td><td>8.178</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility</td><td>passed</td><td>4.249</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission</td><td>passed</td><td>1.858</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id</td><td>passed</td><td>14.484</td></tr></tbody>
+      <tbody><tr><td>tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated</td><td>passed</td><td>8.294</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission</td><td>passed</td><td>1.774</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility</td><td>passed</td><td>4.31</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission</td><td>passed</td><td>1.92</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id</td><td>passed</td><td>12.871</td></tr></tbody>
     </table>
   </section>
   <section class="card">

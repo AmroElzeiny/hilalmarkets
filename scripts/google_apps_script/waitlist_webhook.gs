@@ -45,8 +45,8 @@ function doPost(event) {
     }
 
     const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
-    const sheet = spreadsheet.getSheetByName(sheetName);
-    if (!sheet) return jsonResponse_({ ok: false, error: 'sheet_unavailable' });
+    let sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
 
     prepareWaitlistSheet_(sheet);
 
@@ -60,6 +60,9 @@ function doPost(event) {
     const submittedAt = new Date(String(payload.submitted_at || ''));
     if (!email || Number.isNaN(submittedAt.getTime())) {
       return jsonResponse_({ ok: false, error: 'invalid_signup' });
+    }
+    if (findEmail_(sheet, email)) {
+      return jsonResponse_({ ok: true, created: false });
     }
 
     const source = safeCellText_(payload.utm_source || payload.source_page || 'Direct');
@@ -163,6 +166,16 @@ function findDeliveryId_(sheet, deliveryId) {
   return sheet
     .getRange(2, 8, sheet.getLastRow() - 1, 1)
     .createTextFinder(deliveryId)
+    .matchEntireCell(true)
+    .findNext();
+}
+
+function findEmail_(sheet, email) {
+  if (sheet.getLastRow() < 2) return null;
+  return sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, 1)
+    .createTextFinder(email)
+    .matchCase(false)
     .matchEntireCell(true)
     .findNext();
 }

@@ -33,9 +33,22 @@ def test_consent_choice_is_versioned_persistent_and_withdrawable():
     assert "updatedAt: new Date().toISOString()" in script
     assert "window.localStorage.setItem" in script
     assert "document.cookie" in script
-    assert "if (value.analytics) loadGtm()" in script
+    assert "if (value.analytics) loadGoogle()" in script
     assert "saveAndClose(defaults)" in script
     assert 'analytics_storage: value.analytics ? "granted" : "denied"' in script
+
+
+def test_shared_public_shell_loads_direct_ga4_only_after_analytics_consent():
+    base = BASE.read_text(encoding="utf-8")
+    script = CONSENT.read_text(encoding="utf-8")
+
+    assert '"analyticsEnabled": public_analytics_enabled' in base
+    assert '"ga4MeasurementId": analytics_runtime_config.ga4MeasurementId' in base
+    assert 'if (value.analytics) loadGoogle()' in script
+    assert '/^G-[A-Z0-9]+$/.test(measurementId)' in script
+    assert "googletagmanager.com/gtag/js?id=" in script
+    assert 'window.gtag("config", measurementId)' in script
+    assert 'script.dataset.hmProvider = "google-analytics"' in script
 
 
 def test_first_visit_banner_has_equal_explicit_choices_and_preference_center():
@@ -53,4 +66,3 @@ def test_optional_analytics_code_contains_no_prohibited_product_properties():
     script = CONSENT.read_text(encoding="utf-8").casefold()
     for property_name in PROHIBITED_ANALYTICS_PROPERTIES:
         assert property_name.casefold() not in script
-

@@ -198,6 +198,8 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "AI_AGENT_CONTROL_ENABLED": "false",
             "CAPABILITY_EXTENSION_ENABLED": "false",
             "PUBLIC_CHAT_AI_ENABLED": "false",
+            "VITE_ANALYTICS_ENABLED": "true",
+            "VITE_GA4_MEASUREMENT_ID": "G-HILALTEST1",
             "TELEGRAM_ENABLED": "false",
             "BILLING_ENABLED": "false",
             "BILLING_PROVIDER": "static",

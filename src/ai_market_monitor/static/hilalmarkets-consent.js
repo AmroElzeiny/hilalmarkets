@@ -12,7 +12,7 @@
     marketing: false,
   });
   let previousFocus = null;
-  let gtmLoaded = false;
+  let googleLoaded = false;
 
   const elements = () => ({
     banner: document.querySelector("[data-cookie-banner]"),
@@ -51,19 +51,28 @@
     }
   }
 
-  function loadGtm() {
+  function loadGoogle() {
     const containerId = String(config.gtmContainerId || "").trim();
-    if (
-      gtmLoaded ||
-      !config.analyticsEnabled ||
-      !/^GTM-[A-Z0-9]+$/.test(containerId)
-    ) return;
-    gtmLoaded = true;
-    window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
+    const measurementId = String(config.ga4MeasurementId || "").trim();
+    if (googleLoaded || !config.analyticsEnabled) return;
+
     const script = document.createElement("script");
     script.async = true;
-    script.src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(containerId)}`;
     script.dataset.hmOptionalAnalytics = "true";
+    if (/^GTM-[A-Z0-9]+$/.test(containerId)) {
+      googleLoaded = true;
+      window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
+      script.src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(containerId)}`;
+      script.dataset.hmProvider = "google-tag-manager";
+    } else if (/^G-[A-Z0-9]+$/.test(measurementId)) {
+      googleLoaded = true;
+      script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
+      script.dataset.hmProvider = "google-analytics";
+      window.gtag("js", new Date());
+      window.gtag("config", measurementId);
+    } else {
+      return;
+    }
     document.head.appendChild(script);
   }
 
@@ -82,7 +91,7 @@
     document.documentElement.dataset.consentAnalytics = value.analytics ? "granted" : "denied";
     document.documentElement.dataset.consentFunctional = value.functional ? "granted" : "denied";
     document.documentElement.dataset.consentMarketing = marketing ? "granted" : "denied";
-    if (value.analytics) loadGtm();
+    if (value.analytics) loadGoogle();
     window.dispatchEvent(new CustomEvent("hm:consent-updated", {
       detail: {
         version,

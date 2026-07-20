@@ -88,6 +88,21 @@ async def test_public_landing_is_available_without_screening_seed_data(test_cont
     assert "universally halal" not in content.lower()
 
 
+async def test_every_public_shell_receives_consent_gated_ga4_configuration(test_context):
+    settings = test_context["settings"]
+    settings.vite_analytics_enabled = True
+    settings.vite_gtm_id = None
+    settings.vite_ga4_measurement_id = "G-HILALTEST1"
+
+    for path in ("/", *(page.path for page in PUBLIC_PAGES)):
+        response = await test_context["client"].get(path)
+        assert response.status_code == 200, path
+        content = response.text
+        assert "G-HILALTEST1" in content, path
+        assert 'analytics_storage: "denied"' in content, path
+        assert "googletagmanager.com/gtag/js?id=G-HILALTEST1" not in content, path
+
+
 async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
     sitemap = await test_context["client"].get("/sitemap.xml")
     assert sitemap.status_code == 200
