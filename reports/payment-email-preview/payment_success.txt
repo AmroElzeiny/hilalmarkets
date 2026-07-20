@@ -1,0 +1,25 @@
+Hi Test User,
+
+Your payment succeeded and your HilalMarkets Pro plan is active.
+
+Plan: Pro
+Billing: Monthly
+Amount: 29.00 USD
+Payment date: 16 Jul 2026, 19:00 UTC
+Next renewal: 15 Aug 2026, 19:00 UTC
+
+Your main limits:
+- Active Watch Plans: 10
+- Markets per Watch Plan: Unlimited
+- Market checks per month: 60
+
+Open HilalMarkets: https://app.trace-edge.com/dashboard
+Create a Watch Plan: https://app.trace-edge.com/dashboard/strategies/new
+Manage billing: https://app.trace-edge.com/dashboard/billing
+Support: https://app.trace-edge.com/dashboard/support
+
+Your plan renews according to the billing agreement shown at checkout. Use Plan and Billing to review or manage it.
+
+HilalMarkets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. Review the Terms (https://app.trace-edge.com/terms) and Risk Disclosure (https://app.trace-edge.com/risk-disclosure).
+
+HilalMarkets

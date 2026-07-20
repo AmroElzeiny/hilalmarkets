@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-07-19T23:35:43.441773+00:00",
+  "started_at": "2026-07-19T23:35:13.911730+00:00",
+  "base_url": "http://127.0.0.1:64663",
+  "browser": "chromium",
+  "auto_started": true,
+  "command": ".venv\\Scripts\\python.exe -m pytest tests\\browser\\test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa tests\\unit\\test_landing_analytics.py -q",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 64663",
+  "exitstatus": 0,
+  "tests_run": 1,
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "console_errors": [],
+  "failed_network_calls": [],
+  "page_errors": [],
+  "artifacts": {
+    "tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa": {}
+  },
+  "tests": {
+    "tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 11.659,
+      "longrepr": ""
+    }
+  },
+  "remaining_browser_side_risks": [
+    "Live Telegram delivery is not exercised without dedicated staging credentials.",
+    "Quick Scan interpretation is mocked for browser determinism; light-scan submission uses the backend fixture market-data provider.",
+    "Long-running worker scans and production billing webhooks remain covered by non-browser tests/manual checks."
+  ]
+}

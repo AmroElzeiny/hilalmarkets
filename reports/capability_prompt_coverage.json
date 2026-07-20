@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-07-12T21:37:17.163917+00:00",
+  "registry_hash": "31c3272ad3d7b3ad39f1a89913e51c46cbf72cbd7db66a6dd0e7bd4dfd0e5027",
+  "metric": "supported_capability_candidate_recall",
+  "shortlist_size": 8,
+  "prompt_variants": 2643,
+  "recalled": 2643,
+  "missed": 0,
+  "recall_percent": 100.0,
+  "misses": []
+}
