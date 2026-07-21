@@ -22,6 +22,9 @@ from ai_market_monitor.core.site_content import (
     PURCHASE_FAQS,
     SITE_DESCRIPTION,
     SITE_NAME,
+    SOCIAL_PREVIEW_DESCRIPTION,
+    SOCIAL_PREVIEW_PATH,
+    SOCIAL_PREVIEW_TITLE,
     HelpArticle,
     PurchaseFaq,
 )
@@ -124,6 +127,12 @@ def _public_context(
     legal_review_required: bool = False,
     **extra: Any,
 ) -> dict[str, Any]:
+    default_social_image_url = _absolute_url(settings, SOCIAL_PREVIEW_PATH)
+    social_image_url = (
+        str(settings.public_og_image_url)
+        if settings.public_og_image_url
+        else default_social_image_url
+    )
     telegram_username = (
         settings.telegram_bot_username.lstrip("@").strip()
         if settings.telegram_bot_username
@@ -167,6 +176,26 @@ def _public_context(
                 },
             }
         )
+    json_ld.append(
+        {
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            "name": title,
+            "description": description,
+            "url": _absolute_url(settings, path),
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": SITE_NAME,
+                "url": _absolute_url(settings, "/"),
+            },
+            "primaryImageOfPage": {
+                "@type": "ImageObject",
+                "url": social_image_url,
+                "width": 1200,
+                "height": 630,
+            },
+        }
+    )
     return {
         "request": request,
         "settings": settings,
@@ -175,7 +204,17 @@ def _public_context(
         "title": title,
         "description": description,
         "canonical_url": _absolute_url(settings, path),
-        "og_image_url": str(settings.public_og_image_url) if settings.public_og_image_url else None,
+        "social_title": SOCIAL_PREVIEW_TITLE,
+        "social_description": SOCIAL_PREVIEW_DESCRIPTION,
+        "og_image_url": social_image_url,
+        "og_image_alt": (
+            "Hilal Markets: Halal Trading With Clarity, from screened assets "
+            "to user-defined monitoring rules."
+        ),
+        "robots_content": (
+            "index,follow,max-image-preview:large,max-snippet:-1,"
+            "max-video-preview:-1"
+        ),
         "json_ld": json_ld,
         "public_navigation": PUBLIC_NAVIGATION,
         "footer_navigation": FOOTER_NAVIGATION,
@@ -264,11 +303,8 @@ async def landing_page(
             request,
             settings,
             page="landing",
-            title="Strategy monitoring for Muslim crypto traders",
-            description=(
-                "Build trading strategies, explore Shariah-screened assets, and "
-                "monitor every setup in one place."
-            ),
+            title=SOCIAL_PREVIEW_TITLE,
+            description=SOCIAL_PREVIEW_DESCRIPTION,
             path="/",
         ),
     )

@@ -138,21 +138,35 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
         }
         if (config.robots?.index === false) {
           tags.push({ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' }, injectTo: 'head' })
+        } else {
+          tags.push({ tag: 'meta', attrs: { name: 'robots', content: 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1' }, injectTo: 'head' })
         }
         if (favicon) {
           tags.push({ tag: 'link', attrs: { rel: 'icon', href: favicon }, injectTo: 'head' })
         }
         if (title) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:title', content: title }, injectTo: 'head' })
+          tags.push(
+            { tag: 'meta', attrs: { property: 'og:title', content: title }, injectTo: 'head' },
+            { tag: 'meta', attrs: { name: 'twitter:title', content: title }, injectTo: 'head' },
+          )
         }
         if (description) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:description', content: description }, injectTo: 'head' })
+          tags.push(
+            { tag: 'meta', attrs: { property: 'og:description', content: description }, injectTo: 'head' },
+            { tag: 'meta', attrs: { name: 'twitter:description', content: description }, injectTo: 'head' },
+          )
         }
         if (socialImage) {
           tags.push(
+            { tag: 'meta', attrs: { property: 'og:type', content: 'website' }, injectTo: 'head' },
             { tag: 'meta', attrs: { property: 'og:image', content: socialImage }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image:type', content: 'image/png' }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image:height', content: '630' }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Hilal Markets: Halal Trading With Clarity' }, injectTo: 'head' },
             { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' }, injectTo: 'head' },
             { tag: 'meta', attrs: { name: 'twitter:image', content: socialImage }, injectTo: 'head' },
+            { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Hilal Markets: Halal Trading With Clarity' }, injectTo: 'head' },
           )
         }
 

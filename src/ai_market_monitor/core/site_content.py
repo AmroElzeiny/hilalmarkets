@@ -45,11 +45,14 @@ class HelpCategory(TypedDict):
     articles: tuple[HelpArticle, ...]
 
 
-SITE_NAME = "HilalMarkets"
+SITE_NAME = "Hilal Markets"
 SITE_DESCRIPTION = (
-    "Sharia-screened crypto spot intelligence and evidence-led market monitoring "
-    "for self-directed Muslim investors."
+    "Screen halal assets, build your rules, and monitor setups without watching "
+    "charts all day."
 )
+SOCIAL_PREVIEW_TITLE = "Halal Trading With Clarity"
+SOCIAL_PREVIEW_DESCRIPTION = SITE_DESCRIPTION
+SOCIAL_PREVIEW_PATH = "/static/hilalmarkets-social-preview.png"
 COOKIE_CONSENT_VERSION = 1
 
 

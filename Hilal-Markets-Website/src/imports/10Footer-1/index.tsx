@@ -4,7 +4,7 @@ import { TrackedCta } from '../../components/Tracking'
 function HilalMarketsLogoReversed() {
   return (
     <div className="h-[51px] w-[194px] max-w-full" data-name="Hilal Markets logo / reversed">
-      <svg className="block h-full w-full" fill="none" preserveAspectRatio="xMinYMid meet" viewBox="10.6304 0 193.602 51" aria-label="Hilal Markets">
+      <svg className="block h-full w-full" fill="none" preserveAspectRatio="xMinYMid meet" viewBox="10.6304 0 193.602 51" role="img" aria-label="Hilal Markets">
         <g>
           <path d={svgPaths.p1b468e00} fill="white" />
           <path d={svgPaths.p28519b80} fill="white" />

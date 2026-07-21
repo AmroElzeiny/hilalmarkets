@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -10,6 +11,7 @@ LEGAL = FRONTEND / "pages" / "LegalPage.tsx"
 STYLES = FRONTEND / "index.css"
 SHELL = ROOT / "src/ai_market_monitor/templates/hilal/public/react_site.html"
 FAVICON = ROOT / "favicon-dark.png"
+SOCIAL_PREVIEW = ROOT / "src/ai_market_monitor/static/hilalmarkets-social-preview.png"
 
 
 def test_landing_uses_one_provider_agnostic_consent_aware_analytics_module():
@@ -68,6 +70,73 @@ def test_every_page_shell_uses_the_root_dark_favicon():
         encoding="utf-8"
     )
     assert '"icon": "/favicon-dark.png"' in site_config
+
+
+def test_public_shells_have_complete_social_preview_and_seo_metadata():
+    expected_title = "Halal Trading With Clarity"
+    expected_description = (
+        "Screen halal assets, build your rules, and monitor setups without watching "
+        "charts all day."
+    )
+    for relative_path in (
+        "src/ai_market_monitor/templates/hilal/base_public.html",
+        "src/ai_market_monitor/templates/hilal/public/react_site.html",
+    ):
+        shell = (ROOT / relative_path).read_text(encoding="utf-8")
+        for marker in (
+            'name="robots"',
+            'rel="canonical"',
+            'property="og:site_name"',
+            'property="og:title"',
+            'property="og:description"',
+            'property="og:image"',
+            'property="og:image:secure_url"',
+            'property="og:image:type"',
+            'property="og:image:width"',
+            'property="og:image:height"',
+            'property="og:image:alt"',
+            'name="twitter:card"',
+            'name="twitter:title"',
+            'name="twitter:description"',
+            'name="twitter:image"',
+            'name="twitter:image:alt"',
+        ):
+            assert marker in shell, (relative_path, marker)
+
+    site_config = (ROOT / "Hilal-Markets-Website/.figma/make/site.json").read_text(
+        encoding="utf-8"
+    )
+    assert expected_title in site_config
+    assert expected_description in site_config
+    assert '"image": "/hilalmarkets-social-preview.png"' in site_config
+
+
+def test_social_preview_is_a_real_1200_by_630_png_in_both_public_asset_roots():
+    browser_asset = ROOT / "Hilal-Markets-Website/public/hilalmarkets-social-preview.png"
+    landing_asset = (
+        ROOT / "src/ai_market_monitor/static/landing/hilalmarkets-social-preview.png"
+    )
+    expected = SOCIAL_PREVIEW.read_bytes()
+    assert browser_asset.read_bytes() == expected
+    assert landing_asset.read_bytes() == expected
+    assert expected[:8] == b"\x89PNG\r\n\x1a\n"
+    assert int.from_bytes(expected[16:20], "big") == 1200
+    assert int.from_bytes(expected[20:24], "big") == 630
+
+
+def test_non_dashboard_image_elements_have_descriptive_alt_text():
+    files = [
+        ROOT / "src/ai_market_monitor/templates/auth.html",
+        ROOT / "src/ai_market_monitor/templates/dashboard_public.html",
+        ROOT / "src/ai_market_monitor/templates/hilal/partials/public_header.html",
+        ROOT / "src/ai_market_monitor/templates/hilal/partials/public_footer.html",
+        *(ROOT / "src/ai_market_monitor/templates/hilal/public").glob("*.html"),
+    ]
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        for image in re.findall(r"<img\b[^>]*>", source, flags=re.IGNORECASE):
+            alt = re.search(r'\balt="([^"]+)"', image, flags=re.IGNORECASE)
+            assert alt and alt.group(1).strip(), (path, image)
 
 
 def test_section_and_form_visibility_use_the_required_threshold_and_dwell_time():

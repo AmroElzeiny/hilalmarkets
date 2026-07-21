@@ -22,7 +22,7 @@ function Coin({ symbol }: { symbol: 'BTC' | 'ETH' | 'LTC' }) {
 
 function Sparkline() {
   return (
-    <svg viewBox="0 0 320 64" className="w-full" fill="none" preserveAspectRatio="none">
+    <svg viewBox="0 0 320 64" className="w-full" fill="none" preserveAspectRatio="none" aria-hidden="true">
       <path
         d="M0 50 C30 46 46 30 70 34 C96 38 108 20 140 24 C168 28 184 44 214 40 C244 36 262 14 300 10 L320 8"
         stroke="#a8d936"
@@ -66,7 +66,7 @@ export function HeroFlow() {
             </div>
             <div className="mt-3 flex items-start gap-2 border-t border-hairline pt-3">
               <span className="mt-0.5 flex size-4 items-center justify-center rounded-full bg-[#e7f5ce]">
-                <svg viewBox="0 0 10 8" className="size-2.5" fill="none">
+                <svg viewBox="0 0 10 8" className="size-2.5" fill="none" aria-hidden="true">
                   <path d="M1 4.2 3.4 6.6 9 1" stroke="#55712a" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </span>
@@ -86,7 +86,7 @@ export function HeroFlow() {
       <div className="rounded-[22px] border border-[#c8cdd5] bg-surface p-5">
         <div className="flex items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-full bg-apple text-ink">
-            <svg viewBox="0 0 14 14" className="size-3.5" fill="none">
+            <svg viewBox="0 0 14 14" className="size-3.5" fill="none" aria-hidden="true">
               <path d="M7 1v12M1 7h12" stroke="#2b2e35" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </span>
@@ -109,7 +109,7 @@ export function HeroFlow() {
 
         <TrackedCta analyticsName="build_plan" analyticsLocation="hero_flow" href="#waitlist" className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-apple px-4 py-2 text-[12px] font-bold text-[#263018] transition-transform hover:-translate-y-0.5">
           Build plan
-          <svg viewBox="0 0 12 12" className="size-3" fill="none">
+          <svg viewBox="0 0 12 12" className="size-3" fill="none" aria-hidden="true">
             <path d="M2 6h8M6 2l4 4-4 4" stroke="#263018" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </TrackedCta>

@@ -18,14 +18,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ description }}">
+  <meta name="robots" content="{{ robots_content }}">
   <meta name="theme-color" content="#0F5C4D">
   <link rel="canonical" href="{{ canonical_url }}">
-  <meta property="og:title" content="{{ title }} | {{ site_name }}">
-  <meta property="og:description" content="{{ description }}">
+  <meta property="og:site_name" content="{{ site_name }}">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="{{ social_title }}">
+  <meta property="og:description" content="{{ social_description }}">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{ canonical_url }}">
-  {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
-  <meta name="twitter:card" content="summary{% if og_image_url %}_large_image{% endif %}">
+  <meta property="og:image" content="{{ og_image_url }}">
+  <meta property="og:image:secure_url" content="{{ og_image_url }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{ og_image_alt }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ social_title }}">
+  <meta name="twitter:description" content="{{ social_description }}">
+  <meta name="twitter:image" content="{{ og_image_url }}">
+  <meta name="twitter:image:alt" content="{{ og_image_alt }}">
   <title>{{ title }} | {{ site_name }}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">

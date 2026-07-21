@@ -7,6 +7,8 @@ from ai_market_monitor.core.site_content import (
     FOOTER_NAVIGATION,
     PUBLIC_NAVIGATION,
     PUBLIC_PAGES,
+    SOCIAL_PREVIEW_DESCRIPTION,
+    SOCIAL_PREVIEW_TITLE,
 )
 
 
@@ -45,6 +47,33 @@ async def test_every_public_page_renders_unique_metadata_without_prototype_conte
         canonical = re.search(r'<link rel="canonical" href="([^"]+)">', content)
         assert title and page.title in html.unescape(title.group(1)), page.path
         assert canonical and canonical.group(1).endswith(page.path), page.path
+        assert f'<meta name="description" content="{page.description}">' in content
+        assert (
+            '<meta name="robots" '
+            'content="index,follow,max-image-preview:large,max-snippet:-1,'
+            'max-video-preview:-1">'
+        ) in content
+        assert f'<meta property="og:title" content="{SOCIAL_PREVIEW_TITLE}">' in content
+        assert (
+            f'<meta property="og:description" content="{SOCIAL_PREVIEW_DESCRIPTION}">'
+            in content
+        )
+        assert '<meta property="og:site_name" content="Hilal Markets">' in content
+        assert '<meta property="og:image:type" content="image/png">' in content
+        assert '<meta property="og:image:width" content="1200">' in content
+        assert '<meta property="og:image:height" content="630">' in content
+        assert 'property="og:image:alt"' in content
+        assert '<meta name="twitter:card" content="summary_large_image">' in content
+        assert f'<meta name="twitter:title" content="{SOCIAL_PREVIEW_TITLE}">' in content
+        twitter_description = (
+            f'<meta name="twitter:description" '
+            f'content="{SOCIAL_PREVIEW_DESCRIPTION}">'
+        )
+        assert twitter_description in content
+        assert 'name="twitter:image"' in content
+        assert 'name="twitter:image:alt"' in content
+        assert '/static/hilalmarkets-social-preview.png' in content
+        assert '"@type": "WebPage"' in content
         assert title.group(1) not in titles, page.path
         assert canonical.group(1) not in canonicals, page.path
         titles.add(title.group(1))
@@ -54,6 +83,35 @@ async def test_every_public_page_renders_unique_metadata_without_prototype_conte
         ids = re.findall(r'\sid="([^"]+)"', content)
         assert len(ids) == len(set(ids)), f"duplicate id on {page.path}"
         assert 'type="application/ld+json"' in content
+
+
+async def test_homepage_uses_requested_social_preview_copy_and_bundled_image(
+    test_context,
+):
+    response = await test_context["client"].get("/")
+    assert response.status_code == 200
+    content = response.text
+
+    assert f"<title>{SOCIAL_PREVIEW_TITLE} | Hilal Markets</title>" in content
+    assert f'<meta name="description" content="{SOCIAL_PREVIEW_DESCRIPTION}">' in content
+    assert f'<meta property="og:title" content="{SOCIAL_PREVIEW_TITLE}">' in content
+    assert f'<meta property="og:description" content="{SOCIAL_PREVIEW_DESCRIPTION}">' in content
+
+    image = await test_context["client"].get(
+        "/static/hilalmarkets-social-preview.png"
+    )
+    assert image.status_code == 200
+    assert image.headers["content-type"].startswith("image/png")
+    assert image.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert int.from_bytes(image.content[16:20], "big") == 1200
+    assert int.from_bytes(image.content[20:24], "big") == 630
+
+
+async def test_authentication_pages_are_not_indexable(test_context):
+    for path in ("/signin", "/signup"):
+        response = await test_context["client"].get(path)
+        assert response.status_code == 200
+        assert '<meta name="robots" content="noindex,nofollow,noarchive">' in response.text
 
 
 async def test_public_legal_pages_do_not_expose_internal_launch_placeholders(

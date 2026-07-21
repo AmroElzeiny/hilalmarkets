@@ -58,7 +58,7 @@ function Hero() {
         className="pointer-events-none absolute left-1/2 top-24 -z-10 h-[560px] w-[860px] -translate-x-1/2 opacity-[0.45]"
         aria-hidden="true"
       >
-        <svg viewBox="0 0 860 560" fill="none" className="h-full w-full">
+        <svg viewBox="0 0 860 560" fill="none" className="h-full w-full" aria-hidden="true">
           <path
             d="M120 40h500l100 100v300a80 80 0 0 1-80 80H120a80 80 0 0 1-80-80V120a80 80 0 0 1 80-80Z"
             stroke="#e3e8ee"
@@ -256,7 +256,7 @@ function FAQ() {
                       isOpen ? 'rotate-45 bg-apple' : 'bg-surface'
                     }`}
                   >
-                    <svg viewBox="0 0 12 12" className="size-3" fill="none">
+                    <svg viewBox="0 0 12 12" className="size-3" fill="none" aria-hidden="true">
                       <path d="M6 1v10M1 6h10" stroke="#2b2e35" strokeWidth="1.6" strokeLinecap="round" />
                     </svg>
                   </span>

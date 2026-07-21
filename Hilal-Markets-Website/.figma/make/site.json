@@ -1,9 +1,12 @@
 {
-  "title": "Hilal Markets — Strategy monitoring for Muslim crypto traders",
-  "description": "Build trading strategies, explore Shariah-screened assets, and monitor every setup in one place.",
+  "title": "Halal Trading With Clarity | Hilal Markets",
+  "description": "Screen halal assets, build your rules, and monitor setups without watching charts all day.",
   "language": "en",
   "icons": {
     "icon": "/favicon-dark.png"
+  },
+  "openGraph": {
+    "image": "/hilalmarkets-social-preview.png"
   },
   "robots": {
     "index": true
