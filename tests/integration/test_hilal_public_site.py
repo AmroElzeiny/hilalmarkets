@@ -56,6 +56,24 @@ async def test_every_public_page_renders_unique_metadata_without_prototype_conte
         assert 'type="application/ld+json"' in content
 
 
+async def test_public_legal_pages_do_not_expose_internal_launch_placeholders(
+    test_context,
+):
+    forbidden = (
+        "Draft structure",
+        "qualified counsel review required before launch",
+        "Not final legal advice or terms",
+        "Operating entity details are not yet configured",
+        "Governing law is not yet configured",
+    )
+
+    for path in ("/cookies", "/risk-disclosure"):
+        response = await test_context["client"].get(path)
+        assert response.status_code == 200, path
+        for phrase in forbidden:
+            assert phrase not in response.text, (path, phrase)
+
+
 async def test_public_header_and_footer_follow_the_central_navigation(test_context):
     response = await test_context["client"].get("/features")
     assert response.status_code == 200

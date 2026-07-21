@@ -294,7 +294,6 @@ PUBLIC_PAGES = (
             "methodology-specific screening."
         ),
         "hilal/public/risk_disclosure.html",
-        True,
     ),
     PublicPageMetadata(
         "privacy",
@@ -303,16 +302,14 @@ PUBLIC_PAGES = (
         "Privacy Policy",
         "Learn how Hilal Markets handles account, product, support, and optional analytics data.",
         "hilal/public/privacy.html",
-        True,
     ),
     PublicPageMetadata(
         "terms",
         "public_terms",
         "/terms",
         "Terms of Use",
-        "Review the proposed terms and service boundaries for using Hilal Markets.",
+        "Review the terms and service boundaries for using Hilal Markets.",
         "hilal/public/terms.html",
-        True,
     ),
     PublicPageMetadata(
         "cookies",
@@ -324,7 +321,6 @@ PUBLIC_PAGES = (
             "preference withdrawal."
         ),
         "hilal/public/cookies.html",
-        True,
     ),
 )
 

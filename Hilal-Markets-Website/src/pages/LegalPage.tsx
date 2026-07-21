@@ -29,15 +29,6 @@ function Paragraph({ children }: { children: ReactNode }) {
   return <p className="mt-4 text-[15px] leading-[1.75] text-[#50555e]">{children}</p>
 }
 
-function MissingConfiguration({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="mt-5 rounded-[18px] border border-[#d7dde3] bg-[#f5f8fb] p-5">
-      <strong className="font-display text-[15px] font-medium text-[#2b2e35]">{title}</strong>
-      <p className="mt-2 text-[14px] leading-[1.65] text-[#63716c]">{children}</p>
-    </div>
-  )
-}
-
 function PrivacyContact({ email }: { email: string }) {
   return (
     <a
@@ -49,11 +40,7 @@ function PrivacyContact({ email }: { email: string }) {
   )
 }
 
-function privacySections(
-  privacyEmail: string,
-  legalName?: string | null,
-  companyAddress?: string | null,
-): LegalSection[] {
+function privacySections(privacyEmail: string): LegalSection[] {
   return [
     {
       id: 'scope',
@@ -72,16 +59,11 @@ function privacySections(
     {
       id: 'controller',
       title: '2. Who is responsible',
-      content: legalName ? (
+      content: (
         <Paragraph>
-          The configured service provider and data controller is {legalName}
-          {companyAddress ? `, located at ${companyAddress}` : ''}. Privacy questions may be sent to{' '}
-          <PrivacyContact email={privacyEmail} />.
+          Hilal Markets is responsible for the personal information handled through this service.
+          Privacy questions and rights requests may be sent to <PrivacyContact email={privacyEmail} />.
         </Paragraph>
-      ) : (
-        <MissingConfiguration title="Operating entity details are not yet configured">
-          The legal entity name and registered address must be verified and published before public launch. Privacy questions can currently be sent to {privacyEmail}.
-        </MissingConfiguration>
       ),
     },
     {
@@ -172,7 +154,7 @@ function privacySections(
       title: '10. International transfers',
       content: (
         <Paragraph>
-          Service providers may process information in countries different from your own. Where transfer safeguards are legally required, we will use an appropriate mechanism and assess relevant provider protections. Final processor locations and transfer terms must be verified before public launch.
+          Service providers may process information in countries different from your own. Where transfer safeguards are legally required, we use an appropriate mechanism and assess relevant provider protections. You may contact us for more information about safeguards relevant to your personal information.
         </Paragraph>
       ),
     },
@@ -224,12 +206,7 @@ function privacySections(
   ]
 }
 
-function termsSections(
-  supportEmail: string,
-  legalName?: string | null,
-  companyAddress?: string | null,
-  governingLaw?: string | null,
-): LegalSection[] {
+function termsSections(supportEmail: string): LegalSection[] {
   return [
     {
       id: 'agreement',
@@ -237,11 +214,7 @@ function termsSections(
       content: (
         <>
           <Paragraph>These Terms govern access to Hilal Markets and its public pages, private-beta product, research tools, Watch Plans, evidence Passports, monitoring, alerts, and related services. By creating an account or using the service, you agree to these Terms and the related Privacy Policy, Cookie Policy, and Risk Disclosure.</Paragraph>
-          {legalName ? (
-            <Paragraph>The configured service provider is {legalName}{companyAddress ? `, located at ${companyAddress}` : ''}.</Paragraph>
-          ) : (
-            <MissingConfiguration title="Operating entity details are not yet configured">The legal entity name and registered address must be verified and published before these Terms become final for public launch.</MissingConfiguration>
-          )}
+          <Paragraph>Hilal Markets provides the service described in these Terms. Questions about the service or these Terms may be sent to <PrivacyContact email={supportEmail} />.</Paragraph>
         </>
       ),
     },
@@ -350,16 +323,12 @@ function termsSections(
     {
       id: 'liability',
       title: '17. Responsibility and liability',
-      content: <Paragraph>You are responsible for decisions made using the service and for verifying information appropriate to your circumstances. Final warranty exclusions, liability limits, indemnity terms, and mandatory consumer-law exceptions depend on the verified operating entity and governing jurisdiction and require qualified legal review before public launch. Nothing in these Terms excludes rights or liability that cannot lawfully be excluded.</Paragraph>,
+      content: <Paragraph>You are responsible for decisions made using the service and for verifying information appropriate to your circumstances. To the extent permitted by applicable law, Hilal Markets is not responsible for indirect, incidental, special, or consequential loss arising from use of, or inability to use, the service or third-party data and delivery providers. Nothing in these Terms excludes rights or liability that cannot lawfully be excluded.</Paragraph>,
     },
     {
       id: 'law',
-      title: '18. Governing law and disputes',
-      content: governingLaw ? (
-        <Paragraph>The configured governing-law reference is {governingLaw}. Mandatory local consumer protections continue to apply where they cannot be excluded.</Paragraph>
-      ) : (
-        <MissingConfiguration title="Governing law is not yet configured">The applicable jurisdiction, dispute process, venue, and mandatory consumer-rights exceptions must be verified by qualified counsel before public launch.</MissingConfiguration>
-      ),
+      title: '18. Disputes and mandatory rights',
+      content: <Paragraph>If a concern arises, please contact us first at <PrivacyContact email={supportEmail} /> so we can try to resolve it directly. Any mandatory consumer protections, statutory rights, and jurisdictional rules that apply to you remain unaffected by these Terms.</Paragraph>,
     },
     {
       id: 'changes',
@@ -374,8 +343,8 @@ export default function LegalPage({ kind }: { kind: LegalKind }) {
   const email = (kind === 'privacy' ? config.privacyEmail : config.supportEmail) || FALLBACK_EMAIL
   const isPrivacy = kind === 'privacy'
   const sections = isPrivacy
-    ? privacySections(email, config.legalName, config.companyAddress)
-    : termsSections(email, config.legalName, config.companyAddress, config.governingLaw)
+    ? privacySections(email)
+    : termsSections(email)
   const highlights = isPrivacy
     ? ['Consent before optional analytics', 'No form content in ad analytics', 'Clear choices and requests']
     : ['Research and monitoring only', 'No trade execution', 'You approve executable changes']

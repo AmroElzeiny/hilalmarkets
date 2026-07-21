@@ -1,5 +1,5 @@
 {% extends "hilal/base_public.html" %}
 {% block content %}
-<header class="legal-hero"><div class="container"><span class="eyebrow">{% block legal_eyebrow %}Legal and trust{% endblock %}</span><h1>{{ title }}</h1><p>{{ description }}</p>{% if legal_review_required %}<span class="legal-date">Draft structure - qualified counsel review required before launch</span>{% endif %}</div></header>
-<section class="section"><div class="container content-nav-layout"><nav class="content-nav" aria-label="{{ title }} sections">{% block legal_navigation %}{% endblock %}</nav><article class="prose">{% if legal_review_required %}<div class="legal-callout"><strong>Not final legal advice or terms</strong><p>This structured draft requires review for the operating entity, applicable jurisdictions, consumer rights, billing terms, and regulatory obligations.</p></div>{% endif %}{% block legal_content %}{% endblock %}</article></div></section>
+<header class="legal-hero"><div class="container"><span class="eyebrow">{% block legal_eyebrow %}Legal and trust{% endblock %}</span><h1>{{ title }}</h1><p>{{ description }}</p></div></header>
+<section class="section"><div class="container content-nav-layout"><nav class="content-nav" aria-label="{{ title }} sections">{% block legal_navigation %}{% endblock %}</nav><article class="prose">{% block legal_content %}{% endblock %}</article></div></section>
 {% endblock %}

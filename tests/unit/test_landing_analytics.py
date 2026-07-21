@@ -268,6 +268,9 @@ def test_responsive_sections_keep_the_original_prototype_internals():
 
 def test_legal_pages_use_the_landing_shell_and_cover_required_product_boundaries():
     legal = LEGAL.read_text(encoding="utf-8")
+    server_legal = (
+        ROOT / "src" / "ai_market_monitor" / "templates" / "hilal" / "public" / "_legal_base.html"
+    ).read_text(encoding="utf-8")
     for expected in (
         "Privacy Policy",
         "Terms of Use",
@@ -281,6 +284,11 @@ def test_legal_pages_use_the_landing_shell_and_cover_required_product_boundaries
         assert expected in legal
     assert "Private-beta legal draft" not in legal
     assert "Counsel review required before public launch" not in legal
+    assert "Operating entity details are not yet configured" not in legal
+    assert "Governing law is not yet configured" not in legal
+    assert "qualified legal review before public launch" not in legal
+    assert "qualified counsel review required before launch" not in server_legal
+    assert "Not final legal advice or terms" not in server_legal
     assert "SiteNav" in legal
     assert "SiteFooter" in legal
     assert "office@hilalmarkets.com" in legal
