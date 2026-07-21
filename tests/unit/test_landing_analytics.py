@@ -309,9 +309,13 @@ def test_analytics_environment_contract_is_documented_for_both_environments():
 
 
 def test_production_compose_pins_gtm_and_disables_direct_ga4():
-    compose = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+    production = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+    default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-    assert 'VITE_ANALYTICS_ENABLED: "true"' in compose
-    assert 'VITE_GTM_ID: "GTM-KBBHH2FV"' in compose
-    assert 'VITE_GA4_MEASUREMENT_ID: ""' in compose
-    assert compose.count("environment: *public_analytics_env") == 3
+    assert 'VITE_ANALYTICS_ENABLED: "true"' in production
+    assert 'VITE_GTM_ID: "GTM-KBBHH2FV"' in production
+    assert 'VITE_GA4_MEASUREMENT_ID: ""' in production
+    assert production.count("environment: *public_analytics_env") == 3
+    assert default.count('VITE_ANALYTICS_ENABLED: "true"') == 3
+    assert default.count('VITE_GTM_ID: "GTM-KBBHH2FV"') == 3
+    assert default.count('VITE_GA4_MEASUREMENT_ID: ""') == 3
