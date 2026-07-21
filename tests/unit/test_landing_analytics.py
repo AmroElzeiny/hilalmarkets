@@ -306,3 +306,12 @@ def test_analytics_environment_contract_is_documented_for_both_environments():
         }
         assert required <= keys
         assert "VITE_GA4_MEASUREMENT_ID=" in lines
+
+
+def test_production_compose_pins_gtm_and_disables_direct_ga4():
+    compose = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    assert 'VITE_ANALYTICS_ENABLED: "true"' in compose
+    assert 'VITE_GTM_ID: "GTM-KBBHH2FV"' in compose
+    assert 'VITE_GA4_MEASUREMENT_ID: ""' in compose
+    assert compose.count("environment: *public_analytics_env") == 3
