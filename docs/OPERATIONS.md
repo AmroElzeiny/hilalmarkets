@@ -299,12 +299,12 @@ system column that Apps Script hides automatically. The first request after upgr
 migrates rows written by the earlier technical layout. The endpoint, secret, and delivery metadata
 never enter HTML, browser JavaScript, analytics, or public form responses.
 
-Analytics is off by default. Configure either `VITE_GTM_ID` or `VITE_GA4_MEASUREMENT_ID`, then set
-`VITE_ANALYTICS_ENABLED=true`. Meta additionally requires `VITE_META_PIXEL_ID`,
+Analytics is off by default. Configure `VITE_GTM_ID`, keep the deprecated
+`VITE_GA4_MEASUREMENT_ID` empty, then set `VITE_ANALYTICS_ENABLED=true`. GA4 must be configured
+inside the published GTM container; the website does not load `gtag.js` directly. Meta additionally requires `VITE_META_PIXEL_ID`,
 `VITE_META_PIXEL_ENABLED=true`, and `MARKETING_CONSENT_ENABLED=true`. GA initializes only after
-Analytics consent; Meta initializes only after Marketing consent. Do not configure the same GA tag
-both directly and through GTM. `VITE_ANALYTICS_DEBUG=true` enables sanitized console diagnostics
-and GA `debug_mode`; never enable it as routine production logging.
+Analytics consent; Meta initializes only after Marketing consent. `VITE_ANALYTICS_DEBUG=true`
+enables sanitized console diagnostics; never enable it as routine production logging.
 
 ## Telegram Setup
 

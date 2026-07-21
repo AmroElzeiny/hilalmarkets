@@ -16,15 +16,6 @@
     });
     window.__hmConsentDefaultSet = true;
   </script>
-  {% if analytics_runtime_config.gtmId %}
-  <!-- Google Tag Manager -->
-  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-  })(window,document,'script','dataLayer','{{ analytics_runtime_config.gtmId }}');</script>
-  <!-- End Google Tag Manager -->
-  {% endif %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ description }}">
@@ -47,7 +38,7 @@
       "version": cookie_consent_version,
       "analyticsEnabled": public_analytics_enabled,
       "marketingEnabled": marketing_consent_enabled,
-      "gtmContainerId": none
+      "gtmContainerId": analytics_runtime_config.gtmId
     } | tojson }};
     window.HilalMarketsRuntimeConfig = {{ {
       "analytics": analytics_runtime_config,
@@ -64,12 +55,6 @@
   {% for item in json_ld %}<script type="application/ld+json">{{ item | tojson }}</script>{% endfor %}
 </head>
 <body class="hm-react-site">
-  {% if analytics_runtime_config.gtmId %}
-  <!-- Google Tag Manager (noscript) -->
-  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{ analytics_runtime_config.gtmId }}"
-  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-  <!-- End Google Tag Manager (noscript) -->
-  {% endif %}
   <a class="figma-bypass-link" href="#root">Skip to content</a>
   <div id="root"></div>
   {% include "hilal/partials/cookie_banner.html" %}

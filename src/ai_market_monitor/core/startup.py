@@ -213,18 +213,16 @@ def validate_runtime_configuration(settings: Settings) -> None:
                     "Sheet delivery is enabled"
                 )
         if settings.public_analytics_enabled:
-            if not settings.public_gtm_id and not settings.vite_ga4_measurement_id:
-                errors.append(
-                    "VITE_GTM_ID or VITE_GA4_MEASUREMENT_ID is required when analytics is enabled"
-                )
+            if not settings.public_gtm_id:
+                errors.append("VITE_GTM_ID is required when analytics is enabled")
             if settings.public_gtm_id and not re.fullmatch(
                 r"GTM-[A-Z0-9]+", settings.public_gtm_id
             ):
                 errors.append("VITE_GTM_ID must be a valid GTM container ID")
-            if settings.vite_ga4_measurement_id and not re.fullmatch(
-                r"G-[A-Z0-9]+", settings.vite_ga4_measurement_id.strip()
-            ):
-                errors.append("VITE_GA4_MEASUREMENT_ID must be a valid GA4 measurement ID")
+            if settings.vite_ga4_measurement_id:
+                errors.append(
+                    "VITE_GA4_MEASUREMENT_ID must be empty; configure GA4 inside GTM"
+                )
         if settings.vite_meta_pixel_enabled:
             if not settings.marketing_consent_enabled:
                 errors.append(

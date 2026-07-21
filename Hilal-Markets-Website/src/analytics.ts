@@ -27,7 +27,6 @@ type EventParameters = Record<string, string | number | boolean | undefined>
 type AnalyticsRuntimeConfig = {
   enabled?: boolean
   gtmId?: string
-  ga4MeasurementId?: string
   metaPixelId?: string
   metaPixelEnabled?: boolean
   siteUrl?: string
@@ -80,7 +79,6 @@ const FORBIDDEN_PARAMETER_KEYS = new Set([
   'ip_address',
 ])
 const VALID_GTM = /^GTM-[A-Z0-9]+$/
-const VALID_GA4 = /^G-[A-Z0-9]+$/
 const VALID_PIXEL = /^[0-9]{5,32}$/
 
 let consent: AnalyticsConsent = { analytics: false, marketing: false }
@@ -160,40 +158,25 @@ function loadGoogle() {
   const config = runtimeConfig()
   if (!config.enabled || googleLoaded || !consent.analytics) return
   const gtmId = String(config.gtmId ?? '').trim().toUpperCase()
-  const ga4Id = String(config.ga4MeasurementId ?? '').trim().toUpperCase()
-  if (VALID_GTM.test(gtmId)) {
-    const loadedContainer = Array.from(document.scripts).some((item) => {
-      try {
-        const source = new URL(item.src)
-        return source.hostname === 'www.googletagmanager.com'
-          && source.pathname === '/gtm.js'
-          && source.searchParams.get('id') === gtmId
-      } catch {
-        return false
-      }
-    })
-    googleLoaded = true
-    if (loadedContainer) return
-    window.dataLayer?.push({ 'gtm.start': Date.now(), event: 'gtm.js' })
-    injectScript(
-      `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(gtmId)}`,
-      'google-tag-manager',
-      () => debug('google_script_error'),
-    )
-    return
-  }
-  if (!VALID_GA4.test(ga4Id)) return
+  if (!VALID_GTM.test(gtmId)) return
+  const loadedContainer = Array.from(document.scripts).some((item) => {
+    try {
+      const source = new URL(item.src)
+      return source.hostname === 'www.googletagmanager.com'
+        && source.pathname === '/gtm.js'
+        && source.searchParams.get('id') === gtmId
+    } catch {
+      return false
+    }
+  })
   googleLoaded = true
+  if (loadedContainer) return
+  window.dataLayer?.push({ 'gtm.start': Date.now(), event: 'gtm.js' })
   injectScript(
-    `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(ga4Id)}`,
-    'google-analytics',
+    `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(gtmId)}`,
+    'google-tag-manager',
     () => debug('google_script_error'),
   )
-  window.gtag?.('js', new Date())
-  window.gtag?.('config', ga4Id, {
-    send_page_view: false,
-    debug_mode: Boolean(config.debug),
-  })
 }
 
 function installMetaStub(): MetaPixelFunction {
@@ -358,15 +341,16 @@ export function trackWaitlistSubmitAttempt(formLocation: string): boolean {
   )
 }
 
-export function trackWaitlistSuccess(formLocation: string): boolean {
-  const google = emitOnce(`waitlist-lead:${pagePath()}:${formLocation}`, () =>
-    emitGoogle('generate_lead', {
-      form_name: 'waitlist',
-      form_location: formLocation.slice(0, 80),
-      page_path: pagePath(),
-    }),
+export function trackWaitlistSuccess(
+  formLocation: string,
+  submissionId = '',
+): boolean {
+  const eventScope = submissionId.trim().slice(0, 128)
+    || `${pagePath()}:${formLocation.slice(0, 80)}`
+  const google = emitOnce(`waitlist-success:${eventScope}`, () =>
+    emitGoogle('waitlist_signup_success', {}),
   )
-  const meta = emitOnce(`meta-lead:${pagePath()}:${formLocation}`, () => emitMeta('Lead'))
+  const meta = emitOnce(`meta-lead:${eventScope}`, () => emitMeta('Lead'))
   return google || meta
 }
 

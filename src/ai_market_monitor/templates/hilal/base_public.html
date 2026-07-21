@@ -15,15 +15,6 @@
       wait_for_update: 500
     });
   </script>
-  {% if analytics_runtime_config.gtmId %}
-  <!-- Google Tag Manager -->
-  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-  })(window,document,'script','dataLayer','{{ analytics_runtime_config.gtmId }}');</script>
-  <!-- End Google Tag Manager -->
-  {% endif %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ description }}">
@@ -48,20 +39,13 @@
       "version": cookie_consent_version,
       "analyticsEnabled": public_analytics_enabled,
       "marketingEnabled": marketing_consent_enabled,
-      "gtmContainerId": analytics_runtime_config.gtmId,
-      "ga4MeasurementId": analytics_runtime_config.ga4MeasurementId
+      "gtmContainerId": analytics_runtime_config.gtmId
     } | tojson }};
   </script>
   {% for item in json_ld %}<script type="application/ld+json">{{ item | tojson }}</script>{% endfor %}
   {% block page_styles %}{% endblock %}
 </head>
 <body class="public-page page-{{ page }}">
-  {% if analytics_runtime_config.gtmId %}
-  <!-- Google Tag Manager (noscript) -->
-  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{ analytics_runtime_config.gtmId }}"
-  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-  <!-- End Google Tag Manager (noscript) -->
-  {% endif %}
   <a class="skip-link" href="#main-content">Skip to content</a>
   {% include "hilal/partials/public_header.html" %}
   <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>

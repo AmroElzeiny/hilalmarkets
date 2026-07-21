@@ -29,7 +29,10 @@ def test_landing_uses_one_provider_agnostic_consent_aware_analytics_module():
     assert "!consent.analytics" in analytics
     assert "!consent.marketing" in analytics
     assert "__hmAnalyticsInitialized" in analytics
-    assert "send_page_view: false" in analytics
+    assert "googletagmanager.com/gtm.js?id=" in analytics
+    assert "googletagmanager.com/gtag/js" not in analytics
+    assert "ga4MeasurementId" not in analytics
+    assert "emitGoogle('generate_lead'" not in analytics
     assert "FORBIDDEN_PARAMETER_KEYS" in analytics
 
     for source_path in FRONTEND.rglob("*.tsx"):
@@ -145,10 +148,14 @@ def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads
 
 def test_waitlist_conversion_requires_a_new_server_confirmed_record():
     app = APP.read_text(encoding="utf-8")
+    analytics = ANALYTICS.read_text(encoding="utf-8")
     created_branch = app.index("if (result.created)")
     conversion = app.index("trackWaitlistSuccess", created_branch)
     duplicate = app.index("trackWaitlistError('duplicate_email'", created_branch)
     assert created_branch < conversion < duplicate
+    assert "trackWaitlistSuccess('landing_final', idempotencyKey.current)" in app
+    assert "emitGoogle('waitlist_signup_success', {})" in analytics
+    assert "emitGoogle('generate_lead'" not in analytics
     assert "trackWaitlistSubmitAttempt" in app
     assert "getFirstTouchAttribution()" in app
     assert "This email is already on the waitlist. Please use a different email." in app
@@ -291,9 +298,11 @@ def test_analytics_environment_contract_is_documented_for_both_environments():
         "VITE_ANALYTICS_DEBUG",
     }
     for name in (".env.example", ".env.production.example"):
+        lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
         keys = {
             line.split("=", 1)[0]
-            for line in (ROOT / name).read_text(encoding="utf-8").splitlines()
+            for line in lines
             if "=" in line and not line.lstrip().startswith("#")
         }
         assert required <= keys
+        assert "VITE_GA4_MEASUREMENT_ID=" in lines

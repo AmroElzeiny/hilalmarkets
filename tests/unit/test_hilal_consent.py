@@ -10,11 +10,10 @@ CONSENT = ROOT / "src/ai_market_monitor/static/hilalmarkets-consent.js"
 BANNER = ROOT / "src/ai_market_monitor/templates/hilal/partials/cookie_banner.html"
 
 
-def test_consent_mode_denied_defaults_precede_optional_analytics_loader():
+def test_consent_mode_denied_defaults_precede_consent_gated_gtm_loader():
     base = BASE.read_text(encoding="utf-8")
     consent_script = "hilalmarkets-consent.js"
     assert 'window.gtag("consent", "default"' in base
-    assert base.index('window.gtag("consent", "default"') < base.index("<!-- Google Tag Manager -->")
     assert base.index('window.gtag("consent", "default"') < base.index(consent_script)
     for setting in (
         "ad_storage",
@@ -26,7 +25,8 @@ def test_consent_mode_denied_defaults_precede_optional_analytics_loader():
     ):
         assert f'{setting}: "denied"' in base
     assert 'security_storage: "granted"' in base
-    assert "googletagmanager.com/gtm.js?id=" in base
+    assert "googletagmanager.com/gtm.js" not in base
+    assert "googletagmanager.com/ns.html" not in base
 
 
 def test_consent_choice_is_versioned_persistent_and_withdrawable():
@@ -41,34 +41,33 @@ def test_consent_choice_is_versioned_persistent_and_withdrawable():
     assert 'analytics_storage: value.analytics ? "granted" : "denied"' in script
 
 
-def test_shared_public_shell_preloads_gtm_once_and_consent_loader_reuses_it():
+def test_shared_public_shell_loads_only_gtm_after_analytics_consent():
     base = BASE.read_text(encoding="utf-8")
+    react_shell = REACT_SHELL.read_text(encoding="utf-8")
     script = CONSENT.read_text(encoding="utf-8")
 
-    assert '"analyticsEnabled": public_analytics_enabled' in base
-    assert '"gtmContainerId": analytics_runtime_config.gtmId' in base
+    for shell in (base, react_shell):
+        assert '"analyticsEnabled": public_analytics_enabled' in shell
+        assert '"gtmContainerId": analytics_runtime_config.gtmId' in shell
+        assert "ga4MeasurementId" not in shell
     assert 'if (value.analytics) loadGoogle()' in script
-    assert '/^GTM-[A-Z0-9]+$/.test(containerId)' in script
+    assert '!/^GTM-[A-Z0-9]+$/.test(containerId)' in script
     assert "googletagmanager.com/gtm.js?id=" in script
     assert 'script.dataset.hmProvider = "google-tag-manager"' in script
-    assert "const loadedContainer = Array.from(document.scripts)" in script
-    assert 'source.pathname === "/gtm.js"' in script
+    assert "googletagmanager.com/gtag/js" not in script
+    assert "google-analytics" not in script
+    assert "ga4MeasurementId" not in script
 
 
-def test_every_public_document_shell_has_gtm_head_and_immediate_body_fallback():
+def test_public_document_shells_and_standalone_source_do_not_preload_gtm():
     for path in (BASE, REACT_SHELL):
         shell = path.read_text(encoding="utf-8")
-        assert shell.index("<!-- Google Tag Manager -->") < shell.index('<meta charset="utf-8">')
-        body = shell.index("<body")
-        body_close = shell.index(">", body) + 1
-        fallback = shell.index("<!-- Google Tag Manager (noscript) -->")
-        assert fallback > body_close
-        assert shell[body_close:fallback].strip() == "{% if analytics_runtime_config.gtmId %}"
-        assert "googletagmanager.com/ns.html?id={{ analytics_runtime_config.gtmId }}" in shell
+        assert "<!-- Google Tag Manager -->" not in shell
+        assert "Google Tag Manager (noscript)" not in shell
 
     standalone = LANDING_INDEX.read_text(encoding="utf-8")
-    assert "'dataLayer','GTM-KBBHH2FV'" in standalone
-    assert "googletagmanager.com/ns.html?id=GTM-KBBHH2FV" in standalone
+    assert "googletagmanager.com/gtm.js" not in standalone
+    assert "googletagmanager.com/ns.html" not in standalone
 
 
 def test_first_visit_banner_has_equal_explicit_choices_and_preference_center():

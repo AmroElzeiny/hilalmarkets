@@ -53,43 +53,31 @@
 
   function loadGoogle() {
     const containerId = String(config.gtmContainerId || "").trim();
-    const measurementId = String(config.ga4MeasurementId || "").trim();
     if (googleLoaded || !config.analyticsEnabled) return;
+    if (!/^GTM-[A-Z0-9]+$/.test(containerId)) return;
 
-    if (/^GTM-[A-Z0-9]+$/.test(containerId)) {
-      const loadedContainer = Array.from(document.scripts).some((item) => {
-        try {
-          const source = new URL(item.src);
-          return source.hostname === "www.googletagmanager.com"
-            && source.pathname === "/gtm.js"
-            && source.searchParams.get("id") === containerId;
-        } catch {
-          return false;
-        }
-      });
-      if (loadedContainer) {
-        googleLoaded = true;
-        return;
+    const loadedContainer = Array.from(document.scripts).some((item) => {
+      try {
+        const source = new URL(item.src);
+        return source.hostname === "www.googletagmanager.com"
+          && source.pathname === "/gtm.js"
+          && source.searchParams.get("id") === containerId;
+      } catch {
+        return false;
       }
+    });
+    if (loadedContainer) {
+      googleLoaded = true;
+      return;
     }
 
     const script = document.createElement("script");
     script.async = true;
     script.dataset.hmOptionalAnalytics = "true";
-    if (/^GTM-[A-Z0-9]+$/.test(containerId)) {
-      googleLoaded = true;
-      window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
-      script.src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(containerId)}`;
-      script.dataset.hmProvider = "google-tag-manager";
-    } else if (/^G-[A-Z0-9]+$/.test(measurementId)) {
-      googleLoaded = true;
-      script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
-      script.dataset.hmProvider = "google-analytics";
-      window.gtag("js", new Date());
-      window.gtag("config", measurementId);
-    } else {
-      return;
-    }
+    googleLoaded = true;
+    window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
+    script.src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(containerId)}`;
+    script.dataset.hmProvider = "google-tag-manager";
     document.head.appendChild(script);
   }
 

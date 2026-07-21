@@ -312,7 +312,7 @@ function Waitlist() {
         idempotencyKey.current,
       )
       if (result.created) {
-        trackWaitlistSuccess('landing_final')
+        trackWaitlistSuccess('landing_final', idempotencyKey.current)
         setStatus('success')
       } else {
         trackWaitlistError('duplicate_email', 'landing_final')

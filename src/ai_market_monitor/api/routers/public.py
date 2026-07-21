@@ -211,7 +211,6 @@ def _public_context(
         "analytics_runtime_config": {
             "enabled": settings.public_analytics_enabled,
             "gtmId": settings.public_gtm_id,
-            "ga4MeasurementId": settings.vite_ga4_measurement_id,
             "metaPixelId": settings.vite_meta_pixel_id,
             "metaPixelEnabled": settings.vite_meta_pixel_enabled,
             "siteUrl": settings.public_site_url,

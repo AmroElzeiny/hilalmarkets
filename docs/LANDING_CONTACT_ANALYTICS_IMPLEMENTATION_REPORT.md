@@ -127,7 +127,7 @@ Implemented events:
 | Waitlist form visible | `waitlist_form_view` | None | No |
 | First email-field interaction | `waitlist_form_start` | None | No |
 | Valid submit attempt | `waitlist_submit_attempt` | None | No |
-| New server-confirmed signup | `generate_lead` | `Lead` | Candidate |
+| New server-confirmed signup | `waitlist_signup_success` (mapped by GTM to GA4 `generate_lead`) | `Lead` | Candidate |
 | Failed or duplicate signup | `waitlist_form_error` | None | No |
 
 Only normalized error categories are emitted. The submitted email, title, description, raw server
@@ -157,6 +157,7 @@ public settings:
 ```env
 VITE_ANALYTICS_ENABLED=false
 VITE_GTM_ID=
+# Deprecated direct-loader setting. Keep empty; configure GA4 inside GTM.
 VITE_GA4_MEASUREMENT_ID=
 VITE_META_PIXEL_ID=
 VITE_META_PIXEL_ENABLED=false
@@ -177,12 +178,14 @@ No external event delivery is claimed.
 
 ### GA4
 
-1. Configure one valid `VITE_GTM_ID` or `VITE_GA4_MEASUREMENT_ID` and enable analytics.
+1. Configure a valid `VITE_GTM_ID`, keep `VITE_GA4_MEASUREMENT_ID` empty, and enable analytics.
+   HilalMarkets loads Google analytics only through GTM after Analytics consent.
 2. Grant Analytics consent on staging and submit a new, unique waitlist email.
 3. Temporarily set `VITE_ANALYTICS_DEBUG=true` and inspect GA4 DebugView. Google documents
    DebugView and debug mode here: https://support.google.com/analytics/answer/7201382
-4. After the event is observed, mark `generate_lead` as a key event in GA4. Do not mark section,
-   CTA, form-view, form-start, attempt, or error events as key events.
+4. Verify the website emits one `waitlist_signup_success` data-layer event and the published GTM
+   container maps it to one GA4 `generate_lead` event. Do not implement `generate_lead` directly
+   in the website or mark section, CTA, form-view, form-start, attempt, or error events as key events.
 5. Disable debug mode after verification.
 
 ### Meta

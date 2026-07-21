@@ -37,15 +37,6 @@ def _google_event_parameters(page: Page, event_name: str) -> list[dict]:
     )
 
 
-def _google_config_count(page: Page, measurement_id: str) -> int:
-    return page.evaluate(
-        """(measurementId) => (window.dataLayer || []).filter((item) =>
-            item && item[0] === 'config' && item[1] === measurementId
-        ).length""",
-        measurement_id,
-    )
-
-
 def _configure_fake_providers(page: Page) -> None:
     page.route(
         "https://www.googletagmanager.com/**",
@@ -67,7 +58,7 @@ def _configure_fake_providers(page: Page) -> None:
         """() => {
           window.HilalMarketsRuntimeConfig.analytics = {
             enabled: true,
-            ga4MeasurementId: 'G-HILALTEST1',
+            gtmId: 'GTM-KBBHH2FV',
             metaPixelEnabled: true,
             metaPixelId: '1234567890',
             debug: false,
@@ -98,10 +89,17 @@ def _mock_waitlist_backend(page: Page) -> None:
     page.route("**/api/v1/public-forms/waitlist", respond)
 
 
-def test_shared_public_shell_loads_direct_ga4_once_after_consent(
+def test_shared_public_shell_loads_gtm_once_only_after_consent(
     page: Page,
     base_url: str,
 ) -> None:
+    google_requests: list[str] = []
+    page.on(
+        "request",
+        lambda request: google_requests.append(request.url)
+        if "googletagmanager.com" in request.url
+        else None,
+    )
     page.route(
         "https://www.googletagmanager.com/**",
         lambda route: route.fulfill(
@@ -111,23 +109,24 @@ def test_shared_public_shell_loads_direct_ga4_once_after_consent(
         ),
     )
     page.goto(f"{base_url}/features", wait_until="domcontentloaded")
-    assert page.locator('script[data-hm-provider="google-analytics"]').count() == 0
-    assert _google_config_count(page, "G-HILALTEST1") == 0
+    assert page.locator('script[data-hm-provider="google-tag-manager"]').count() == 0
+    assert google_requests == []
 
     page.locator("[data-cookie-accept-analytics]").click()
     page.wait_for_selector(
-        'script[data-hm-provider="google-analytics"]',
+        'script[data-hm-provider="google-tag-manager"]',
         state="attached",
     )
-    assert _google_config_count(page, "G-HILALTEST1") == 1
+    assert sum("gtm.js?id=GTM-KBBHH2FV" in url for url in google_requests) == 1
+    assert not any("gtag/js?id=G-EJN34D4BEM" in url for url in google_requests)
 
     page.evaluate(
         """() => window.dispatchEvent(new CustomEvent('hm:consent-updated', {
           detail: {analytics: true, marketing: false}
         }))"""
     )
-    assert page.locator('script[data-hm-provider="google-analytics"]').count() == 1
-    assert _google_config_count(page, "G-HILALTEST1") == 1
+    assert page.locator('script[data-hm-provider="google-tag-manager"]').count() == 1
+    assert sum("gtm.js?id=GTM-KBBHH2FV" in url for url in google_requests) == 1
 
 
 def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
@@ -143,7 +142,7 @@ def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
     _configure_fake_providers(page)
     page.locator("[data-cookie-accept-analytics]").click()
     page.wait_for_selector(
-        'script[data-hm-provider="google-analytics"]', state="attached"
+        'script[data-hm-provider="google-tag-manager"]', state="attached"
     )
     assert _event_count(page, "page_view") == 1
     assert page.locator('script[data-hm-provider="meta-pixel"]').count() == 0
@@ -183,7 +182,8 @@ def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
     page.locator('#waitlist button[type="submit"]').click()
     expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
     assert _event_count(page, "waitlist_submit_attempt") == 1
-    assert _event_count(page, "generate_lead") == 1
+    assert _event_count(page, "waitlist_signup_success") == 1
+    assert _event_count(page, "generate_lead") == 0
     assert _meta_event_count(page, "Lead") == 1
     assert email not in page.evaluate(
         """() => JSON.stringify({
@@ -202,7 +202,8 @@ def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(
     expect(duplicate_error).to_be_visible()
     expect(page.locator("#waitlist-email")).to_have_attribute("aria-invalid", "true")
     assert _event_count(page, "waitlist_submit_attempt") == 2
-    assert _event_count(page, "generate_lead") == 1
+    assert _event_count(page, "waitlist_signup_success") == 1
+    assert _event_count(page, "generate_lead") == 0
     assert _meta_event_count(page, "Lead") == 1
 
 
@@ -321,13 +322,13 @@ def test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission(
         """() => {
           window.HilalMarketsRuntimeConfig.analytics = {
             enabled: true,
-            ga4MeasurementId: 'G-HILALTEST2',
+            gtmId: 'GTM-KBBHH2FV',
             metaPixelEnabled: false,
           };
         }"""
     )
     page.locator("[data-cookie-accept-analytics]").click()
-    provider_script = page.locator('script[data-hm-provider="google-analytics"]')
+    provider_script = page.locator('script[data-hm-provider="google-tag-manager"]')
     expect(provider_script).to_be_attached()
     provider_script.dispatch_event("error")
     email = f"provider-failure-{uuid4().hex[:12]}@example.com"
@@ -335,6 +336,31 @@ def test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission(
     page.locator("#waitlist-email").fill(email)
     page.locator('#waitlist button[type="submit"]').click()
     expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
+
+
+def test_failed_waitlist_submission_never_emits_success_event(
+    page: Page,
+    base_url: str,
+) -> None:
+    page.route(
+        "**/api/v1/public-forms/waitlist",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body="{invalid-response",
+        ),
+    )
+    page.goto(base_url, wait_until="domcontentloaded")
+    _configure_fake_providers(page)
+    page.locator("[data-cookie-accept-analytics]").click()
+    page.locator("#waitlist").scroll_into_view_if_needed()
+    page.locator("#waitlist-email").fill(
+        f"failed-{uuid4().hex[:12]}@example.com"
+    )
+    page.locator('#waitlist button[type="submit"]').click()
+    expect(page.get_by_text("We could not submit your email. Please try again.")).to_be_visible()
+    assert _event_count(page, "waitlist_signup_success") == 0
+    assert _event_count(page, "generate_lead") == 0
 
 
 def test_contact_form_shows_branded_success_without_duplicate_client_submission(
