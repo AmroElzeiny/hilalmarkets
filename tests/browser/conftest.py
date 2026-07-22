@@ -372,6 +372,130 @@ def assert_no_raw_traceback(page: Page) -> None:
     assert not found, f"Raw server/runtime output visible in browser: {found}"
 
 
+def assert_hilal_brand_palette(page: Page) -> None:
+    """Fail when a visible product element escapes the approved brand palette."""
+
+    # Sample the settled design rather than an intermediate color during a
+    # purposeful 220ms hover/state transition.
+    page.wait_for_timeout(300)
+    approved = {
+        "31,110,151",
+        "32,35,41",
+        "42,143,195",
+        "43,46,53",
+        "70,85,27",
+        "80,85,94",
+        "85,113,42",
+        "91,98,107",
+        "99,113,108",
+        "108,39,31",
+        "122,128,137",
+        "123,164,40",
+        "138,99,22",
+        "141,48,41",
+        "203,250,77",
+        "208,214,222",
+        "225,229,234",
+        "226,241,249",
+        "228,184,178",
+        "232,251,191",
+        "238,241,244",
+        "241,250,223",
+        "245,248,251",
+        "250,251,252",
+        "253,242,223",
+        "255,245,243",
+        "255,255,255",
+    }
+    unexpected = page.evaluate(
+        """approvedValues => {
+            const approved = new Set(approvedValues);
+            const colorProperties = ['color', 'backgroundColor'];
+            const borderSides = ['Top', 'Right', 'Bottom', 'Left'];
+            const parse = (value) => {
+                const match = String(value || '').match(
+                    /^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)(?:\\s*,\\s*([0-9.]+))?\\s*\\)$/
+                );
+                if (!match || (match[4] !== undefined && Number(match[4]) === 0)) {
+                    return null;
+                }
+                return `${match[1]},${match[2]},${match[3]}`;
+            };
+            const found = new Map();
+            for (const element of document.querySelectorAll('body *')) {
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                if (
+                    rect.width === 0 || rect.height === 0 ||
+                    style.display === 'none' || style.visibility === 'hidden'
+                ) continue;
+                const properties = [...colorProperties];
+                for (const side of borderSides) {
+                    if (
+                        style[`border${side}Style`] !== 'none' &&
+                        Number.parseFloat(style[`border${side}Width`]) > 0
+                    ) properties.push(`border${side}Color`);
+                }
+                if (
+                    style.outlineStyle !== 'none' &&
+                    Number.parseFloat(style.outlineWidth) > 0
+                ) properties.push('outlineColor');
+                if (element instanceof SVGElement) properties.push('fill', 'stroke');
+                for (const property of properties) {
+                    const value = style[property];
+                    const rgb = parse(value);
+                    if (!rgb || approved.has(rgb)) continue;
+                    const key = `${property}: ${value}`;
+                    if (!found.has(key)) {
+                        const identity = `${element.tagName.toLowerCase()}${
+                            element.id ? `#${element.id}` : ''
+                        }${[...element.classList].slice(0, 3).map(name => `.${name}`).join('')}`;
+                        found.set(key, identity);
+                    }
+                }
+            }
+            return [...found].map(([value, element]) => ({value, element}));
+        }""",
+        sorted(approved),
+    )
+    assert unexpected == [], f"Visible elements use non-brand colors: {unexpected}"
+
+
+def assert_no_horizontal_overflow(page: Page) -> None:
+    # Responsive drawers and the sidebar use the shared 220ms motion token.
+    # Measure after the layout has reached its final breakpoint state.
+    page.wait_for_timeout(300)
+    overflow = page.evaluate(
+        """() => {
+            const viewport = window.innerWidth;
+            if (document.documentElement.scrollWidth <= viewport + 1) return [];
+            return [...document.querySelectorAll('body *')]
+                .filter(element => {
+                    const style = getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                        return (
+                            style.display !== 'none' && style.visibility !== 'hidden' &&
+                            rect.width > 0 && rect.height > 0 &&
+                            rect.left < viewport && rect.right > viewport + 1
+                        );
+                })
+                .slice(0, 12)
+                .map(element => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                        element: `${element.tagName.toLowerCase()}${
+                            element.id ? `#${element.id}` : ''
+                        }${[...element.classList].slice(0, 4).map(name => `.${name}`).join('')}`,
+                        left: Math.round(rect.left),
+                        right: Math.round(rect.right),
+                        width: Math.round(rect.width),
+                    };
+                });
+        }"""
+    )
+    assert overflow == [], f"Visible elements overflow the viewport: {overflow}"
+
+
 def unique_email(prefix: str) -> str:
     return f"{prefix}+{uuid4().hex[:10]}@example.com"
 
@@ -379,6 +503,8 @@ def unique_email(prefix: str) -> str:
 def signup(page: Page, base_url: str, email: str | None = None) -> str:
     email = email or unique_email("browser-e2e")
     page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
+    page.get_by_test_id("auth-first-name").fill("Browser")
+    page.get_by_test_id("auth-last-name").fill("Trader")
     page.get_by_test_id("auth-email").fill(email)
     page.get_by_test_id("auth-password").fill(TEST_PASSWORD)
     page.get_by_test_id("auth-repeat-password").fill(TEST_PASSWORD)
@@ -505,8 +631,12 @@ def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]
         from decimal import Decimal
 
         from ai_market_monitor.db.models import (
+            ApprovedWatchlist,
+            ApprovedWatchlistAsset,
             AssetShariaAssessment,
             AssetShariaStatusHistory,
+            ComplianceChange,
+            ComplianceDriftNotification,
             SetupInstance,
             ShariaEvidenceSource,
             ShariaMethodology,
@@ -515,6 +645,9 @@ def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]
             UserIdentity,
         )
         from ai_market_monitor.db.models.enums import (
+            ComplianceChangeBehavior,
+            ComplianceChangeSeverity,
+            ComplianceChangeStatus,
             IdentityProvider,
             SetupLifecycleState,
             ShariaAssetStatus,
@@ -651,6 +784,64 @@ def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]
                 sharia_assessment_id=assessment.id,
             )
             session.add(setup)
+            watchlist = ApprovedWatchlist(
+                user_id=identity.user_id,
+                name="Browser Screened Assets",
+                is_default=True,
+            )
+            session.add(watchlist)
+            await session.flush()
+            session.add(
+                ApprovedWatchlistAsset(
+                    watchlist_id=watchlist.id,
+                    canonical_asset="SOL",
+                    added_at=now,
+                )
+            )
+            compliance_change = ComplianceChange(
+                canonical_asset="SOL",
+                change_type="reviewed_status_update",
+                severity=ComplianceChangeSeverity.INFORMATIONAL,
+                title="SOL screening review completed",
+                summary="The retained review moved SOL from under review to eligible.",
+                structured_change={
+                    "reviewed_status": {
+                        "before": "under_review",
+                        "after": "eligible",
+                    },
+                    "evidence_scope": {
+                        "before": "pending review",
+                        "after": "reviewed source snapshot",
+                    },
+                },
+                detected_at=now,
+                effective_at=now,
+                status=ComplianceChangeStatus.APPROVED,
+                detection_method="browser_qa",
+                confidence_label="reviewed",
+                idempotency_key=f"browser-change-{uuid4().hex}",
+            )
+            session.add(compliance_change)
+            await session.flush()
+            session.add(
+                ComplianceDriftNotification(
+                    user_id=identity.user_id,
+                    compliance_change_id=compliance_change.id,
+                    strategy_id=strategy.id,
+                    canonical_asset="SOL",
+                    previous_status=ShariaAssetStatus.UNDER_REVIEW,
+                    new_status=ShariaAssetStatus.ELIGIBLE,
+                    behavior=ComplianceChangeBehavior.NOTIFY_ONLY,
+                    impact={
+                        "methodology_version": methodology.version,
+                        "monitor_impact": "notify_only",
+                        "review_state": "approved",
+                        "policy_reason": "Reviewed source evidence was completed.",
+                    },
+                    idempotency_key=f"browser-drift-{uuid4().hex}",
+                    created_at=now,
+                )
+            )
             await session.commit()
             result = {
                 "methodology_id": str(methodology.id),

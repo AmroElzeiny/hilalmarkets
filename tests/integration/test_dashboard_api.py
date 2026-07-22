@@ -8,12 +8,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import StatementError
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.core.csrf import csrf_token
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
     AlertInboxItem,
     AuditEvent,
     ChartSnapshot,
+    DashboardNotification,
     DashboardPreference,
     EdgeHealthSnapshot,
     ReferralRelationship,
@@ -547,7 +549,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
 
     page = await test_context["client"].get("/dashboard/lifecycles")
     assert page.status_code == 200
-    assert "Follow every market journey." in page.text
+    assert "Notification center" in page.text
     assert "SOL/USDT" in page.text
     assert "ETH/USDT" in page.text
     assert "Expired" in page.text
@@ -722,7 +724,7 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
             "maximum_alerts_per_hour": "7",
             "maximum_alerts_per_day": "120",
             "alert_channels": ["telegram"],
-            "providers": ["binance"],
+            "providers": ["binance", "bybit"],
             "alert_days": ["Monday", "Friday"],
             "alert_hours": ["09:00", "21:00"],
         },
@@ -739,11 +741,28 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
         assert preference.notification_preferences["near_miss_threshold"] == 82
         assert preference.notification_preferences["maximum_alerts_per_hour"] == 7
         assert preference.notification_preferences["maximum_alerts_per_day"] == 120
-        assert preference.notification_preferences["alert_channels"] == ["telegram"]
-        assert preference.notification_preferences["channels"] == ["telegram"]
-        assert preference.notification_preferences["providers"] == ["binance"]
+        assert preference.notification_preferences["alert_channels"] == ["web", "telegram"]
+        assert preference.notification_preferences["channels"] == ["web", "telegram"]
+        assert preference.notification_preferences["providers"] == ["binance", "bybit"]
         assert preference.notification_preferences["alert_days"] == ["Monday", "Friday"]
         assert preference.notification_preferences["alert_hours"] == ["09:00", "21:00"]
+
+
+async def test_dashboard_settings_allow_external_channels_to_be_deselected(test_context):
+    await _signup(test_context, "dashboard-in-app-only@example.com")
+
+    response = await test_context["client"].post(
+        "/dashboard/settings",
+        data={"timezone": "UTC", "providers": ["bybit"]},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    async with test_context["session_factory"]() as session:
+        preference = await session.scalar(select(DashboardPreference))
+        assert preference is not None
+        assert preference.notification_preferences["alert_channels"] == ["web"]
+        assert preference.notification_preferences["providers"] == ["bybit"]
 
 
 async def test_dashboard_disconnect_telegram_removes_backend_connection(test_context):
@@ -985,6 +1004,68 @@ async def test_dashboard_web_notifications_deliver_pending_web_alerts(test_conte
         assert delivery.status == DeliveryStatus.DELIVERED
 
 
+async def test_notification_center_is_user_scoped_and_persists_read_state(test_context):
+    await _signup(test_context, "notification-center@example.com")
+    async with test_context["session_factory"]() as session:
+        from ai_market_monitor.db.models import User
+
+        user = await session.scalar(select(User))
+        session.add(
+            DashboardNotification(
+                user_id=user.id,
+                level="info",
+                title="Provider recovered",
+                body="Market checks are current again.",
+                action_url="/dashboard/activity",
+                created_at=datetime.now(UTC),
+            )
+        )
+        alert = Alert(
+            user_id=user.id,
+            alert_type=AlertType.CONFIRMED,
+            deduplication_key="notification-center-confirmed",
+            title="BTC/USDT confirmed",
+            body="Deterministic proof attached.",
+            proof_receipt={"symbol": "BTC/USDT", "setup_completion_score": 100},
+            candle_timestamp=datetime.now(UTC),
+        )
+        session.add(alert)
+        await session.flush()
+        delivery = AlertDelivery(
+            alert_id=alert.id,
+            channel=DeliveryChannel.WEB,
+            destination_key=f"dashboard:{user.id}",
+            status=DeliveryStatus.PENDING,
+        )
+        session.add(delivery)
+        await session.commit()
+        user_id = user.id
+        delivery_id = delivery.id
+
+    center = await test_context["client"].get("/api/v1/dashboard/notifications/center")
+    assert center.status_code == 200
+    payload = center.json()
+    assert payload["unread_count"] == 2
+    assert {item["kind"] for item in payload["items"]} >= {"system", "alert"}
+
+    missing_csrf = await test_context["client"].post(
+        "/api/v1/dashboard/notifications/center/read"
+    )
+    assert missing_csrf.status_code == 403
+    marked = await test_context["client"].post(
+        "/api/v1/dashboard/notifications/center/read",
+        headers={"X-CSRF-Token": csrf_token(test_context["settings"], user_id)},
+    )
+    assert marked.status_code == 200
+    assert marked.json() == {"dashboard_notifications": 1, "alert_deliveries": 1}
+
+    async with test_context["session_factory"]() as session:
+        notification = await session.scalar(select(DashboardNotification))
+        delivery = await session.get(AlertDelivery, delivery_id)
+        assert notification.read_at is not None
+        assert delivery.status == DeliveryStatus.DELIVERED
+
+
 async def test_historical_replay_is_hidden_and_inaccessible(test_context):
     await _signup(test_context, "dashboard-backtest-disabled@example.com")
 
@@ -1087,18 +1168,18 @@ async def test_advanced_dashboard_pages_render(test_context):
 
     for path, expected in [
         ("/dashboard/strategies/new", "Guided Watch Plan"),
-        ("/dashboard/strategies/new", "Describe what you want HilalMarkets to watch."),
-        ("/dashboard/strategies/new", "Advanced Controls"),
+        ("/dashboard/strategies/new", "Build your Watch Plan"),
+        ("/dashboard/strategies/new", "AI Sheet"),
         ("/dashboard/strategies/new", "Preview mechanics"),
         ("/dashboard/strategies/new", "Visual Strategy Canvas"),
         ("/dashboard/strategies/new", "Search condition library"),
         ("/dashboard/strategies/new", "Monitor Overview"),
         ("/dashboard/strategies/new", "Proof &amp; Review"),
         ("/dashboard/strategies/new", "Six-Month High Breakout"),
-        ("/dashboard/integrations", "Integrations"),
-        ("/dashboard/lifecycles", "Follow every market journey."),
+        ("/dashboard/integrations", "Notifications"),
+        ("/dashboard/lifecycles", "Notification center"),
         ("/dashboard/settings", "America/New_York"),
-        ("/dashboard/settings", "modern-listbox"),
+        ("/dashboard/settings", 'data-schedule-options="hours"'),
     ]:
         response = await test_context["client"].get(path)
         assert response.status_code == 200
@@ -1118,7 +1199,7 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "What is forming now" in dashboard.text
     assert "Latest alert proof" in dashboard.text
     assert "Notification channels" in dashboard.text
-    assert "Screening policy" in dashboard.text
+    assert "Screening policy" not in dashboard.text
     assert "analytics-coverage-panel" not in dashboard.text
     assert "Import or clone" not in dashboard.text
     assert "Open Setup Replay" not in dashboard.text

@@ -98,6 +98,12 @@
           <input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">
           <div class="dash-flash success">This form will connect your Dashboard account to Telegram after submit.</div>
         {% endif %}
+        {% if page == 'signup' %}
+          <div class="auth-name-grid">
+            <label>First name <input name="first_name" type="text" required maxlength="60" autocomplete="given-name" data-testid="auth-first-name"></label>
+            <label>Last name <input name="last_name" type="text" required maxlength="60" autocomplete="family-name" data-testid="auth-last-name"></label>
+          </div>
+        {% endif %}
         <label>Email <input name="email" type="email" required autocomplete="email" data-testid="auth-email"></label>
         <label>Password
           <input name="password" type="password" required minlength="{{ 6 if page == 'signup' else 1 }}" autocomplete="{{ 'new-password' if page == 'signup' else 'current-password' }}" data-testid="auth-password">

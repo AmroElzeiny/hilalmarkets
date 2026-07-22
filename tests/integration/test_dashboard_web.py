@@ -69,7 +69,8 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
         "/signup",
         data={
             "email": "Trader@example.com",
-            "display_name": "Trader",
+            "first_name": "Amal",
+            "last_name": "Trader",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },
@@ -94,18 +95,55 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
 
     dashboard = await test_context["client"].get("/dashboard")
     assert dashboard.status_code == 200
-    assert "Active monitors" in dashboard.text
-    assert "Eligible screened assets" in dashboard.text
+    assert "Create your first Watch Plan" in dashboard.text
+    assert "Your next useful action" in dashboard.text
     assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
 
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))
         assert user is not None
+        assert user.display_name == "Amal Trader"
         identity = await session.scalar(select(UserIdentity))
         assert identity.password_hash
+        assert identity.profile_data["first_name"] == "Amal"
+        assert identity.profile_data["last_name"] == "Trader"
         assert await session.scalar(select(WebSession)) is not None
         assert await session.scalar(select(DisclaimerAcceptance)) is None
+
+
+async def test_dashboard_uses_account_locale_and_only_reports_active_telegram(test_context):
+    await _signup_and_verify(test_context, email="rtl-dashboard@example.com")
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User))
+        assert user is not None
+        user.locale = "ar"
+        session.add(
+            TelegramConnection(
+                user_id=user.id,
+                telegram_user_id="rtl-pending-telegram",
+                status=ConnectionStatus.PENDING,
+                alerts_enabled=True,
+            )
+        )
+        await session.commit()
+
+    pending = await test_context["client"].get("/dashboard")
+    assert pending.status_code == 200
+    assert '<html lang="ar" dir="rtl">' in pending.text
+    assert "Not connected" in pending.text
+
+    async with test_context["session_factory"]() as session:
+        connection = await session.scalar(select(TelegramConnection))
+        assert connection is not None
+        connection.status = ConnectionStatus.ACTIVE
+        connection.alerts_enabled = True
+        await session.commit()
+
+    active = await test_context["client"].get("/dashboard")
+    assert active.status_code == 200
+    assert "Connected" in active.text
+    assert ">Ready<" in active.text
 
 
 async def test_signup_verification_sends_admin_notification(test_context, monkeypatch):
@@ -170,7 +208,9 @@ async def test_signup_does_not_require_disclaimer_acceptance(test_context):
     assert response.headers["location"].startswith("/dashboard")
 
 
-async def test_hilal_watchlist_and_compliance_pages_use_only_persisted_user_records(test_context):
+async def test_consolidated_market_and_notification_pages_use_only_persisted_user_records(
+    test_context,
+):
     email = "hilal-pages@example.com"
     _, verified = await _signup_and_verify(test_context, email=email)
     assert verified.status_code == 303
@@ -205,16 +245,25 @@ async def test_hilal_watchlist_and_compliance_pages_use_only_persisted_user_reco
         )
         await session.commit()
 
-    watchlist_page = await test_context["client"].get("/dashboard/watchlist")
+    watchlist_redirect = await test_context["client"].get("/dashboard/watchlist")
+    assert watchlist_redirect.status_code == 303
+    assert watchlist_redirect.headers["location"] == "/dashboard/market?saved_assets=1"
+    watchlist_page = await test_context["client"].get(watchlist_redirect.headers["location"])
     assert watchlist_page.status_code == 200
-    assert "My screened assets" in watchlist_page.text
+    assert "Saved Assets" in watchlist_page.text
     assert "SOL" in watchlist_page.text
     assert "Your saved asset passports will appear here." not in watchlist_page.text
 
-    compliance_page = await test_context["client"].get("/dashboard/compliance")
+    compliance_redirect = await test_context["client"].get("/dashboard/compliance")
+    assert compliance_redirect.status_code == 303
+    assert compliance_redirect.headers["location"] == (
+        "/dashboard/activity?tab=compliance_changes"
+    )
+    compliance_page = await test_context["client"].get(compliance_redirect.headers["location"])
     assert compliance_page.status_code == 200
-    assert "Compliance Changes" in compliance_page.text
-    assert "eligible → under review" in compliance_page.text
+    assert "Notification center" in compliance_page.text
+    assert "Screening changes" in compliance_page.text
+    assert "SOL" in compliance_page.text
 
 
 async def test_signin_success_and_failure(test_context):
@@ -523,7 +572,7 @@ async def test_integrations_telegram_link_opens_new_tab_and_creates_pending_link
     assert page.status_code == 200
     assert 'target="_blank"' in page.text
     assert "https://t.me/trace_edge_bot?start=link_" in page.text
-    assert "Telegram Web fallback" in page.text
+    assert "Using Telegram Web?" in page.text
     assert "/start link_" in page.text
     assert "Under Maintenance" not in page.text
     assert "Discord" not in page.text

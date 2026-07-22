@@ -11,7 +11,16 @@
   </div>
   <div class="topbar-right">
     {% if active_methodology is defined and active_methodology %}<span class="badge badge-eligible">{{ active_methodology.name }} | v{{ active_methodology.version }}</span>{% endif %}
-    <a class="btn btn-secondary btn-icon" href="{{ url_for('lifecycles_page') }}" aria-label="Open recent activity"><span data-icon="bell" data-icon-class="icon"></span></a>
+    <div class="topbar-notifications" data-notification-center>
+      <button class="btn btn-secondary btn-icon notification-center-trigger" type="button" aria-label="Open notifications" aria-haspopup="dialog" aria-expanded="false" data-notification-center-trigger>
+        <span data-icon="bell" data-icon-class="icon"></span>
+        <span class="notification-count" data-notification-count {{ 'hidden' if not unread_notification_count else '' }}>{{ unread_notification_count if unread_notification_count < 100 else '99+' }}</span>
+      </button>
+      <section class="notification-center-popover" role="dialog" aria-label="Recent notifications" hidden data-notification-center-popover>
+        <header><div><span class="kicker">Recent updates</span><h2>Notifications</h2></div><a href="{{ url_for('lifecycles_page') }}">View all</a></header>
+        <div class="notification-center-list" data-notification-center-list><div class="skeleton"></div><div class="skeleton"></div></div>
+      </section>
+    </div>
     <a class="btn btn-primary btn-sm sidebar-create-quick" href="{{ url_for('new_strategy_builder_page') }}"><span data-icon="plus" data-icon-class="icon"></span>New Watch Plan</a>
   </div>
 </header>

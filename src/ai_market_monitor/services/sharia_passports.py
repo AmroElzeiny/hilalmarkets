@@ -226,7 +226,10 @@ class ShariaPassportReadService:
             if passport.historical.is_historical
             and passport.identity.canonical_asset_id
             and passport.passport_version_id
-            else f"/dashboard/market/{passport.assessment.canonical_asset}"
+            else (
+                f"/dashboard/market/{passport.assessment.canonical_asset}"
+                f"?methodology_id={passport.assessment.methodology_id}"
+            )
         )
         return PassportQuickViewResponse(
             identity=passport.identity,

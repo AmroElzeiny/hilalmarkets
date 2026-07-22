@@ -3,8 +3,7 @@
 <div class="page-header">
   <div>
     <span class="eyebrow">Your screened market</span>
-    <h1>Assalamu alaikum, {{ (user.display_name or 'there').split(' ')[0] }}.</h1>
-    <p>Review what is forming, check your Watch Plans, and inspect the evidence behind every update.</p>
+    <h1>Assalamu Alaikum, {{ (user.display_name or 'there').split(' ')[0] }}.</h1>
   </div>
   <div class="page-actions">
     <a class="btn btn-secondary" href="/dashboard/market"><span data-icon="market" data-icon-class="icon"></span>Explore Screened Market</a>
@@ -12,12 +11,29 @@
   </div>
 </div>
 
+{% if counts.strategies == 0 and counts.setups == 0 and counts.alerts == 0 %}
+<section class="home-start-card" aria-labelledby="home-start-title">
+  <div class="home-start-copy">
+    <span class="icon-box is-gold"><span data-icon="workflow" data-icon-class="icon"></span></span>
+    <div>
+      <span class="kicker">Your next useful action</span>
+      <h2 id="home-start-title">Create your first Watch Plan</h2>
+      <p>Describe the market behavior you already follow. Hilal Markets will help turn it into visible rules for you to review before anything is monitored.</p>
+    </div>
+  </div>
+  <div class="home-start-actions">
+    <a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon"></span>Create Watch Plan</a>
+    <a class="link-arrow" href="/dashboard/market">Explore the Screened Market <span data-icon="arrow" data-icon-class="icon-sm"></span></a>
+  </div>
+</section>
+{% else %}
 <section class="stat-grid" aria-label="Account summary">
   <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="shield" data-icon-class="icon"></span></div><span class="badge badge-eligible">Current</span></div><div class="value">{{ overview.eligible_market_count }}</div><div class="caption">Eligible screened assets</div></article>
   <article class="stat-card"><div class="stat-head"><div class="icon-box is-gold"><span data-icon="activity" data-icon-class="icon"></span></div></div><div class="value">{{ overview.forming_screened_count }}</div><div class="caption">Forming opportunities</div></article>
   <article class="stat-card"><div class="stat-head"><div class="icon-box is-amber"><span data-icon="compliance" data-icon-class="icon"></span></div></div><div class="value">{{ overview.compliance_attention_count }}</div><div class="caption">Compliance changes in 30 days</div></article>
   <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div><span class="sr-only">Active monitors</span></div><div class="value">{{ counts.active }}</div><div class="caption">Active Watch Plans</div></article>
 </section>
+{% endif %}
 
 <section class="dashboard-grid">
   <div class="main-column stack">
@@ -57,9 +73,6 @@
         <a class="setting-row" href="/dashboard/integrations" data-overview-channel="telegram"><div><strong>Telegram</strong><small>{{ 'Connected' if overview.telegram_connected else 'Not connected' }}</small></div><span class="badge {{ 'badge-eligible' if overview.telegram_connected else 'badge-neutral' }}">{{ 'Ready' if overview.telegram_connected else 'Set up' }}</span></a>
         <div class="setting-row"><div><strong>In-app</strong><small>Evidence and lifecycle records</small></div><span class="badge badge-eligible">Always on</span></div>
       </div>
-    </article>
-    <article class="panel">
-      <span class="kicker">Screening policy</span><h2>{{ overview.screening_methodology.name if overview.screening_methodology else 'Methodology unavailable' }}</h2><p>{% if overview.screening_methodology %}Version {{ overview.screening_methodology.version }} is attached to current screened-market records.{% else %}No approved executable methodology is currently available. HilalMarkets will not infer eligibility.{% endif %}</p><a class="link-arrow" href="/dashboard/methodology">How we screen <span data-icon="arrow" data-icon-class="icon-sm"></span></a>
     </article>
   </aside>
 </section>

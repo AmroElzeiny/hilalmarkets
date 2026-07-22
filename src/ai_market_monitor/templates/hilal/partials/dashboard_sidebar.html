@@ -1,11 +1,16 @@
 <aside class="sidebar" data-sidebar data-hilal-sidebar>
   <div class="sidebar-head">
-    <a class="logo" href="{{ url_for('dashboard_home') }}" aria-label="HilalMarkets home">
+    <a class="logo" href="{{ url_for('dashboard_home') }}" aria-label="Hilal Markets home">
       <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
-      <span>HilalMarkets<small>Screened market intelligence</small></span>
+      <span class="logo-wordmark">hilal markets<small>Evidence-led monitoring</small></span>
     </a>
     <button class="btn btn-secondary btn-icon sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close menu"><span data-icon="close" data-icon-class="icon"></span></button>
   </div>
+
+  <button class="sidebar-collapse" type="button" data-sidebar-collapse aria-expanded="true" aria-label="Minimize side menu" title="Minimize side menu">
+    <span data-icon="panel" data-icon-class="icon-sm"></span>
+    <span>Minimize menu</span>
+  </button>
 
   <nav data-testid="dashboard-nav" aria-label="Dashboard navigation">
     {% for group in dashboard_navigation %}
@@ -26,7 +31,7 @@
   <div class="sidebar-profile">
     <div class="avatar">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</div>
     <div class="meta">
-      <strong>{{ (user.display_name or 'HilalMarkets user') if user else 'HilalMarkets' }}</strong>
+      <strong>{{ (user.display_name or 'Hilal Markets user') if user else 'Hilal Markets' }}</strong>
       <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Screened market intelligence') }}</small>
     </div>
     {% if user %}

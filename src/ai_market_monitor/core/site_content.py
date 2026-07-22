@@ -122,12 +122,6 @@ DASHBOARD_NAVIGATION = (
                 "market",
                 ("asset_passport",),
             ),
-            NavigationItem(
-                "Saved Assets",
-                "saved_assets_page",
-                "saved_assets",
-                "watchlist",
-            ),
         ),
     ),
     NavigationGroup(
@@ -163,33 +157,16 @@ DASHBOARD_NAVIGATION = (
                 "activity",
                 ("lifecycles", "alert_proof"),
             ),
-            NavigationItem(
-                "Compliance Changes",
-                "compliance_changes_page",
-                "compliance",
-                "compliance",
-            ),
-        ),
-    ),
-    NavigationGroup(
-        "Trust",
-        (
-            NavigationItem(
-                "How We Screen",
-                "methodology_page",
-                "methodology",
-                "methodology",
-            ),
         ),
     ),
     NavigationGroup(
         "Account",
         (
             NavigationItem(
-                "Integrations",
+                "Notifications",
                 "connections_page",
                 "integrations",
-                "integrations",
+                "bell",
             ),
             NavigationItem(
                 "Plan & Billing",

@@ -9,7 +9,7 @@ import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validator, model_validator
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import (
@@ -17,6 +17,7 @@ from ai_market_monitor.api.dependencies import (
     get_market_data_provider,
 )
 from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.csrf import csrf_token_matches
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
     AISetupChatSession,
@@ -25,7 +26,10 @@ from ai_market_monitor.db.models import (
     AuditEvent,
     BacktestJob,
     BacktestResult,
+    BillingCheckoutAttempt,
     ChartSnapshot,
+    ComplianceChange,
+    ComplianceDriftNotification,
     DashboardNotification,
     DashboardPreference,
     IntegrationTestResult,
@@ -52,6 +56,7 @@ from ai_market_monitor.db.models import (
     User,
     UserExportJob,
     UserIdentity,
+    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
     AlertType,
@@ -106,6 +111,7 @@ from ai_market_monitor.services.verified_strategy import (
     VerifiedStrategyService,
 )
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
+from ai_market_monitor.whatsapp.service import connection_payload
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard-api"])
 logger = structlog.get_logger(__name__)
@@ -3016,6 +3022,9 @@ async def web_notifications(
             .join(Alert, Alert.id == AlertDelivery.alert_id)
             .where(
                 Alert.user_id == principal.user_id,
+                Alert.alert_type.in_(
+                    [AlertType.CONFIRMED, AlertType.NEAR_MISS, AlertType.LIFECYCLE]
+                ),
                 AlertDelivery.channel == DeliveryChannel.WEB,
                 AlertDelivery.destination_key == f"dashboard:{principal.user_id}",
                 AlertDelivery.status == DeliveryStatus.PENDING,
@@ -3054,35 +3063,249 @@ async def web_notifications(
         )
         delivery.status = DeliveryStatus.DELIVERED
         delivery.delivered_at = now
-    dashboard_rows = (
-        await session.scalars(
-            select(DashboardNotification)
-            .where(
-                DashboardNotification.user_id == principal.user_id,
-                DashboardNotification.read_at.is_(None),
-            )
-            .order_by(DashboardNotification.created_at.desc())
-            .limit(limit)
-        )
-    ).all()
-    for notification in dashboard_rows:
-        items.append(
-            {
-                "id": notification.id,
-                "alert_id": None,
-                "title": notification.title,
-                "symbol": "Monitor Health",
-                "completion_rate": None,
-                "alert_type": "system_notice",
-                "created_at": notification.created_at,
-                "body": notification.body,
-                "action_url": notification.action_url,
-            }
-        )
-        notification.read_at = now
-    if rows or dashboard_rows:
+    if rows:
         await session.commit()
     return {"items": items}
+
+
+@router.get("/notifications/center")
+async def notification_center(
+    limit: int = Query(default=15, ge=1, le=30),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Combine bounded, persisted user notifications without changing delivery state."""
+    items: list[dict[str, Any]] = []
+    dashboard_rows = list(
+        (
+            await session.scalars(
+                select(DashboardNotification)
+                .where(DashboardNotification.user_id == principal.user_id)
+                .order_by(DashboardNotification.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    pending_alert_ids = set(
+        (
+            await session.scalars(
+                select(AlertDelivery.alert_id)
+                .join(Alert, Alert.id == AlertDelivery.alert_id)
+                .where(
+                    Alert.user_id == principal.user_id,
+                    AlertDelivery.channel == DeliveryChannel.WEB,
+                    AlertDelivery.destination_key == f"dashboard:{principal.user_id}",
+                    AlertDelivery.status == DeliveryStatus.PENDING,
+                )
+                .order_by(AlertDelivery.created_at.desc())
+                .limit(limit * 2)
+            )
+        ).all()
+    )
+    for dashboard_notice in dashboard_rows:
+        action_url = (
+            dashboard_notice.action_url
+            if str(dashboard_notice.action_url or "").startswith("/dashboard")
+            else None
+        )
+        items.append(
+            {
+                "id": f"dashboard:{dashboard_notice.id}",
+                "kind": "system",
+                "title": dashboard_notice.title,
+                "body": dashboard_notice.body,
+                "status": dashboard_notice.level,
+                "created_at": dashboard_notice.created_at,
+                "action_url": action_url,
+                "unread": dashboard_notice.read_at is None,
+            }
+        )
+    alert_rows = list(
+        (
+            await session.scalars(
+                select(Alert)
+                .where(Alert.user_id == principal.user_id)
+                .order_by(Alert.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    for alert in alert_rows:
+        compliance = alert.alert_type == AlertType.COMPLIANCE
+        items.append(
+            {
+                "id": f"alert:{alert.id}",
+                "kind": "compliance" if compliance else "alert",
+                "title": alert.title,
+                "body": alert.body,
+                "status": alert.alert_type.value,
+                "created_at": alert.created_at,
+                "action_url": (
+                    "/dashboard/activity?tab=compliance_changes"
+                    if compliance
+                    else f"/dashboard/alerts/{alert.id}/proof"
+                ),
+                "unread": alert.id in pending_alert_ids,
+            }
+        )
+    billing_rows = list(
+        (
+            await session.scalars(
+                select(BillingCheckoutAttempt)
+                .where(BillingCheckoutAttempt.user_id == principal.user_id)
+                .order_by(BillingCheckoutAttempt.created_at.desc())
+                .limit(5)
+            )
+        ).all()
+    )
+    for billing_attempt in billing_rows:
+        items.append(
+            {
+                "id": f"billing:{billing_attempt.id}",
+                "kind": "billing",
+                "title": "Billing update",
+                "body": f"Checkout status: {billing_attempt.status.replace('_', ' ')}.",
+                "status": billing_attempt.status,
+                "created_at": billing_attempt.updated_at,
+                "action_url": "/dashboard/billing",
+                "unread": False,
+            }
+        )
+    integration_rows = list(
+        (
+            await session.scalars(
+                select(IntegrationTestResult)
+                .where(
+                    IntegrationTestResult.user_id == principal.user_id,
+                    IntegrationTestResult.integration.in_(["telegram", "whatsapp"]),
+                )
+                .order_by(IntegrationTestResult.created_at.desc())
+                .limit(5)
+            )
+        ).all()
+    )
+    for integration_result in integration_rows:
+        channel = integration_result.integration.title()
+        items.append(
+            {
+                "id": f"integration:{integration_result.id}",
+                "kind": "integration",
+                "title": (
+                    f"{channel} test {integration_result.status.replace('_', ' ')}"
+                ),
+                "body": "Notification-channel test result.",
+                "status": integration_result.status,
+                "created_at": integration_result.created_at,
+                "action_url": "/dashboard/integrations",
+                "unread": False,
+            }
+        )
+    items.sort(key=lambda item: ensure_aware(item["created_at"]), reverse=True)
+    return {"items": items[:limit], "unread_count": sum(bool(item["unread"]) for item in items)}
+
+
+@router.post("/notifications/center/read")
+async def mark_notification_center_read(
+    x_csrf_token: str | None = Header(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, int]:
+    """Mark only this user's in-dashboard notifications as seen."""
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    now = _now()
+    dashboard_result = await session.execute(
+        update(DashboardNotification)
+        .where(
+            DashboardNotification.user_id == principal.user_id,
+            DashboardNotification.read_at.is_(None),
+        )
+        .values(read_at=now)
+    )
+    alert_result = await session.execute(
+        update(AlertDelivery)
+        .where(
+            AlertDelivery.alert_id.in_(
+                select(Alert.id).where(Alert.user_id == principal.user_id)
+            ),
+            AlertDelivery.channel == DeliveryChannel.WEB,
+            AlertDelivery.destination_key == f"dashboard:{principal.user_id}",
+            AlertDelivery.status == DeliveryStatus.PENDING,
+        )
+        .values(status=DeliveryStatus.DELIVERED, delivered_at=now)
+    )
+    await session.commit()
+    return {
+        "dashboard_notifications": max(
+            0, int(getattr(dashboard_result, "rowcount", 0) or 0)
+        ),
+        "alert_deliveries": max(0, int(getattr(alert_result, "rowcount", 0) or 0)),
+    }
+
+
+@router.get("/compliance-notifications/{notification_id}/difference")
+async def compliance_notification_difference(
+    notification_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return a bounded, user-owned explanation of a screening-status change."""
+    row = await session.scalar(
+        select(ComplianceDriftNotification).where(
+            ComplianceDriftNotification.id == notification_id,
+            ComplianceDriftNotification.user_id == principal.user_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Compliance notification not found")
+    change = (
+        await session.get(ComplianceChange, row.compliance_change_id)
+        if row.compliance_change_id
+        else None
+    )
+    impact = dict(row.impact or {})
+    structured = dict(change.structured_change or {}) if change else {}
+
+    def safe_value(value: object) -> str:
+        if value is None:
+            return "Not recorded"
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        if isinstance(value, (str, int, float)):
+            return str(value)[:240]
+        if isinstance(value, list):
+            return ", ".join(str(item)[:80] for item in value[:8]) or "None"
+        return "See the reviewed evidence record"
+
+    evidence_changes: list[dict[str, str]] = []
+    for key, value in list(structured.items())[:16]:
+        label = str(key).replace("_", " ").strip().title()[:100]
+        if isinstance(value, dict):
+            before = safe_value(value.get("before", value.get("previous")))
+            after = safe_value(value.get("after", value.get("current")))
+            detail = f"{before} to {after}" if before != after else after
+        else:
+            detail = safe_value(value)
+        evidence_changes.append({"label": label or "Evidence update", "detail": detail})
+
+    return {
+        "notification_id": row.id,
+        "asset": row.canonical_asset,
+        "previous_status": row.previous_status.value if row.previous_status else "not_recorded",
+        "current_status": row.new_status.value,
+        "title": change.title if change else f"{row.canonical_asset} screening status changed",
+        "summary": change.summary if change else str(
+            impact.get("policy_reason") or "Reviewed screening evidence changed."
+        ),
+        "change_type": change.change_type if change else "status_change",
+        "methodology_version": impact.get("methodology_version"),
+        "watch_plan_action": impact.get("monitor_impact") or row.behavior.value,
+        "review_state": impact.get("review_state") or "recorded",
+        "changed_at": change.detected_at if change else row.created_at,
+        "evidence_changes": evidence_changes,
+        "evidence_available": bool(change),
+    }
 
 
 async def create_setup_replay(
@@ -3938,6 +4161,7 @@ async def billing_status(
 async def integrations(
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     telegram = await session.scalar(
         select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
@@ -3947,14 +4171,22 @@ async def integrations(
             select(IntegrationTestResult)
             .where(
                 IntegrationTestResult.user_id == principal.user_id,
-                IntegrationTestResult.integration == "telegram",
+                IntegrationTestResult.integration.in_(["telegram", "whatsapp"]),
             )
             .order_by(IntegrationTestResult.created_at.desc())
             .limit(10)
         )
     ).all()
+    whatsapp = await session.scalar(
+        select(WhatsAppConnection).where(WhatsAppConnection.user_id == principal.user_id)
+    )
+    entitlement = await EntitlementService(session).current(principal.user_id)
     return {
         "telegram": _telegram_payload(telegram),
+        "whatsapp": connection_payload(whatsapp),
+        "whatsapp_enabled": bool(
+            settings.whatsapp_enabled and entitlement.feature_enabled("whatsapp")
+        ),
         "recent_tests": [
             {
                 "id": test.id,

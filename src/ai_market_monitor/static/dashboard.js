@@ -202,24 +202,24 @@
       root?.classList.contains("theme-light");
     return light
       ? {
-          background: "#fbfaf6",
-          text: "#102a24",
-          grid: "rgba(31, 139, 116, .13)",
-          up: "#1f8b74",
-          down: "#c2544d",
-          target: "#d2af63",
-          stop: "#c2544d",
-          entry: "#0f5c4d",
+          background: "#fafbfc",
+          text: "#2b2e35",
+          grid: "rgba(99, 113, 108, .13)",
+          up: "#55712a",
+          down: "#8d3029",
+          target: "#8a6316",
+          stop: "#8d3029",
+          entry: "#46551b",
         }
       : {
-          background: "#082f29",
-          text: "#f7f4ec",
-          grid: "rgba(155, 200, 187, .12)",
-          up: "#4fae96",
-          down: "#d97970",
-          target: "#d2af63",
-          stop: "#d97970",
-          entry: "#1f8b74",
+          background: "#202329",
+          text: "#ffffff",
+          grid: "rgba(225, 229, 234, .12)",
+          up: "#cbfa4d",
+          down: "#e4b8b2",
+          target: "#cbfa4d",
+          stop: "#e4b8b2",
+          entry: "#7ba428",
         };
   }
 
@@ -3910,7 +3910,7 @@
           result.hidden = false;
           result.classList.add("error");
           result.innerHTML = `
-            <strong style="color:#b4234f">Strategy version</strong>
+            <strong style="color:#8d3029">Strategy version</strong>
             <p>Missing. Choose an approved strategy version before running Quick Scan.</p>
           `;
         }
@@ -4539,7 +4539,7 @@
       drawCandles(canvas, safeArray(payload.items));
     } catch (error) {
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#94a3bd";
+      ctx.fillStyle = "#7a8089";
       ctx.font = "14px DM Sans, Arial";
       ctx.fillText(error.message, 20, 40);
     }
@@ -5343,10 +5343,10 @@
                 return {
                   id: `${marker.kind || "event"}-${index}-${time}`,
                   time,
-                  color: condition ? "#1f8b74" : "#d2af63",
+                  color: condition ? "#55712a" : "#8a6316",
                   text: marker.text || marker.label || "Lifecycle event",
                   label: condition ? "C" : "L",
-                  labelFontColor: condition ? "#ffffff" : "#082f29",
+                  labelFontColor: condition ? "#ffffff" : "#2b2e35",
                   minSize: 22,
                 };
               })
@@ -5493,7 +5493,7 @@
       await ensureTradingViewChartingLibrary();
       widgetHost.replaceChildren();
       const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      const background = theme === "light" ? "#f3efff" : "#151021";
+      const background = theme === "light" ? "#f5f8fb" : "#202329";
       workspace.currentExchange = payload.setup.exchange;
       workspace.currentSymbol = payload.setup.symbol;
       workspace.widget = new window.TradingView.widget({
@@ -5506,7 +5506,7 @@
         theme,
         style: "1",
         locale: "en",
-        toolbar_bg: theme === "light" ? "#f3efff" : "#151021",
+        toolbar_bg: theme === "light" ? "#f5f8fb" : "#202329",
         enable_publishing: false,
         allow_symbol_change: true,
         hide_side_toolbar: false,
@@ -5533,15 +5533,15 @@
         overrides: {
           "paneProperties.background": background,
           "paneProperties.backgroundType": "solid",
-          "paneProperties.vertGridProperties.color": theme === "light" ? "#d7e8e2" : "#174a40",
-          "paneProperties.horzGridProperties.color": theme === "light" ? "#d7e8e2" : "#174a40",
-          "scalesProperties.textColor": theme === "light" ? "#102a24" : "#f7f4ec",
-          "mainSeriesProperties.candleStyle.upColor": "#1f8b74",
-          "mainSeriesProperties.candleStyle.downColor": "#d97970",
-          "mainSeriesProperties.candleStyle.borderUpColor": "#1f8b74",
-          "mainSeriesProperties.candleStyle.borderDownColor": "#d97970",
-          "mainSeriesProperties.candleStyle.wickUpColor": "#1f8b74",
-          "mainSeriesProperties.candleStyle.wickDownColor": "#d97970",
+          "paneProperties.vertGridProperties.color": theme === "light" ? "#e1e5ea" : "#50555e",
+          "paneProperties.horzGridProperties.color": theme === "light" ? "#e1e5ea" : "#50555e",
+          "scalesProperties.textColor": theme === "light" ? "#2b2e35" : "#ffffff",
+          "mainSeriesProperties.candleStyle.upColor": "#55712a",
+          "mainSeriesProperties.candleStyle.downColor": "#8d3029",
+          "mainSeriesProperties.candleStyle.borderUpColor": "#55712a",
+          "mainSeriesProperties.candleStyle.borderDownColor": "#8d3029",
+          "mainSeriesProperties.candleStyle.wickUpColor": "#55712a",
+          "mainSeriesProperties.candleStyle.wickDownColor": "#8d3029",
         },
         container_id: "lifecycle-tradingview-widget",
       });
@@ -5569,25 +5569,25 @@
       const chart = window.LightweightCharts.createChart(container, {
         autoSize: true,
         layout: {
-          background: { color: theme === "light" ? "#fbfaf6" : "#082f29" },
-          textColor: theme === "light" ? "#102a24" : "#f7f4ec",
-          fontFamily: "Inter, Satoshi, system-ui, sans-serif",
+          background: { color: theme === "light" ? "#fafbfc" : "#202329" },
+          textColor: theme === "light" ? "#2b2e35" : "#ffffff",
+          fontFamily: "Onest, Arial, sans-serif",
         },
         grid: {
-          vertLines: { color: theme === "light" ? "rgba(31,139,116,.14)" : "rgba(155,200,187,.12)" },
-          horzLines: { color: theme === "light" ? "rgba(31,139,116,.14)" : "rgba(155,200,187,.12)" },
+          vertLines: { color: theme === "light" ? "rgba(99,113,108,.14)" : "rgba(225,229,234,.12)" },
+          horzLines: { color: theme === "light" ? "rgba(99,113,108,.14)" : "rgba(225,229,234,.12)" },
         },
-        rightPriceScale: { borderColor: "rgba(155,200,187,.28)" },
-        timeScale: { borderColor: "rgba(155,200,187,.28)", timeVisible: true },
+        rightPriceScale: { borderColor: "rgba(99,113,108,.28)" },
+        timeScale: { borderColor: "rgba(99,113,108,.28)", timeVisible: true },
         crosshair: { mode: window.LightweightCharts.CrosshairMode.Normal },
       });
       const series = chart.addCandlestickSeries({
-        upColor: "#1f8b74",
-        downColor: "#d97970",
-        borderUpColor: "#1f8b74",
-        borderDownColor: "#d97970",
-        wickUpColor: "#1f8b74",
-        wickDownColor: "#d97970",
+        upColor: "#55712a",
+        downColor: "#8d3029",
+        borderUpColor: "#55712a",
+        borderDownColor: "#8d3029",
+        wickUpColor: "#55712a",
+        wickDownColor: "#8d3029",
       });
       const data = safeArray(payload.candles)
         .map((candle) => ({
@@ -5604,7 +5604,7 @@
         .map((marker) => ({
           time: Math.floor(new Date(marker.time).getTime() / 1000),
           position: marker.position === "aboveBar" ? "aboveBar" : "belowBar",
-          color: marker.kind === "lifecycle" ? "#d2af63" : "#1f8b74",
+          color: marker.kind === "lifecycle" ? "#8a6316" : "#55712a",
           shape: marker.kind === "lifecycle" ? "arrowDown" : "circle",
           text: String(marker.text || marker.label || "event").slice(0, 20),
         }))
@@ -5729,37 +5729,46 @@
     };
     form?.addEventListener("input", markDirty);
     form?.addEventListener("change", markDirty);
-    document.querySelectorAll("[data-toggle-list]").forEach((listbox) => {
-      listbox.addEventListener("mousedown", (event) => {
-        if (event.target.tagName !== "OPTION") return;
-        event.preventDefault();
-        event.target.selected = !event.target.selected;
-        listbox.dispatchEvent(new Event("change", { bubbles: true }));
-      });
-    });
+    const nearMissEnabled = form?.querySelector("[data-near-miss-enabled]");
+    const nearMissThreshold = form?.querySelector("[data-near-miss-threshold]");
+    const syncNearMiss = () => {
+      if (nearMissThreshold) nearMissThreshold.hidden = nearMissEnabled?.value === "false";
+    };
+    nearMissEnabled?.addEventListener("change", syncNearMiss);
+    syncNearMiss();
+
+    const dayOptions = [...document.querySelectorAll('[data-schedule-options="days"] input')];
+    const hourOptions = [...document.querySelectorAll('[data-schedule-options="hours"] input')];
+    dayOptions.forEach((input) => input.addEventListener("change", () => {
+      if (!input.checked) return;
+      if (input.value === "Every Day") {
+        dayOptions.forEach((candidate) => { if (candidate !== input) candidate.checked = false; });
+      } else {
+        const everyDay = dayOptions.find((candidate) => candidate.value === "Every Day");
+        if (everyDay) everyDay.checked = false;
+      }
+    }));
     document.querySelectorAll("[data-schedule-action]").forEach((button) => {
       button.addEventListener("click", () => {
         const action = button.dataset.scheduleAction;
-        const days = document.querySelector('[data-toggle-list="days"]');
-        const hours = document.querySelector('[data-toggle-list="hours"]');
-        if (action?.startsWith("days") && days) {
-          Array.from(days.options).forEach((option) => {
-            if (action === "days-all") option.selected = option.value === "Every Day";
+        if (action?.startsWith("days")) {
+          dayOptions.forEach((option) => {
+            if (action === "days-all") option.checked = option.value === "Every Day";
             if (action === "days-weekdays") {
-              option.selected = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].includes(option.value);
+              option.checked = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].includes(option.value);
             }
-            if (action === "days-clear") option.selected = false;
+            if (action === "days-clear") option.checked = false;
           });
-          days.dispatchEvent(new Event("change", { bubbles: true }));
+          form?.dispatchEvent(new Event("change", { bubbles: true }));
         }
-        if (action?.startsWith("hours") && hours) {
-          Array.from(hours.options).forEach((option) => {
+        if (action?.startsWith("hours")) {
+          hourOptions.forEach((option) => {
             const hour = Number(option.value.slice(0, 2));
-            if (action === "hours-all") option.selected = true;
-            if (action === "hours-business") option.selected = hour >= 8 && hour <= 18;
-            if (action === "hours-clear") option.selected = false;
+            if (action === "hours-all") option.checked = true;
+            if (action === "hours-business") option.checked = hour >= 8 && hour <= 18;
+            if (action === "hours-clear") option.checked = false;
           });
-          hours.dispatchEvent(new Event("change", { bubbles: true }));
+          form?.dispatchEvent(new Event("change", { bubbles: true }));
         }
       });
     });
@@ -6853,6 +6862,5 @@
     initInboxFilter();
     initVerifiedStrategyWorkspace();
     initAlertProofReceipt();
-    initWebNotifications();
   });
 })();

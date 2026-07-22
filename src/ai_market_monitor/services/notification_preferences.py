@@ -52,14 +52,17 @@ class NotificationPreferenceService:
             select(DashboardPreference).where(DashboardPreference.user_id == user_id)
         )
         data = row.notification_preferences if row else {}
-        channel_values = data.get("alert_channels", data.get("channels", ["telegram"]))
+        channel_values = data.get(
+            "alert_channels",
+            data.get("channels", ["web", "telegram"]),
+        )
         channels = {
             DeliveryChannel(value)
             for value in channel_values
             if value in {channel.value for channel in DeliveryChannel}
         } & self._supported_channels()
         return NotificationPreference(
-            channels=channels or {DeliveryChannel.TELEGRAM},
+            channels=channels or {DeliveryChannel.WEB},
             near_miss_enabled=bool(data.get("near_miss_enabled", True)),
             near_miss_threshold=max(1, min(100, int(data.get("near_miss_threshold", 70)))),
             lifecycle_enabled=bool(data.get("lifecycle_enabled", True)),

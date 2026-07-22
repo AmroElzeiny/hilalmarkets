@@ -20,6 +20,7 @@
   const errorText = root.querySelector("[data-ai-chat-error-text]");
   const openCanvasButton = document.querySelector("[data-ai-open-canvas]");
   const returnChatButton = root.querySelector("[data-ai-return-chat]");
+  const minimizeChatButton = root.querySelector("[data-ai-minimize-chat]");
   let chat = null;
   let loading = false;
   let lastAction = null;
@@ -378,8 +379,10 @@
     previewEmpty.hidden = hasSheet;
     previewContent.hidden = !hasSheet;
     previewActions.hidden = !hasSheet;
+    const needsClarification = !["ready_for_approval", "ready_to_scan", "approved"].includes(chat?.status);
+    root.querySelector("[data-ai-preview-panel]")?.classList.toggle("needs-clarification", needsClarification);
     previewStatus.textContent = chat?.status === "ready_for_approval"
-      ? "Monitor ready"
+      ? "Ready to review"
       : chat?.status === "ready_to_scan" ? "Scanner ready"
       : chat?.status === "approved" ? "Approved" : "Needs clarification";
     if (!hasSheet) return;
@@ -688,6 +691,7 @@
     document.querySelector('[data-builder-direction="canvas"]')?.click();
     if (openCanvasButton) openCanvasButton.hidden = true;
     if (returnChatButton) returnChatButton.hidden = false;
+    if (minimizeChatButton) minimizeChatButton.hidden = false;
     publishDraftToCanvas();
   }
 
@@ -695,14 +699,25 @@
     const builder = document.querySelector("[data-builder-shell]");
     root.classList.remove("canvas-open");
     document.body.classList.remove("ai-canvas-active");
+    document.body.classList.remove("ai-chat-minimized");
+    root.classList.remove("assistant-minimized");
     if (builder && !builder.querySelector("[data-strategy-id]")?.dataset.strategyId) builder.hidden = true;
     if (openCanvasButton) openCanvasButton.hidden = false;
     if (returnChatButton) returnChatButton.hidden = true;
+    if (minimizeChatButton) minimizeChatButton.hidden = true;
     input.focus();
   }
 
   openCanvasButton?.addEventListener("click", openCanvas);
   returnChatButton?.addEventListener("click", returnToChat);
+  minimizeChatButton?.addEventListener("click", () => {
+    const minimized = root.classList.toggle("assistant-minimized");
+    document.body.classList.toggle("ai-chat-minimized", minimized);
+    minimizeChatButton.setAttribute("aria-expanded", String(!minimized));
+    minimizeChatButton.setAttribute("aria-label", minimized ? "Restore assistant" : "Minimize assistant");
+    const symbol = minimizeChatButton.querySelector("[data-ai-minimize-symbol]");
+    if (symbol) symbol.textContent = minimized ? "+" : "-";
+  });
 
   async function initialize() {
     if (initialized) return;

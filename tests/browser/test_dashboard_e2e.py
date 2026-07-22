@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 
 from conftest import (
+    assert_hilal_brand_palette,
+    assert_no_horizontal_overflow,
     assert_no_raw_traceback,
     seed_alert_proof,
     seed_setup_observability,
@@ -582,6 +584,53 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
     assert_no_raw_traceback(page)
 
 
+def test_all_customer_dashboard_pages_use_the_brand_system(
+    page: Page,
+    base_url: str,
+    repo_root: Path,
+) -> None:
+    signup(page, base_url, unique_email("dashboard-brand"))
+    output = repo_root / "reports" / "playwright" / "dashboard-brand"
+    output.mkdir(parents=True, exist_ok=True)
+    routes = page.locator("[data-testid='dashboard-nav'] .nav-item").evaluate_all(
+        "links => [...new Set(links.map(link => link.getAttribute('href')))]"
+    )
+    routes.append("/dashboard/strategies/new")
+
+    for route in routes:
+        page.set_viewport_size({"width": 1440, "height": 1000})
+        target = route if route.startswith("http") else f"{base_url}{route}"
+        page.goto(target, wait_until="domcontentloaded")
+        expect(page.get_by_test_id("dashboard-root")).to_be_attached()
+        expect(page.locator("body")).to_have_attribute(
+            "data-brand-system", "hilal-markets-v2"
+        )
+        expect(page.locator(".sidebar .logo img")).to_have_attribute(
+            "src", re.compile(r"hilalmarkets-logo-mark\.svg")
+        )
+        assert "Onest" in page.locator("body").evaluate(
+            "node => getComputedStyle(node).fontFamily"
+        )
+        heading = page.locator("h1:visible, h2:visible").first
+        expect(heading).to_be_visible()
+        assert "Geometria" in heading.evaluate(
+            "node => getComputedStyle(node).fontFamily"
+        )
+        assert page.locator("body").evaluate(
+            "node => getComputedStyle(node).backgroundColor"
+        ) == "rgb(245, 248, 251)"
+        assert_no_horizontal_overflow(page)
+        assert_hilal_brand_palette(page)
+        assert_no_raw_traceback(page)
+        slug = route.strip("/").replace("/", "-") or "dashboard"
+        page.screenshot(path=str(output / f"{slug}-desktop.png"), full_page=True)
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert_no_horizontal_overflow(page)
+        assert_hilal_brand_palette(page)
+        page.screenshot(path=str(output / f"{slug}-mobile-390.png"), full_page=True)
+
+
 def test_screened_market_passport_and_mobile_visual_qa(
     page: Page,
     base_url: str,
@@ -593,31 +642,18 @@ def test_screened_market_passport_and_mobile_visual_qa(
     visual_dir.mkdir(parents=True, exist_ok=True)
 
     page.goto(
-        f"{base_url}/dashboard/market?view=opportunities"
-        f"&methodology_id={seeded['methodology_id']}"
+        f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}"
     )
-    expect(page.get_by_role("heading", name="Find opportunities inside a screened market."))\
-        .to_be_visible()
-    card = page.locator(".opportunity-card").first
-    expect(card).to_be_visible()
-    expect(card).to_contain_text("SOL/USDT")
-    expect(card).to_contain_text("Eligible")
-    expect(card).to_contain_text("80%")
-    expect(card).to_contain_text("SOL Browser Watchlist")
-    page.screenshot(
-        path=str(visual_dir / "screened-market-desktop.png"),
-        full_page=True,
-    )
-
-    page.goto(
-        f"{base_url}/dashboard/market?view=assets"
-        f"&methodology_id={seeded['methodology_id']}"
-    )
+    expect(page.get_by_role("heading", name="Screened Market", exact=True)).to_be_visible()
+    expect(page.get_by_text("All screened assets")).to_have_count(0)
+    expect(page.get_by_text("Find opportunities inside a screened market.")).to_have_count(0)
     live_row = page.locator(".live-market-row", has_text="SOL/USDT")
     expect(live_row).to_be_visible(timeout=15_000)
     expect(live_row).to_contain_text("Eligible")
     expect(page.locator("[data-live-market-error]")).to_be_hidden()
     expect(page.locator("[data-live-market-status]")).to_have_text("Live quotes connected")
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.locator("[data-live-market-search]").fill("SOL/USDT")
     expect(live_row).to_be_visible()
     expect(page.locator(".live-market-row:visible")).to_have_count(1)
@@ -627,6 +663,8 @@ def test_screened_market_passport_and_mobile_visual_qa(
     expect(passport_dialog).to_be_visible()
     expect(passport_dialog).to_contain_text("Eligible")
     expect(passport_dialog.get_by_role("link", name="Open Full Passport")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(
         path=str(visual_dir / "passport-quick-view-desktop.png"),
         full_page=False,
@@ -634,18 +672,29 @@ def test_screened_market_passport_and_mobile_visual_qa(
     page.keyboard.press("Escape")
     expect(passport_dialog).to_be_hidden()
     expect(passport_button).to_be_focused()
+
+    page.locator("[data-saved-assets-open]").click()
+    saved_dialog = page.locator("[data-saved-assets-dialog]")
+    expect(saved_dialog).to_be_visible()
+    saved_row = saved_dialog.locator("[data-saved-asset]", has_text="SOL")
+    expect(saved_row).to_be_visible()
+    mark_button = saved_row.locator("[data-saved-asset-mark]")
+    mark_button.click()
+    expect(mark_button).to_have_attribute("aria-checked", "true")
+    expect(saved_dialog.locator("[data-saved-assets-save]")).to_be_visible()
+    saved_dialog.locator("[data-saved-assets-cancel]").click()
+    expect(saved_dialog).to_be_hidden()
+    page.locator("[data-saved-assets-open]").click()
+    expect(mark_button).to_have_attribute("aria-checked", "false")
+    saved_dialog.locator("[data-saved-assets-cancel]").click()
+
     page.screenshot(
         path=str(visual_dir / "screened-market-live-table-desktop.png"),
         full_page=True,
     )
 
-    page.goto(
-        f"{base_url}/dashboard/market?view=opportunities"
-        f"&methodology_id={seeded['methodology_id']}"
-    )
-    page.locator(".opportunity-card").first.get_by_role(
-        "link", name="Full Passport"
-    ).click()
+    passport_button.click()
+    passport_dialog.get_by_role("link", name="Open Full Passport").click()
     expect(page.locator(".passport-page-title .eyebrow")).to_have_text(
         "Sharia Evidence Passport"
     )
@@ -656,20 +705,23 @@ def test_screened_market_passport_and_mobile_visual_qa(
             name="AI-organized factual research — not a religious decision.",
         )
     ).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(
         path=str(visual_dir / "sharia-evidence-passport-desktop.png"),
         full_page=True,
     )
 
     page.goto(
-        f"{base_url}/dashboard/market?view=opportunities"
-        f"&methodology_id={seeded['methodology_id']}"
+        f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}"
     )
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(card).to_be_visible()
-    assert card.bounding_box()["width"] <= 390
-    card.get_by_role("button", name="Quick View").click()
+    expect(live_row).to_be_visible(timeout=15_000)
+    assert page.locator(".live-market-panel").bounding_box()["width"] <= 390
+    live_row.get_by_role("button", name="Show passport").click()
     expect(passport_dialog).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(
         path=str(visual_dir / "passport-quick-view-mobile-390.png"),
         full_page=False,
@@ -682,6 +734,30 @@ def test_screened_market_passport_and_mobile_visual_qa(
     assert_no_raw_traceback(page)
 
 
+def test_screening_change_opens_evidence_difference_dialog(
+    page: Page,
+    base_url: str,
+    browser_app,
+) -> None:
+    email = signup(page, base_url, unique_email("screening-difference"))
+    seed_sharia_screened_market(browser_app.database_url, email)
+
+    page.goto(
+        f"{base_url}/dashboard/activity?tab=compliance_changes",
+        wait_until="domcontentloaded",
+    )
+    expect(page.get_by_role("heading", name="Notification center")).to_be_visible()
+    expect(page.get_by_role("link", name="Ended")).to_have_count(0)
+    page.get_by_role("button", name="Show evidence difference").click()
+    dialog = page.locator("[data-evidence-dialog]")
+    expect(dialog).to_be_visible()
+    expect(dialog).to_contain_text("Decision difference")
+    expect(dialog).to_contain_text("Under Review")
+    expect(dialog).to_contain_text("Eligible")
+    expect(dialog).to_contain_text("Evidence that changed")
+    assert_no_raw_traceback(page)
+
+
 def test_private_beta_billing_desktop_and_mobile_visual_qa(
     page: Page,
     base_url: str,
@@ -691,15 +767,19 @@ def test_private_beta_billing_desktop_and_mobile_visual_qa(
     output.mkdir(parents=True, exist_ok=True)
 
     page.goto(f"{base_url}/dashboard/billing")
-    expect(page.get_by_role("heading", name="Plan and billing.")).to_be_visible()
+    expect(page.get_by_role("heading", name="Billing", exact=True)).to_be_visible()
     expect(page.get_by_text("Billing is paused for invited beta users")).to_be_visible()
     expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
     expect(page.get_by_role("link", name="Review and pay")).to_have_count(0)
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(path=str(output / "private-beta-access-desktop-1440.png"), full_page=True)
 
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.get_by_role("heading", name="Plan and billing.")).to_be_visible()
+    expect(page.get_by_role("heading", name="Billing", exact=True)).to_be_visible()
     expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(path=str(output / "private-beta-access-mobile-390.png"), full_page=True)
     assert_no_raw_traceback(page)
 
@@ -990,6 +1070,8 @@ def test_approve_and_publish_executable_monitor(
         wait_until="domcontentloaded",
     )
     expect(page.locator("[data-verified-content]")).to_be_visible(timeout=20_000)
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     output = repo_root / "reports" / "playwright" / "visual-qa"
     output.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(output / "verified-strategy-workflow-desktop.png"), full_page=True)
@@ -1009,6 +1091,8 @@ def test_approve_and_publish_executable_monitor(
     )
 
     page.set_viewport_size({"width": 390, "height": 844})
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(path=str(output / "verified-strategy-workflow-mobile-390.png"), full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.once("dialog", lambda dialog: dialog.accept())
@@ -1022,10 +1106,36 @@ def test_approve_and_publish_executable_monitor(
     expect(
         row.get_by_role("button", name=re.compile(r"^(Pause|Resume)$", re.I))
     ).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(
         path=str(output / "hilalmarkets-watch-plans-desktop.png"),
         full_page=True,
     )
+
+    for suffix, screenshot_name in (
+        ("", "strategy-detail-desktop.png"),
+        ("/versions", "strategy-versions-desktop.png"),
+        ("/builder", "strategy-edit-canvas-desktop.png"),
+    ):
+        page.goto(
+            f"{base_url}/dashboard/strategies/{strategy_id}{suffix}",
+            wait_until="domcontentloaded",
+        )
+        expect(page.get_by_test_id("dashboard-root")).to_be_attached()
+        assert_no_horizontal_overflow(page)
+        assert_hilal_brand_palette(page)
+        assert_no_raw_traceback(page)
+        page.screenshot(path=str(output / screenshot_name), full_page=True)
+
+    page.goto(
+        f"{base_url}/dashboard/strategies/{strategy_id}/versions",
+        wait_until="domcontentloaded",
+    )
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
+    page.screenshot(path=str(output / "strategy-versions-mobile-390.png"), full_page=True)
     assert_no_raw_traceback(page)
 
 
@@ -1059,6 +1169,8 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
     page.goto(f"{base_url}/dashboard/alerts/{alert_id}/proof", wait_until="domcontentloaded")
     expect(page.get_by_text("Immutable monitoring receipt")).to_be_visible(timeout=10_000)
     expect(page.get_by_text("Integrity verified")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     output = repo_root / "reports" / "playwright" / "visual-qa"
     output.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(output / "immutable-alert-proof-desktop.png"), full_page=True)
@@ -1078,7 +1190,7 @@ def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     expect(page.locator("body")).to_contain_text("Watch Plans")
     expect(page.locator("body")).not_to_contain_text("Alert Quality Inbox")
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("Follow every market journey.")
+    expect(page.locator("body")).to_contain_text("Notification center")
     expect(page.locator("body")).not_to_contain_text("Traceback")
     assert_no_raw_traceback(page)
 
@@ -1095,18 +1207,24 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     visual_dir.mkdir(parents=True, exist_ok=True)
 
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
-    expect(page.get_by_text("Live Setup Readiness Radar")).to_be_visible()
+    expect(page.get_by_role("heading", name="What is closest right now?")).to_be_visible()
     expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4, timeout=15_000)
+    insight_cards = page.locator(".activity-insight-card")
+    expect(insight_cards).to_have_count(2)
+    insight_cards.nth(0).locator("summary").click()
     expect(page.locator("[data-health-list]")).to_contain_text("Degraded")
     expect(page.locator("[data-health-list]")).to_contain_text("Too Strict")
+    insight_cards.nth(1).locator("summary").click()
     expect(page.locator("[data-bottleneck-list]")).to_contain_text("RVOL above 1.50x")
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(path=str(visual_dir / "setup-observability-desktop.png"), full_page=True)
     page.locator(".state-forming").screenshot(path=str(visual_dir / "forming-candidate.png"))
     page.locator(".state-near_miss").screenshot(path=str(visual_dir / "near-miss-candidate.png"))
-    page.locator(".monitor-health-card").screenshot(
+    page.locator(".activity-insight-card").nth(0).screenshot(
         path=str(visual_dir / "degraded-too-strict-monitor.png")
     )
-    page.locator(".bottleneck-intelligence").screenshot(
+    page.locator(".activity-insight-card").nth(1).screenshot(
         path=str(visual_dir / "bottleneck-intelligence.png")
     )
 
@@ -1130,6 +1248,8 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     expect(page.locator("[data-observability-drawer-content]")).to_contain_text(
         "RVOL above 1.50x"
     )
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.locator("[data-observability-drawer]").screenshot(
         path=str(visual_dir / "candidate-detail-timeline.png")
     )
@@ -1137,6 +1257,7 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
 
     page.locator("[data-radar-state]").select_option("provider_data_error")
     expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(1)
+    assert_hilal_brand_palette(page)
     page.locator("[data-radar-list]").screenshot(path=str(visual_dir / "provider-error-state.png"))
     page.locator("[data-radar-state]").select_option("invalidated")
     expect(page.locator("[data-radar-list]")).to_contain_text("No readiness evidence yet")
@@ -1145,9 +1266,11 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     page.locator("[data-radar-state]").select_option("")
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4)
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
     page.screenshot(path=str(visual_dir / "setup-observability-mobile-390.png"), full_page=True)
     page.emulate_media(reduced_motion="reduce")
-    animation_name = page.locator(".observability-live i").evaluate(
+    animation_name = page.locator(".readiness-candidate").first.evaluate(
         "node => getComputedStyle(node).animationName"
     )
     assert animation_name == "none"
@@ -1159,7 +1282,13 @@ def test_notification_channel_handoff_links_smoke(page: Page, base_url: str) -> 
     page.goto(f"{base_url}/dashboard/integrations", wait_until="domcontentloaded")
     expect(page.get_by_test_id("integrations-root")).to_be_visible()
     expect(page.get_by_test_id("telegram-integration-card")).to_contain_text("Telegram")
-    expect(page.get_by_test_id("whatsapp-integration-card")).to_have_count(0)
+    expect(page.get_by_test_id("whatsapp-integration-card")).to_be_visible()
+    expect(page.get_by_test_id("whatsapp-integration-card")).to_contain_text("Unavailable")
+    expect(
+        page.get_by_test_id("whatsapp-integration-card").get_by_role(
+            "button", name="Connect WhatsApp"
+        )
+    ).to_be_disabled()
     expect(page.get_by_test_id("discord-integration-card")).to_have_count(0)
     body = page.locator("body").inner_text(timeout=10_000).lower()
     assert "telegram_bot_token" not in body

@@ -1,0 +1,154 @@
+@font-face {
+  font-family: "Geometria";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/landing/fonts/Geometria-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Geometria";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/static/landing/fonts/Geometria-Medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/static/landing/fonts/Onest-Variable.ttf") format("truetype");
+}
+
+:root {
+  color-scheme: light;
+  --hm-ink: #2b2e35;
+  --hm-ink-strong: #202329;
+  --hm-copy: #50555e;
+  --hm-muted: #7a8089;
+  --hm-canvas: #f5f8fb;
+  --hm-surface: #ffffff;
+  --hm-surface-soft: #fafbfc;
+  --hm-hairline: #e1e5ea;
+  --hm-hairline-strong: #d0d6de;
+  --hm-apple: #cbfa4d;
+  --hm-apple-soft: #f1fadf;
+  --hm-apple-pale: #e8fbbf;
+  --hm-apple-deep: #55712a;
+  --hm-success: #46551b;
+  --hm-info: #1f6e97;
+  --hm-info-bg: #e2f1f9;
+  --hm-blue: #2a8fc3;
+  --hm-warning: #8a6316;
+  --hm-warning-bg: #fdf2df;
+  --hm-danger: #8d3029;
+  --hm-danger-strong: #6c271f;
+  --hm-danger-bg: #fff5f3;
+  --hm-danger-line: #e4b8b2;
+  --hm-neutral-bg: #eef1f4;
+  --hm-neutral: #5b626b;
+  --hm-shadow-xs: 0 12px 28px -24px rgba(43, 46, 53, .55);
+  --hm-shadow-sm: 0 20px 50px -42px rgba(43, 46, 53, .58);
+  --hm-shadow-md: 0 28px 72px -48px rgba(43, 46, 53, .62);
+  --hm-shadow-popover: 0 34px 90px -42px rgba(43, 46, 53, .7);
+  --hm-radius-sm: 12px;
+  --hm-radius-md: 18px;
+  --hm-radius-lg: 24px;
+  --hm-radius-xl: 32px;
+  --hm-motion: 220ms cubic-bezier(.2, .75, .25, 1);
+
+  /* Compatibility aliases keep older deterministic components on-brand. */
+  --emerald-950: var(--hm-ink);
+  --emerald-900: var(--hm-ink);
+  --emerald-800: var(--hm-ink);
+  --emerald-700: var(--hm-apple-deep);
+  --emerald-600: #7ba428;
+  --emerald-100: var(--hm-apple-pale);
+  --emerald-50: var(--hm-apple-soft);
+  --ivory: var(--hm-canvas);
+  --ivory-2: var(--hm-canvas);
+  --ink: var(--hm-ink);
+  --muted: var(--hm-muted);
+  --line: var(--hm-hairline);
+  --white: var(--hm-surface);
+  --gold: var(--hm-apple);
+  --gold-2: var(--hm-apple-soft);
+  --amber: var(--hm-warning);
+  --amber-bg: var(--hm-warning-bg);
+  --red: var(--hm-danger);
+  --red-bg: var(--hm-danger-bg);
+  --blue: var(--hm-info);
+  --blue-bg: var(--hm-info-bg);
+  --shadow-sm: var(--hm-shadow-xs);
+  --shadow: var(--hm-shadow-sm);
+  --shadow-lg: var(--hm-shadow-popover);
+  --radius-sm: var(--hm-radius-sm);
+  --radius: var(--hm-radius-md);
+  --radius-lg: var(--hm-radius-xl);
+  --ease: cubic-bezier(.2, .75, .25, 1);
+}
+
+html {
+  background: var(--hm-canvas);
+  scrollbar-color: #63716c transparent;
+  scrollbar-width: thin;
+}
+
+body {
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:where(button, input, select, textarea) {
+  font-family: inherit;
+}
+
+:where(h1, h2, h3, h4, h5, h6, .brand-display) {
+  color: var(--hm-ink);
+  font-family: "Geometria", "Onest", sans-serif;
+  font-weight: 500;
+  letter-spacing: -.025em;
+}
+
+:where(.tnum, [data-count], .value, [data-price], [data-progress]) {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(a, button, input, select, textarea, summary, [role="button"]):focus-visible {
+  outline: 3px solid rgba(203, 250, 77, .78);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--hm-apple);
+  color: var(--hm-ink);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #63716c;
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

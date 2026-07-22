@@ -23,6 +23,7 @@ from ai_market_monitor.db.models import (
     DashboardPreference,
     IdentityLinkToken,
     IntegrationTestResult,
+    Subscription,
     User,
     UserIdentity,
     WhatsAppConnection,
@@ -34,7 +35,9 @@ from ai_market_monitor.db.models.enums import (
     DeliveryChannel,
     DeliveryStatus,
     IdentityProvider,
+    SubscriptionStatus,
 )
+from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.notifications import NotificationDispatcher
 from ai_market_monitor.whatsapp.adapter import WhatsAppDeliveryError
 from ai_market_monitor.whatsapp.service import (
@@ -140,6 +143,23 @@ async def _user_id(test_context):
         return user_id
 
 
+async def _grant_whatsapp_plan(test_context, user_id) -> None:
+    async with test_context["session_factory"]() as session:
+        plan = await PlanCatalogService(session).get_or_sync("pro")
+        session.add(
+            Subscription(
+                user_id=user_id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider="test",
+                provider_subscription_id=f"whatsapp-test-{user_id}",
+                current_period_start=datetime.now(UTC),
+                current_period_end=datetime.now(UTC) + timedelta(days=30),
+            )
+        )
+        await session.commit()
+
+
 def _raw_link_token(link_url: str) -> str:
     message = parse_qs(urlsplit(link_url).query)["text"][0]
     prefix, token = message.split(" ", 1)
@@ -242,6 +262,21 @@ async def test_dashboard_link_requires_csrf_and_inbound_phone_ownership(test_con
         },
     )
     assert missing_csrf.status_code == 403
+
+    plan_blocked = await test_context["client"].post(
+        "/api/v1/whatsapp/link",
+        headers={"X-CSRF-Token": csrf_token(settings, user_id)},
+        json={
+            "phone_e164": "+12025550123",
+            "consent": True,
+            "categories": ["account", "compliance"],
+            "locale": "en_US",
+        },
+    )
+    assert plan_blocked.status_code == 403
+    assert plan_blocked.json()["detail"]["code"] == "whatsapp_plan_required"
+
+    await _grant_whatsapp_plan(test_context, user_id)
 
     response = await test_context["client"].post(
         "/api/v1/whatsapp/link",

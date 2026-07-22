@@ -525,6 +525,13 @@ class ShariaAdminDashboardService:
                 output.get("potentially_affected_methodology_areas") or []
             ),
             "limitations": list(output.get("explicit_limitations") or []),
+            "ai_review_cue": {
+                "recommended_next_action": output.get("recommended_next_action"),
+                "human_review_reason": output.get("human_review_reason"),
+                "confidence": output.get("confidence"),
+            }
+            if ai
+            else None,
             "snapshots": [
                 {
                     "id": row.id,

@@ -1,61 +1,91 @@
 {% extends "hilal/base_dashboard.html" %}
-{% from "hilal/macros/opportunity_card.html" import opportunity_card %}
 {% block content %}
+<div class="page-header market-page-header">
+  <div>
+    <span class="eyebrow">Sharia-screened market</span>
+    <h1>Screened Market</h1>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-secondary" type="button" data-saved-assets-open>
+      <span data-icon="watchlist" data-icon-class="icon"></span>
+      Saved Assets{% if saved_assets %}<span class="nav-count">{{ saved_assets|length }}</span>{% endif %}
+    </button>
+    <a class="btn btn-primary" href="/dashboard/strategies/new">
+      <span data-icon="radar" data-icon-class="icon"></span>
+      New Watch Plan
+    </a>
+  </div>
+</div>
+
 {% if live_test_market|default(false) %}
-<div class="page-header">
-  <div><span class="eyebrow">Sharia market | Test methodology</span><h1>Live spot market feed.</h1><p>Follow every active {{ selected_quote_asset }} spot pair with real bid and ask prices, then open its compact test passport.</p></div>
-  <div class="page-actions"><a class="btn btn-secondary" href="/dashboard/methodology"><span data-icon="methodology" data-icon-class="icon"></span>How we screen</a><a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="radar" data-icon-class="icon"></span>New Watch Plan</a></div>
+<div class="notice notice-warning test-methodology-notice" role="note">
+  <span data-icon="alert" data-icon-class="icon"></span>
+  <div><strong>Test methodology only</strong><p>{{ test_methodology_notice }}</p></div>
 </div>
-
-<form class="panel filter-bar" method="get" action="/dashboard/market" aria-label="Choose market methodology">
-  <div class="field"><label for="test-market-method">Methodology</label><select id="test-market-method" class="select" name="methodology_id">{% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }} | v{{ method.version }}{{ ' | local preview' if method.code.startswith('TRACEDGE_DEV_TEST_') else '' }}</option>{% endfor %}</select></div>
-  <input type="hidden" name="exchange" value="{{ selected_exchange }}"><input type="hidden" name="quote_asset" value="{{ selected_quote_asset }}"><input type="hidden" name="view" value="assets">
-  <button class="btn btn-primary" type="submit"><span data-icon="methodology" data-icon-class="icon"></span>Use methodology</button>
-</form>
-
-<div class="notice notice-warning test-methodology-notice" role="note"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Test methodology only</strong><p>{{ test_methodology_notice }}</p></div></div>
-
-<section class="stat-grid live-market-stats" aria-label="Live market summary">
-  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="market" data-icon-class="icon"></span></div><span class="live-dot"><i></i>Live</span></div><div class="value" data-live-market-count>--</div><div class="caption">Active spot pairs</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box is-gold"><span data-icon="check" data-icon-class="icon"></span></div></div><div class="value" data-live-market-eligible>--</div><div class="caption">Test-eligible pairs</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box is-amber"><span data-icon="database" data-icon-class="icon"></span></div></div><div class="value" data-live-market-provider>{{ selected_exchange|title }}</div><div class="caption">Price provider</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div></div><div class="value">{{ active_watchlists }}</div><div class="caption">Active Watch Plans</div></article>
-</section>
-
-{% set live_methodology_name = 'Test' %}
-{% set live_methodology_notice = test_methodology_notice %}
-{% include "hilal/dashboard/partials/live_market.html" %}
-{% else %}
-<div class="page-header">
-  <div><span class="eyebrow">Sharia-screened market</span><h1>Find opportunities inside a screened market.</h1><p>Browse stored screening outcomes, then inspect the exact methodology and evidence passport before adding an asset to your saved assets.</p></div>
-  <div class="page-actions"><a class="btn btn-secondary" href="/dashboard/methodology"><span data-icon="methodology" data-icon-class="icon"></span>How we screen</a><a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="radar" data-icon-class="icon"></span>New Watch Plan</a></div>
-</div>
-
-<section class="stat-grid">
-  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="check" data-icon-class="icon"></span></div></div><div class="value">{{ screened.status_counts.get('eligible', 0) + screened.status_counts.get('eligible_with_qualifications', 0) }}</div><div class="caption">Eligible assets</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box is-amber"><span data-icon="clock" data-icon-class="icon"></span></div></div><div class="value">{{ screened.status_counts.get('under_review', 0) }}</div><div class="caption">Under review</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box is-gold"><span data-icon="compliance" data-icon-class="icon"></span></div></div><div class="value">{{ status_changes }}</div><div class="caption">Status changes this week</div></article>
-  <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div></div><div class="value">{{ active_watch_plans }}</div><div class="caption">Active Watch Plans</div></article>
-</section>
-
-<article class="panel">
-  <form class="filter-bar" method="get" action="/dashboard/market">
-    <div class="field"><label for="market-search">Search assets</label><input id="market-search" class="input" name="search" value="{{ market_search }}" placeholder="BTC, ETH, Solana..."></div>
-    <div class="field"><label for="market-method">Methodology</label><select id="market-method" class="select" name="methodology_id">{% for method in methodologies %}<option value="{{ method.id }}" {% if selected_methodology_id == method.id %}selected{% endif %}>{{ method.name }} | v{{ method.version }}{{ ' | local preview' if method.code.startswith('TRACEDGE_DEV_TEST_') else '' }}</option>{% endfor %}</select></div>
-    <div class="field"><label for="market-exchange">Exchange</label><select id="market-exchange" class="select" name="exchange"><option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance spot</option><option value="bybit" {% if selected_exchange == 'bybit' %}selected{% endif %}>Bybit spot</option></select></div>
-    <input type="hidden" name="view" value="assets"><button class="btn btn-primary" type="submit"><span data-icon="search" data-icon-class="icon"></span>Apply filters</button>
-  </form>
-  <div class="row-between wrap" style="margin-top:16px"><div><span class="kicker">Current record</span><h2>{{ screened.methodology.name if screened.methodology else 'Screening policy unavailable' }}</h2><p>{% if screened.methodology %}Version {{ screened.methodology.version }} | {{ screened.total }} stored results match this view.{% else %}No customer-ready screening policy is available for this view yet.{% endif %}</p></div><div class="tabs"><a class="tab {{ 'is-active' if selected_view == 'opportunities' else '' }}" href="/dashboard/market?view=opportunities{% if selected_methodology_id %}&methodology_id={{ selected_methodology_id }}{% endif %}">Opportunities</a><a class="tab {{ 'is-active' if selected_view == 'assets' else '' }}" href="/dashboard/market?view=assets{% if selected_methodology_id %}&methodology_id={{ selected_methodology_id }}{% endif %}">All screened assets</a></div></div>
-</article>
-
-{% if market_data_warning %}<div class="notice"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Market data note</strong><p>{{ market_data_warning }}</p></div></div>{% elif screened.warning %}<div class="notice notice-warning"><span data-icon="info" data-icon-class="icon"></span><div><strong>No screened assets are available yet.</strong><p>Assets appear here only after their evidence and methodology review are complete. Nothing is treated as eligible while required information is missing.</p></div></div>{% endif %}
-
-{% if selected_view == 'assets' and selected_methodology_id %}
-  {% set live_methodology_name = screened.methodology.name %}
-  {% set live_methodology_notice = 'Statuses come from stored, reviewed methodology evidence. Live prices do not change the published screening decision.' %}
-  {% include "hilal/dashboard/partials/live_market.html" %}
-{% elif opportunity_cards %}<section class="market-grid" style="margin-top:18px">{% for card in opportunity_cards %}{{ opportunity_card(card.presentation, '/dashboard/market/' ~ card.assessment.canonical_asset ~ '?methodology_id=' ~ card.assessment.methodology_id, '/dashboard/strategies/new?asset=' ~ card.assessment.canonical_asset) }}{% endfor %}</section>{% else %}<div class="empty-state"><div class="icon-box"><span data-icon="market" data-icon-class="icon"></span></div><h3>{{ 'No screened assets are available yet.' if screened.warning else 'No opportunities match this view' }}</h3><p>{{ 'Assets appear here only after their evidence and methodology review are complete. Nothing is treated as eligible while required information is missing.' if screened.warning else 'Opportunity cards appear after an active Watch Plan creates a real lifecycle candidate.' }}</p><div class="row wrap">{% if not screened.warning %}<a class="btn btn-secondary btn-sm" href="/dashboard/market?view=assets{% if screened.methodology %}&methodology_id={{ screened.methodology.id }}{% endif %}">Open live screened assets</a>{% else %}<a class="btn btn-secondary btn-sm" href="/how-we-screen">Learn How We Screen</a><a class="btn btn-secondary btn-sm" href="/dashboard/support">Contact support</a>{% endif %}</div></div>{% endif %}
-{% if selected_view == 'opportunities' and (market_previous_url or market_next_url) %}<nav class="pagination" aria-label="Market pages"><a class="btn btn-secondary btn-sm {{ 'is-disabled' if not market_previous_url else '' }}" href="{{ market_previous_url or '#' }}" {% if not market_previous_url %}aria-disabled="true"{% endif %}>Previous</a><span>Page {{ screened.page }} of {{ market_maximum_page }}</span><a class="btn btn-secondary btn-sm {{ 'is-disabled' if not market_next_url else '' }}" href="{{ market_next_url or '#' }}" {% if not market_next_url %}aria-disabled="true"{% endif %}>Next</a></nav>{% endif %}
 {% endif %}
+
+{% if market_data_warning %}
+<div class="notice is-info" role="status">
+  <span data-icon="alert" data-icon-class="icon"></span>
+  <div><strong>Market data note</strong><p>{{ market_data_warning }}</p></div>
+</div>
+{% elif screened is defined and screened.warning %}
+<div class="notice notice-warning" role="status">
+  <span data-icon="info" data-icon-class="icon"></span>
+  <div><strong>No screened assets are available yet.</strong><p>Assets appear only after evidence and methodology review are complete. Missing information never becomes an eligible result.</p></div>
+</div>
+{% endif %}
+
+{% if selected_methodology_id or live_test_market|default(false) %}
+  {% set live_methodology_name = 'Test' if live_test_market|default(false) else screened.methodology.name %}
+  {% set live_methodology_notice = test_methodology_notice if live_test_market|default(false) else 'Statuses come from stored, reviewed methodology evidence. Live prices do not change the published screening decision.' %}
+  {% include "hilal/dashboard/partials/live_market.html" %}
+{% else %}
+<div class="empty-state">
+  <div class="icon-box"><span data-icon="passport" data-icon-class="icon"></span></div>
+  <h3>No active screening methodology</h3>
+  <p>The market remains unavailable until an approved methodology and its evidence-backed Passports are active.</p>
+  <a class="btn btn-secondary btn-sm" href="/how-we-screen">How We Screen</a>
+</div>
+{% endif %}
+
+<dialog class="saved-assets-dialog" data-saved-assets-dialog data-open-on-load="{{ 'true' if request.query_params.get('saved_assets') == '1' else 'false' }}">
+  <form method="dialog" class="saved-assets-shell" data-saved-assets-form>
+    <header class="dialog-header">
+      <div>
+        <span class="kicker">My Screened Watchlist</span>
+        <h2>Saved Assets</h2>
+        <p>Mark assets you want to remove. Nothing changes until you choose Save.</p>
+      </div>
+      <button class="btn btn-ghost btn-icon" type="button" data-saved-assets-close aria-label="Close Saved Assets">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="saved-assets-feedback notice is-info" data-saved-assets-feedback hidden></div>
+    {% if saved_assets %}
+    <div class="saved-assets-list" data-saved-assets-list>
+      {% for item in saved_assets %}
+      <article class="saved-asset-row" data-saved-asset data-watchlist-id="{{ item.watchlist_id }}" data-asset="{{ item.canonical_asset }}">
+        <div class="coin">
+          <span class="coin-logo">{{ item.canonical_asset[:3] }}</span>
+          <span><strong>{{ item.canonical_asset }}</strong><small>{{ item.watchlist_name }}</small></span>
+        </div>
+        <button class="saved-asset-mark" type="button" role="checkbox" aria-checked="false" data-saved-asset-mark>
+          <span data-icon="check" data-icon-class="icon-sm"></span>
+          <span data-saved-asset-mark-label>Mark to remove</span>
+        </button>
+        <div class="saved-asset-impact" data-saved-asset-impact hidden></div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state compact"><h3>No saved assets</h3><p>Save a screened asset from its Passport and it will appear here.</p></div>
+    {% endif %}
+    <footer class="dialog-actions">
+      <button class="btn btn-secondary" type="button" data-saved-assets-cancel>Cancel</button>
+      <button class="btn btn-primary" type="button" data-saved-assets-save hidden>Save changes</button>
+    </footer>
+  </form>
+</dialog>
 {% endblock %}
-{% block page_scripts %}{% if live_test_market|default(false) or selected_view|default('') == 'assets' %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260716-live-screened-market"></script>{% endif %}{% endblock %}
+{% block page_scripts %}{% if selected_methodology_id or live_test_market|default(false) %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260722-product-system"></script>{% endif %}{% endblock %}

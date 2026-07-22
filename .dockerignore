@@ -5,6 +5,8 @@
 .pytest_cache
 .ruff_cache
 .venv
+**/node_modules
+Hilal-Markets-Website/dist
 __pycache__
 *.py[cod]
 *.log

@@ -25,6 +25,7 @@ from ai_market_monitor.db.models import (
     WhatsAppWebhookReceipt,
 )
 from ai_market_monitor.db.models.enums import DeliveryChannel, HealthStatus
+from ai_market_monitor.services.entitlements import EntitlementService
 from ai_market_monitor.whatsapp.adapter import WhatsAppCloudAdapter, WhatsAppDeliveryError
 from ai_market_monitor.whatsapp.security import (
     payload_digest,
@@ -218,6 +219,7 @@ async def create_whatsapp_link(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     _require_csrf(settings, principal.user_id, x_csrf_token)
+    await _require_whatsapp_plan(session, principal.user_id)
     try:
         result = await WhatsAppAccountService(session, settings).create_link(
             user_id=principal.user_id, request=payload
@@ -243,6 +245,7 @@ async def test_whatsapp_connection(
     adapter_factory: WhatsAppAdapterFactory = Depends(get_whatsapp_adapter_factory),
 ) -> dict[str, Any]:
     _require_csrf(settings, principal.user_id, x_csrf_token)
+    await _require_whatsapp_plan(session, principal.user_id)
     try:
         result = await WhatsAppIntegrationTestService(
             session, settings, adapter_factory(settings)
@@ -277,6 +280,7 @@ async def resume_whatsapp(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    await _require_whatsapp_plan(session, principal.user_id)
     return await _account_mutation(
         "resume", principal, x_csrf_token, session, settings
     )
@@ -303,6 +307,7 @@ async def update_whatsapp_preferences(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     _require_csrf(settings, principal.user_id, x_csrf_token)
+    await _require_whatsapp_plan(session, principal.user_id)
     try:
         connection = await WhatsAppAccountService(
             session, settings
@@ -355,6 +360,18 @@ async def _account_mutation(
 def _require_csrf(settings: Settings, user_id: Any, supplied: str | None) -> None:
     if not csrf_token_matches(settings, user_id, supplied):
         raise HTTPException(status_code=403, detail="Invalid form token.")
+
+
+async def _require_whatsapp_plan(session: AsyncSession, user_id: Any) -> None:
+    entitlement = await EntitlementService(session).current(user_id)
+    if not entitlement.feature_enabled("whatsapp"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "whatsapp_plan_required",
+                "message": "WhatsApp is not included in the current plan.",
+            },
+        )
 
 
 def _service_error(exc: WhatsAppServiceError) -> HTTPException:

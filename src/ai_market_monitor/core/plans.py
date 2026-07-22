@@ -42,6 +42,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": False,
             "light_prompt_scan": True,
             "near_miss": False,
             "condition_proof": True,
@@ -68,6 +69,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": False,
             "light_prompt_scan": True,
             "near_miss": True,
             "condition_proof": True,
@@ -94,6 +96,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": True,
             "light_prompt_scan": True,
             "near_miss": True,
             "full_near_miss_history": True,
@@ -121,6 +124,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": True,
             "light_prompt_scan": True,
             "shared_templates": True,
             "community_delivery": True,
@@ -146,6 +150,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": True,
             "light_prompt_scan": True,
             "team_members": True,
             "shared_strategies": True,
@@ -179,6 +184,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": True,
             "light_prompt_scan": True,
             "near_miss": True,
             "full_near_miss_history": True,
@@ -229,6 +235,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
         features={
             "telegram": True,
+            "whatsapp": False,
             "light_prompt_scan": True,
             "near_miss": True,
             "condition_proof": True,

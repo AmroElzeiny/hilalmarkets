@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
@@ -6,6 +7,40 @@ BUILDER_TEMPLATE = Path("src/ai_market_monitor/templates/hilal/dashboard/builder
 BUILDER_WORKSPACE = Path(
     "src/ai_market_monitor/templates/hilal/dashboard/partials/builder_workspace.html"
 )
+
+APPROVED_BRAND_HEX = {
+    "#1f6e97",
+    "#202329",
+    "#2a8fc3",
+    "#2b2e35",
+    "#46551b",
+    "#50555e",
+    "#55712a",
+    "#5b626b",
+    "#63716c",
+    "#6c271f",
+    "#7a8089",
+    "#7ba428",
+    "#8a6316",
+    "#8d3029",
+    "#cbfa4d",
+    "#d0d6de",
+    "#e1e5ea",
+    "#e2f1f9",
+    "#e4b8b2",
+    "#e8fbbf",
+    "#eef1f4",
+    "#f1fadf",
+    "#f5f8fb",
+    "#fafbfc",
+    "#fdf2df",
+    "#fff5f3",
+    "#ffffff",
+}
+APPROVED_BRAND_RGB = {
+    tuple(int(value[index : index + 2], 16) for index in (1, 3, 5))
+    for value in APPROVED_BRAND_HEX
+}
 
 
 def _builder_markup() -> str:
@@ -110,7 +145,7 @@ def test_hilalmarkets_dashboard_interaction_system_is_present():
     ).read_text()
 
     assert "Guided Watch Plan" in template
-    assert "Advanced Controls" in template
+    assert "Advanced Controls" not in template
     assert "data-ai-setup-chat" in template
     assert "creation-card-top" in template
     assert "builder-header-status" in template
@@ -178,6 +213,17 @@ def test_hilalmarkets_core_styles_include_focus_and_reduced_motion_guards():
     assert "outline:3px solid" in stylesheet
 
 
+def test_authenticated_dashboard_has_no_legacy_blue_theme():
+    dashboard_css = Path("src/ai_market_monitor/static/dashboard.css").read_text()
+    hilal_css = Path("src/ai_market_monitor/static/hilalmarkets.css").read_text()
+
+    assert "Unified modern blue dashboard theme" not in dashboard_css
+    for legacy_color in ("#60a5fa", "#3b82f6", "#2563eb", "#7dd3fc"):
+        assert legacy_color not in dashboard_css.lower()
+    assert ".home-start-card" in hilal_css
+    assert "--dash-mint:var(--emerald-800)" in hilal_css
+
+
 def test_hilalmarkets_runtime_icons_do_not_require_remote_iconify():
     sources = [
         Path("src/ai_market_monitor/static/ai-setup-chat.js").read_text(),
@@ -190,7 +236,7 @@ def test_hilalmarkets_runtime_icons_do_not_require_remote_iconify():
     assert "window.icon" in sources[1]
 
 
-def test_private_beta_integrations_expose_only_in_app_and_telegram():
+def test_notification_integrations_show_plan_gated_whatsapp_without_discord():
     template = Path(
         "src/ai_market_monitor/templates/hilal/dashboard/integrations.html"
     ).read_text()
@@ -199,10 +245,154 @@ def test_private_beta_integrations_expose_only_in_app_and_telegram():
     ).read_text()
     script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
     assert 'data-testid="telegram-integration-card"' in template
+    assert 'data-testid="whatsapp-integration-card"' in template
     assert "In-app" in template
-    assert "WhatsApp" not in template
+    assert "WhatsApp" in template
+    assert "is-plan-locked" in template
     assert "Discord" not in template
     assert 'value="telegram"' in settings
-    assert 'value="whatsapp"' not in settings
+    assert 'value="whatsapp"' in settings
+    assert 'value="bybit"' in settings
     assert 'value="discord"' not in settings
     assert "return channelActive(payload?.telegram);" in script
+
+
+def test_dashboard_notification_polling_is_scoped_to_authenticated_shell():
+    source = Path("src/ai_market_monitor/static/hilalmarkets.js").read_text()
+
+    assert "if (notificationCenter && !notificationStack)" in source
+    assert "if (!notificationCenter || document.hidden" in source
+
+
+def test_authenticated_surfaces_load_the_final_brand_layer_last():
+    dashboard = Path(
+        "src/ai_market_monitor/templates/hilal/base_dashboard.html"
+    ).read_text(encoding="utf-8")
+    brain = Path("src/ai_market_monitor/templates/system_brain.html").read_text(
+        encoding="utf-8"
+    )
+    brain_auth = Path(
+        "src/ai_market_monitor/templates/system_brain_auth.html"
+    ).read_text(encoding="utf-8")
+
+    assert "hilalmarkets-brand.css" in dashboard
+    assert "hilalmarkets-dashboard-v2.css" in dashboard
+    page_styles_index = dashboard.index("{% block page_styles %}")
+    brand_index = dashboard.index("hilalmarkets-brand.css")
+    final_index = dashboard.index("hilalmarkets-dashboard-v2.css")
+    assert page_styles_index < brand_index < final_index
+    assert "fonts.googleapis.com" not in dashboard
+    assert 'data-brand-system="hilal-markets-v2"' in dashboard
+    assert "hilalmarkets-brand.css" in brain
+    assert "hilalmarkets-brand.css" in brain_auth
+    assert "brain-orbit" not in brain_auth
+
+
+def test_authenticated_assets_share_the_current_cache_busting_release_key():
+    paths = [
+        Path("src/ai_market_monitor/templates/hilal/base_dashboard.html"),
+        *Path("src/ai_market_monitor/templates/hilal/dashboard").glob("*.html"),
+        Path("src/ai_market_monitor/templates/system_brain.html"),
+        Path("src/ai_market_monitor/templates/system_brain_auth.html"),
+    ]
+    release_keys = {
+        value
+        for path in paths
+        for value in re.findall(
+            r"\?v=([a-zA-Z0-9-]+)", path.read_text(encoding="utf-8")
+        )
+    }
+
+    assert release_keys == {"20260722-product-system"}
+
+
+def test_final_authenticated_styles_use_only_approved_brand_hex_colors():
+    files = (
+        Path("src/ai_market_monitor/static/hilalmarkets-brand.css"),
+        Path("src/ai_market_monitor/static/hilalmarkets-dashboard-v2.css"),
+        Path("src/ai_market_monitor/static/system-brain.css"),
+    )
+    unexpected: dict[str, list[str]] = {}
+    for path in files:
+        hex_values = {
+            value.lower()
+            for value in re.findall(r"#[0-9a-fA-F]{6}", path.read_text(encoding="utf-8"))
+        }
+        rgb_values = {
+            tuple(map(int, value))
+            for value in re.findall(
+                r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)",
+                path.read_text(encoding="utf-8"),
+            )
+        }
+        rejected_hex = sorted(hex_values - APPROVED_BRAND_HEX)
+        rejected_rgb = sorted(rgb_values - APPROVED_BRAND_RGB)
+        if rejected_hex or rejected_rgb:
+            unexpected[str(path)] = [
+                *rejected_hex,
+                *(f"rgb{value}" for value in rejected_rgb),
+            ]
+
+    assert unexpected == {}
+
+
+def test_dashboard_runtime_generated_colors_use_only_approved_brand_palette():
+    path = Path("src/ai_market_monitor/static/dashboard.js")
+    source = path.read_text(encoding="utf-8")
+    hex_values = {
+        value.lower()
+        for value in re.findall(r"#[0-9a-fA-F]{6}", source)
+    }
+    rgb_values = {
+        tuple(map(int, value))
+        for value in re.findall(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", source)
+    }
+
+    assert hex_values <= APPROVED_BRAND_HEX
+    assert rgb_values <= APPROVED_BRAND_RGB
+
+
+def test_every_dashboard_template_inherits_the_single_brand_shell():
+    dashboard_templates = Path("src/ai_market_monitor/templates/hilal/dashboard")
+    top_level = sorted(dashboard_templates.glob("*.html"))
+
+    assert top_level
+    assert all(
+        '{% extends "hilal/base_dashboard.html" %}' in path.read_text(encoding="utf-8")
+        for path in top_level
+    )
+    assert all(
+        "path='/hilalmarkets.css'" not in path.read_text(encoding="utf-8")
+        for path in top_level
+    )
+    assert not {
+        path.name: re.findall(
+            r"#[0-9a-fA-F]{3,8}(?![\w-])", path.read_text(encoding="utf-8")
+        )
+        for path in dashboard_templates.rglob("*.html")
+        if re.findall(
+            r"#[0-9a-fA-F]{3,8}(?![\w-])", path.read_text(encoding="utf-8")
+        )
+    }
+
+
+def test_official_mark_and_complete_outline_icon_catalog_are_used():
+    logo = Path("src/ai_market_monitor/static/hilalmarkets-logo-mark.svg").read_text(
+        encoding="utf-8"
+    )
+    icons = Path("src/ai_market_monitor/static/hilalmarkets-icons.js").read_text(
+        encoding="utf-8"
+    )
+    templates = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("src/ai_market_monitor/templates").rglob("*.html")
+    )
+    requested_icons = set(re.findall(r'data-icon="([a-z0-9_-]+)"', templates))
+    available_icons = set(re.findall(r"^\s*([a-z0-9_]+):", icons, re.MULTILINE))
+
+    assert "#CBFA4D" in logo
+    assert "#2B2E35" in logo
+    assert "#0F5C4D" not in logo
+    assert requested_icons <= available_icons
+    assert "api.iconify.design" not in icons
+    assert 'stroke-width="1.75"' in icons

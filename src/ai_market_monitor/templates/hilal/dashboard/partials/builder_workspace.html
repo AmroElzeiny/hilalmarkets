@@ -42,7 +42,7 @@
             <div class="builder-path-head">
               <div>
                 <p class="eyebrow">Describe strategy</p>
-                <h2>Teach HilalMarkets what matters</h2>
+                <h2>Teach Hilal Markets what matters</h2>
                 <p>Describe the setup. You will review the interpreted mechanics before they enter the canvas.</p>
               </div>
               <button class="button button-secondary button-nowrap rechoose-path-button" type="button" data-builder-direction="choose">Rechoose path</button>
@@ -192,7 +192,7 @@
             <div class="builder-screened-market-banner {{ 'ready' if builder_screening.configured else 'blocked' }}" role="status">
               <span data-icon="compliance" data-icon-class="icon"></span>
               <div><span>Screened market</span><strong>{% if builder_screening.configured %}{{ builder_screening.methodology_name }} | v{{ builder_screening.methodology_version }}{% else %}Approved methodology required{% endif %}</strong><small>{% if builder_screening.configured %}Default scope: eligible assets and eligible assets with qualifications. Status changes pause the affected asset.{% else %}This draft can be edited, but validation and activation stay blocked until qualified governance activates a real methodology.{% endif %}</small></div>
-              <a href="/dashboard/methodology">View methodology</a>
+              <a href="/how-we-screen">How We Screen</a>
             </div>
 
             <nav class="builder-mobile-stepper" aria-label="Mobile strategy steps">
@@ -336,7 +336,7 @@
                         <button class="card-action" type="button" data-open-section-editor="risk">Edit risk context</button>
                       </div>
                       <div class="map-fact-grid" id="builder-risk-facts"></div>
-                      <p class="map-card-note">Context only. HilalMarkets does not place trades.</p>
+                      <p class="map-card-note">Context only. Hilal Markets does not place trades.</p>
                     </div>
                   </article>
 
@@ -580,7 +580,7 @@
                   {% if item.main_bottleneck %}
                     <small><strong>Top blocker:</strong> {{ item.main_bottleneck.condition_label }} - {{ item.main_bottleneck.blocking_rate|round|int }}% blocking impact</small>
                   {% else %}
-                    <small>More scan evidence is needed before HilalMarkets can rank condition blockers.</small>
+                    <small>More scan evidence is needed before Hilal Markets can rank condition blockers.</small>
                   {% endif %}
                 </div>
                 <div class="row-actions monitor-card-actions">

@@ -1,9 +1,6 @@
-<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect x="1" y="1" width="70" height="70" rx="22" fill="#0F5C4D"/>
-<path d="M46.8 15.8C35.6 17.4 27 27 27 38.6c0 8.1 4.1 15.2 10.4 19.4C25.6 57.1 16.2 47.2 16.2 35.2c0-12.8 10.4-23.2 23.2-23.2 2.6 0 5.1.4 7.4 1.2v2.6Z" fill="#F7F4EC"/>
-<rect x="38" y="39" width="5" height="11" rx="2.5" fill="#D2AF63"/>
-<rect x="46" y="32" width="5" height="18" rx="2.5" fill="#D2AF63"/>
-<rect x="54" y="23" width="5" height="27" rx="2.5" fill="#D2AF63"/>
-<path d="M39.5 33.5 47.5 27l7.7-8" stroke="#F7F4EC" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="m52 19.4 3.4-.7-.3 3.5" stroke="#F7F4EC" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<svg width="72" height="72" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hilal Markets">
+  <path d="M8 1h13l10 10v13a7 7 0 0 1-7 7H8a7 7 0 0 1-7-7V8a7 7 0 0 1 7-7Z" fill="#2B2E35"/>
+  <path d="M21 1l10 10h-6a4 4 0 0 1-4-4V1Z" fill="#CBFA4D"/>
+  <circle cx="14.5" cy="12.5" r="3.2" fill="#CBFA4D"/>
+  <circle cx="17" cy="21.5" r="5" fill="#CBFA4D"/>
 </svg>

@@ -36,6 +36,7 @@ from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     CapabilityExtension,
     ComplianceDriftNotification,
+    DashboardNotification,
     DashboardPreference,
     MonitorShariaAssetState,
     NearMissSnapshot,
@@ -58,9 +59,11 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
+    ConnectionStatus,
+    DeliveryChannel,
+    DeliveryStatus,
     IdentityProvider,
     MonitorShariaAssetStatus,
-    SetupLifecycleState,
     ShariaAssetStatus,
     StrategyStatus,
     UserRole,
@@ -80,7 +83,6 @@ from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
 )
-from ai_market_monitor.services.opportunity_cards import OpportunityCardReadService
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
@@ -476,10 +478,35 @@ async def _context(
     **extra,
 ) -> dict:
     dashboard_preference = None
+    entitlement = None
+    unread_notification_count = 0
     if user is not None:
         dashboard_preference = await session.scalar(
             select(DashboardPreference).where(DashboardPreference.user_id == user.id)
         )
+        entitlement = await EntitlementService(session).current(user.id)
+        dashboard_unread = int(
+            await session.scalar(
+                select(func.count(DashboardNotification.id)).where(
+                    DashboardNotification.user_id == user.id,
+                    DashboardNotification.read_at.is_(None),
+                )
+            )
+            or 0
+        )
+        pending_alerts = int(
+            await session.scalar(
+                select(func.count(AlertDelivery.id))
+                .join(Alert, Alert.id == AlertDelivery.alert_id)
+                .where(
+                    Alert.user_id == user.id,
+                    AlertDelivery.channel == DeliveryChannel.WEB,
+                    AlertDelivery.status == DeliveryStatus.PENDING,
+                )
+            )
+            or 0
+        )
+        unread_notification_count = dashboard_unread + pending_alerts
     dashboard_theme = "light"
     if dashboard_theme not in SUPPORTED_THEMES:
         dashboard_theme = "light"
@@ -505,6 +532,16 @@ async def _context(
         "plans": PLAN_DEFINITIONS,
         "dashboard_navigation": DASHBOARD_NAVIGATION,
         "dashboard_preference": dashboard_preference,
+        "entitlement": entitlement,
+        "whatsapp_plan_included": bool(
+            entitlement and entitlement.feature_enabled("whatsapp")
+        ),
+        "whatsapp_available": bool(
+            entitlement
+            and entitlement.feature_enabled("whatsapp")
+            and settings.whatsapp_enabled
+        ),
+        "unread_notification_count": unread_notification_count,
         "dashboard_theme": dashboard_theme,
         "dashboard_csrf_token": csrf_token(settings, user.id) if user else None,
         **extra,
@@ -638,6 +675,9 @@ async def signup_page(
 @router.post("/signup", include_in_schema=False)
 async def signup_submit(
     request: Request,
+    first_name: str = Form(default=""),
+    last_name: str = Form(default=""),
+    display_name: str | None = Form(default=None),
     email: str = Form(...),
     password: str = Form(...),
     repeat_password: str = Form(...),
@@ -654,7 +694,9 @@ async def signup_submit(
             await service.request_signup_email_code(
                 email=email,
                 password=password,
-                display_name=None,
+                first_name=first_name,
+                last_name=last_name,
+                display_name=display_name,
                 telegram_link=telegram_link,
                 requested_ip=request.client.host if request.client else None,
             )
@@ -1119,7 +1161,11 @@ async def dashboard_home(
         "latest_setup": latest_setup,
         "latest_alert": _alert_view(latest_alert) if latest_alert else None,
         "coverage": coverage,
-        "telegram_connected": telegram is not None,
+        "telegram_connected": bool(
+            telegram
+            and telegram.status == ConnectionStatus.ACTIVE
+            and telegram.alerts_enabled
+        ),
         "eligible_market_count": screened_home.total,
         "screening_methodology": screened_home.methodology,
         "forming_screened_count": forming_screened,
@@ -1157,13 +1203,16 @@ async def screened_market_page(
     quote_asset: str = Query(default="USDT", max_length=12),
     liquidity: float | None = Query(default=None, ge=0),
     search: str | None = Query(default=None, max_length=120),
-    view: str = Query(default="opportunities", pattern="^(opportunities|assets)$"),
+    view: str = Query(default="assets", pattern="^(opportunities|assets)$"),
     page_number: int = Query(default=1, ge=1, alias="page"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
     provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> HTMLResponse:
+    # Opportunities have one authoritative home in Opportunities & Evidence.
+    # Retain the old query value for compatible links, but render the market itself.
+    view = "assets"
     methodology_id = _optional_uuid(methodology_id_input, label="methodology")
     selected_live_exchange = (exchange or settings.market_data_exchange).lower()
     if selected_live_exchange not in {"binance", "bybit"}:
@@ -1263,33 +1312,6 @@ async def screened_market_page(
                 "Exchange market data is currently unavailable. No asset was guessed or "
                 "silently included."
             )
-    if view == "opportunities":
-        opportunity_assets = {
-            canonical_asset(symbol)
-            for symbol in (
-                await session.scalars(
-                    select(SetupInstance.symbol)
-                    .where(
-                        SetupInstance.user_id == user.id,
-                        SetupInstance.state.in_(
-                            {
-                                SetupLifecycleState.CANDIDATE_DETECTED,
-                                SetupLifecycleState.DETECTED,
-                                SetupLifecycleState.FORMING,
-                                SetupLifecycleState.NEAR_CONFIRMATION,
-                                SetupLifecycleState.ARMED,
-                                SetupLifecycleState.CONFIRMED,
-                                SetupLifecycleState.ALERT_SENT,
-                            }
-                        ),
-                    )
-                    .distinct()
-                )
-            ).all()
-        }
-        asset_scope = (
-            opportunity_assets if asset_scope is None else asset_scope & opportunity_assets
-        )
     screened = await screening.list_screened_assets(
         methodology_id=methodology_id,
         statuses=set(status_filter) if status_filter else DEFAULT_ALLOWED_STATUSES,
@@ -1298,50 +1320,6 @@ async def screened_market_page(
         page=page_number,
         limit=30,
     )
-    visible_assets = (
-        {item.canonical_asset for item in screened.items} if view == "opportunities" else set()
-    )
-    latest_by_asset: dict[str, tuple[SetupInstance, UUID, str]] = {}
-    if visible_assets:
-        setup_rows = (
-            await session.execute(
-                select(SetupInstance, Strategy.id, Strategy.name)
-                .join(StrategyVersion, StrategyVersion.id == SetupInstance.strategy_version_id)
-                .join(Strategy, Strategy.id == StrategyVersion.strategy_id)
-                .where(SetupInstance.user_id == user.id)
-                .order_by(SetupInstance.last_evaluated_at.desc())
-                .limit(1000)
-            )
-        ).all()
-        for setup, strategy_id, strategy_name in setup_rows:
-            asset = canonical_asset(setup.symbol)
-            if asset in visible_assets:
-                latest_by_asset.setdefault(asset, (setup, strategy_id, strategy_name))
-    opportunity_cards = []
-    opportunity_reader = OpportunityCardReadService(session)
-    for assessment in screened.items:
-        latest = latest_by_asset.get(assessment.canonical_asset)
-        setup, strategy_id, strategy_name = latest if latest else (None, None, None)
-        if setup is None or strategy_name is None:
-            continue
-        presentation = await opportunity_reader.for_setup(
-            setup=setup,
-            assessment=assessment,
-            strategy_name=strategy_name,
-        )
-        opportunity_cards.append(
-            {
-                "assessment": assessment,
-                "setup": setup,
-                "strategy_id": strategy_id,
-                "strategy_name": strategy_name,
-                "readiness": presentation["readiness"],
-                "direction": presentation["direction"],
-                "summary": "Stored Watch Plan evidence",
-                "still_missing": presentation["missing_requirement"],
-                "presentation": presentation,
-            }
-        )
     active_watch_plans = int(
         await session.scalar(
             select(func.count(Strategy.id)).where(
@@ -1373,6 +1351,28 @@ async def screened_market_page(
             )
         ).all()
     )
+    saved_asset_rows = list(
+        (
+            await session.execute(
+                select(ApprovedWatchlistAsset, ApprovedWatchlist.name)
+                .join(
+                    ApprovedWatchlist,
+                    ApprovedWatchlist.id == ApprovedWatchlistAsset.watchlist_id,
+                )
+                .where(ApprovedWatchlist.user_id == user.id)
+                .order_by(ApprovedWatchlistAsset.added_at.desc())
+            )
+        ).all()
+    )
+    saved_assets = [
+        {
+            "watchlist_id": row.watchlist_id,
+            "canonical_asset": row.canonical_asset,
+            "added_at": row.added_at,
+            "watchlist_name": watchlist_name,
+        }
+        for row, watchlist_name in saved_asset_rows
+    ]
     market_query: list[tuple[str, str]] = [("view", view), ("quote_asset", quote_asset)]
     if methodology_id:
         market_query.append(("methodology_id", str(methodology_id)))
@@ -1402,7 +1402,7 @@ async def screened_market_page(
             screened=screened,
             methodologies=methodologies,
             selected_methodology_id=selected_methodology_id,
-            opportunity_cards=opportunity_cards,
+            opportunity_cards=[],
             active_watch_plans=active_watch_plans,
             status_changes=status_changes,
             selected_statuses={
@@ -1415,6 +1415,7 @@ async def screened_market_page(
             market_search=search or "",
             market_data_warning=market_data_warning,
             watchlists=watchlists,
+            saved_assets=saved_assets,
             market_previous_url=(market_page_url(screened.page - 1) if screened.page > 1 else None),
             market_next_url=(
                 market_page_url(screened.page + 1) if screened.page < maximum_page else None
@@ -1600,58 +1601,15 @@ async def approved_watchlist_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
+) -> RedirectResponse:
     """Render the user's persisted screened-asset watchlists.
 
     The page intentionally reads only user-owned saved assets. Eligibility is
     shown from the linked evidence passport instead of being recreated from
     display-only client data.
     """
-    watchlists = list(
-        (
-            await session.scalars(
-                select(ApprovedWatchlist)
-                .where(ApprovedWatchlist.user_id == user.id)
-                .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name.asc())
-            )
-        ).all()
-    )
-    assets = list(
-        (
-            await session.execute(
-                select(ApprovedWatchlistAsset, ApprovedWatchlist.name)
-                .join(
-                    ApprovedWatchlist,
-                    ApprovedWatchlist.id == ApprovedWatchlistAsset.watchlist_id,
-                )
-                .where(ApprovedWatchlist.user_id == user.id)
-                .order_by(ApprovedWatchlistAsset.added_at.desc())
-            )
-        ).all()
-    )
-    watchlist_assets = [
-        {
-            "watchlist_id": asset.watchlist_id,
-            "canonical_asset": asset.canonical_asset,
-            "added_at": asset.added_at,
-            "watchlist_name": watchlist_name,
-        }
-        for asset, watchlist_name in assets
-    ]
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/watchlist.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="saved_assets",
-            title="Saved Assets",
-            watchlists=watchlists,
-            watchlist_assets=watchlist_assets,
-        ),
-    )
+    del request, user, session, settings
+    return _redirect("/dashboard/market?saved_assets=1")
 
 
 @router.get("/dashboard/compliance", response_class=HTMLResponse, include_in_schema=False)
@@ -1661,36 +1619,13 @@ async def compliance_changes_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
+) -> RedirectResponse:
     """Show persisted, user-scoped screening status changes."""
-    statement = select(ComplianceDriftNotification).where(
-        ComplianceDriftNotification.user_id == user.id
-    )
+    del request, user, session, settings
+    query_values = [("tab", "compliance_changes")]
     if asset:
-        statement = statement.where(
-            ComplianceDriftNotification.canonical_asset == canonical_asset(asset)
-        )
-    changes = list(
-        (
-            await session.scalars(
-                statement.order_by(ComplianceDriftNotification.created_at.desc()).limit(100)
-            )
-        ).all()
-    )
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/compliance.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="compliance",
-            title="Compliance Changes",
-            compliance_changes=changes,
-            filtered_asset=canonical_asset(asset) if asset else None,
-        ),
-    )
+        query_values.append(("symbol", canonical_asset(asset)))
+    return _redirect(f"/dashboard/activity?{urlencode(query_values)}")
 
 
 @router.get("/dashboard/methodology", response_class=HTMLResponse, include_in_schema=False)
@@ -1699,43 +1634,9 @@ async def methodology_page(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    service = ShariaScreeningService(session, settings)
-    rows = await service.executable_methodologies()
-    selected = await service.default_methodology()
-    test_methodology = None
-    if settings.app_env in {"development", "test"} and settings.sharia_test_market_enabled:
-        test_methodology = {
-            "name": "Test",
-            "version": "1.0-test",
-            "governing_body": "Development/test environment",
-            "reviewer_group": "No religious review authority",
-            "rules": {
-                "universe": "Every active spot pair returned by the selected exchange",
-                "display_status": "Halal (test)",
-                "execution": "Display-only; forbidden for production screening",
-            },
-            "evidence_requirements": {
-                "quotes": "Real best bid and ask from the configured spot provider",
-                "refresh": "Shared server snapshot refreshed approximately every second",
-                "religious_conclusion": "None; this methodology is a UI and data-flow test",
-            },
-        }
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/methodology.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="methodology",
-            title="Methodology",
-            methodologies=[service.methodology_detail(row) for row in rows],
-            selected_methodology=service.methodology_detail(selected) if selected else None,
-            test_methodology=test_methodology,
-        ),
-    )
+) -> RedirectResponse:
+    del request, user, session, settings
+    return _redirect("/how-we-screen")
 
 
 @router.get(
@@ -1799,7 +1700,11 @@ async def new_strategy_builder_page(
             session=session,
             settings=settings,
             user=user,
-            page="strategy_builder",
+            page=(
+                "check_market"
+                if request.query_params.get("mode") == "scanner"
+                else "strategy_builder"
+            ),
             title="Strategy Builder",
             strategy=None,
             version=None,
@@ -2970,7 +2875,7 @@ async def connections_page(
             settings=settings,
             user=user,
             page="integrations",
-            title="Integrations",
+            title="Notifications",
             telegram=telegram,
             telegram_connect_url=telegram_connect_url,
             telegram_start_command=telegram_start_command,
@@ -2998,19 +2903,7 @@ async def settings_page(
     preference = await session.scalar(
         select(DashboardPreference).where(DashboardPreference.user_id == user.id)
     )
-    screening = ShariaScreeningService(session, settings)
     sharia_preferences = dict((preference.notification_preferences or {}) if preference else {})
-    sharia_methodologies = []
-    for methodology in await screening.executable_methodologies():
-        assessments = await screening.effective_assessments(methodology.id)
-        sharia_methodologies.append(
-            {
-                "id": methodology.id,
-                "name": methodology.name,
-                "version": methodology.version,
-                "published_asset_count": len(assessments),
-            }
-        )
     return templates.TemplateResponse(
         request,
         "hilal/dashboard/settings.html",
@@ -3026,7 +2919,6 @@ async def settings_page(
             supported_themes=SUPPORTED_THEMES,
             alert_days=ALERT_DAYS,
             alert_hours=ALERT_HOURS,
-            sharia_methodologies=sharia_methodologies,
             sharia_preferences=sharia_preferences,
         ),
     )
@@ -3039,7 +2931,7 @@ async def settings_submit(
     near_miss_threshold: int = Form(70),
     maximum_alerts_per_hour: int = Form(50),
     maximum_alerts_per_day: int = Form(500),
-    alert_channels: list[str] = Form(default=["telegram"]),
+    alert_channels: list[str] = Form(default=[]),
     providers: list[str] = Form(default=["binance"]),
     alert_days: list[str] = Form(default=["Every Day"]),
     alert_hours: list[str] = Form(default=ALERT_HOURS),
@@ -3053,6 +2945,10 @@ async def settings_submit(
     compliance_change_behavior: str = Form(default=ComplianceChangeBehavior.PAUSE_ASSET.value),
     compliance_alert_channels: list[str] = Form(default=["web"]),
     compliance_alert_digest: str = Form(default="immediate"),
+    dashboard_notifications_enabled: str = Form(default="true"),
+    dashboard_notification_sound: str = Form(default="chime"),
+    forming_dashboard_notifications: str = Form(default="false"),
+    forming_notification_sound: str = Form(default="pulse"),
     qualification_change_alerts: str = Form(default="true"),
     under_review_alerts: str = Form(default="true"),
     exclusion_alerts: str = Form(default="true"),
@@ -3063,11 +2959,18 @@ async def settings_submit(
 ) -> RedirectResponse:
     if timezone not in SUPPORTED_TIMEZONES:
         return _redirect("/dashboard/settings?error=unsupported_timezone")
+    entitlement = await EntitlementService(session).current(user.id)
+    whatsapp_allowed = bool(
+        settings.whatsapp_enabled and entitlement.feature_enabled("whatsapp")
+    )
     allowed_channels = {"telegram"}
-    channels = [channel for channel in alert_channels if channel in allowed_channels]
-    if not channels:
-        channels = ["telegram"]
-    allowed_providers = {"binance"}
+    if whatsapp_allowed:
+        allowed_channels.add("whatsapp")
+    external_channels = [
+        channel for channel in dict.fromkeys(alert_channels) if channel in allowed_channels
+    ]
+    channels = ["web", *external_channels]
+    allowed_providers = {"binance", "bybit"}
     selected_providers = [provider for provider in providers if provider in allowed_providers]
     if not selected_providers:
         selected_providers = ["binance"]
@@ -3108,7 +3011,7 @@ async def settings_submit(
     selected_compliance_channels = [
         channel
         for channel in dict.fromkeys(compliance_alert_channels)
-        if channel in {"web", "telegram"}
+        if channel in ({"web", "telegram", "whatsapp"} if whatsapp_allowed else {"web", "telegram"})
     ]
     if "web" not in selected_compliance_channels:
         selected_compliance_channels.insert(0, "web")
@@ -3138,6 +3041,18 @@ async def settings_submit(
             "providers": selected_providers,
             "alert_days": days,
             "alert_hours": hours,
+            "dashboard_notifications_enabled": dashboard_notifications_enabled == "true",
+            "dashboard_notification_sound": (
+                dashboard_notification_sound
+                if dashboard_notification_sound in {"chime", "bell", "soft", "none"}
+                else "chime"
+            ),
+            "forming_dashboard_notifications": forming_dashboard_notifications == "true",
+            "forming_notification_sound": (
+                forming_notification_sound
+                if forming_notification_sound in {"pulse", "chime", "soft", "none"}
+                else "pulse"
+            ),
             "default_sharia_methodology_id": (
                 str(selected_methodology_id) if selected_methodology_id else None
             ),

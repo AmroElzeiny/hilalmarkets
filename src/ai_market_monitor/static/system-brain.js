@@ -29,6 +29,14 @@ if (!reduceMotion) {
 }
 
 document.querySelectorAll("[data-decision-form], [data-guarded-form]").forEach((form) => {
+  form.querySelectorAll("button[name='action']").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (["approve_with_qualification", "request_more_evidence"].includes(button.value)) {
+        const extras = form.querySelector("[data-decision-extras]");
+        if (extras) extras.open = true;
+      }
+    });
+  });
   form.addEventListener("submit", (event) => {
     const submitter = event.submitter;
     const prompt = submitter?.dataset.confirm;

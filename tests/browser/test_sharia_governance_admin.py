@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import _run_async_in_thread, assert_no_raw_traceback, signup, unique_email
+from conftest import (
+    _run_async_in_thread,
+    assert_hilal_brand_palette,
+    assert_no_horizontal_overflow,
+    assert_no_raw_traceback,
+    signup,
+    unique_email,
+)
 from playwright.sync_api import Page, expect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -61,8 +68,31 @@ def test_sharia_governance_workspace_visual_qa(
     expect(page.get_by_text("Pending initial reviews")).to_be_visible()
     expect(page.get_by_text("SC-BTC-TEST")).to_be_visible()
     expect(page.locator("pre")).to_have_count(0)
+    assert "Onest" in page.locator("body").evaluate(
+        "node => getComputedStyle(node).fontFamily"
+    )
+    assert "Geometria" in page.locator("h1").evaluate(
+        "node => getComputedStyle(node).fontFamily"
+    )
+    assert_hilal_brand_palette(page)
     assert_no_raw_traceback(page)
     page.screenshot(path=str(output / "admin-overview-desktop-1440.png"), full_page=True)
+
+    admin_routes = page.locator(".brain-sidebar nav a").evaluate_all(
+        "links => [...new Set(links.map(link => link.getAttribute('href')))]"
+    )
+    for index, route in enumerate(admin_routes):
+        target = route if route.startswith("http") else f"{base_url}{route}"
+        page.goto(target, wait_until="domcontentloaded")
+        expect(page.locator(".brain-main")).to_be_visible()
+        assert_no_horizontal_overflow(page)
+        assert_hilal_brand_palette(page)
+        page.screenshot(
+            path=str(output / f"admin-section-{index + 1:02d}.png"),
+            full_page=True,
+        )
+
+    page.goto(f"{base_url}/system-brain", wait_until="networkidle")
 
     page.set_viewport_size({"width": 900, "height": 1000})
     page.screenshot(path=str(output / "admin-overview-tablet-900.png"), full_page=True)

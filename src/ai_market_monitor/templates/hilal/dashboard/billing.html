@@ -3,8 +3,7 @@
 <div class="page-header">
   <div>
     <span class="eyebrow">Account</span>
-    <h1>Plan and billing.</h1>
-    <p>See your current capacity and choose the monitoring depth that fits your use. Screening remains foundational across plans.</p>
+    <h1>Billing</h1>
   </div>
 </div>
 
@@ -12,7 +11,7 @@
   <div>
     <span class="eyebrow">Your current plan</span>
     <h2>{{ entitlement.plan.name }}</h2>
-    <p>{{ entitlement.plan.description or 'Your current HilalMarkets monitoring access.' }}</p>
+    <p>{{ entitlement.plan.description or 'Your current Hilal Markets monitoring access.' }}</p>
     <div class="row wrap">
       <span class="badge badge-dark">Source | {{ entitlement.source }}</span>
       {% if trial %}<span class="badge badge-dark">Trial ends {{ trial.ends_at|short_dt(user.timezone) }}</span>{% endif %}

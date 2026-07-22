@@ -1,18 +1,19 @@
 <!doctype html>
-<html lang="en">
+{% set dashboard_locale = user.locale if user and user.locale else 'en' %}
+<html lang="{{ dashboard_locale }}" dir="{{ 'rtl' if dashboard_locale[:2] in ['ar', 'fa', 'ur', 'he'] else 'ltr' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="HilalMarkets - Sharia-screened crypto spot intelligence and guided monitoring.">
-  <title>{{ title }} | HilalMarkets</title>
+  <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
+  <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260717-whatsapp">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260722-product-system">
   {% block page_styles %}{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260722-product-system">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260722-product-system">
 </head>
-<body class="dashboard-body hilal-dashboard theme-light app-body" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-testid="dashboard-root">
+{% set shell_prefs = (dashboard_preference.notification_preferences if dashboard_preference else {}) or {} %}
+<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root">
   <div class="app-shell">
     {% include "hilal/partials/dashboard_sidebar.html" %}
     <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
@@ -28,9 +29,9 @@
   </div>
   {% include "hilal/dashboard/partials/passport_quick_view.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260717-whatsapp"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260715-expansion"></script>
-  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260716-passport"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260722-product-system"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260722-product-system"></script>
+  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260722-product-system"></script>
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

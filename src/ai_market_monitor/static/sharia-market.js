@@ -209,10 +209,10 @@ if (root) {
     controller?.abort();
     controller = new AbortController();
     const params = new URLSearchParams({
-      methodology_id: methodologyId,
       exchange: exchange.value,
       quote_asset: quote.value,
     });
+    if (methodologyId) params.set("methodology_id", methodologyId);
     try {
       const response = await fetch(`${endpoint}?${params}`, {
         credentials: "same-origin",

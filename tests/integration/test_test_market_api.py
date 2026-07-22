@@ -83,7 +83,7 @@ async def test_test_market_api_and_dashboard_are_gated_and_provider_backed(test_
     assert all(item["status_label"] == "Halal (test)" for item in payload["items"])
     assert all(item["bid"] == 10.0 and item["ask"] == 10.1 for item in payload["items"])
     assert page.status_code == 200
-    assert 'data-endpoint="/api/v1/sharia/market-quotes"' in page.text
+    assert 'data-endpoint="/api/v1/sharia/test-market"' in page.text
     assert "Test methodology only" in page.text
     assert "data-passport-quick-dialog" in page.text
     assert "sharia-market.js" in page.text
@@ -246,14 +246,16 @@ async def test_active_methodology_without_publications_has_clear_readiness_state
     assert "Open governance reviews" not in page.text
     assert "live-market-table" in page.text
     assert settings_page.status_code == 200
-    assert "Empty SC Malaysia test | v2026.03-test | 0 published passports" in settings_page.text
+    assert "Empty SC Malaysia test" not in settings_page.text
     assert saved.status_code == 303
     assert "settings_saved" in saved.headers["location"]
     assert default_market.status_code == 200
     assert "Empty SC Malaysia test" in default_market.text
 
 
-async def test_watchlists_saved_assets_and_market_scanner_are_distinct_routes(test_context):
+async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_distinct(
+    test_context,
+):
     await _signup(test_context, "distinct-watch-routes@example.com")
 
     watchlists = await test_context["client"].get("/dashboard/watchlists")
@@ -265,7 +267,11 @@ async def test_watchlists_saved_assets_and_market_scanner_are_distinct_routes(te
 
     assert watchlists.status_code == 200
     assert "Your monitoring systems" in watchlists.text
-    assert saved_assets.status_code == 200
-    assert "Your approved assets, kept together" in saved_assets.text
+    assert saved_assets.status_code == 303
+    assert saved_assets.headers["location"] == "/dashboard/market?saved_assets=1"
+    market = await test_context["client"].get(saved_assets.headers["location"])
+    assert market.status_code == 200
+    assert "Screened Market" in market.text
+    assert "data-saved-assets-dialog" in market.text
     assert scanner.status_code == 303
     assert scanner.headers["location"] == "/dashboard/strategies/new?mode=scanner"

@@ -1,23 +1,41 @@
 <section
   class="panel live-market-panel"
   data-live-market-root
-  data-endpoint="/api/v1/sharia/market-quotes"
+  data-endpoint="{{ '/api/v1/sharia/test-market' if live_test_market|default(false) and not selected_methodology_id else '/api/v1/sharia/market-quotes' }}"
   data-methodology-id="{{ selected_methodology_id }}"
   data-exchange="{{ selected_exchange }}"
   data-quote="{{ selected_quote_asset }}"
 >
   <div class="live-market-toolbar">
     <div>
-      <span class="kicker">Methodology: {{ live_methodology_name }}</span>
+      <span class="kicker">{{ live_methodology_name }} methodology</span>
       <h2>Live screened assets</h2>
-      <p>Bid, ask, spread, and market activity refresh every second. Screening status comes only from the selected methodology.</p>
-    </div>
-    <div class="live-market-controls">
-      <label class="field"><span>Search coins</span><input class="input" type="search" value="{{ market_search }}" placeholder="BTC, Bitcoin, BTC/USDT..." data-live-market-search></label>
-      <label class="field"><span>Exchange</span><select class="select" data-live-market-exchange><option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance spot</option><option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit spot</option></select></label>
-      <label class="field"><span>Quote</span><select class="select" data-live-market-quote><option value="USDT" {{ 'selected' if selected_quote_asset == 'USDT' else '' }}>USDT</option><option value="USDC" {{ 'selected' if selected_quote_asset == 'USDC' else '' }}>USDC</option></select></label>
+      <p>Screening status is evidence-backed. Bid and ask prices refresh from the selected spot provider.</p>
     </div>
   </div>
+
+  <form class="market-filter-row" method="get" action="/dashboard/market" aria-label="Filter screened assets">
+    <label class="field market-filter-control">
+      <span>Search assets</span>
+      <input class="input" type="search" name="search" value="{{ market_search }}" placeholder="BTC, ETH, SOL..." data-live-market-search>
+    </label>
+    <label class="field market-filter-control">
+      <span>Methodology</span>
+      <select class="select" name="methodology_id">
+        {% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }} | v{{ method.version }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field market-filter-control">
+      <span>Exchange</span>
+      <select class="select" name="exchange" data-live-market-exchange>
+        <option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance spot</option>
+        <option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit spot</option>
+      </select>
+    </label>
+    <input type="hidden" name="quote_asset" value="{{ selected_quote_asset }}" data-live-market-quote>
+    <button class="btn btn-primary market-filter-submit" type="submit"><span data-icon="filter" data-icon-class="icon"></span>Apply filters</button>
+  </form>
+
   <div class="live-market-meta"><span class="live-dot"><i></i><b data-live-market-status>Connecting to provider...</b></span><span data-live-market-updated>Waiting for the first verified snapshot</span></div>
   <div class="live-market-error notice notice-error" data-live-market-error hidden><span data-icon="alert" data-icon-class="icon"></span><div><strong>Quotes unavailable</strong><p data-live-market-error-message>No market values were guessed.</p><button class="btn btn-secondary btn-sm" type="button" data-live-market-retry>Retry</button></div></div>
   <div class="live-market-scroll" role="region" aria-label="Live screened spot market quotes" tabindex="0">
@@ -30,5 +48,6 @@
       </div>
     </div>
   </div>
-  <div class="live-market-empty empty-state compact" data-live-market-empty hidden><h3>No screened symbols match</h3><p>Clear the search, choose another exchange, or review whether this methodology has published passports.</p></div>
+  <div class="live-market-empty empty-state compact" data-live-market-empty hidden><h3>No screened symbols match</h3><p>Clear the search, choose another exchange, or review whether this methodology has published Passports.</p></div>
+  <p class="field-help market-methodology-note">{{ live_methodology_notice }}</p>
 </section>

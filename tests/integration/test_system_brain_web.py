@@ -83,8 +83,14 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
     assert "<pre" not in dashboard.text
     assert "tojson" not in dashboard.text
 
+    assert "hilalmarkets-brand.css" in dashboard.text
     stylesheet = (await test_context["client"].get("/static/system-brain.css")).text
-    assert "--emerald-950" in stylesheet
+    brand_stylesheet = (
+        await test_context["client"].get("/static/hilalmarkets-brand.css")
+    ).text
+    assert "--hm-apple: #cbfa4d" in brand_stylesheet
+    assert 'font-family: "Geometria"' in stylesheet
+    assert "#0b3b31" not in stylesheet.lower()
     assert "prefers-reduced-motion" in stylesheet
 
     csrf_match = re.search(r'name="csrf_token" value="([a-f0-9]+)"', dashboard.text)

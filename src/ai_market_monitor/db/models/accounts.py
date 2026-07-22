@@ -278,6 +278,8 @@ class PendingEmailSignup(UUIDPrimaryKeyMixin, Base):
 
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_identifier: Mapped[str] = mapped_column(String(320), nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String(60))
+    last_name: Mapped[str | None] = mapped_column(String(60))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     telegram_link: Mapped[str | None] = mapped_column(String(1000))
     code_digest: Mapped[str] = mapped_column(String(64), nullable=False)

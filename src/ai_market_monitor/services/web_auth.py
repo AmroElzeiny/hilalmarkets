@@ -90,8 +90,8 @@ class WebAuthService:
                         "near_miss_enabled": True,
                         "near_miss_threshold": 70,
                         "maximum_alerts_per_hour": 50,
-                        "alert_channels": ["telegram"],
-                        "channels": ["telegram"],
+                        "alert_channels": ["web", "telegram"],
+                        "channels": ["web", "telegram"],
                         "providers": ["binance", "bybit"],
                         "alert_days": ["Every Day"],
                         "alert_hours": [],
@@ -117,7 +117,9 @@ class WebAuthService:
         *,
         email: str,
         password: str,
-        display_name: str | None,
+        display_name: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
         telegram_link: str | None = None,
         requested_ip: str | None = None,
     ) -> bool:
@@ -127,6 +129,29 @@ class WebAuthService:
         password_error = password_validation_error(password)
         if password_error:
             raise WebAuthError("invalid_password", password_error)
+        clean_first_name = normalize_person_name(
+            first_name,
+            label="First name",
+            required=False,
+        )
+        clean_last_name = normalize_person_name(
+            last_name,
+            label="Last name",
+            required=False,
+        )
+        if not clean_first_name and display_name:
+            name_parts = str(display_name).split(maxsplit=1)
+            clean_first_name = normalize_person_name(name_parts[0], label="First name")
+            clean_last_name = normalize_person_name(
+                name_parts[1] if len(name_parts) > 1 else None,
+                label="Last name",
+                required=False,
+            )
+        if not clean_first_name:
+            clean_first_name = normalize_person_name(
+                normalized.split("@", 1)[0],
+                label="First name",
+            )
         existing_identity = await self.session.scalar(
             select(UserIdentity.id).where(
                 UserIdentity.provider == IdentityProvider.EMAIL,
@@ -155,6 +180,8 @@ class WebAuthService:
         pending = PendingEmailSignup(
             email=normalized,
             display_identifier=email.strip(),
+            first_name=clean_first_name,
+            last_name=clean_last_name,
             password_hash=hash_password(password),
             telegram_link=telegram_link,
             code_digest=self._auth_code_digest(normalized, "signup", code),
@@ -209,7 +236,10 @@ class WebAuthService:
             pending.consumed_at = now
             raise WebAuthError("account_exists", "This email already has an account.")
 
-        user = User(display_name=normalized.split("@", 1)[0])
+        display_name = " ".join(
+            part for part in (pending.first_name, pending.last_name) if part
+        ) or normalized.split("@", 1)[0]
+        user = User(display_name=display_name)
         self.session.add(user)
         await self.session.flush()
         self.session.add(
@@ -223,7 +253,10 @@ class WebAuthService:
                 is_verified=True,
                 is_primary=True,
                 verified_at=now,
-                profile_data={},
+                profile_data={
+                    "first_name": pending.first_name,
+                    "last_name": pending.last_name,
+                },
             )
         )
         self.session.add(
@@ -237,8 +270,8 @@ class WebAuthService:
                     "near_miss_enabled": True,
                     "near_miss_threshold": 70,
                     "maximum_alerts_per_hour": 50,
-                    "alert_channels": ["telegram"],
-                    "channels": ["telegram"],
+                    "alert_channels": ["web", "telegram"],
+                    "channels": ["web", "telegram"],
                     "providers": ["binance", "bybit"],
                     "alert_days": ["Every Day"],
                     "alert_hours": [],
@@ -483,6 +516,24 @@ def normalize_email(email: str) -> str:
     if "@" not in value or value.startswith("@") or value.endswith("@"):
         return ""
     return value
+
+
+def normalize_person_name(
+    value: str | None,
+    *,
+    label: str,
+    required: bool = True,
+) -> str:
+    cleaned = " ".join(str(value or "").split())
+    if not cleaned:
+        if required:
+            raise WebAuthError("invalid_name", f"{label} is required.")
+        return ""
+    if len(cleaned) > 60 or not any(character.isalpha() for character in cleaned):
+        raise WebAuthError("invalid_name", f"Enter a valid {label.lower()}.")
+    if any(ord(character) < 32 or character in "<>" for character in cleaned):
+        raise WebAuthError("invalid_name", f"Enter a valid {label.lower()}.")
+    return cleaned
 
 
 def normalize_password(password: str) -> str:

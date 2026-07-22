@@ -1,79 +1,50 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
 {% set telegram_active = telegram and telegram.status.value == 'active' and telegram.alerts_enabled %}
-<div class="page-header">
-  <div>
-    <span class="eyebrow">Notifications</span>
-    <h1>Choose where you want to receive updates.</h1>
-    <p>Every event is kept in your dashboard. Connect Telegram for timely private-beta notifications.</p>
-  </div>
-  <div class="page-actions">
-    <a class="btn btn-secondary" href="/dashboard/settings">
-      <span data-icon="settings" data-icon-class="icon"></span>
-      Notification settings
-    </a>
-  </div>
-</div>
+<div class="page-header"><div><span class="eyebrow">Account</span><h1>Notifications</h1></div><div class="page-actions"><a class="btn btn-secondary" href="/dashboard/settings"><span data-icon="settings" data-icon-class="icon"></span>Notification settings</a></div></div>
 
-<section class="grid grid-2 integration-summary-grid">
-  <article class="stat-card">
-    <div class="stat-head">
-      <div class="icon-box"><span data-icon="bell" data-icon-class="icon"></span></div>
-      <span class="badge badge-eligible">Always available</span>
-    </div>
-    <strong>In-app</strong>
-    <div class="caption">Proof, lifecycle, and compliance records</div>
-  </article>
-  <article class="stat-card">
-    <div class="stat-head">
-      <div class="icon-box is-dark"><span data-icon="telegram" data-icon-class="icon"></span></div>
-      <span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}" data-telegram-summary-status>{{ 'Connected' if telegram_active else 'Not connected' }}</span>
-    </div>
-    <strong>Telegram</strong>
-    <div class="caption">External private-beta delivery</div>
-  </article>
+<section class="integration-summary-grid">
+  <article class="channel-summary"><span class="icon-box"><span data-icon="bell" data-icon-class="icon"></span></span><span><strong>In-app</strong><small>Always available</small></span><span class="badge badge-eligible">Ready</span></article>
+  <article class="channel-summary"><span class="icon-box is-dark"><span data-icon="telegram" data-icon-class="icon"></span></span><span><strong>Telegram</strong><small>Private notifications</small></span><span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}" data-telegram-summary-status>{{ 'Connected' if telegram_active else 'Not connected' }}</span></article>
+  <article class="channel-summary"><span class="icon-box is-gold"><span data-icon="whatsapp" data-icon-class="icon"></span></span><span><strong>WhatsApp</strong><small>{{ 'Available' if whatsapp_available else 'Not available' }}</small></span><span class="badge badge-neutral" data-whatsapp-summary-status>{{ 'Not connected' if whatsapp_available else 'Disabled' }}</span></article>
 </section>
 
-<section class="integrations-grid" style="margin-top:18px" data-testid="integrations-root" data-integrations-auto-refresh>
+<section class="integrations-grid" data-testid="integrations-root" data-integrations-auto-refresh data-whatsapp-enabled="{{ 'true' if whatsapp_available else 'false' }}">
   <article class="integration-card" data-testid="telegram-integration-card">
-    <div class="integration-hero">
-      <div class="coin">
-        <div class="icon-box is-dark"><span data-icon="telegram" data-icon-class="icon"></span></div>
-        <div><span class="kicker">Private notifications</span><h2>Telegram</h2></div>
-      </div>
-      <span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}" data-telegram-status>{{ 'Connected' if telegram_active else 'Not connected' }}</span>
-    </div>
-    <p>Receive selected Watch Plan updates, immutable proof summaries, compliance changes, and account notices.</p>
-    <div class="integration-details">
-      <div class="rule-row"><span>Connected account</span><strong data-telegram-username>{{ '@' ~ telegram.username if telegram and telegram.username else 'Not linked' }}</strong></div>
-      <div class="rule-row"><span>Last delivery</span><strong data-telegram-delivery>{{ telegram.last_delivery_at|short_dt(user.timezone) if telegram and telegram.last_delivery_at else 'No delivery recorded' }}</strong></div>
-      <div class="rule-row"><span>Dashboard record</span><strong>Always retained</strong></div>
-    </div>
-    <div class="row wrap">
+    <div class="integration-hero"><div class="coin"><div class="icon-box is-dark"><span data-icon="telegram" data-icon-class="icon"></span></div><div><span class="kicker">Private delivery</span><h2>Telegram</h2></div></div><span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}" data-telegram-status>{{ 'Connected' if telegram_active else 'Not connected' }}</span></div>
+    <p>Receive selected Watch Plan updates, proof summaries, screening changes, and account notices.</p>
+    <div class="integration-details"><div class="rule-row"><span>Connected account</span><strong data-telegram-username>{{ '@' ~ telegram.username if telegram and telegram.username else 'Not linked' }}</strong></div><div class="rule-row"><span>Last delivery</span><strong data-telegram-delivery>{{ telegram.last_delivery_at|short_dt(user.timezone) if telegram and telegram.last_delivery_at else 'No delivery recorded' }}</strong></div></div>
+    <div class="integration-action-row">
       <a class="btn btn-primary" href="{{ telegram_connect_url or telegram_url }}" target="_blank" rel="noopener" data-telegram-connect-link {{ 'hidden' if telegram_active else '' }}>Link Telegram</a>
-      <button class="btn btn-primary" type="button" disabled data-telegram-connected-button {{ '' if telegram_active else 'hidden' }}>Telegram Connected</button>
-      <button class="btn btn-secondary" type="button" data-telegram-disconnect {{ '' if telegram_active else 'hidden' }}>Remove Telegram</button>
+      <button class="btn btn-secondary" type="button" disabled data-telegram-connected-button {{ '' if telegram_active else 'hidden' }}><span data-icon="check" data-icon-class="icon-sm"></span>Telegram connected</button>
+      <button class="btn btn-ghost danger-link" type="button" data-telegram-disconnect {{ '' if telegram_active else 'hidden' }}>Remove Telegram</button>
     </div>
-    {% if telegram_start_command %}
-    <p class="field-help" data-telegram-web-fallback {{ 'hidden' if telegram_active else '' }}><strong>Telegram Web fallback:</strong> send <code>{{ telegram_start_command }}</code> if the command is not inserted automatically.</p>
+    {% if telegram_start_command %}<p class="field-help" data-telegram-web-fallback {{ 'hidden' if telegram_active else '' }}><strong>Using Telegram Web?</strong> Send <code>{{ telegram_start_command }}</code> if the command is not inserted automatically.</p>{% endif %}
+  </article>
+
+  <article class="integration-card whatsapp-integration-card {{ 'is-plan-locked' if not whatsapp_available else '' }}" data-testid="whatsapp-integration-card">
+    <div class="integration-hero"><div class="coin"><div class="icon-box is-gold"><span data-icon="whatsapp" data-icon-class="icon"></span></div><div><span class="kicker">Additional channel</span><h2>WhatsApp</h2></div></div><span class="badge badge-neutral" data-whatsapp-status>{{ 'Not connected' if whatsapp_available else 'Disabled' }}</span></div>
+    {% if not whatsapp_available %}
+      <div class="integration-locked-message"><span data-icon="shield" data-icon-class="icon"></span><div><strong>{{ 'Your plan does not include WhatsApp' if not whatsapp_plan_included else 'WhatsApp is disabled for this release' }}</strong><p>{{ 'Choose a plan that includes WhatsApp when the channel becomes available.' if not whatsapp_plan_included else 'No connection can be created until the channel is enabled by Hilal Markets.' }}</p></div></div>
+      <button class="btn btn-secondary" type="button" disabled>Connect WhatsApp</button>
+    {% else %}
+      <p>Connect your number with explicit consent. Hilal Markets never asks for a WhatsApp password.</p>
+      <form class="whatsapp-connect-form" data-whatsapp-connect-form>
+        <label class="field"><span>WhatsApp number</span><input class="input" type="tel" data-whatsapp-phone placeholder="+201000000000" autocomplete="tel"></label>
+        <input type="hidden" data-whatsapp-locale value="en_US">
+        <fieldset class="whatsapp-category-fieldset"><legend>Message categories</legend><div class="whatsapp-category-grid"><label class="whatsapp-category-option"><input type="checkbox" value="opportunity" data-whatsapp-category checked><span><strong>Watch Plan updates</strong><small>Forming and confirmed setup notices</small></span></label><label class="whatsapp-category-option"><input type="checkbox" value="evidence" data-whatsapp-category checked><span><strong>Evidence</strong><small>Proof and investigation updates</small></span></label><label class="whatsapp-category-option"><input type="checkbox" value="compliance" data-whatsapp-category checked><span><strong>Screening changes</strong><small>Methodology and Passport status changes</small></span></label><label class="whatsapp-category-option"><input type="checkbox" value="account" data-whatsapp-category checked><span><strong>Account</strong><small>Important account notices</small></span></label></div></fieldset>
+        <label class="whatsapp-consent"><input type="checkbox" data-whatsapp-consent><span>I agree to receive the selected Hilal Markets notifications on WhatsApp. I can pause or disconnect them later.</span></label>
+        <button class="btn btn-primary" type="submit" data-whatsapp-create-link>Connect WhatsApp</button>
+        <div class="whatsapp-link-result" data-whatsapp-link-output hidden><p>Open the secure one-time link and send the prepared message from WhatsApp.</p><a class="btn btn-primary" href="#" target="_blank" rel="noopener" data-whatsapp-link-anchor>Open WhatsApp</a><small data-whatsapp-link-expiry></small></div>
+      </form>
+      <div class="whatsapp-connected-panel" data-whatsapp-connected-controls hidden>
+        <div class="integration-details"><div class="rule-row"><span>Connected number</span><strong data-whatsapp-number>Not linked</strong></div><div class="rule-row"><span>Consent</span><strong data-whatsapp-opt-in>Required</strong></div><div class="rule-row"><span>Last delivery</span><strong data-whatsapp-delivery>No delivery recorded</strong></div><div class="rule-row"><span>Latest test</span><strong data-whatsapp-test-state>No test recorded</strong></div><div class="rule-row" data-whatsapp-error-row hidden><span>Needs attention</span><strong data-whatsapp-error>None</strong></div></div>
+        <fieldset class="whatsapp-category-fieldset"><legend>Message categories</legend><div class="whatsapp-category-grid compact">{% for value, label in [('opportunity', 'Watch Plan updates'), ('evidence', 'Evidence'), ('compliance', 'Screening changes'), ('account', 'Account')] %}<label class="whatsapp-category-option"><input type="checkbox" value="{{ value }}" data-whatsapp-preference-category><span><strong>{{ label }}</strong></span></label>{% endfor %}</div></fieldset>
+        <input type="hidden" data-whatsapp-preference-locale value="en_US">
+        <div class="row wrap whatsapp-actions"><button class="btn btn-primary" type="button" data-whatsapp-test>Test notification</button><button class="btn btn-secondary" type="button" data-whatsapp-save>Save categories</button><button class="btn btn-secondary" type="button" data-whatsapp-pause>Pause</button><button class="btn btn-secondary" type="button" data-whatsapp-resume hidden>Resume</button><button class="btn btn-secondary" type="button" data-whatsapp-clear-error hidden>Clear error</button><button class="btn btn-ghost danger-link" type="button" data-whatsapp-disconnect>Disconnect</button></div>
+      </div>
     {% endif %}
   </article>
 </section>
-
-<article class="panel" style="margin-top:18px">
-  <div class="panel-head">
-    <div><span class="kicker">Delivery clarity</span><h2>What each channel receives</h2><p>Your saved notification rules control Telegram delivery. In-app evidence remains available even when Telegram is not connected.</p></div>
-  </div>
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead><tr><th>Event</th><th>In-app</th><th>Telegram</th></tr></thead>
-      <tbody>
-        <tr><td>Forming or near-miss update</td><td><span class="badge badge-eligible">Available</span></td><td><span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}">{{ 'Connected' if telegram_active else 'Not linked' }}</span></td></tr>
-        <tr><td>Confirmed alert proof</td><td><span class="badge badge-eligible">Stored</span></td><td><span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}">{{ 'Connected' if telegram_active else 'Not linked' }}</span></td></tr>
-        <tr><td>Compliance status change</td><td><span class="badge badge-qualified">Always recorded</span></td><td><span class="badge {{ 'badge-eligible' if telegram_active else 'badge-neutral' }}">{{ 'Connected' if telegram_active else 'Not linked' }}</span></td></tr>
-      </tbody>
-    </table>
-  </div>
-</article>
 {% endblock %}
-{% block page_scripts %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260717-beta1"></script>{% endblock %}
+{% block page_scripts %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260722-product-system"></script>{% endblock %}
