@@ -5,6 +5,7 @@ if (root) {
   const methodologyId = root.dataset.methodologyId;
   const body = root.querySelector("[data-live-market-body]");
   const search = root.querySelector("[data-live-market-search]");
+  const methodology = root.querySelector("[data-live-market-methodology]");
   const exchange = root.querySelector("[data-live-market-exchange]");
   const quote = root.querySelector("[data-live-market-quote]");
   const status = root.querySelector("[data-live-market-status]");
@@ -272,6 +273,7 @@ if (root) {
     if (item) openPassport(item, button);
   });
   search.addEventListener("input", applySearch);
+  methodology?.addEventListener("change", () => methodology.form?.requestSubmit());
   [exchange, quote].forEach((control) => control.addEventListener("change", () => {
     clearRows();
     refresh();

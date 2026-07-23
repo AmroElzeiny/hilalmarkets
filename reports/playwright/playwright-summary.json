@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-07-20T04:29:36.176249+00:00",
-  "started_at": "2026-07-20T04:29:01.394483+00:00",
-  "base_url": "http://127.0.0.1:40801",
+  "generated_at": "2026-07-23T13:45:14.958308+00:00",
+  "started_at": "2026-07-23T13:44:28.577632+00:00",
+  "base_url": "http://127.0.0.1:59761",
   "browser": "chromium",
   "auto_started": true,
-  "command": "/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -k consent_cta_sections_and_waitlist_funnel -q",
-  "app_command": "/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 40801",
+  "command": ".venv\\Scripts\\python.exe -m pytest tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa -q --tb=short",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 59761",
   "exitstatus": 0,
   "tests_run": 1,
   "passed": 1,
@@ -15,12 +15,12 @@
   "failed_network_calls": [],
   "page_errors": [],
   "artifacts": {
-    "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {}
+    "tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa": {}
   },
   "tests": {
-    "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {
+    "tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa": {
       "outcome": "passed",
-      "duration_seconds": 8.55,
+      "duration_seconds": 23.596,
       "longrepr": ""
     }
   },

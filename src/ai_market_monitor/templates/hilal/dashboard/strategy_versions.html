@@ -1,10 +1,10 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260722-product-system">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260723-reviewer-first">
 {% endblock %}
 {% block content %}
 <div class="page-header">
-  <div><span class="eyebrow">Watch Plan history</span><h1>{{ strategy.name }} versions.</h1><p>Each approved rule change remains traceable and linked to its evidence.</p></div>
+  <div><span class="eyebrow">Watchlist history</span><h1>{{ strategy.name }} versions.</h1><p>Each approved rule change remains traceable and linked to its evidence.</p></div>
   <div class="page-actions"><a class="btn btn-primary" href="/dashboard/strategies/{{ strategy.id }}/verify">Review current version</a></div>
 </div>
 {% include "hilal/dashboard/partials/strategy_versions_content.html" %}

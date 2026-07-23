@@ -6,8 +6,8 @@
     <div class="price"><strong>${{ plan.monthly_price | int }}</strong><span>{% if plan.monthly_price == 0 %} free{% elif billing_capabilities.supports_recurring_billing %}/month{% else %}/30 days{% endif %}</span></div>
     <p>{{ plan.description }}</p>
     <ul class="feature-list">
-      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.active_strategies }} active Watch Plan{{ '' if plan.limits.active_strategies == 1 else 's' }}</li>
-      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.symbols_per_strategy | plan_limit }} markets per Watch Plan</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.active_strategies }} active Watchlist{{ '' if plan.limits.active_strategies == 1 else 's' }}</li>
+      <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.symbols_per_strategy | plan_limit }} markets per Watchlist</li>
       <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.on_demand_scans_per_month }} market check{{ '' if plan.limits.on_demand_scans_per_month == 1 else 's' }} per month</li>
       <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram delivery' if plan.features.telegram else 'Dashboard delivery' }}</li>
     </ul>

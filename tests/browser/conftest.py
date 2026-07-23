@@ -189,7 +189,6 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "PUBLIC_BASE_URL": base_url,
             "ALLOW_MOCK_PROVIDERS": "true",
             "SCANNING_ENABLED": "false",
-            "SHARIA_TEST_MARKET_ENABLED": "false",
             "TRACEDGE_MARKET_DATA_MODE": "fixture",
             "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED": "true",
             "MARKET_DATA_PROVIDER": "ccxt",
@@ -516,6 +515,57 @@ def signup(page: Page, base_url: str, email: str | None = None) -> str:
     page.get_by_test_id("dashboard-root").wait_for(state="attached", timeout=10_000)
     assert_no_raw_traceback(page)
     return email
+
+
+def seed_system_brain_reviewer(
+    database_url: str,
+    email: str,
+) -> str:
+    if not database_url:
+        pytest.skip("System Brain browser coverage requires the auto-started database.")
+
+    async def _seed() -> str:
+        from ai_market_monitor.db.models import ReviewCase, User, UserIdentity
+        from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test identity found for {email}.")
+            user = await session.get(User, identity.user_id)
+            if user is None:
+                raise AssertionError(f"No browser test user found for {email}.")
+            user.role = UserRole.ADMIN
+            case = ReviewCase(
+                case_reference=f"REV-BROWSER-{uuid4().hex[:8]}",
+                case_type="material_source_change",
+                state="ready_for_review",
+                publication_state="change_under_review",
+                title="Review retained official-source change",
+                priority="high",
+                risk_severity="medium",
+                human_review_reason=(
+                    "A retained official-source snapshot changed after publication."
+                ),
+                assigned_reviewer_id=user.id,
+                requested_evidence=[],
+                admin_notes=[],
+                idempotency_key=f"browser-system-brain-{uuid4()}",
+            )
+            session.add(case)
+            await session.commit()
+            case_id = str(case.id)
+        await engine.dispose()
+        return case_id
+
+    return _run_async_in_thread(_seed)
 
 
 def seed_alert_proof(database_url: str, email: str) -> str:

@@ -52,6 +52,7 @@ from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHt
 from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMessage
 
 SC_METHODOLOGY_CODE = "SC_MALAYSIA_SAC_REFERENCE"
+FASSET_METHODOLOGY_CODE = "FASSET_SHARIAH_REPORTS"
 TERMINAL_CASE_STATES = {"published", "rejected", "superseded"}
 OPEN_REMINDER_STATES = {"ready_for_review", "needs_evidence"}
 GOVERNANCE_ROLES = {"SYSTEM_ADMIN", "RESEARCHER", "REVIEWER", "PUBLISHER"}
@@ -272,16 +273,32 @@ class ShariaGovernanceService:
         active_publications = list(
             (
                 await self.session.scalars(
-                    select(PublishedAssetAssessment).where(
+                    select(PublishedAssetAssessment)
+                    .join(
+                        AssetShariaAssessment,
+                        AssetShariaAssessment.id
+                        == PublishedAssetAssessment.asset_assessment_id,
+                    )
+                    .where(
                         PublishedAssetAssessment.canonical_asset_id == asset.id,
                         PublishedAssetAssessment.is_active.is_(True),
-                    ).order_by(PublishedAssetAssessment.version.desc())
+                        AssetShariaAssessment.methodology_id == methodology.id,
+                    )
+                    .order_by(PublishedAssetAssessment.version.desc())
                 )
             ).all()
         )
         latest_publication = await self.session.scalar(
             select(PublishedAssetAssessment)
-            .where(PublishedAssetAssessment.canonical_asset_id == asset.id)
+            .join(
+                AssetShariaAssessment,
+                AssetShariaAssessment.id
+                == PublishedAssetAssessment.asset_assessment_id,
+            )
+            .where(
+                PublishedAssetAssessment.canonical_asset_id == asset.id,
+                AssetShariaAssessment.methodology_id == methodology.id,
+            )
             .order_by(PublishedAssetAssessment.version.desc())
             .limit(1)
         )
@@ -334,7 +351,7 @@ class ShariaGovernanceService:
             )
             .values(
                 invalidated_at=now,
-                invalidation_reason=f"published SC assessment {assessment.id}",
+                invalidation_reason=f"published assessment {assessment.id}",
             )
         )
         self._audit(
@@ -491,6 +508,77 @@ class ShariaGovernanceService:
             "sharia_review_case",
             str(case.id),
             {"note_recorded": True},
+        )
+        await self.session.flush()
+        return case
+
+    async def record_ai_field_review(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        field_key: str,
+        disposition: str,
+        reviewer_value: str,
+        original_ai_suggestion: str,
+        reason: str,
+        source_references: list[str],
+    ) -> ReviewCase:
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if disposition not in {"accepted", "edited", "rejected", "irrelevant"}:
+            raise ShariaGovernanceError(
+                "invalid_ai_field_disposition",
+                "Choose accept, edit, reject, or irrelevant.",
+            )
+        normalized_key = field_key.strip()
+        if not normalized_key or len(normalized_key) > 120:
+            raise ShariaGovernanceError(
+                "invalid_review_field",
+                "The review field is unavailable.",
+            )
+        normalized_value = reviewer_value.strip()
+        if disposition in {"accepted", "edited"} and len(normalized_value) < 2:
+            raise ShariaGovernanceError(
+                "reviewer_value_required",
+                "Enter the independently reviewed value before accepting it.",
+            )
+        normalized_reason = reason.strip()
+        if len(normalized_reason) < 3:
+            raise ShariaGovernanceError(
+                "field_review_reason_required",
+                "Record why this suggestion was accepted, changed, or rejected.",
+            )
+        now = datetime.now(UTC)
+        entry = {
+            "entry_type": "ai_field_review",
+            "field_key": normalized_key,
+            "disposition": disposition,
+            "original_ai_suggestion": original_ai_suggestion[:4000],
+            "reviewer_value": normalized_value[:4000],
+            "reason": normalized_reason[:1200],
+            "source_references": [str(item)[:160] for item in source_references[:12]],
+            "admin_user_id": str(admin.id),
+            "created_at": now.isoformat(),
+        }
+        notes = list(case.admin_notes or [])
+        notes.append(entry)
+        case.admin_notes = notes
+        self._audit(
+            admin.id,
+            "sharia.ai_field_suggestion_reviewed",
+            "sharia_review_case",
+            str(case.id),
+            {
+                "field_key": normalized_key,
+                "disposition": disposition,
+                "original_ai_suggestion": original_ai_suggestion[:2000],
+                "final_reviewer_value": normalized_value[:2000],
+                "reason": normalized_reason[:500],
+                "source_references": entry["source_references"],
+            },
         )
         await self.session.flush()
         return case
@@ -1148,17 +1236,31 @@ class ShariaGovernanceService:
         rules: MethodologyRulesDefinition,
         external: ExternalAssessment,
     ) -> None:
-        if rules.source_adapter != "sc_malaysia":
+        authority = external.source_authority.casefold()
+        source_matches = False
+        if rules.source_adapter == "sc_malaysia":
+            source_matches = (
+                rules.source_family == "sc_malaysia_sac"
+                and external.source_family == "sc_malaysia_sac"
+                and "securities commission malaysia" in authority
+                and external.exact_status_wording.casefold() == "shariah-compliant"
+                and external.sac_meeting_number is not None
+                and external.decision_date is not None
+            )
+        elif rules.source_adapter == "fasset":
+            source_matches = (
+                rules.source_family == "fasset_shariah_reports"
+                and external.source_family == "fasset_shariah_reports"
+                and "fasset" in authority
+                and external.exact_status_wording == "Shariah Compliant"
+                and bool(external.structured_facts)
+            )
+        else:
             raise ShariaGovernanceError(
                 "source_adapter_unsupported",
                 "No reviewed import adapter is configured for this methodology.",
             )
-        authority = external.source_authority.casefold()
-        if (
-            rules.source_family != "sc_malaysia_sac"
-            or "securities commission malaysia" not in authority
-            or external.exact_status_wording.casefold() != "shariah-compliant"
-        ):
+        if not source_matches:
             raise ShariaGovernanceError(
                 "methodology_source_mismatch",
                 "The external assessment does not match the case methodology source family.",
@@ -1176,6 +1278,13 @@ class ShariaGovernanceService:
                 f"{external.exact_status_wording}. HilalMarkets use-specific coverage is "
                 "shown separately and does not infer unpublished SC reasoning.",
                 "sc_malaysia_reviewed_publication",
+            )
+        if rules.source_adapter == "fasset":
+            return (
+                "The retained Fasset asset profile records the explicit verdict "
+                f"{external.exact_status_wording}. HilalMarkets identity and use-specific "
+                "coverage are reviewed separately and no missing source fact was inferred.",
+                "fasset_reviewed_publication",
             )
         raise ShariaGovernanceError(
             "source_adapter_unsupported",
@@ -1201,6 +1310,11 @@ class ShariaGovernanceService:
             for row in snapshots
         ):
             categories.add("official_sc_reference")
+        if rules.source_adapter == "fasset" and any(
+            row.id == external.source_snapshot_id and row.fetch_status == "success"
+            for row in snapshots
+        ):
+            categories.add("official_fasset_reference")
         official_ids = {
             row.official_source_id for row in snapshots if row.official_source_id is not None
         }
@@ -1529,29 +1643,50 @@ class ShariaGovernanceService:
         dossier: AssetResearchDossier,
     ) -> list[EvidenceSourceInput]:
         rules = MethodologyRulesDefinition.model_validate(methodology.rules_json)
-        if rules.source_adapter != "sc_malaysia":
+        if rules.source_adapter == "sc_malaysia":
+            if external.decision_date is None or external.sac_meeting_number is None:
+                raise ShariaGovernanceError(
+                    "sc_reference_incomplete",
+                    "The SC meeting reference and decision date are required.",
+                )
+            sources = [
+                EvidenceSourceInput(
+                    source_type="official_regulator",
+                    title="SC Malaysia Digital Assets",
+                    publisher="Securities Commission Malaysia",
+                    source_url=HttpUrl(external.source_url),
+                    published_at=datetime.combine(
+                        external.decision_date, datetime.min.time(), tzinfo=UTC
+                    ),
+                    retrieved_at=external.retrieval_date,
+                    evidence_category="official_sc_reference",
+                    evidence_summary=(
+                        f"Exact imported wording: {external.exact_status_wording}; "
+                        f"{external.sac_meeting_number} SAC Meeting, "
+                        f"{external.decision_date.isoformat()}."
+                    ),
+                )
+            ]
+        elif rules.source_adapter == "fasset":
+            sources = [
+                EvidenceSourceInput(
+                    source_type="published_authority_profile",
+                    title=f"Fasset Shariah Report: {external.asset_name}",
+                    publisher="Fasset",
+                    source_url=HttpUrl(external.source_url),
+                    retrieved_at=external.retrieval_date,
+                    evidence_category="official_fasset_reference",
+                    evidence_summary=(
+                        f"Explicit retained verdict: {external.exact_status_wording}; "
+                        f"source reference: {external.source_reference or 'asset profile'}."
+                    ),
+                )
+            ]
+        else:
             raise ShariaGovernanceError(
                 "source_adapter_unsupported",
                 "No evidence adapter is configured for this methodology.",
             )
-        sources = [
-            EvidenceSourceInput(
-                source_type="official_regulator",
-                title="SC Malaysia Digital Assets",
-                publisher="Securities Commission Malaysia",
-                source_url=HttpUrl(external.source_url),
-                published_at=datetime.combine(
-                    external.decision_date, datetime.min.time(), tzinfo=UTC
-                ),
-                retrieved_at=external.retrieval_date,
-                evidence_category="official_sc_reference",
-                evidence_summary=(
-                    f"Exact imported wording: {external.exact_status_wording}; "
-                    f"{external.sac_meeting_number} SAC Meeting, "
-                    f"{external.decision_date.isoformat()}."
-                ),
-            )
-        ]
         snapshot_ids = [UUID(value) for value in dossier.source_snapshot_ids]
         if snapshot_ids:
             snapshots = list(
@@ -1590,7 +1725,7 @@ class ShariaGovernanceService:
                         evidence_category=source.category,
                         evidence_summary=(
                             "Official-source factual information captured for the HilalMarkets "
-                            "profile; it is not SC Malaysia's unpublished reasoning."
+                            "profile; it is not unpublished authority reasoning."
                         ),
                     )
                 )
@@ -1621,26 +1756,45 @@ class ShariaGovernanceService:
         next_governance_review = published_at + timedelta(
             days=requirements.review_cadence_days
         )
+        rules = MethodologyRulesDefinition.model_validate(methodology.rules_json)
+        source_label = (
+            "SC Malaysia SAC reference"
+            if rules.source_adapter == "sc_malaysia"
+            else "Fasset Shariah Report"
+        )
+        authority_reference = {
+            "label": f"{source_label}: {external.exact_status_wording}",
+            "exact_wording": external.exact_status_wording,
+            "authority": external.source_authority,
+            "source_family": external.source_family,
+            "source_reference": external.source_reference,
+            "source_url": external.source_url,
+            "retrieval_date": external.retrieval_date.isoformat(),
+            "regulatory_scope": external.regulatory_scope,
+            "published_profile_facts": dict(external.structured_facts or {}),
+            "limitations": [
+                "The source verdict is retained exactly and is not expanded to an unreviewed use.",
+                "Staking, lending, yield, leverage, derivatives, wrapped assets, and bridges "
+                "remain separate use decisions.",
+            ],
+        }
+        if external.sac_meeting_number:
+            authority_reference["sac_meeting_number"] = external.sac_meeting_number
+        if external.decision_date:
+            authority_reference["decision_date"] = external.decision_date.isoformat()
         return {
             "passport_version": 1,
             "key_reasons": [decision.reason],
-            "official_sc_malaysia_reference": {
-                "label": "SC Malaysia SAC reference: Shariah-compliant",
-                "exact_wording": external.exact_status_wording,
-                "authority": external.source_authority,
-                "sac_meeting_number": external.sac_meeting_number,
-                "decision_date": external.decision_date.isoformat(),
-                "source_url": external.source_url,
-                "retrieval_date": external.retrieval_date.isoformat(),
-                "regulatory_scope": external.regulatory_scope,
-                "limitations": [
-                    "Coin-specific detailed reasoning was not publicly provided by this source.",
-                    "This reference does not automatically apply to staking, lending, yield, "
-                    "leveraged, derivative, wrapped, or bridged uses.",
-                ],
-            },
+            "official_methodology_reference": authority_reference,
+            "official_sc_malaysia_reference": (
+                authority_reference if rules.source_adapter == "sc_malaysia" else {}
+            ),
+            "official_fasset_reference": (
+                authority_reference if rules.source_adapter == "fasset" else {}
+            ),
             "hilalmarkets_factual_information_profile": {
                 **profile,
+                "authority_published_profile": dict(external.structured_facts or {}),
                 "official_source_snapshot_ids": list(dossier.source_snapshot_ids),
                 "missing_information": output.get("missing_evidence") or [],
                 "contradictions": output.get("contradictions") or [],
@@ -1655,6 +1809,11 @@ class ShariaGovernanceService:
                 "notice": (
                     "HilalMarkets factual research is not SC Malaysia's unpublished reasoning "
                     "and is not an independent religious ruling."
+                    if rules.source_adapter == "sc_malaysia"
+                    else (
+                        "HilalMarkets factual research is not Fasset's unpublished reasoning "
+                        "and is not an independent religious ruling."
+                    )
                 ),
             },
             "separate_use_status": use_decisions,
@@ -1665,8 +1824,7 @@ class ShariaGovernanceService:
                 "criteria_version": decision.methodology_criteria_version,
                 "criteria_hash": decision.methodology_criteria_hash,
                 "result": (
-                    "Official asset-level SC Malaysia reference: "
-                    f"{external.exact_status_wording}"
+                    f"Official asset-level {source_label}: {external.exact_status_wording}"
                 ),
             },
             "publication": {
@@ -1929,13 +2087,21 @@ class ShariaAdminTelegramService:
             f"State: {case.state.replace('_', ' ').title()}",
         ]
         if external:
+            authority_details = [
+                value
+                for value in (
+                    external.source_reference,
+                    external.sac_meeting_number,
+                    external.decision_date.isoformat()
+                    if external.decision_date
+                    else None,
+                )
+                if value
+            ]
             lines.extend(
                 [
-                    f"SC reference: {external.exact_status_wording}",
-                    (
-                        f"Meeting/date: {external.sac_meeting_number} | "
-                        f"{external.decision_date.isoformat()}"
-                    ),
+                    f"Authority reference: {external.exact_status_wording}",
+                    "Source detail: " + " | ".join(authority_details),
                 ]
             )
         if dossier:
@@ -1962,7 +2128,7 @@ class ShariaAdminTelegramService:
             ]
         )
         url = (
-            f"{str(self.settings.public_base_url).rstrip('/')}/system-brain/reviews/{case.id}"
+            f"{str(self.settings.public_base_url).rstrip('/')}/dashboard/system-brain/cases/{case.id}"
         )
         return TelegramOutboundMessage(
             chat_id=self.settings.sharia_admin_telegram_chat_id or "",

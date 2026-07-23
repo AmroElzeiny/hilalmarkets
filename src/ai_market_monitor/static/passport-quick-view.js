@@ -68,14 +68,18 @@
     const kind = identity.native_asset === true ? "Native asset" : identity.native_asset === false ? "Token" : label(identity.asset_type);
     const network = identity.network || "Network not recorded";
     text("[data-passport-quick-logo]", symbol.slice(0, 3));
+    window.HilalAssetLogos?.load(
+      dialog.querySelector("[data-passport-quick-logo]"),
+      identity.logo_module_url,
+      symbol,
+    );
     text("[data-passport-quick-name]", `${identity.name} · ${symbol}`);
     text("[data-passport-quick-identity]", `${network} · ${kind}`);
     text("[data-passport-quick-primary]", payload.primary_wording);
     text("[data-passport-quick-methodology]", `${assessment.methodology_name} · v${assessment.methodology_version}`);
-    text("[data-passport-quick-authority]", payload.review_authority);
     text("[data-passport-quick-decision]", formatDate(payload.decision_date));
     text("[data-passport-quick-publication]", formatDate(payload.publication_date));
-    text("[data-passport-quick-next-review]", payload.next_review_at ? formatDate(payload.next_review_at) : "Not scheduled");
+    text("[data-passport-quick-next-scan]", payload.next_source_scan_at ? formatDate(payload.next_source_scan_at, true) : "Not scheduled");
 
     const status = dialog.querySelector("[data-passport-quick-status]");
     status.textContent = assessment.status_label;

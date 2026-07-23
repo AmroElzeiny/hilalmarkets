@@ -23,6 +23,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.accounts import User
 from ai_market_monitor.engine.capability_resolver import CapabilityResolver
+from ai_market_monitor.services.ai_usage_context import ai_usage_correlation
 from ai_market_monitor.services.system_brain import (
     CapabilityCoverageService,
     SystemBrainAccessError,
@@ -135,6 +136,33 @@ async def test_capability_telemetry_records_false_ranking_alias_and_cost(test_co
         assert usage is not None
         assert usage.reasoning_tokens == 300_000
         assert usage.estimated_cost_usd == Decimal("1.41400000")
+
+
+async def test_ai_usage_records_the_current_request_correlation(test_context):
+    settings = test_context["settings"]
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Correlated Usage")
+        session.add(user)
+        await session.flush()
+        chat = AISetupChatSession(user_id=user.id, title="Correlated chat")
+        session.add(chat)
+        await session.flush()
+
+        with ai_usage_correlation("request-correlation-1"):
+            await CapabilityCoverageService(settings).record_usage(
+                session,
+                chat=chat,
+                operation="strategy_compile",
+                usage={
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                },
+            )
+        await session.commit()
+
+        usage = await session.scalar(select(AIUsageEvent))
+        assert usage is not None
+        assert usage.raw_usage["_traceedge_correlation_id"] == "request-correlation-1"
 
 
 async def test_system_brain_session_is_database_backed(test_context):

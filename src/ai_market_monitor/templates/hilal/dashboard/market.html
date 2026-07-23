@@ -1,28 +1,5 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
-<div class="page-header market-page-header">
-  <div>
-    <span class="eyebrow">Sharia-screened market</span>
-    <h1>Screened Market</h1>
-  </div>
-  <div class="page-actions">
-    <button class="btn btn-secondary" type="button" data-saved-assets-open>
-      <span data-icon="watchlist" data-icon-class="icon"></span>
-      Saved Assets{% if saved_assets %}<span class="nav-count">{{ saved_assets|length }}</span>{% endif %}
-    </button>
-    <a class="btn btn-primary" href="/dashboard/strategies/new">
-      <span data-icon="radar" data-icon-class="icon"></span>
-      New Watch Plan
-    </a>
-  </div>
-</div>
-
-{% if live_test_market|default(false) %}
-<div class="notice notice-warning test-methodology-notice" role="note">
-  <span data-icon="alert" data-icon-class="icon"></span>
-  <div><strong>Test methodology only</strong><p>{{ test_methodology_notice }}</p></div>
-</div>
-{% endif %}
 
 {% if market_data_warning %}
 <div class="notice is-info" role="status">
@@ -36,9 +13,7 @@
 </div>
 {% endif %}
 
-{% if selected_methodology_id or live_test_market|default(false) %}
-  {% set live_methodology_name = 'Test' if live_test_market|default(false) else screened.methodology.name %}
-  {% set live_methodology_notice = test_methodology_notice if live_test_market|default(false) else 'Statuses come from stored, reviewed methodology evidence. Live prices do not change the published screening decision.' %}
+{% if selected_methodology_id %}
   {% include "hilal/dashboard/partials/live_market.html" %}
 {% else %}
 <div class="empty-state">
@@ -88,4 +63,4 @@
   </form>
 </dialog>
 {% endblock %}
-{% block page_scripts %}{% if selected_methodology_id or live_test_market|default(false) %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260722-product-system"></script>{% endif %}{% endblock %}
+{% block page_scripts %}{% if selected_methodology_id %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260723-reviewer-first"></script>{% endif %}{% endblock %}

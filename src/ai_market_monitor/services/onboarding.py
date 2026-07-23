@@ -48,7 +48,7 @@ class OnboardingService:
         self.identity_assertions = IdentityAssertionTokenService(settings)
 
     async def start(self, request: StartOnboardingRequest) -> OnboardingSessionResponse:
-        identity_service = IdentityService(self.session)
+        identity_service = IdentityService(self.session, self.settings)
         trusted_assertion = False
         if request.identity_assertion:
             try:

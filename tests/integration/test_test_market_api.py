@@ -61,37 +61,26 @@ async def _signup(test_context, email: str) -> None:
     assert verified.status_code == 303
 
 
-async def test_test_market_api_and_dashboard_are_gated_and_provider_backed(test_context):
+async def test_retired_test_market_route_stays_unavailable(test_context):
     await _signup(test_context, "live-test-market@example.com")
 
-    disabled = await test_context["client"].get("/api/v1/sharia/test-market")
-    assert disabled.status_code == 404
-
-    test_context["settings"].sharia_test_market_enabled = True
     test_context["app"].dependency_overrides[get_market_data_provider] = ApiQuoteProvider
-
     response = await test_context["client"].get(
         "/api/v1/sharia/test-market?exchange=bybit&quote_asset=USDT"
     )
     page = await test_context["client"].get("/dashboard/market?exchange=bybit")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["methodology"]["name"] == "Test"
-    assert payload["methodology"]["development_only"] is True
-    assert payload["total"] == 2
-    assert all(item["status_label"] == "Halal (test)" for item in payload["items"])
-    assert all(item["bid"] == 10.0 and item["ask"] == 10.1 for item in payload["items"])
+    assert response.status_code == 404
     assert page.status_code == 200
-    assert 'data-endpoint="/api/v1/sharia/test-market"' in page.text
-    assert "Test methodology only" in page.text
+    assert "/api/v1/sharia/test-market" not in page.text
+    assert "Test methodology only" not in page.text
     assert "data-passport-quick-dialog" in page.text
-    assert "sharia-market.js" in page.text
 
 
-async def test_local_test_market_does_not_hide_selected_executable_methodology(test_context):
+async def test_development_methodology_is_never_selectable_over_approved_methodology(
+    test_context,
+):
     await _signup(test_context, "coexisting-methodologies@example.com")
-    test_context["settings"].sharia_test_market_enabled = True
     test_context["app"].dependency_overrides[get_market_data_provider] = ApiQuoteProvider
     now = datetime.now(UTC)
     async with test_context["session_factory"]() as session:
@@ -181,8 +170,8 @@ async def test_local_test_market_does_not_hide_selected_executable_methodology(t
     assert 'data-endpoint="/api/v1/sharia/market-quotes"' in default_page.text
     assert "Test methodology only" not in default_page.text
     assert test_page.status_code == 200
-    assert "Test methodology only" in test_page.text
     assert "SC Malaysia selection test" in test_page.text
+    assert "Development Test route" not in test_page.text
     assert malaysia_page.status_code == 200
     assert 'data-endpoint="/api/v1/sharia/market-quotes"' in malaysia_page.text
     assert "live-market-table" in malaysia_page.text
@@ -266,7 +255,7 @@ async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_dis
     )
 
     assert watchlists.status_code == 200
-    assert "Your monitoring systems" in watchlists.text
+    assert ">Watchlists<" in watchlists.text
     assert saved_assets.status_code == 303
     assert saved_assets.headers["location"] == "/dashboard/market?saved_assets=1"
     market = await test_context["client"].get(saved_assets.headers["location"])

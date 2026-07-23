@@ -16,6 +16,7 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
     AISetupChatSession,
+    AIUsageEvent,
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
     Strategy,
@@ -61,6 +62,10 @@ from ai_market_monitor.services.agent_control import (
 )
 from ai_market_monitor.services.agent_tools import AgentToolService
 from ai_market_monitor.services.ai_model_routing import select_setup_model
+from ai_market_monitor.services.ai_setup_evaluator_control import (
+    consume_evaluator_llm_fault,
+    evaluator_prompt_appendix,
+)
 from ai_market_monitor.services.hybrid_capability_resolution import (
     HybridCapabilityResolutionService,
 )
@@ -155,7 +160,7 @@ class OpenAISetupChatInterviewer:
                     "schema": _turn_classification_schema(),
                 }
             },
-            "instructions": _turn_router_prompt(),
+            "instructions": _turn_router_prompt() + evaluator_prompt_appendix(),
             "input": json.dumps(
                 {
                     "conversation": history[-20:],
@@ -172,14 +177,16 @@ class OpenAISetupChatInterviewer:
             "Content-Type": "application/json",
         }
         try:
-            async with httpx.AsyncClient(
-                base_url=str(self.settings.openai_base_url).rstrip("/"),
-                timeout=self.settings.openai_timeout_seconds,
-                transport=self.transport,
-            ) as client:
-                response = await client.post("/responses", headers=headers, json=payload)
-            response.raise_for_status()
-            response_payload = response.json()
+            response_payload = consume_evaluator_llm_fault()
+            if response_payload is None:
+                async with httpx.AsyncClient(
+                    base_url=str(self.settings.openai_base_url).rstrip("/"),
+                    timeout=self.settings.openai_timeout_seconds,
+                    transport=self.transport,
+                ) as client:
+                    response = await client.post("/responses", headers=headers, json=payload)
+                response.raise_for_status()
+                response_payload = response.json()
             self.last_usage = {
                 **dict(response_payload.get("usage") or {}),
                 **route.usage_metadata(),
@@ -236,7 +243,7 @@ class OpenAISetupChatInterviewer:
                     "schema": _interview_schema(),
                 }
             },
-            "instructions": _system_prompt(),
+            "instructions": _system_prompt() + evaluator_prompt_appendix(),
             "input": json.dumps(
                 {
                     "conversation": history[-20:],
@@ -252,14 +259,16 @@ class OpenAISetupChatInterviewer:
             "Content-Type": "application/json",
         }
         try:
-            async with httpx.AsyncClient(
-                base_url=str(self.settings.openai_base_url).rstrip("/"),
-                timeout=self.settings.openai_timeout_seconds,
-                transport=self.transport,
-            ) as client:
-                response = await client.post("/responses", headers=headers, json=payload)
-            response.raise_for_status()
-            response_payload = response.json()
+            response_payload = consume_evaluator_llm_fault()
+            if response_payload is None:
+                async with httpx.AsyncClient(
+                    base_url=str(self.settings.openai_base_url).rstrip("/"),
+                    timeout=self.settings.openai_timeout_seconds,
+                    transport=self.transport,
+                ) as client:
+                    response = await client.post("/responses", headers=headers, json=payload)
+                response.raise_for_status()
+                response_payload = response.json()
             self.last_usage = {
                 **dict(response_payload.get("usage") or {}),
                 **route.usage_metadata(),
@@ -388,6 +397,64 @@ class AISetupChatService:
                 )
             ).all()
         )
+
+    async def attach_turn_usage(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        correlation_id: str,
+    ) -> None:
+        events = list(
+            (
+                await session.scalars(
+                    select(AIUsageEvent)
+                    .where(AIUsageEvent.chat_session_id == chat.id)
+                    .order_by(AIUsageEvent.created_at.desc())
+                    .limit(100)
+                )
+            ).all()
+        )
+        correlated = [
+            event
+            for event in events
+            if (event.raw_usage or {}).get("_traceedge_correlation_id") == correlation_id
+        ]
+        if not correlated:
+            return
+        assistant = await session.scalar(
+            select(AISetupChatMessage)
+            .where(
+                AISetupChatMessage.session_id == chat.id,
+                AISetupChatMessage.role == "assistant",
+            )
+            .order_by(AISetupChatMessage.sequence.desc())
+            .limit(1)
+        )
+        if assistant is None:
+            return
+        models = sorted({event.model for event in correlated})
+        usage = {
+            "input_tokens": sum(event.input_tokens for event in correlated),
+            "input_tokens_details": {
+                "cached_tokens": sum(event.cached_input_tokens for event in correlated)
+            },
+            "output_tokens": sum(event.output_tokens for event in correlated),
+            "output_tokens_details": {
+                "reasoning_tokens": sum(event.reasoning_tokens for event in correlated)
+            },
+            "estimated_cost_usd": float(
+                sum(
+                    (event.estimated_cost_usd for event in correlated),
+                    start=0,
+                )
+            ),
+            "models": models,
+        }
+        payload = dict(assistant.payload or {})
+        payload["_traceedge_model"] = models[0] if len(models) == 1 else "mixed"
+        payload["usage"] = usage
+        assistant.payload = payload
 
     async def handle_message(
         self,
@@ -2440,6 +2507,8 @@ class AISetupChatService:
                     "name_required": True,
                     "can_approve": False,
                     "agent_run_id": str(outcome.run_id),
+                    "_traceedge_model": outcome.model,
+                    "usage": outcome.usage,
                 },
             )
             return
@@ -2456,6 +2525,8 @@ class AISetupChatService:
         }.get(final.intent, "conversation")
         payload: dict[str, Any] = {
             "agent_run_id": str(outcome.run_id),
+            "_traceedge_model": outcome.model,
+            "usage": outcome.usage,
             "agent_intent": final.intent,
             "agent_status": final.status,
             "evidence_refs": final.evidence_refs,

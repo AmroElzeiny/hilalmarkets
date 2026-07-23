@@ -153,3 +153,36 @@ async def test_disabled_email_adapter_reports_actionable_code():
         )
 
     assert error.value.code == "email_adapter_disabled"
+
+
+@pytest.mark.asyncio
+async def test_one_time_and_transactional_emails_share_hilalmarkets_brand_shell():
+    settings = Settings(
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        email_adapter="memory",
+        public_base_url="https://hilalmarkets.com",
+        ai_interpreter_provider="rules",
+    )
+    service = AuthEmailService(settings)
+
+    await service.send_code(
+        recipient="customer@example.com",
+        code="123456",
+        purpose="signup",
+    )
+    await service.send_transactional(
+        recipient="customer@example.com",
+        subject="Account notice",
+        text_body="Your account was updated.",
+        html_body="<p>Your account was updated.</p>",
+        idempotency_key="account-notice:test",
+        purpose="account_notice",
+    )
+
+    assert len(settings.email_test_outbox) == 2
+    for message in settings.email_test_outbox:
+        html_body = message["html_body"]
+        assert 'data-hm-email-shell="true"' in html_body
+        assert "#2b2e35" in html_body
+        assert "#cbfa4d" in html_body
+        assert "hilal markets" in html_body

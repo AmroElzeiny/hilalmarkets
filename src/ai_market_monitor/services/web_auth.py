@@ -25,6 +25,7 @@ from ai_market_monitor.db.models import (
     WebSession,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, UserStatus
+from ai_market_monitor.services.account_admin import identifier_is_banned
 from ai_market_monitor.services.email_delivery import AuthEmailService
 
 SESSION_COOKIE_NAME = "amm_session"
@@ -52,6 +53,7 @@ class WebAuthService:
         normalized = normalize_email(email)
         if not normalized:
             raise WebAuthError("invalid_email", "Enter a valid email address.")
+        await self._ensure_not_banned(normalized)
         password_error = password_validation_error(password)
         if password_error:
             raise WebAuthError("invalid_password", password_error)
@@ -104,7 +106,7 @@ class WebAuthService:
             if existing_user is None:
                 raise WebAuthError("identity_broken", "This identity is not linked correctly.")
             if existing_user.status == UserStatus.SUSPENDED:
-                raise WebAuthError("account_suspended", "This account is suspended.")
+                raise WebAuthError("account_banned", "Your profile is banned.")
             if not verify_password(password, identity.password_hash):
                 raise WebAuthError("invalid_login", "Email or password is incorrect.")
             user = existing_user
@@ -126,6 +128,7 @@ class WebAuthService:
         normalized = normalize_email(email)
         if not normalized:
             raise WebAuthError("invalid_email", "Enter a valid email address.")
+        await self._ensure_not_banned(normalized)
         password_error = password_validation_error(password)
         if password_error:
             raise WebAuthError("invalid_password", password_error)
@@ -204,6 +207,7 @@ class WebAuthService:
         normalized = normalize_email(email)
         if not normalized or not code.isdigit() or len(code) != 6:
             raise WebAuthError("invalid_code", "Enter the six-digit code from your email.")
+        await self._ensure_not_banned(normalized)
         pending = await self.session.scalar(
             select(PendingEmailSignup)
             .where(
@@ -292,6 +296,7 @@ class WebAuthService:
         normalized = normalize_email(email)
         if not normalized or purpose not in {"login", "password_reset"}:
             return False
+        await self._ensure_not_banned(normalized)
         identity = await self.session.scalar(
             select(UserIdentity).where(
                 UserIdentity.provider == IdentityProvider.EMAIL,
@@ -301,7 +306,11 @@ class WebAuthService:
         if identity is None:
             return False
         user = await self.session.get(User, identity.user_id)
-        if user is None or user.status == UserStatus.SUSPENDED:
+        if user is None:
+            return False
+        if user.status == UserStatus.SUSPENDED:
+            raise WebAuthError("account_banned", "Your profile is banned.")
+        if user.status != UserStatus.ACTIVE:
             return False
         now = datetime.now(UTC)
         latest = await self.session.scalar(
@@ -377,6 +386,7 @@ class WebAuthService:
         normalized = normalize_email(email)
         if not normalized or not code.isdigit() or len(code) != 6:
             raise WebAuthError("invalid_code", "Enter the six-digit code from your email.")
+        await self._ensure_not_banned(normalized)
         challenge = await self.session.scalar(
             select(EmailAuthChallenge)
             .where(
@@ -412,7 +422,9 @@ class WebAuthService:
         if user is None:
             raise WebAuthError("identity_broken", "This identity is not linked correctly.")
         if user.status == UserStatus.SUSPENDED:
-            raise WebAuthError("account_suspended", "This account is suspended.")
+            raise WebAuthError("account_banned", "Your profile is banned.")
+        if user.status != UserStatus.ACTIVE:
+            raise WebAuthError("account_unavailable", "This profile is not available.")
         return user, identity
 
     def _auth_code_digest(self, email: str, purpose: str, code: str) -> str:
@@ -432,10 +444,15 @@ class WebAuthService:
         secret = self.settings.app_secret_key.get_secret_value().encode("utf-8")
         return hmac.new(secret, requested_ip.encode("utf-8"), hashlib.sha256).hexdigest()
 
+    async def _ensure_not_banned(self, normalized_email: str) -> None:
+        if await identifier_is_banned(self.session, self.settings, normalized_email):
+            raise WebAuthError("account_banned", "Your profile is banned.")
+
     async def signin_email(self, *, email: str, password: str) -> User:
         normalized = normalize_email(email)
         if not normalized:
             raise WebAuthError("invalid_email", "Enter a valid email address.")
+        await self._ensure_not_banned(normalized)
         password = password or ""
         if not password:
             raise WebAuthError("invalid_login", "Email or password is incorrect.")
@@ -453,7 +470,9 @@ class WebAuthService:
         if user is None:
             raise WebAuthError("identity_broken", "This identity is not linked correctly.")
         if user.status == UserStatus.SUSPENDED:
-            raise WebAuthError("account_suspended", "This account is suspended.")
+            raise WebAuthError("account_banned", "Your profile is banned.")
+        if user.status != UserStatus.ACTIVE:
+            raise WebAuthError("account_unavailable", "This profile is not available.")
         user.last_seen_at = datetime.now(UTC)
         await self.session.flush()
         return user
@@ -491,7 +510,7 @@ class WebAuthService:
         ):
             return None
         user = await self.session.get(User, row.user_id)
-        if user is None or user.status == UserStatus.SUSPENDED:
+        if user is None or user.status != UserStatus.ACTIVE:
             return None
         row.last_seen_at = now
         user.last_seen_at = now

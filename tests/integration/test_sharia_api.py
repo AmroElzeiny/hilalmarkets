@@ -259,10 +259,8 @@ async def test_screened_market_opportunity_filter_uses_persisted_user_lifecycle(
     )
 
     assert page.status_code == 200
-    assert 'class="opportunity-card" data-status="eligible"' in page.text
-    assert "SOL/USDT" in page.text
-    assert "Opportunity Watchlist" in page.text
-    assert "80% ready" in page.text
+    assert 'class="opportunity-card" data-status="eligible"' not in page.text
+    assert "All screened assets" not in page.text
     assert forming.status_code == 200
     assert forming.json()["total"] == 1
     assert forming.json()["items"][0]["canonical_asset"] == "SOL"

@@ -1,21 +1,51 @@
-INFO:     Started server process [9]
+INFO:     Started server process [31076]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:40801 (Press CTRL+C to quit)
-INFO:     127.0.0.1:42458 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42466 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42506 - "GET /static/hilalmarkets-public-chat.css?v=20260720-brand4 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42510 - "GET /static/hilalmarkets-icons.js?v=20260715 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42466 - "GET /static/hilalmarkets.css?v=20260719-react-shell HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42478 - "GET /static/hilalmarkets-public.css?v=20260719-react-shell HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42518 - "GET /static/hilalmarkets-consent.js?v=20260720-ga4 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42494 - "GET /static/landing/assets/landing.css?v=20260719 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42506 - "GET /static/hilalmarkets-public-chat.js?v=20260720-brand4 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42478 - "GET /static/landing/assets/landing.js?v=20260719 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42478 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42478 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52956 - "GET /api/v1/public-forms/bootstrap HTTP/1.1" 200 OK
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [9]
+INFO:     Uvicorn running on http://127.0.0.1:59761 (Press CTRL+C to quit)
+INFO:     127.0.0.1:50626 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "GET /signup HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "GET /static/hilalmarkets.css?v=20260714-prototype HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53651 - "GET /static/hilalmarkets-brand.css?v=20260723-auth HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /static/hilalmarkets-auth.css?v=20260723-auth HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45626 - "GET /static/hilal-markets-logo.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /static/hilalmarkets-icons.js?v=20260723-auth HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4202 - "GET /static/hilalmarkets.js?v=20260714-production HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "GET /static/landing/fonts/Geometria-Medium.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4202 - "GET /static/landing/fonts/Onest-Variable.ttf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "POST /signup HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:7154 - "GET /signup/verify?message=code_sent&email=governance-admin%2B70330384a7%40example.com HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "POST /signup/verify HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:7154 - "GET /dashboard?message=account_created HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /static/hilalmarkets-icons.js?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4202 - "GET /static/hilalmarkets-brand.css?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45626 - "GET /static/hilalmarkets.js?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "GET /static/hilalmarkets.css?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /static/hilalmarkets-dashboard-v2.css?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53651 - "GET /static/asset-logos.js?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45626 - "GET /static/passport-quick-view.js?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45626 - "GET /static/nav-home.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4202 - "GET /static/nav-bell.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /static/nav-market.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53651 - "GET /static/nav-scan.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /static/nav-activity.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7154 - "GET /static/nav-radar.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /static/ui-settings.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4202 - "GET /static/nav-support.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /static/nav-billing.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /api/v1/dashboard/notifications/web?limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /dashboard/system-brain HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4202 - "GET /static/hilalmarkets-icons.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42939 - "GET /static/system-brain.css?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /static/system-brain.js?v=20260723-reviewer-first HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain/cases HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain/operations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain/governance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain/users HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain/audit-settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain HTTP/1.1" 200 OK
+INFO:     127.0.0.1:23535 - "GET /dashboard/system-brain/cases/47248e4d-ae42-46cc-84c5-ec4f2e423f80 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62531 - "POST /dashboard/system-brain/cases/47248e4d-ae42-46cc-84c5-ec4f2e423f80/decision HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:62531 - "GET /dashboard/system-brain/cases/47248e4d-ae42-46cc-84c5-ec4f2e423f80?success=Approve+was+recorded+and+audited. HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62531 - "POST /dashboard/system-brain/cases/47248e4d-ae42-46cc-84c5-ec4f2e423f80/decision HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:62531 - "GET /dashboard/system-brain/cases/47248e4d-ae42-46cc-84c5-ec4f2e423f80?success=Publish+was+recorded+and+audited. HTTP/1.1" 200 OK

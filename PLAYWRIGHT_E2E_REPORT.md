@@ -1,12 +1,12 @@
 # Playwright E2E Report
 
-Generated: 2026-07-20T04:29:36.176249+00:00
+Generated: 2026-07-23T13:45:14.958308+00:00
 
-Base URL tested: http://127.0.0.1:40801
+Base URL tested: http://127.0.0.1:59761
 Browser: chromium
 App auto-started: True
-Command: `/usr/local/bin/python -m pytest tests/browser/test_landing_analytics.py -k consent_cta_sections_and_waitlist_funnel -q`
-App command: `/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 40801`
+Command: `.venv\Scripts\python.exe -m pytest tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa -q --tb=short`
+App command: `C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 59761`
 
 ## Result
 
@@ -23,7 +23,7 @@ App command: `/usr/local/bin/python -m uvicorn ai_market_monitor.main:app --host
 
 | Test | Outcome | Seconds |
 | --- | --- | ---: |
-| `tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated` | passed | 8.55 |
+| `tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa` | passed | 23.596 |
 
 ## Runtime Checks
 

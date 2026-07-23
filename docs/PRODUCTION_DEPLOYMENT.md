@@ -152,7 +152,10 @@ SHARIA_SCRAPER_CONCURRENCY=1
 SHARIA_SCRAPER_OBEY_ROBOTS=true
 SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS=1
 SHARIA_PILOT_SYMBOLS=BTC,ETH,SOL
-SHARIA_PROCESS_REMAINING_IMPORTS=false
+SHARIA_PROCESS_REMAINING_IMPORTS=true
+FASSET_SHARIAH_REPORTS_URL=https://www.fasset.com/shariah-reports
+FASSET_MINIMUM_PROFILE_COUNT=100
+SHARIA_SOURCE_SCAN_INTERVAL_HOURS=240
 SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true
 ```
 
@@ -162,15 +165,16 @@ monitor until qualified governance has published the named methodology, its asse
 evidence-backed assessments, the Watchlist has resolved a screened universe, and a human operator
 has reviewed its exclusions and explicitly resumed it.
 
-The `TRACEDGE_DEV_TEST_V1` migration seed is schema/test data only. It is non-executable, hidden
-from ordinary methodology selection, and must never be promoted or represented as a religious
-ruling. Verify the Compliance Watch review queue, cache invalidation, one provisional safety hold,
-one approved status transition, and in-app plus staging Telegram drift delivery before
-opening production scanning.
+Migration `6f02832495ab` archives `TRACEDGE_DEV_TEST_V1` and every methodology with the
+`TRACEDGE_DEV_TEST_` prefix. Development methodologies are not selectable or publishable. Verify
+the Compliance Watch review queue, cache invalidation, one provisional safety hold, one approved
+status transition, and in-app plus staging Telegram drift delivery before opening production
+scanning.
 
-After the migration, open `/system-brain` and choose **Import SC Malaysia now**, or run
-`celery -A ai_market_monitor.worker call ai_market_monitor.process_sc_malaysia_imports` from the
-worker container. Importing creates evidence and review cases; it does not publish passports.
+After the migration, open `/dashboard/system-brain` and choose **Check official source**, or run
+`celery -A ai_market_monitor.worker call ai_market_monitor.process_sharia_authority_imports` from
+the worker container. The task checks SC Malaysia and Fasset independently. Importing creates
+retained evidence and review cases; it does not approve or publish Passports.
 An authenticated administrator must review and approve each evidence package before the asset can
 appear in the customer screener. An active methodology with zero approved assessments therefore
 produces an intentionally empty, clearly labelled screener.

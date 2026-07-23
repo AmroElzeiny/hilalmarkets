@@ -2,6 +2,19 @@
 
 Date: 2026-07-11
 
+## Authenticated Evaluator Integration
+
+The repository-root `HilalMarkets_Chatbot_AI_Evaluator` package is integrated as
+`src/hm_chatbot_eval` against the real authenticated Setup Chat session/message path and Strategy
+Canvas. It consumes a server-built contract derived from the validated production
+`StrategyDefinition`, canonical approval hash, immutable approved version, and Canvas tree.
+Test-only one-shot LLM faults and allowlisted model/prompt versions fail closed outside
+`APP_ENV=test`; deployed startup rejects their configuration. Stable UI selectors and response
+capture compare browser output with backend data, while the adapter refuses public Support pages.
+
+Exact schemas, field mappings, commands, CI/manual boundaries, and generated report paths are
+documented in [AI_SETUP_CHAT_EVALUATOR.md](AI_SETUP_CHAT_EVALUATOR.md).
+
 ## 1. Summary
 
 TraceEdge now opens new monitor creation directly in the persistent, branded AI Setup Assistant.

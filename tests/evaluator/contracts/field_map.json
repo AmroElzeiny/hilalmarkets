@@ -1,0 +1,50 @@
+{
+  "alerts": "alerts",
+  "approval_state": "approval",
+  "assumptions": "assumptions",
+  "canonical_hash": "canonical_hash",
+  "canvas_edges": "canvas.edges",
+  "canvas_groups": "canvas.groups",
+  "canvas_nodes": "canvas.nodes",
+  "condition_groups": "condition_groups",
+  "confidence": "confidence",
+  "context_timeframe": {
+    "match": "contains",
+    "path": "timeframes"
+  },
+  "direction": "direction",
+  "excluded_symbol": {
+    "match": "contains",
+    "path": "exclusions"
+  },
+  "exclusions": "exclusions",
+  "filters": "filters",
+  "must_not_assign_sharia_status": "must_not_assign_sharia_status",
+  "nested_groups": "condition_groups",
+  "operator": {
+    "match": "contains",
+    "path": "operators"
+  },
+  "operators": "operators",
+  "provider_required_capabilities": "provider_required_capabilities",
+  "requires_explicit_approval": "requires_explicit_approval",
+  "strategy_version": "approval.strategy_version_number",
+  "symbol": {
+    "match": "contains",
+    "path": "symbols"
+  },
+  "symbols": "symbols",
+  "threshold_percent": {
+    "match": "contains_numeric",
+    "path": "thresholds"
+  },
+  "thresholds": "thresholds",
+  "timeframe": {
+    "match": "contains",
+    "path": "timeframes"
+  },
+  "timeframes": "timeframes",
+  "universe": "strategy.universe",
+  "unsupported_capabilities": "unsupported_capabilities",
+  "version_hash": "approval.immutable_version_hash"
+}

@@ -98,7 +98,6 @@ from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkService,
 )
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
-from ai_market_monitor.services.test_market_quotes import TEST_METHODOLOGY_NOTICE
 from ai_market_monitor.services.trials import TrialError, TrialLifecycleService
 from ai_market_monitor.services.verified_strategy import seal_alert_proof
 from ai_market_monitor.services.web_auth import (
@@ -169,6 +168,25 @@ SUPPORTED_TIMEZONES = [
     "Asia/Tokyo",
     "Australia/Sydney",
 ]
+
+
+def _timezone_options(at: datetime | None = None) -> list[dict[str, str]]:
+    instant = at or datetime.now(UTC)
+    options: list[dict[str, str]] = []
+    for timezone_name in SUPPORTED_TIMEZONES:
+        offset = instant.astimezone(ZoneInfo(timezone_name)).utcoffset() or timedelta()
+        total_minutes = int(offset.total_seconds() // 60)
+        sign = "+" if total_minutes >= 0 else "-"
+        hours, minutes = divmod(abs(total_minutes), 60)
+        options.append(
+            {
+                "value": timezone_name,
+                "label": f"{timezone_name} (UTC{sign}{hours:02d}:{minutes:02d})",
+            }
+        )
+    return options
+
+
 ALERT_DAYS = [
     "Every Day",
     "Monday",
@@ -1219,10 +1237,6 @@ async def screened_market_page(
         selected_live_exchange = "binance"
     screening = ShariaScreeningService(session, settings)
     methodologies = await screening.selectable_market_methodologies()
-    executable_methodologies = [
-        row for row in methodologies if not methodology_is_development_only(row)
-    ]
-    test_methodology = await screening.development_methodology()
     preference = await session.scalar(
         select(DashboardPreference).where(DashboardPreference.user_id == user.id)
     )
@@ -1240,47 +1254,6 @@ async def screened_market_page(
             methodology_id = UUID(str(preference_methodology))
         except ValueError:
             methodology_id = None
-    use_test_market = bool(
-        screening.development_methodologies_enabled()
-        and (
-            (test_methodology is not None and methodology_id == test_methodology.id)
-            or (methodology_id is None and not executable_methodologies)
-        )
-    )
-    if use_test_market:
-        active_watchlists = int(
-            await session.scalar(
-                select(func.count(Strategy.id)).where(
-                    Strategy.user_id == user.id,
-                    Strategy.status == StrategyStatus.ACTIVE,
-                    Strategy.archived_at.is_(None),
-                )
-            )
-            or 0
-        )
-        return templates.TemplateResponse(
-            request,
-            "hilal/dashboard/market.html",
-            await _context(
-                request=request,
-                session=session,
-                settings=settings,
-                user=user,
-                page="screened_market",
-                title="Sharia Market",
-                live_test_market=True,
-                test_methodology_notice=TEST_METHODOLOGY_NOTICE,
-                methodologies=methodologies,
-                selected_methodology_id=(
-                    test_methodology.id if test_methodology is not None else None
-                ),
-                selected_exchange=selected_live_exchange,
-                selected_quote_asset=quote_asset.upper(),
-                selected_view="assets",
-                market_search=search or "",
-                active_watchlists=active_watchlists,
-            ),
-        )
     if methodology_id is not None:
         selected_row = await session.get(ShariaMethodology, methodology_id)
         if selected_row is not None and methodology_is_development_only(selected_row):
@@ -1672,7 +1645,7 @@ async def monitors_page(
             settings=settings,
             user=user,
             page="watchlists",
-            title="Watch Plans",
+            title="Watchlists",
             monitor_cards=await _monitor_cards_context(session, user),
         ),
     )
@@ -2915,7 +2888,7 @@ async def settings_page(
             page="settings",
             title="Settings",
             preference=preference,
-            supported_timezones=SUPPORTED_TIMEZONES,
+            supported_timezones=_timezone_options(),
             supported_themes=SUPPORTED_THEMES,
             alert_days=ALERT_DAYS,
             alert_hours=ALERT_HOURS,
@@ -3138,7 +3111,7 @@ async def dashboard_admin_page(
 ) -> RedirectResponse:
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Administrator role required")
-    return _redirect("/system-brain")
+    return _redirect("/dashboard/system-brain")
 
 
 @router.get("/dashboard/referrals", response_class=HTMLResponse, include_in_schema=False)

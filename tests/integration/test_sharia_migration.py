@@ -32,6 +32,14 @@ def test_sharia_migration_identifiers_fit_postgresql_limit():
         / "alembic"
         / "versions"
         / "e7f8a9b0c1d2_add_passport_governance_checkout_email.py",
+        repo_root
+        / "alembic"
+        / "versions"
+        / "6f02832495ab_add_fasset_and_aggregate_methodologies.py",
+        repo_root
+        / "alembic"
+        / "versions"
+        / "70a1395b26cf_add_system_brain_user_controls.py",
     ]
     explicit_names = [
         name
@@ -75,6 +83,27 @@ def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):
             WHERE code = 'SC_MALAYSIA_SAC_REFERENCE'
             """
         ).fetchone()
+        additional_methodologies = connection.execute(
+            """
+            SELECT code, name, status, rules_json
+            FROM sharia_methodologies
+            WHERE code IN ('ALL_APPROVED_METHODOLOGIES', 'FASSET_SHARIAH_REPORTS')
+            ORDER BY code
+            """
+        ).fetchall()
+        development_methodology = connection.execute(
+            """
+            SELECT status
+            FROM sharia_methodologies
+            WHERE code = 'TRACEDGE_DEV_TEST_V1'
+            """
+        ).fetchone()
+        external_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info('external_assessments')"
+            ).fetchall()
+        }
         canonical_assets = connection.execute(
             "SELECT COUNT(*) FROM canonical_assets"
         ).fetchone()[0]
@@ -96,8 +125,23 @@ def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):
         "sharia_passport_problem_reports",
         "billing_checkout_attempts",
         "payment_email_deliveries",
+        "account_bans",
+        "account_admin_actions",
+        "account_email_deliveries",
     }.issubset(table_names)
     assert methodology == ("SC_MALAYSIA_SAC_REFERENCE", "2026.03", "active")
+    assert [(row[0], row[1], row[2]) for row in additional_methodologies] == [
+        ("ALL_APPROVED_METHODOLOGIES", "All", "active"),
+        ("FASSET_SHARIAH_REPORTS", "Fasset", "active"),
+    ]
+    assert '"aggregate_view": true' in additional_methodologies[0][3]
+    assert '"source_adapter": "fasset"' in additional_methodologies[1][3]
+    assert development_methodology == ("archived",)
+    assert {
+        "source_family",
+        "source_reference",
+        "structured_facts",
+    }.issubset(external_columns)
     assert canonical_assets == 0
     assert published_assets == 0
 
@@ -168,6 +212,6 @@ def test_sharia_migration_pauses_existing_active_monitors(tmp_path):
     assert migration[1] == "paused_pending_approved_methodology"
     assert "approved active methodology" in migration[2]
     assert development is not None
-    assert development[0] == "draft"
+    assert development[0] == "archived"
     assert development[1].startswith("TRACEDGE_DEV_TEST_")
     assert '"executable": false' in development[2]

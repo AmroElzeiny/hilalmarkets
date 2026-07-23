@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import monotonic
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy import and_, delete, or_, select, update
@@ -1658,7 +1658,10 @@ class PublicChatService:
     def feedback_token_matches(self, inquiry: PublicInquiry, supplied: str) -> bool:
         return hmac.compare_digest(self.feedback_token(inquiry), supplied)
 
-    async def email_delivery_state(self, inquiry_id: UUID) -> str:
+    async def email_delivery_state(
+        self,
+        inquiry_id: UUID,
+    ) -> Literal["queued", "sent", "partial", "retrying"]:
         states = [
             state
             for state in (

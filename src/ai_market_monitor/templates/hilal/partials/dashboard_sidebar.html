@@ -1,14 +1,16 @@
 <aside class="sidebar" data-sidebar data-hilal-sidebar>
   <div class="sidebar-head">
-    <a class="logo" href="{{ url_for('dashboard_home') }}" aria-label="Hilal Markets home">
-      <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="">
-      <span class="logo-wordmark">hilal markets<small>Evidence-led monitoring</small></span>
+    <a class="logo dashboard-brand-logo" href="{{ url_for('dashboard_home') }}" aria-label="Hilal Markets home">
+      <span class="dashboard-logo-viewport" aria-hidden="true">
+        <img class="dashboard-logo-art" src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="">
+      </span>
     </a>
     <button class="btn btn-secondary btn-icon sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close menu"><span data-icon="close" data-icon-class="icon"></span></button>
   </div>
 
   <button class="sidebar-collapse" type="button" data-sidebar-collapse aria-expanded="true" aria-label="Minimize side menu" title="Minimize side menu">
-    <span data-icon="panel" data-icon-class="icon-sm"></span>
+    <span data-sidebar-collapse-icon="minimize" data-icon="panel" data-icon-class="icon-sm"></span>
+    <span data-sidebar-collapse-icon="expand" data-icon="panel_expand" data-icon-class="icon-sm" hidden></span>
     <span>Minimize menu</span>
   </button>
 
@@ -19,7 +21,7 @@
       {% for item in group.items %}
       {% set is_active = page == item.page or page in item.active_pages %}
       <a class="nav-item {{ 'is-active' if is_active else '' }}" href="{{ url_for(item.endpoint) }}" {% if is_active %}aria-current="page"{% endif %}>
-        <span data-icon="{{ item.icon }}" data-icon-class="icon"></span>
+        <span class="nav-icon nav-icon-{{ item.icon }}" aria-hidden="true"></span>
         <span>{{ item.label }}</span>
       </a>
       {% endfor %}

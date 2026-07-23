@@ -12,6 +12,11 @@ env/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.chatbot_eval_cache.sqlite3
+chatbot_eval_runs/
+# Supplied evaluator distribution bundle. The integrated, maintained package
+# lives at src/hm_chatbot_eval.
+HilalMarkets_Chatbot_AI_Evaluator/
 .mypy_cache/
 .ruff_cache/
 .coverage

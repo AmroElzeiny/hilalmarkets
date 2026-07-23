@@ -192,7 +192,11 @@ async def test_scan_schedule_is_idempotent_and_partial_job_persists_success(test
         assert await session.scalar(select(func.count(ConditionRuntimeState.id))) == 3
         assert await session.scalar(select(func.count(NearMissSnapshot.id))) == 0
         assert await session.scalar(select(func.count(Alert.id))) == 1
-        assert await session.scalar(select(func.count(AlertDelivery.id))) == 1
+        alert_deliveries = (await session.scalars(select(AlertDelivery))).all()
+        assert {delivery.channel for delivery in alert_deliveries} == {
+            DeliveryChannel.TELEGRAM,
+            DeliveryChannel.WEB,
+        }
 
         deliveries = await TelegramDeliveryService(
             session,

@@ -128,7 +128,7 @@ DASHBOARD_NAVIGATION = (
         "Watch",
         (
             NavigationItem(
-                "Watch Plans",
+                "Watchlists",
                 "watchlists_page",
                 "watchlists",
                 "radar",
@@ -140,7 +140,7 @@ DASHBOARD_NAVIGATION = (
                 ),
             ),
             NavigationItem(
-                "Check the Market Now",
+                "Market Scanner",
                 "dashboard_check_market",
                 "check_market",
                 "scan",
@@ -188,7 +188,7 @@ PUBLIC_PAGES = (
         "/features",
         "Features",
         (
-            "Explore Sharia-screened discovery, guided Watch Plans, evidence, "
+            "Explore Sharia-screened discovery, guided Watchlists, evidence, "
             "and compliance monitoring."
         ),
         "hilal/public/features.html",
@@ -200,7 +200,7 @@ PUBLIC_PAGES = (
         "How It Works",
         (
             "See how HilalMarkets turns a screened market idea into an approved, "
-            "explainable Watch Plan."
+            "explainable Watchlist."
         ),
         "hilal/public/how_it_works.html",
     ),
@@ -229,7 +229,7 @@ PUBLIC_PAGES = (
         "/help",
         "Help Center",
         (
-            "Get clear answers about screened markets, Watch Plans, alerts, evidence, "
+            "Get clear answers about screened markets, Watchlists, alerts, evidence, "
             "billing, and account safety."
         ),
         "hilal/public/help.html",
@@ -360,25 +360,25 @@ HELP_CATEGORIES: tuple[HelpCategory, ...] = (
                 "question": "Why can a screening status change?",
                 "answer": (
                     "Projects, evidence, and methodologies can change. Compliance Watch "
-                    "preserves the change and shows its effect on your Watch Plans."
+                    "preserves the change and shows its effect on your Watchlists."
                 ),
             },
         ),
     },
     {
         "slug": "watch-plans",
-        "title": "Watch Plans and market checks",
+        "title": "Watchlists and market scans",
         "icon": "radar",
         "articles": (
             {
-                "question": "What is a Watch Plan?",
+                "question": "What is a Watchlist?",
                 "answer": (
-                    "A Watch Plan is your approved set of measurable market conditions, "
+                    "A Watchlist is your approved set of measurable market conditions, "
                     "screened universe, alert timing, and compliance-change behavior."
                 ),
             },
             {
-                "question": "What is Check the Market Now?",
+                "question": "What is Market Scanner?",
                 "answer": (
                     "It runs the same validated rules once against the eligible screened "
                     "universe. It does not create continuous monitoring unless you choose to."

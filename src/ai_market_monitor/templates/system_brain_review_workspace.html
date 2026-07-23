@@ -1,0 +1,293 @@
+{% set case = detail.case %}
+{% set asset = detail.asset %}
+{% set external = detail.external %}
+{% set analysis = detail.ai %}
+{% set methodology = detail.methodology %}
+<section class="brain-section brain-review-layout brain-reveal" data-testid="system-brain-review-board">
+  <div class="brain-review-content">
+    <a class="brain-back" href="/dashboard/system-brain/cases"><i data-icon="arrow"></i> Back to cases</a>
+
+    <article class="brain-review-hero">
+      <div class="brain-asset-mark">{{ (asset.symbol if asset else '?')[:3] }}</div>
+      <div class="brain-review-identity">
+        <div class="brain-chip-row">
+          <span class="brain-status {{ case.state }}">{{ case.state.replace('_',' ') }}</span>
+          <span class="brain-status risk-{{ case.priority }}">{{ case.priority }}</span>
+          {% if detail.overdue %}<span class="brain-status overdue">SLA overdue</span>{% endif %}
+          {% if case.state == 'safety_hold' %}<span class="brain-status failed">Safety hold</span>{% endif %}
+        </div>
+        <h2>{{ asset.name if asset else case.title }}{% if asset %} <small>{{ asset.symbol }}</small>{% endif %}</h2>
+        <div class="brain-review-meta">
+          <span>Identity: {{ asset.mapping_state.replace('_',' ').title() if asset else 'Unresolved' }}</span>
+          <span>{{ case.case_type.replace('_',' ').title() }}</span>
+          <span>{{ case.case_reference }}</span>
+          <span>{{ case.assigned_reviewer_id or 'Unassigned' }}</span>
+          <span>Open {{ detail.case_age_hours }}h &middot; {% if case.due_at %}Due {{ case.due_at.strftime('%d %b %Y, %H:%M UTC') }}{% else %}No SLA deadline{% endif %}</span>
+          <span>Evidence: {{ detail.latest_evidence_at.strftime('%d %b %Y, %H:%M UTC') if detail.latest_evidence_at else 'No snapshot attached' }}</span>
+          <span>{{ methodology.name if methodology else 'Methodology unavailable' }}{% if methodology %} v{{ methodology.version }}{% endif %}</span>
+          <span>Published status: {{ detail.current_published_status.replace('_',' ').title() }}</span>
+          <span>Hold: {{ 'Active' if case.state == 'safety_hold' else 'None' }}</span>
+        </div>
+      </div>
+    </article>
+
+    <details class="brain-panel brain-assignment-panel brain-progressive">
+      <summary><span><i data-icon="user"></i> Assignment and SLA</span><small>Change ownership or priority</small></summary>
+      <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/assignment" data-guarded-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Assigned reviewer<select name="assigned_reviewer_id"><option value="">Unassigned</option>{% for reviewer in detail.reviewers %}<option value="{{ reviewer.id }}" {{ 'selected' if case.assigned_reviewer_id == reviewer.id else '' }}>{{ reviewer.display_name or reviewer.id }}</option>{% endfor %}</select></label>
+        <label>Priority<select name="priority">{% for value in ['low','normal','high','urgent'] %}<option value="{{ value }}" {{ 'selected' if case.priority == value else '' }}>{{ value.title() }}</option>{% endfor %}</select></label>
+        <label class="wide">Reason<input name="reason" minlength="5" maxlength="500" required placeholder="Why is ownership or priority changing?"></label>
+        <button class="brain-action-button" type="submit"><i data-icon="check"></i>Save</button>
+      </form>
+    </details>
+
+    <article class="brain-panel brain-case-reason">
+      <div class="brain-panel-title"><i data-icon="alert"></i><div><p class="brain-kicker">1 · Why this case exists</p><h3>{{ detail.why_case.trigger }}</h3></div></div>
+      <dl class="brain-facts brain-facts-four">
+        <div><dt>Trigger</dt><dd>{{ detail.why_case.trigger }}</dd></div>
+        <div><dt>Affected area</dt><dd>{{ detail.why_case.assessment_area }}</dd></div>
+        <div><dt>Severity</dt><dd>{{ detail.why_case.severity.title() }}</dd></div>
+        <div><dt>Required action</dt><dd>{{ detail.why_case.required_action }}</dd></div>
+      </dl>
+    </article>
+
+    <article class="brain-panel">
+      <div class="brain-section-head compact">
+        <div class="brain-panel-title"><i data-icon="passport"></i><div><p class="brain-kicker">2 · Essential evidence</p><h3>Evidence relevant to this review</h3></div></div>
+        <span class="brain-status neutral">{{ detail.snapshots|length }} retained</span>
+      </div>
+      {% if external %}
+      <div class="brain-authority-line">
+        <strong>{{ external.source_authority }}</strong>
+        <span>{{ external.exact_status_wording }}</span>
+        <small>{{ external.decision_date.strftime('%d %b %Y') }} · {{ external.regulatory_scope }}</small>
+        <a href="{{ external.source_url }}" target="_blank" rel="noopener">Open authoritative source</a>
+      </div>
+      {% endif %}
+      <div class="brain-source-list">
+        {% for item in detail.snapshots[:3] %}
+        <section>
+          <div><span class="brain-status {{ item.status }}">{{ item.status }}</span><strong>{{ item.title }}</strong><small>{{ item.category.replace('_',' ').title() }} · {{ item.retrieved_at.strftime('%d %b %Y, %H:%M UTC') }}</small></div>
+          <p>{{ item.summary }}</p>
+          <div class="brain-evidence-meta">
+            <span>Source date: {{ item.source_date.strftime('%d %b %Y') if item.source_date else 'Not recorded' }}</span>
+            <span>Freshness: {{ item.freshness }}</span>
+            <span>Completeness: {{ item.completeness }}</span>
+            <span>{{ item.contradiction_status }}</span>
+          </div>
+          <div class="brain-source-actions"><a href="{{ item.url }}" target="_blank" rel="noopener">Open source</a><span>Evidence {{ item.hash[:12] }}</span></div>
+        </section>
+        {% else %}<p class="brain-empty">No retained evidence snapshot is attached. Approval remains blocked by the existing governance validation.</p>{% endfor %}
+      </div>
+      {% if detail.snapshots|length > 3 %}
+      <details class="brain-inline-details"><summary>Show {{ detail.snapshots|length - 3 }} secondary evidence records</summary>
+        <div class="brain-source-list">{% for item in detail.snapshots[3:] %}<section><strong>{{ item.title }}</strong><p>{{ item.summary }}</p><a href="{{ item.url }}" target="_blank" rel="noopener">Open source</a></section>{% endfor %}</div>
+      </details>
+      {% endif %}
+    </article>
+
+    {% if detail.evidence_changes %}
+    <article class="brain-panel">
+      <div class="brain-panel-title"><i data-icon="activity"></i><div><p class="brain-kicker">3 · Previous versus current</p><h3>Material evidence changes</h3></div></div>
+      <div class="brain-change-list">
+        {% for change in detail.evidence_changes %}
+        <section>
+          <div><strong>{{ change.source }}</strong><span class="brain-status {{ 'warning' if change.material else 'neutral' }}">{{ 'Material' if change.material else 'Non-material' }}</span></div>
+          {% for line in change.removed[:3] %}<p class="brain-diff removed"><b>Previous</b> {{ line }}</p>{% endfor %}
+          {% for line in change.added[:3] %}<p class="brain-diff added"><b>Current</b> {{ line }}</p>{% endfor %}
+          <small>Evidence snapshot {{ change.snapshot_id }}</small>
+        </section>
+        {% endfor %}
+      </div>
+    </article>
+    {% endif %}
+
+    {% if detail.missing_evidence or detail.contradictions %}
+    <article class="brain-panel">
+      <div class="brain-panel-title"><i data-icon="warning"></i><div><p class="brain-kicker">4 · Unresolved</p><h3>Gaps and contradictions</h3></div></div>
+      <div class="brain-detail-grid">
+        <section><h4>Missing evidence</h4><ul class="brain-findings">{% for item in detail.missing_evidence %}<li><i data-icon="alert"></i><span>{{ item }} <strong>Action: obtain a current authoritative source.</strong></span></li>{% else %}<li class="clear"><i data-icon="check"></i><span>No missing evidence is recorded.</span></li>{% endfor %}</ul></section>
+        <section><h4>Contradictions</h4><ul class="brain-findings">{% for item in detail.contradictions %}<li><i data-icon="alert"></i><span>{{ item }} <strong>Action: resolve the conflicting sources before approval.</strong></span></li>{% else %}<li class="clear"><i data-icon="check"></i><span>No unresolved contradiction is recorded.</span></li>{% endfor %}</ul></section>
+      </div>
+    </article>
+    {% endif %}
+
+    <article class="brain-panel" data-testid="ai-field-assistance">
+      <div class="brain-panel-title"><i data-icon="spark"></i><div><p class="brain-kicker">5 · AI assistance by field</p><h3>Verify each factual suggestion</h3><p>Suggestions never become reviewer decisions unless you explicitly record them.</p></div></div>
+      <div class="brain-field-list">
+        {% for field in detail.review_fields %}
+        <details class="brain-review-field" {{ 'open' if loop.index <= 2 else '' }}>
+          <summary>
+            <span><strong>{{ field.label }}</strong><small>{{ field.source_status|title }}</small></span>
+            {% if field.review %}<span class="brain-status success">{{ field.review.disposition }}</span>{% elif field.ai_suggestion is not none %}<span class="brain-status warning">AI suggestion ready</span>{% else %}<span class="brain-status neutral">Pending</span>{% endif %}
+          </summary>
+          <div class="brain-field-grid">
+            <section>
+              <p class="brain-kicker">Current human-reviewed value</p>
+              <p>{{ field.current_value if field.current_value is not none else 'No independently reviewed value has been recorded.' }}</p>
+              <small>Source status: {{ field.source_status }} · Evidence freshness follows the attached snapshot dates.</small>
+            </section>
+            <section class="brain-ai-suggestion">
+              <p class="brain-kicker">AI suggestion</p>
+              <p>{{ field.ai_suggestion if field.ai_suggestion is not none else 'AI suggested value will appear here.' }}</p>
+              <small>{% if field.confidence is not none %}Confidence {{ (field.confidence * 100)|round|int }}%.{% else %}AI confidence and limitations will appear here.{% endif %}</small>
+              <small>{% if field.source_refs %}Sources: {{ field.source_refs|join(', ') }}{% else %}AI evidence summary will appear here.{% endif %}</small>
+              <small>{{ field.uncertainty or 'AI suggested follow-up question will appear here.' }}</small>
+            </section>
+          </div>
+          <form class="brain-field-review-form" method="post" action="/dashboard/system-brain/cases/{{ case.id }}/ai-field-review" data-guarded-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="field_key" value="{{ field.key }}">
+            <label>Reviewer value<textarea name="reviewer_value" maxlength="4000" placeholder="Verify and edit the factual value before accepting it.">{{ field.current_value if field.current_value is not none else field.ai_suggestion if field.ai_suggestion is not none else '' }}</textarea></label>
+            <label>Reason<input name="reason" minlength="3" maxlength="1200" required placeholder="Why are you accepting, changing, or rejecting this suggestion?"></label>
+            <div class="brain-field-actions">
+              <button name="disposition" value="accepted" type="submit" {{ 'disabled' if field.ai_suggestion is none else '' }}>Accept</button>
+              <button name="disposition" value="edited" type="submit">Save edited</button>
+              <button name="disposition" value="rejected" type="submit">Reject</button>
+              <button name="disposition" value="irrelevant" type="submit">Irrelevant</button>
+            </div>
+          </form>
+          {% if case.state not in ['published','rejected','stored','superseded','safety_hold'] %}
+          <form class="brain-regenerate-form" method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-guarded-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="return_to_research">
+            <input type="hidden" name="reason" value="Regenerate the factual AI suggestion for {{ field.label }} against the retained evidence.">
+            <button type="submit" data-confirm="Return this case to research to regenerate its factual suggestions?">Regenerate through research</button>
+          </form>
+          {% endif %}
+          {% if field.missing_evidence %}<p class="brain-field-warning">Missing: {{ field.missing_evidence|join('; ') }}</p>{% endif %}
+          {% if field.contradictions %}<p class="brain-field-warning danger">Contradictions: {{ field.contradictions|join('; ') }}</p>{% endif %}
+        </details>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="brain-panel">
+      <div class="brain-panel-title"><i data-icon="spark"></i><div><p class="brain-kicker">6 · AI case summary</p><h3>Non-binding factual research</h3></div></div>
+      <div class="brain-warning-card"><i data-icon="info"></i><p>AI research assistance. This is not a Sharia ruling, approval, rejection, or publication decision.</p></div>
+      {% if analysis %}
+      <p>{{ detail.ai_review_cue.human_review_reason if detail.ai_review_cue else 'No factual summary was retained.' }}</p>
+      <dl class="brain-facts brain-facts-four">
+        <div><dt>Attention</dt><dd>{{ detail.ai_review_cue.recommended_next_action.replace('_',' ').title() if detail.ai_review_cue and detail.ai_review_cue.recommended_next_action else 'Human review' }}</dd></div>
+        <div><dt>Completeness</dt><dd>{{ (detail.dossier.evidence_completeness * 100)|round|int if detail.dossier else 0 }}%</dd></div>
+        <div><dt>Model</dt><dd>{{ analysis.model }} · {{ analysis.reasoning_effort }}</dd></div>
+        <div><dt>Prompt / time</dt><dd>{{ analysis.prompt_version }} · {{ analysis.created_at.strftime('%d %b %Y, %H:%M UTC') }}</dd></div>
+      </dl>
+      <div class="brain-detail-grid compact">
+        <section><h4>Contradictions</h4><p>{{ detail.contradictions|join('; ') if detail.contradictions else 'No contradiction was detected in the validated AI output.' }}</p></section>
+        <section><h4>Unresolved questions</h4><p>{{ detail.missing_evidence|join('; ') if detail.missing_evidence else 'No missing evidence item was listed in the validated AI output.' }}</p></section>
+        <section><h4>Limitations</h4><p>{{ detail.limitations|join('; ') if detail.limitations else 'No additional limitation was retained.' }}</p></section>
+        <section><h4>Suggested workflow</h4><p>{{ detail.ai_review_cue.recommended_next_action.replace('_',' ').title() if detail.ai_review_cue and detail.ai_review_cue.recommended_next_action else 'Independent human review' }}</p></section>
+      </div>
+      {% else %}<p class="brain-empty">AI evidence summary will appear here after a validated research run.</p>{% endif %}
+    </article>
+
+    <details class="brain-panel brain-progressive">
+      <summary><span><i data-icon="activity"></i> 7 · History and immutable audit</span><small>{{ detail.timeline|length }} events</small></summary>
+      <ol class="brain-timeline">{% for event in detail.timeline %}<li><span></span><div><strong>{{ event.label }}</strong><p>{{ event.detail }}</p><time>{{ event.at.strftime('%d %b %Y, %H:%M:%S UTC') }}</time></div></li>{% endfor %}</ol>
+    </details>
+  </div>
+
+  <aside class="brain-decision-panel" aria-label="Review decision" data-testid="human-decision-panel">
+    <div class="brain-decision-state">
+      <p class="brain-kicker">Human governance</p>
+      <h3>{{ case.state.replace('_',' ').title() }}</h3>
+      <p>Only actions valid for this state are shown. Review and publication remain separate.</p>
+    </div>
+    <details class="brain-impact-preview">
+      <summary>What will change?</summary>
+      <ul>
+        <li>{{ detail.impact_preview.approval_state }}</li>
+        <li>{{ detail.impact_preview.publication }}</li>
+        <li>{{ detail.impact_preview.previous_version }}</li>
+        <li>{{ detail.impact_preview.evidence_snapshot_count }} evidence snapshots will be referenced.</li>
+        <li>{{ detail.impact_preview.customer_visibility }}</li>
+        <li>{{ detail.impact_preview.second_approval }}</li>
+        <li>{{ detail.impact_preview.notifications }}</li>
+      </ul>
+    </details>
+    <section class="brain-rationale-draft">
+      <p class="brain-kicker">AI-assisted rationale draft</p>
+      <p data-ai-rationale-source>{{ detail.ai_review_cue.human_review_reason if detail.ai_review_cue and detail.ai_review_cue.human_review_reason else 'Based on the reviewed evidence, the AI-generated factual rationale will appear here. The reviewer must verify, edit, and explicitly accept it before use.' }}</p>
+      <small>This text remains linked to the immutable AI snapshot. Accepting only copies it into your editable rationale.</small>
+      <button type="button" data-accept-ai-rationale {{ 'disabled' if not detail.ai_review_cue }}>Use as editable draft</button>
+    </section>
+    <p class="brain-mobile-decision-note">Terminal governance actions are available on a desktop-sized review workspace.</p>
+
+    {% if case.state == 'approved' and case.publication_state in ['approved_not_published','awaiting_second_approval'] %}
+    <div class="brain-terminal pending"><i data-icon="check"></i><strong>{{ case.publication_state.replace('_',' ').title() }}</strong><small>The decision is not public.</small></div>
+    <button class="brain-action-button brain-publish-launch brain-terminal-action" type="button" data-open-publication><i data-icon="passport"></i>Review publication impact</button>
+
+    {% elif case.state == 'ready_for_review' %}
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if detail.methodology_contract_error %}<div class="brain-terminal danger"><strong>Approval blocked</strong><small>{{ detail.methodology_contract_error }}</small></div>{% endif %}
+      <div class="brain-criterion-list">
+        {% for criterion in detail.review_criteria %}
+        <fieldset>
+          <legend>{{ criterion.label }}{% if criterion.required %} · Required{% endif %}</legend>
+          <details><summary>Evidence requirement</summary><p>{{ criterion.description }}</p></details>
+          <input type="hidden" name="criterion_key" value="{{ criterion.key }}">
+          <input type="hidden" name="criterion_label" value="{{ criterion.label }}">
+          <select name="criterion_outcome" aria-label="Outcome for {{ criterion.label }}" required><option value="" disabled {{ 'selected' if not criterion.outcome else '' }}>Choose after review</option>{% for value in criterion.allowed_outcomes %}<option value="{{ value }}" {{ 'selected' if criterion.outcome == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select>
+          <textarea name="criterion_reason" minlength="10" maxlength="1200" required placeholder="Independent evidence finding">{{ criterion.reviewer_explanation or '' }}</textarea>
+        </fieldset>
+        {% endfor %}
+      </div>
+      <details class="brain-decision-extras">
+        <summary>Use-specific scope decisions</summary>
+        <div class="brain-criterion-list">{% for use_case in detail.review_use_cases %}<fieldset><legend>{{ use_case.label }}{% if use_case.required %} · Required{% endif %}</legend><input type="hidden" name="use_key" value="{{ use_case.key }}"><select name="use_decision" required><option value="" disabled {{ 'selected' if not use_case.decision else '' }}>Choose after review</option>{% for value in use_case.allowed_decisions %}<option value="{{ value }}" {{ 'selected' if use_case.decision == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select><textarea name="use_reason" minlength="10" maxlength="1200" required placeholder="Independent scope finding">{{ use_case.reason or '' }}</textarea><input name="use_scope" minlength="3" maxlength="1000" required value="{{ use_case.scope or use_case.default_scope }}"></fieldset>{% endfor %}</div>
+      </details>
+      <label>Decision rationale<textarea id="decision-reason" name="reason" minlength="10" maxlength="5000" required placeholder="Verify and record your independent evidence-based reasoning."></textarea></label>
+      <details class="brain-decision-extras" data-decision-extras><summary>Qualifications, gaps, or evidence requests</summary><textarea name="qualifications" placeholder="One qualification per line"></textarea><textarea name="acknowledged_gaps" placeholder="One acknowledged gap per line"></textarea><textarea name="requested_evidence" placeholder="One evidence request per line"></textarea></details>
+      <div class="brain-decision-actions brain-terminal-action">
+        <button name="action" value="approve" data-confirm="Record approval without publishing?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve</button>
+        <button name="action" value="approve_with_qualification" data-confirm="Record qualified approval without publishing?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve with qualification</button>
+        <button name="action" value="request_more_evidence" class="secondary">Request evidence</button>
+        <button name="action" value="return_to_research" class="secondary">Return to research</button>
+        {% if case.case_type in ['material_source_change','user_factual_report'] %}<button name="action" value="dismiss_false_positive" data-confirm="Dismiss this review trigger as a false positive and retain the audit record?" class="secondary">Dismiss false positive</button>{% endif %}
+        <button name="action" value="reject_and_store" data-confirm="Reject and retain the immutable evidence?" class="danger">Reject and store</button>
+      </div>
+    </form>
+
+    {% elif case.state == 'safety_hold' %}
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="request_safety_hold_removal">
+      <label>Reason to begin fresh review<textarea name="reason" minlength="10" maxlength="5000" required></textarea></label>
+      <button class="brain-action-button brain-terminal-action" type="submit" data-confirm="Begin a fresh review? This does not reactivate the Passport.">Review hold removal</button>
+    </form>
+
+    {% elif case.done_at or case.state in ['published','rejected','stored','superseded'] %}
+    <div class="brain-terminal"><strong>{{ case.state.replace('_',' ').title() }}</strong><small>{{ case.publication_state.replace('_',' ').title() }}</small></div>
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="reopen"><label>Reason to reopen<textarea name="reason" minlength="10" maxlength="5000" required></textarea></label><button class="brain-action-button brain-terminal-action" type="submit" data-confirm="Reopen as a new review without changing history?">Reopen review</button></form>
+    {% if detail.active_publication %}<form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="place_safety_hold"><label>Safety-hold reason<textarea name="reason" minlength="10" maxlength="5000" required></textarea></label><button class="brain-action-button danger brain-terminal-action" type="submit" data-confirm="Place the public Passport on safety hold?">Place safety hold</button></form>{% endif %}
+
+    {% else %}
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Operational reason<textarea name="reason" minlength="5" maxlength="5000" required></textarea></label>
+      <label>Evidence requested<textarea name="requested_evidence"></textarea></label>
+      <div class="brain-decision-actions">
+        {% if case.state in ['draft','research_failed','needs_evidence'] %}<button name="action" value="{{ 'retry_research' if case.state == 'research_failed' else 'start_research' }}" class="approve">{{ 'Retry research' if case.state == 'research_failed' else 'Start research' }}</button>{% endif %}
+        {% if case.state in ['researching','needs_evidence'] %}<button name="action" value="mark_ready_for_review" class="approve">Mark ready</button>{% endif %}
+        <button name="action" value="request_more_evidence" class="secondary">Request evidence</button>
+        <button name="action" value="add_admin_note" class="secondary">Add note</button>
+      </div>
+    </form>
+    {% endif %}
+  </aside>
+
+  {% if case.state == 'approved' and case.publication_state in ['approved_not_published','awaiting_second_approval'] %}
+  <dialog class="brain-publication-dialog" data-publication-dialog>
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="publish">
+      <button class="brain-dialog-close" type="button" data-close-publication aria-label="Close"><i data-icon="close"></i></button>
+      <p class="brain-kicker">Deterministic impact preview</p><h2>Publish this approved immutable Passport?</h2>
+      <ul class="brain-plain-list"><li>{{ detail.impact_preview.previous_version }}</li><li>{{ detail.impact_preview.customer_visibility }}</li><li>{{ detail.impact_preview.second_approval }}</li></ul>
+      <label>Publication reason<textarea name="reason" minlength="10" maxlength="5000" required></textarea></label>
+      <div class="brain-dialog-actions"><button type="button" class="brain-action-button secondary" data-close-publication>Cancel</button><button type="submit" class="brain-action-button">Publish approved version</button></div>
+    </form>
+  </dialog>
+  {% endif %}
+</section>

@@ -76,11 +76,15 @@ jobs:
           alembic upgrade 1acbd2e3f405
           alembic upgrade head
       - run: ruff check .
-      - run: mypy src/ai_market_monitor
+      - run: mypy src/ai_market_monitor src/hm_chatbot_eval
       - run: python scripts/check_api_route_security.py
       - run: python scripts/check_release_invariants.py
       - run: python scripts/check_jinja_templates.py
       - run: python scripts/check_javascript.py
+      - name: Verify authenticated Setup Chat evaluator contracts
+        run: |
+          python scripts/export_setup_chat_eval_contracts.py --check
+          pytest tests/evaluator
       - name: Full backend test suite
         run: pytest --ignore=tests/browser --junitxml=reports/backend-results.xml
       - name: Verify tests did not modify tracked artifacts

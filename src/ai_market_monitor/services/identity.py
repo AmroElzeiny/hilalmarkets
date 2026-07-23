@@ -3,9 +3,11 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import User, UserIdentity
-from ai_market_monitor.db.models.enums import IdentityProvider
+from ai_market_monitor.db.models.enums import IdentityProvider, UserStatus
 from ai_market_monitor.schemas.onboarding import IdentityInput
+from ai_market_monitor.services.account_admin import identifier_is_banned
 
 
 class IdentityConflictError(ValueError):
@@ -19,13 +21,23 @@ def normalize_identifier(identity: IdentityInput) -> str | None:
 
 
 class IdentityService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
+        self.settings = settings
 
     async def resolve_or_create(
         self, identity: IdentityInput, *, trusted_provider_assertion: bool = False
     ) -> tuple[User, UserIdentity, bool]:
         normalized = normalize_identifier(identity)
+        asserted_email = (
+            str(identity.email).strip().casefold() if identity.email is not None else None
+        )
+        if asserted_email and await identifier_is_banned(
+            self.session,
+            self.settings,
+            asserted_email,
+        ):
+            raise IdentityConflictError("Your profile is banned.")
         identity_matches = [
             and_(
                 UserIdentity.provider == identity.provider,
@@ -49,6 +61,10 @@ class IdentityService:
             existing_user = await self.session.get(User, existing.user_id)
             if existing_user is None:
                 raise IdentityConflictError("Identity references a missing account")
+            if existing_user.status == UserStatus.SUSPENDED:
+                raise IdentityConflictError("Your profile is banned.")
+            if existing_user.status != UserStatus.ACTIVE:
+                raise IdentityConflictError("This profile is not available.")
             existing_user.last_seen_at = datetime.now(UTC)
             return existing_user, existing, False
 
@@ -66,6 +82,12 @@ class IdentityService:
             )
             if email_identity:
                 user = await self.session.get(User, email_identity.user_id)
+                if user is None:
+                    raise IdentityConflictError("Identity references a missing account")
+                if user.status == UserStatus.SUSPENDED:
+                    raise IdentityConflictError("Your profile is banned.")
+                if user.status != UserStatus.ACTIVE:
+                    raise IdentityConflictError("This profile is not available.")
 
         created = user is None
         if user is None:
@@ -98,6 +120,10 @@ class IdentityService:
         *,
         trusted_provider_assertion: bool,
     ) -> UserIdentity:
+        if user.status == UserStatus.SUSPENDED:
+            raise IdentityConflictError("Your profile is banned.")
+        if user.status != UserStatus.ACTIVE:
+            raise IdentityConflictError("This profile is not available.")
         existing = await self.session.scalar(
             select(UserIdentity).where(
                 UserIdentity.provider == identity.provider,
@@ -111,6 +137,15 @@ class IdentityService:
         if not trusted_provider_assertion:
             raise IdentityConflictError("Identity must be verified before linking")
         normalized = normalize_identifier(identity)
+        asserted_email = (
+            str(identity.email).strip().casefold() if identity.email is not None else None
+        )
+        if asserted_email and await identifier_is_banned(
+            self.session,
+            self.settings,
+            asserted_email,
+        ):
+            raise IdentityConflictError("Your profile is banned.")
         linked = UserIdentity(
             user_id=user.id,
             provider=identity.provider,

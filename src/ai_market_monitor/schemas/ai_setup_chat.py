@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ai_market_monitor.schemas.setup_chat_evaluation import SetupChatEvaluationContract
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 
 
@@ -134,6 +135,7 @@ class SetupChatSessionResponse(BaseModel):
     scanner_result: dict[str, Any] | None = None
     approved_strategy_id: UUID | None
     approved_strategy_version_id: UUID | None
+    evaluation_contract: SetupChatEvaluationContract | None = None
     next_url: str | None = None
     updated_at: datetime
 

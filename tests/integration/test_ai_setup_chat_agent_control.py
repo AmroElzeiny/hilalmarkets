@@ -10,6 +10,7 @@ from ai_market_monitor.db.models import (
     AgentRun,
     AISetupChatMessage,
     AISetupChatSession,
+    AIUsageEvent,
 )
 from ai_market_monitor.schemas.ai_setup_chat import SetupChatInterviewResult
 from ai_market_monitor.schemas.strategy import InterpretationPreview
@@ -265,7 +266,20 @@ async def test_agent_market_snapshot_renders_authoritative_tool_payload(test_con
     assert latest["payload"]["provider_name"] == "SnapshotProvider"
     assert latest["payload"]["symbols_checked"] == 3
     assert latest["payload"]["evidence_refs"]
+    assert latest["payload"]["_traceedge_model"] == "gpt-5.4-nano"
+    assert latest["payload"]["usage"]["input_tokens"] == 100
+    assert latest["payload"]["usage"]["output_tokens"] == 30
+    assert latest["payload"]["usage"]["estimated_cost_usd"] > 0
+    assert latest["payload"]["usage"]["models"] == ["gpt-5.4-nano"]
     assert len([item for item in response.json()["messages"] if item["role"] == "user"]) == 1
+    async with test_context["session_factory"]() as session:
+        run = await session.scalar(select(AgentRun))
+        usage_events = list((await session.scalars(select(AIUsageEvent))).all())
+        assert usage_events
+        assert all(
+            event.raw_usage["_traceedge_correlation_id"] == run.correlation_id
+            for event in usage_events
+        )
 
 
 async def test_provider_unavailability_is_explicit_and_contains_no_invented_values(test_context):

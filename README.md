@@ -11,6 +11,16 @@ confidence/lint/assumption evidence, and creates an immutable approved strategy 
 explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
 to `gpt-5.4-nano` with low reasoning.
 
+The integrated `hm_chatbot_eval` package exercises this authenticated flow through the real
+session/message APIs and Strategy Canvas, with production-derived JSON Schemas, a canonical field
+map, and test-only LLM fault injection that deployed startup rejects. The public Support assistant
+is explicitly outside its target boundary. Deterministic evaluator checks run in CI; credentialed
+OpenAI and Playwright corpus runs remain manual or scheduled. See
+[docs/AI_SETUP_CHAT_EVALUATOR.md](docs/AI_SETUP_CHAT_EVALUATOR.md).
+For routine release confidence, `--mode budget --target both` covers every evaluator topic
+through the authenticated backend, repeats only UI/Canvas boundary topics in Playwright, judges
+the results, and enforces a measured all-in `$2.50` cap across evaluator and chatbot model calls.
+
 Bounded Agent Control selects among a small server-offered tool set for messy, multi-intent chat
 turns. The controlled-beta deployment profile serves the live coordinator to all authenticated
 beta users (`AI_AGENT_SHADOW_MODE=false`, `AI_AGENT_ROLLOUT_PERCENT=100`). Registry, compiler,
@@ -22,12 +32,16 @@ rollback. See
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
 persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
-and universe resolver. The SC Malaysia workflow imports only explicit asset-level source rows,
-verifies canonical identity, builds a factual evidence dossier, and creates an administrator review
-case. No asset is customer-visible until an application `ADMIN` approves publication. AI cannot set
-a religious status or publish an asset. See
+and universe resolver. Bounded authority adapters retain explicit asset-level results from SC
+Malaysia and Fasset, verify canonical identity, build factual evidence dossiers, and create
+administrator review cases. `All` is a deduplicated customer view over active published source
+methodologies, not a separate ruling. No imported asset is customer-visible until its exact evidence,
+identity, use scope, and methodology criteria are explicitly reviewed and separately published. AI
+cannot set a religious status, infer missing source facts, or publish an asset. See
 [docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md](docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md)
 for the architecture, source boundaries, deployment order, tests, and manual review requirements.
+The multi-authority extension is documented in
+[docs/FASSET_AND_MULTI_METHODOLOGY_IMPLEMENTATION_REPORT.md](docs/FASSET_AND_MULTI_METHODOLOGY_IMPLEMENTATION_REPORT.md).
 Current and historical Passport views now share one read model, alerts retain the exact Passport
 version used at evaluation, and System Brain separates review from publication with optional
 four-eyes enforcement. The first-party checkout uses the server Plan Catalog and a durable
@@ -102,6 +116,7 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md),
 [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md),
 [docs/PRIVATE_BETA_SOAK_RUNBOOK.md](docs/PRIVATE_BETA_SOAK_RUNBOOK.md),
 [docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md](docs/AI_SETUP_CHAT_IMPLEMENTATION_REPORT.md), and
+[docs/AI_SETUP_CHAT_EVALUATOR.md](docs/AI_SETUP_CHAT_EVALUATOR.md), and
 [docs/CAPABILITY_EXTENSION_PIPELINE.md](docs/CAPABILITY_EXTENSION_PIPELINE.md), and
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md), and
 [docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md](docs/SHARIA_FIRST_PRODUCT_LAYER_IMPLEMENTATION_REPORT.md), and

@@ -10,7 +10,7 @@ async def test_landing_page_serves_supplied_react_design_without_legacy_shell(
     response = await test_context["client"].get("/")
     assert response.status_code == 200
     content = response.text
-    assert "Strategy monitoring for Muslim crypto traders" in content
+    assert "<title>Halal Trading With Clarity | Hilal Markets</title>" in content
     assert 'id="root"' in content
     assert "/static/landing/assets/landing.css" in content
     assert "/static/landing/assets/landing.js" in content

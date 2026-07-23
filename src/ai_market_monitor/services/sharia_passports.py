@@ -17,12 +17,14 @@ from ai_market_monitor.db.models import (
     CanonicalAsset,
     DashboardPreference,
     ExchangeMarket,
+    ExternalAssessment,
     PublishedAssetAssessment,
     ReviewCase,
     ReviewDecision,
     SetupInstance,
     ShariaEvidenceSource,
     ShariaMethodology,
+    ShariaMonitoringRun,
     ShariaPassportProblemReport,
     SourceSnapshot,
     User,
@@ -246,6 +248,7 @@ class ShariaPassportReadService:
             next_review_at=passport.next_review_at,
             evidence_expires_at=passport.evidence_expires_at,
             source_scan_frequency_hours=passport.source_scan_frequency_hours,
+            next_source_scan_at=passport.next_source_scan_at,
             review_authority=passport.assessment.reviewed_by,
             decision_date=passport.decision_date,
             publication_date=passport.publication_date,
@@ -417,8 +420,17 @@ class ShariaPassportReadService:
         return AssetPassportResponse(
             assessment=self.screening.assessment_summary(assessment, methodology),
             why_this_status=assessment.summary,
+            official_methodology_reference=dict(
+                snapshot.get("official_methodology_reference")
+                or snapshot.get("official_sc_malaysia_reference")
+                or snapshot.get("official_fasset_reference")
+                or {}
+            ),
             official_sc_malaysia_reference=dict(
                 snapshot.get("official_sc_malaysia_reference") or {}
+            ),
+            official_fasset_reference=dict(
+                snapshot.get("official_fasset_reference") or {}
             ),
             hilalmarkets_factual_information_profile=dict(
                 snapshot.get("hilalmarkets_factual_information_profile") or {}
@@ -454,7 +466,11 @@ class ShariaPassportReadService:
         )
         if not snapshot:
             snapshot = {
+                "official_methodology_reference": (
+                    base.official_methodology_reference
+                ),
                 "official_sc_malaysia_reference": base.official_sc_malaysia_reference,
+                "official_fasset_reference": base.official_fasset_reference,
                 "hilalmarkets_factual_information_profile": (
                     base.hilalmarkets_factual_information_profile
                 ),
@@ -468,6 +484,7 @@ class ShariaPassportReadService:
         analysis = None
         source_snapshots: list[SourceSnapshot] = []
         publisher = None
+        scheduled_source_scan_at = None
         if publication is not None:
             asset = await self.session.get(CanonicalAsset, publication.canonical_asset_id)
             markets = list(
@@ -482,6 +499,50 @@ class ShariaPassportReadService:
             decision = await self.session.get(ReviewDecision, publication.review_decision_id)
             dossier = await self.session.get(AssetResearchDossier, publication.dossier_id)
             publisher = await self.session.get(User, publication.published_by_user_id)
+            schedule_candidates: list[datetime] = [
+                value
+                for value in (
+                    await self.session.scalars(
+                        select(ShariaMonitoringRun.next_due_at)
+                        .where(
+                            ShariaMonitoringRun.canonical_asset_id
+                            == publication.canonical_asset_id,
+                            ShariaMonitoringRun.next_due_at.is_not(None),
+                        )
+                        .order_by(ShariaMonitoringRun.created_at.desc())
+                        .limit(1)
+                    )
+                ).all()
+                if value is not None
+            ]
+            external = await self.session.get(
+                ExternalAssessment, publication.external_assessment_id
+            )
+            authority_run_due = (
+                await self.session.scalar(
+                    select(ShariaMonitoringRun.next_due_at)
+                    .where(
+                        ShariaMonitoringRun.run_kind.in_(
+                            {"sc_import", "fasset_import"}
+                        ),
+                        ShariaMonitoringRun.source_url == external.source_url,
+                        ShariaMonitoringRun.next_due_at.is_not(None),
+                    )
+                    .order_by(ShariaMonitoringRun.created_at.desc())
+                    .limit(1)
+                )
+                if external is not None
+                else None
+            )
+            if authority_run_due is not None:
+                schedule_candidates.append(authority_run_due)
+            scheduled_source_scan_at = min(
+                (
+                    value if value.tzinfo else value.replace(tzinfo=UTC)
+                    for value in schedule_candidates
+                ),
+                default=None,
+            )
             if dossier is not None:
                 analysis = await self.session.scalar(
                     select(AIAnalysisSnapshot)
@@ -509,13 +570,36 @@ class ShariaPassportReadService:
 
         identity = self._identity(base, asset, markets)
         profile = dict(base.hilalmarkets_factual_information_profile or {})
-        official = dict(base.official_sc_malaysia_reference or {})
+        official = dict(
+            base.official_methodology_reference
+            or base.official_sc_malaysia_reference
+            or base.official_fasset_reference
+            or {}
+        )
         next_review = _parse_datetime(
             profile.get("next_governance_review_at") or profile.get("next_review_date")
         )
         evidence_expires_at = _parse_datetime(profile.get("evidence_expires_at"))
         source_scan_frequency_hours = profile.get("source_monitor_scan_frequency_hours")
         last_verified = _parse_datetime(profile.get("last_evidence_verification"))
+        source_scan_hours = (
+            int(source_scan_frequency_hours)
+            if isinstance(source_scan_frequency_hours, int | float)
+            and source_scan_frequency_hours > 0
+            else None
+        )
+        latest_source_scan = max(
+            [
+                parsed
+                for value in (
+                    last_verified,
+                    *(item.retrieved_at for item in base.evidence_sources),
+                    *(item.retrieved_at for item in source_snapshots),
+                )
+                if (parsed := _parse_datetime(value)) is not None
+            ],
+            default=None,
+        )
         freshness = _freshness(
             status=base.assessment.status,
             next_review_at=min(
@@ -570,9 +654,11 @@ class ShariaPassportReadService:
         base.freshness = freshness
         base.next_review_at = next_review
         base.evidence_expires_at = evidence_expires_at
-        base.source_scan_frequency_hours = (
-            int(source_scan_frequency_hours)
-            if isinstance(source_scan_frequency_hours, int | float)
+        base.source_scan_frequency_hours = source_scan_hours
+        base.next_source_scan_at = (
+            scheduled_source_scan_at
+            or _next_source_scan_at(latest_source_scan, source_scan_hours)
+            if publication is None or publication.is_active
             else None
         )
         base.last_verified_at = last_verified or base.assessment.reviewed_at
@@ -715,6 +801,10 @@ class ShariaPassportReadService:
             official_website=asset.official_website,
             official_documentation=asset.official_documentation,
             provider_ids=dict(asset.provider_ids or {}),
+            logo_module_url=(
+                "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
+                f"dist/svgs/tokens/branded/{asset.symbol.upper()}.svg.js"
+            ),
             exchange_markets=[
                 PassportExchangeMarket(
                     exchange=row.exchange,
@@ -938,6 +1028,31 @@ def _parse_datetime(value: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _next_source_scan_at(
+    last_scan_at: datetime | None,
+    cadence_hours: int | None,
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    if last_scan_at is None or cadence_hours is None or cadence_hours <= 0:
+        return None
+    reference = now or datetime.now(UTC)
+    reference = reference if reference.tzinfo else reference.replace(tzinfo=UTC)
+    last_scan = (
+        last_scan_at
+        if last_scan_at.tzinfo
+        else last_scan_at.replace(tzinfo=UTC)
+    )
+    cadence = timedelta(hours=cadence_hours)
+    next_scan = last_scan + cadence
+    if next_scan > reference:
+        return next_scan
+    elapsed_intervals = int(
+        (reference - next_scan).total_seconds() // cadence.total_seconds()
+    )
+    return next_scan + cadence * (elapsed_intervals + 1)
 
 
 def _freshness(

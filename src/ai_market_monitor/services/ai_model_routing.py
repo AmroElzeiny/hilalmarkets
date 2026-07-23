@@ -130,6 +130,15 @@ def select_setup_model(
         if complex_route
         else settings.ai_setup_simple_reasoning_effort
     ) or settings.openai_reasoning_effort
+    from ai_market_monitor.services.ai_setup_evaluator_control import (
+        current_evaluator_target,
+    )
+
+    evaluator_target = current_evaluator_target()
+    if evaluator_target is not None:
+        model = evaluator_target.model
+        effort = evaluator_target.reasoning_effort
+        unique_reasons = (*unique_reasons, "evaluator_target_version")
     return AISetupModelRoute(
         model=model,
         reasoning_effort=effort,

@@ -104,6 +104,7 @@ class PassportIdentity(BaseModel):
     official_website: str | None = None
     official_documentation: str | None = None
     provider_ids: dict[str, str] = Field(default_factory=dict)
+    logo_module_url: str | None = None
     exchange_markets: list[PassportExchangeMarket] = Field(default_factory=list)
     identity_state: str = "unavailable"
     identity_verified_at: datetime | None = None
@@ -199,7 +200,9 @@ class PassportHistoricalReference(BaseModel):
 class AssetPassportResponse(BaseModel):
     assessment: AssetAssessmentSummary
     why_this_status: str
+    official_methodology_reference: dict[str, Any] = Field(default_factory=dict)
     official_sc_malaysia_reference: dict[str, Any] = Field(default_factory=dict)
+    official_fasset_reference: dict[str, Any] = Field(default_factory=dict)
     hilalmarkets_factual_information_profile: dict[str, Any] = Field(default_factory=dict)
     separate_use_status: dict[str, Any] = Field(default_factory=dict)
     reviewed_dimensions: list[dict[str, Any]]
@@ -213,6 +216,7 @@ class AssetPassportResponse(BaseModel):
     next_review_at: datetime | None = None
     evidence_expires_at: datetime | None = None
     source_scan_frequency_hours: int | None = None
+    next_source_scan_at: datetime | None = None
     decision_date: datetime | None = None
     publication_date: datetime | None = None
     last_verified_at: datetime | None = None
@@ -243,6 +247,7 @@ class PassportQuickViewResponse(BaseModel):
     next_review_at: datetime | None = None
     evidence_expires_at: datetime | None = None
     source_scan_frequency_hours: int | None = None
+    next_source_scan_at: datetime | None = None
     review_authority: str
     decision_date: datetime | None = None
     publication_date: datetime | None = None
@@ -316,13 +321,6 @@ class LiveMarketMethodologySummary(BaseModel):
     notice: str
 
 
-class TestMethodologySummary(LiveMarketMethodologySummary):
-    code: str = "TRACEDGE_DEV_TEST_V1"
-    name: str = "Test"
-    version: str = "1.0-test"
-    development_only: bool = True
-
-
 class LiveSpotMarketQuote(BaseModel):
     symbol: str
     canonical_asset: str
@@ -330,10 +328,10 @@ class LiveSpotMarketQuote(BaseModel):
     exchange: str
     quote_asset: str
     methodology_id: UUID | None = None
-    methodology_name: str = "Test"
-    methodology_version: str = "1.0-test"
-    status: str = "test_eligible"
-    status_label: str = "Halal (test)"
+    methodology_name: str = "Unavailable"
+    methodology_version: str = "unavailable"
+    status: str = "unavailable"
+    status_label: str = "Unavailable"
     reviewed_at: datetime | None = None
     passport_url: str | None = None
     bid: float | None = None

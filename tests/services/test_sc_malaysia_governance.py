@@ -40,6 +40,7 @@ from ai_market_monitor.services.sc_malaysia_import import (
     SCMalaysiaParser,
 )
 from ai_market_monitor.services.sharia_governance import (
+    FASSET_METHODOLOGY_CODE,
     SC_METHODOLOGY_CODE,
     ShariaAdminTelegramService,
     ShariaGovernanceError,
@@ -50,7 +51,10 @@ from ai_market_monitor.services.sharia_identity import (
     AssetIdentityError,
     CanonicalAssetMappingService,
 )
-from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
+from ai_market_monitor.services.sharia_passports import (
+    ShariaPassportReadService,
+    _next_source_scan_at,
+)
 from ai_market_monitor.services.sharia_research import (
     AIAnalysisResult,
     ShariaFactualAnalysis,
@@ -81,6 +85,19 @@ SC_HTML = """
   </tbody>
 </table></body></html>
 """
+
+
+def test_next_source_scan_advances_an_overdue_cadence():
+    now = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
+    last_scan = datetime(2026, 7, 20, 6, 0, tzinfo=UTC)
+
+    assert _next_source_scan_at(last_scan, 24, now=now) == datetime(
+        2026, 7, 24, 6, 0, tzinfo=UTC
+    )
+    assert _next_source_scan_at(now, 12, now=now) == datetime(
+        2026, 7, 23, 22, 0, tzinfo=UTC
+    )
+    assert _next_source_scan_at(None, 24, now=now) is None
 
 TEST_CRITERIA = [
     {
@@ -256,6 +273,63 @@ def _evidence_requirements() -> dict:
         "contradiction_policy": "block_any_unresolved",
         "review_cadence_days": 90,
     }
+
+
+def _fasset_methodology_rules() -> dict:
+    criteria = [
+        {
+            **item,
+            "evidence_categories": (
+                ["official_fasset_reference"]
+                if item["key"] == "official_methodology_reference"
+                else list(item["evidence_categories"])
+            ),
+        }
+        for item in TEST_CRITERIA
+    ]
+    asset_reference = {
+        **TEST_USE_CASES[0],
+        "key": "asset_level_fasset_reference",
+        "label": "Asset-level Fasset reference",
+        "evidence_categories": ["official_fasset_reference"],
+        "default_scope": "Asset-level verdict in the retained Fasset profile.",
+    }
+    return {
+        "schema_version": "1",
+        "criteria_version": "test.fasset.criteria.1",
+        "source_family": "fasset_shariah_reports",
+        "source_adapter": "fasset",
+        "executable": True,
+        "required_criteria": criteria,
+        "use_cases": [asset_reference, TEST_USE_CASES[1]],
+    }
+
+
+def _fasset_evidence_requirements() -> dict:
+    requirements = _evidence_requirements()
+    requirements["mandatory_source_categories"] = [
+        "canonical_identity",
+        "official_fasset_reference",
+        "factual_dossier",
+    ]
+    return requirements
+
+
+def _fasset_use_case_decisions() -> list[dict]:
+    return [
+        {
+            "key": "asset_level_fasset_reference",
+            "decision": "covered",
+            "reason": "The reviewer checked the exact retained Fasset profile and verdict.",
+            "scope": "Asset-level verdict in the retained Fasset profile.",
+        },
+        {
+            "key": "spot_ownership_and_monitoring",
+            "decision": "qualified",
+            "reason": "The reviewer limited coverage to spot ownership and monitoring.",
+            "scope": "Spot ownership and research monitoring only.",
+        },
+    ]
 
 
 def _criterion_decisions() -> list[dict]:
@@ -864,6 +938,65 @@ async def test_only_admin_can_publish_and_passport_keeps_two_layers(test_context
     assert attempt_count == 1
 
 
+async def test_fasset_publication_reuses_human_governance_and_keeps_source_layers(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        external = await session.get(ExternalAssessment, case.external_assessment_id)
+        assert external is not None
+        external.source_family = "fasset_shariah_reports"
+        external.source_authority = "Fasset published Shariah Reports"
+        external.source_url = "https://www.fasset.com/shariah-reports"
+        external.source_reference = "profile:1"
+        external.exact_status_wording = "Shariah Compliant"
+        external.sac_meeting_number = None
+        external.decision_date = None
+        external.regulatory_scope = "Asset-level Fasset Shariah profile"
+        external.structured_facts = {
+            "platform_purpose": "Peer-to-peer digital money.",
+            "token_utility": "Payments and value transfer.",
+        }
+        methodology.code = FASSET_METHODOLOGY_CODE
+        methodology.name = "Fasset"
+        methodology.governing_body = "Fasset published Shariah Reports"
+        methodology.rules_json = _fasset_methodology_rules()
+        methodology.evidence_requirements_json = _fasset_evidence_requirements()
+        reviewer = User(display_name="Fasset reviewer", role=UserRole.ADMIN)
+        session.add(reviewer)
+        await session.flush()
+
+        service = ShariaGovernanceService(session, test_context["settings"])
+        await service.approve_for_publication(
+            case.id,
+            admin_user_id=reviewer.id,
+            reason="The Fasset profile, identity, evidence, and product scope were reviewed.",
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_fasset_use_case_decisions(),
+        )
+        publication = await service.publish_approved(
+            case.id,
+            admin_user_id=reviewer.id,
+            reason="Publish the explicitly reviewed Fasset Passport.",
+        )
+        passport = await ShariaPassportReadService(
+            session,
+            test_context["settings"],
+        ).current("BTC", methodology_id=methodology.id)
+
+    assert publication.is_active is True
+    assert passport.official_sc_malaysia_reference == {}
+    assert passport.official_fasset_reference["source_family"] == (
+        "fasset_shariah_reports"
+    )
+    assert passport.official_fasset_reference["published_profile_facts"][
+        "token_utility"
+    ] == "Payments and value transfer."
+    assert "not Fasset's unpublished reasoning" in (
+        passport.hilalmarkets_factual_information_profile["notice"]
+    )
+
+
 async def test_review_publication_hold_and_restore_are_separate_immutable_actions(
     test_context,
 ):
@@ -1405,6 +1538,55 @@ async def _publish_for_monitoring(test_context, session):
     return publication
 
 
+async def test_passport_uses_exact_persisted_authority_scan_due_at(test_context):
+    async with test_context["session_factory"]() as session:
+        publication = await _publish_for_monitoring(test_context, session)
+        assessment = await session.get(
+            AssetShariaAssessment,
+            publication.asset_assessment_id,
+        )
+        external = await session.get(
+            ExternalAssessment,
+            publication.external_assessment_id,
+        )
+        assert assessment is not None
+        assert external is not None
+        exact_due_at = (
+            datetime.now(UTC).replace(microsecond=0)
+            + timedelta(hours=test_context["settings"].sharia_source_scan_interval_hours)
+        )
+        session.add(
+            ShariaMonitoringRun(
+                run_kind="sc_import",
+                idempotency_key=f"test-exact-authority-due:{publication.id}",
+                status="completed",
+                source_url=external.source_url,
+                started_at=exact_due_at
+                - timedelta(
+                    hours=test_context["settings"].sharia_source_scan_interval_hours
+                ),
+                completed_at=datetime.now(UTC),
+                next_due_at=exact_due_at,
+            )
+        )
+        await session.flush()
+
+        passport = await ShariaPassportReadService(
+            session,
+            test_context["settings"],
+        ).current(
+            assessment.canonical_asset,
+            methodology_id=assessment.methodology_id,
+        )
+
+    actual_due_at = passport.next_source_scan_at
+    assert actual_due_at is not None
+    if actual_due_at.tzinfo is None:
+        actual_due_at = actual_due_at.replace(tzinfo=UTC)
+    assert actual_due_at == exact_due_at
+    assert passport.source_scan_frequency_hours == 240
+
+
 class BTCUniverseProvider:
     async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
         return ["BTC/USDT"]
@@ -1422,7 +1604,6 @@ async def test_deployed_universe_requires_publication_verified_identity_and_acti
                 "app_env": "staging",
                 "sharia_screening_enforced": True,
                 "sharia_allow_legacy_unscreened_local": False,
-                "sharia_test_market_enabled": False,
             }
         )
         definition = load_strategy()

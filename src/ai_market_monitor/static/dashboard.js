@@ -664,6 +664,13 @@
     return leaves;
   }
 
+  function collectConditionGroups(node, groups = []) {
+    if (!node || node.node_type !== "group") return groups;
+    groups.push(node);
+    safeArray(node.children).forEach((child) => collectConditionGroups(child, groups));
+    return groups;
+  }
+
   function logicOperators() {
     const configured = safeArray(capabilityRegistry.logic_operators);
     return configured.length
@@ -1338,7 +1345,7 @@
       const screening = loadBuilderScreeningContext();
       if (screening.enforced && !schema.universe?.sharia_policy?.methodology_id) {
         blocking.push(
-          "An approved screening methodology is required before this Watch Plan can run.",
+          "An approved screening methodology is required before this Watchlist can run.",
         );
       }
       if (!safeArray(schema.alerts?.channels).length) blocking.push("Choose at least one alert destination.");
@@ -1780,6 +1787,7 @@
 
     function boardNodes() {
       const leaves = collectConditionLeaves(schema.conditions);
+      const nestedGroups = collectConditionGroups(schema.conditions).slice(1);
       const filterCount = leaves.filter((condition) => (
         ["market_filter", "risk"].includes(condition.condition_type) ||
         /trend|volume|session|context|liquidity|volatility/i.test(condition.label || "")
@@ -1808,13 +1816,23 @@
         },
         {
           id: "entry_logic",
+          contractId: schema.conditions?.key ? `group:${schema.conditions.key}` : null,
           type: "Condition Logic",
           title: operatorLabel(schema.conditions?.operator),
           body: `${leaves.length} deterministic condition${leaves.length === 1 ? "" : "s"} feeding this monitor.`,
           action: "conditions",
         },
+        ...nestedGroups.map((group, index) => ({
+          id: `group:${group.key || index}`,
+          contractId: `group:${group.key || index}`,
+          type: "Logic Group",
+          title: operatorLabel(group.operator),
+          body: `${safeArray(group.children).length} child rule${safeArray(group.children).length === 1 ? "" : "s"} in this nested group.`,
+          action: "group",
+        })),
         ...leaves.map((condition, index) => ({
           id: condition.key || `condition-${index}`,
+          contractId: `condition:${condition.key || `condition-${index}`}`,
           type: titleize(condition.condition_type || "Condition"),
           title: condition.label || `Condition ${index + 1}`,
           body: conditionSentence(condition),
@@ -1865,9 +1883,18 @@
         ["risk", "proof_review"],
         ["alerts", "proof_review"],
       ];
-      collectConditionLeaves(schema.conditions).forEach((condition) => {
-        if (condition.key) connections.push(["entry_logic", condition.key]);
-      });
+      function connectConditionTree(group, parentId) {
+        safeArray(group?.children).forEach((child, index) => {
+          if (child.node_type === "group") {
+            const groupId = `group:${child.key || index}`;
+            connections.push([parentId, groupId]);
+            connectConditionTree(child, groupId);
+            return;
+          }
+          if (child.key) connections.push([parentId, child.key]);
+        });
+      }
+      connectConditionTree(schema.conditions, "entry_logic");
       return connections.filter(
         ([from, to]) => ids.has(from) && ids.has(to) && !boardDeletedConnections.has(boardConnectionKey(from, to)),
       );
@@ -2078,7 +2105,8 @@
         </svg>
         ${positioned.map((node) => {
         return `
-          <article class="strategy-board-node" data-testid="strategy-board-node" data-board-node="${escapeHtml(node.id)}" data-board-action="${escapeHtml(node.action)}" style="left:${node.position.x}px;top:${node.position.y}px">
+          <article class="strategy-board-node" data-testid="strategy-board-node" data-board-node="${escapeHtml(node.id)}" data-board-action="${escapeHtml(node.action)}" data-canvas-contract-id="${escapeHtml(node.contractId || "")}" style="left:${node.position.x}px;top:${node.position.y}px">
+            ${node.contractId ? `<span hidden data-testid="${node.action === "group" || node.action === "conditions" ? "strategy-canvas-group" : "strategy-canvas-node"}" data-canvas-node-id="${escapeHtml(node.contractId)}"></span>` : ""}
             <span>${escapeHtml(node.type)}</span>
             <strong>${escapeHtml(node.title)}</strong>
             <p>${escapeHtml(node.body)}</p>
@@ -4748,8 +4776,10 @@
         "flask-conical": "info",
         "circle-x": "close",
       };
-      const svg = window.icon?.(aliases[name] || name, "icon") || "";
-      return `data:image/svg+xml,${encodeURIComponent(svg.replaceAll("currentColor", `#${color}`))}`;
+      const svg = (window.icon?.(aliases[name] || name, "icon") || "")
+        .replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ')
+        .replaceAll("currentColor", `#${color}`);
+      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
     };
 
     function updateObservabilityUrl() {
@@ -4761,10 +4791,32 @@
 
     function renderRadar(payload) {
       if (!radarList) return;
-      const items = safeArray(payload.items);
+      const requestedState = radarState?.value || "";
+      const requestedSort = radarSort?.value || "readiness";
+      const items = safeArray(payload.items)
+        .filter((item) => !requestedState || item.state === requestedState)
+        .sort((left, right) => {
+          if (requestedSort === "newest_change") {
+            return new Date(right.last_changed_at || right.last_evaluated_at || 0)
+              - new Date(left.last_changed_at || left.last_evaluated_at || 0);
+          }
+          if (requestedSort === "symbol") {
+            return String(left.symbol || "").localeCompare(String(right.symbol || ""));
+          }
+          if (requestedSort === "blocker") {
+            return String(left.blocker?.label || "").localeCompare(
+              String(right.blocker?.label || ""),
+            );
+          }
+          const leftTotal = safeNumber(left.required?.total);
+          const rightTotal = safeNumber(right.required?.total);
+          const leftReadiness = leftTotal ? safeNumber(left.required?.passed) / leftTotal : 0;
+          const rightReadiness = rightTotal ? safeNumber(right.required?.passed) / rightTotal : 0;
+          return rightReadiness - leftReadiness;
+        });
       radarList.setAttribute("aria-busy", "false");
       radarSummary.innerHTML = items.length
-        ? `<strong>${payload.total}</strong><span>candidates in this view</span><span>${items.filter((item) => item.state === "confirmation_pending" || item.state === "near_miss").length} close now</span>`
+        ? `<strong>${items.length}</strong><span>candidates in this view</span><span>${items.filter((item) => item.state === "confirmation_pending" || item.state === "near_miss").length} close now</span>`
         : "";
       if (!items.length) {
         radarList.innerHTML = `<div class="observability-empty"><img src="${iconUrl("radar")}" alt=""><strong>No readiness evidence yet</strong><p>The next completed worker evaluation will add candidates here.</p></div>`;
@@ -4917,10 +4969,62 @@
       const params = new URLSearchParams(window.location.search);
       if (radarState) radarState.value = params.get("state") || "";
       if (radarSort) radarSort.value = params.get("sort") || "readiness";
-      radarState?.addEventListener("change", () => { radarPage = 1; updateObservabilityUrl(); loadRadar(); });
-      radarSort?.addEventListener("change", () => { radarPage = 1; updateObservabilityUrl(); loadRadar(); });
+      const lifecycleStack = document.querySelector(".journey-panel > .stack");
+      const lifecycleCards = [...document.querySelectorAll("[data-lifecycle-card]")];
+      let lifecycleEmpty = document.querySelector("[data-lifecycle-filter-empty]");
+      if (lifecycleStack && lifecycleCards.length && !lifecycleEmpty) {
+        lifecycleEmpty = document.createElement("div");
+        lifecycleEmpty.className = "empty-state compact";
+        lifecycleEmpty.dataset.lifecycleFilterEmpty = "";
+        lifecycleEmpty.innerHTML = "<h3>No journeys match these filters</h3><p>Choose another state or sort order to review the retained lifecycle evidence.</p>";
+        lifecycleEmpty.hidden = true;
+        lifecycleStack.after(lifecycleEmpty);
+      }
+      const groupedLifecycleState = (state) => {
+        if (["candidate_detected", "detected", "forming"].includes(state)) return "forming";
+        if (["near_confirmation", "armed"].includes(state)) return "confirmation_pending";
+        if (["confirmed", "alert_sent", "entry_active", "entry_zone_active", "entry_touched"].includes(state)) return "confirmed";
+        if (["entry_zone_missed", "entry_missed", "suppressed", "blocked"].includes(state)) return "near_miss";
+        if (["data_unavailable"].includes(state)) return "provider_data_error";
+        return state;
+      };
+      const syncLifecycleCards = () => {
+        if (!lifecycleStack || !lifecycleCards.length) return;
+        const requestedState = radarState?.value || "";
+        const requestedSort = radarSort?.value || "readiness";
+        const ordered = [...lifecycleCards].sort((left, right) => {
+          if (requestedSort === "newest_change") {
+            return new Date(right.dataset.lifecycleChanged || 0)
+              - new Date(left.dataset.lifecycleChanged || 0);
+          }
+          if (requestedSort === "symbol") {
+            return String(left.querySelector(".coin h3")?.textContent || "").localeCompare(
+              String(right.querySelector(".coin h3")?.textContent || ""),
+            );
+          }
+          if (requestedSort === "blocker") {
+            const blocker = (card) => card.querySelector(
+              "[data-lifecycle-details] > div:nth-child(2) .method-result strong",
+            )?.textContent || "";
+            return blocker(left).localeCompare(blocker(right));
+          }
+          return safeNumber(right.dataset.lifecycleScore) - safeNumber(left.dataset.lifecycleScore);
+        });
+        let visibleCount = 0;
+        ordered.forEach((card) => {
+          const visible = !requestedState
+            || groupedLifecycleState(card.dataset.lifecycleState) === requestedState;
+          card.hidden = !visible;
+          if (visible) visibleCount += 1;
+          lifecycleStack.append(card);
+        });
+        if (lifecycleEmpty) lifecycleEmpty.hidden = visibleCount !== 0;
+      };
+      radarState?.addEventListener("change", () => { radarPage = 1; updateObservabilityUrl(); syncLifecycleCards(); loadRadar(); });
+      radarSort?.addEventListener("change", () => { radarPage = 1; updateObservabilityUrl(); syncLifecycleCards(); loadRadar(); });
       radarView?.addEventListener("click", () => { const compact = radarList.classList.toggle("compact"); radarView.setAttribute("aria-pressed", String(compact)); radarView.querySelector("span").textContent = compact ? "Expanded" : "Compact"; });
       bottleneckRequired?.addEventListener("change", loadBottlenecks);
+      syncLifecycleCards();
       Promise.all([loadRadar(), loadHealth(), loadBottlenecks()]);
       const interval = Math.max(5, safeNumber(observabilityRoot.dataset.pollSeconds, 15)) * 1000;
       window.setInterval(() => { if (!document.hidden) Promise.all([loadRadar({ quiet: true }), loadHealth()]); }, interval);
@@ -5724,7 +5828,7 @@
     const saveButton = form?.querySelector("[data-settings-save]");
     const markDirty = () => {
       if (!saveButton) return;
-      saveButton.hidden = false;
+      saveButton.disabled = false;
       saveButton.classList.add("visible");
     };
     form?.addEventListener("input", markDirty);

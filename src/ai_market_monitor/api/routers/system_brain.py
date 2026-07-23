@@ -18,8 +18,14 @@ from ai_market_monitor.api.dependencies import UserPrincipal
 from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.db.models import AuditEvent, UserIdentity
+from ai_market_monitor.db.models import AccountEmailDelivery, AuditEvent, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
+from ai_market_monitor.schemas.system_brain import SystemBrainAssistantRequest
+from ai_market_monitor.services.account_admin import (
+    AccountAdminError,
+    SystemBrainUserAdminService,
+)
+from ai_market_monitor.services.account_emails import AccountEmailOutboxService
 from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
 )
@@ -27,7 +33,10 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
-from ai_market_monitor.services.system_brain import CapabilityCoverageService
+from ai_market_monitor.services.system_brain_assistant import (
+    SystemBrainAssistantService,
+    SystemBrainAssistantUnavailable,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
@@ -97,6 +106,48 @@ def _verify_csrf(settings: Settings, user_id: UUID, supplied: str) -> None:
         raise HTTPException(status_code=403, detail="Invalid form token.")
 
 
+def _apply_case_view(
+    cases: list[dict],
+    *,
+    view: str | None,
+    reviewer_id: UUID,
+) -> list[dict]:
+    if not view:
+        return cases
+    if view == "mine":
+        return [item for item in cases if item["assigned_reviewer_id"] == reviewer_id]
+    if view == "urgent":
+        return [
+            item
+            for item in cases
+            if item["priority"] == "urgent" or item["overdue"]
+        ]
+    if view == "evidence_missing":
+        return [
+            item
+            for item in cases
+            if item["evidence_state"] in {"stale", "incomplete", "unavailable"}
+        ]
+    if view == "evidence_changed":
+        return [
+            item
+            for item in cases
+            if item["case_type"]
+            in {"Material Source Change", "Evidence Refresh", "Methodology Change"}
+        ]
+    if view == "safety_hold":
+        return [item for item in cases if item["state"] == "safety_hold"]
+    if view == "failed_processing":
+        return [
+            item
+            for item in cases
+            if item["state"] in {"research_failed", "publication_failed"}
+        ]
+    if view == "unassigned":
+        return [item for item in cases if item["assigned_reviewer_id"] is None]
+    return cases
+
+
 async def _admin_email(session: AsyncSession, user_id: UUID) -> str:
     identity = await session.scalar(
         select(UserIdentity)
@@ -136,6 +187,11 @@ async def _base_context(
 
 
 @router.get("/system-brain", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/dashboard/system-brain",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 async def system_brain_home(
     request: Request,
     principal: UserPrincipal = Depends(_require_application_admin),
@@ -145,11 +201,9 @@ async def system_brain_home(
     context = await _base_context(
         request, session, settings, principal, section="overview"
     )
-    data = await ShariaAdminDashboardService(session).overview()
-    data["ai_operations"] = await CapabilityCoverageService(
-        settings
-    ).operations_summary(session)
+    data = await ShariaAdminDashboardService(session).reviewer_overview()
     context["data"] = data
+    context["assistant_enabled"] = settings.system_brain_ai_enabled
     return _protect(
         templates.TemplateResponse(
             request=request,
@@ -164,14 +218,20 @@ async def system_brain_home(
     response_class=HTMLResponse,
     include_in_schema=False,
 )
+@router.get(
+    "/dashboard/system-brain/cases",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 async def system_brain_reviews(
     request: Request,
-    kind: str = "initial_asset_review",
+    kind: str | None = None,
     state: str | None = None,
     priority: str | None = None,
     assignee: UUID | None = None,
     deadline: str | None = None,
     asset: str | None = None,
+    view: str | None = None,
     principal: UserPrincipal = Depends(_require_application_admin),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -184,9 +244,9 @@ async def system_brain_reviews(
         "methodology_change",
         "user_factual_report",
     }
-    if kind not in allowed_kinds:
+    if kind is not None and kind not in allowed_kinds:
         raise HTTPException(status_code=404, detail="Review queue not found.")
-    section = (
+    section = "cases" if kind is None else (
         "initial-reviews"
         if kind == "initial_asset_review"
         else "user-reports"
@@ -194,22 +254,26 @@ async def system_brain_reviews(
         else "change-reviews"
     )
     context = await _base_context(request, session, settings, principal, section=section)
+    cases = await ShariaAdminDashboardService(session).list_cases(
+        state=state,
+        case_type=kind,
+        priority=priority,
+        assignee_id=assignee,
+        deadline=deadline,
+        asset_query=asset,
+        limit=300,
+    )
+    cases = _apply_case_view(cases, view=view, reviewer_id=principal.user_id)
     context.update(
         {
-            "review_kind": kind,
+            "review_kind": kind or "",
             "review_state": state,
             "review_priority": priority,
             "review_assignee": assignee,
             "review_deadline": deadline,
             "review_asset": asset or "",
-            "cases": await ShariaAdminDashboardService(session).list_cases(
-                state=state,
-                case_type=kind,
-                priority=priority,
-                assignee_id=assignee,
-                deadline=deadline,
-                asset_query=asset,
-            ),
+            "review_view": view or "",
+            "cases": cases,
         }
     )
     return _protect(
@@ -223,6 +287,11 @@ async def system_brain_reviews(
 
 @router.get(
     "/system-brain/reviews/{case_id}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+@router.get(
+    "/dashboard/system-brain/cases/{case_id}",
     response_class=HTMLResponse,
     include_in_schema=False,
 )
@@ -253,31 +322,276 @@ async def system_brain_review_detail(
     "/system-brain/sc-malaysia/import",
     include_in_schema=False,
 )
-async def system_brain_import_sc_malaysia(
+@router.post(
+    "/dashboard/system-brain/sc-malaysia/import",
+    include_in_schema=False,
+)
+@router.post(
+    "/system-brain/authority-sources/import",
+    include_in_schema=False,
+)
+@router.post(
+    "/dashboard/system-brain/authority-sources/import",
+    include_in_schema=False,
+)
+async def system_brain_import_authority_sources(
     csrf_token: str = Form(...),
     principal: UserPrincipal = Depends(_require_application_admin),
     settings: Settings = Depends(get_settings),
 ):
-    """Queue the idempotent SC import without publishing any customer conclusion."""
+    """Queue all bounded authority imports without publishing a conclusion."""
     _verify_csrf(settings, principal.user_id, csrf_token)
     try:
         from ai_market_monitor.worker import app as worker_app
 
-        worker_app.send_task("ai_market_monitor.process_sc_malaysia_imports")
+        worker_app.send_task("ai_market_monitor.process_sharia_authority_imports")
     except Exception:
         query = urlencode(
-            {"error": "The SC Malaysia import could not be queued. Check worker and Redis health."}
+            {
+                "error": (
+                    "The official-source import could not be queued. "
+                    "Check worker and Redis health."
+                )
+            }
         )
-        return RedirectResponse(f"/system-brain?{query}", status_code=303)
+        return RedirectResponse(f"/dashboard/system-brain?{query}", status_code=303)
     query = urlencode(
         {
             "success": (
-                "SC Malaysia import queued. Imported evidence will appear in Initial Coin "
-                "Reviews; nothing is customer-visible until an admin approves publication."
+                "SC Malaysia and Fasset source imports were queued. New evidence will appear "
+                "in the review Inbox; nothing becomes customer-visible until a reviewer "
+                "approves it and a publisher completes publication."
             )
         }
     )
-    return RedirectResponse(f"/system-brain?{query}", status_code=303)
+    return RedirectResponse(f"/dashboard/system-brain?{query}", status_code=303)
+
+
+@router.get(
+    "/system-brain/users",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+@router.get(
+    "/dashboard/system-brain/users",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def system_brain_users(
+    request: Request,
+    q: str | None = Query(default=None, max_length=160),
+    status: str | None = Query(default=None, max_length=24),
+    page: int = Query(default=1, ge=1),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    context = await _base_context(
+        request,
+        session,
+        settings,
+        principal,
+        section="users",
+    )
+    context.update(
+        await SystemBrainUserAdminService(session, settings).list_users(
+            query=q,
+            status=status,
+            page=page,
+        )
+    )
+    return _protect(
+        templates.TemplateResponse(
+            request=request,
+            name="system_brain.html",
+            context=context,
+        )
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/users/{user_id}/ban",
+    include_in_schema=False,
+)
+async def system_brain_ban_user(
+    user_id: UUID,
+    reason: str = Form(...),
+    idempotency_key: str = Form(...),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        result = await SystemBrainUserAdminService(session, settings).ban_user(
+            actor_user_id=principal.user_id,
+            target_user_id=user_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        await session.commit()
+    except AccountAdminError as exc:
+        await session.rollback()
+        return _user_admin_redirect(error=str(exc))
+    return _user_admin_redirect(success=result.message)
+
+
+@router.post(
+    "/dashboard/system-brain/users/{user_id}/delete",
+    include_in_schema=False,
+)
+async def system_brain_delete_user(
+    user_id: UUID,
+    reason: str = Form(...),
+    idempotency_key: str = Form(...),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        result = await SystemBrainUserAdminService(session, settings).delete_profile(
+            actor_user_id=principal.user_id,
+            target_user_id=user_id,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        await session.commit()
+    except AccountAdminError as exc:
+        await session.rollback()
+        return _user_admin_redirect(error=str(exc))
+    return _user_admin_redirect(success=result.message)
+
+
+@router.post(
+    "/dashboard/system-brain/users/{user_id}/access",
+    include_in_schema=False,
+)
+async def system_brain_apply_user_access(
+    user_id: UUID,
+    tier: str = Form(...),
+    months: str = Form(default=""),
+    reason: str = Form(...),
+    idempotency_key: str = Form(...),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        parsed_months = int(months) if months.strip() else None
+    except ValueError:
+        return _user_admin_redirect(
+            error="Full access requires a whole number of months.",
+        )
+    try:
+        result = await SystemBrainUserAdminService(session, settings).apply_access(
+            actor_user_id=principal.user_id,
+            target_user_id=user_id,
+            tier=tier,
+            months=parsed_months,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        await session.commit()
+    except AccountAdminError as exc:
+        await session.rollback()
+        return _user_admin_redirect(error=str(exc))
+    delivery_status = None
+    if result.email_delivery_id:
+        try:
+            await AccountEmailOutboxService(
+                session,
+                settings,
+            ).process_due(delivery_id=result.email_delivery_id)
+        except Exception:
+            await session.rollback()
+        delivery = await session.get(AccountEmailDelivery, result.email_delivery_id)
+        delivery_status = delivery.status if delivery is not None else None
+    message = result.message
+    if result.email_delivery_id is None:
+        message += " No verified email was available for the access notice."
+    elif delivery_status == "sent":
+        message += (
+            " The access email was already delivered; no duplicate was sent."
+            if result.repeated
+            else " The user was notified by email."
+        )
+    elif delivery_status == "failed":
+        message += " The access email failed permanently; inspect the email delivery record."
+    else:
+        message += " The access email is queued for retry."
+    return _user_admin_redirect(success=message)
+
+
+@router.get(
+    "/dashboard/system-brain/{section_name}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def system_brain_workspace_section(
+    request: Request,
+    section_name: str,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    if section_name not in {"operations", "governance", "audit-settings"}:
+        raise HTTPException(status_code=404, detail="Admin section not found.")
+    context = await _base_context(
+        request, session, settings, principal, section=section_name
+    )
+    context.update(
+        await ShariaAdminDashboardService(session).workspace_section(section_name)
+    )
+    return _protect(
+        templates.TemplateResponse(
+            request=request,
+            name="system_brain.html",
+            context=context,
+        )
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/assistant",
+    response_class=JSONResponse,
+    include_in_schema=False,
+)
+async def system_brain_assistant(
+    payload: SystemBrainAssistantRequest,
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(
+        settings,
+        principal.user_id,
+        request.headers.get("x-csrf-token", ""),
+    )
+    try:
+        response = await SystemBrainAssistantService(settings).answer(
+            session,
+            admin_user_id=principal.user_id,
+            request=payload,
+        )
+        await session.commit()
+    except SystemBrainAssistantUnavailable as exc:
+        await session.rollback()
+        return _protect(
+            JSONResponse(
+                status_code=503,
+                content={
+                    "detail": str(exc),
+                    "retryable": True,
+                },
+            )
+        )
+    return _protect(JSONResponse(response.model_dump(mode="json")))
 
 
 @router.get(
@@ -294,10 +608,35 @@ async def system_brain_section(
 ):
     if section_name not in SECTIONS:
         raise HTTPException(status_code=404, detail="Admin section not found.")
+    target = {
+        "published-assets": "governance",
+        "rejected-assets": "cases",
+        "methodologies": "governance",
+        "source-registry": "operations",
+        "scraper-runs": "operations",
+        "ai-assessments": "operations",
+        "delivery-health": "operations",
+        "audit-history": "audit-settings",
+    }[section_name]
     context = await _base_context(
-        request, session, settings, principal, section=section_name
+        request, session, settings, principal, section=target
     )
-    context.update(await ShariaAdminDashboardService(session).section(section_name))
+    service = ShariaAdminDashboardService(session)
+    if target == "cases":
+        context.update(
+            {
+                "review_kind": "",
+                "review_state": "rejected",
+                "review_priority": None,
+                "review_assignee": None,
+                "review_deadline": None,
+                "review_asset": "",
+                "review_view": "",
+                "cases": await service.list_cases(state="rejected"),
+            }
+        )
+    else:
+        context.update(await service.workspace_section(target))
     return _protect(
         templates.TemplateResponse(
             request=request,
@@ -309,6 +648,10 @@ async def system_brain_section(
 
 @router.post(
     "/system-brain/reviews/{case_id}/decision",
+    include_in_schema=False,
+)
+@router.post(
+    "/dashboard/system-brain/cases/{case_id}/decision",
     include_in_schema=False,
 )
 async def system_brain_review_decision(
@@ -458,7 +801,9 @@ async def system_brain_review_decision(
             try:
                 from ai_market_monitor.worker import app as worker_app
 
-                worker_app.send_task("ai_market_monitor.process_sc_malaysia_imports")
+                worker_app.send_task(
+                    "ai_market_monitor.process_sharia_authority_imports"
+                )
             except Exception as exc:
                 raise ShariaGovernanceError(
                     "research_queue_unavailable",
@@ -477,20 +822,99 @@ async def system_brain_review_decision(
         await session.rollback()
         query = urlencode({"error": str(exc)[:500]})
         return RedirectResponse(
-            f"/system-brain/reviews/{case_id}?{query}",
+            f"/dashboard/system-brain/cases/{case_id}?{query}",
             status_code=303,
         )
     query = urlencode(
         {"success": f"{action.replace('_', ' ').title()} was recorded and audited."}
     )
     return RedirectResponse(
-        f"/system-brain/reviews/{case_id}?{query}",
+        f"/dashboard/system-brain/cases/{case_id}?{query}",
+        status_code=303,
+    )
+
+
+def _user_admin_redirect(
+    *,
+    success: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    query = urlencode({"success": success} if success else {"error": error or "Action failed."})
+    return RedirectResponse(
+        f"/dashboard/system-brain/users?{query}",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/cases/{case_id}/ai-field-review",
+    include_in_schema=False,
+)
+async def system_brain_ai_field_review(
+    case_id: UUID,
+    field_key: str = Form(...),
+    disposition: str = Form(...),
+    reviewer_value: str = Form(default=""),
+    reason: str = Form(...),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        detail = await ShariaAdminDashboardService(session).case_detail(case_id)
+        field = next(
+            (
+                item
+                for item in detail["review_fields"]
+                if item["key"] == field_key
+            ),
+            None,
+        )
+        if field is None:
+            raise ShariaGovernanceError(
+                "review_field_not_found",
+                "The requested review field is not part of this evidence package.",
+            )
+        suggestion = field.get("ai_suggestion")
+        await ShariaGovernanceService(session, settings).record_ai_field_review(
+            case_id,
+            admin_user_id=principal.user_id,
+            field_key=field_key,
+            disposition=disposition,
+            reviewer_value=reviewer_value,
+            original_ai_suggestion=json.dumps(
+                suggestion,
+                sort_keys=True,
+                default=str,
+            )
+            if suggestion is not None
+            else "",
+            reason=reason,
+            source_references=list(field.get("source_refs") or []),
+        )
+        await session.commit()
+    except (LookupError, ShariaGovernanceError) as exc:
+        await session.rollback()
+        return RedirectResponse(
+            "/dashboard/system-brain/cases/"
+            f"{case_id}?{urlencode({'error': str(exc)[:500]})}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/dashboard/system-brain/cases/"
+        f"{case_id}?{urlencode({'success': 'The field review was recorded and audited.'})}",
         status_code=303,
     )
 
 
 @router.post(
     "/system-brain/reviews/{case_id}/assignment",
+    include_in_schema=False,
+)
+@router.post(
+    "/dashboard/system-brain/cases/{case_id}/assignment",
     include_in_schema=False,
 )
 async def system_brain_review_assignment(
@@ -518,14 +942,21 @@ async def system_brain_review_assignment(
         await session.rollback()
         query = urlencode({"error": str(exc)[:500]})
         return RedirectResponse(
-            f"/system-brain/reviews/{case_id}?{query}", status_code=303
+            f"/dashboard/system-brain/cases/{case_id}?{query}", status_code=303
         )
     query = urlencode({"success": "The assignment and due date were recorded."})
-    return RedirectResponse(f"/system-brain/reviews/{case_id}?{query}", status_code=303)
+    return RedirectResponse(
+        f"/dashboard/system-brain/cases/{case_id}?{query}",
+        status_code=303,
+    )
 
 
 @router.post(
     "/system-brain/notifications/{attempt_id}/retry",
+    include_in_schema=False,
+)
+@router.post(
+    "/dashboard/system-brain/notifications/{attempt_id}/retry",
     include_in_schema=False,
 )
 async def system_brain_retry_notification(
@@ -547,16 +978,19 @@ async def system_brain_retry_notification(
     except ShariaGovernanceError as exc:
         await session.rollback()
         return RedirectResponse(
-            f"/system-brain/delivery-health?{urlencode({'error': str(exc)[:500]})}",
+            "/dashboard/system-brain/operations?"
+            f"{urlencode({'error': str(exc)[:500]})}",
             status_code=303,
         )
     return RedirectResponse(
-        "/system-brain/delivery-health?success=Delivery+retry+was+queued+and+audited.",
+        "/dashboard/system-brain/operations?"
+        "success=Delivery+retry+was+queued+and+audited.",
         status_code=303,
     )
 
 
 @router.get("/system-brain/audit-export", include_in_schema=False)
+@router.get("/dashboard/system-brain/audit-export", include_in_schema=False)
 async def system_brain_audit_export(
     output: str = Query(default="csv", pattern="^(csv|json)$"),
     date_from: datetime | None = None,
@@ -629,5 +1063,6 @@ async def system_brain_audit_export(
 
 
 @router.post("/system-brain/logout", include_in_schema=False)
+@router.post("/dashboard/system-brain/logout", include_in_schema=False)
 async def system_brain_logout() -> RedirectResponse:
     return RedirectResponse("/dashboard/logout", status_code=303)

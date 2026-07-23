@@ -3,7 +3,7 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -98,6 +98,13 @@ class SCSourceFetcher:
             raise SCImportError(
                 "sc_source_fetch_failed",
                 f"SC Malaysia source returned HTTP {response.status_code}.",
+            )
+        expected_host = urlparse(url).hostname
+        final_host = urlparse(str(response.url)).hostname
+        if not expected_host or final_host != expected_host:
+            raise SCImportError(
+                "sc_source_redirected",
+                "SC Malaysia redirected the importer outside the configured official host.",
             )
         return FetchedSource(
             url=str(response.url),
@@ -230,7 +237,9 @@ class SCMalaysiaImporter:
     async def import_latest(self, *, actor_user_id=None) -> SCImportResult:
         source = await self.fetcher.fetch(str(self.settings.sc_malaysia_digital_assets_url))
         source_hash = _sha256(source.content)
-        run_key = f"sc-malaysia-import:{source_hash}"
+        cadence = timedelta(hours=self.settings.sharia_source_scan_interval_hours)
+        cycle = int(source.retrieved_at.timestamp() // cadence.total_seconds())
+        run_key = f"sc-malaysia-import:{cycle}:{source_hash[:64]}"
         existing_run = await self.session.scalar(
             select(ShariaMonitoringRun).where(
                 ShariaMonitoringRun.idempotency_key == run_key
@@ -260,6 +269,7 @@ class SCMalaysiaImporter:
             status="running",
             source_url=source.url,
             started_at=source.retrieved_at,
+            next_due_at=source.retrieved_at + cadence,
         )
         self.session.add(run)
         await self.session.flush()
@@ -325,8 +335,12 @@ class SCMalaysiaImporter:
             self.session.add(
                 ExternalAssessment(
                     source_snapshot_id=snapshot.id,
+                    source_family="sc_malaysia_sac",
                     source_authority=SC_AUTHORITY,
                     source_url=source.url,
+                    source_reference=(
+                        f"{row.meeting_number} SAC Meeting ({row.decision_date.isoformat()})"
+                    ),
                     asset_name=row.name,
                     asset_symbol=row.symbol,
                     exact_status_wording=row.exact_status_wording,
@@ -335,6 +349,11 @@ class SCMalaysiaImporter:
                     regulatory_scope=SC_SCOPE,
                     retrieval_date=source.retrieved_at,
                     exact_row_text=row.exact_row_text,
+                    structured_facts={
+                        "sac_meeting_number": row.meeting_number,
+                        "decision_date": row.decision_date.isoformat(),
+                        "regulatory_scope": SC_SCOPE,
+                    },
                     import_hash=import_hash,
                     mapping_state="unresolved",
                     mapping_notes=[],

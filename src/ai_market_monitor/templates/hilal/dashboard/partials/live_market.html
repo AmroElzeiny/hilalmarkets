@@ -1,16 +1,21 @@
 <section
   class="panel live-market-panel"
   data-live-market-root
-  data-endpoint="{{ '/api/v1/sharia/test-market' if live_test_market|default(false) and not selected_methodology_id else '/api/v1/sharia/market-quotes' }}"
+  data-endpoint="/api/v1/sharia/market-quotes"
   data-methodology-id="{{ selected_methodology_id }}"
   data-exchange="{{ selected_exchange }}"
   data-quote="{{ selected_quote_asset }}"
 >
   <div class="live-market-toolbar">
-    <div>
-      <span class="kicker">{{ live_methodology_name }} methodology</span>
-      <h2>Live screened assets</h2>
-      <p>Screening status is evidence-backed. Bid and ask prices refresh from the selected spot provider.</p>
+    <div class="live-market-toolbar-actions">
+      <button class="btn btn-secondary" type="button" data-saved-assets-open>
+        <span data-icon="watchlist" data-icon-class="icon"></span>
+        Saved Assets{% if saved_assets %}<span class="nav-count">{{ saved_assets|length }}</span>{% endif %}
+      </button>
+      <a class="btn btn-primary" href="/dashboard/strategies/new">
+        <span data-icon="radar" data-icon-class="icon"></span>
+        New Watchlist
+      </a>
     </div>
   </div>
 
@@ -21,19 +26,22 @@
     </label>
     <label class="field market-filter-control">
       <span>Methodology</span>
-      <select class="select" name="methodology_id">
-        {% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }} | v{{ method.version }}</option>{% endfor %}
-      </select>
+      <span class="hm-select-control" data-hm-select>
+        <select class="select" name="methodology_id" data-live-market-methodology>
+          {% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }} | v{{ method.version }}</option>{% endfor %}
+        </select>
+      </span>
     </label>
     <label class="field market-filter-control">
       <span>Exchange</span>
-      <select class="select" name="exchange" data-live-market-exchange>
-        <option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance spot</option>
-        <option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit spot</option>
-      </select>
+      <span class="hm-select-control" data-hm-select>
+        <select class="select" name="exchange" data-live-market-exchange>
+          <option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance</option>
+          <option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit</option>
+        </select>
+      </span>
     </label>
     <input type="hidden" name="quote_asset" value="{{ selected_quote_asset }}" data-live-market-quote>
-    <button class="btn btn-primary market-filter-submit" type="submit"><span data-icon="filter" data-icon-class="icon"></span>Apply filters</button>
   </form>
 
   <div class="live-market-meta"><span class="live-dot"><i></i><b data-live-market-status>Connecting to provider...</b></span><span data-live-market-updated>Waiting for the first verified snapshot</span></div>
@@ -49,5 +57,4 @@
     </div>
   </div>
   <div class="live-market-empty empty-state compact" data-live-market-empty hidden><h3>No screened symbols match</h3><p>Clear the search, choose another exchange, or review whether this methodology has published Passports.</p></div>
-  <p class="field-help market-methodology-note">{{ live_methodology_notice }}</p>
 </section>

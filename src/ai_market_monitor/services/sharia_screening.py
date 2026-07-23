@@ -56,6 +56,7 @@ STATUS_LABELS = {
 }
 
 DEVELOPMENT_METHODOLOGY_PREFIX = "TRACEDGE_DEV_TEST_"
+AGGREGATE_METHODOLOGY_CODE = "ALL_APPROVED_METHODOLOGIES"
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -127,7 +128,7 @@ class ShariaScreeningService:
         query = select(ShariaMethodology)
         if not include_non_active:
             query = query.where(ShariaMethodology.status == ShariaMethodologyStatus.ACTIVE)
-        return list(
+        rows = list(
             (
                 await self.session.scalars(
                     query.order_by(
@@ -136,6 +137,14 @@ class ShariaScreeningService:
                     )
                 )
             ).all()
+        )
+        return sorted(
+            rows,
+            key=lambda row: (
+                0 if row.code == AGGREGATE_METHODOLOGY_CODE else 1,
+                -_as_utc(row.effective_from or row.created_at).timestamp(),
+                row.name.casefold(),
+            ),
         )
 
     async def executable_methodologies(
@@ -156,32 +165,15 @@ class ShariaScreeningService:
         return executable
 
     def development_methodologies_enabled(self) -> bool:
-        """Return whether development-only methodologies may be shown in local UI."""
-        return bool(
-            self.settings
-            and self.settings.app_env in {"development", "test"}
-            and self.settings.sharia_test_market_enabled
-        )
+        """The former permissive Test methodology is retired from every customer view."""
+        return False
 
     async def selectable_market_methodologies(self) -> list[ShariaMethodology]:
-        """Return executable methods plus an explicitly enabled local test method.
-
-        Development methodologies remain excluded from strategy execution. This method is
-        only for choosing which market view to render, so enabling the Test screener cannot
-        make its permissive results executable in production monitoring.
-        """
-        executable = await self.executable_methodologies()
-        if not self.development_methodologies_enabled():
-            return executable
-        rows = await self.methodologies(include_non_active=True)
-        development = [row for row in rows if methodology_is_development_only(row)]
-        return [*executable, *development]
+        """Return only executable, non-development methodologies."""
+        return await self.executable_methodologies()
 
     async def development_methodology(self) -> ShariaMethodology | None:
-        if not self.development_methodologies_enabled():
-            return None
-        rows = await self.methodologies(include_non_active=True)
-        return next((row for row in rows if methodology_is_development_only(row)), None)
+        return None
 
     async def methodology(
         self,
@@ -262,8 +254,22 @@ class ShariaScreeningService:
         as_of: datetime | None = None,
     ) -> dict[str, AssetShariaAssessment]:
         as_of = as_of or datetime.now(UTC)
+        methodology = await self.methodology(methodology_id, require_active=True, as_of=as_of)
+        aggregate = methodology.code == AGGREGATE_METHODOLOGY_CODE
+        source_methodologies: list[ShariaMethodology] = []
+        methodology_ids = [methodology_id]
+        if aggregate:
+            source_methodologies = [
+                row
+                for row in await self.executable_methodologies(as_of=as_of)
+                if row.code != AGGREGATE_METHODOLOGY_CODE
+                and not methodology_is_development_only(row)
+            ]
+            methodology_ids = [row.id for row in source_methodologies]
+            if not methodology_ids:
+                return {}
         query = select(AssetShariaAssessment).where(
-            AssetShariaAssessment.methodology_id == methodology_id,
+            AssetShariaAssessment.methodology_id.in_(methodology_ids),
             AssetShariaAssessment.valid_from <= as_of,
             or_(
                 AssetShariaAssessment.valid_until.is_(None),
@@ -284,6 +290,31 @@ class ShariaScreeningService:
             )
         ).all()
         current: dict[str, AssetShariaAssessment] = {}
+        priority_codes = list(
+            methodology.rules_json.get(
+                "source_priority_codes",
+                ["SC_MALAYSIA_SAC_REFERENCE", "FASSET_SHARIAH_REPORTS"],
+            )
+        )
+        priority_by_id = {
+            row.id: (
+                priority_codes.index(row.code)
+                if row.code in priority_codes
+                else len(priority_codes)
+            )
+            for row in source_methodologies
+        }
+        if aggregate:
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    row.canonical_asset,
+                    0 if row.status in DEFAULT_ALLOWED_STATUSES else 1,
+                    priority_by_id.get(row.methodology_id, len(priority_codes)),
+                    -_as_utc(row.reviewed_at).timestamp(),
+                    str(row.id),
+                ),
+            )
         for row in rows:
             current.setdefault(row.canonical_asset, row)
         return current
@@ -360,7 +391,15 @@ class ShariaScreeningService:
         readiness_warning = None
         safety_holds = await self.safety_hold_assets(assets=set(assessments))
         values = list(assessments.values())
-        if self.settings and self.settings.is_deployed:
+        source_methodologies = {
+            row.id: row
+            for row in await self.methodologies(include_non_active=True)
+            if row.id in {assessment.methodology_id for assessment in values}
+        }
+        if (
+            methodology.code == AGGREGATE_METHODOLOGY_CODE
+            or (self.settings and self.settings.is_deployed)
+        ):
             assessment_ids = [row.id for row in values]
             if assessment_ids:
                 published_ids = set(
@@ -385,6 +424,7 @@ class ShariaScreeningService:
         if asset_scope is not None:
             normalized_scope = {canonical_asset(asset) for asset in asset_scope}
             values = [row for row in values if row.canonical_asset in normalized_scope]
+        count_values = list(values)
         if statuses:
             values = [
                 row
@@ -408,7 +448,7 @@ class ShariaScreeningService:
             ]
         values.sort(key=lambda row: (row.canonical_asset, row.reviewed_at), reverse=False)
         counts: dict[str, int] = {}
-        for row in assessments.values():
+        for row in count_values:
             effective_status = (
                 ShariaAssetStatus.UNDER_REVIEW
                 if row.canonical_asset in safety_holds
@@ -421,7 +461,7 @@ class ShariaScreeningService:
             items=[
                 self.assessment_summary(
                     row,
-                    methodology,
+                    source_methodologies.get(row.methodology_id, methodology),
                     status_override=(
                         ShariaAssetStatus.UNDER_REVIEW
                         if row.canonical_asset in safety_holds
@@ -458,6 +498,11 @@ class ShariaScreeningService:
                 "assessment_not_found",
                 "No current evidence-backed assessment exists for this asset and methodology.",
             )
+        if assessment.methodology_id != methodology.id:
+            methodology = await self.methodology(
+                assessment.methodology_id,
+                require_active=True,
+            )
         evidence = list(
             (
                 await self.session.scalars(
@@ -485,7 +530,12 @@ class ShariaScreeningService:
         )
         reviewed_dimensions = list(snapshot.get("reviewed_dimensions") or [])
         methodology_result = dict(snapshot.get("methodology_result") or {})
-        official_reference = dict(snapshot.get("official_sc_malaysia_reference") or {})
+        official_reference = dict(
+            snapshot.get("official_methodology_reference")
+            or snapshot.get("official_sc_malaysia_reference")
+            or snapshot.get("official_fasset_reference")
+            or {}
+        )
         factual_profile = dict(
             snapshot.get("hilalmarkets_factual_information_profile") or {}
         )
@@ -511,7 +561,13 @@ class ShariaScreeningService:
                 if safety_hold
                 else assessment.summary
             ),
-            official_sc_malaysia_reference=official_reference,
+            official_methodology_reference=official_reference,
+            official_sc_malaysia_reference=dict(
+                snapshot.get("official_sc_malaysia_reference") or {}
+            ),
+            official_fasset_reference=dict(
+                snapshot.get("official_fasset_reference") or {}
+            ),
             hilalmarkets_factual_information_profile=factual_profile,
             separate_use_status=separate_use_status,
             reviewed_dimensions=reviewed_dimensions,
@@ -536,6 +592,8 @@ class ShariaScreeningService:
         methodologies = await self.executable_methodologies()
         results: list[MethodologyComparisonItem] = []
         for methodology in methodologies:
+            if methodology.code == AGGREGATE_METHODOLOGY_CODE:
+                continue
             assessment = await self.effective_assessment(methodology.id, asset)
             if assessment is None:
                 continue

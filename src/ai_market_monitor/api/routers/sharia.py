@@ -16,7 +16,6 @@ from ai_market_monitor.db.models import (
     AssetShariaStatusHistory,
     DashboardPreference,
     SetupInstance,
-    ShariaMethodology,
     Strategy,
     StrategyUniverse,
     StrategyVersion,
@@ -54,6 +53,7 @@ from ai_market_monitor.services.compliance_watch import (
     ComplianceWatchService,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.live_market_quotes import LiveMarketQuoteService
 from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
@@ -65,11 +65,6 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
     canonical_asset,
     canonical_symbol,
-    methodology_is_development_only,
-)
-from ai_market_monitor.services.test_market_quotes import (
-    TEST_METHODOLOGY_CODE,
-    TestMarketQuoteService,
 )
 
 router = APIRouter(prefix="/sharia", tags=["sharia-screening"])
@@ -292,39 +287,6 @@ async def screened_assets(
     return result
 
 
-@router.get("/test-market", response_model=LiveSpotMarketResponse)
-async def test_market_quotes(
-    exchange: str = Query(default="binance", pattern="^(binance|bybit)$"),
-    quote_asset: str = Query(default="USDT", min_length=2, max_length=12),
-    principal: UserPrincipal = Depends(get_dashboard_principal),
-    session: AsyncSession = Depends(get_db_session),
-    provider: MarketDataProvider = Depends(get_market_data_provider),
-    settings: Settings = Depends(get_settings),
-) -> LiveSpotMarketResponse:
-    if settings.app_env not in {"development", "test"} or not settings.sharia_test_market_enabled:
-        raise HTTPException(status_code=404, detail="The Test market is not enabled.")
-    methodology_id = await session.scalar(
-        select(ShariaMethodology.id)
-        .where(ShariaMethodology.code == TEST_METHODOLOGY_CODE)
-        .order_by(ShariaMethodology.created_at.desc())
-        .limit(1)
-    )
-    try:
-        return await TestMarketQuoteService(provider, settings).snapshot(
-            exchange=exchange,
-            quote_asset=quote_asset,
-            methodology_id=methodology_id,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "live_test_market_unavailable",
-                "message": "Live spot quotes are unavailable; no prices were invented.",
-            },
-        ) from exc
-
-
 @router.get("/market-quotes", response_model=LiveSpotMarketResponse)
 async def screened_market_quotes(
     methodology_id: UUID,
@@ -341,27 +303,7 @@ async def screened_market_quotes(
     except ShariaScreeningError as exc:
         raise _screening_error(exc) from exc
 
-    quote_service = TestMarketQuoteService(provider, settings)
-    if methodology_is_development_only(methodology):
-        if (
-            settings.app_env not in {"development", "test"}
-            or not settings.sharia_test_market_enabled
-        ):
-            raise HTTPException(status_code=404, detail="The Test market is not enabled.")
-        try:
-            return await quote_service.snapshot(
-                exchange=exchange,
-                quote_asset=quote_asset,
-                methodology_id=methodology.id,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "live_market_unavailable",
-                    "message": "Live spot quotes are unavailable; no prices were invented.",
-                },
-            ) from exc
+    quote_service = LiveMarketQuoteService(provider, settings)
 
     try:
         screened = await screening.list_screened_assets(

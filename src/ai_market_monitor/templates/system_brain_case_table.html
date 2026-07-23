@@ -1,23 +1,49 @@
-<div class="brain-table-wrap">
-  <table>
-    <thead><tr><th>Asset</th><th>Case</th><th>Stage / SLA</th><th>Assignment</th><th>Impact</th><th>Risk</th><th>Publication</th><th></th></tr></thead>
+<div class="brain-table-wrap brain-attention-table">
+  <table data-testid="system-brain-case-table">
+    <thead>
+      <tr>
+        <th>Priority</th>
+        <th>Asset or case</th>
+        <th>Review reason</th>
+        <th>State</th>
+        <th>Evidence</th>
+        <th>Waiting / SLA</th>
+        <th>Reviewer</th>
+        <th>Next action</th>
+      </tr>
+    </thead>
     <tbody>
       {% for item in data.recent_cases %}
       <tr>
-        <td><strong>{{ item.asset_name }}</strong><small>{{ item.symbol }}</small></td>
-        <td><strong>{{ item.title }}</strong><small>{{ item.reference }} | {{ item.case_type }}</small></td>
+        <td><span class="brain-status risk-{{ item.priority }}">{{ item.priority }}</span></td>
+        <td>
+          <strong>{{ item.asset_name }} <small>{{ item.symbol }}</small></strong>
+          <small>{{ item.reference }} · {{ item.case_type }}</small>
+        </td>
+        <td class="brain-reason-cell">{{ item.review_reason }}</td>
         <td>
           <span class="brain-status {{ item.state }}">{{ item.state.replace('_',' ') }}</span>
-          <small>{{ item.stage_hours }}h in stage | {{ item.age_hours }}h total</small>
-          {% if item.overdue %}<span class="brain-status overdue">Overdue</span>{% elif item.due_at %}<small>Due {{ item.due_at.strftime('%d %b %H:%M UTC') }}</small>{% endif %}
+          <small>{{ item.publication_state.replace('_',' ').title() }}</small>
         </td>
-        <td><strong>{{ item.assigned_reviewer }}</strong><small>{{ item.priority.title() }} priority</small></td>
-        <td><strong>{{ item.affected_watch_plans }} Watch Plans</strong><small>{{ item.affected_users }} users</small></td>
-        <td><span class="brain-status risk-{{ item.risk }}">{{ item.risk }}</span></td>
-        <td>{{ item.publication_state.replace('_',' ').title() }}</td>
-        <td><a class="brain-row-action" href="/system-brain/reviews/{{ item.id }}" aria-label="Open {{ item.reference }}">Review <i data-icon="arrow"></i></a></td>
+        <td>
+          <span class="brain-status {{ item.evidence_state }}">{{ item.evidence_state }}</span>
+          <small>{{ item.evidence_completeness }}% complete</small>
+        </td>
+        <td>
+          <strong>{{ item.age_hours }}h</strong>
+          <small>{{ item.stage_hours }}h in current state</small>
+          {% if item.overdue %}<span class="brain-status overdue">SLA overdue</span>{% elif item.due_at %}<small>Due {{ item.due_at.strftime('%d %b %H:%M UTC') }}</small>{% endif %}
+        </td>
+        <td><strong>{{ item.assigned_reviewer }}</strong></td>
+        <td>
+          <a class="brain-row-action" href="/dashboard/system-brain/cases/{{ item.id }}" aria-label="{{ item.next_action }} for {{ item.reference }}">
+            {{ item.next_action }} <i data-icon="arrow"></i>
+          </a>
+        </td>
       </tr>
-      {% else %}<tr><td colspan="8" class="brain-empty">No review cases match this queue.</td></tr>{% endfor %}
+      {% else %}
+      <tr><td colspan="8" class="brain-empty">No cases require action in this view. The latest recorded checks found no matching work.</td></tr>
+      {% endfor %}
     </tbody>
   </table>
 </div>

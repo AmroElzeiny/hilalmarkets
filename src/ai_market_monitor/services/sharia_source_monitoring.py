@@ -80,7 +80,7 @@ class ShariaSourceMonitoringService:
         now = datetime.now(UTC)
         window_seconds = self.settings.sharia_source_scan_interval_hours * 3600
         window = int(now.timestamp() // window_seconds)
-        run_key = f"source-monitor:{publication.canonical_asset_id}:{window}"
+        run_key = f"source-monitor:{publication.id}:{window}"
         if await self.session.scalar(
             select(ShariaMonitoringRun.id).where(
                 ShariaMonitoringRun.idempotency_key == run_key
@@ -355,11 +355,19 @@ class ShariaSourceMonitoringService:
         }
         return {
             "asset": {"id": str(asset.id), "name": asset.name, "symbol": asset.symbol},
-            "official_sc_reference": {
+            "external_authority_reference": {
+                "source_family": external.source_family,
+                "authority": external.source_authority,
                 "exact_status_wording": external.exact_status_wording,
+                "source_reference": external.source_reference,
                 "meeting": external.sac_meeting_number,
-                "decision_date": external.decision_date.isoformat(),
+                "decision_date": (
+                    external.decision_date.isoformat()
+                    if external.decision_date
+                    else None
+                ),
                 "scope": external.regulatory_scope,
+                "published_profile_facts": dict(external.structured_facts or {}),
             },
             "changed_sources": [
                 {

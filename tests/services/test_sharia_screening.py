@@ -59,6 +59,7 @@ from ai_market_monitor.services.compliance_watch import (
 )
 from ai_market_monitor.services.product_language import readiness_copy
 from ai_market_monitor.services.sharia_screening import (
+    AGGREGATE_METHODOLOGY_CODE,
     DEVELOPMENT_METHODOLOGY_PREFIX,
     ShariaScreeningError,
     ShariaScreeningService,
@@ -441,6 +442,81 @@ async def test_methodology_comparison_keeps_conflicting_results_separate(test_co
             ShariaAssetStatus.UNDER_REVIEW,
         }
         assert "false consensus" in comparison.notice
+
+
+async def test_all_methodology_is_first_deduplicates_and_never_exposes_drafts(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Aggregate methodology user")
+        session.add(user)
+        await session.flush()
+        service = ShariaScreeningService(session, screening_settings())
+        now = datetime.now(UTC)
+
+        async def create_method(code: str, name: str):
+            return await service.create_methodology(
+                MethodologyCreateRequest(
+                    code=code,
+                    name=name,
+                    version="1.0",
+                    description=(
+                        "An evidence-backed methodology used to verify the aggregate market."
+                    ),
+                    status=ShariaMethodologyStatus.ACTIVE,
+                    governing_body="Qualified test governance",
+                    reviewer_group="Qualified test reviewers",
+                    effective_from=now - timedelta(days=1),
+                    rules=methodology_rules(source_family=code.casefold()),
+                    evidence_requirements=methodology_evidence_requirements(),
+                ),
+                actor_user_id=user.id,
+                actor_identity="test-admin",
+            )
+
+        all_method = await create_method(AGGREGATE_METHODOLOGY_CODE, "All")
+        sc_method = await create_method("SC_MALAYSIA_SAC_REFERENCE", "SC Malaysia")
+        fasset_method = await create_method("FASSET_SHARIAH_REPORTS", "Fasset")
+        sc_btc = await assess(
+            session,
+            sc_method.id,
+            user.id,
+            "BTC",
+            ShariaAssetStatus.ELIGIBLE,
+        )
+        await assess(
+            session,
+            fasset_method.id,
+            user.id,
+            "BTC",
+            ShariaAssetStatus.ELIGIBLE,
+        )
+        await assess(
+            session,
+            fasset_method.id,
+            user.id,
+            "SOL",
+            ShariaAssetStatus.ELIGIBLE,
+        )
+        await session.flush()
+
+        methods = await service.selectable_market_methodologies()
+        effective = await service.effective_assessments(all_method.id)
+        listed = await service.list_screened_assets(
+            methodology_id=all_method.id,
+            statuses={
+                ShariaAssetStatus.ELIGIBLE,
+                ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS,
+            },
+        )
+
+        assert methods[0].code == AGGREGATE_METHODOLOGY_CODE
+        assert set(effective) == {"BTC", "SOL"}
+        assert effective["BTC"].id == sc_btc.id
+        assert effective["SOL"].methodology_id == fasset_method.id
+        assert listed.total == 0
+        assert listed.status_counts == {}
+        assert "no active published Passports" in (listed.warning or "")
 
 
 async def test_methodology_versions_are_immutable_and_unique(test_context):

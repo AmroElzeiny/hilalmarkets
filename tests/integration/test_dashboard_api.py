@@ -549,7 +549,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
 
     page = await test_context["client"].get("/dashboard/lifecycles")
     assert page.status_code == 200
-    assert "Notification center" in page.text
+    assert "What is closest right now?" in page.text
     assert "SOL/USDT" in page.text
     assert "ETH/USDT" in page.text
     assert "Expired" in page.text
@@ -1167,8 +1167,7 @@ async def test_advanced_dashboard_pages_render(test_context):
     await _signup(test_context, "dashboard-pages@example.com")
 
     for path, expected in [
-        ("/dashboard/strategies/new", "Guided Watch Plan"),
-        ("/dashboard/strategies/new", "Build your Watch Plan"),
+        ("/dashboard/strategies/new", "Guided Watchlist"),
         ("/dashboard/strategies/new", "AI Sheet"),
         ("/dashboard/strategies/new", "Preview mechanics"),
         ("/dashboard/strategies/new", "Visual Strategy Canvas"),
@@ -1177,7 +1176,7 @@ async def test_advanced_dashboard_pages_render(test_context):
         ("/dashboard/strategies/new", "Proof &amp; Review"),
         ("/dashboard/strategies/new", "Six-Month High Breakout"),
         ("/dashboard/integrations", "Notifications"),
-        ("/dashboard/lifecycles", "Notification center"),
+        ("/dashboard/lifecycles", "What is closest right now?"),
         ("/dashboard/settings", "America/New_York"),
         ("/dashboard/settings", 'data-schedule-options="hours"'),
     ]:
@@ -1190,7 +1189,7 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "Latest Setups" not in dashboard.text
     assert "Strategy Cockpit" not in dashboard.text
     assert "Coverage score" not in dashboard.text
-    assert "Eligible screened assets" in dashboard.text
+    assert "Create your first Watchlist" in dashboard.text
     assert "data-open-sidebar" in dashboard.text
     assert "data-close-sidebar" in dashboard.text
     assert "sidebar-create-quick" in dashboard.text
@@ -1582,7 +1581,7 @@ async def test_verified_strategy_workspace_tests_history_and_contract(test_conte
         f"/dashboard/strategies/{strategy_id}/verify"
     )
     assert page.status_code == 200
-    assert "What HilalMarkets understood" in page.text
+    assert "What Hilal Markets understood" in page.text
     workspace = await test_context["client"].get(
         f"/api/v1/dashboard/strategies/{strategy_id}/verification",
         params={"version_id": version["id"]},

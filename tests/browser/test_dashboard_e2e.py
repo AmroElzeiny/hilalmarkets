@@ -4,6 +4,7 @@ import json
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from conftest import (
     assert_hilal_brand_palette,
@@ -12,6 +13,7 @@ from conftest import (
     seed_alert_proof,
     seed_setup_observability,
     seed_sharia_screened_market,
+    seed_system_brain_reviewer,
     seed_telegram_connection,
     signup,
     unique_email,
@@ -26,6 +28,43 @@ EXECUTABLE_PROMPT = {
     "universe": "Binance USDT spot pairs.",
     "timeframe": "15m trigger timeframe.",
 }
+
+
+def test_system_brain_reviewer_first_desktop_and_mobile(
+    page: Page,
+    base_url: str,
+    browser_app,
+    repo_root: Path,
+) -> None:
+    email = signup(page, base_url, unique_email("system-brain"))
+    case_id = seed_system_brain_reviewer(browser_app.database_url, email)
+    output = repo_root / "reports" / "playwright" / "visual-qa"
+    output.mkdir(parents=True, exist_ok=True)
+
+    page.goto(f"{base_url}/dashboard/system-brain", wait_until="domcontentloaded")
+    expect(page.get_by_test_id("system-brain-assistant")).to_be_visible()
+    expect(page.locator(".brain-sidebar nav a")).to_have_count(5)
+    expect(page.get_by_role("heading", name="Needs Attention")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_no_raw_traceback(page)
+    page.screenshot(path=str(output / "system-brain-desktop.png"), full_page=True)
+
+    page.goto(
+        f"{base_url}/dashboard/system-brain/cases/{case_id}",
+        wait_until="domcontentloaded",
+    )
+    expect(page.get_by_test_id("system-brain-review-board")).to_be_visible()
+    expect(page.get_by_test_id("human-decision-panel")).to_be_visible()
+    expect(page.get_by_test_id("ai-field-assistance")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator(".brain-mobile-decision-note")).to_be_visible()
+    assert page.locator(".brain-terminal-action").first.is_hidden()
+    assert_no_horizontal_overflow(page)
+    assert_no_raw_traceback(page)
+    page.screenshot(path=str(output / "system-brain-mobile-390.png"), full_page=True)
 
 
 def _visual_chat_payload(status: str, *, can_approve: bool) -> dict:
@@ -571,6 +610,23 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
 
     expect(page.get_by_test_id("dashboard-root")).to_be_attached()
     expect(page.get_by_test_id("dashboard-nav")).to_be_visible()
+    sidebar = page.locator("[data-sidebar]")
+    minimize_icon = page.locator('[data-sidebar-collapse-icon="minimize"]')
+    expand_icon = page.locator('[data-sidebar-collapse-icon="expand"]')
+    expect(minimize_icon).to_be_visible()
+    expect(expand_icon).to_be_hidden()
+    expanded_width = sidebar.evaluate("node => node.getBoundingClientRect().width")
+    page.locator("[data-sidebar-collapse]").click()
+    expect(page.locator("body")).to_have_class(re.compile(r"sidebar-collapsed"))
+    expect(minimize_icon).to_be_hidden()
+    expect(expand_icon).to_be_visible()
+    collapsed_width = sidebar.evaluate("node => node.getBoundingClientRect().width")
+    assert expanded_width > 200
+    assert collapsed_width <= 80
+    expect(page.locator("[data-sidebar-collapse]")).to_have_attribute(
+        "aria-label", "Expand side menu"
+    )
+    page.locator("[data-sidebar-collapse]").click()
     page.locator(".sidebar-create-quick").click()
     page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=10_000)
     expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
@@ -606,23 +662,32 @@ def test_all_customer_dashboard_pages_use_the_brand_system(
             "data-brand-system", "hilal-markets-v2"
         )
         expect(page.locator(".sidebar .logo img")).to_have_attribute(
-            "src", re.compile(r"hilalmarkets-logo-mark\.svg")
+            "src", re.compile(r"hilal-markets-logo\.svg")
         )
         assert "Onest" in page.locator("body").evaluate(
             "node => getComputedStyle(node).fontFamily"
         )
         heading = page.locator("h1:visible, h2:visible").first
-        expect(heading).to_be_visible()
-        assert "Geometria" in heading.evaluate(
-            "node => getComputedStyle(node).fontFamily"
-        )
+        if heading.count():
+            expect(heading).to_be_visible()
+            assert "Geometria" in heading.evaluate(
+                "node => getComputedStyle(node).fontFamily"
+            )
+        else:
+            expect(page.locator(".app-content > *").first).to_be_visible()
         assert page.locator("body").evaluate(
             "node => getComputedStyle(node).backgroundColor"
         ) == "rgb(245, 248, 251)"
+        branded_select_count = page.locator("[data-hm-select]").count()
+        if branded_select_count:
+            expect(page.locator("[data-hm-select-trigger]")).to_have_count(
+                branded_select_count
+            )
         assert_no_horizontal_overflow(page)
         assert_hilal_brand_palette(page)
         assert_no_raw_traceback(page)
-        slug = route.strip("/").replace("/", "-") or "dashboard"
+        route_path = urlparse(route).path if route.startswith("http") else route
+        slug = route_path.strip("/").replace("/", "-") or "dashboard"
         page.screenshot(path=str(output / f"{slug}-desktop.png"), full_page=True)
 
         page.set_viewport_size({"width": 390, "height": 844})
@@ -644,7 +709,9 @@ def test_screened_market_passport_and_mobile_visual_qa(
     page.goto(
         f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}"
     )
-    expect(page.get_by_role("heading", name="Screened Market", exact=True)).to_be_visible()
+    expect(page.get_by_role("form", name="Filter screened assets")).to_be_visible()
+    expect(page.locator("[data-hm-select-trigger]")).to_have_count(2)
+    expect(page.get_by_role("region", name="Live screened spot market quotes")).to_be_visible()
     expect(page.get_by_text("All screened assets")).to_have_count(0)
     expect(page.get_by_text("Find opportunities inside a screened market.")).to_have_count(0)
     live_row = page.locator(".live-market-row", has_text="SOL/USDT")
@@ -695,9 +762,15 @@ def test_screened_market_passport_and_mobile_visual_qa(
 
     passport_button.click()
     passport_dialog.get_by_role("link", name="Open Full Passport").click()
-    expect(page.locator(".passport-page-title .eyebrow")).to_have_text(
-        "Sharia Evidence Passport"
-    )
+    expect(page.locator(".passport-summary-header h1")).to_be_visible()
+    assert page.locator(".passport-tabs").evaluate(
+        "node => getComputedStyle(node).position"
+    ) == "static"
+    expect(
+        page.locator(".passport-summary-header").get_by_role(
+            "link", name="Back to market"
+        )
+    ).to_be_visible()
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
     expect(
         page.get_by_role(
@@ -746,7 +819,7 @@ def test_screening_change_opens_evidence_difference_dialog(
         f"{base_url}/dashboard/activity?tab=compliance_changes",
         wait_until="domcontentloaded",
     )
-    expect(page.get_by_role("heading", name="Notification center")).to_be_visible()
+    expect(page.get_by_role("heading", name="Screening changes")).to_be_visible()
     expect(page.get_by_role("link", name="Ended")).to_have_count(0)
     page.get_by_role("button", name="Show evidence difference").click()
     dialog = page.locator("[data-evidence-dialog]")
@@ -767,7 +840,10 @@ def test_private_beta_billing_desktop_and_mobile_visual_qa(
     output.mkdir(parents=True, exist_ok=True)
 
     page.goto(f"{base_url}/dashboard/billing")
-    expect(page.get_by_role("heading", name="Billing", exact=True)).to_be_visible()
+    expect(page.locator(".billing-current-plan")).to_be_visible()
+    expect(page.locator(".billing-current-plan").get_by_role("heading")).to_have_text(
+        "Free"
+    )
     expect(page.get_by_text("Billing is paused for invited beta users")).to_be_visible()
     expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
     expect(page.get_by_role("link", name="Review and pay")).to_have_count(0)
@@ -776,7 +852,7 @@ def test_private_beta_billing_desktop_and_mobile_visual_qa(
     page.screenshot(path=str(output / "private-beta-access-desktop-1440.png"), full_page=True)
 
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.get_by_role("heading", name="Billing", exact=True)).to_be_visible()
+    expect(page.locator(".billing-current-plan")).to_be_visible()
     expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)
@@ -892,13 +968,13 @@ def test_ai_setup_chat_visual_qa_states(
     output = repo_root / "reports" / "playwright" / "visual-qa"
     output.mkdir(parents=True, exist_ok=True)
     sidebar_box = page.locator("[data-hilal-sidebar]").bounding_box()
-    notification_box = page.locator(".topbar-right > .btn").first.bounding_box()
+    notification_box = page.locator("[data-notification-center-trigger]").bounding_box()
     create_plan_box = page.locator(".topbar-right > .sidebar-create-quick").bounding_box()
-    assert sidebar_box is not None and sidebar_box["x"] <= 1
+    assert sidebar_box is not None and 14 <= sidebar_box["x"] <= 18
     assert notification_box is not None and notification_box["width"] <= 60
     assert create_plan_box is not None and create_plan_box["width"] <= 220
     expect(page.locator(".topbar-right > .sidebar-create-quick")).to_contain_text(
-        "New Watch Plan"
+        "New Watchlist"
     )
     page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
 
@@ -1147,6 +1223,24 @@ def test_legacy_scan_route_redirects_into_chat_scanner(page: Page, base_url: str
     expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
         "Scanner is ready", timeout=10_000
     )
+    composer = page.locator(".ai-chat-composer")
+    assistant_bubble = page.locator(".ai-chat-message.assistant .ai-chat-bubble").first
+    submit = composer.locator("button[type='submit']")
+    expect(composer).to_be_visible()
+    expect(assistant_bubble).to_be_visible()
+    assert composer.evaluate(
+        "node => getComputedStyle(node).backgroundColor"
+    ) == "rgb(255, 255, 255)"
+    assert assistant_bubble.evaluate(
+        "node => getComputedStyle(node).backgroundColor"
+    ) == "rgb(255, 255, 255)"
+    assert assistant_bubble.evaluate(
+        "node => getComputedStyle(node).color"
+    ) == "rgb(43, 46, 53)"
+    assert submit.evaluate(
+        "node => getComputedStyle(node).backgroundColor"
+    ) == "rgb(203, 250, 77)"
+    assert submit.evaluate("node => getComputedStyle(node).color") == "rgb(43, 46, 53)"
     assert_no_raw_traceback(page)
 
 
@@ -1187,10 +1281,10 @@ def test_seeded_proof_receipt_visible_without_ai_claims(
 def test_monitor_and_lifecycle_smoke(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("monitor-lifecycle-smoke"))
     page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("Watch Plans")
+    expect(page.locator("body")).to_contain_text("Watchlists")
     expect(page.locator("body")).not_to_contain_text("Alert Quality Inbox")
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_contain_text("Notification center")
+    expect(page.locator("body")).to_contain_text("What is closest right now?")
     expect(page.locator("body")).not_to_contain_text("Traceback")
     assert_no_raw_traceback(page)
 
@@ -1208,7 +1302,26 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
 
     page.goto(f"{base_url}/dashboard/lifecycles", wait_until="domcontentloaded")
     expect(page.get_by_role("heading", name="What is closest right now?")).to_be_visible()
+    expect(page.locator(".activity-page-tabs")).to_have_count(0)
     expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4, timeout=15_000)
+    assert page.locator(".readiness-candidate img").evaluate_all(
+        "images => images.every(image => image.complete && image.naturalWidth > 0)"
+    )
+    state_control = page.locator("[data-radar-state]").locator("xpath=..")
+    expect(state_control.locator("[data-hm-select-trigger]")).to_be_visible()
+    state_control.locator("[data-hm-select-trigger]").click()
+    expect(state_control.locator("[data-hm-select-menu]")).to_be_visible()
+    page.screenshot(
+        path=str(visual_dir / "branded-opportunity-state-select.png"),
+        full_page=False,
+    )
+    state_control.locator("[data-hm-select-menu]").get_by_role(
+        "option", name="Near miss", exact=True
+    ).click()
+    expect(page.locator("[data-radar-state]")).to_have_value("near_miss")
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(1)
+    page.locator("[data-radar-state]").select_option("")
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4)
     insight_cards = page.locator(".activity-insight-card")
     expect(insight_cards).to_have_count(2)
     insight_cards.nth(0).locator("summary").click()

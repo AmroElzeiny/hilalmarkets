@@ -52,7 +52,6 @@ async def test_context() -> AsyncIterator[dict]:
         capability_extension_enabled=False,
         public_chat_ai_enabled=False,
         email_adapter="memory",
-        sharia_test_market_enabled=False,
         sharia_default_methodology_code=None,
         openai_model="gpt-5.4-nano",
         openai_reasoning_effort="low",

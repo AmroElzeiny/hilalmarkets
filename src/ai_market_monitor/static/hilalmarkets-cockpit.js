@@ -86,7 +86,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const versionIds = [values.get("left_version_id"), values.get("right_version_id")];
     target.hidden = false;
     if (versionIds[0] === versionIds[1]) {
-      target.textContent = "Choose two different Watch Plan versions.";
+      target.textContent = "Choose two different Watchlist versions.";
       return;
     }
     target.textContent = "Comparing retained monitoring evidence...";

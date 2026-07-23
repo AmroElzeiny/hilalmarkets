@@ -32,6 +32,10 @@ document.addEventListener("DOMContentLoaded", () => {
     collapseButton?.setAttribute("title", collapsed ? "Expand side menu" : "Minimize side menu");
     const label = collapseButton?.querySelector("span:last-child");
     if (label) label.textContent = collapsed ? "Expand menu" : "Minimize menu";
+    const minimizeIcon = collapseButton?.querySelector('[data-sidebar-collapse-icon="minimize"]');
+    const expandIcon = collapseButton?.querySelector('[data-sidebar-collapse-icon="expand"]');
+    if (minimizeIcon) minimizeIcon.hidden = collapsed;
+    if (expandIcon) expandIcon.hidden = !collapsed;
   };
   const savedSidebarState = window.localStorage.getItem(collapsedStorageKey) === "true";
   syncSidebarCollapse(savedSidebarState);
@@ -43,6 +47,153 @@ document.addEventListener("DOMContentLoaded", () => {
   desktopSidebar.addEventListener?.("change", () => syncSidebarCollapse(
     window.localStorage.getItem(collapsedStorageKey) === "true",
   ));
+
+  const brandedSelects = [...document.querySelectorAll("[data-hm-select]")];
+  const closeBrandedSelect = (wrapper, restoreFocus = false) => {
+    const trigger = wrapper.querySelector("[data-hm-select-trigger]");
+    const menu = wrapper.querySelector("[data-hm-select-menu]");
+    if (!trigger || !menu || menu.hidden) return;
+    menu.hidden = true;
+    wrapper.classList.remove("is-open");
+    trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus) trigger.focus();
+  };
+  brandedSelects.forEach((wrapper, index) => {
+    const select = wrapper.querySelector("select");
+    if (!select || wrapper.dataset.hmSelectReady === "true") return;
+    wrapper.dataset.hmSelectReady = "true";
+
+    const fieldLabel = wrapper.closest(".field")?.querySelector(":scope > span")
+      ?.textContent?.trim() || "Select option";
+    const trigger = document.createElement("button");
+    const selectedLabel = document.createElement("span");
+    const chevron = document.createElement("span");
+    const menu = document.createElement("span");
+    const menuId = `hm-select-menu-${index}`;
+    const optionElements = [];
+
+    trigger.className = "hm-select-trigger";
+    trigger.dataset.hmSelectTrigger = "";
+    trigger.type = "button";
+    trigger.setAttribute("tabindex", select.disabled ? "-1" : "0");
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-controls", menuId);
+    selectedLabel.className = "hm-select-value";
+    selectedLabel.dataset.hmSelectValue = "";
+    chevron.className = "hm-select-chevron";
+    trigger.append(selectedLabel, chevron);
+
+    menu.id = menuId;
+    menu.className = "hm-select-menu";
+    menu.dataset.hmSelectMenu = "";
+    menu.setAttribute("role", "listbox");
+    menu.hidden = true;
+
+    const sync = () => {
+      const selected = select.options[select.selectedIndex];
+      selectedLabel.textContent = selected?.textContent?.trim() || "Choose";
+      trigger.setAttribute(
+        "aria-label",
+        `${fieldLabel}: ${selectedLabel.textContent}`,
+      );
+      trigger.setAttribute("aria-disabled", String(select.disabled));
+      trigger.setAttribute("tabindex", select.disabled ? "-1" : "0");
+      optionElements.forEach((option) => {
+        const active = option.dataset.value === select.value;
+        option.classList.toggle("is-selected", active);
+        option.setAttribute("aria-selected", String(active));
+      });
+    };
+    const focusOption = (position) => {
+      const enabled = optionElements.filter(
+        (option) => option.getAttribute("aria-disabled") !== "true",
+      );
+      if (!enabled.length) return;
+      const current = enabled.indexOf(document.activeElement);
+      const next = position === "first"
+        ? 0
+        : position === "last"
+          ? enabled.length - 1
+          : (current + position + enabled.length) % enabled.length;
+      enabled[next].focus();
+    };
+    const open = (direction = 1) => {
+      if (select.disabled) return;
+      brandedSelects.forEach((candidate) => {
+        if (candidate !== wrapper) closeBrandedSelect(candidate);
+      });
+      menu.hidden = false;
+      wrapper.classList.add("is-open");
+      trigger.setAttribute("aria-expanded", "true");
+      const selected = optionElements.find((option) => option.classList.contains("is-selected"));
+      window.requestAnimationFrame(() => {
+        (selected || optionElements[direction < 0 ? optionElements.length - 1 : 0])?.focus();
+      });
+    };
+
+    [...select.options].forEach((nativeOption) => {
+      const option = document.createElement("span");
+      option.className = "hm-select-option";
+      option.dataset.value = nativeOption.value;
+      option.textContent = nativeOption.textContent;
+      option.setAttribute("role", "option");
+      option.setAttribute("tabindex", "-1");
+      option.setAttribute("aria-disabled", String(nativeOption.disabled));
+      option.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (nativeOption.disabled) return;
+        const changed = select.value !== nativeOption.value;
+        select.value = nativeOption.value;
+        sync();
+        closeBrandedSelect(wrapper, true);
+        if (changed) select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      option.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Home" || event.key === "End") {
+          event.preventDefault();
+          focusOption(event.key === "Home" ? "first" : "last");
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          option.click();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeBrandedSelect(wrapper, true);
+        }
+      });
+      optionElements.push(option);
+      menu.append(option);
+    });
+
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (menu.hidden) open();
+      else closeBrandedSelect(wrapper);
+    });
+    trigger.addEventListener("keydown", (event) => {
+      if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) {
+        event.preventDefault();
+        open(event.key === "ArrowUp" ? -1 : 1);
+      } else if (event.key === "Escape") {
+        closeBrandedSelect(wrapper);
+      }
+    });
+    select.addEventListener("change", sync);
+    select.classList.add("hm-select-native-enhanced");
+    wrapper.classList.add("is-enhanced");
+    wrapper.append(trigger, menu);
+    sync();
+  });
+  document.addEventListener("click", (event) => {
+    brandedSelects.forEach((wrapper) => {
+      if (!wrapper.contains(event.target)) closeBrandedSelect(wrapper);
+    });
+  });
 
   const publicMenuButton = document.querySelector("[data-public-menu]");
   const publicLinks = document.querySelector(".public-links");
@@ -182,7 +333,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const entries = Object.entries(result.preferences || {});
     preferencesTarget.replaceChildren();
     if (!entries.length) {
-      preferencesTarget.textContent = "No personal Watch Plan preferences are stored yet.";
+      preferencesTarget.textContent = "No personal Watchlist preferences are stored yet.";
       return;
     }
     const list = document.createElement("ul");
@@ -194,7 +345,7 @@ document.addEventListener("DOMContentLoaded", () => {
       list.append(item);
     });
     const evidence = document.createElement("small");
-    evidence.textContent = `Derived from ${result.evidence?.strategy_versions_reviewed || 0} saved Watch Plan versions.`;
+    evidence.textContent = `Derived from ${result.evidence?.strategy_versions_reviewed || 0} saved Watchlist versions.`;
     preferencesTarget.append(list, evidence);
   };
   if (preferencesTarget) {
@@ -204,10 +355,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   preferenceButton?.addEventListener("click", async () => {
-    if (!window.confirm("Clear the Watch Plan preferences derived for this account?")) return;
+    if (!window.confirm("Clear the Watchlist preferences derived for this account?")) return;
     try {
       await preferenceRequest({ method: "DELETE" });
-      if (preferencesTarget) preferencesTarget.textContent = "Your personal Watch Plan preferences were cleared.";
+      if (preferencesTarget) preferencesTarget.textContent = "Your personal Watchlist preferences were cleared.";
     } catch (error) {
       if (preferencesTarget) preferencesTarget.textContent = error.message;
     }
@@ -290,7 +441,7 @@ document.addEventListener("DOMContentLoaded", () => {
       syncSavedAssetActions();
       if (!impact) return;
       impact.hidden = false;
-      impact.textContent = "Checking affected Watch Plans...";
+      impact.textContent = "Checking affected Watchlists...";
       const watchlistId = row.dataset.watchlistId || "";
       const asset = row.dataset.asset || "";
       try {
@@ -304,8 +455,8 @@ document.addEventListener("DOMContentLoaded", () => {
         impact.replaceChildren();
         const summary = document.createElement("strong");
         summary.textContent = plans.length
-          ? `${plans.length} Watch Plan${plans.length === 1 ? " uses" : "s use"} this asset`
-          : "No Watch Plans use this asset";
+          ? `${plans.length} Watchlist${plans.length === 1 ? " uses" : "s use"} this asset`
+          : "No Watchlists use this asset";
         impact.append(summary);
         plans.slice(0, 5).forEach((plan) => {
           const item = document.createElement("span");
@@ -429,7 +580,7 @@ document.addEventListener("DOMContentLoaded", () => {
       summary.textContent = button.dataset.evidenceSummary || "Stored evidence for this update.";
       evidenceContent.append(evidenceBlock("What happened", summary));
       const metadata = evidenceFacts([
-        { label: "Watch Plan", value: button.dataset.evidenceMonitor },
+        { label: "Watchlist", value: button.dataset.evidenceMonitor },
         { label: "Recorded", value: button.dataset.evidenceTime },
       ]);
       if (metadata.childElementCount) evidenceContent.append(metadata);
@@ -451,7 +602,7 @@ document.addEventListener("DOMContentLoaded", () => {
             { label: "Before", value: readableEvidence(payload.previous_status) },
             { label: "Now", value: readableEvidence(payload.current_status) },
             { label: "Methodology version", value: payload.methodology_version },
-            { label: "Watch Plan action", value: readableEvidence(payload.watch_plan_action) },
+            { label: "Watchlist action", value: readableEvidence(payload.watch_plan_action) },
             { label: "Review state", value: readableEvidence(payload.review_state) },
           ]), "is-change"));
           const changes = document.createElement("div");
@@ -659,7 +810,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const title = document.createElement("strong");
     const detail = document.createElement("small");
     const dismiss = document.createElement("button");
-    title.textContent = item.title || "Watch Plan update";
+    title.textContent = item.title || "Watchlist update";
     detail.textContent = item.body || item.symbol || "Open Opportunities & Evidence for details.";
     dismiss.type = "button";
     dismiss.setAttribute("aria-label", "Dismiss notification");

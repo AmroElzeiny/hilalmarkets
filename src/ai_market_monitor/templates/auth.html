@@ -5,53 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <meta name="description" content="Secure access to HilalMarkets screened market intelligence and guided monitoring.">
-  <title>{{ title }} · HilalMarkets</title>
+  <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-prototype">
-  <style>
-    .auth-production-form{width:min(100%,520px)}
-    .auth-production-form>p{margin-top:8px}
-    .auth-fields{display:grid;gap:13px;margin-top:24px}
-    .auth-fields label{display:grid;gap:7px;color:var(--ink);font-size:.84rem;font-weight:650}
-    .auth-fields input{width:100%;min-height:48px;padding:0 15px;border:1px solid var(--line);border-radius:14px;background:var(--white);color:var(--ink);font:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
-    .auth-fields input:focus{border-color:var(--emerald-600);box-shadow:0 0 0 4px rgba(31,139,116,.11)}
-    .auth-fields small{color:var(--muted);font-weight:500}
-    .auth-fields .btn{width:100%;margin-top:4px}
-    .auth-alternative-actions{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:14px}
-    .auth-switch{margin-top:20px;text-align:center;color:var(--muted)}
-    .auth-switch a,.text-link{color:var(--emerald-800);font-weight:700}
-    .dash-flash{margin:16px 0;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:var(--emerald-50);color:var(--emerald-900);font-size:.86rem}
-    .dash-flash.error,.auth-inline-error{background:#fff2ef;border-color:#efc5bc;color:#9c3528}
-    .auth-inline-error{padding:10px 12px;border:1px solid #efc5bc;border-radius:10px;font-size:.82rem}
-    .auth-brand .logo small{color:#9bc8bb}
-    .auth-brand-copy{margin-top:90px;max-width:560px}
-    .auth-brand-copy h1{font-size:clamp(3rem,5vw,4.4rem);color:#fff}
-    .auth-brand-copy h1 span{color:#d2af63}
-    .auth-brand-copy p{font-size:1.05rem}
-    @media(max-width:900px){.auth-form-wrap{padding:34px 20px}.auth-production-form{max-width:560px}}
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260723-auth">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260723-auth">
 </head>
-<body>
+<body class="hilal-auth-page">
   <div class="auth-shell">
     <section class="auth-brand">
-      <a class="logo" href="/"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="Hilal Markets logo"><span>Hilal Markets<small>Screened market intelligence</small></span></a>
+      <a class="auth-logo-surface" href="/" aria-label="Hilal Markets home"><img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets"></a>
       <div class="auth-brand-copy">
-        <span class="eyebrow" style="color:#9bc8bb">Screened first. Watched continuously.</span>
+        <span class="eyebrow">Screened first. Watched continuously.</span>
         <h1>Know what fits your values.<br><span>Know when it matters.</span></h1>
         <p>Start with a disclosed Sharia methodology, choose the market behavior you care about, and keep every decision in your hands.</p>
       </div>
-      <div class="auth-visual">
-        <div class="auth-card-float one"><div class="row-between"><div class="coin"><div class="coin-logo" style="background:#222d48">SOL</div><div><strong>SOL/USDT</strong><small style="display:block;color:#a9c2bb">Breaking a recent high</small></div></div><span class="badge badge-dark">Eligible</span></div><div class="readiness"><strong style="color:white">80%</strong><span style="color:#b9cec8">ready</span></div><div class="progress"><span data-progress="80"></span></div></div>
-        <div class="auth-card-float two"><span class="kicker">Evidence at every step</span><div class="row" style="margin-top:10px"><span data-icon="passport" data-icon-class="icon"></span><strong style="color:white">Methodology HM-01 · Reviewed</strong></div></div>
+      <div class="auth-trust-list" aria-label="Hilal Markets product boundaries">
+        <div class="auth-trust-item"><span class="icon-box"><span data-icon="passport" data-icon-class="icon"></span></span><span><strong>Evidence stays visible</strong><small>Methodology, source, and review history remain inspectable.</small></span></div>
+        <div class="auth-trust-item"><span class="icon-box"><span data-icon="workflow" data-icon-class="icon"></span></span><span><strong>You approve every rule</strong><small>AI helps structure your idea but cannot activate it for you.</small></span></div>
+        <div class="auth-trust-item"><span class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></span><span><strong>Monitoring, not execution</strong><small>Hilal Markets watches crypto spot setups and never places trades.</small></span></div>
       </div>
     </section>
     <main class="auth-form-wrap">
       <div class="auth-form auth-production-form">
-        <a href="/" class="logo" style="margin-bottom:38px"><img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="Hilal Markets logo"><span>Hilal Markets</span></a>
-        <span class="eyebrow">{{ 'Create your account' if page in ['signup', 'signup_verify'] else 'Secure dashboard access' }}</span>
         <h1>{{ title }}</h1>
-        <p>{{ 'Choose your screening policy and create your first Watch Plan.' if page in ['signup', 'signup_verify'] else 'Return to your screened market, Watch Plans, and latest evidence.' }}</p>
     {% if message == 'code_sent' and page == 'signup_verify' %}
       <div class="dash-flash success">A six-digit code was sent to your email. Enter it below to create your dashboard account.</div>
     {% elif message == 'code_sent' %}
@@ -59,7 +36,9 @@
     {% elif message %}
       <div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>
     {% endif %}
-    {% if error == 'account_exists' %}
+    {% if error == 'account_banned' %}
+      <div class="dash-flash error">Your profile is banned.</div>
+    {% elif error == 'account_exists' %}
       <div class="dash-flash error">This email already has an account. Please sign in instead.</div>
       <p><a class="btn btn-primary" href="/signin{{ '?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '' }}">Go To Sign In</a></p>
     {% elif error == 'account_not_registered' %}
@@ -176,7 +155,7 @@
       </div>
     </main>
   </div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260714-prototype"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260723-auth"></script>
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-production"></script>
   <script>
     function clearSensitiveAuthFields() {

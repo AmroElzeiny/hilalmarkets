@@ -21,6 +21,8 @@
   const openCanvasButton = document.querySelector("[data-ai-open-canvas]");
   const returnChatButton = root.querySelector("[data-ai-return-chat]");
   const minimizeChatButton = root.querySelector("[data-ai-minimize-chat]");
+  input.dataset.testid = "ai-setup-input";
+  sendButton.dataset.testid = "ai-setup-send";
   let chat = null;
   let loading = false;
   let lastAction = null;
@@ -120,6 +122,7 @@
       const wrapper = document.createElement("aside");
       wrapper.className = "ai-chat-process-state mechanic";
       wrapper.setAttribute("role", "status");
+      wrapper.dataset.testid = "ai-setup-assistant-message";
       wrapper.dataset.processState = stage;
       wrapper.innerHTML = `
         ${window.icon?.("settings", "icon") || ""}
@@ -131,6 +134,7 @@
       const wrapper = document.createElement("aside");
       wrapper.className = "ai-chat-process-state";
       wrapper.setAttribute("role", "status");
+      wrapper.dataset.testid = "ai-setup-assistant-message";
       wrapper.dataset.processState = state;
       wrapper.innerHTML = `
         ${window.icon?.("workflow", "icon") || ""}
@@ -139,6 +143,7 @@
     }
     const wrapper = document.createElement("article");
     wrapper.className = `ai-chat-message ${user ? "user" : "assistant"}${item.pending ? " pending" : ""}${item.failed ? " failed" : ""}`;
+    if (!user) wrapper.dataset.testid = "ai-setup-assistant-message";
     if (item.client_message_id) wrapper.dataset.clientMessageId = item.client_message_id;
     const avatarIcon = window.icon?.(user ? "user" : "spark", "icon") || "";
     const timestamp = item.created_at
@@ -438,14 +443,14 @@
           </article>`).join("")}
         </div>
       </section>` : ""}
-      ${reasons.length ? `<section class="ai-sheet-card ai-refusal-report">
+      ${reasons.length ? `<section class="ai-sheet-card ai-refusal-report" data-testid="ai-setup-validation-errors">
         <h3>${icon("triangle-alert", "%23f59e0b")} What needs attention</h3>
         <p class="ai-refusal-intro">${reasons.some((item) => item.blocking) ? "Approval is paused until these exact items are resolved." : "These notes are shown once so the rule set stays consistent."}</p>
         <div class="ai-warning-list ai-refusal-reasons">
           ${reasons.map((item, index) => `<article class="ai-warning ai-refusal-reason ${item.blocking ? "critical" : clean(item.severity)}"><span class="ai-attention-number">${index + 1}</span><span class="ai-attention-copy"><small class="ai-attention-category">${clean(item.category)}</small><strong>${clean(item.title)}</strong><p>${clean(item.message)}</p><small><b>Next:</b> ${clean(item.nextStep)}</small></span></article>`).join("")}
         </div>
       </section>` : ""}
-      <section class="ai-sheet-card">
+      <section class="ai-sheet-card" data-testid="ai-setup-assumptions">
         <h3>${icon("eye")} Assumptions shown openly</h3>
         ${assumptions.length ? `<ul class="ai-assumption-list">${assumptions.map((item) => `<li>${clean(item)}</li>`).join("")}</ul>` : "<p>No hidden assumptions were added.</p>"}
       </section>
@@ -520,6 +525,11 @@
   }
 
   function render() {
+    const evaluationContract = chat?.evaluation_contract || null;
+    root.dataset.evaluationContractHash = evaluationContract?.canonical_hash || "";
+    root.dataset.canvasContractNodeCount = String(
+      evaluationContract?.canvas?.nodes?.length || 0,
+    );
     renderConversation();
     renderPreview();
     publishDraftToCanvas();
@@ -533,6 +543,7 @@
       lint: chat?.lint_warnings || [],
       ambiguity: chat?.ambiguities || [],
       setupMode: chat?.setup_mode || null,
+      evaluationContract: chat?.evaluation_contract || null,
     };
     window.__traceEdgeChatDraft = detail;
     window.dispatchEvent(new CustomEvent("traceedge:chat-draft", {detail}));

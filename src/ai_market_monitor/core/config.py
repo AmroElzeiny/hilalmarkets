@@ -2,7 +2,15 @@ import re
 from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 WHATSAPP_TEMPLATE_EVENTS = frozenset(
@@ -20,6 +28,16 @@ WHATSAPP_TEMPLATE_EVENTS = frozenset(
         "confirmed_research_event",
     }
 )
+
+
+class AISetupEvaluatorTargetVersion(BaseModel):
+    """Server-owned model and prompt variant available only to test evaluators."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1, max_length=120)
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+    prompt_version: Literal["current", "context_guard_v1"] = "current"
 
 
 class Settings(BaseSettings):
@@ -60,7 +78,6 @@ class Settings(BaseSettings):
     scanning_enabled: bool = False
     sharia_screening_enforced: bool = False
     sharia_allow_legacy_unscreened_local: bool = True
-    sharia_test_market_enabled: bool = False
     sharia_live_quote_cache_seconds: float = Field(default=0.75, ge=0.5, le=10)
     sharia_default_methodology_code: str | None = None
     sharia_universe_cache_ttl_seconds: int = Field(default=300, ge=30, le=86400)
@@ -72,6 +89,10 @@ class Settings(BaseSettings):
     sc_malaysia_digital_assets_url: AnyHttpUrl = AnyHttpUrl(
         "https://www.sc.com.my/digital-assets"
     )
+    fasset_shariah_reports_url: AnyHttpUrl = AnyHttpUrl(
+        "https://www.fasset.com/shariah-reports"
+    )
+    fasset_minimum_profile_count: int = Field(default=100, ge=1, le=1000)
     sharia_ai_model: str = "gpt-5.4-nano"
     sharia_ai_reasoning_effort: Literal[
         "none", "minimal", "low", "medium", "high", "xhigh"
@@ -83,12 +104,12 @@ class Settings(BaseSettings):
     sharia_review_reminder_hours: int = Field(default=6, ge=1, le=168)
     sharia_review_sla_hours: int = Field(default=48, ge=1, le=720)
     require_second_reviewer: bool = False
-    sharia_source_scan_interval_hours: int = Field(default=24, ge=1, le=720)
+    sharia_source_scan_interval_hours: int = Field(default=240, ge=1, le=720)
     sharia_scraper_concurrency: int = Field(default=1, ge=1, le=4)
     sharia_scraper_obey_robots: bool = True
     sharia_scraper_download_delay_seconds: float = Field(default=1, ge=0.2, le=60)
     sharia_pilot_symbols: str = "BTC,ETH,SOL"
-    sharia_process_remaining_imports: bool = False
+    sharia_process_remaining_imports: bool = True
     tracedge_market_data_mode: Literal["ccxt", "fixture"] = "ccxt"
     tracedge_fixture_market_data_enabled: bool = False
     market_data_provider: Literal["ccxt", "memory"] = "ccxt"
@@ -196,6 +217,11 @@ class Settings(BaseSettings):
     ai_setup_complex_condition_threshold: int = Field(default=4, ge=2, le=20)
     ai_setup_repeated_correction_threshold: int = Field(default=2, ge=1, le=10)
     ai_setup_low_capability_confidence: float = Field(default=0.72, ge=0, le=1)
+    ai_setup_evaluator_enabled: bool = False
+    ai_setup_evaluator_faults_enabled: bool = False
+    ai_setup_evaluator_target_versions: dict[str, AISetupEvaluatorTargetVersion] = Field(
+        default_factory=dict
+    )
     ai_agent_control_enabled: bool = False
     ai_agent_shadow_mode: bool = False
     ai_agent_rollout_percent: int = Field(default=0, ge=0, le=100)
@@ -337,6 +363,23 @@ class Settings(BaseSettings):
     system_brain_session_hours: int = Field(default=8, ge=1, le=72)
     system_brain_login_attempts_per_15_minutes: int = Field(default=5, ge=1, le=20)
     system_brain_cloudflare_access_required: bool = False
+    system_brain_ai_enabled: bool = True
+    system_brain_ai_model: str = "gpt-5.4-nano"
+    system_brain_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "low"
+    system_brain_ai_timeout_seconds: int = Field(default=30, ge=3, le=120)
+    system_brain_ai_max_output_tokens: int = Field(default=900, ge=256, le=2400)
+    system_brain_ai_max_context_characters: int = Field(
+        default=24_000,
+        ge=4_000,
+        le=80_000,
+    )
+    system_brain_ai_max_estimated_cost_usd_per_turn: float = Field(
+        default=0.02,
+        gt=0,
+        le=1,
+    )
     openai_model_pricing_usd_per_million: dict[str, dict[str, float]] = Field(
         default_factory=lambda: {
             "gpt-5.4-nano": {
@@ -390,6 +433,11 @@ class Settings(BaseSettings):
             raise ValueError("AI_AGENT_PARALLEL_TOOL_CALLS must remain false for bounded control")
         if self.ai_agent_tool_timeout_seconds > self.ai_agent_timeout_seconds:
             raise ValueError("AI_AGENT_TOOL_TIMEOUT_SECONDS cannot exceed AI_AGENT_TIMEOUT_SECONDS")
+        for label in self.ai_setup_evaluator_target_versions:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", label):
+                raise ValueError(
+                    "AI_SETUP_EVALUATOR_TARGET_VERSIONS contains an invalid version label"
+                )
         if (
             self.capability_extension_min_candidate_rate
             >= self.capability_extension_max_candidate_rate

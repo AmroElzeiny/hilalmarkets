@@ -72,6 +72,8 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE` | Public spot provider used for certification preflight. Controlled beta requires `binance`. |
 | `SHARIA_ADMIN_TELEGRAM_CHAT_ID` | Admin-only destination for review notifications. Required when deployed screening is enforced. |
 | `SC_MALAYSIA_DIGITAL_ASSETS_URL` | Authoritative SC Malaysia digital-assets page imported by the governance worker. |
+| `FASSET_SHARIAH_REPORTS_URL` | Published Fasset Shariah Reports page imported by the bounded authority worker. |
+| `FASSET_MINIMUM_PROFILE_COUNT` | Fail-closed source-shape floor for complete Fasset profiles. Default: `100`. |
 | `SHARIA_AI_MODEL` | Model used for bounded factual dossier/change analysis. Default: `gpt-5.4-nano`. |
 | `SHARIA_AI_REASONING_EFFORT` | Factual research reasoning effort. Default: `low`. |
 | `SHARIA_AI_SERVICE_TIER` | Must be `flex` for the deployed governance workflow. |
@@ -81,12 +83,12 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `SHARIA_REVIEW_REMINDER_HOURS` | Reminder window for open review cases. Default: `6`. |
 | `SHARIA_REVIEW_SLA_HOURS` | Initial due-date window for review cases. Default: `48`. |
 | `REQUIRE_SECOND_REVIEWER` | When true, the reviewer cannot publish the same decision. Default: `false`. |
-| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Published-source monitoring interval. Default: `24`. |
+| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Authority import and published-source monitoring interval. Default: `240` (10 days). |
 | `SHARIA_SCRAPER_CONCURRENCY` | Must be `1`; official sources are fetched sequentially. |
 | `SHARIA_SCRAPER_OBEY_ROBOTS` | Must remain `true` in staging and production. |
 | `SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS` | Delay between official-source requests; deployed minimum is one second. |
 | `SHARIA_PILOT_SYMBOLS` | Pilot allowlist, default `BTC,ETH,SOL`. |
-| `SHARIA_PROCESS_REMAINING_IMPORTS` | Enables processing of explicit non-pilot rows after pilot approval; default `false`. |
+| `SHARIA_PROCESS_REMAINING_IMPORTS` | Sends every explicit imported authority record through exact identity, factual research, and human review gates; default `true`. |
 | `TELEGRAM_ENABLED` | Enables Telegram webhooks and delivery workers. |
 | `TELEGRAM_ADAPTER` | Must be `http` when Telegram is enabled in a deployed environment. |
 | `BILLING_ENABLED` | Enables checkout, portal and billing webhook processing. |
@@ -166,6 +168,10 @@ methodology family/version and never seeds or publishes an asset.
 Migration `e7f8a9b0c1d2` adds immutable Passport/event references, governance roles, reviewer
 profiles and assignments, problem reports, decision/publication integrity fields, first-party
 checkout attempts, and payment-email outbox state.
+
+Migration `6f02832495ab` adds Fasset source provenance fields, archives development/test
+methodologies, and adds the Fasset methodology and deduplicated `All` aggregate view. Neither
+methodology seed publishes an asset.
 
 ## Local Development
 
@@ -259,7 +265,8 @@ Scheduled tasks currently wired:
 - Dormant WhatsApp webhook/retry tasks only when the separately disabled WhatsApp feature is enabled.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
-- Daily idempotent SC Malaysia import and pilot processing.
+- Idempotent SC Malaysia and Fasset authority imports every
+  `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` (240 hours by default).
 - Hourly open-review reminders and minute-level Telegram retry processing.
 - Published-asset source monitoring at `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`.
 

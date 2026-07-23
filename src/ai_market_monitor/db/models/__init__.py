@@ -1,4 +1,7 @@
 from ai_market_monitor.db.models.accounts import (
+    AccountAdminAction,
+    AccountBan,
+    AccountEmailDelivery,
     AttributionTouch,
     DashboardNotification,
     DashboardPreference,
@@ -186,6 +189,9 @@ from ai_market_monitor.db.models.whatsapp import (
 
 __all__ = [
     "AIAnalysisSnapshot",
+    "AccountAdminAction",
+    "AccountBan",
+    "AccountEmailDelivery",
     "AgentRun",
     "AgentToolCall",
     "AISetupChatMessage",

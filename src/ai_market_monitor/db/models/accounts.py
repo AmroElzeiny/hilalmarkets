@@ -78,6 +78,75 @@ class UserIdentity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="identities")
 
 
+class AccountBan(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "account_bans"
+    __table_args__ = (
+        UniqueConstraint("identifier_hash", name="uq_account_ban_identifier_hash"),
+        Index("ix_account_ban_active_created", "is_active", "created_at"),
+    )
+
+    identifier_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    banned_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    banned_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AccountAdminAction(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "account_admin_actions"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_account_admin_action_idempotency"),
+        Index("ix_account_admin_action_target_created", "target_user_id", "created_at"),
+        Index("ix_account_admin_action_actor_created", "actor_user_id", "created_at"),
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    target_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    action: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_redacted: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AccountEmailDelivery(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "account_email_deliveries"
+    __table_args__ = (
+        UniqueConstraint("event_key", name="uq_account_email_delivery_event"),
+        Index("ix_account_email_delivery_due", "status", "next_retry_at"),
+    )
+
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    admin_action_id: Mapped[UUID] = mapped_column(
+        ForeignKey("account_admin_actions.id", ondelete="CASCADE"), nullable=False
+    )
+    event_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(320), nullable=False)
+    template_kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    payload_redacted: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class TelegramConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "telegram_connections"
     __table_args__ = (UniqueConstraint("telegram_user_id", name="uq_telegram_user_id"),)

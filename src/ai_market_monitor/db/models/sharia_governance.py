@@ -168,6 +168,7 @@ class ExternalAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("import_hash", name="uq_external_assessment_import_hash"),
         Index("ix_external_assessment_symbol_state", "asset_symbol", "mapping_state"),
+        Index("ix_external_assessment_family_symbol", "source_family", "asset_symbol"),
     )
 
     canonical_asset_id: Mapped[UUID | None] = mapped_column(
@@ -176,16 +177,23 @@ class ExternalAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_snapshot_id: Mapped[UUID] = mapped_column(
         ForeignKey("source_snapshots.id", ondelete="RESTRICT"), nullable=False
     )
+    source_family: Mapped[str] = mapped_column(
+        String(80), default="sc_malaysia_sac", nullable=False
+    )
     source_authority: Mapped[str] = mapped_column(String(300), nullable=False)
     source_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    source_reference: Mapped[str | None] = mapped_column(String(160))
     asset_name: Mapped[str] = mapped_column(String(160), nullable=False)
     asset_symbol: Mapped[str] = mapped_column(String(32), nullable=False)
     exact_status_wording: Mapped[str] = mapped_column(String(160), nullable=False)
-    sac_meeting_number: Mapped[str] = mapped_column(String(80), nullable=False)
-    decision_date: Mapped[date] = mapped_column(Date, nullable=False)
+    sac_meeting_number: Mapped[str | None] = mapped_column(String(80))
+    decision_date: Mapped[date | None] = mapped_column(Date)
     regulatory_scope: Mapped[str] = mapped_column(Text, nullable=False)
     retrieval_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     exact_row_text: Mapped[str] = mapped_column(Text, nullable=False)
+    structured_facts: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
     import_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     mapping_state: Mapped[str] = mapped_column(
         String(32), default="unresolved", nullable=False

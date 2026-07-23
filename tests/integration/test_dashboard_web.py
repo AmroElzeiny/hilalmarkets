@@ -95,7 +95,7 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
 
     dashboard = await test_context["client"].get("/dashboard")
     assert dashboard.status_code == 200
-    assert "Create your first Watch Plan" in dashboard.text
+    assert "Create your first Watchlist" in dashboard.text
     assert "Your next useful action" in dashboard.text
     assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
@@ -131,7 +131,8 @@ async def test_dashboard_uses_account_locale_and_only_reports_active_telegram(te
     pending = await test_context["client"].get("/dashboard")
     assert pending.status_code == 200
     assert '<html lang="ar" dir="rtl">' in pending.text
-    assert "Not connected" in pending.text
+    assert ">Set up<" in pending.text
+    assert "<small>Not connected</small>" not in pending.text
 
     async with test_context["session_factory"]() as session:
         connection = await session.scalar(select(TelegramConnection))
@@ -142,8 +143,8 @@ async def test_dashboard_uses_account_locale_and_only_reports_active_telegram(te
 
     active = await test_context["client"].get("/dashboard")
     assert active.status_code == 200
-    assert "Connected" in active.text
     assert ">Ready<" in active.text
+    assert "<small>Connected</small>" not in active.text
 
 
 async def test_signup_verification_sends_admin_notification(test_context, monkeypatch):
@@ -261,7 +262,7 @@ async def test_consolidated_market_and_notification_pages_use_only_persisted_use
     )
     compliance_page = await test_context["client"].get(compliance_redirect.headers["location"])
     assert compliance_page.status_code == 200
-    assert "Notification center" in compliance_page.text
+    assert "Recent updates" in compliance_page.text
     assert "Screening changes" in compliance_page.text
     assert "SOL" in compliance_page.text
 

@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic
@@ -41,6 +41,13 @@ from ai_market_monitor.services.agent_tools import (
     strict_json_schema,
 )
 from ai_market_monitor.services.ai_model_routing import AISetupModelRoute, select_setup_model
+from ai_market_monitor.services.ai_setup_evaluator_control import (
+    consume_evaluator_llm_fault,
+    evaluator_prompt_appendix,
+)
+from ai_market_monitor.services.ai_usage_context import (
+    current_ai_usage_correlation_id,
+)
 from ai_market_monitor.services.system_brain import (
     CapabilityCoverageService,
     estimate_usage_cost,
@@ -69,6 +76,9 @@ class OpenAIAgentResponsesClient:
     async def create(self, payload: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
         if self.settings.openai_api_key is None:
             raise ValueError("OPENAI_API_KEY is not configured")
+        injected = consume_evaluator_llm_fault()
+        if injected is not None:
+            return injected
         headers = {
             "Authorization": f"Bearer {self.settings.openai_api_key.get_secret_value()}",
             "Content-Type": "application/json",
@@ -95,6 +105,17 @@ class AgentTurnOutcome:
     run_id: UUID
     shadow_mode: bool = False
     fallback_reason: str | None = None
+    model: str | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+
+
+def _usage_payload(usage: AgentUsageTotals) -> dict[str, Any]:
+    return {
+        "input_tokens": usage.input_tokens,
+        "input_tokens_details": {"cached_tokens": usage.cached_input_tokens},
+        "output_tokens": usage.output_tokens,
+        "output_tokens_details": {"reasoning_tokens": usage.reasoning_tokens},
+    }
 
 
 class AgentControlService:
@@ -151,7 +172,7 @@ class AgentControlService:
             reasoning_effort=model_route.reasoning_effort,
             started_at=datetime.now(UTC),
             status="shadow_running" if shadow_mode else "running",
-            correlation_id=uuid4().hex,
+            correlation_id=current_ai_usage_correlation_id() or uuid4().hex,
             shadow_mode=shadow_mode,
             comparison={
                 "legacy_status_before": chat.status,
@@ -194,6 +215,7 @@ class AgentControlService:
                 run_id=run.id,
                 shadow_mode=shadow_mode,
                 fallback_reason="agent_model_pricing_unavailable",
+                model=model_route.model,
             )
         usage = AgentUsageTotals()
         input_items: list[dict[str, Any]] = [
@@ -476,6 +498,8 @@ class AgentControlService:
                 run_id=run.id,
                 shadow_mode=True,
                 fallback_reason=fallback_reason,
+                model=model_route.model,
+                usage=_usage_payload(usage),
             )
 
         if final is None and stop_reason is None and run.step_count >= budgets.max_steps:
@@ -537,6 +561,8 @@ class AgentControlService:
             runtime=runtime,
             run_id=run.id,
             fallback_reason=fallback_reason or stop_reason,
+            model=model_route.model,
+            usage=_usage_payload(usage),
         )
 
     def _request_payload(
@@ -553,7 +579,7 @@ class AgentControlService:
             "store": False,
             "max_output_tokens": max_output_tokens,
             "reasoning": {"effort": model_route.reasoning_effort},
-            "instructions": _coordinator_instructions(),
+            "instructions": _coordinator_instructions() + evaluator_prompt_appendix(),
             "input": input_items,
             "parallel_tool_calls": False,
             "text": {

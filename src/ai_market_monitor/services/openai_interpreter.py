@@ -14,6 +14,10 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.services.ai_model_routing import select_setup_model
+from ai_market_monitor.services.ai_setup_evaluator_control import (
+    consume_evaluator_llm_fault,
+    evaluator_prompt_appendix,
+)
 from ai_market_monitor.services.interfaces import StrategyInterpreter
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 
@@ -72,7 +76,7 @@ class OpenAIResponsesInterpretationClient:
                     "schema": _strategy_draft_schema(candidate_keys),
                 }
             },
-            "instructions": _instructions(),
+            "instructions": _instructions() + evaluator_prompt_appendix(),
             "input": json.dumps(
                 {
                     "guided_setup": guided_setup.model_dump(mode="json"),
@@ -86,14 +90,16 @@ class OpenAIResponsesInterpretationClient:
             "Authorization": f"Bearer {api_key.get_secret_value()}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.openai_base_url).rstrip("/"),
-            timeout=self.settings.openai_timeout_seconds,
-            transport=self.transport,
-        ) as client:
-            response = await client.post("/responses", headers=headers, json=payload)
-        response.raise_for_status()
-        response_payload = response.json()
+        response_payload = consume_evaluator_llm_fault()
+        if response_payload is None:
+            async with httpx.AsyncClient(
+                base_url=str(self.settings.openai_base_url).rstrip("/"),
+                timeout=self.settings.openai_timeout_seconds,
+                transport=self.transport,
+            ) as client:
+                response = await client.post("/responses", headers=headers, json=payload)
+            response.raise_for_status()
+            response_payload = response.json()
         self.last_usage = {
             **dict(response_payload.get("usage") or {}),
             **route.usage_metadata(),

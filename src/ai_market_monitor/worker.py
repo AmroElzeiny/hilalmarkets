@@ -100,9 +100,9 @@ app.conf.update(
             "task": "ai_market_monitor.send_compliance_digests",
             "schedule": 60 * 60,
         },
-        "process-sc-malaysia-imports-daily": {
-            "task": "ai_market_monitor.process_sc_malaysia_imports",
-            "schedule": 24 * 60 * 60,
+        "process-sharia-authority-imports": {
+            "task": "ai_market_monitor.process_sharia_authority_imports",
+            "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
         },
         "send-sharia-review-reminders-hourly": {
             "task": "ai_market_monitor.send_sharia_review_reminders",
@@ -114,6 +114,10 @@ app.conf.update(
         },
         "retry-payment-emails-every-minute": {
             "task": "ai_market_monitor.retry_payment_emails",
+            "schedule": 60,
+        },
+        "retry-account-emails-every-minute": {
+            "task": "ai_market_monitor.retry_account_emails",
             "schedule": 60,
         },
         "retry-public-inquiry-emails-every-minute": {
@@ -285,7 +289,12 @@ def send_compliance_digests() -> dict:
 
 @app.task(name="ai_market_monitor.process_sc_malaysia_imports")
 def process_sc_malaysia_imports() -> dict:
-    return _run_async_task(_process_sc_malaysia_imports())
+    return _run_async_task(_process_sharia_authority_imports())
+
+
+@app.task(name="ai_market_monitor.process_sharia_authority_imports")
+def process_sharia_authority_imports() -> dict:
+    return _run_async_task(_process_sharia_authority_imports())
 
 
 @app.task(name="ai_market_monitor.send_sharia_review_reminders")
@@ -296,6 +305,11 @@ def send_sharia_review_reminders() -> dict:
 @app.task(name="ai_market_monitor.retry_payment_emails")
 def retry_payment_emails() -> dict:
     return _run_async_task(_retry_payment_emails())
+
+
+@app.task(name="ai_market_monitor.retry_account_emails")
+def retry_account_emails() -> dict:
+    return _run_async_task(_retry_account_emails())
 
 
 @app.task(name="ai_market_monitor.retry_public_inquiry_emails")
@@ -722,13 +736,15 @@ async def _send_compliance_digests() -> dict:
         return result
 
 
-async def _process_sc_malaysia_imports() -> dict:
+async def _process_sharia_authority_imports() -> dict:
+    from dataclasses import asdict
     from uuid import UUID
 
     from sqlalchemy import select
 
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.db.models import ExternalAssessment, ReviewCase
+    from ai_market_monitor.services.fasset_import import FassetImporter
     from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
     from ai_market_monitor.services.sc_malaysia_import import SCMalaysiaImporter
     from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
@@ -744,9 +760,26 @@ async def _process_sc_malaysia_imports() -> dict:
             symbol.upper()
             for symbol in await provider.list_symbols("binance", ["USDT"])
         }
-        async with SessionFactory() as session:
-            imported = await SCMalaysiaImporter(session, settings).import_latest()
-            await session.commit()
+        imports: dict[str, dict] = {}
+        for source_name, importer_type in (
+            ("sc_malaysia", SCMalaysiaImporter),
+            ("fasset", FassetImporter),
+        ):
+            async with SessionFactory() as session:
+                try:
+                    imported = await importer_type(session, settings).import_latest()
+                    await session.commit()
+                    imports[source_name] = {
+                        "status": "completed",
+                        **asdict(imported),
+                    }
+                except Exception as exc:
+                    await session.rollback()
+                    logger.exception("%s authority import failed", source_name)
+                    imports[source_name] = {
+                        "status": "failed",
+                        "error_type": type(exc).__name__,
+                    }
         allowed = settings.sharia_pilot_symbol_set
         if settings.sharia_process_remaining_imports:
             allowed = set()
@@ -793,7 +826,8 @@ async def _process_sc_malaysia_imports() -> dict:
                     failed += 1
                 except Exception:
                     logger.exception(
-                        "SC Malaysia pilot processing failed for %s", external.asset_symbol
+                        "Authority assessment processing failed for %s",
+                        external.asset_symbol,
                     )
                     failed += 1
             await session.commit()
@@ -803,10 +837,8 @@ async def _process_sc_malaysia_imports() -> dict:
             ).process_due()
             await session.commit()
         return {
-            "import_run_id": imported.run_id,
-            "explicit_rows": imported.explicit_rows,
-            "notice_only_rows_excluded": imported.excluded_notice_rows,
-            "pilot_assets_mapped": mapped,
+            "imports": imports,
+            "assets_mapped": mapped,
             "review_cases_ready": cases,
             "failed_or_waiting_identity": failed,
             "telegram_attempts_processed": delivered,
@@ -844,6 +876,14 @@ async def _retry_payment_emails() -> dict:
 
     async with SessionFactory() as session:
         return await PaymentEmailOutboxService(session, settings).process_due()
+
+
+async def _retry_account_emails() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.account_emails import AccountEmailOutboxService
+
+    async with SessionFactory() as session:
+        return await AccountEmailOutboxService(session, settings).process_due()
 
 
 async def _retry_public_inquiry_emails() -> dict:

@@ -107,4 +107,6 @@ async def test_admin_notification_retries_timeout_and_rate_limit_without_duplica
     assert f"Methodology: {methodology.name} v{methodology.version}" in final_message.text
     assert "Affected Watch Plans/users: 0/0" in final_message.text
     assert final_message.buttons[0].url is not None
-    assert final_message.buttons[0].url.endswith(f"/system-brain/reviews/{case.id}")
+    assert final_message.buttons[0].url.endswith(
+        f"/dashboard/system-brain/cases/{case.id}"
+    )

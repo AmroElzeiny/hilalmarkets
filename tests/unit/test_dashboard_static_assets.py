@@ -144,7 +144,7 @@ def test_hilalmarkets_dashboard_interaction_system_is_present():
         "src/ai_market_monitor/static/hilalmarkets-builder.css"
     ).read_text()
 
-    assert "Guided Watch Plan" in template
+    assert "Guided Watchlist" in template
     assert "Advanced Controls" not in template
     assert "data-ai-setup-chat" in template
     assert "creation-card-top" in template
@@ -303,7 +303,7 @@ def test_authenticated_assets_share_the_current_cache_busting_release_key():
         )
     }
 
-    assert release_keys == {"20260722-product-system"}
+    assert release_keys == {"20260723-reviewer-first"}
 
 
 def test_final_authenticated_styles_use_only_approved_brand_hex_colors():

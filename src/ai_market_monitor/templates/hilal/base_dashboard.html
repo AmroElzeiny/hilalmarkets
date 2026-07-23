@@ -7,13 +7,13 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260722-product-system">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260723-reviewer-first">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260722-product-system">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260722-product-system">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260723-reviewer-first">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260723-reviewer-first">
 </head>
 {% set shell_prefs = (dashboard_preference.notification_preferences if dashboard_preference else {}) or {} %}
-<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root">
+<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root">
   <div class="app-shell">
     {% include "hilal/partials/dashboard_sidebar.html" %}
     <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
@@ -29,9 +29,10 @@
   </div>
   {% include "hilal/dashboard/partials/passport_quick_view.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260722-product-system"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260722-product-system"></script>
-  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260722-product-system"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260723-reviewer-first"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260723-reviewer-first"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260723-reviewer-first"></script>
+  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260723-reviewer-first"></script>
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

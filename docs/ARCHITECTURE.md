@@ -146,6 +146,31 @@ text and clarification friction use the complex tier. The selected route and rea
 usage telemetry and System Brain aggregates. This routing changes cost/interpretation capacity, not
 the executable policy boundary.
 
+### Setup Chat Evaluator Boundary
+
+`src/hm_chatbot_eval` targets only the authenticated Setup Chat and Strategy Canvas. Its default
+backend adapter creates an owned durable session and sends idempotent messages through the real
+dashboard APIs. The server response includes an evaluator contract projected from a successfully
+validated `StrategyDefinition`; it is not a second compiler or approval path. The contract exposes
+canonical fields, approval readiness and immutable version references plus a deterministic Canvas
+node/group/edge projection. JSON Schemas and the canonical field map are exported from production
+Pydantic models under `tests/evaluator/contracts`.
+
+One-shot LLM faults and model/prompt comparison labels are context-local test controls at the real
+OpenAI boundary. They require `APP_ENV=test` and explicit test flags. Staging and production startup
+reject the flags and all variant mappings. Labels select only server-owned configurations, and no
+customer request can supply a model or prompt. The Playwright adapter requires the authenticated
+Setup Chat marker and refuses pages containing the public Support marker. See
+`docs/AI_SETUP_CHAT_EVALUATOR.md`.
+
+The evaluator's budget profile preserves one live backend scenario for every topic, repeats only
+the API/UI and Canvas boundaries in Chromium, and reserves longer conversations for context,
+correction and persistence topics. Cost accounting uses authoritative usage returned with the
+assistant message for both API and UI targets. Each chat request correlates every recorded AI call,
+including coordinator and tool-invoked compiler calls, before returning one authoritative mixed-
+model cost. The evaluator adds its own model usage, runs serially, and stops fail-closed at the
+configured all-in cap. Model-version variants are repeated only by the drift topic in this profile.
+
 ## Telegram Application Layer
 
 `telegram/service.py` implements framework-independent async handlers used by the production
@@ -382,14 +407,23 @@ evaluation, universe snapshot, and policy decision. Current status is resolved s
 reviews cannot rewrite prior proof. `ActivityReadService` composes the user-owned read model without
 merging source tables. AI can explain these records but has no status mutation or review tool.
 
-The SC Malaysia governance workflow sits before that existing screening boundary. The idempotent
+The authority-import workflow sits before that existing screening boundary. The idempotent
 `SCMalaysiaImporter` retains the official response and imports only rows with explicit
-`Shariah-compliant` wording, an SAC meeting, and a parseable decision date. Canonical mapping checks
-name, symbol, native/token identity, chain/contracts, official URLs, and a current spot-market
-identity; ticker-only matches create a blocking conflict case. `ShariaResearchPipeline` fetches a
-stable, verified official-source registry sequentially and makes one bounded Flex analysis request
-per asset/run. Its schema contains factual findings and review recommendations, but no publication
-or religious-status field.
+`Shariah-compliant` wording, an SAC meeting, and a parseable decision date.
+`FassetImporter` retains the published Shariah Reports response, parses each complete asset profile,
+and imports only profiles whose verdict section says exactly `Shariah Compliant`. Decorative labels,
+missing verdicts, non-compliant verdicts, duplicate aliases, source-shape changes, redirects, and
+anti-bot challenge pages fail closed or remain excluded evidence. Both adapters create
+`ExternalAssessment` records, never public assessments.
+
+Canonical mapping checks name, symbol, native/token identity, chain/contracts, official URLs, and a
+current spot-market identity; ticker-only matches create a blocking conflict case.
+`ShariaResearchPipeline` fetches a stable, verified official-source registry sequentially and makes
+one bounded Flex analysis request per mapped asset/run. Its schema contains factual findings and
+review recommendations, but no publication or religious-status field. The active
+`ALL_APPROVED_METHODOLOGIES` entry is an aggregate read policy: it unions active published
+assessments, deduplicates by canonical asset with deterministic source priority, and preserves the
+selected source methodology and Passport on every result.
 
 `ShariaGovernanceService` is the only publication bridge. It rechecks application `ADMIN` authority,
 records an immutable decision, preserves evidence snapshot references, and then requires a separate
@@ -421,6 +455,10 @@ are attached. Governance migration `d6e7f8a9b0c1` adds normalized source, dossie
 publication, monitoring, and Telegram-attempt records. It seeds the SC Malaysia methodology
 family/version but no asset conclusion. See
 `docs/SC_MALAYSIA_SHARIA_GOVERNANCE_IMPLEMENTATION_REPORT.md`.
+
+Migration `6f02832495ab` adds source-neutral external-assessment fields, archives every development
+test methodology, and seeds the versioned Fasset methodology plus the non-ruling `All` aggregate
+view. It seeds no asset conclusion and publishes no Passport.
 
 Governance/Passport/checkout migration `e7f8a9b0c1d2` adds exact historical references, reviewer
 roles/profiles/assignments, Passport problem reports, immutable decision details, superseding

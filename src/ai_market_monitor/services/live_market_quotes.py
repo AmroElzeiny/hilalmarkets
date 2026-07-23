@@ -14,17 +14,10 @@ from ai_market_monitor.schemas.sharia import (
     LiveSpotMarketQuote,
     LiveSpotMarketResponse,
     MethodologySummary,
-    TestMethodologySummary,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.sharia_screening import canonical_asset, canonical_symbol
 
-TEST_METHODOLOGY_CODE = "TRACEDGE_DEV_TEST_V1"
-TEST_METHODOLOGY_NOTICE = (
-    "Test is a permissive development methodology: every active spot pair is marked eligible "
-    "only to test the product workflow. It is not a fatwa, Sharia assessment, or production "
-    "screening conclusion."
-)
 _LOGO_CDN_BASE = "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/dist/svgs/tokens/branded"
 _SAFE_ASSET = re.compile(r"^[A-Z0-9]{1,24}$")
 
@@ -35,8 +28,8 @@ class _QuoteCacheEntry:
     expires_at: float
 
 
-class TestMarketQuoteService:
-    """Provider-backed quotes for the explicit development-only Test methodology."""
+class LiveMarketQuoteService:
+    """Provider-backed quotes attached to reviewed screening assessments."""
 
     _cache: dict[tuple[int, str, str, UUID | None], _QuoteCacheEntry] = {}
     _locks: dict[tuple[int, str, str, UUID | None], asyncio.Lock] = {}
@@ -112,27 +105,63 @@ class TestMarketQuoteService:
         )
         by_asset = {item.canonical_asset: item for item in assessments}
         items = []
+        quoted_assets: set[str] = set()
         for quote in snapshot.items:
             assessment = by_asset.get(quote.canonical_asset)
             if assessment is None:
                 continue
+            quoted_assets.add(quote.canonical_asset)
             items.append(
                 quote.model_copy(
                     update={
                         "asset_name": assessment.asset_name or quote.asset_name,
-                        "methodology_id": methodology.id,
-                        "methodology_name": methodology.name,
-                        "methodology_version": methodology.version,
+                        "methodology_id": assessment.methodology_id,
+                        "methodology_name": assessment.methodology_name,
+                        "methodology_version": assessment.methodology_version,
                         "status": assessment.status.value,
                         "status_label": assessment.status_label,
                         "reviewed_at": assessment.reviewed_at,
                         "passport_url": (
                             f"/dashboard/market/{assessment.canonical_asset}"
-                            f"?methodology_id={methodology.id}"
+                            f"?methodology_id={assessment.methodology_id}"
                         ),
                     }
                 )
             )
+        for assessment in assessments:
+            if assessment.canonical_asset in quoted_assets:
+                continue
+            items.append(
+                LiveSpotMarketQuote(
+                    symbol=f"{assessment.canonical_asset}/{quote_asset}",
+                    canonical_asset=assessment.canonical_asset,
+                    asset_name=assessment.asset_name or assessment.canonical_asset,
+                    exchange=exchange,
+                    quote_asset=quote_asset,
+                    methodology_id=assessment.methodology_id,
+                    methodology_name=assessment.methodology_name,
+                    methodology_version=assessment.methodology_version,
+                    status=assessment.status.value,
+                    status_label=assessment.status_label,
+                    reviewed_at=assessment.reviewed_at,
+                    passport_url=(
+                        f"/dashboard/market/{assessment.canonical_asset}"
+                        f"?methodology_id={assessment.methodology_id}"
+                    ),
+                    logo_module_url=self._logo_module_url(
+                        assessment.canonical_asset
+                    ),
+                    data_available=False,
+                    updated_at=snapshot.captured_at,
+                )
+            )
+        items.sort(
+            key=lambda item: (
+                not item.data_available,
+                -(item.quote_volume_24h or 0),
+                item.symbol,
+            )
+        )
         return snapshot.model_copy(
             update={
                 "methodology": LiveMarketMethodologySummary(
@@ -195,9 +224,12 @@ class TestMarketQuoteService:
             )
         items.sort(key=lambda item: (-(item.quote_volume_24h or 0), item.symbol))
         return LiveSpotMarketResponse(
-            methodology=TestMethodologySummary(
+            methodology=LiveMarketMethodologySummary(
                 id=methodology_id,
-                notice=TEST_METHODOLOGY_NOTICE,
+                code="PROVIDER_QUOTE_SNAPSHOT",
+                name="Provider quote snapshot",
+                version="runtime",
+                notice="Internal unfiltered quote snapshot; no screening status is implied.",
             ),
             items=items,
             total=len(items),

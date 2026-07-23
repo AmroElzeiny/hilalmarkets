@@ -33,7 +33,7 @@
       <div><dt>Cancellation</dt><dd>{{ 'Manage through the provider portal' if billing_capabilities.supports_customer_portal else 'No subscription cancellation is needed' }}</dd></div>
     </dl>
     <div class="checkout-limit-grid">
-      <article><span data-icon="watchlist" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>Active Watch Plans</span></article>
+      <article><span data-icon="watchlist" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>Active Watchlists</span></article>
       <article><span data-icon="market" data-icon-class="icon"></span><strong>{{ plan_limits.get('on_demand_scans_per_month', 0)|plan_limit }}</strong><span>Market checks / month</span></article>
       <article><span data-icon="passport" data-icon-class="icon"></span><strong>{{ plan_limits.get('detailed_history_days', 'Plan default')|plan_limit }}</strong><span>Evidence-history days</span></article>
       <article><span data-icon="telegram" data-icon-class="icon"></span><strong>{{ 'Telegram' if plan_features.get('telegram') else 'In-app' }}</strong><span>Notification access</span></article>

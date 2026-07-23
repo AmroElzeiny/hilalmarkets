@@ -77,6 +77,28 @@ body.hilal-dashboard .sidebar-head {
   border-bottom: 1px solid var(--hm-hairline);
 }
 
+body.hilal-dashboard .dashboard-brand-logo {
+  display: block;
+  min-width: 0;
+  max-width: 197px;
+}
+
+body.hilal-dashboard .dashboard-logo-viewport {
+  display: block;
+  width: 197px;
+  height: 31px;
+  overflow: hidden;
+  transition: width var(--hm-motion);
+}
+
+body.hilal-dashboard .dashboard-logo-art,
+body.hilal-dashboard .logo .dashboard-logo-art {
+  display: block;
+  width: 197px;
+  max-width: none;
+  height: 31px;
+}
+
 body.hilal-dashboard .logo {
   gap: 10px;
   color: var(--hm-ink);
@@ -182,6 +204,69 @@ body.hilal-dashboard .sidebar-profile {
   border-color: var(--hm-hairline);
   border-radius: 16px;
   background: var(--hm-surface-soft);
+}
+
+@media (min-width: 901px) {
+  body.dashboard-body.hilal-dashboard.sidebar-collapsed {
+    --sidebar: 76px;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .app-shell {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .sidebar {
+    width: 76px;
+    padding-inline: 8px;
+    overflow-x: hidden;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .sidebar-head {
+    display: grid;
+    place-items: center;
+    padding-inline: 0;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .dashboard-brand-logo {
+    width: 31px;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .dashboard-logo-viewport {
+    width: 31px;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .sidebar-collapse {
+    width: 44px;
+    margin-inline: auto;
+    padding: 0;
+    justify-content: center;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .sidebar-collapse > span:last-child,
+  body.hilal-dashboard.sidebar-collapsed .nav-label,
+  body.hilal-dashboard.sidebar-collapsed .nav-item > span:last-child,
+  body.hilal-dashboard.sidebar-collapsed .sidebar-profile .meta,
+  body.hilal-dashboard.sidebar-collapsed .sidebar-profile form {
+    display: none;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .nav-item {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+    margin-inline: auto;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .nav-item.is-active::after {
+    right: 4px;
+    top: 4px;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .sidebar-profile {
+    width: 52px;
+    padding: 7px;
+    justify-content: center;
+  }
 }
 
 body.hilal-dashboard .avatar {
@@ -392,26 +477,105 @@ body.hilal-dashboard :where(.stat-card, .watch-plan-card, .integration-card, .qu
 }
 
 body.hilal-dashboard .card-dark,
-body.hilal-dashboard .plan-current,
 body.hilal-dashboard .scan-stage,
-body.hilal-dashboard .passport-page-head,
-body.hilal-dashboard .passport-summary-header {
+body.hilal-dashboard .passport-page-head {
   border-color: var(--hm-ink);
   background: var(--hm-ink);
   color: var(--hm-surface);
 }
 
-body.hilal-dashboard :where(.card-dark, .plan-current, .scan-stage, .passport-page-head, .passport-summary-header) :where(h1, h2, h3, strong) { color: var(--hm-surface); }
-body.hilal-dashboard :where(.card-dark, .plan-current, .scan-stage, .passport-page-head, .passport-summary-header) :where(p, small, span:not(.badge)) { color: rgba(255, 255, 255, .76); }
+body.hilal-dashboard :where(.card-dark, .scan-stage, .passport-page-head) :where(h1, h2, h3, strong) { color: var(--hm-surface); }
+body.hilal-dashboard :where(.card-dark, .scan-stage, .passport-page-head) :where(p, small, span:not(.badge)) { color: rgba(255, 255, 255, .76); }
 body.hilal-dashboard .card-dark p,
-body.hilal-dashboard .plan-current p,
-body.hilal-dashboard .plan-current small,
-body.hilal-dashboard .plan-current .icon,
 body.hilal-dashboard .scan-stage p,
-body.hilal-dashboard .passport-page-head p,
-body.hilal-dashboard .passport-summary-header p,
+body.hilal-dashboard .passport-page-head p { color: rgba(255, 255, 255, .76); }
+
+body.hilal-dashboard .passport-summary-header {
+  position: relative;
+  z-index: auto;
+  top: auto;
+  padding: 24px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-lg);
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-sm);
+  color: var(--hm-ink);
+}
+
+body.hilal-dashboard .passport-summary-copy h1 {
+  margin: 3px 0 4px;
+  color: var(--hm-ink);
+  font-size: clamp(1.65rem, 3vw, 2.3rem);
+}
+
+body.hilal-dashboard .passport-summary-copy p,
 body.hilal-dashboard .passport-summary-header .field-help,
-body.hilal-dashboard .passport-summary-header .passport-freshness { color: rgba(255, 255, 255, .76); }
+body.hilal-dashboard .passport-summary-header .passport-freshness {
+  color: var(--hm-copy);
+}
+
+body.hilal-dashboard .passport-summary-logo {
+  border: 1px solid var(--hm-hairline);
+  background: var(--hm-apple-soft);
+  color: var(--hm-ink);
+}
+
+body.hilal-dashboard .passport-summary-facts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.hilal-dashboard .passport-summary-facts > div {
+  border-color: var(--hm-hairline);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .passport-summary-facts small { color: var(--hm-muted); }
+body.hilal-dashboard .passport-summary-facts strong { color: var(--hm-ink); }
+
+body.hilal-dashboard .passport-summary-actions {
+  align-items: stretch;
+  gap: 10px;
+}
+
+body.hilal-dashboard .passport-summary-actions .btn {
+  min-width: 154px;
+  min-height: 44px;
+  justify-content: center;
+}
+
+body.hilal-dashboard .passport-select-control {
+  position: relative;
+  display: block;
+  width: min(100%, 420px);
+}
+
+body.hilal-dashboard .passport-select-control .select {
+  width: 100%;
+  min-height: 50px;
+  padding-inline: 15px 46px;
+  appearance: none;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 14px;
+  background: var(--hm-surface);
+  background-image: none !important;
+  color: var(--hm-ink);
+  box-shadow: var(--hm-shadow-xs);
+  cursor: pointer;
+}
+
+body.hilal-dashboard .passport-select-control > .icon-sm {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  color: var(--hm-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+body.hilal-dashboard .passport-select-control:focus-within .select {
+  border-color: var(--hm-apple-deep);
+  box-shadow: 0 0 0 3px rgba(203, 250, 77, .34);
+}
 
 /* Evidence Passport quick view and saved-asset dialogs */
 body.hilal-dashboard :where(.passport-quick-dialog, .asset-removal-dialog) {
@@ -664,7 +828,13 @@ body.hilal-dashboard .live-market-head {
   color: var(--hm-muted);
   font-weight: 600;
 }
-body.hilal-dashboard .passport-tabs { border-color: var(--hm-hairline); background: rgba(255, 255, 255, .96); }
+body.hilal-dashboard .passport-tabs {
+  position: static !important;
+  z-index: auto;
+  top: auto !important;
+  border-color: var(--hm-hairline);
+  background: rgba(255, 255, 255, .96);
+}
 
 body.hilal-dashboard .monitor-filter-menu {
   border-color: var(--hm-hairline);
@@ -764,6 +934,7 @@ body.hilal-dashboard .ai-chat-agent > span {
 
 body.hilal-dashboard .ai-chat-avatar { background: var(--hm-ink); color: var(--hm-apple); }
 body.hilal-dashboard .ai-chat-message.user .ai-chat-avatar { background: var(--hm-apple-soft); color: var(--hm-ink); }
+body.hilal-dashboard .ai-chat-typing i { background: var(--hm-apple); }
 
 body.hilal-dashboard .ai-chat-messages {
   background:
@@ -798,6 +969,38 @@ body.hilal-dashboard .ai-chat-composer button[type="submit"] { background: var(-
 body.hilal-dashboard .ai-chat-chip { border-color: var(--hm-hairline); background: var(--hm-surface); color: var(--hm-ink); }
 body.hilal-dashboard .ai-chat-chip:hover,
 body.hilal-dashboard .ai-chat-chip.selected { border-color: var(--hm-apple); background: var(--hm-apple-soft); }
+
+body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-message.assistant .ai-chat-bubble {
+  border-color: var(--hm-hairline);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+}
+
+body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-message.assistant .ai-chat-bubble :where(strong, p, span, small, li, a, code) {
+  color: var(--hm-ink);
+}
+
+body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer {
+  border-color: var(--hm-hairline-strong);
+  background: var(--hm-surface);
+}
+
+body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer > small {
+  color: var(--hm-copy);
+}
+
+body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer button[type="submit"] {
+  border-color: #cbfa4d;
+  background: #cbfa4d !important;
+  background-image: none !important;
+  color: var(--hm-ink) !important;
+  box-shadow: none;
+}
+
+body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer button[type="submit"] :where(svg, path) {
+  color: var(--hm-ink);
+  stroke: currentColor;
+}
 
 body.hilal-dashboard .ai-preview-title { align-items: center; }
 body.hilal-dashboard .ai-preview-title h2 { color: var(--hm-ink); font-size: 1.05rem; }
@@ -849,7 +1052,32 @@ body.hilal-dashboard .builder-canvas::before {
 body.hilal-dashboard .readiness-candidate { border-left-color: var(--hm-apple); }
 body.hilal-dashboard .readiness-candidate.state-confirmed { border-left-color: var(--hm-apple-deep); }
 body.hilal-dashboard :where(.readiness-candidate.state-provider_data_error, .readiness-candidate.state-invalidated) { border-left-color: var(--hm-danger); }
+body.hilal-dashboard .readiness-candidate.state-forming {
+  animation:
+    observability-card-in .24s ease both,
+    hm-forming-evidence-pulse 1.2s ease-out 1;
+}
+@keyframes hm-forming-evidence-pulse {
+  45% { box-shadow: 0 0 0 5px rgba(203, 250, 77, .2); }
+}
 body.hilal-dashboard :where(.candidate-state, .candidate-monitor-tag, .lifecycle-monitor-tag, .bottleneck-rank) { background: var(--hm-apple-soft); color: var(--hm-apple-deep) !important; }
+body.hilal-dashboard .candidate-health {
+  color: var(--hm-muted);
+  background: var(--hm-neutral-bg);
+}
+body.hilal-dashboard .candidate-health.error {
+  color: var(--hm-danger);
+  background: var(--hm-danger-bg);
+}
+body.hilal-dashboard .observability-drawer-backdrop {
+  background: rgba(43, 46, 53, .36);
+}
+body.hilal-dashboard .observability-empty,
+body.hilal-dashboard .observability-error {
+  color: var(--hm-muted);
+  background: var(--hm-surface-soft);
+  border-color: var(--hm-hairline-strong);
+}
 body.hilal-dashboard .candidate-blocker,
 body.hilal-dashboard .health-dimension,
 body.hilal-dashboard .counterfactual-preview { background: var(--hm-surface-soft); }
@@ -898,7 +1126,8 @@ body.hilal-dashboard .observability-skeleton {
   background: linear-gradient(100deg, var(--hm-neutral-bg) 20%, var(--hm-apple-soft) 40%, var(--hm-neutral-bg) 60%);
 }
 
-body.hilal-dashboard :where(.observability-empty, .observability-error) {
+body.hilal-dashboard .observability-empty,
+body.hilal-dashboard .observability-error {
   border-color: var(--hm-hairline-strong);
 }
 
@@ -1158,6 +1387,288 @@ body.hilal-dashboard .grid > :nth-child(4) { animation-delay: 135ms; }
   from { opacity: 0; transform: translateY(10px); }
 }
 
+/* Refined customer controls and page-specific composition */
+body.hilal-dashboard .opportunity-card :where(.readiness strong, .value, [data-count]),
+body.hilal-dashboard .price strong {
+  font-family: "Geometria", "Onest", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+body.hilal-dashboard :where(.field > span, .field > label > span, .field > label, fieldset > legend) {
+  color: var(--hm-copy);
+  font-size: .79rem;
+  font-weight: 600;
+}
+
+body.hilal-dashboard :where(.select, select) {
+  min-height: 48px;
+  padding-inline: 14px 42px;
+  border-width: 1px;
+  background-position: calc(100% - 19px) 21px, calc(100% - 14px) 21px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  font-size: .86rem;
+  font-weight: 540;
+  cursor: pointer;
+  transition: border-color var(--hm-motion), box-shadow var(--hm-motion), background-color var(--hm-motion);
+}
+
+body.hilal-dashboard :where(.select, select):hover {
+  border-color: var(--hm-muted) !important;
+  background-color: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .live-market-panel { margin-top: 0; }
+
+body.hilal-dashboard .live-market-toolbar {
+  justify-content: flex-end;
+  padding: 18px 20px 0;
+  border-bottom: 0;
+}
+
+body.hilal-dashboard .live-market-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+body.hilal-dashboard .market-filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 200px));
+  align-items: end;
+  gap: 12px;
+  margin: 12px 20px 18px;
+}
+
+body.hilal-dashboard .opportunity-journey-progress {
+  margin-bottom: 10px;
+}
+
+body.hilal-dashboard .sidebar-collapse [data-sidebar-collapse-icon] {
+  transform: none !important;
+}
+
+body.hilal-dashboard .market-filter-control {
+  width: 200px;
+  max-width: 100%;
+}
+
+body.hilal-dashboard .activity-page-tabs {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 16px;
+  padding: 5px;
+  overflow-x: auto;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-xs);
+  scrollbar-width: none;
+}
+
+body.hilal-dashboard .activity-page-tabs::-webkit-scrollbar { display: none; }
+
+body.hilal-dashboard .readiness-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(170px, .8fr));
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .readiness-filters .field {
+  width: auto;
+  min-width: 0;
+}
+
+body.hilal-dashboard .opportunity-monitor-filter {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+body.hilal-dashboard .monitor-filter-trigger {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 14px;
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font: inherit;
+  font-size: .86rem;
+  font-weight: 540;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+body.hilal-dashboard .monitor-filter-trigger:hover {
+  border-color: var(--hm-muted);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .monitor-filter-trigger > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .monitor-filter-menu {
+  top: calc(100% + 8px);
+  right: 0;
+  left: 0;
+  min-width: 230px;
+  padding: 8px;
+  border-radius: 16px;
+}
+
+body.hilal-dashboard .monitor-filter-menu a {
+  padding: 10px 11px;
+  border-radius: 10px;
+  font-size: .82rem;
+}
+
+body.hilal-dashboard .activity-panel-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+body.hilal-dashboard .activity-panel-actions .opportunity-monitor-filter {
+  width: min(280px, 100%);
+}
+
+body.hilal-dashboard .settings-command-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 13px 14px 13px 18px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-xs);
+}
+
+body.hilal-dashboard .settings-command-bar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--hm-copy);
+  font-size: .82rem;
+}
+
+body.hilal-dashboard .settings-command-bar button:disabled {
+  border-color: var(--hm-hairline);
+  background: var(--hm-neutral-bg);
+  color: var(--hm-muted);
+  cursor: not-allowed;
+  transform: none;
+}
+
+body.hilal-dashboard .service-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+body.hilal-dashboard .ui-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+body.hilal-dashboard .nav-item .ui-icon {
+  width: 19px;
+  height: 19px;
+}
+
+body.hilal-dashboard .service-icon-wide {
+  width: 26px;
+  filter: grayscale(1) contrast(1.3);
+}
+
+body.hilal-dashboard .icon-box .service-icon {
+  width: 21px;
+  height: 21px;
+}
+
+body.hilal-dashboard .icon-box.is-dark .service-icon { filter: invert(1); }
+
+body.hilal-dashboard .choice-chip {
+  min-height: 46px;
+  padding-inline: 14px;
+  border-radius: 13px;
+}
+
+body.hilal-dashboard .choice-chip:has(input:focus-visible) {
+  outline: 3px solid rgba(203, 250, 77, .78);
+  outline-offset: 3px;
+}
+
+body.hilal-dashboard .schedule-choice-grid label > span {
+  min-height: 42px;
+  border-radius: 12px;
+  font-weight: 560;
+}
+
+body.hilal-dashboard .plan-current .icon-lg { color: var(--hm-ink); }
+body.hilal-dashboard .support-workspace { margin-top: 18px; }
+
+body.hilal-dashboard .support-upload-field {
+  display: grid;
+  gap: 8px;
+}
+
+body.hilal-dashboard .support-upload-control {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 14px;
+  border: 1px dashed var(--hm-hairline-strong);
+  border-radius: 15px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  cursor: pointer;
+  transition: border-color var(--hm-motion), background var(--hm-motion), transform var(--hm-motion);
+}
+
+body.hilal-dashboard .support-upload-control:hover {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+  transform: translateY(-1px);
+}
+
+body.hilal-dashboard .support-upload-control strong,
+body.hilal-dashboard .support-upload-control small { display: block; }
+
+body.hilal-dashboard .support-upload-control small {
+  margin-top: 2px;
+  color: var(--hm-muted);
+  font-size: .72rem;
+}
+
 @keyframes hm-section-enter {
   from { opacity: 0; transform: translateY(8px); }
 }
@@ -1187,6 +1698,7 @@ html[dir="rtl"] body.hilal-dashboard .dash-topbar::after { right: auto; left: -6
 @media (max-width: 900px) {
   body.hilal-dashboard .app-shell { display: block; padding: 10px; }
   body.hilal-dashboard .integrations-grid { grid-template-columns: minmax(0, 1fr); }
+  body.hilal-dashboard .readiness-filters { grid-template-columns: minmax(0, 1fr); }
   body.hilal-dashboard .sidebar {
     position: fixed;
     top: 10px;
@@ -1219,6 +1731,34 @@ html[dir="rtl"] body.hilal-dashboard .dash-topbar::after { right: auto; left: -6
   body.hilal-dashboard .market-filter-row,
   body.hilal-dashboard .activity-toolbar,
   body.hilal-dashboard .settings-nav { padding: 10px; }
+  body.hilal-dashboard .live-market-toolbar {
+    align-items: stretch;
+    padding: 14px 14px 0;
+  }
+  body.hilal-dashboard .live-market-toolbar-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+  body.hilal-dashboard .live-market-toolbar-actions .btn { width: 100%; }
+  body.hilal-dashboard .market-filter-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  body.hilal-dashboard .market-filter-row .field { width: 100%; }
+  body.hilal-dashboard .activity-panel-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+  body.hilal-dashboard .activity-panel-actions .opportunity-monitor-filter { width: 100%; }
+  body.hilal-dashboard .settings-command-bar {
+    position: sticky;
+    top: 80px;
+    z-index: 12;
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+  }
+  body.hilal-dashboard .settings-command-bar .btn { width: 100%; }
   body.hilal-dashboard :where(.grid-2, .grid-3, .grid-4) { grid-template-columns: minmax(0, 1fr); }
   body.hilal-dashboard :where(.app-content > *, .panel, .field, form) { min-width: 0; max-width: 100%; }
   body.hilal-dashboard input[type="file"] { width: 100%; max-width: 100%; }
@@ -1238,9 +1778,510 @@ html[dir="rtl"] body.hilal-dashboard .dash-topbar::after { right: auto; left: -6
   body.hilal-dashboard .ai-chat-layout { gap: 10px; }
   body.hilal-dashboard .ai-chat-panel,
   body.hilal-dashboard .ai-preview-panel { border-radius: 18px; }
+  body.hilal-dashboard .passport-summary-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.hilal-dashboard .passport-summary-actions .btn { width: 100%; }
+}
+
+/* Imported Lucide outline assets are used as masks so navigation state can
+   inherit the Hilal Markets palette without altering the source artwork. */
+body.hilal-dashboard .nav-icon {
+  --nav-icon-url: none;
+  display: block;
+  flex: 0 0 19px;
+  width: 19px;
+  height: 19px;
+  color: var(--hm-muted);
+  background-color: currentColor;
+  -webkit-mask-image: var(--nav-icon-url);
+  mask-image: var(--nav-icon-url);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  transition: color 180ms ease, transform 180ms ease;
+}
+
+body.hilal-dashboard .nav-icon-home { --nav-icon-url: url("/static/nav-home.svg"); }
+body.hilal-dashboard .nav-icon-market { --nav-icon-url: url("/static/nav-market.svg"); }
+body.hilal-dashboard .nav-icon-radar { --nav-icon-url: url("/static/nav-radar.svg"); }
+body.hilal-dashboard .nav-icon-scan { --nav-icon-url: url("/static/nav-scan.svg"); }
+body.hilal-dashboard .nav-icon-activity { --nav-icon-url: url("/static/nav-activity.svg"); }
+body.hilal-dashboard .nav-icon-bell { --nav-icon-url: url("/static/nav-bell.svg"); }
+body.hilal-dashboard .nav-icon-billing { --nav-icon-url: url("/static/nav-billing.svg"); }
+body.hilal-dashboard .nav-icon-settings { --nav-icon-url: url("/static/ui-settings.svg"); }
+body.hilal-dashboard .nav-icon-support { --nav-icon-url: url("/static/nav-support.svg"); }
+
+body.hilal-dashboard .nav-item:hover .nav-icon,
+body.hilal-dashboard .nav-item:focus-visible .nav-icon {
+  color: var(--hm-apple-deep);
+  transform: translateY(-1px);
+}
+
+body.hilal-dashboard .nav-item.is-active .nav-icon {
+  color: var(--hm-apple);
+}
+
+/* Shared progressive-enhancement select. The native control remains the
+   authoritative form value while this supplies the branded interaction. */
+body.hilal-dashboard .hm-select-control {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+body.hilal-dashboard .hm-select-control > select {
+  width: 100%;
+}
+
+body.hilal-dashboard .hm-select-native-enhanced {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+body.hilal-dashboard .hm-select-trigger {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  align-items: center;
+  width: 100%;
+  min-height: 50px;
+  padding: 0 0 0 15px;
+  overflow: hidden;
+  color: var(--hm-ink);
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 15px;
+  box-shadow: var(--hm-shadow-xs);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    transform 180ms ease;
+}
+
+body.hilal-dashboard .hm-select-trigger::before {
+  position: absolute;
+  inset: 10px auto 10px 0;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: var(--hm-apple-deep);
+  content: "";
+  opacity: 0;
+  transform: scaleY(.55);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+body.hilal-dashboard .hm-select-trigger:hover {
+  border-color: rgba(85, 113, 42, .4);
+  background: var(--hm-surface-soft);
+  transform: translateY(-1px);
+}
+
+body.hilal-dashboard .hm-select-trigger:focus-visible,
+body.hilal-dashboard .hm-select-control.is-open .hm-select-trigger {
+  outline: none;
+  border-color: var(--hm-apple-deep);
+  box-shadow:
+    0 0 0 3px rgba(85, 113, 42, .14),
+    var(--hm-shadow-sm);
+}
+
+body.hilal-dashboard .hm-select-trigger:focus-visible::before,
+body.hilal-dashboard .hm-select-control.is-open .hm-select-trigger::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+body.hilal-dashboard .hm-select-value {
+  min-width: 0;
+  overflow: hidden;
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-size: .91rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-select-chevron {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  color: var(--hm-apple-deep);
+  border-left: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard .hm-select-chevron::before {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  content: "";
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 180ms ease;
+}
+
+body.hilal-dashboard .hm-select-control.is-open .hm-select-chevron::before {
+  transform: translateY(2px) rotate(225deg);
+}
+
+body.hilal-dashboard .hm-select-menu {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  display: grid;
+  max-height: 280px;
+  padding: 7px;
+  overflow-y: auto;
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 16px;
+  box-shadow: var(--hm-shadow-popover);
+}
+
+body.hilal-dashboard .hm-select-menu[hidden] {
+  display: none !important;
+}
+
+body.hilal-dashboard .hm-select-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 43px;
+  padding: 9px 38px 9px 11px;
+  color: var(--hm-ink);
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 650;
+  line-height: 1.25;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+body.hilal-dashboard .hm-select-option::after {
+  position: absolute;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  background: var(--hm-apple-deep);
+  border-radius: 999px;
+  content: "";
+  opacity: 0;
+  transform: scale(.4);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+body.hilal-dashboard .hm-select-option:hover,
+body.hilal-dashboard .hm-select-option.is-focused {
+  color: var(--hm-apple-deep);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .hm-select-option.is-selected {
+  color: var(--hm-apple-deep);
+  background: rgba(203, 250, 77, .23);
+}
+
+body.hilal-dashboard .hm-select-option.is-selected::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+body.hilal-dashboard .hm-select-option[aria-disabled="true"] {
+  color: var(--hm-muted);
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+body.hilal-dashboard .guided-builder-heading {
+  display: grid;
+  min-height: 0;
+  gap: 12px;
+  padding: 15px 17px;
+}
+
+body.hilal-dashboard .guided-builder-heading-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  gap: 14px;
+}
+
+body.hilal-dashboard .guided-builder-heading-line .eyebrow {
+  min-width: 0;
+  margin: 0;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .guided-builder-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-left: auto;
+}
+
+body.hilal-dashboard .guided-builder-heading-actions .btn {
+  width: auto;
+  min-height: 40px;
+}
+
+body.hilal-dashboard .guided-builder-heading > .guided-starts {
+  width: 100%;
+  margin: 0;
+  box-shadow: none;
+}
+
+body.hilal-dashboard .opportunity-journey-actions {
+  margin-top: 10px;
+}
+
+body.hilal-dashboard .integrations-page-header {
+  display: grid;
+  min-height: 0;
+  gap: 20px;
+}
+
+body.hilal-dashboard .integrations-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 18px;
+}
+
+body.hilal-dashboard .integrations-page-header .integration-summary-grid {
+  width: 100%;
+  margin: 0;
+}
+
+body.hilal-dashboard .billing-current-plan {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr);
+  align-items: stretch;
+  gap: 22px;
+  padding: 24px;
+  overflow: hidden;
+  color: var(--hm-ink);
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 22px;
+  box-shadow: var(--hm-shadow-sm);
+}
+
+body.hilal-dashboard .billing-current-plan::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--hm-apple-deep);
+  content: "";
+}
+
+body.hilal-dashboard .billing-current-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 16px;
+}
+
+body.hilal-dashboard .billing-current-icon {
+  display: grid;
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  color: var(--hm-apple);
+  background: var(--hm-ink);
+  border-radius: 16px;
+}
+
+body.hilal-dashboard .billing-current-icon .icon-lg {
+  color: var(--hm-apple);
+}
+
+body.hilal-dashboard .billing-current-copy {
+  min-width: 0;
+}
+
+body.hilal-dashboard .billing-current-copy h2 {
+  margin: 2px 0 6px;
+  color: var(--hm-ink);
+  font-size: clamp(2rem, 3vw, 2.75rem);
+}
+
+body.hilal-dashboard .billing-current-copy p {
+  max-width: 660px;
+  margin: 0;
+  color: var(--hm-muted);
+}
+
+body.hilal-dashboard .billing-current-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-current-meta > span {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 12px;
+  color: var(--hm-muted);
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 14px;
+  font-size: .75rem;
+  line-height: 1.25;
+}
+
+body.hilal-dashboard .billing-current-meta strong {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-size: .88rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .billing-plan-panel .pricing-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+}
+
+body.hilal-dashboard .billing-plan-panel .price-card {
+  display: flex;
+  flex: 0 1 40%;
+  flex-direction: column;
+  align-items: center;
+  width: 40%;
+  min-width: min(100%, 310px);
+  text-align: center;
+}
+
+body.hilal-dashboard .billing-plan-panel .price-card .feature-list {
+  width: 100%;
+}
+
+body.hilal-dashboard .billing-plan-panel .price-card .feature-list li {
+  justify-content: center;
+  text-align: center;
+}
+
+body.hilal-dashboard .billing-plan-panel .price-card > form,
+body.hilal-dashboard .billing-plan-panel .price-card > .btn {
+  width: 100%;
+}
+
+html[dir="rtl"] body.hilal-dashboard .hm-select-trigger {
+  padding-right: 15px;
+  padding-left: 0;
+}
+
+html[dir="rtl"] body.hilal-dashboard .hm-select-trigger::before {
+  right: 0;
+  left: auto;
+  border-radius: 999px 0 0 999px;
+}
+
+html[dir="rtl"] body.hilal-dashboard .hm-select-chevron {
+  border-right: 1px solid var(--hm-hairline);
+  border-left: 0;
+}
+
+html[dir="rtl"] body.hilal-dashboard .hm-select-option {
+  padding-right: 11px;
+  padding-left: 38px;
+}
+
+html[dir="rtl"] body.hilal-dashboard .hm-select-option::after {
+  right: auto;
+  left: 14px;
+}
+
+html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+@media (max-width: 980px) {
+  body.hilal-dashboard .billing-current-plan {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  body.hilal-dashboard .integrations-page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.hilal-dashboard .billing-current-meta {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-plan-panel .price-card {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  body.hilal-dashboard .guided-builder-heading {
+    padding: 13px;
+  }
+
+  body.hilal-dashboard .guided-builder-heading-line {
+    gap: 8px;
+  }
+
+  body.hilal-dashboard .guided-builder-heading-actions .btn {
+    min-height: 38px;
+    padding-right: 12px;
+    padding-left: 12px;
+    font-size: .78rem;
+  }
+
+  body.hilal-dashboard .billing-current-main {
+    align-items: flex-start;
+  }
+
+  body.hilal-dashboard .billing-current-plan {
+    padding: 18px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .nav-icon,
+  body.hilal-dashboard .hm-select-trigger,
+  body.hilal-dashboard .hm-select-trigger::before,
+  body.hilal-dashboard .hm-select-chevron::before,
+  body.hilal-dashboard .hm-select-option,
+  body.hilal-dashboard .hm-select-option::after {
+    transition: none;
+  }
+
   body.hilal-dashboard .app-content > *,
   body.hilal-dashboard .page-header,
   body.hilal-dashboard .guided-builder-heading,

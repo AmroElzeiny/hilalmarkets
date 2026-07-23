@@ -26,13 +26,19 @@ from ai_market_monitor.db.models import (
     ExternalAssessment,
     OfficialSource,
     ReviewCase,
+    ShariaMethodology,
     ShariaMonitoringRun,
     SourceSnapshot,
 )
+from ai_market_monitor.db.models.enums import ShariaMethodologyStatus
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 
 SCRAPER_VERSION = "scrapling-evidence-v1"
-AI_PROMPT_VERSION = "sharia-factual-dossier-v1"
+AI_PROMPT_VERSION = "sharia-factual-dossier-v2"
+_SOURCE_METHODOLOGY_CODES = {
+    "sc_malaysia_sac": "SC_MALAYSIA_SAC_REFERENCE",
+    "fasset_shariah_reports": "FASSET_SHARIAH_REPORTS",
+}
 
 
 class ShariaResearchError(RuntimeError):
@@ -279,7 +285,7 @@ class ShariaAIResearchClient:
         instructions = (
             "You are HilalMarkets' bounded factual research analyst. Analyze only the supplied "
             "official-source evidence for a crypto spot asset. You do not issue halal or haram "
-            "rulings, reconstruct unpublished SC Malaysia reasoning, change an official status, "
+            "rulings, reconstruct unpublished authority reasoning, change an external verdict, "
             "publish or reject assets, or treat third-party products as part of an asset-level "
             "decision. Cite only supplied snapshot IDs. State missing evidence rather than guess. "
             "Separate native staking, third-party lending or yield, derivatives, and wrapped uses."
@@ -351,11 +357,25 @@ class ShariaResearchPipeline:
                 )
             ).all()
         )
-        if not sources:
+        external_snapshot = await self.session.get(
+            SourceSnapshot, external.source_snapshot_id
+        )
+        if external_snapshot is None or external_snapshot.fetch_status != "success":
+            raise ShariaResearchError(
+                "external_source_snapshot_missing",
+                "The retained authority snapshot is unavailable.",
+            )
+        if not sources and not (
+            external.source_family == "fasset_shariah_reports"
+            and external.structured_facts
+        ):
             raise ShariaResearchError(
                 "verified_sources_missing", "No verified official source is registered."
             )
-        run_key = f"initial-research:{external.id}:{_source_registry_hash(sources)}"
+        run_key = (
+            f"initial-research:{external.id}:{external_snapshot.content_hash[:16]}:"
+            f"{_source_registry_hash(sources)}"
+        )
         existing = await self.session.scalar(
             select(AssetResearchDossier).where(AssetResearchDossier.run_key == run_key)
         )
@@ -368,7 +388,11 @@ class ShariaResearchPipeline:
                 case_id=str(case.id) if case else None,
                 source_count=len(existing.source_snapshot_ids),
                 failed_source_count=0,
-                ai_status="completed" if existing.state == "ready" else existing.state,
+                ai_status=(
+                    "completed"
+                    if existing.state in {"ready", "completed"}
+                    else existing.state
+                ),
                 idempotent_replay=True,
             )
 
@@ -379,11 +403,11 @@ class ShariaResearchPipeline:
             idempotency_key=run_key,
             status="running",
             started_at=now,
-            items_attempted=len(sources),
+            items_attempted=len(sources) + 1,
         )
         self.session.add(run)
         await self.session.flush()
-        snapshots: list[SourceSnapshot] = []
+        snapshots: list[SourceSnapshot] = [external_snapshot]
         failures = 0
         for source in sources:  # Deliberately sequential to bound load and preserve order.
             snapshot = await self._fetch_source(run, source)
@@ -402,7 +426,7 @@ class ShariaResearchPipeline:
             run_key=run_key,
             state="researching",
             source_snapshot_ids=[str(row.id) for row in snapshots],
-            evidence_completeness=(len(successful) / len(sources) if sources else 0),
+            evidence_completeness=len(successful) / (len(sources) + 1),
             evidence_package_hash=evidence_hash,
             factual_profile={},
             limitations=[],
@@ -461,7 +485,7 @@ class ShariaResearchPipeline:
         ai_row.retry_count = result.retry_count
         ai_row.status = "completed"
         ai_row.completed_at = datetime.now(UTC)
-        dossier.state = "ready"
+        dossier.state = "completed"
         dossier.factual_profile = analysis.profile.model_dump(mode="json")
         dossier.missing_information_count = len(analysis.missing_evidence)
         dossier.contradiction_count = len(analysis.contradictions)
@@ -595,15 +619,24 @@ class ShariaResearchPipeline:
         if existing is not None:
             return existing
         now = datetime.now(UTC)
+        source_name = (
+            "Fasset"
+            if external.source_family == "fasset_shariah_reports"
+            else "SC Malaysia"
+        )
         case = ReviewCase(
-            case_reference=f"SC-{asset.symbol}-{str(dossier.id)[:8].upper()}",
+            case_reference=(
+                f"{'FAS' if external.source_family == 'fasset_shariah_reports' else 'SC'}-"
+                f"{asset.symbol}-{str(dossier.id)[:8].upper()}"
+            ),
             case_type="initial_asset_review",
             state="ready_for_review",
             publication_state="unpublished",
             canonical_asset_id=asset.id,
             external_assessment_id=external.id,
             dossier_id=dossier.id,
-            title=f"Initial SC Malaysia review: {asset.name} ({asset.symbol})",
+            methodology_id=await self._methodology_id_for_external(external),
+            title=f"Initial {source_name} review: {asset.name} ({asset.symbol})",
             priority="high" if analysis.human_review_required else "normal",
             risk_severity=analysis.potential_impact_severity,
             human_review_reason=analysis.human_review_reason,
@@ -617,6 +650,26 @@ class ShariaResearchPipeline:
         self.session.add(case)
         await self.session.flush()
         return case
+
+    async def _methodology_id_for_external(self, external: ExternalAssessment):
+        code = _SOURCE_METHODOLOGY_CODES.get(external.source_family)
+        if code is None:
+            raise ShariaResearchError(
+                "source_methodology_unconfigured",
+                "No active methodology is configured for this authority source.",
+            )
+        methodology_id = await self.session.scalar(
+            select(ShariaMethodology.id).where(
+                ShariaMethodology.code == code,
+                ShariaMethodology.status == ShariaMethodologyStatus.ACTIVE,
+            )
+        )
+        if methodology_id is None:
+            raise ShariaResearchError(
+                "source_methodology_unavailable",
+                "The authority methodology is not active.",
+            )
+        return methodology_id
 
     def _record_usage(self, result: AIAnalysisResult) -> None:
         usage = result.usage
@@ -717,15 +770,21 @@ def _evidence_package(
             "contract_addresses": asset.contract_addresses,
             "official_website": asset.official_website,
         },
-        "official_sc_reference": {
+        "external_authority_reference": {
+            "source_family": external.source_family,
             "authority": external.source_authority,
             "exact_status_wording": external.exact_status_wording,
             "meeting_number": external.sac_meeting_number,
-            "decision_date": external.decision_date.isoformat(),
+            "decision_date": (
+                external.decision_date.isoformat() if external.decision_date else None
+            ),
             "regulatory_scope": external.regulatory_scope,
             "source_url": external.source_url,
+            "source_reference": external.source_reference,
+            "published_profile_facts": external.structured_facts,
             "limitation": (
-                "Coin-specific detailed reasoning was not publicly provided by this source."
+                "Treat only the exact supplied verdict and profile facts as source claims. "
+                "Missing fields remain missing."
             ),
         },
         "official_sources": [
@@ -740,8 +799,8 @@ def _evidence_package(
             for row in snapshots
         ],
         "required_boundary": (
-            "This is factual information research, not SC Malaysia's unpublished reasoning and "
-            "not an independent religious ruling."
+            "This is factual information research, not unpublished authority reasoning and not "
+            "an independent religious ruling."
         ),
     }
 

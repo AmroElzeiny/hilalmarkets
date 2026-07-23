@@ -38,6 +38,14 @@ def _looks_like_placeholder(value) -> bool:
 def validate_runtime_configuration(settings: Settings) -> None:
     errors: list[str] = []
     if settings.is_deployed:
+        if (
+            settings.ai_setup_evaluator_enabled
+            or settings.ai_setup_evaluator_faults_enabled
+        ):
+            errors.append(
+                "AI Setup evaluator controls and fault injection are forbidden in "
+                "staging and production"
+            )
         if settings.allow_mock_providers:
             errors.append("ALLOW_MOCK_PROVIDERS must be false in staging and production")
         if settings.app_secret_key.get_secret_value() == DEFAULT_SECRET:
@@ -72,8 +80,6 @@ def validate_runtime_configuration(settings: Settings) -> None:
             errors.append("BINANCE_MARKET_DATA_ENABLED must be true for deployed live scanning")
         if settings.scanning_enabled and not settings.sharia_screening_enforced:
             errors.append("SHARIA_SCREENING_ENFORCED must be true for deployed live scanning")
-        if settings.sharia_test_market_enabled:
-            errors.append("SHARIA_TEST_MARKET_ENABLED must be false in staging and production")
         if settings.sharia_screening_enforced and settings.sharia_allow_legacy_unscreened_local:
             errors.append(
                 "SHARIA_ALLOW_LEGACY_UNSCREENED_LOCAL must be false in staging and production"

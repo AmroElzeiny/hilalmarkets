@@ -1,0 +1,1956 @@
+{
+  "$defs": {
+    "AlertPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "alert_on_one_condition_remaining": {
+          "default": true,
+          "title": "Alert On One Condition Remaining",
+          "type": "boolean"
+        },
+        "channels": {
+          "items": {
+            "enum": [
+              "telegram",
+              "whatsapp",
+              "discord",
+              "web"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Channels",
+          "type": "array"
+        },
+        "cooldown_seconds": {
+          "default": 900,
+          "maximum": 86400,
+          "minimum": 0,
+          "title": "Cooldown Seconds",
+          "type": "integer"
+        },
+        "daily_alert_budget": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Daily Alert Budget"
+        },
+        "forming_alerts": {
+          "default": true,
+          "title": "Forming Alerts",
+          "type": "boolean"
+        },
+        "maximum_alerts_per_hour": {
+          "default": 50,
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Maximum Alerts Per Hour",
+          "type": "integer"
+        },
+        "near_miss_threshold": {
+          "default": 70,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Near Miss Threshold",
+          "type": "number"
+        },
+        "suppress_repetitive_near_miss": {
+          "default": true,
+          "title": "Suppress Repetitive Near Miss",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "channels"
+      ],
+      "title": "AlertPolicy",
+      "type": "object"
+    },
+    "Comparator": {
+      "enum": [
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "eq",
+        "crosses_above",
+        "crosses_below",
+        "is_true",
+        "is_false"
+      ],
+      "title": "Comparator",
+      "type": "string"
+    },
+    "ComplianceChangeBehavior": {
+      "enum": [
+        "pause_asset",
+        "remove_asset",
+        "pause_monitor_if_any_asset_changes",
+        "notify_only"
+      ],
+      "title": "ComplianceChangeBehavior",
+      "type": "string"
+    },
+    "ConditionGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "children": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ConditionRule"
+              },
+              {
+                "$ref": "#/$defs/ConditionGroup"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Children",
+          "type": "array"
+        },
+        "key": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "node_type": {
+          "const": "group",
+          "default": "group",
+          "title": "Node Type",
+          "type": "string"
+        },
+        "operator": {
+          "$ref": "#/$defs/LogicalOperator"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "title": "Parameters",
+          "type": "object"
+        }
+      },
+      "required": [
+        "key",
+        "operator",
+        "children"
+      ],
+      "title": "ConditionGroup",
+      "type": "object"
+    },
+    "ConditionRule": {
+      "additionalProperties": false,
+      "properties": {
+        "ai_interpreted": {
+          "default": false,
+          "title": "Ai Interpreted",
+          "type": "boolean"
+        },
+        "approximation_note": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approximation Note"
+        },
+        "availability": {
+          "default": "available",
+          "maxLength": 40,
+          "title": "Availability",
+          "type": "string"
+        },
+        "cap_score_on_fail": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cap Score On Fail"
+        },
+        "capability_artifact_hash": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Artifact Hash"
+        },
+        "capability_key": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Key"
+        },
+        "capability_version": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "minLength": 1,
+              "pattern": "^[0-9]+(?:\\.[0-9]+){0,2}(?:[-+][a-zA-Z0-9.-]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Version"
+        },
+        "comparator": {
+          "$ref": "#/$defs/Comparator"
+        },
+        "condition_type": {
+          "$ref": "#/$defs/ConditionType"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "explanation_template": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation Template"
+        },
+        "forming_tolerance_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forming Tolerance Percent"
+        },
+        "key": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "left": {
+          "$ref": "#/$defs/Operand"
+        },
+        "node_type": {
+          "const": "condition",
+          "default": "condition",
+          "title": "Node Type",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "provider_required": {
+          "default": false,
+          "title": "Provider Required",
+          "type": "boolean"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "required_data": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Required Data",
+          "type": "array"
+        },
+        "resolved_parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "title": "Resolved Parameters",
+          "type": "object"
+        },
+        "right": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Operand"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_fragment": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Fragment"
+        },
+        "timeframe": {
+          "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "weight": {
+          "default": 1.0,
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "condition_type",
+        "timeframe",
+        "left",
+        "comparator"
+      ],
+      "title": "ConditionRule",
+      "type": "object"
+    },
+    "ConditionType": {
+      "enum": [
+        "indicator",
+        "price_action",
+        "candle_pattern",
+        "market_filter",
+        "risk"
+      ],
+      "title": "ConditionType",
+      "type": "string"
+    },
+    "EntryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "calculation": {
+          "default": "signal_close",
+          "enum": [
+            "signal_close",
+            "fixed_percent_zone",
+            "indicator_zone"
+          ],
+          "title": "Calculation",
+          "type": "string"
+        },
+        "expires_after_candles": {
+          "default": 3,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Expires After Candles",
+          "type": "integer"
+        },
+        "invalidate_if_price_moves_percent": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invalidate If Price Moves Percent"
+        },
+        "zone_percent": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zone Percent"
+        }
+      },
+      "title": "EntryPolicy",
+      "type": "object"
+    },
+    "EvaluationApprovalState": {
+      "additionalProperties": false,
+      "properties": {
+        "approved": {
+          "title": "Approved",
+          "type": "boolean"
+        },
+        "eligible": {
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "immutable_version_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Immutable Version Hash"
+        },
+        "schema_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Schema Hash",
+          "type": "string"
+        },
+        "session_status": {
+          "title": "Session Status",
+          "type": "string"
+        },
+        "strategy_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy Id"
+        },
+        "strategy_version_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy Version Id"
+        },
+        "strategy_version_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy Version Number"
+        }
+      },
+      "required": [
+        "session_status",
+        "eligible",
+        "approved",
+        "schema_hash"
+      ],
+      "title": "EvaluationApprovalState",
+      "type": "object"
+    },
+    "EvaluationCanvasEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "target",
+        "order"
+      ],
+      "title": "EvaluationCanvasEdge",
+      "type": "object"
+    },
+    "EvaluationCanvasNode": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Key"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "node_type": {
+          "enum": [
+            "group",
+            "condition"
+          ],
+          "title": "Node Type",
+          "type": "string"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operator"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "required": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required"
+        }
+      },
+      "required": [
+        "id",
+        "key",
+        "node_type",
+        "label"
+      ],
+      "title": "EvaluationCanvasNode",
+      "type": "object"
+    },
+    "EvaluationCanvasPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/EvaluationCanvasEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/EvaluationCanvasNode"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/EvaluationCanvasNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "root_node_id": {
+          "title": "Root Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root_node_id",
+        "nodes",
+        "groups",
+        "edges"
+      ],
+      "title": "EvaluationCanvasPayload",
+      "type": "object"
+    },
+    "EvaluationCondition": {
+      "additionalProperties": false,
+      "description": "Canonical, evaluator-facing view of one validated strategy condition.",
+      "properties": {
+        "availability": {
+          "title": "Availability",
+          "type": "string"
+        },
+        "capability_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Key"
+        },
+        "capability_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Version"
+        },
+        "comparator": {
+          "title": "Comparator",
+          "type": "string"
+        },
+        "condition_type": {
+          "title": "Condition Type",
+          "type": "string"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "parent_group_key": {
+          "title": "Parent Group Key",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "provider_required": {
+          "title": "Provider Required",
+          "type": "boolean"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "source_fragment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Fragment"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "timeframe": {
+          "title": "Timeframe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "path",
+        "parent_group_key",
+        "label",
+        "condition_type",
+        "timeframe",
+        "comparator",
+        "required",
+        "provider_required",
+        "availability"
+      ],
+      "title": "EvaluationCondition",
+      "type": "object"
+    },
+    "EvaluationConditionGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "child_keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Child Keys",
+          "type": "array"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "operator": {
+          "title": "Operator",
+          "type": "string"
+        },
+        "parent_group_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Group Key"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "path",
+        "operator",
+        "child_keys"
+      ],
+      "title": "EvaluationConditionGroup",
+      "type": "object"
+    },
+    "ExpiryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "expire_after_candles": {
+          "default": 3,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Expire After Candles",
+          "type": "integer"
+        },
+        "expire_if_price_moves_beyond_entry_percent": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expire If Price Moves Beyond Entry Percent"
+        }
+      },
+      "title": "ExpiryPolicy",
+      "type": "object"
+    },
+    "ForwardTestPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "estimated_fee_bps": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Estimated Fee Bps",
+          "type": "number"
+        },
+        "estimated_slippage_bps": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Estimated Slippage Bps",
+          "type": "number"
+        }
+      },
+      "title": "ForwardTestPolicy",
+      "type": "object"
+    },
+    "LogicalOperator": {
+      "enum": [
+        "and",
+        "or",
+        "not",
+        "sequence",
+        "within_last",
+        "persisted_for",
+        "count_of",
+        "cooldown_condition",
+        "first_time_true",
+        "changed_state",
+        "cross_with_confirmation",
+        "conditional_branch"
+      ],
+      "title": "LogicalOperator",
+      "type": "string"
+    },
+    "MarketType": {
+      "enum": [
+        "spot"
+      ],
+      "title": "MarketType",
+      "type": "string"
+    },
+    "NearMissPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "mandatory_fail_cap": {
+          "default": 90,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Mandatory Fail Cap",
+          "type": "number"
+        },
+        "minimum_score_to_store": {
+          "default": 40,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Minimum Score To Store",
+          "type": "number"
+        },
+        "one_condition_remaining_enabled": {
+          "default": true,
+          "title": "One Condition Remaining Enabled",
+          "type": "boolean"
+        },
+        "thresholds": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 10,
+          "title": "Thresholds",
+          "type": "array"
+        }
+      },
+      "title": "NearMissPolicy",
+      "type": "object"
+    },
+    "Operand": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "kind": {
+          "$ref": "#/$defs/OperandKind"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Operand",
+      "type": "object"
+    },
+    "OperandKind": {
+      "enum": [
+        "indicator",
+        "price",
+        "constant",
+        "market_metric",
+        "price_action",
+        "candle_pattern",
+        "risk_metric"
+      ],
+      "title": "OperandKind",
+      "type": "string"
+    },
+    "PositionSizingPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "account_risk_percent": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Risk Percent"
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "store_account_balance": {
+          "default": false,
+          "title": "Store Account Balance",
+          "type": "boolean"
+        }
+      },
+      "title": "PositionSizingPolicy",
+      "type": "object"
+    },
+    "RiskPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "account_risk_percent": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Risk Percent"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "estimated_fee_bps": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Estimated Fee Bps",
+          "type": "number"
+        },
+        "estimated_slippage_bps": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Estimated Slippage Bps",
+          "type": "number"
+        },
+        "maximum_stop_percent": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum Stop Percent"
+        },
+        "minimum_reward_to_risk": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 50,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum Reward To Risk"
+        },
+        "stop_method": {
+          "default": "structure",
+          "enum": [
+            "structure",
+            "fixed_percent",
+            "atr",
+            "swing_low",
+            "swing_high",
+            "technical_invalidation"
+          ],
+          "title": "Stop Method",
+          "type": "string"
+        },
+        "stop_value": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Value"
+        },
+        "target_method": {
+          "default": "risk_multiple",
+          "enum": [
+            "risk_multiple",
+            "structure",
+            "fixed_percent"
+          ],
+          "title": "Target Method",
+          "type": "string"
+        },
+        "target_value": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Value"
+        }
+      },
+      "title": "RiskPolicy",
+      "type": "object"
+    },
+    "ShariaAssetStatus": {
+      "enum": [
+        "eligible",
+        "eligible_with_qualifications",
+        "disputed",
+        "under_review",
+        "excluded",
+        "insufficient_information"
+      ],
+      "title": "ShariaAssetStatus",
+      "type": "string"
+    },
+    "ShariaPolicyDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "advanced_override_acknowledged": {
+          "default": false,
+          "title": "Advanced Override Acknowledged",
+          "type": "boolean"
+        },
+        "allowed_statuses": {
+          "items": {
+            "$ref": "#/$defs/ShariaAssetStatus"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Allowed Statuses",
+          "type": "array"
+        },
+        "approved_watchlist_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Watchlist Id"
+        },
+        "compliance_change_behavior": {
+          "$ref": "#/$defs/ComplianceChangeBehavior",
+          "default": "pause_asset"
+        },
+        "disputed_asset_policy": {
+          "default": "exclude",
+          "enum": [
+            "exclude",
+            "include_with_warning"
+          ],
+          "title": "Disputed Asset Policy",
+          "type": "string"
+        },
+        "methodology_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Id"
+        },
+        "qualification_policy": {
+          "default": "include_with_warning",
+          "enum": [
+            "include_with_warning",
+            "exclude",
+            "require_acknowledgement"
+          ],
+          "title": "Qualification Policy",
+          "type": "string"
+        },
+        "universe_last_resolved_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Universe Last Resolved At"
+        },
+        "universe_mode": {
+          "$ref": "#/$defs/ShariaUniverseMode",
+          "default": "eligible_market"
+        },
+        "universe_snapshot_version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Universe Snapshot Version"
+        }
+      },
+      "title": "ShariaPolicyDefinition",
+      "type": "object"
+    },
+    "ShariaUniverseMode": {
+      "enum": [
+        "eligible_market",
+        "approved_watchlist",
+        "explicit_assets"
+      ],
+      "title": "ShariaUniverseMode",
+      "type": "string"
+    },
+    "StopPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "atr_multiplier": {
+          "default": 1.5,
+          "exclusiveMinimum": 0,
+          "maximum": 20,
+          "title": "Atr Multiplier",
+          "type": "number"
+        },
+        "atr_period": {
+          "default": 14,
+          "maximum": 200,
+          "minimum": 2,
+          "title": "Atr Period",
+          "type": "integer"
+        },
+        "method": {
+          "default": "structure",
+          "enum": [
+            "structure",
+            "fixed_percent",
+            "atr",
+            "swing_low",
+            "swing_high",
+            "technical_invalidation"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "swing_lookback": {
+          "default": 10,
+          "maximum": 200,
+          "minimum": 2,
+          "title": "Swing Lookback",
+          "type": "integer"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "StopPolicy",
+      "type": "object"
+    },
+    "StrategyDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "alerts": {
+          "$ref": "#/$defs/AlertPolicy"
+        },
+        "base_timeframe": {
+          "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+          "title": "Base Timeframe",
+          "type": "string"
+        },
+        "conditions": {
+          "$ref": "#/$defs/ConditionGroup"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "direction": {
+          "$ref": "#/$defs/StrategyDirection",
+          "default": "long"
+        },
+        "entry": {
+          "$ref": "#/$defs/EntryPolicy"
+        },
+        "expiry": {
+          "$ref": "#/$defs/ExpiryPolicy"
+        },
+        "forward_test": {
+          "$ref": "#/$defs/ForwardTestPolicy"
+        },
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "near_miss": {
+          "$ref": "#/$defs/NearMissPolicy"
+        },
+        "position_sizing": {
+          "$ref": "#/$defs/PositionSizingPolicy"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskPolicy"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "stop": {
+          "$ref": "#/$defs/StopPolicy"
+        },
+        "supporting_timeframes": {
+          "items": {
+            "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Supporting Timeframes",
+          "type": "array"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/TargetPolicy"
+          },
+          "title": "Targets",
+          "type": "array"
+        },
+        "trigger_mode": {
+          "$ref": "#/$defs/TriggerMode"
+        },
+        "universe": {
+          "$ref": "#/$defs/UniverseDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "base_timeframe",
+        "trigger_mode",
+        "universe",
+        "conditions",
+        "alerts"
+      ],
+      "title": "StrategyDefinition",
+      "type": "object"
+    },
+    "StrategyDirection": {
+      "enum": [
+        "long",
+        "short",
+        "both"
+      ],
+      "title": "StrategyDirection",
+      "type": "string"
+    },
+    "TargetPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "default": "T1",
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "method": {
+          "default": "risk_multiple",
+          "enum": [
+            "risk_multiple",
+            "fixed_percent",
+            "structure"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "size_percent": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Percent"
+        },
+        "value": {
+          "exclusiveMinimum": 0,
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "TargetPolicy",
+      "type": "object"
+    },
+    "TriggerMode": {
+      "enum": [
+        "candle_close",
+        "intrabar"
+      ],
+      "title": "TriggerMode",
+      "type": "string"
+    },
+    "UniverseDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "exchange": {
+          "maxLength": 40,
+          "minLength": 2,
+          "title": "Exchange",
+          "type": "string"
+        },
+        "exclude_leveraged_tokens": {
+          "default": true,
+          "title": "Exclude Leveraged Tokens",
+          "type": "boolean"
+        },
+        "exclude_stablecoins": {
+          "default": true,
+          "title": "Exclude Stablecoins",
+          "type": "boolean"
+        },
+        "exclude_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Exclude Symbols",
+          "type": "array"
+        },
+        "include_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Include Symbols",
+          "type": "array"
+        },
+        "market_type": {
+          "$ref": "#/$defs/MarketType",
+          "default": "spot"
+        },
+        "max_spread_bps": {
+          "anyOf": [
+            {
+              "maximum": 1000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Spread Bps"
+        },
+        "max_symbols": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Symbols"
+        },
+        "min_average_candle_volume": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Average Candle Volume"
+        },
+        "min_historical_candles": {
+          "default": 50,
+          "maximum": 5000,
+          "minimum": 1,
+          "title": "Min Historical Candles",
+          "type": "integer"
+        },
+        "min_listing_age_days": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Listing Age Days"
+        },
+        "min_market_cap": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Market Cap"
+        },
+        "min_order_book_depth": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Order Book Depth"
+        },
+        "min_quote_volume_24h": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Quote Volume 24H"
+        },
+        "quote_currencies": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "title": "Quote Currencies",
+          "type": "array"
+        },
+        "sharia_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShariaPolicyDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "exchange",
+        "quote_currencies"
+      ],
+      "title": "UniverseDefinition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Read-only contract derived from the production-validated strategy draft.",
+  "properties": {
+    "alerts": {
+      "additionalProperties": true,
+      "title": "Alerts",
+      "type": "object"
+    },
+    "approval": {
+      "$ref": "#/$defs/EvaluationApprovalState"
+    },
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "canonical_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Canonical Hash",
+      "type": "string"
+    },
+    "canvas": {
+      "$ref": "#/$defs/EvaluationCanvasPayload"
+    },
+    "condition_groups": {
+      "items": {
+        "$ref": "#/$defs/EvaluationConditionGroup"
+      },
+      "title": "Condition Groups",
+      "type": "array"
+    },
+    "conditions": {
+      "items": {
+        "$ref": "#/$defs/EvaluationCondition"
+      },
+      "title": "Conditions",
+      "type": "array"
+    },
+    "confidence": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Confidence",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "direction": {
+      "title": "Direction",
+      "type": "string"
+    },
+    "exclusions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Exclusions",
+      "type": "array"
+    },
+    "filters": {
+      "items": {
+        "$ref": "#/$defs/EvaluationCondition"
+      },
+      "title": "Filters",
+      "type": "array"
+    },
+    "must_not_assign_sharia_status": {
+      "const": true,
+      "default": true,
+      "title": "Must Not Assign Sharia Status",
+      "type": "boolean"
+    },
+    "operators": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Operators",
+      "type": "array"
+    },
+    "provider_required_capabilities": {
+      "items": {
+        "$ref": "#/$defs/EvaluationCondition"
+      },
+      "title": "Provider Required Capabilities",
+      "type": "array"
+    },
+    "requires_explicit_approval": {
+      "const": true,
+      "default": true,
+      "title": "Requires Explicit Approval",
+      "type": "boolean"
+    },
+    "sharia_status_assignment_authorized": {
+      "const": false,
+      "default": false,
+      "title": "Sharia Status Assignment Authorized",
+      "type": "boolean"
+    },
+    "strategy": {
+      "$ref": "#/$defs/StrategyDefinition"
+    },
+    "symbols": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Symbols",
+      "type": "array"
+    },
+    "thresholds": {
+      "items": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        ]
+      },
+      "title": "Thresholds",
+      "type": "array"
+    },
+    "timeframes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Timeframes",
+      "type": "array"
+    },
+    "unsupported_capabilities": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Unsupported Capabilities",
+      "type": "array"
+    }
+  },
+  "required": [
+    "strategy",
+    "canonical_hash",
+    "symbols",
+    "exclusions",
+    "direction",
+    "timeframes",
+    "operators",
+    "thresholds",
+    "condition_groups",
+    "conditions",
+    "filters",
+    "alerts",
+    "assumptions",
+    "confidence",
+    "unsupported_capabilities",
+    "provider_required_capabilities",
+    "approval",
+    "canvas"
+  ],
+  "title": "SetupChatEvaluationContract",
+  "type": "object"
+}

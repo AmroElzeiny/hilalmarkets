@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 
 from ai_market_monitor.db.models import AuditEvent, ReviewCase, User, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
+from ai_market_monitor.schemas.system_brain import SystemBrainAssistantResponse
 
 
 async def _user(test_context, *, role: UserRole, email: str) -> User:
@@ -67,18 +68,21 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
         email="governance@example.com",
     )
     headers = {"X-User-ID": str(admin.id)}
-    dashboard = await test_context["client"].get("/system-brain", headers=headers)
+    dashboard = await test_context["client"].get(
+        "/dashboard/system-brain", headers=headers
+    )
 
     assert dashboard.status_code == 200
     assert dashboard.headers["cache-control"] == "no-store, max-age=0"
-    assert "Evidence before publication" in dashboard.text
-    assert "Initial Coin Reviews" in dashboard.text
-    assert "Published Assets" in dashboard.text
-    assert "Telegram / Delivery" in dashboard.text
-    assert "Import SC Malaysia now" in dashboard.text
-    assert 'data-testid="ai-operations-overview"' in dashboard.text
-    assert "Live coordinator and public support" in dashboard.text
-    assert "Forbidden executed" in dashboard.text
+    assert "Needs Attention" in dashboard.text
+    assert "Ask System Brain" in dashboard.text
+    assert 'data-testid="system-brain-assistant"' in dashboard.text
+    assert 'href="/dashboard/system-brain/cases"' in dashboard.text
+    assert 'href="/dashboard/system-brain/operations"' in dashboard.text
+    assert 'href="/dashboard/system-brain/governance"' in dashboard.text
+    assert 'href="/dashboard/system-brain/audit-settings"' in dashboard.text
+    assert "AI token usage" not in dashboard.text
+    assert "Customer growth" not in dashboard.text
     assert "governance@example.com" in dashboard.text
     assert "<pre" not in dashboard.text
     assert "tojson" not in dashboard.text
@@ -101,15 +105,19 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
         lambda task_name: queued.append(task_name),
     )
     imported = await test_context["client"].post(
-        "/system-brain/sc-malaysia/import",
+        "/dashboard/system-brain/authority-sources/import",
         data={"csrf_token": csrf_match.group(1)},
         headers=headers,
         follow_redirects=False,
     )
     assert imported.status_code == 303
-    assert queued == ["ai_market_monitor.process_sc_malaysia_imports"]
+    assert queued == ["ai_market_monitor.process_sharia_authority_imports"]
 
     for path in (
+        "/dashboard/system-brain/cases",
+        "/dashboard/system-brain/operations",
+        "/dashboard/system-brain/governance",
+        "/dashboard/system-brain/audit-settings",
         "/system-brain/reviews?kind=initial_asset_review",
         "/system-brain/reviews?kind=material_source_change",
         "/system-brain/published-assets",
@@ -126,6 +134,84 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
         assert "<pre" not in response.text
 
 
+async def test_system_brain_assistant_is_admin_scoped_and_read_only(
+    test_context,
+    monkeypatch,
+):
+    admin = await _user(
+        test_context,
+        role=UserRole.ADMIN,
+        email="brain-assistant@example.com",
+    )
+    ordinary = await _user(
+        test_context,
+        role=UserRole.USER,
+        email="brain-assistant-customer@example.com",
+    )
+    headers = {"X-User-ID": str(admin.id)}
+    dashboard = await test_context["client"].get(
+        "/dashboard/system-brain",
+        headers=headers,
+    )
+    csrf = re.search(
+        r'data-system-brain-csrf="([a-f0-9]+)"',
+        dashboard.text,
+    )
+    assert csrf is not None
+
+    async def fake_answer(_service, _session, *, admin_user_id, request):
+        assert admin_user_id == admin.id
+        assert request.message == "Why is this queue waiting?"
+        return SystemBrainAssistantResponse(
+            answer="One retained case is waiting for independent evidence review.",
+            findings=[
+                {
+                    "title": "Review required",
+                    "detail": "The case remains ready for review.",
+                    "severity": "attention",
+                    "evidence_ref": "case:bounded-test",
+                }
+            ],
+            suggested_actions=[
+                {
+                    "label": "Open the case",
+                    "rationale": "Review its retained source snapshots.",
+                }
+            ],
+            evidence_refs=["case:bounded-test"],
+            limitations=["No terminal action was taken."],
+            model="gpt-5.4-nano",
+            reasoning_effort="low",
+        )
+
+    monkeypatch.setattr(
+        "ai_market_monitor.api.routers.system_brain."
+        "SystemBrainAssistantService.answer",
+        fake_answer,
+    )
+    denied = await test_context["client"].post(
+        "/dashboard/system-brain/assistant",
+        json={"message": "Why is this queue waiting?", "history": []},
+        headers={
+            "X-User-ID": str(ordinary.id),
+            "X-CSRF-Token": csrf.group(1),
+        },
+    )
+    answered = await test_context["client"].post(
+        "/dashboard/system-brain/assistant",
+        json={"message": "Why is this queue waiting?", "history": []},
+        headers={**headers, "X-CSRF-Token": csrf.group(1)},
+    )
+
+    assert denied.status_code == 403
+    assert answered.status_code == 200
+    payload = answered.json()
+    assert payload["model"] == "gpt-5.4-nano"
+    assert payload["reasoning_effort"] == "low"
+    assert payload["evidence_refs"] == ["case:bounded-test"]
+    assert "approve" not in payload["answer"].casefold()
+
+
 async def test_system_brain_all_sections_enforce_admin_role(test_context):
     ordinary = await _user(
         test_context,
@@ -133,6 +219,11 @@ async def test_system_brain_all_sections_enforce_admin_role(test_context):
         email="no-admin@example.com",
     )
     for path in (
+        "/dashboard/system-brain",
+        "/dashboard/system-brain/cases",
+        "/dashboard/system-brain/operations",
+        "/dashboard/system-brain/governance",
+        "/dashboard/system-brain/audit-settings",
         "/system-brain/reviews?kind=initial_asset_review",
         "/system-brain/published-assets",
         "/system-brain/source-registry",

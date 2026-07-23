@@ -91,6 +91,11 @@ from ai_market_monitor.schemas.strategy import (
 )
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.ai_setup_chat import AISetupChatService, SetupChatError
+from ai_market_monitor.services.ai_setup_evaluator_control import (
+    AISetupEvaluatorControlError,
+    evaluator_turn,
+)
+from ai_market_monitor.services.ai_usage_context import ai_usage_correlation
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService, export_file_path
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
@@ -100,6 +105,9 @@ from ai_market_monitor.services.lifecycle_dashboard import state_label
 from ai_market_monitor.services.market_preview import timeframe_duration
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
+from ai_market_monitor.services.setup_chat_evaluation import (
+    build_setup_chat_evaluation_contract,
+)
 from ai_market_monitor.services.setup_observability import (
     GroundedObservabilityExplainer,
     SetupObservabilityService,
@@ -997,6 +1005,32 @@ async def _setup_chat_response(
     setup_mode: Literal["scanner", "monitor"] = (
         "scanner" if chat_context.get("setup_mode") == "scanner" else "monitor"
     )
+    can_approve = chat.status == "ready_for_approval" and not blocking_lint
+    approved_version = (
+        await session.get(StrategyVersion, chat.approved_strategy_version_id)
+        if chat.approved_strategy_version_id
+        else None
+    )
+    evaluation_contract = (
+        build_setup_chat_evaluation_contract(
+            definition,
+            session_status=chat.status,
+            approval_eligible=can_approve,
+            assumptions=chat.assumptions or [],
+            confidence=chat.rule_confidence or [],
+            unsupported_capabilities=chat.unsupported_conditions or [],
+            strategy_id=chat.approved_strategy_id,
+            strategy_version_id=chat.approved_strategy_version_id,
+            strategy_version_number=(
+                approved_version.version_number if approved_version is not None else None
+            ),
+            immutable_version_hash=(
+                approved_version.schema_hash if approved_version is not None else None
+            ),
+        )
+        if definition is not None
+        else None
+    )
     return SetupChatSessionResponse(
         id=chat.id,
         status=chat.status,
@@ -1025,11 +1059,12 @@ async def _setup_chat_response(
         ambiguities=chat.ambiguities or [],
         unsupported_conditions=chat.unsupported_conditions or [],
         setup_mode=setup_mode,
-        can_approve=(chat.status == "ready_for_approval" and not blocking_lint),
+        can_approve=can_approve,
         can_scan=(chat.status == "ready_to_scan" and not blocking_lint),
         scanner_result=chat_context.get("scanner_result"),
         approved_strategy_id=chat.approved_strategy_id,
         approved_strategy_version_id=chat.approved_strategy_version_id,
+        evaluation_contract=evaluation_contract,
         next_url=next_url,
         updated_at=chat.updated_at,
     )
@@ -1089,22 +1124,42 @@ async def send_ai_setup_chat_message(
     payload: SetupChatMessageRequest,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
     service: AISetupChatService = Depends(get_ai_setup_chat_service),
+    evaluator_fault: str | None = Header(default=None, alias="X-HM-Eval-Fault"),
+    evaluator_target_version: str | None = Header(
+        default=None,
+        alias="X-HM-Eval-Target-Version",
+    ),
 ) -> SetupChatSessionResponse:
     try:
         chat = await service.owned_session(session, principal.user_id, chat_id)
-        await service.handle_message(
+        usage_correlation_id = uuid4().hex
+        with ai_usage_correlation(usage_correlation_id), evaluator_turn(
+            settings,
+            fault=evaluator_fault,
+            target_version=evaluator_target_version,
+        ):
+            await service.handle_message(
+                session,
+                chat,
+                message=payload.message,
+                option_key=payload.option_key,
+                option_value=payload.option_value,
+                option_label=payload.option_label,
+                client_message_id=payload.client_message_id,
+            )
+            await service.finalize_agent_shadow_comparison(session, chat)
+        await service.attach_turn_usage(
             session,
             chat,
-            message=payload.message,
-            option_key=payload.option_key,
-            option_value=payload.option_value,
-            option_label=payload.option_label,
-            client_message_id=payload.client_message_id,
+            correlation_id=usage_correlation_id,
         )
-        await service.finalize_agent_shadow_comparison(session, chat)
         await session.commit()
         await session.refresh(chat)
+    except AISetupEvaluatorControlError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=403, detail="evaluator_control_unavailable") from exc
     except SetupChatError as exc:
         await session.rollback()
         raise HTTPException(

@@ -45,7 +45,7 @@ class CanonicalAssetCandidate:
     exchange_markets: tuple[ExchangeMarketIdentity, ...] = ()
 
 
-SC_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
+REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
     "BTC": CanonicalAssetCandidate(
         name="Bitcoin",
         symbol="BTC",
@@ -241,7 +241,7 @@ SC_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
 }
 
 PILOT_ASSET_CANDIDATES = {
-    symbol: SC_ASSET_CANDIDATES[symbol] for symbol in ("BTC", "ETH", "SOL")
+    symbol: REVIEWED_ASSET_CANDIDATES[symbol] for symbol in ("BTC", "ETH", "SOL")
 }
 
 
@@ -399,10 +399,10 @@ class CanonicalAssetMappingService:
         actor_user_id=None,
         verified_exchange_symbols: set[str] | None = None,
     ) -> CanonicalAsset:
-        candidate = SC_ASSET_CANDIDATES.get(external.asset_symbol.upper())
+        candidate = REVIEWED_ASSET_CANDIDATES.get(external.asset_symbol.upper())
         if candidate is None:
             problems = [
-                "No reviewed canonical metadata exists for this imported SC Malaysia row."
+                "No reviewed canonical metadata exists for this imported authority record."
             ]
             external.mapping_state = "conflict"
             external.mapping_notes = problems

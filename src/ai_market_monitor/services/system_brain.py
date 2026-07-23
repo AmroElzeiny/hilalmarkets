@@ -53,6 +53,9 @@ from ai_market_monitor.engine.capability_compatibility import compatibility_repo
 from ai_market_monitor.engine.capability_quality import capability_quality_snapshot
 from ai_market_monitor.engine.capability_resolver import CapabilityResolutionReport
 from ai_market_monitor.services.agent_policy import FORBIDDEN_AGENT_TOOLS
+from ai_market_monitor.services.ai_usage_context import (
+    current_ai_usage_correlation_id,
+)
 from ai_market_monitor.services.email_delivery import AuthEmailService
 
 SYSTEM_BRAIN_PENDING_COOKIE = "traceedge_system_brain_pending"
@@ -490,6 +493,10 @@ class CapabilityCoverageService:
             model=model,
             usage=usage,
         )
+        recorded_usage = dict(usage)
+        correlation_id = current_ai_usage_correlation_id()
+        if correlation_id:
+            recorded_usage["_traceedge_correlation_id"] = correlation_id
         session.add(
             AIUsageEvent(
                 user_id=chat.user_id,
@@ -503,7 +510,7 @@ class CapabilityCoverageService:
                 reasoning_tokens=reasoning,
                 estimated_cost_usd=cost,
                 pricing_source="configured_from_openai_pricing",
-                raw_usage=usage,
+                raw_usage=recorded_usage,
                 created_at=datetime.now(UTC),
             )
         )

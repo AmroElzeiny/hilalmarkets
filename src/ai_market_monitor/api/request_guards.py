@@ -48,7 +48,10 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
         _rule(
             "ai_chat",
             {"POST"},
-            r"^/api/v1/(setup-chat|strategies/interpret|scan-now/interpret)",
+            (
+                r"^/api/v1/(setup-chat|strategies/interpret|scan-now/interpret)"
+                r"|^/dashboard/system-brain/assistant$"
+            ),
             configured,
         ),
         _rule(
@@ -115,7 +118,10 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
         _rule(
             "admin_mutation",
             {"POST", "PUT", "PATCH", "DELETE"},
-            r"^(/api/v1/(admin|sharia/admin)|/system-brain)(/|$)",
+            (
+                r"^(/api/v1/(admin|sharia/admin)|/system-brain"
+                r"|/dashboard/system-brain)(/|$)"
+            ),
             configured,
         ),
     )

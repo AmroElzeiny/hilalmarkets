@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.email_branding import HilalMarketsEmailRenderer
 
 
 class EmailDeliveryError(RuntimeError):
@@ -29,29 +30,24 @@ class AuthEmailService:
         self.settings = settings
 
     async def send_code(self, *, recipient: str, code: str, purpose: str) -> None:
-        subjects = {
-            "login": "Your HilalMarkets login code",
-            "password_reset": "Your HilalMarkets password reset code",
-            "signup": "Verify your HilalMarkets email",
-            "system_brain": "Your HilalMarkets System Brain access code",
-        }
-        subject = subjects.get(purpose, "Your HilalMarkets verification code")
         ttl_minutes = (
             self.settings.system_brain_otp_ttl_minutes
             if purpose == "system_brain"
             else self.settings.auth_code_ttl_minutes
         )
-        body = (
-            f"Your HilalMarkets verification code is {code}.\n\n"
-            f"It expires in {ttl_minutes} minutes. "
-            "If you did not request this code, you can ignore this email."
+        rendered = HilalMarketsEmailRenderer(self.settings).auth_code(
+            recipient=recipient,
+            code=code,
+            purpose=purpose,
+            ttl_minutes=ttl_minutes,
         )
         if self.settings.email_adapter == "memory":
             self.settings.email_test_outbox.append(
                 {
                     "recipient": recipient,
-                    "subject": subject,
-                    "body": body,
+                    "subject": rendered.subject,
+                    "body": rendered.text_body,
+                    "html_body": rendered.html_body,
                     "code": code,
                     "purpose": purpose,
                 }
@@ -70,8 +66,9 @@ class AuthEmailService:
         await asyncio.to_thread(
             self._send_smtp,
             recipient=recipient,
-            subject=subject,
-            body=body,
+            subject=rendered.subject,
+            body=rendered.text_body,
+            html_body=rendered.html_body,
         )
 
     async def send_support_ticket(
@@ -101,12 +98,22 @@ class AuthEmailService:
             "Context:\n"
             f"{context_json}\n"
         )
+        html_body = HilalMarketsEmailRenderer(self.settings).ensure_shell(
+            subject=email_subject,
+            preheader=f"Support ticket {ticket_id} was created.",
+            html_body=(
+                '<div style="color:#50555e;font-size:14px;line-height:1.7;'
+                'white-space:pre-wrap">'
+                f"{_escape_email_text(body)}</div>"
+            ),
+        )
         if self.settings.email_adapter == "memory":
             self.settings.email_test_outbox.append(
                 {
                     "recipient": recipient,
                     "subject": email_subject,
                     "body": body,
+                    "html_body": html_body,
                     "purpose": "support_ticket",
                     "ticket_id": str(ticket_id),
                     "attachments": [
@@ -135,6 +142,7 @@ class AuthEmailService:
             recipient=recipient,
             subject=email_subject,
             body=body,
+            html_body=html_body,
             attachments=screenshots,
         )
 
@@ -152,6 +160,10 @@ class AuthEmailService:
         reply_to: str | None = None,
         bcc: list[str] | None = None,
     ) -> str:
+        html_body = HilalMarketsEmailRenderer(self.settings).ensure_shell(
+            subject=subject,
+            html_body=html_body,
+        )
         message_id = make_msgid(
             idstring=idempotency_key[:48],
             domain=(sender_email or self.settings.smtp_from_email or "hilalmarkets.local").split(
@@ -332,3 +344,9 @@ class AuthEmailService:
             sender_name if sender_name is not None else self.settings.smtp_from_name or ""
         ).strip()
         return formataddr((from_name, from_email)) if from_name else from_email
+
+
+def _escape_email_text(value: str) -> str:
+    import html
+
+    return html.escape(value)

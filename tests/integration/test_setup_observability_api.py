@@ -110,7 +110,7 @@ async def test_observability_api_filter_investigation_and_user_isolation(test_co
     assert "Strategy version" not in filtered_page.text
 
     empty_page = await test_context["client"].get(f"/dashboard/lifecycles?monitor={empty_id}")
-    assert "No lifecycle records found for this monitor." in empty_page.text
+    assert "No lifecycle records found for this Watchlist." in empty_page.text
 
 
 async def test_successful_delivery_hides_why_no_alert_action(test_context):

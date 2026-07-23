@@ -1,10 +1,13 @@
+from datetime import UTC, datetime
+from uuid import uuid4
+
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.services.test_market_quotes import (
-    TEST_METHODOLOGY_NOTICE,
+from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
+from ai_market_monitor.schemas.sharia import (
+    AssetAssessmentSummary,
+    MethodologySummary,
 )
-from ai_market_monitor.services.test_market_quotes import (
-    TestMarketQuoteService as LiveTestMarketQuoteService,
-)
+from ai_market_monitor.services.live_market_quotes import LiveMarketQuoteService
 
 
 class QuoteProvider:
@@ -53,25 +56,23 @@ def _settings() -> Settings:
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         database_url="sqlite+aiosqlite://",
-        sharia_test_market_enabled=True,
         sharia_live_quote_cache_seconds=0.5,
     )
 
 
-async def test_test_market_marks_every_active_pair_and_preserves_quote_evidence():
-    LiveTestMarketQuoteService.clear_cache()
+async def test_provider_snapshot_preserves_quote_evidence_without_implying_screening():
+    LiveMarketQuoteService.clear_cache()
     provider = QuoteProvider()
-    result = await LiveTestMarketQuoteService(provider, _settings()).snapshot(
+    result = await LiveMarketQuoteService(provider, _settings()).snapshot(
         exchange="binance",
         quote_asset="usdt",
     )
 
-    assert result.methodology.name == "Test"
-    assert result.methodology.development_only is True
-    assert result.methodology.notice == TEST_METHODOLOGY_NOTICE
+    assert result.methodology.name == "Provider quote snapshot"
+    assert result.methodology.development_only is False
     assert result.total == 2
     assert [item.symbol for item in result.items] == ["BTC/USDT", "ETH/USDT"]
-    assert all(item.status_label == "Halal (test)" for item in result.items)
+    assert all(item.status_label == "Unavailable" for item in result.items)
     assert result.items[0].bid == 100.0
     assert result.items[0].ask == 100.1
     assert result.items[0].bid_size == 4.0
@@ -80,10 +81,10 @@ async def test_test_market_marks_every_active_pair_and_preserves_quote_evidence(
     assert "@web3icons/core@4.0.53" in result.items[0].logo_module_url
 
 
-async def test_test_market_cache_coalesces_requests_and_returns_stale_last_good_snapshot():
-    LiveTestMarketQuoteService.clear_cache()
+async def test_live_market_cache_coalesces_requests_and_returns_stale_last_good_snapshot():
+    LiveMarketQuoteService.clear_cache()
     provider = QuoteProvider()
-    service = LiveTestMarketQuoteService(provider, _settings())
+    service = LiveMarketQuoteService(provider, _settings())
 
     first = await service.snapshot(exchange="bybit", quote_asset="USDT")
     second = await service.snapshot(exchange="bybit", quote_asset="USDT")
@@ -92,7 +93,7 @@ async def test_test_market_cache_coalesces_requests_and_returns_stale_last_good_
     assert provider.symbol_calls == 1
     assert provider.metadata_calls == 1
 
-    for entry in LiveTestMarketQuoteService._cache.values():
+    for entry in LiveMarketQuoteService._cache.values():
         entry.expires_at = 0
     provider.fail = True
     stale = await service.snapshot(exchange="bybit", quote_asset="USDT")
@@ -104,5 +105,56 @@ async def test_test_market_cache_coalesces_requests_and_returns_stale_last_good_
 
 
 def test_logo_catalog_path_rejects_unsafe_asset_names():
-    assert LiveTestMarketQuoteService._logo_module_url("BTC") is not None
-    assert LiveTestMarketQuoteService._logo_module_url("BTC/../../secret") is None
+    assert LiveMarketQuoteService._logo_module_url("BTC") is not None
+    assert LiveMarketQuoteService._logo_module_url("BTC/../../secret") is None
+
+
+async def test_screened_snapshot_uses_source_methodology_and_keeps_unavailable_assets():
+    LiveMarketQuoteService.clear_cache()
+    provider = QuoteProvider()
+    service = LiveMarketQuoteService(provider, _settings())
+    now = datetime.now(UTC)
+    aggregate_id = uuid4()
+    source_id = uuid4()
+    assessment = AssetAssessmentSummary(
+        id=uuid4(),
+        canonical_asset="SOL",
+        asset_name="Solana",
+        methodology_id=source_id,
+        methodology_name="Fasset",
+        methodology_version="2026.07",
+        status=ShariaAssetStatus.ELIGIBLE,
+        status_label="Eligible",
+        summary="Reviewed source assessment.",
+        qualifications=[],
+        reviewed_by="Reviewer",
+        reviewed_at=now,
+        valid_from=now,
+        valid_until=None,
+    )
+    result = await service.screened_snapshot(
+        exchange="binance",
+        quote_asset="USDT",
+        methodology=MethodologySummary(
+            id=aggregate_id,
+            code="ALL_APPROVED_METHODOLOGIES",
+            name="All",
+            version="2026.07",
+            description="Aggregate view.",
+            status=ShariaMethodologyStatus.ACTIVE,
+            governing_body=None,
+            reviewer_group=None,
+            published_at=now,
+            effective_from=now,
+            effective_to=None,
+        ),
+        assessments=[assessment],
+    )
+
+    assert result.methodology.id == aggregate_id
+    assert result.items[0].canonical_asset == "SOL"
+    assert result.items[0].methodology_id == source_id
+    assert result.items[0].data_available is False
+    assert result.items[0].passport_url == (
+        f"/dashboard/market/SOL?methodology_id={source_id}"
+    )

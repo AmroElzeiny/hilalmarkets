@@ -178,11 +178,12 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
         ai_interpreter_provider="rules",
         telegram_enabled=False,
         billing_enabled=False,
-        sharia_test_market_enabled=False,
         ai_agent_control_enabled=False,
         capability_extension_enabled=False,
         public_chat_enabled=True,
         public_chat_ai_enabled=True,
+        ai_setup_evaluator_enabled=False,
+        ai_setup_evaluator_faults_enabled=False,
         openai_api_key="production-openai-key",
         email_adapter="smtp",
         smtp_host="smtp.example.com",
@@ -204,7 +205,6 @@ def test_deployed_public_chat_requires_real_smtp_configuration():
         ai_interpreter_provider="rules",
         telegram_enabled=False,
         billing_enabled=False,
-        sharia_test_market_enabled=False,
         ai_agent_control_enabled=False,
         capability_extension_enabled=False,
         public_chat_enabled=True,
@@ -239,10 +239,11 @@ def test_agent_kill_switch_keeps_certified_capabilities_bootable() -> None:
         ai_interpreter_provider="rules",
         telegram_enabled=False,
         billing_enabled=False,
-        sharia_test_market_enabled=False,
         public_chat_enabled=False,
         ai_agent_control_enabled=False,
         capability_extension_enabled=True,
+        ai_setup_evaluator_enabled=False,
+        ai_setup_evaluator_faults_enabled=False,
         capability_extension_preflight_exchange="binance",
         openai_api_key="production-openai-key",
     )
@@ -250,24 +251,8 @@ def test_agent_kill_switch_keeps_certified_capabilities_bootable() -> None:
     validate_runtime_configuration(settings)
 
 
-def test_deployed_runtime_rejects_test_sharia_market():
-    settings = Settings(
-        app_env="production",
-        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
-        public_base_url="https://monitor.example.com",
-        allow_mock_providers=False,
-        scanning_enabled=False,
-        ai_interpreter_provider="rules",
-        telegram_enabled=False,
-        billing_enabled=False,
-        sharia_test_market_enabled=True,
-    )
-
-    with pytest.raises(RuntimeConfigurationError) as error:
-        validate_runtime_configuration(settings)
-
-    assert "SHARIA_TEST_MARKET_ENABLED" in str(error.value)
+def test_test_sharia_market_switch_is_not_a_runtime_setting():
+    assert "sharia_test_market_enabled" not in Settings.model_fields
 
 
 def test_deployed_runtime_requires_fail_closed_api_rate_limits():
