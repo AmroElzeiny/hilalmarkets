@@ -1,0 +1,366 @@
+{
+  "cases": 24,
+  "passed": 0,
+  "pass_rate": 0.0,
+  "average_score": 0.0,
+  "total_test_cost_usd": 0,
+  "errored_cases": 24,
+  "pending_judges": 0,
+  "critical_topics_failed": [
+    "contradiction_resolution",
+    "cross_turn_binding",
+    "exclusion_mapping",
+    "long_context_retention",
+    "model_version_drift",
+    "nested_boolean_logic",
+    "operator_mapping",
+    "precedence_grouping",
+    "repeated_correction_cycles",
+    "schema_valid_semantic_error",
+    "threshold_mapping",
+    "timeframe_mapping"
+  ],
+  "release_gate": "FAIL",
+  "topics": [
+    {
+      "topic_id": "contradiction_resolution",
+      "title": "Contradiction detection and resolution",
+      "category": "conversation",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "clarification_quality",
+          "operator": ">=",
+          "threshold": 0.95,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Contradiction explicitly resolved",
+          "measured_cases": 0
+        },
+        {
+          "metric": "unsafe_guess_rate",
+          "operator": "==",
+          "threshold": 0,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "No guessed execution",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "cross_turn_binding",
+      "title": "Cross-turn constraint binding",
+      "category": "conversation",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "semantic_accuracy",
+          "operator": ">=",
+          "threshold": 0.97,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Combined contract is correct",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "exclusion_mapping",
+      "title": "Exclusions and negative constraints",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "semantic_accuracy",
+          "operator": ">=",
+          "threshold": 0.98,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Exclusions correct",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "long_context_retention",
+      "title": "Long-conversation context retention",
+      "category": "conversation",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "context_fact_recall",
+          "operator": ">=",
+          "threshold": 0.97,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Required early facts retained",
+          "measured_cases": 0
+        },
+        {
+          "metric": "silent_constraint_loss",
+          "operator": "==",
+          "threshold": 0,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "No silent loss",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "model_version_drift",
+      "title": "Model and prompt version drift",
+      "category": "drift",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "pass_flip_rate",
+          "operator": "<=",
+          "threshold": 0.01,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Minimal unexplained pass flips",
+          "measured_cases": 0
+        },
+        {
+          "metric": "semantic_score_delta_abs",
+          "operator": "<=",
+          "threshold": 0.03,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Stable semantics",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "nested_boolean_logic",
+      "title": "Nested AND/OR logic",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "grouping_accuracy",
+          "operator": ">=",
+          "threshold": 0.98,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Nested groups exact",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "operator_mapping",
+      "title": "Comparison operator mapping",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "operator_accuracy",
+          "operator": ">=",
+          "threshold": 0.99,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Operators exact",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "precedence_grouping",
+      "title": "Boolean precedence",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "grouping_accuracy",
+          "operator": ">=",
+          "threshold": 0.98,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Precedence preserved",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "repeated_correction_cycles",
+      "title": "Repeated correction cycles",
+      "category": "conversation",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "correction_adherence",
+          "operator": ">=",
+          "threshold": 0.98,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Latest correction wins",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "schema_valid_semantic_error",
+      "title": "Schema-valid but semantically incorrect mapping",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "semantic_accuracy",
+          "operator": ">=",
+          "threshold": 0.98,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Correct meaning beyond schema",
+          "measured_cases": 0
+        },
+        {
+          "metric": "false_executable_rate",
+          "operator": "==",
+          "threshold": 0,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "No wrong executable output",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "threshold_mapping",
+      "title": "Numeric threshold mapping",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "threshold_accuracy",
+          "operator": ">=",
+          "threshold": 0.99,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Thresholds exact",
+          "measured_cases": 0
+        }
+      ]
+    },
+    {
+      "topic_id": "timeframe_mapping",
+      "title": "Timeframe mapping",
+      "category": "mapping",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 0,
+      "test_ai_cost_usd": 0,
+      "target_cost_usd": 0,
+      "criteria_pass": false,
+      "criteria": [
+        {
+          "metric": "timeframe_accuracy",
+          "operator": ">=",
+          "threshold": 0.99,
+          "actual": null,
+          "passed": false,
+          "critical": true,
+          "description": "Timeframes exact",
+          "measured_cases": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "cases": 0,
+  "passed": 0,
+  "pass_rate": 0.0,
+  "average_score": 0,
+  "total_test_cost_usd": 0,
+  "errored_cases": 0,
+  "pending_judges": 0,
+  "critical_topics_failed": [],
+  "release_gate": "INCOMPLETE",
+  "topics": [],
+  "budget_usd": 2.5,
+  "measured_spend_usd": 0.0,
+  "budget_remaining_usd": 2.5,
+  "execution_status": "infrastructure_unavailable",
+  "execution_error": "Evaluator or target access failed before a quality case could run (HTTP 401)."
+}

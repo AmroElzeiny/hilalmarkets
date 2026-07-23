@@ -1,0 +1,49 @@
+scenario_id,topic,target,score,error,proof,recommended_fix,reproduce
+long_context_retention-001-1491321658,long_context_retention,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z long_context_retention-001-1491321658 --target backend
+long_context_retention-001-1491321658,long_context_retention,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z long_context_retention-001-1491321658 --target ui
+cross_turn_binding-001-468438448,cross_turn_binding,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z cross_turn_binding-001-468438448 --target backend
+cross_turn_binding-001-468438448,cross_turn_binding,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z cross_turn_binding-001-468438448 --target ui
+contradiction_resolution-001-1583695396,contradiction_resolution,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z contradiction_resolution-001-1583695396 --target backend
+contradiction_resolution-001-1583695396,contradiction_resolution,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z contradiction_resolution-001-1583695396 --target ui
+repeated_correction_cycles-001-950375139,repeated_correction_cycles,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z repeated_correction_cycles-001-950375139 --target backend
+repeated_correction_cycles-001-950375139,repeated_correction_cycles,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z repeated_correction_cycles-001-950375139 --target ui
+model_version_drift-001-505914558,model_version_drift,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z model_version_drift-001-505914558 --target backend
+model_version_drift-001-505914558,model_version_drift,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z model_version_drift-001-505914558 --target ui
+schema_valid_semantic_error-001-964743671,schema_valid_semantic_error,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z schema_valid_semantic_error-001-964743671 --target backend
+schema_valid_semantic_error-001-964743671,schema_valid_semantic_error,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z schema_valid_semantic_error-001-964743671 --target ui
+operator_mapping-001-508429853,operator_mapping,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z operator_mapping-001-508429853 --target backend
+operator_mapping-001-508429853,operator_mapping,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z operator_mapping-001-508429853 --target ui
+threshold_mapping-001-874133838,threshold_mapping,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z threshold_mapping-001-874133838 --target backend
+threshold_mapping-001-874133838,threshold_mapping,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z threshold_mapping-001-874133838 --target ui
+timeframe_mapping-001-812507485,timeframe_mapping,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z timeframe_mapping-001-812507485 --target backend
+timeframe_mapping-001-812507485,timeframe_mapping,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z timeframe_mapping-001-812507485 --target ui
+nested_boolean_logic-001-210481855,nested_boolean_logic,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z nested_boolean_logic-001-210481855 --target backend
+nested_boolean_logic-001-210481855,nested_boolean_logic,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z nested_boolean_logic-001-210481855 --target ui
+precedence_grouping-001-1568343993,precedence_grouping,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z precedence_grouping-001-1568343993 --target backend
+precedence_grouping-001-1568343993,precedence_grouping,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z precedence_grouping-001-1568343993 --target ui
+exclusion_mapping-001-1219669429,exclusion_mapping,backend:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z exclusion_mapping-001-1219669429 --target backend
+exclusion_mapping-001-1219669429,exclusion_mapping,ui:current,0.0,"HTTPStatusError: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/responses'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",,,hm-chatbot-eval replay 20260723T054409Z exclusion_mapping-001-1219669429 --target ui
