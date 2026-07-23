@@ -1,6 +1,28 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-consent-analytics="denied" data-consent-functional="denied" data-consent-marketing="denied">
 <head>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    window.gtag("consent", "default", {
+      ad_storage: "denied",
+      analytics_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+      functionality_storage: "denied",
+      personalization_storage: "denied",
+      security_storage: "granted",
+      wait_for_update: 500
+    });
+    window.HilalMarketsConsentConfig = {{ {
+      "version": settings.cookie_consent_version,
+      "analyticsEnabled": settings.public_analytics_enabled,
+      "marketingEnabled": settings.marketing_consent_enabled,
+      "gtmContainerId": settings.public_gtm_id,
+      "xPixelEnabled": settings.vite_x_pixel_enabled,
+      "xPixelId": settings.vite_x_pixel_id
+    } | tojson }};
+  </script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
@@ -155,8 +177,11 @@
       </div>
     </main>
   </div>
+  {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
+  {% include "hilal/partials/cookie_banner.html" %}
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260723-auth"></script>
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-production"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-x-pixel"></script>
   <script>
     function clearSensitiveAuthFields() {
       document

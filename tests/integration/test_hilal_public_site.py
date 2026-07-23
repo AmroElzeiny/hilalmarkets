@@ -169,15 +169,21 @@ async def test_every_public_shell_exposes_gtm_config_without_preloading(test_con
     settings.vite_analytics_enabled = True
     settings.vite_gtm_id = "GTM-HILALTEST1"
     settings.vite_ga4_measurement_id = None
+    settings.marketing_consent_enabled = True
+    settings.vite_x_pixel_enabled = True
+    settings.vite_x_pixel_id = "re20l"
 
     for path in ("/", *(page.path for page in PUBLIC_PAGES)):
         response = await test_context["client"].get(path)
         assert response.status_code == 200, path
         content = response.text
         assert "GTM-HILALTEST1" in content, path
+        assert "re20l" in content, path
+        assert '"xPixelEnabled": true' in content, path
         assert 'analytics_storage: "denied"' in content, path
         assert "googletagmanager.com/gtm.js" not in content, path
         assert "googletagmanager.com/ns.html" not in content, path
+        assert "static.ads-twitter.com/uwt.js" not in content, path
         assert "G-EJN34D4BEM" not in content, path
 
     homepage = await test_context["client"].get("/")

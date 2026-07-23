@@ -13,13 +13,14 @@
   });
   let previousFocus = null;
   let googleLoaded = false;
+  let xLoaded = false;
 
   const elements = () => ({
     banner: document.querySelector("[data-cookie-banner]"),
     modal: document.querySelector("[data-cookie-modal]"),
-    analytics: document.querySelector("[data-consent-analytics]"),
-    functional: document.querySelector("[data-consent-functional]"),
-    marketing: document.querySelector("[data-consent-marketing]"),
+    analytics: document.querySelector("input[data-consent-analytics]"),
+    functional: document.querySelector("input[data-consent-functional]"),
+    marketing: document.querySelector("input[data-consent-marketing]"),
   });
 
   function parse(value) {
@@ -81,6 +82,55 @@
     document.head.appendChild(script);
   }
 
+  function loadX() {
+    const pixelId = String(config.xPixelId || "").trim();
+    if (xLoaded || !config.xPixelEnabled) return;
+    if (!/^[A-Za-z0-9]{3,32}$/.test(pixelId)) return;
+
+    const configuredPixels = window.__hmXConfiguredPixels instanceof Set
+      ? window.__hmXConfiguredPixels
+      : new Set();
+    window.__hmXConfiguredPixels = configuredPixels;
+    if (configuredPixels.has(pixelId)) {
+      xLoaded = true;
+      return;
+    }
+
+    window.twq = window.twq || function () {
+      window.twq.exe
+        ? window.twq.exe.apply(window.twq, arguments)
+        : window.twq.queue.push(arguments);
+    };
+    window.twq.version = "1.1";
+    window.twq.queue = window.twq.queue || [];
+    window.twq.integration = "gtm-ad-manager";
+
+    const loadedScript = Array.from(document.scripts).some((item) => {
+      try {
+        const source = new URL(item.src);
+        return source.hostname === "static.ads-twitter.com"
+          && source.pathname === "/uwt.js";
+      } catch {
+        return false;
+      }
+    });
+    if (!loadedScript) {
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = "https://static.ads-twitter.com/uwt.js";
+      script.dataset.hmProvider = "x-pixel";
+      script.addEventListener("error", () => {
+        xLoaded = false;
+        configuredPixels.delete(pixelId);
+      }, { once: true });
+      document.head.appendChild(script);
+    }
+
+    configuredPixels.add(pixelId);
+    xLoaded = true;
+    window.twq("config", pixelId);
+  }
+
   function apply(choice) {
     const value = { ...defaults, ...(choice || {}) };
     const marketing = Boolean(config.marketingEnabled && value.marketing);
@@ -97,6 +147,7 @@
     document.documentElement.dataset.consentFunctional = value.functional ? "granted" : "denied";
     document.documentElement.dataset.consentMarketing = marketing ? "granted" : "denied";
     if (value.analytics) loadGoogle();
+    if (marketing) loadX();
     window.dispatchEvent(new CustomEvent("hm:consent-updated", {
       detail: {
         version,

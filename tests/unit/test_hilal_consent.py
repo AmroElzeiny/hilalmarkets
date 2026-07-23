@@ -5,6 +5,8 @@ from ai_market_monitor.core.site_content import PROHIBITED_ANALYTICS_PROPERTIES
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "src/ai_market_monitor/templates/hilal/base_public.html"
 REACT_SHELL = ROOT / "src/ai_market_monitor/templates/hilal/public/react_site.html"
+DASHBOARD_SHELL = ROOT / "src/ai_market_monitor/templates/hilal/base_dashboard.html"
+AUTH_SHELL = ROOT / "src/ai_market_monitor/templates/auth.html"
 LANDING_INDEX = ROOT / "Hilal-Markets-Website/index.html"
 CONSENT = ROOT / "src/ai_market_monitor/static/hilalmarkets-consent.js"
 BANNER = ROOT / "src/ai_market_monitor/templates/hilal/partials/cookie_banner.html"
@@ -39,6 +41,8 @@ def test_consent_choice_is_versioned_persistent_and_withdrawable():
     assert "if (value.analytics) loadGoogle()" in script
     assert "saveAndClose(defaults)" in script
     assert 'analytics_storage: value.analytics ? "granted" : "denied"' in script
+    assert 'document.querySelector("input[data-consent-analytics]")' in script
+    assert 'document.querySelector("input[data-consent-marketing]")' in script
 
 
 def test_shared_public_shell_loads_only_gtm_after_analytics_consent():
@@ -57,6 +61,36 @@ def test_shared_public_shell_loads_only_gtm_after_analytics_consent():
     assert "googletagmanager.com/gtag/js" not in script
     assert "google-analytics" not in script
     assert "ga4MeasurementId" not in script
+
+
+def test_x_pixel_loads_once_only_after_marketing_consent():
+    script = CONSENT.read_text(encoding="utf-8")
+    assert 'if (marketing) loadX()' in script
+    assert 'script.src = "https://static.ads-twitter.com/uwt.js"' in script
+    assert 'window.twq.integration = "gtm-ad-manager"' in script
+    assert 'window.twq("config", pixelId)' in script
+    assert 'script.dataset.hmProvider = "x-pixel"' in script
+    assert "configuredPixels.has(pixelId)" in script
+
+    for shell in (BASE, REACT_SHELL, DASHBOARD_SHELL, AUTH_SHELL):
+        content = shell.read_text(encoding="utf-8")
+        assert '"xPixelEnabled"' in content
+        assert '"xPixelId"' in content
+        assert "static.ads-twitter.com" not in content
+        assert "twq(" not in content
+        assert "hilalmarkets-consent.js" in content
+
+
+def test_system_brain_templates_never_include_x_pixel_or_consent_loader():
+    templates = ROOT / "src/ai_market_monitor/templates"
+    system_brain_templates = tuple(templates.glob("system_brain*.html"))
+    assert system_brain_templates
+    for path in system_brain_templates:
+        content = path.read_text(encoding="utf-8")
+        assert "hilalmarkets-consent.js" not in content, path
+        assert "static.ads-twitter.com" not in content, path
+        assert "xPixelId" not in content, path
+        assert "twq(" not in content, path
 
 
 def test_public_document_shells_and_standalone_source_do_not_preload_gtm():

@@ -131,6 +131,17 @@ class _UnauthorizedRunner(EvaluationRunner):
         return _UnauthorizedTarget()
 
 
+class _UnauthorizedTestAI:
+    async def next_user_turn(self, *_args, **_kwargs):
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError(
+            "Unauthorized",
+            request=request,
+            response=response,
+        )
+
+
 async def test_all_in_budget_counts_target_chatbot_usage_and_fails_closed(tmp_path):
     settings = Settings(
         _env_file=None,
@@ -204,6 +215,34 @@ async def test_access_failure_stops_after_first_case_and_is_not_a_quality_score(
         assert summary["release_gate"] == "INCOMPLETE"
         assert summary["execution_status"] == "infrastructure_unavailable"
         assert summary["cases"] == 0
+        assert summary["execution_error"].startswith("Authenticated target access failed")
+    finally:
+        await runner.close()
+
+
+async def test_evaluator_openai_failure_is_identified_separately(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings = Settings(
+        _env_file=None,
+        eval_output_dir=tmp_path / "runs",
+        eval_cache_db=tmp_path / "cache.sqlite3",
+        test_ai_base_url="https://api.openai.com/v1",
+    )
+    runner = _UsageRunner(settings, "openai-access-stop", 2.5)
+    runner.test_ai = _UnauthorizedTestAI()
+    try:
+        cases, summary = await runner.run(
+            mode="budget",
+            target_kinds=["backend"],
+            topic_ids=["operator_mapping"],
+            tests_per_topic=24,
+            seed=42,
+            judge_mode="online",
+        )
+        assert cases == []
+        assert summary["release_gate"] == "INCOMPLETE"
+        assert summary["execution_status"] == "infrastructure_unavailable"
+        assert summary["execution_error"].startswith("Evaluator OpenAI access failed")
     finally:
         await runner.close()
 

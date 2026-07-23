@@ -7,6 +7,7 @@ from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
 )
 from hm_chatbot_eval.compare import compare_runs
+from hm_chatbot_eval.config import Settings, process_openai_key_overrides_dotenv
 from hm_chatbot_eval.evaluate import semantic_field_metrics, validate_schema
 from hm_chatbot_eval.models import CaseResult
 from hm_chatbot_eval.report import aggregate
@@ -127,6 +128,42 @@ def test_canonical_field_map_covers_the_required_contract_surface():
 
 def test_compare_runs_symbol_remains_importable():
     assert callable(compare_runs)
+
+
+def test_process_openai_key_override_detection_is_redacted(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=project-key\n", encoding="utf-8")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "global-key")
+    assert process_openai_key_overrides_dotenv(env_file) is True
+
+    monkeypatch.setenv("OPENAI_API_KEY", "project-key")
+    assert process_openai_key_overrides_dotenv(env_file) is False
+
+    monkeypatch.delenv("OPENAI_API_KEY")
+    assert process_openai_key_overrides_dotenv(env_file) is False
+    assert "project-key" not in repr(process_openai_key_overrides_dotenv(env_file))
+
+
+def test_target_authentication_requires_credentials_or_nonempty_cookie():
+    empty = Settings(
+        _env_file=None,
+        target_backend_email="",
+        target_backend_password="",
+        target_session_cookie="",
+    )
+    assert empty.target_session_cookie is None
+    assert empty.target_authentication_configured is False
+
+    credentials = Settings(
+        _env_file=None,
+        target_backend_email="evaluator@example.test",
+        target_backend_password="secret",
+    )
+    assert credentials.target_authentication_configured is True
+
+    cookie = Settings(_env_file=None, target_session_cookie="short-lived-session")
+    assert cookie.target_authentication_configured is True
 
 
 def test_errored_cases_fail_instead_of_appearing_pending():

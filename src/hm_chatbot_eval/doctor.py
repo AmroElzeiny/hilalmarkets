@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import Settings
+from .config import Settings, process_openai_key_overrides_dotenv
 
 
 def checks(settings: Settings) -> list[tuple[str, bool, str]]:
@@ -28,7 +28,16 @@ def checks(settings: Settings) -> list[tuple[str, bool, str]]:
                 (
                     "OpenAI API authentication",
                     response.is_success,
-                    "authenticated" if response.is_success else f"HTTP {response.status_code}",
+                    (
+                        "authenticated"
+                        if response.is_success
+                        else (
+                            f"HTTP {response.status_code}; process OPENAI_API_KEY overrides "
+                            "a different .env value"
+                            if process_openai_key_overrides_dotenv()
+                            else f"HTTP {response.status_code}"
+                        )
+                    ),
                 )
             )
         except Exception as exc:
@@ -46,6 +55,20 @@ def checks(settings: Settings) -> list[tuple[str, bool, str]]:
             "configured"
             if "support" not in settings.target_name.lower()
             else "TARGET_NAME must not identify the public Support agent",
+        )
+    )
+    results.append(
+        (
+            "Target authentication configured",
+            settings.target_authentication_configured,
+            (
+                "configured"
+                if settings.target_authentication_configured
+                else (
+                    "set TARGET_BACKEND_EMAIL/PASSWORD for a dedicated test user "
+                    "or provide TARGET_SESSION_COOKIE"
+                )
+            ),
         )
     )
     results.append(

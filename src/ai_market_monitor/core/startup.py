@@ -238,6 +238,15 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 r"[0-9]{5,32}", settings.vite_meta_pixel_id.strip()
             ):
                 errors.append("VITE_META_PIXEL_ID must be a valid numeric Pixel ID")
+        if settings.vite_x_pixel_enabled:
+            if not settings.marketing_consent_enabled:
+                errors.append(
+                    "MARKETING_CONSENT_ENABLED must be true when X Pixel is enabled"
+                )
+            if not settings.vite_x_pixel_id or not re.fullmatch(
+                r"[A-Za-z0-9]{3,32}", settings.vite_x_pixel_id.strip()
+            ):
+                errors.append("VITE_X_PIXEL_ID must be a valid X Pixel ID")
         if settings.telegram_enabled:
             if settings.telegram_adapter != "http":
                 errors.append("TELEGRAM_ADAPTER=http is required when Telegram is enabled")

@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     vite_ga4_measurement_id: str | None = None
     vite_meta_pixel_id: str | None = None
     vite_meta_pixel_enabled: bool = False
+    vite_x_pixel_id: str | None = None
+    vite_x_pixel_enabled: bool = False
     vite_site_url: AnyHttpUrl | None = None
     vite_analytics_debug: bool = False
     log_level: str = "INFO"

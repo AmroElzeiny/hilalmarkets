@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from .cache import ResponseCache
-from .config import Settings
+from .config import Settings, process_openai_key_overrides_dotenv
 from .evaluate import deterministic_metrics, validate_schema
 from .models import CaseResult, JudgeVerdict, ScenarioSpec, TurnRecord
 from .openai_client import OpenAIResponsesClient
@@ -224,8 +224,22 @@ class EvaluationRunner:
             raise
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {401, 403, 429}:
+                evaluator_request = str(exc.request.url).startswith(
+                    self.settings.test_ai_base_url.rstrip("/")
+                )
+                if evaluator_request:
+                    source_hint = (
+                        " A process-level OPENAI_API_KEY is overriding a different "
+                        "project .env value."
+                        if process_openai_key_overrides_dotenv()
+                        else ""
+                    )
+                    raise EvaluationInfrastructureError(
+                        "Evaluator OpenAI access failed before a quality case could run "
+                        f"(HTTP {exc.response.status_code}).{source_hint}"
+                    ) from exc
                 raise EvaluationInfrastructureError(
-                    "Evaluator or target access failed before a quality case could run "
+                    "Authenticated target access failed before a quality case could run "
                     f"(HTTP {exc.response.status_code})."
                 ) from exc
             error = f"{type(exc).__name__}: {exc}"

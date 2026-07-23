@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hmac
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+from dotenv import dotenv_values
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,6 +28,16 @@ def _default_model_pricing() -> dict[str, dict[str, dict[str, float]]]:
             "flex": {"input": 0.1, "cached_input": 0.01, "output": 0.625},
         },
     }
+
+
+def process_openai_key_overrides_dotenv(env_file: str | Path = ".env") -> bool:
+    """Detect a different process-level key without exposing either credential."""
+    process_value = os.environ.get("OPENAI_API_KEY", "").strip()
+    path = Path(env_file)
+    if not process_value or not path.is_file():
+        return False
+    dotenv_value = str(dotenv_values(path).get("OPENAI_API_KEY") or "").strip()
+    return bool(dotenv_value) and not hmac.compare_digest(process_value, dotenv_value)
 
 
 class Settings(BaseSettings):
@@ -137,6 +150,15 @@ class Settings(BaseSettings):
     def empty_path_to_none(cls, value):
         return None if value in (None, "") else value
 
+    @field_validator("target_session_cookie", mode="before")
+    @classmethod
+    def empty_session_cookie_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, SecretStr):
+            return value if value.get_secret_value().strip() else None
+        return value if str(value).strip() else None
+
     @field_validator("eval_default_tests_per_topic")
     @classmethod
     def validate_case_count(cls, value: int) -> int:
@@ -170,6 +192,16 @@ class Settings(BaseSettings):
         if self.target_backend_auth_token:
             value[self.target_backend_auth_header] = self.target_backend_auth_token
         return {str(k): str(v) for k, v in value.items()}
+
+    @property
+    def target_authentication_configured(self) -> bool:
+        cookie = (
+            self.target_session_cookie.get_secret_value().strip()
+            if self.target_session_cookie is not None
+            else ""
+        )
+        credentials = self.target_backend_email.strip() and self.target_backend_password
+        return bool(cookie or credentials)
 
     @property
     def target_variants(self) -> list[dict[str, Any]]:

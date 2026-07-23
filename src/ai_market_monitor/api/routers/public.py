@@ -252,6 +252,8 @@ def _public_context(
             "gtmId": settings.public_gtm_id,
             "metaPixelId": settings.vite_meta_pixel_id,
             "metaPixelEnabled": settings.vite_meta_pixel_enabled,
+            "xPixelId": settings.vite_x_pixel_id,
+            "xPixelEnabled": settings.vite_x_pixel_enabled,
             "siteUrl": settings.public_site_url,
             "debug": settings.vite_analytics_debug,
         },

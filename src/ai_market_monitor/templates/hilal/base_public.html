@@ -51,7 +51,9 @@
       "version": cookie_consent_version,
       "analyticsEnabled": public_analytics_enabled,
       "marketingEnabled": marketing_consent_enabled,
-      "gtmContainerId": analytics_runtime_config.gtmId
+      "gtmContainerId": analytics_runtime_config.gtmId,
+      "xPixelEnabled": analytics_runtime_config.xPixelEnabled,
+      "xPixelId": analytics_runtime_config.xPixelId
     } | tojson }};
   </script>
   {% for item in json_ld %}<script type="application/ld+json">{{ item | tojson }}</script>{% endfor %}
@@ -66,7 +68,7 @@
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260715-expansion"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260721-gtm"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-x-pixel"></script>
   {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260720-brand4"></script>{% endif %}
   {% block page_scripts %}{% endblock %}
 </body>

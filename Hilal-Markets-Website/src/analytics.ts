@@ -29,6 +29,8 @@ type AnalyticsRuntimeConfig = {
   gtmId?: string
   metaPixelId?: string
   metaPixelEnabled?: boolean
+  xPixelId?: string
+  xPixelEnabled?: boolean
   siteUrl?: string
   debug?: boolean
 }
@@ -53,6 +55,8 @@ declare global {
     gtag?: (...args: unknown[]) => void
     fbq?: MetaPixelFunction
     _fbq?: MetaPixelFunction
+    twq?: XPixelFunction
+    __hmXConfiguredPixels?: Set<string>
     __hmConsentDefaultSet?: boolean
     __hmAnalyticsInitialized?: boolean
   }
@@ -64,6 +68,13 @@ type MetaPixelFunction = ((...args: unknown[]) => void) & {
   loaded?: boolean
   version?: string
   push?: (...args: unknown[]) => void
+}
+
+type XPixelFunction = ((...args: unknown[]) => void) & {
+  exe?: (...args: unknown[]) => void
+  queue?: unknown[][]
+  version?: string
+  integration?: string
 }
 
 const ATTRIBUTION_KEY = 'hm-first-touch-attribution-v1'
@@ -80,10 +91,12 @@ const FORBIDDEN_PARAMETER_KEYS = new Set([
 ])
 const VALID_GTM = /^GTM-[A-Z0-9]+$/
 const VALID_PIXEL = /^[0-9]{5,32}$/
+const VALID_X_PIXEL = /^[A-Za-z0-9]{3,32}$/
 
 let consent: AnalyticsConsent = { analytics: false, marketing: false }
 let googleLoaded = false
 let metaLoaded = false
+let xLoaded = false
 let volatileAttribution: FirstTouchAttribution | null = null
 let lastGooglePageView = ''
 let lastMetaPageView = ''
@@ -211,6 +224,48 @@ function loadMeta() {
     'https://connect.facebook.net/en_US/fbevents.js',
     'meta-pixel',
     () => debug('meta_script_error'),
+  )
+}
+
+function loadX() {
+  const config = runtimeConfig()
+  const pixelId = String(config.xPixelId ?? '').trim()
+  if (
+    !config.xPixelEnabled ||
+    xLoaded ||
+    !consent.marketing ||
+    !VALID_X_PIXEL.test(pixelId)
+  ) return
+
+  const configuredPixels = window.__hmXConfiguredPixels instanceof Set
+    ? window.__hmXConfiguredPixels
+    : new Set<string>()
+  window.__hmXConfiguredPixels = configuredPixels
+  if (configuredPixels.has(pixelId)) {
+    xLoaded = true
+    return
+  }
+
+  const twq = window.twq || function (...args: unknown[]) {
+    if (twq.exe) twq.exe(...args)
+    else twq.queue?.push(args)
+  } as XPixelFunction
+  twq.version = '1.1'
+  twq.queue = twq.queue || []
+  twq.integration = 'gtm-ad-manager'
+  window.twq = twq
+
+  configuredPixels.add(pixelId)
+  xLoaded = true
+  twq('config', pixelId)
+  injectScript(
+    'https://static.ads-twitter.com/uwt.js',
+    'x-pixel',
+    () => {
+      configuredPixels.delete(pixelId)
+      xLoaded = false
+      debug('x_pixel_script_error')
+    },
   )
 }
 
@@ -433,8 +488,12 @@ function setConsent(next: Partial<AnalyticsConsent>) {
     captureFirstTouchAttribution()
     loadGoogle()
   }
-  if (consent.marketing) loadMeta()
-  else if (window.fbq) window.fbq('consent', 'revoke')
+  if (consent.marketing) {
+    loadMeta()
+    loadX()
+  } else if (window.fbq) {
+    window.fbq('consent', 'revoke')
+  }
   trackPageView()
 }
 

@@ -9,6 +9,9 @@ services:
       VITE_ANALYTICS_ENABLED: "true"
       VITE_GTM_ID: "GTM-KBBHH2FV"
       VITE_GA4_MEASUREMENT_ID: ""
+      MARKETING_CONSENT_ENABLED: "true"
+      VITE_X_PIXEL_ENABLED: "true"
+      VITE_X_PIXEL_ID: "re20l"
     ports:
       - "${API_HOST_PORT:-8000}:8000"
     depends_on:
@@ -33,6 +36,9 @@ services:
       VITE_ANALYTICS_ENABLED: "true"
       VITE_GTM_ID: "GTM-KBBHH2FV"
       VITE_GA4_MEASUREMENT_ID: ""
+      MARKETING_CONSENT_ENABLED: "true"
+      VITE_X_PIXEL_ENABLED: "true"
+      VITE_X_PIXEL_ID: "re20l"
     depends_on:
       api:
         condition: service_healthy
@@ -57,6 +63,9 @@ services:
       VITE_ANALYTICS_ENABLED: "true"
       VITE_GTM_ID: "GTM-KBBHH2FV"
       VITE_GA4_MEASUREMENT_ID: ""
+      MARKETING_CONSENT_ENABLED: "true"
+      VITE_X_PIXEL_ENABLED: "true"
+      VITE_X_PIXEL_ID: "re20l"
     depends_on:
       api:
         condition: service_healthy

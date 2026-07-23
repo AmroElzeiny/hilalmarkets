@@ -1,26 +1,68 @@
 {
-  "generated_at": "2026-07-23T13:45:14.958308+00:00",
-  "started_at": "2026-07-23T13:44:28.577632+00:00",
-  "base_url": "http://127.0.0.1:59761",
+  "generated_at": "2026-07-23T15:53:37.594212+00:00",
+  "started_at": "2026-07-23T15:52:31.163669+00:00",
+  "base_url": "http://127.0.0.1:39392",
   "browser": "chromium",
   "auto_started": true,
-  "command": ".venv\\Scripts\\python.exe -m pytest tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa -q --tb=short",
-  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 59761",
+  "command": ".venv\\Scripts\\python.exe -m pytest -q tests/browser/test_landing_analytics.py",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 39392",
   "exitstatus": 0,
-  "tests_run": 1,
-  "passed": 1,
+  "tests_run": 8,
+  "passed": 8,
   "failed": 0,
   "skipped": 0,
   "console_errors": [],
   "failed_network_calls": [],
   "page_errors": [],
   "artifacts": {
-    "tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa": {}
+    "tests/browser/test_landing_analytics.py::test_shared_public_shell_loads_gtm_once_only_after_consent": {},
+    "tests/browser/test_landing_analytics.py::test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain": {},
+    "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {},
+    "tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id": {},
+    "tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility": {},
+    "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {},
+    "tests/browser/test_landing_analytics.py::test_failed_waitlist_submission_never_emits_success_event": {},
+    "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {}
   },
   "tests": {
-    "tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa": {
+    "tests/browser/test_landing_analytics.py::test_shared_public_shell_loads_gtm_once_only_after_consent": {
       "outcome": "passed",
-      "duration_seconds": 23.596,
+      "duration_seconds": 2.098,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain": {
+      "outcome": "passed",
+      "duration_seconds": 3.039,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {
+      "outcome": "passed",
+      "duration_seconds": 9.281,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id": {
+      "outcome": "passed",
+      "duration_seconds": 13.804,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility": {
+      "outcome": "passed",
+      "duration_seconds": 4.5,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {
+      "outcome": "passed",
+      "duration_seconds": 2.245,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_failed_waitlist_submission_never_emits_success_event": {
+      "outcome": "passed",
+      "duration_seconds": 2.053,
+      "longrepr": ""
+    },
+    "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {
+      "outcome": "passed",
+      "duration_seconds": 1.776,
       "longrepr": ""
     }
   },

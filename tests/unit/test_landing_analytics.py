@@ -36,6 +36,10 @@ def test_landing_uses_one_provider_agnostic_consent_aware_analytics_module():
     assert "ga4MeasurementId" not in analytics
     assert "emitGoogle('generate_lead'" not in analytics
     assert "FORBIDDEN_PARAMETER_KEYS" in analytics
+    assert "function loadX()" in analytics
+    assert "'https://static.ads-twitter.com/uwt.js'" in analytics
+    assert "twq('config', pixelId)" in analytics
+    assert "__hmXConfiguredPixels" in analytics
 
     for source_path in FRONTEND.rglob("*.tsx"):
         source = source_path.read_text(encoding="utf-8")
@@ -371,6 +375,8 @@ def test_analytics_environment_contract_is_documented_for_both_environments():
         "VITE_GA4_MEASUREMENT_ID",
         "VITE_META_PIXEL_ID",
         "VITE_META_PIXEL_ENABLED",
+        "VITE_X_PIXEL_ID",
+        "VITE_X_PIXEL_ENABLED",
         "VITE_SITE_URL",
         "VITE_ANALYTICS_DEBUG",
     }
@@ -392,7 +398,13 @@ def test_production_compose_pins_gtm_and_disables_direct_ga4():
     assert 'VITE_ANALYTICS_ENABLED: "true"' in production
     assert 'VITE_GTM_ID: "GTM-KBBHH2FV"' in production
     assert 'VITE_GA4_MEASUREMENT_ID: ""' in production
+    assert 'MARKETING_CONSENT_ENABLED: "true"' in production
+    assert 'VITE_X_PIXEL_ENABLED: "true"' in production
+    assert 'VITE_X_PIXEL_ID: "re20l"' in production
     assert production.count("environment: *public_analytics_env") == 3
     assert default.count('VITE_ANALYTICS_ENABLED: "true"') == 3
     assert default.count('VITE_GTM_ID: "GTM-KBBHH2FV"') == 3
     assert default.count('VITE_GA4_MEASUREMENT_ID: ""') == 3
+    assert default.count('MARKETING_CONSENT_ENABLED: "true"') == 3
+    assert default.count('VITE_X_PIXEL_ENABLED: "true"') == 3
+    assert default.count('VITE_X_PIXEL_ID: "re20l"') == 3

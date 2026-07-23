@@ -54,6 +54,14 @@ def _configure_fake_providers(page: Page) -> None:
             body="/* pixel transport intentionally empty in browser tests */",
         ),
     )
+    page.route(
+        "https://static.ads-twitter.com/**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/javascript",
+            body="/* X Pixel transport intentionally empty in browser tests */",
+        ),
+    )
     page.evaluate(
         """() => {
           window.HilalMarketsRuntimeConfig.analytics = {
@@ -61,6 +69,8 @@ def _configure_fake_providers(page: Page) -> None:
             gtmId: 'GTM-KBBHH2FV',
             metaPixelEnabled: true,
             metaPixelId: '1234567890',
+            xPixelEnabled: true,
+            xPixelId: 're20l',
             debug: false,
           };
         }"""
@@ -127,6 +137,55 @@ def test_shared_public_shell_loads_gtm_once_only_after_consent(
     )
     assert page.locator('script[data-hm-provider="google-tag-manager"]').count() == 1
     assert sum("gtm.js?id=GTM-KBBHH2FV" in url for url in google_requests) == 1
+
+
+def test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain(
+    page: Page,
+    base_url: str,
+) -> None:
+    x_requests: list[str] = []
+    page.on(
+        "request",
+        lambda request: x_requests.append(request.url)
+        if "ads-twitter.com" in request.url or "analytics.twitter.com" in request.url
+        else None,
+    )
+    page.route(
+        "https://static.ads-twitter.com/**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/javascript",
+            body="/* X Pixel transport intentionally empty in browser tests */",
+        ),
+    )
+
+    page.goto(f"{base_url}/features", wait_until="domcontentloaded")
+    assert page.locator('script[data-hm-provider="x-pixel"]').count() == 0
+    assert x_requests == []
+
+    page.locator("[data-cookie-customize]").click()
+    page.locator("input[data-consent-marketing]").check()
+    page.locator("[data-cookie-save]").click()
+    page.wait_for_selector('script[data-hm-provider="x-pixel"]', state="attached")
+
+    assert sum("static.ads-twitter.com/uwt.js" in url for url in x_requests) == 1
+    assert page.evaluate(
+        """() => (window.twq?.queue || []).filter((item) =>
+          item && item[0] === 'config' && item[1] === 're20l'
+        ).length"""
+    ) == 1
+
+    page.locator("[data-cookie-settings]").first.click()
+    page.locator("input[data-consent-marketing]").uncheck()
+    page.locator("[data-cookie-save]").click()
+    page.goto(f"{base_url}/privacy", wait_until="domcontentloaded")
+    assert page.locator('script[data-hm-provider="x-pixel"]').count() == 0
+    assert sum("static.ads-twitter.com/uwt.js" in url for url in x_requests) == 1
+
+    response = page.request.get(f"{base_url}/dashboard/system-brain")
+    assert "static.ads-twitter.com" not in response.text()
+    assert "hilalmarkets-consent.js" not in response.text()
+    assert "xPixelId" not in response.text()
 
 
 def test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated(

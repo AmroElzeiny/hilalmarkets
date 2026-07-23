@@ -77,7 +77,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
           <Bullet><strong>Shariah-evidence interactions:</strong> methodologies and Passport versions viewed or attached to evaluations. AI may support factual research, but it does not issue Shariah decisions.</Bullet>
           <Bullet><strong>Communications:</strong> support requests, public-assistant feedback, delivery status, and connected-channel identifiers needed to send requested notifications.</Bullet>
           <Bullet><strong>Technical information:</strong> timestamps, page paths, browser or device category, security logs, provider errors, and limited diagnostics needed to operate and protect the service.</Bullet>
-          <Bullet><strong>Optional analytics:</strong> consented page views, section views, CTA interactions, normalized form outcomes, referrer, and campaign parameters. We do not send your email, password, message text, strategy text, or other form values to Google Analytics or Meta Pixel.</Bullet>
+          <Bullet><strong>Optional analytics and advertising measurement:</strong> consented page views, section views, CTA interactions, normalized form outcomes, referrer, and campaign parameters. We do not send your email, password, message text, strategy text, or other form values to Google Analytics, Meta Pixel, or X Pixel.</Bullet>
         </BulletList>
       ),
     },
@@ -132,7 +132,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
       content: (
         <>
           <Paragraph>
-            Essential storage supports security and core page behavior. Functional storage may remember preferences you choose. Google Analytics can load only after Analytics consent, and Meta Pixel can load only after Marketing consent. Denied consent is the default where supported.
+            Essential storage supports security and core page behavior. Functional storage may remember preferences you choose. Google Analytics can load only after Analytics consent. Meta Pixel and X Pixel can load only after Marketing consent. Denied consent is the default where supported.
           </Paragraph>
           <Paragraph>
             Waitlist submission works independently of optional analytics. A successful server-confirmed signup may produce a consented lead event without the submitted email or other personal form content. Failed or duplicate submissions do not create a new conversion event.
