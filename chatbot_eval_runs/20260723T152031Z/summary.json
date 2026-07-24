@@ -1,0 +1,43 @@
+{
+  "cases": 2,
+  "passed": 0,
+  "pass_rate": 0.0,
+  "average_score": 0.0,
+  "total_test_cost_usd": 0.091314425,
+  "errored_cases": 0,
+  "pending_judges": 0,
+  "critical_topics_failed": [
+    "ui_backend_parity"
+  ],
+  "release_gate": "FAIL",
+  "topics": [
+    {
+      "topic_id": "ui_backend_parity",
+      "title": "UI and backend parity",
+      "category": "integration",
+      "severity": "critical",
+      "cases": 2,
+      "pass_rate": 0.0,
+      "score": 0.0,
+      "avg_latency_ms": 116657.42084995145,
+      "test_ai_cost_usd": 0.006327125,
+      "target_cost_usd": 0.08498729999999999,
+      "criteria_pass": true,
+      "criteria": [
+        {
+          "metric": "ui_backend_parity",
+          "operator": ">=",
+          "threshold": 0.99,
+          "actual": 1.0,
+          "passed": true,
+          "critical": true,
+          "description": "Outputs equivalent",
+          "measured_cases": 1
+        }
+      ]
+    }
+  ],
+  "budget_usd": 0.2,
+  "measured_spend_usd": 0.09131442500000002,
+  "budget_remaining_usd": 0.10868557499999999
+}

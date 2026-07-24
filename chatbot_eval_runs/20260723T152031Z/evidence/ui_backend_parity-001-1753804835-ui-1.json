@@ -1,0 +1,5 @@
+{
+  "user": "Alright—setup for a watchlist: I want **SOLUSDT only** (explicitly **exclude XRPUSDT**). Use **5m** context, and the **trigger comes from 1d**. Condition: a **bullish move >= 7.5%** on the 1d logic, targeting **long**. \n\nAlso don’t assume anything—**ask me explicitly for approval** before you finalize whatever the UI/backend result is supposed to be. No sharia-status tagging either.",
+  "reply": null,
+  "error": "TimeoutError: Page.wait_for_function: Timeout 90000ms exceeded."
+}

@@ -1,0 +1,5 @@
+{
+  "user": "Alright—setup my watchlist.\n- Include: **ETHUSDT** only\n- Exclude: **XRPUSDT**\n\nLogic:\n- Use **1m context** to monitor the move\n- Use **15m trigger** to fire\n- Condition: bearish move of **at most 0.5%** → i.e., **%change <= 0.5** with **short** bias\n\nAlso: **keep the approval explicit** (don’t auto-approve). And don’t assign any “status” like sharia/anything.\n\nConfirm you’re aligned and I’ll approve the trigger direction/threshold.",
+  "reply": null,
+  "error": "RemoteProtocolError: Server disconnected without sending a response."
+}

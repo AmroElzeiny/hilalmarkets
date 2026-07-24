@@ -1,0 +1,7 @@
+{
+  "user": "Yep—here’s the plain confirmation on my side:\n1) **XRPUSDT stays excluded** (hard exclude).\n2) **Context = 1d**, **Trigger = 1m**.\n3) **Direction = LONG** with **bullish move ≥ 7.5%** using **operator gte**.\n4) I **approve explicitly** before you lock any watchlist/update (no silent changes).\n\nNow for the “reference point” for the 7.5% move: since you’re asking for a measurable event, propose this so we’re not guessing—\n- On **1m**, the **trigger event** counts once price moves **≥ 7.5% up from the most recent 1m swing low** *that qualifies within the 1d bullish context* (your 1d bias condition).\n\nIf you prefer a different anchor (e.g., breakout from a 1d anchor high/low), tell me the exact rule—**but keep** the universe, timeframes, direction, 7.5% threshold, and **explicit approval** unchanged.\n\nAlso: about the revert—if I revert to a previous value, don’t “merge” anything; just **roll back to the prior saved state** cleanly.\n\nReady—what exact 1d bias condition are you using, and will you follow the roll-back behavior exactly as stated?",
+  "reply": {
+    "text": "Internal Server Error"
+  },
+  "error": "HTTP 500"
+}

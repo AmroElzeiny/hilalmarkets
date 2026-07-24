@@ -1,0 +1,5 @@
+{
+  "user": "Yep, I’m aligned.\n\nWatchlist:\n- ✅ Include: ETHUSDT\n- ❌ Exclude: XRPUSDT\n\nTrigger logic:\n- Context timeframe: 1m (monitor the move there)\n- Trigger timeframe: 15m (evaluate/fire from here)\n- Bias: **short**\n- Condition: bearish move limited to **≤ 0.5%** i.e. **%change <= 0.5**\n\nApprovals:\n- I will **not** auto-approve anything—your confirmation is required.\n- No extra “status” tagging (no sharia/anything).",
+  "reply": null,
+  "error": "RemoteProtocolError: Server disconnected without sending a response."
+}

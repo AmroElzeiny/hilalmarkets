@@ -1,0 +1,7 @@
+{
+  "user": "ETHUSDT in this setup = symbol filter: only build the watchlist/rules for **ETHUSDT**; **LTCUSDT is fully ignored** (no watch, no signals, no operator mapping for it).\n\nOperator mapping (exact) for the **1m LONG trigger** (>= +0.5%) — with **5m used only as context filter**:\n\n**Definitions**\n- Let **Ref** = the reference level coming from the **5m context** (i.e., the 5m-derived level you choose for the idea; in the logic below it’s just “Ref”).\n- Define the **Long target level**:\n  - **L = Ref * (1 + 0.005)**  (this is the +0.5% requirement)\n- On each **1m candle** at time *t* use:\n  - **H1(t)** = 1m high\n  - **L1(t)** = 1m low\n  - **C1(t)** = 1m close\n\n**Operator → condition logic (use on 1m candles):**\n- **above** → `C1(t) > L`\n- **below** → `C1(t) < L`\n- **at least** → `C1(t) >= L`\n- **at most** → `C1(t) <= L`\n- **crosses** (from below to above) → `C1(t) > L AND C1(t-1) <= L`\n- **sweeps** (wick sweep) → `H1(t) >= L AND C1(t) < L`\n\nThat means for the LONG trigger of **>= 0.5%**, the strict trigger is: **use `at least` on 1m close** i.e. `C1(t) >= Ref*1.005`.\n\nAlso: I will **not** auto-approve anything. Before I finalize the ETHUSDT watchlist, confirm you approve this operator mapping + trigger definition (and tell me what your **5m Ref** is, since the rule uses that as the baseline).",
+  "reply": {
+    "text": "Internal Server Error"
+  },
+  "error": "HTTP 500"
+}

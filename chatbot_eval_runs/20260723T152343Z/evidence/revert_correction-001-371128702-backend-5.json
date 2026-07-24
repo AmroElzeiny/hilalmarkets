@@ -1,0 +1,844 @@
+{
+  "user": "Alright, good—so you’re confirming (a) XRP stays hard-excluded, (b) 1d context + 1m trigger, (c) explicit approval gates any lock/update, and (d) rollback is a clean restore (no merging/re-interpretation). \n\nBut you *still* haven’t given the exact 1d bullish-bias condition.\nGive me the precise rule you’ll use on 1d (one unambiguous condition), so the “1m swing low that qualifies within 1d bullish context” is deterministic.\n\nAlso confirm, in one line: on revert, you restore the last saved configuration exactly as-is—no edits, no recompute of thresholds/filters.",
+  "reply": {
+    "id": "d9fc4ff4-a355-453e-8aff-8c6495b17ff4",
+    "status": "needs_clarification",
+    "title": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to...",
+    "original_idea": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?",
+    "messages": [
+      {
+        "id": "973cbb40-86e3-4258-beda-36d208827c71",
+        "role": "assistant",
+        "message_type": "welcome",
+        "content": "Hi, I’m your HilalMarkets setup assistant. Choose Scanner for a one-time market search or Monitor for persistent alerts. I’ll make every rule clear before anything is created.",
+        "payload": {
+          "start_modes": [
+            {
+              "key": "setup_mode",
+              "value": "scanner",
+              "label": "Scanner",
+              "description": "One-time market scan. Define at least one measurable trigger; nothing is saved as a monitor."
+            },
+            {
+              "key": "setup_mode",
+              "value": "monitor",
+              "label": "Monitor",
+              "description": "Persistent monitoring with alerts, proof, notifications, and lifecycle tracking after approval."
+            }
+          ]
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:55:38.877727Z"
+      },
+      {
+        "id": "e4d0266f-0e8f-4dd0-a27d-2f4e1772193a",
+        "role": "user",
+        "message_type": "text",
+        "content": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?",
+        "payload": {
+          "option_key": null,
+          "option_value": null,
+          "option_label": null,
+          "turn_classification": {
+            "intent": "setup_instruction",
+            "assistant_message": "",
+            "technical_fragments": [
+              "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+            ],
+            "clarification_answer": null,
+            "segments": [
+              {
+                "text": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?",
+                "category": "technical_instruction"
+              }
+            ],
+            "preserve_pending_question": false,
+            "confidence": 0.72
+          }
+        },
+        "client_message_id": "eval-05078192aa5a6dc51846a3329c0644395355f743",
+        "created_at": "2026-07-23T15:56:08.541361Z"
+      },
+      {
+        "id": "3236eabb-3a02-48ba-b0f0-6eccde043461",
+        "role": "assistant",
+        "message_type": "process_state",
+        "content": "Clarification checkpoint: 10 details remain in this 10-question review. I’ll ask one at a time before validation.",
+        "payload": {
+          "state": "clarifying",
+          "source": "capability_resolver",
+          "current": 1,
+          "total": 10,
+          "remaining": 10
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:56:21.682358Z"
+      },
+      {
+        "id": "142e92c1-7dbd-4766-abe1-533fe78d0ced",
+        "role": "assistant",
+        "message_type": "clarification",
+        "content": "Question 1 of 10: I do not have a verified candle-data rule for 'Alright—before you lock anything in' yet. Should I build and test that exact rule?",
+        "payload": {
+          "clarifications": [
+            {
+              "key": "capability_meaning_alright_before_you_lock_anything_in",
+              "question": "I do not have a verified candle-data rule for 'Alright—before you lock anything in' yet. Should I build and test that exact rule?",
+              "reason": "This can be proposed from closed price and volume history, but it must pass deterministic validation before it can become a rule.",
+              "options": [
+                {
+                  "key": "capability_meaning_alright_before_you_lock_anything_in",
+                  "label": "Build and test this rule",
+                  "value": "__build_mechanic__",
+                  "description": "AI drafts the candle logic; deterministic checks and market tests must certify it before review.",
+                  "action": "build_mechanic"
+                },
+                {
+                  "key": "capability_meaning_alright_before_you_lock_anything_in",
+                  "label": "Other (type in chat)",
+                  "value": "__other__",
+                  "description": "Answer this question in your own words.",
+                  "action": "other"
+                }
+              ]
+            }
+          ],
+          "beginner_note": "This can be proposed from closed price and volume history, but it must pass deterministic validation before it can become a rule.",
+          "question_progress": {
+            "current": 1,
+            "total": 10
+          },
+          "_traceedge_model": "gpt-5.4-mini",
+          "usage": {
+            "input_tokens": "[REDACTED]",
+            "input_tokens_details": "[REDACTED]",
+            "output_tokens": "[REDACTED]",
+            "output_tokens_details": "[REDACTED]",
+            "estimated_cost_usd": 0.01441575,
+            "models": [
+              "gpt-5.4-mini"
+            ]
+          }
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:56:21.684517Z"
+      },
+      {
+        "id": "2a8e05e4-d922-4ba6-9ca5-fed2c537b3eb",
+        "role": "user",
+        "message_type": "text",
+        "content": "Yeah—don’t stall on “question 1 of 10”. We already set the requirements. Trigger logic (no merging, just clean rollback if user reverts): - Universe: **LTCUSDT only**. **Hard exclude XRPUSDT**. - Context timeframe: **1d** (use it to define the bullish bias / environment). - Trigger timeframe: **1m** (wait for the entry trigger). - Direction: **LONG**. - Condition: price must make a **bullish move ≥ 7.5%** on the 1m trigger relative to the relevant reference point you’re using (e.g., breakout move from a swing/anchor you define), **operator = gte**. - Approval: **explicit required** before any “lock in”/watchlist update. Now tell me plainly: will you (1) keep XRP excluded, (2) use 1d for context + 1m for the trigger, (3) enforce ≥7.5% long, and (4) require my explicit approval before proceeding? Then you can ask for the exact reference definition for the 7.5% move—*but don’t change the thresholds/filters.*",
+        "payload": {
+          "option_key": null,
+          "option_value": null,
+          "option_label": null,
+          "turn_classification": {
+            "intent": "clarification_answer",
+            "assistant_message": "",
+            "technical_fragments": [],
+            "clarification_answer": "Yeah—don’t stall on “question 1 of 10”. We already set the requirements. Trigger logic (no merging, just clean rollback if user reverts): - Universe: **LTCUSDT only**. **Hard exclude XRPUSDT**. - Context timeframe: **1d** (use it to define the bullish bias / environment). - Trigger timeframe: **1m** (wait for the entry trigger). - Direction: **LONG**. - Condition: price must make a **bullish move ≥ 7.5%** on the 1m trigger relative to the relevant reference point you’re using (e.g., breakout move from a swing/anchor you define), **operator = gte**. - Approval: **explicit required** before any “lock in”/watchlist update. Now tell me plainly: will you (1) keep XRP excluded, (2) use 1d for context + 1m for the trigger, (3) enforce ≥7.5% long, and (4) require my explicit approval before proceeding? Then you can ask for the exact reference definition for the 7.5% move—*but don’t change the thresholds/filters.*",
+            "segments": [
+              {
+                "text": "Yeah—don’t stall on “question 1 of 10”. We already set the requirements. Trigger logic (no merging, just clean rollback if user reverts): - Universe: **LTCUSDT only**. **Hard exclude XRPUSDT**. - Context timeframe: **1d** (use it to define the bullish bias / environment). - Trigger timeframe: **1m** (wait for the entry trigger). - Direction: **LONG**. - Condition: price must make a **bullish move ≥ 7.5%** on the 1m trigger relative to the relevant reference point you’re using (e.g., breakout move from a swing/anchor you define), **operator = gte**. - Approval: **explicit required** before any “lock in”/watchlist update. Now tell me plainly: will you (1) keep XRP excluded, (2) use 1d for context + 1m for the trigger, (3) enforce ≥7.5% long, and (4) require my explicit approval before proceeding? Then you can ask for the exact reference definition for the 7.5% move—*but don’t change the thresholds/filters.*",
+                "category": "clarification_answer"
+              }
+            ],
+            "preserve_pending_question": false,
+            "confidence": 1.0
+          }
+        },
+        "client_message_id": "eval-14048ce55800e3d88d20aeadb06f7cd5ccb0cbaf",
+        "created_at": "2026-07-23T15:56:52.255799Z"
+      },
+      {
+        "id": "d5717af9-f73c-4a34-9c50-d7cc8c0c4347",
+        "role": "assistant",
+        "message_type": "process_state",
+        "content": "Clarification checkpoint: 1 detail remain in this 1-question review. I’ll ask one at a time before validation.",
+        "payload": {
+          "state": "clarifying",
+          "source": "deterministic",
+          "current": 1,
+          "total": 1,
+          "remaining": 1
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:56:52.263142Z"
+      },
+      {
+        "id": "2dbb564a-34b4-4af7-a1b0-4b0d8c621528",
+        "role": "assistant",
+        "message_type": "clarification",
+        "content": "Question 1 of 1: What measurable event should count as a breakout?",
+        "payload": {
+          "clarifications": [
+            {
+              "key": "breakout",
+              "question": "What measurable event should count as a breakout?",
+              "reason": "A breakout needs a price level, lookback, and close/intrabar rule.",
+              "options": [
+                {
+                  "key": "breakout",
+                  "label": "20-candle close",
+                  "value": "Candle closes above the previous 20-candle high",
+                  "description": null,
+                  "action": "answer"
+                },
+                {
+                  "key": "breakout",
+                  "label": "50-candle close",
+                  "value": "Candle closes above the previous 50-candle high",
+                  "description": null,
+                  "action": "answer"
+                },
+                {
+                  "key": "breakout",
+                  "label": "Intrabar break",
+                  "value": "Price trades above the previous 20-candle high intrabar",
+                  "description": null,
+                  "action": "answer"
+                },
+                {
+                  "key": "breakout",
+                  "label": "Other (type in chat)",
+                  "value": "__other__",
+                  "description": "Answer this question in your own words.",
+                  "action": "other"
+                }
+              ]
+            }
+          ],
+          "beginner_note": "A breakout needs a price level, lookback, and close/intrabar rule.",
+          "question_progress": {
+            "current": 1,
+            "total": 1
+          },
+          "jargon": [
+            {
+              "term": "Breakout",
+              "explanation": "A breakout is a measurable move beyond a defined recent price level."
+            }
+          ],
+          "_traceedge_model": "gpt-5.4-mini",
+          "usage": {
+            "input_tokens": "[REDACTED]",
+            "input_tokens_details": "[REDACTED]",
+            "output_tokens": "[REDACTED]",
+            "output_tokens_details": "[REDACTED]",
+            "estimated_cost_usd": 0.01509675,
+            "models": [
+              "gpt-5.4-mini"
+            ]
+          }
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:56:52.265519Z"
+      },
+      {
+        "id": "6320a721-40c5-49c5-b8da-d995f0312cd8",
+        "role": "user",
+        "message_type": "text",
+        "content": "Looks like your last message dropped (HTTP 500). No worries—let’s get back on track. Confirm you will follow this exactly, no “merging”: - Universe: **LTCUSDT only**, **hard exclude XRPUSDT**. - Context: **1d** to establish bullish bias. - Trigger: **1m**. - Direction: **LONG**. - Entry condition: on **1m**, price must make a **bullish move ≥ 7.5%** with **operator = gte** (measured from the most recent **1m swing low** that is considered within your **1d bullish context**). - Approval: you must get my **explicit approval before any watchlist/update is locked**. Revert behavior: if I revert to a previous setting/value, you **roll back to the prior saved state cleanly**—don’t merge, don’t reinterpret. Now answer plainly: 1) What exact **1d bias condition** are you using to decide “within bullish context”? 2) Will you enforce the rollback behavior exactly as stated? 3) Will you require explicit approval before proceeding with any lock in/update?",
+        "payload": {
+          "turn_classification": {
+            "intent": "conversation",
+            "assistant_message": "Yes — I’ll keep XRP excluded, use 1d for context and 1m for the trigger, require explicit approval before any lock-in/update, and roll back cleanly if you revert to a prior value. The exact 1d bullish-bias rule still needs to be defined, and your current message hasn’t answered the breakout question yet.",
+            "technical_fragments": [],
+            "clarification_answer": null,
+            "segments": [],
+            "preserve_pending_question": true,
+            "confidence": 0.91
+          }
+        },
+        "client_message_id": "eval-56f8374b022e1082bccd42bc8ccea656fe6b4090",
+        "created_at": "2026-07-23T15:57:40.143298Z"
+      },
+      {
+        "id": "2465bb45-f31d-4c89-a15f-5301f5f9d719",
+        "role": "assistant",
+        "message_type": "conversation",
+        "content": "Yes — I’ll keep XRP excluded, use 1d for context and 1m for the trigger, require explicit approval before any lock-in/update, and roll back cleanly if you revert to a prior value. The exact 1d bullish-bias rule still needs to be defined, and your current message hasn’t answered the breakout question yet.",
+        "payload": {
+          "turn_classification": {
+            "intent": "conversation",
+            "assistant_message": "Yes — I’ll keep XRP excluded, use 1d for context and 1m for the trigger, require explicit approval before any lock-in/update, and roll back cleanly if you revert to a prior value. The exact 1d bullish-bias rule still needs to be defined, and your current message hasn’t answered the breakout question yet.",
+            "technical_fragments": [],
+            "clarification_answer": null,
+            "segments": [],
+            "preserve_pending_question": true,
+            "confidence": 0.91
+          },
+          "clarifications": [
+            {
+              "key": "breakout",
+              "question": "What measurable event should count as a breakout?",
+              "reason": "A breakout needs a price level, lookback, and close/intrabar rule.",
+              "options": [
+                {
+                  "key": "breakout",
+                  "label": "20-candle close",
+                  "value": "Candle closes above the previous 20-candle high",
+                  "description": null,
+                  "action": "answer"
+                },
+                {
+                  "key": "breakout",
+                  "label": "50-candle close",
+                  "value": "Candle closes above the previous 50-candle high",
+                  "description": null,
+                  "action": "answer"
+                },
+                {
+                  "key": "breakout",
+                  "label": "Intrabar break",
+                  "value": "Price trades above the previous 20-candle high intrabar",
+                  "description": null,
+                  "action": "answer"
+                },
+                {
+                  "key": "breakout",
+                  "label": "Other (type in chat)",
+                  "value": "__other__",
+                  "description": "Answer this question in your own words.",
+                  "action": "other"
+                }
+              ]
+            }
+          ],
+          "awaiting_answer": true,
+          "beginner_note": "A breakout needs a price level, lookback, and close/intrabar rule.",
+          "_traceedge_model": "gpt-5.4-mini",
+          "usage": {
+            "input_tokens": "[REDACTED]",
+            "input_tokens_details": "[REDACTED]",
+            "output_tokens": "[REDACTED]",
+            "output_tokens_details": "[REDACTED]",
+            "estimated_cost_usd": 0.0138702,
+            "models": [
+              "gpt-5.4-mini"
+            ]
+          }
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:57:40.149146Z"
+      },
+      {
+        "id": "f96a75e7-8fcb-4330-b56c-5439b6a239f1",
+        "role": "user",
+        "message_type": "text",
+        "content": "Alright, good—so you’re confirming (a) XRP stays hard-excluded, (b) 1d context + 1m trigger, (c) explicit approval gates any lock/update, and (d) rollback is a clean restore (no merging/re-interpretation). But you *still* haven’t given the exact 1d bullish-bias condition. Give me the precise rule you’ll use on 1d (one unambiguous condition), so the “1m swing low that qualifies within 1d bullish context” is deterministic. Also confirm, in one line: on revert, you restore the last saved configuration exactly as-is—no edits, no recompute of thresholds/filters.",
+        "payload": {
+          "option_key": null,
+          "option_value": null,
+          "option_label": null,
+          "turn_classification": {
+            "intent": "clarification_answer",
+            "assistant_message": "",
+            "technical_fragments": [],
+            "clarification_answer": "Alright, good—so you’re confirming (a) XRP stays hard-excluded, (b) 1d context + 1m trigger, (c) explicit approval gates any lock/update, and (d) rollback is a clean restore (no merging/re-interpretation). But you *still* haven’t given the exact 1d bullish-bias condition. Give me the precise rule you’ll use on 1d (one unambiguous condition), so the “1m swing low that qualifies within 1d bullish context” is deterministic. Also confirm, in one line: on revert, you restore the last saved configuration exactly as-is—no edits, no recompute of thresholds/filters.",
+            "segments": [
+              {
+                "text": "Alright, good—so you’re confirming (a) XRP stays hard-excluded, (b) 1d context + 1m trigger, (c) explicit approval gates any lock/update, and (d) rollback is a clean restore (no merging/re-interpretation). But you *still* haven’t given the exact 1d bullish-bias condition. Give me the precise rule you’ll use on 1d (one unambiguous condition), so the “1m swing low that qualifies within 1d bullish context” is deterministic. Also confirm, in one line: on revert, you restore the last saved configuration exactly as-is—no edits, no recompute of thresholds/filters.",
+                "category": "clarification_answer"
+              }
+            ],
+            "preserve_pending_question": false,
+            "confidence": 1.0
+          }
+        },
+        "client_message_id": "eval-b5965461946dc1818435dc65192e37450435c9d3",
+        "created_at": "2026-07-23T15:58:08.052381Z"
+      },
+      {
+        "id": "3525e739-365c-499d-a2a4-12dac0a39012",
+        "role": "assistant",
+        "message_type": "process_state",
+        "content": "Clarification checkpoint: 37 details remain in this 37-question review. I’ll ask one at a time before validation.",
+        "payload": {
+          "state": "clarifying",
+          "source": "capability_resolver",
+          "current": 1,
+          "total": 37,
+          "remaining": 37
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:58:35.836490Z"
+      },
+      {
+        "id": "c70252ee-12ba-4639-a7ac-e2f706585b2f",
+        "role": "assistant",
+        "message_type": "clarification",
+        "content": "Question 1 of 37: I do not have a verified candle-data rule for 'quick check: if I change my mind' yet. Should I build and test that exact rule?",
+        "payload": {
+          "clarifications": [
+            {
+              "key": "capability_meaning_quick_check_if_i_change_my_mind",
+              "question": "I do not have a verified candle-data rule for 'quick check: if I change my mind' yet. Should I build and test that exact rule?",
+              "reason": "This can be proposed from closed price and volume history, but it must pass deterministic validation before it can become a rule.",
+              "options": [
+                {
+                  "key": "capability_meaning_quick_check_if_i_change_my_mind",
+                  "label": "Build and test this rule",
+                  "value": "__build_mechanic__",
+                  "description": "AI drafts the candle logic; deterministic checks and market tests must certify it before review.",
+                  "action": "build_mechanic"
+                },
+                {
+                  "key": "capability_meaning_quick_check_if_i_change_my_mind",
+                  "label": "Other (type in chat)",
+                  "value": "__other__",
+                  "description": "Answer this question in your own words.",
+                  "action": "other"
+                }
+              ]
+            }
+          ],
+          "beginner_note": "This can be proposed from closed price and volume history, but it must pass deterministic validation before it can become a rule.",
+          "question_progress": {
+            "current": 1,
+            "total": 37
+          },
+          "_traceedge_model": "gpt-5.4-mini",
+          "usage": {
+            "input_tokens": "[REDACTED]",
+            "input_tokens_details": "[REDACTED]",
+            "output_tokens": "[REDACTED]",
+            "output_tokens_details": "[REDACTED]",
+            "estimated_cost_usd": 0.0152805,
+            "models": [
+              "gpt-5.4-mini"
+            ]
+          }
+        },
+        "client_message_id": null,
+        "created_at": "2026-07-23T15:58:35.838466Z"
+      }
+    ],
+    "draft_strategy": null,
+    "schema_hash": null,
+    "translation_sheet": {},
+    "lint_warnings": [],
+    "rule_confidence": [],
+    "assumptions": [],
+    "ambiguities": [
+      {
+        "code": "capability_meaning_quick_check_if_i_change_my_mind",
+        "message": "I do not have a verified candle-data rule for 'quick check: if I change my mind' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_quick_check_if_i_change_my_mind",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_revert_back_to_an_earlier_setting_value",
+        "message": "I do not have a verified candle-data rule for 'revert back to an earlier setting/value' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_revert_back_to_an_earlier_setting_value",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_don_t_merge_it_just_roll_back_cleanly_to_the_pre",
+        "message": "I do not have a verified candle-data rule for 'don’t “merge” it—just roll back cleanly to the previous state' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_don_t_merge_it_just_roll_back_cleanly_to_the_pre",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_for_the_plan_build_a_watchlist_for_ltcusdt_only_",
+        "message": "I do not have a verified candle-data rule for 'For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**)' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_for_the_plan_build_a_watchlist_for_ltcusdt_only_",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_1m_for_the_trigger",
+        "message": "I do not have a verified candle-data rule for '**1m** for the trigger' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_1m_for_the_trigger",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_and_i_want_a_bullish_move_7_5_with_long_logic",
+        "message": "I do not have a verified candle-data rule for 'and I want a **bullish move ≥ 7.5%** with **long** logic' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_and_i_want_a_bullish_move_7_5_with_long_logic",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_don_t_do_any_silent_permissions_approval_must_st",
+        "message": "I do not have a verified candle-data rule for 'don’t do any silent permissions—**approval must stay explicit**' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_don_t_do_any_silent_permissions_approval_must_st",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_can_you_confirm_the_exact_trigger_logic",
+        "message": "I do not have a verified candle-data rule for 'Can you confirm the exact trigger logic' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_can_you_confirm_the_exact_trigger_logic",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_that_approval_is_required_before_you_proceed",
+        "message": "I do not have a verified candle-data rule for 'that approval is required before you proceed?' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_that_approval_is_required_before_you_proceed",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_yeah_don_t_stall_on_question_1_of_10",
+        "message": "I do not have a verified candle-data rule for 'Yeah—don’t stall on “question 1 of 10”' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_yeah_don_t_stall_on_question_1_of_10",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_we_already_set_the_requirements",
+        "message": "I do not have a verified candle-data rule for 'We already set the requirements' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_we_already_set_the_requirements",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_trigger_logic_no_merging",
+        "message": "I do not have a verified candle-data rule for 'Trigger logic (no merging' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_trigger_logic_no_merging",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_just_clean_rollback_if_user_reverts_universe_ltc",
+        "message": "I do not have a verified candle-data rule for 'just clean rollback if user reverts): - Universe: **LTCUSDT only**' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_just_clean_rollback_if_user_reverts_universe_ltc",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_hard_exclude_xrpusdt",
+        "message": "I do not have a verified candle-data rule for '**Hard exclude XRPUSDT**' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_hard_exclude_xrpusdt",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_context_timeframe_1d_use_it_to_define_the_bullis",
+        "message": "I do not have a verified candle-data rule for 'Context timeframe: **1d** (use it to define the bullish bias / environment)' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_context_timeframe_1d_use_it_to_define_the_bullis",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_trigger_timeframe_1m_wait_for_the_entry_trigger",
+        "message": "I do not have a verified candle-data rule for 'Trigger timeframe: **1m** (wait for the entry trigger)' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_trigger_timeframe_1m_wait_for_the_entry_trigger",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_condition_price_must_make_a_bullish_move_7_5_on_",
+        "message": "I do not have a verified candle-data rule for 'Condition: price must make a **bullish move ≥ 7.5%** on the 1m trigger relative to the relevant reference point you’re using (e' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_condition_price_must_make_a_bullish_move_7_5_on_",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_g",
+        "message": "I do not have a verified candle-data rule for 'g' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_g",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_operator_gte",
+        "message": "I do not have a verified candle-data rule for '**operator = gte**' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_operator_gte",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_approval_explicit_required_before_any_lock_in_wa",
+        "message": "I do not have a verified candle-data rule for 'Approval: **explicit required** before any “lock in”/watchlist update' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_approval_explicit_required_before_any_lock_in_wa",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_now_tell_me_plainly_will_you_1_keep_xrp_excluded",
+        "message": "I do not have a verified candle-data rule for 'Now tell me plainly: will you (1) keep XRP excluded' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_now_tell_me_plainly_will_you_1_keep_xrp_excluded",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_2_use_1d_for_context_1m_for_the_trigger",
+        "message": "I do not have a verified candle-data rule for '(2) use 1d for context + 1m for the trigger' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_2_use_1d_for_context_1m_for_the_trigger",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_3_enforce_7_5_long",
+        "message": "I do not have a verified candle-data rule for '(3) enforce ≥7.5% long' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_3_enforce_7_5_long",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_and_4_require_my_explicit_approval_before_procee",
+        "message": "I do not have a verified candle-data rule for 'and (4) require my explicit approval before proceeding?' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_and_4_require_my_explicit_approval_before_procee",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_you_can_ask_for_the_exact_reference_definition_f",
+        "message": "I do not have a verified candle-data rule for 'you can ask for the exact reference definition for the 7.5% move—*but don’t change the thresholds/filters' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_you_can_ask_for_the_exact_reference_definition_f",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_unknown",
+        "message": "I do not have a verified candle-data rule for '*' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_unknown",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_good_so_you_re_confirming_a_xrp_stays_hard_exclu",
+        "message": "I do not have a verified candle-data rule for 'good—so you’re confirming (a) XRP stays hard-excluded' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_good_so_you_re_confirming_a_xrp_stays_hard_exclu",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_b_1d_context_1m_trigger",
+        "message": "I do not have a verified candle-data rule for '(b) 1d context + 1m trigger' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_b_1d_context_1m_trigger",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_c_explicit_approval_gates_any_lock_update",
+        "message": "I do not have a verified candle-data rule for '(c) explicit approval gates any lock/update' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_c_explicit_approval_gates_any_lock_update",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_and_d_rollback_is_a_clean_restore_no_merging_re_",
+        "message": "I do not have a verified candle-data rule for 'and (d) rollback is a clean restore (no merging/re-interpretation)' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_and_d_rollback_is_a_clean_restore_no_merging_re_",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_you_still_haven_t_given_the_exact_1d_bullish_bia",
+        "message": "I do not have a verified candle-data rule for 'you *still* haven’t given the exact 1d bullish-bias condition' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_you_still_haven_t_given_the_exact_1d_bullish_bia",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_give_me_the_precise_rule_you_ll_use_on_1d_one_un",
+        "message": "I do not have a verified candle-data rule for 'Give me the precise rule you’ll use on 1d (one unambiguous condition)' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_give_me_the_precise_rule_you_ll_use_on_1d_one_un",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_so_the_1m_swing_low_that_qualifies_within_1d_bul",
+        "message": "I do not have a verified candle-data rule for 'so the “1m swing low that qualifies within 1d bullish context” is deterministic' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_so_the_1m_swing_low_that_qualifies_within_1d_bul",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_confirm",
+        "message": "I do not have a verified candle-data rule for 'confirm' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_confirm",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_in_one_line_on_revert",
+        "message": "I do not have a verified candle-data rule for 'in one line: on revert' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_in_one_line_on_revert",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_you_restore_the_last_saved_configuration_exactly",
+        "message": "I do not have a verified candle-data rule for 'you restore the last saved configuration exactly as-is—no edits' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_you_restore_the_last_saved_configuration_exactly",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      },
+      {
+        "code": "capability_meaning_no_recompute_of_thresholds_filters",
+        "message": "I do not have a verified candle-data rule for 'no recompute of thresholds/filters' yet. Should I build and test that exact rule?",
+        "field": "capability_meaning_no_recompute_of_thresholds_filters",
+        "options": [
+          "__build_mechanic__",
+          "__other__"
+        ],
+        "blocking": true,
+        "source_fragment": "Alright—before you lock anything in, quick check: if I change my mind and revert back to an earlier setting/value, don’t “merge” it—just roll back cleanly to the previous state. For the plan: build a watchlist for **LTCUSDT only** (explicitly exclude **XRPUSDT**). Use **1d** for context and **1m** for the trigger, and I want a **bullish move ≥ 7.5%** with **long** logic. Also don’t do any silent permissions—**approval must stay explicit**. Can you confirm the exact trigger logic and that approval is required before you proceed?"
+      }
+    ],
+    "unsupported_conditions": [],
+    "setup_mode": "monitor",
+    "can_approve": false,
+    "can_scan": false,
+    "scanner_result": null,
+    "approved_strategy_id": null,
+    "approved_strategy_version_id": null,
+    "evaluation_contract": null,
+    "next_url": null,
+    "updated_at": "2026-07-23T15:58:35.830586Z"
+  },
+  "error": null
+}

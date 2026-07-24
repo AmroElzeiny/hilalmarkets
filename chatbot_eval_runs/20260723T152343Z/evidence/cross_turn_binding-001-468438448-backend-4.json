@@ -1,0 +1,7 @@
+{
+  "user": "“Blocked” is fine, but I need something concrete: what’s the exact config object you would set (fields + values) for the watchlist/trigger?\n\nPlease reply with the exact keys/values you’ll use for:\n- symbol = ADAUSDT (only)\n- excluded_symbol = XRPUSDT\n- timeframe = 15m\n- context_timeframe = 1m\n- direction = short\n- operator = lte\n- threshold_percent = 7.5\n- requires_explicit_approval = true\n\nDon’t add anything else (and don’t include XRP).",
+  "reply": {
+    "text": "Internal Server Error"
+  },
+  "error": "HTTP 500"
+}
