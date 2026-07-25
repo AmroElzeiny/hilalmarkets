@@ -15,6 +15,31 @@ fi
 export TRACEDGE_ENV_FILE="$ENV_FILE"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
+echo "Compose project and persistent volumes:"
+mapfile -t COMPOSE_IDENTITY < <(
+  "${COMPOSE[@]}" config --format json | python -c \
+    'import json,sys; data=json.load(sys.stdin); print(data["name"]); print(data["volumes"]["postgres_data"]["name"])'
+)
+PROJECT_NAME="${COMPOSE_IDENTITY[0]}"
+POSTGRES_VOLUME="${COMPOSE_IDENTITY[1]}"
+echo "project=$PROJECT_NAME"
+echo "selected_postgres_volume=$POSTGRES_VOLUME"
+docker volume ls \
+  --filter label=com.docker.compose.volume=postgres_data \
+  --format 'postgres_volume={{.Name}}'
+if ! docker volume inspect "$POSTGRES_VOLUME" >/dev/null 2>&1; then
+  EXISTING_POSTGRES_VOLUMES="$(
+    docker volume ls \
+      --filter label=com.docker.compose.volume=postgres_data \
+      --format '{{.Name}}'
+  )"
+  if [[ -n "$EXISTING_POSTGRES_VOLUMES" ]]; then
+    echo "Refusing to create a new PostgreSQL volume while another Compose PostgreSQL volume exists." >&2
+    echo "Select the authoritative existing COMPOSE_PROJECT_NAME after comparing database backups and record counts." >&2
+    exit 1
+  fi
+fi
+
 echo "Pulling latest source..."
 git pull --ff-only
 

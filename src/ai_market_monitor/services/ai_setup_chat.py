@@ -25,6 +25,7 @@ from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
     ShariaAssetStatus,
     ShariaUniverseMode,
+    TriggerMode,
 )
 from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.capability_resolver import (
@@ -88,6 +89,9 @@ class SetupChatError(ValueError):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+
+
+MAX_CLARIFICATION_QUESTIONS_PER_CONDITION = 2
 
 
 class SetupChatInterviewer(Protocol):
@@ -341,7 +345,7 @@ class AISetupChatService:
                         "value": "scanner",
                         "label": "Scanner",
                         "description": (
-                            "One-time market scan. Define at least one measurable trigger; "
+                            "One-time market search. Add the conditions coins must match now; "
                             "nothing is saved as a monitor."
                         ),
                     },
@@ -742,6 +746,27 @@ class AISetupChatService:
                 client_message_id=client_message_id,
             )
             pending_model = _with_other_option(pending_model)
+            if _clarification_question_limit_reached(context, pending_model):
+                await self._assistant(
+                    session,
+                    chat,
+                    (
+                        "That did not resolve the condition, and I will not keep repeating the "
+                        "same question. Give the missing measurable detail directly, revise the "
+                        "condition, or remove it."
+                    ),
+                    message_type="clarification_limit",
+                    payload={
+                        "awaiting_answer": True,
+                        "clarification_limit_reached": True,
+                        "maximum_questions_per_condition": (
+                            MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
+                        ),
+                    },
+                )
+                return chat
+            _record_clarification_question(context, pending_model)
+            chat.context_json = dict(context)
             await self._assistant(
                 session,
                 chat,
@@ -935,13 +960,24 @@ class AISetupChatService:
             chat.ambiguities = []
             chat.unsupported_conditions = []
             if self.settings.sharia_screening_enforced:
+                setup_language = "\n".join(
+                    [chat.original_idea or "", *(context.get("setup_fragments") or [])]
+                )
+                if _requests_favorites_universe(setup_language):
+                    await self._apply_screened_universe_answer(
+                        session,
+                        chat,
+                        key="screened_universe_mode",
+                        value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                    )
+                    return chat
                 await self._ask_screened_universe(session, chat)
                 return chat
             await self._assistant(
                 session,
                 chat,
                 (
-                    "Scanner is ready. Tell me the measurable market event to find."
+                    "Scanner is ready. Describe the conditions coins should match right now."
                     if mode == "scanner"
                     else "Let’s build your monitor. First, describe the market event that "
                     "should trigger it; we’ll clarify filters and timing next."
@@ -985,6 +1021,10 @@ class AISetupChatService:
             answered_keys,
             answered_fingerprints,
         )
+        deterministic_clarifications = _apply_clarification_question_budget(
+            context,
+            deterministic_clarifications,
+        )
         if deterministic_clarifications:
             deterministic_clarifications = [
                 _with_other_option(item) for item in deterministic_clarifications
@@ -1012,6 +1052,7 @@ class AISetupChatService:
             new_question_set = _begin_clarification_set(
                 context, deterministic_clarifications, source="deterministic"
             )
+            _record_clarification_question(context, clarification)
             _set_awaiting_clarification(context, clarification)
             chat.context_json = dict(context)
             chat.status = "needs_clarification"
@@ -1053,6 +1094,7 @@ class AISetupChatService:
             answered_keys,
             answered_fingerprints,
         )
+        pending_ai = _apply_clarification_question_budget(context, pending_ai)
         if pending_ai:
             pending_ai = [_with_other_option(item) for item in pending_ai]
             clarification = pending_ai.pop(0)
@@ -1065,6 +1107,7 @@ class AISetupChatService:
                 item.model_dump(mode="json") for item in pending_ai
             ]
             context["ai_clarification_current"] = current
+            _record_clarification_question(context, clarification)
             _set_awaiting_clarification(context, clarification)
             chat.context_json = dict(context)
             chat.status = "needs_clarification"
@@ -1099,7 +1142,10 @@ class AISetupChatService:
         hybrid_resolution = await HybridCapabilityResolutionService(self.settings).resolve(
             capability_resolution,
             history=history,
-            default_timeframe=_guided_setup(accumulated).timeframe,
+            default_timeframe=_guided_setup(
+                accumulated,
+                setup_mode=_setup_mode(chat),
+            ).timeframe,
             selections=dict(context.get("capability_selections") or {}),
         )
         capability_resolution = hybrid_resolution.report
@@ -1156,6 +1202,10 @@ class AISetupChatService:
                 and self.settings.openai_api_key is not None
             ),
         )
+        resolver_clarifications = _apply_clarification_question_budget(
+            context,
+            resolver_clarifications,
+        )
         if resolver_clarifications:
             resolver_clarifications = [_with_other_option(item) for item in resolver_clarifications]
             clarification = resolver_clarifications[0]
@@ -1164,6 +1214,7 @@ class AISetupChatService:
                 resolver_clarifications,
                 source="capability_resolver",
             )
+            _record_clarification_question(context, clarification)
             _set_awaiting_clarification(context, clarification)
             chat.context_json = dict(context)
             chat.status = "needs_clarification"
@@ -1213,7 +1264,18 @@ class AISetupChatService:
             history=history,
             current_message=cleaned,
             accumulated_setup=accumulated,
-            capability_context=capability_resolution.ai_context(),
+            capability_context={
+                **capability_resolution.ai_context(),
+                "setup_mode": _setup_mode(chat),
+                "screened_methodology": context.get("sharia_methodology_name"),
+                "clarification_question_counts": context.get(
+                    "clarification_question_counts"
+                )
+                or {},
+                "maximum_questions_per_condition": (
+                    MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
+                ),
+            },
         )
         await CapabilityCoverageService(self.settings).record_usage(
             session,
@@ -1240,6 +1302,7 @@ class AISetupChatService:
                 for item in clarifications
                 if not _clarification_answered_by_prompt(item, accumulated)
             ]
+            clarifications = _apply_clarification_question_budget(context, clarifications)
             clarifications = [_with_other_option(item) for item in clarifications]
             if interview.clarifications and not clarifications:
                 interview = interview.model_copy(update={"ready_to_compile": True})
@@ -1278,6 +1341,7 @@ class AISetupChatService:
             new_question_set = _begin_clarification_set(
                 context, clarifications, source="interviewer"
             )
+            _record_clarification_question(context, clarification)
             _set_awaiting_clarification(context, clarification)
             chat.context_json = dict(context)
             chat.status = "needs_clarification"
@@ -1378,9 +1442,11 @@ class AISetupChatService:
                     ),
                     SetupChatOption(
                         key="screened_universe_mode",
-                        label="My approved watchlist",
+                        label="My Favorites",
                         value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
-                        description="Use only eligible assets in one of your saved watchlists.",
+                        description=(
+                            "Use only eligible assets you have favorited in Screened Market."
+                        ),
                     ),
                     SetupChatOption(
                         key="screened_universe_mode",
@@ -1425,6 +1491,10 @@ class AISetupChatService:
             aliases = {
                 "all_eligible_spot_assets": ShariaUniverseMode.ELIGIBLE_MARKET.value,
                 "my_approved_watchlist": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                "my_favorites": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                "my_favourites": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                "favorites": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                "favourites": ShariaUniverseMode.APPROVED_WATCHLIST.value,
                 "specific_eligible_assets": ShariaUniverseMode.EXPLICIT_ASSETS.value,
             }
             normalized = aliases.get(normalized, normalized)
@@ -1454,8 +1524,8 @@ class AISetupChatService:
                         session,
                         chat,
                         (
-                            "You do not have an approved watchlist yet. Add eligible assets "
-                            "from Screened Market, or choose all eligible or specific assets."
+                            "You do not have Favorites yet. Add eligible assets from Screened "
+                            "Market, or choose all eligible or specific assets."
                         ),
                         message_type="screened_watchlist_missing",
                         payload={"can_approve": False, "can_scan": False},
@@ -1469,7 +1539,7 @@ class AISetupChatService:
                     return
                 clarification = SetupChatClarification(
                     key="screened_watchlist",
-                    question="Which approved watchlist should HilalMarkets use?",
+                    question="Which Favorites list should HilalMarkets use?",
                     reason=(
                         "Every asset is rechecked against the selected methodology before "
                         "scanning."
@@ -1479,7 +1549,7 @@ class AISetupChatService:
                             key="screened_watchlist",
                             label=row.name,
                             value=str(row.id),
-                            description="Use this approved watchlist",
+                            description="Use these favorited eligible assets",
                         )
                         for row in watchlists[:8]
                     ],
@@ -1629,8 +1699,12 @@ class AISetupChatService:
             (
                 f"Screened market set: {scope_label}. {eligible_count} currently eligible "
                 f"asset{'s' if eligible_count != 1 else ''} match this screening scope. "
-                f"If a status changes, the affected asset will be paused. Now tell me the "
-                f"measurable market event this {mode_name} should find."
+                f"If a status changes, the affected asset will be paused. "
+                + (
+                    "Now describe the conditions coins should match right now."
+                    if _setup_mode(chat) == "scanner"
+                    else f"Now tell me the measurable market event this {mode_name} should find."
+                )
             ),
             message_type="screened_universe_selected",
             payload={
@@ -1718,7 +1792,8 @@ class AISetupChatService:
                 "rule_confidence": chat.rule_confidence,
                 "suggestions": interview.suggestions
                 or _improvement_suggestions(
-                    StrategyDefinition.model_validate(chat.draft_schema_json)
+                    StrategyDefinition.model_validate(chat.draft_schema_json),
+                    setup_mode=_setup_mode(chat),
                 ),
                 "can_approve": chat.status == "ready_for_approval",
                 "can_scan": chat.status == "ready_to_scan",
@@ -1883,6 +1958,7 @@ class AISetupChatService:
         guided = _guided_setup(
             setup_text,
             capability_bindings=list((chat.context_json or {}).get("capability_bindings") or []),
+            setup_mode=_setup_mode(chat),
         )
         preview = await self.strategy_interpreter.interpret(guided)
         await CapabilityCoverageService(self.settings).record_usage(
@@ -1893,6 +1969,24 @@ class AISetupChatService:
         )
         definition = StrategyDefinition.model_validate(preview.strategy.model_dump(mode="json"))
         context = dict(chat.context_json or {})
+        if (
+            _setup_mode(chat) == "scanner"
+            and not _explicit_closed_candle_requested(setup_text)
+            and definition.trigger_mode != TriggerMode.INTRABAR
+        ):
+            definition = definition.model_copy(update={"trigger_mode": TriggerMode.INTRABAR})
+            preview = preview.model_copy(
+                update={
+                    "strategy": definition,
+                    "assumptions": [
+                        *preview.assumptions,
+                        (
+                            "Scanner evaluates the current market snapshot because no "
+                            "closed-candle requirement was requested."
+                        ),
+                    ],
+                }
+            )
         screening_resolution = None
         screening_error: dict[str, str] | None = None
         if self.settings.sharia_screening_enforced:
@@ -1964,7 +2058,7 @@ class AISetupChatService:
             context["requires_monitor_name"] = True
             context["interpreter_name_suggestion"] = definition.name
             definition = definition.model_copy(update={"name": "Untitled Monitor"})
-        lint = lint_strategy(definition, preview)
+        lint = lint_strategy(definition, preview, setup_mode=_setup_mode(chat))
         if screening_error:
             lint.append(
                 {
@@ -2034,6 +2128,7 @@ class AISetupChatService:
             context=context,
             preview=preview,
             lint=lint,
+            setup_mode=_setup_mode(chat),
         )
         context["intent_state"] = intent_state
         context["conversation_state"] = intent_state
@@ -2205,7 +2300,8 @@ class AISetupChatService:
         if chat.status != "ready_to_scan" or not chat.draft_schema_json:
             raise SetupChatError(
                 "scanner_not_ready",
-                "Add and resolve at least one measurable trigger before running Scanner.",
+                "Add and resolve at least one measurable current-match condition before "
+                "running Scanner.",
                 status_code=409,
             )
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
@@ -2218,8 +2314,8 @@ class AISetupChatService:
         )
         if not has_executable_required_rule:
             raise SetupChatError(
-                "scanner_trigger_required",
-                "Scanner needs at least one measurable required trigger.",
+                "scanner_condition_required",
+                "Scanner needs at least one measurable condition that coins must match now.",
                 status_code=409,
             )
         try:
@@ -2471,11 +2567,27 @@ class AISetupChatService:
 
         resolution = result_by_name.get("resolve_trading_capabilities")
         clarifications = list((resolution.data if resolution else {}).get("clarifications") or [])
-        if clarifications and "compile_strategy_draft" not in result_by_name:
-            first = dict(clarifications[0])
-            first.pop("source_fragment", None)
-            clarification = _with_other_option(SetupChatClarification.model_validate(first))
+        if clarifications:
             context = dict(chat.context_json or {})
+            parsed_clarifications: list[SetupChatClarification] = []
+            for item in clarifications:
+                safe_item = dict(item)
+                safe_item.pop("source_fragment", None)
+                parsed_clarifications.append(
+                    _with_other_option(SetupChatClarification.model_validate(safe_item))
+                )
+            parsed_clarifications = _apply_clarification_question_budget(
+                context,
+                parsed_clarifications,
+            )
+            clarifications = [
+                item.model_dump(mode="json") for item in parsed_clarifications
+            ]
+            chat.context_json = context
+        if clarifications and "compile_strategy_draft" not in result_by_name:
+            clarification = SetupChatClarification.model_validate(clarifications[0])
+            context = dict(chat.context_json or {})
+            _record_clarification_question(context, clarification)
             _set_awaiting_clarification(context, clarification)
             context["agent_pending_clarifications"] = clarifications[1:]
             chat.context_json = context
@@ -2490,6 +2602,25 @@ class AISetupChatService:
                 }
                 for item in clarifications
             ]
+        elif (
+            resolution
+            and (resolution.data.get("clarifications") or [])
+            and "compile_strategy_draft" not in result_by_name
+        ):
+            message = (
+                "I still cannot make this condition deterministic without inventing details. "
+                "I will not repeat the question; revise that condition directly or remove it."
+            )
+            final = final.model_copy(
+                update={
+                    "message": message,
+                    "assistant_message": message,
+                    "intent": "clarify",
+                    "status": "needs_user_input",
+                    "clarification": None,
+                    "confidence": min(final.confidence, 0.5),
+                }
+            )
 
         if (chat.context_json or {}).get("requires_monitor_name"):
             pending_name_clarification = _pending_clarification_model(
@@ -3265,6 +3396,7 @@ def _guided_setup(
     text: str,
     *,
     capability_bindings: list[dict[str, Any]] | None = None,
+    setup_mode: Literal["scanner", "monitor"] = "monitor",
 ) -> GuidedSetupRequest:
     timeframe_match = re.search(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|8h|12h|1d)\b", text.casefold())
     timeframe = timeframe_match.group(1) if timeframe_match else "15m"
@@ -3276,6 +3408,12 @@ def _guided_setup(
             for match in re.findall(r"\b[A-Z0-9]{2,12}[/\-](?:USDT|USDC)\b", text.upper())
         }
     )
+    explicit_close = _explicit_closed_candle_requested(text)
+    trigger_mode: Literal["candle_close", "intrabar"] = (
+        "intrabar"
+        if "intrabar" in text.casefold() or (setup_mode == "scanner" and not explicit_close)
+        else "candle_close"
+    )
     return GuidedSetupRequest(
         exchange=exchange,
         quote_currency=quote,
@@ -3283,12 +3421,23 @@ def _guided_setup(
         symbols=symbols,
         setup_mode="free_text",
         setup_text=text,
-        trigger_mode="intrabar" if "intrabar" in text.casefold() else "candle_close",
+        trigger_mode=trigger_mode,
         forming_alerts="forming alerts" in text.casefold(),
         near_miss_threshold=70,
         delivery_channels=["telegram"],
         maximum_alerts_per_hour=50,
         capability_bindings=capability_bindings or [],
+    )
+
+
+def _explicit_closed_candle_requested(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:candle|bar)\s+(?:must\s+)?clos(?:e|es|ed)\b|"
+            r"\b(?:closed|completed)\s+(?:candle|bar)\b|"
+            r"\bon\s+(?:candle|bar)\s+close\b",
+            text.casefold(),
+        )
     )
 
 
@@ -3299,6 +3448,17 @@ def _condition_rules(node: ConditionRule | ConditionGroup) -> list[ConditionRule
     for child in node.children:
         rules.extend(_condition_rules(child))
     return rules
+
+
+def _requests_favorites_universe(value: str) -> bool:
+    """Recognize the customer-facing Favorites label without treating it as a mechanic."""
+    return bool(
+        re.search(
+            r"\b(?:my\s+)?favou?rites?\s*(?:assets?|coins?|list)?\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _setup_mode(chat: AISetupChatSession) -> Literal["scanner", "monitor"]:
@@ -3332,8 +3492,17 @@ def _parse_screened_symbols(value: str) -> list[str]:
     return symbols[:1000]
 
 
-def _rule_roles(definition: StrategyDefinition) -> dict[str, str]:
+def _rule_roles(
+    definition: StrategyDefinition,
+    *,
+    setup_mode: Literal["scanner", "monitor"] = "monitor",
+) -> dict[str, str]:
     rules = _condition_rules(definition.conditions)
+    if setup_mode == "scanner":
+        return {
+            rule.key: "current_match_condition" if rule.required else "optional_suggestion"
+            for rule in rules
+        }
     required = [rule for rule in rules if rule.required]
     if not required:
         return {rule.key: "optional_suggestion" for rule in rules}
@@ -3458,7 +3627,10 @@ def rule_confidence(definition: StrategyDefinition) -> list[dict[str, Any]]:
 
 
 def lint_strategy(
-    definition: StrategyDefinition, preview: InterpretationPreview
+    definition: StrategyDefinition,
+    preview: InterpretationPreview,
+    *,
+    setup_mode: Literal["scanner", "monitor"] = "monitor",
 ) -> list[dict[str, Any]]:
     rules = _condition_rules(definition.conditions)
     warnings: list[dict[str, Any]] = []
@@ -3501,10 +3673,16 @@ def lint_strategy(
     if rules and not required:
         warnings.append(
             {
-                "code": "primary_trigger_required",
+                "code": (
+                    "scanner_condition_required"
+                    if setup_mode == "scanner"
+                    else "primary_trigger_required"
+                ),
                 "severity": "critical",
                 "message": (
-                    "Define at least one measurable required trigger before approval or scanning."
+                    "Define at least one measurable condition that coins must match now."
+                    if setup_mode == "scanner"
+                    else "Define at least one measurable required trigger before approval."
                 ),
             }
         )
@@ -3514,7 +3692,8 @@ def lint_strategy(
                 "code": "setup_may_be_too_strict",
                 "severity": "warning",
                 "message": (
-                    f"This monitor has {len(required)} required rules, so matches may be rare."
+                    f"This {'scan' if setup_mode == 'scanner' else 'monitor'} has "
+                    f"{len(required)} required rules, so matches may be rare."
                 ),
             }
         )
@@ -3524,12 +3703,16 @@ def lint_strategy(
                 "code": "setup_may_be_noisy",
                 "severity": "info",
                 "message": (
-                    "A single required rule may create many matches. Consider a measurable "
-                    "confirmation or narrower watchlist."
+                    "A single required rule may create many matches. Consider another measurable "
+                    "condition or a narrower screened universe."
                 ),
             }
         )
-    if definition.trigger_mode.value == "intrabar" and definition.alerts.cooldown_seconds < 60:
+    if (
+        setup_mode == "monitor"
+        and definition.trigger_mode.value == "intrabar"
+        and definition.alerts.cooldown_seconds < 60
+    ):
         warnings.append(
             {
                 "code": "intrabar_noise_risk",
@@ -3570,7 +3753,7 @@ def translation_sheet(
     setup_mode: Literal["scanner", "monitor"] = "monitor",
 ) -> dict[str, Any]:
     rules = _condition_rules(definition.conditions)
-    roles = _rule_roles(definition)
+    roles = _rule_roles(definition, setup_mode=setup_mode)
     risk_invalidation = None
     if definition.risk.enabled:
         risk_invalidation = {
@@ -3593,14 +3776,30 @@ def translation_sheet(
     optional_rules = [
         rule.label for rule in rules if roles.get(rule.key) == "optional_suggestion"
     ]
+    current_match_rules = [
+        rule.label for rule in rules if roles.get(rule.key) == "current_match_condition"
+    ]
     summary = (
-        f"HilalMarkets will watch {definition.universe.exchange.title()} spot markets on "
-        f"{definition.base_timeframe}. The trigger is "
-        f"{trigger.label if trigger else 'not yet defined'}"
-        f" with {required_filters} required filter{'s' if required_filters != 1 else ''} and "
-        f"{required_confirmations} required confirmation"
-        f"{'s' if required_confirmations != 1 else ''}. "
-        f"{optional_count} rule{'s are' if optional_count != 1 else ' is'} optional suggestions."
+        (
+            f"HilalMarkets will scan {definition.universe.exchange.title()} spot markets on "
+            f"{definition.base_timeframe} and return coins where all "
+            f"{len(current_match_rules)} required current condition"
+            f"{'s' if len(current_match_rules) != 1 else ''} match. "
+            f"{optional_count} rule"
+            f"{'s are' if optional_count != 1 else ' is'} optional."
+        )
+        if setup_mode == "scanner"
+        else (
+            f"HilalMarkets will watch {definition.universe.exchange.title()} spot markets on "
+            f"{definition.base_timeframe}. The trigger is "
+            f"{trigger.label if trigger else 'not yet defined'}"
+            f" with {required_filters} required filter"
+            f"{'s' if required_filters != 1 else ''} and "
+            f"{required_confirmations} required confirmation"
+            f"{'s' if required_confirmations != 1 else ''}. "
+            f"{optional_count} rule"
+            f"{'s are' if optional_count != 1 else ' is'} optional suggestions."
+        )
     )
     watchlist = (
         ", ".join(definition.universe.include_symbols)
@@ -3615,9 +3814,8 @@ def translation_sheet(
         if definition.risk.enabled
         else "Not provided; research monitoring only"
     )
-    fields = [
+    common_fields = [
         {"label": "Mode", "value": "One-time Scanner" if setup_mode == "scanner" else "Monitor"},
-        {"label": "Monitor name", "value": definition.name},
         {
             "label": "Market",
             "value": (
@@ -3628,6 +3826,28 @@ def translation_sheet(
         {"label": "Market universe", "value": watchlist},
         {"label": "Timeframes", "value": ", ".join(timeframes)},
         {"label": "Direction", "value": definition.direction.value.replace("_", " ").title()},
+    ]
+    scanner_fields = [
+        {
+            "label": "Current-match conditions",
+            "value": ", ".join(current_match_rules) or "Not defined",
+        },
+        {
+            "label": "Evaluation timing",
+            "value": (
+                "Current market snapshot"
+                if definition.trigger_mode == TriggerMode.INTRABAR
+                else "Latest closed candle"
+            ),
+        },
+        {
+            "label": "Rule logic",
+            "value": definition.conditions.operator.value.upper(),
+        },
+        {"label": "Optional ideas", "value": ", ".join(optional_rules) or "None"},
+    ]
+    monitor_fields = [
+        {"label": "Monitor name", "value": definition.name},
         {"label": "Primary trigger", "value": trigger.label if trigger else "Not defined"},
         {
             "label": "Required filters",
@@ -3652,6 +3872,7 @@ def translation_sheet(
         },
         {"label": "Invalidation", "value": invalidation},
     ]
+    fields = [*common_fields, *(scanner_fields if setup_mode == "scanner" else monitor_fields)]
     coverage = _prompt_coverage_report(preview)
     return {
         "original_idea": original_idea,
@@ -3804,9 +4025,10 @@ def _structured_intent_state(
     context: dict[str, Any],
     preview: InterpretationPreview,
     lint: list[dict[str, Any]],
+    setup_mode: Literal["scanner", "monitor"] = "monitor",
 ) -> dict[str, Any]:
     rules = _condition_rules(definition.conditions)
-    roles = _rule_roles(definition)
+    roles = _rule_roles(definition, setup_mode=setup_mode)
     fragment_records = [
         item for item in context.get("setup_fragment_records") or [] if isinstance(item, dict)
     ]
@@ -4012,7 +4234,11 @@ def _refresh_conversation_state(
     return state.model_copy(update=updates).model_dump(mode="json")
 
 
-def _improvement_suggestions(definition: StrategyDefinition) -> list[str]:
+def _improvement_suggestions(
+    definition: StrategyDefinition,
+    *,
+    setup_mode: Literal["scanner", "monitor"] = "monitor",
+) -> list[str]:
     rules = _condition_rules(definition.conditions)
     text = " ".join(rule.label.casefold() for rule in rules)
     suggestions: list[str] = []
@@ -4022,7 +4248,7 @@ def _improvement_suggestions(definition: StrategyDefinition) -> list[str]:
         suggestions.append(
             "Consider candle-close confirmation to reduce temporary intrabar matches."
         )
-    if not definition.risk.enabled:
+    if setup_mode == "monitor" and not definition.risk.enabled:
         suggestions.append(
             "Optionally define an invalidation rule so HilalMarkets can explain when the idea "
             "is no longer valid."
@@ -4030,8 +4256,8 @@ def _improvement_suggestions(definition: StrategyDefinition) -> list[str]:
     if not definition.supporting_timeframes:
         suggestions.append("Optionally add a higher-timeframe alignment rule.")
     if not definition.universe.include_symbols:
-        suggestions.append("Narrow the watchlist if you want fewer, more focused matches.")
-    if definition.alerts.cooldown_seconds < 300:
+        suggestions.append("Narrow the screened universe if you want fewer, more focused matches.")
+    if setup_mode == "monitor" and definition.alerts.cooldown_seconds < 300:
         suggestions.append("Use a cooldown to reduce repeated alerts for the same symbol.")
     return suggestions[:6]
 
@@ -4245,6 +4471,118 @@ def _clarification_identity(clarification: SetupChatClarification) -> str:
     return f"question:{question or key}"
 
 
+def _clarification_budget_subject(
+    clarification: SetupChatClarification,
+) -> str | None:
+    key = clarification.key.casefold().strip()
+    if key in {
+        "setup_mode",
+        "monitor_name",
+        "screened_universe_mode",
+        "screened_watchlist",
+        "screened_explicit_assets",
+        "compile_confirmation",
+    }:
+        return None
+    combined = " ".join(
+        (
+            clarification.key,
+            clarification.question,
+            clarification.reason,
+        )
+    ).casefold()
+    condition_families = {
+        "rsi": ("rsi", "relative strength index"),
+        "ema": ("ema", "exponential moving average"),
+        "sma": ("sma", "simple moving average"),
+        "macd": ("macd",),
+        "vwap": ("vwap",),
+        "fvg": ("fvg", "fair value gap"),
+        "volume": ("volume", "rvol", "relative volume"),
+        "liquidity_sweep": ("liquidity sweep", "swept", "sweep"),
+        "head_and_shoulders": ("head and shoulders", "head & shoulders", "neckline"),
+        "support_resistance": ("support", "resistance"),
+        "candle_pattern": ("candle", "doji", "hammer", "engulf"),
+    }
+    for identity, terms in condition_families.items():
+        if any(term in combined for term in terms):
+            return f"condition:{identity}"
+    return _clarification_identity(clarification)
+
+
+def _apply_clarification_question_budget(
+    context: dict[str, Any],
+    clarifications: list[SetupChatClarification],
+) -> list[SetupChatClarification]:
+    counts = {
+        str(key): max(0, int(value))
+        for key, value in dict(context.get("clarification_question_counts") or {}).items()
+    }
+    planned: Counter[str] = Counter()
+    allowed: list[SetupChatClarification] = []
+    exhausted: list[dict[str, str]] = []
+    for clarification in clarifications:
+        subject = _clarification_budget_subject(clarification)
+        if subject is None:
+            allowed.append(clarification)
+            continue
+        if counts.get(subject, 0) + planned[subject] >= (
+            MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
+        ):
+            exhausted.append(
+                {
+                    "subject": subject,
+                    "key": clarification.key,
+                    "question": clarification.question,
+                }
+            )
+            continue
+        planned[subject] += 1
+        allowed.append(clarification)
+    if exhausted:
+        previous = [
+            item
+            for item in context.get("clarification_budget_exhausted") or []
+            if isinstance(item, dict)
+        ]
+        identities = {
+            (str(item.get("subject")), str(item.get("key"))) for item in previous
+        }
+        for item in exhausted:
+            identity = (item["subject"], item["key"])
+            if identity not in identities:
+                previous.append(item)
+                identities.add(identity)
+        context["clarification_budget_exhausted"] = previous[-100:]
+    return allowed
+
+
+def _record_clarification_question(
+    context: dict[str, Any],
+    clarification: SetupChatClarification,
+) -> None:
+    subject = _clarification_budget_subject(clarification)
+    if subject is None:
+        return
+    counts = {
+        str(key): max(0, int(value))
+        for key, value in dict(context.get("clarification_question_counts") or {}).items()
+    }
+    counts[subject] = counts.get(subject, 0) + 1
+    context["clarification_question_counts"] = counts
+
+
+def _clarification_question_limit_reached(
+    context: dict[str, Any],
+    clarification: SetupChatClarification,
+) -> bool:
+    subject = _clarification_budget_subject(clarification)
+    if subject is None:
+        return False
+    counts = dict(context.get("clarification_question_counts") or {})
+    return int(counts.get(subject) or 0) >= MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
+
+
 def _unanswered_clarifications(
     clarifications: list[SetupChatClarification],
     answered_keys: set[str],
@@ -4344,6 +4682,13 @@ def _plain_attention_item(code: str, message: str) -> tuple[str, str, str, str]:
     normalized = code.casefold()
     quoted = re.search(r"['\"]([^'\"]{2,300})['\"]", message)
     instruction = quoted.group(1) if quoted else "one part of your request"
+    if normalized == "scanner_condition_required":
+        return (
+            "Add one condition to the scan",
+            "Scanner needs a measurable condition that coins must match right now.",
+            "Describe a condition such as RSI below 30 on 15m.",
+            "Scan condition",
+        )
     if normalized in {"prompt_fragment_unclassified", "instruction_not_converted"}:
         return (
             "One instruction was not translated",
@@ -4425,6 +4770,21 @@ def _plain_validation_message(message: str) -> str:
     return result
 
 
+def _is_platform_screening_only_fragment(fragment: str) -> bool:
+    lowered = " ".join(fragment.casefold().replace("-", " ").split())
+    if not re.search(r"\b(?:halal|shariah?|screened)\b", lowered):
+        return False
+    remainder = re.sub(
+        r"\b(?:all|only|the|our|platform|hilalmarkets|hilal markets|currently|"
+        r"halal|shariah?|screened|approved|eligible|spot|market|markets|"
+        r"coin|coins|asset|assets|token|tokens|pair|pairs|universe|"
+        r"find|show|scan|bring|me|in|on|from)\b",
+        " ",
+        lowered,
+    )
+    return not " ".join(remainder.split())
+
+
 def _resolver_clarifications(
     report: CapabilityResolutionReport,
     resolved: dict[str, str],
@@ -4433,7 +4793,9 @@ def _resolver_clarifications(
 ) -> list[SetupChatClarification]:
     clarifications: list[SetupChatClarification] = []
     for fragment in report.fragments:
-        if fragment.status == "matched":
+        if fragment.status == "matched" or _is_platform_screening_only_fragment(
+            fragment.fragment
+        ):
             continue
         lowered_fragment = fragment.fragment.casefold()
         known_ambiguities = {
@@ -4848,6 +5210,9 @@ def _turn_router_prompt() -> str:
         "one, and two without asking the user to define it. Do not classify assistant-authored "
         "words, option labels, internal keys, or old messages as new user mechanics. Never quote "
         "an old message unless the current user explicitly asks for a quote. "
+        "Treat halal coins, Shariah-screened coins, and screened assets as the platform's current "
+        "screened universe, not as a market mechanic or a request for a religious definition. "
+        "A methodology choice may be requested only when the server has not already selected one. "
         "For a real setup instruction or revision, put only exact verbatim user-authored spans "
         "from current_message in technical_fragments. Never paraphrase, invent, or copy a fragment "
         "from history. Use mixed only when the current message genuinely contains both a human or "
@@ -4932,8 +5297,11 @@ def _system_prompt() -> str:
         "Do not hide assumptions. Keep replies short and direct. Ask necessary measurable "
         "questions "
         "one at a time; the server numbers multi-question interviews. Options must be concrete and "
-        "clickable. Identify one primary trigger, preserve every user-stated required filter and "
-        "confirmation as required logic, and mark only explicitly optional ideas as suggestions. "
+        "clickable. In Monitor mode, identify one primary trigger and preserve every user-stated "
+        "required filter and confirmation. In Scanner mode, do not require or invent a primary "
+        "trigger: treat every required rule as a condition coins must match in the current scan. "
+        "Use the current market snapshot in Scanner unless the user explicitly requires a closed "
+        "candle. Mark only explicitly optional ideas as suggestions. "
         "Use capability_context as the registry authority. Ask only about an unresolved technical "
         "market mechanic, parameter, data dependency, timeframe, or logic relationship. Never ask "
         "the user to define ordinary conversational words, corrections, pronouns, numbers, or "
@@ -4942,6 +5310,9 @@ def _system_prompt() -> str:
         "A `Clarification answer for ...` record is an authoritative answer to a question you "
         "already asked. Treat its label and value in that question's context; never turn a "
         "numeric value, option label, or `none` answer into a new mechanic. "
+        "Treat halal coins, Shariah-screened coins, and screened assets as the platform's current "
+        "screened universe. Never ask what halal means. Ask which methodology only if the server "
+        "has not already supplied one and the choice materially changes the universe. "
         "The current turn has already been classified, so never reinterpret human conversation "
         "or product questions as strategy mechanics. If you offer an option that asks to explain, "
         "compare, "
@@ -4949,9 +5320,12 @@ def _system_prompt() -> str:
         "examples, set its action to explain; it is a help request and never a strategy rule. Set "
         "action to answer only for a concrete answer to the current technical question. If a "
         "technical concept has no confident registered meaning, ask for its measurable meaning or "
-        "offer the resolver's candidates; never guess. Do not ask for a timeframe, universe, "
+        "offer the resolver's candidates; never guess. Ask no more than two short, necessary "
+        "questions about the same condition. Do not ask for a timeframe, universe, "
         "direction, threshold, or definition that is already stated clearly in the accumulated "
-        "setup. "
+        "setup. Infer ordinary logical consequences and established platform defaults, disclose "
+        "them as assumptions, and do not ask the user to confirm details that do not change the "
+        "deterministic calculation. "
         "Mark ready_to_compile "
         "only when the accumulated setup names at least one deterministic condition plus usable "
         "timeframe and universe defaults or choices. Suggest improvements without silently adding "

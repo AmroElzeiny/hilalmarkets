@@ -128,6 +128,23 @@ def evidence(title: str = "Official project disclosure") -> EvidenceSourceInput:
     )
 
 
+def test_assessment_schema_accepts_real_one_character_asset_symbols():
+    request = AssessmentCreateRequest(
+        canonical_asset="s",
+        asset_name="Sonic",
+        methodology_id="00000000-0000-0000-0000-000000000001",
+        status=ShariaAssetStatus.ELIGIBLE,
+        summary="An external authority record supports this methodology-specific status.",
+        evidence_sources=[evidence()],
+        reviewed_by="External reference automation",
+        reviewed_at=datetime.now(UTC),
+        valid_from=datetime.now(UTC),
+        reason_summary="Imported from an explicit compliant authority record.",
+    )
+
+    assert request.canonical_asset == "S"
+
+
 async def assess(
     session,
     methodology_id,

@@ -274,6 +274,60 @@ async def test_system_brain_can_require_cloudflare_access_before_admin(test_cont
     assert passed.status_code == 200
 
 
+async def test_review_queue_hides_published_cases_but_keeps_the_registry_filter(
+    test_context,
+):
+    admin = await _user(
+        test_context,
+        role=UserRole.ADMIN,
+        email="published-queue-admin@example.com",
+    )
+    async with test_context["session_factory"]() as session:
+        session.add_all(
+            [
+                ReviewCase(
+                    case_reference="QUEUE-PUBLISHED",
+                    case_type="initial_asset_review",
+                    state="published",
+                    publication_state="published",
+                    title="Published asset should stay in the audit registry",
+                    priority="normal",
+                    risk_severity="none",
+                    human_review_reason="Publication completed.",
+                    idempotency_key="queue-published-case",
+                ),
+                ReviewCase(
+                    case_reference="QUEUE-OPEN",
+                    case_type="initial_asset_review",
+                    state="ready_for_review",
+                    publication_state="unpublished",
+                    title="Open asset needs a review",
+                    priority="normal",
+                    risk_severity="none",
+                    human_review_reason="Human review is still required.",
+                    idempotency_key="queue-open-case",
+                ),
+            ]
+        )
+        await session.commit()
+
+    headers = {"X-User-ID": str(admin.id)}
+    queue = await test_context["client"].get(
+        "/dashboard/system-brain/cases",
+        headers=headers,
+    )
+    assert queue.status_code == 200
+    assert "Open asset needs a review" in queue.text
+    assert "Published asset should stay in the audit registry" not in queue.text
+
+    published = await test_context["client"].get(
+        "/dashboard/system-brain/cases?state=published",
+        headers=headers,
+    )
+    assert published.status_code == 200
+    assert "Published asset should stay in the audit registry" in published.text
+
+
 async def test_review_action_enforces_admin_csrf_state_and_audit(test_context):
     admin = await _user(
         test_context,

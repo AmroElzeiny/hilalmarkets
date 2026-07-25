@@ -120,6 +120,15 @@ docker compose up -d api worker scheduler
 docker compose ps
 ```
 
+Use one stable Compose project for the lifetime of the deployment. On an
+existing installation, inspect the project and volume counts before setting
+`COMPOSE_PROJECT_NAME`; the Compose files intentionally do not force a new
+project name. Do not alternate unqualified commands with a different
+`docker compose -p ...` value: project names produce separate PostgreSQL and
+Redis named volumes. Rebuilding images never transfers records between those
+volumes. Likewise, committing `ai_market_monitor.db` does not populate the
+PostgreSQL database configured inside Compose.
+
 The current migration head includes the email-auth tables and bounded public-support conversation
 state. Apply the full Alembic chain before enabling public AI support.
 
@@ -155,7 +164,7 @@ SHARIA_PILOT_SYMBOLS=BTC,ETH,SOL
 SHARIA_PROCESS_REMAINING_IMPORTS=true
 FASSET_SHARIAH_REPORTS_URL=https://www.fasset.com/shariah-reports
 FASSET_MINIMUM_PROFILE_COUNT=100
-SHARIA_SOURCE_SCAN_INTERVAL_HOURS=240
+SHARIA_SOURCE_SCAN_INTERVAL_HOURS=24
 SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true
 ```
 

@@ -1,6 +1,7 @@
 import asyncio
 import difflib
 import hashlib
+import io
 import json
 import random
 import re
@@ -12,6 +13,7 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pypdf import PdfReader
 from scrapling.parser import Selector
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +39,7 @@ SCRAPER_VERSION = "scrapling-evidence-v1"
 AI_PROMPT_VERSION = "sharia-factual-dossier-v2"
 _SOURCE_METHODOLOGY_CODES = {
     "sc_malaysia_sac": "SC_MALAYSIA_SAC_REFERENCE",
+    "shariah_review_bureau": "SHARIAH_REVIEW_BUREAU",
     "fasset_shariah_reports": "FASSET_SHARIAH_REPORTS",
 }
 
@@ -92,6 +95,39 @@ class ShariaFactualAnalysis(BaseModel):
     explicit_limitations: list[str] = Field(max_length=40)
 
 
+class PassportEnrichmentProfile(BaseModel):
+    """Strict package-compatible HilalMarkets factual profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_asset_identity: dict[str, Any]
+    official_website: str | None = None
+    official_documentation: str | None = None
+    primary_activity: str | None
+    token_role_and_utility: str | None
+    asset_type: str | None = None
+    native_chain_or_contract: dict[str, Any] | str | None = None
+    data_structure: str | None = None
+    smart_contract_capability: str | None = None
+    transaction_validation: str | None = None
+    consensus_mechanism: str | None = None
+    governance_model: str | None = None
+    tokenomics: str | None = None
+    staking_and_rewards: dict[str, Any] | str | None = None
+    lending_borrowing: dict[str, Any] | str | None = None
+    interest_or_yield: dict[str, Any] | str | None = None
+    derivatives_and_prediction_products: dict[str, Any] | str | None = None
+    treasury_and_revenue: dict[str, Any] | str | None = None
+    backing_redemption_or_collateral: dict[str, Any] | str | None = None
+    official_source_registry: list[dict[str, Any]]
+    missing_information: list[str]
+    contradictions: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    plain_language_profile: str
+    provenance: Literal["HILALMARKETS_AI_ENRICHMENT_UNVERIFIED"]
+    manual_verification_required: Literal[True]
+
+
 @dataclass(frozen=True, slots=True)
 class AIAnalysisResult:
     analysis: ShariaFactualAnalysis
@@ -120,28 +156,62 @@ class OfficialEvidenceFetcher:
         self.settings = settings
         self.transport = transport
         self._robots: dict[str, RobotFileParser | None] = {}
+        self._response_cache: dict[
+            str,
+            tuple[str | bytes, dict[str, str], int],
+        ] = {}
 
-    async def fetch(self, source: OfficialSource) -> tuple[str, dict[str, str], int]:
-        await self._assert_robots(source.source_url)
-        await asyncio.sleep(self.settings.sharia_scraper_download_delay_seconds)
-        async with httpx.AsyncClient(
-            timeout=90,
-            follow_redirects=True,
-            transport=self.transport,
-            headers={"User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"},
-        ) as client:
-            response = await client.get(source.source_url)
+    async def fetch(
+        self,
+        source: OfficialSource,
+    ) -> tuple[str | bytes, dict[str, str], int]:
+        cache_key = source.source_url.strip()
+        cached = self._response_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            await self._assert_robots(source.source_url)
+            await asyncio.sleep(
+                self.settings.sharia_scraper_download_delay_seconds
+            )
+            async with httpx.AsyncClient(
+                timeout=90,
+                follow_redirects=True,
+                transport=self.transport,
+                headers={
+                    "User-Agent": (
+                        "HilalMarketsEvidenceBot/1.0 (+compliance research)"
+                    )
+                },
+            ) as client:
+                response = await client.get(source.source_url)
+        except ShariaResearchError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ShariaResearchError(
+                "official_source_unavailable",
+                "The official source could not be reached securely.",
+                retryable=True,
+            ) from exc
         if response.status_code >= 400:
             raise ShariaResearchError(
                 "official_source_fetch_failed",
                 f"Official source returned HTTP {response.status_code}.",
                 retryable=response.status_code in {408, 429} or response.status_code >= 500,
             )
-        return (
-            response.text,
-            {key.casefold(): value for key, value in response.headers.items()},
-            response.status_code,
+        response_headers = {
+            key.casefold(): value for key, value in response.headers.items()
+        }
+        content_type = response_headers.get("content-type", "").casefold()
+        body: str | bytes = (
+            response.content
+            if "application/pdf" in content_type
+            or response.content.lstrip().startswith(b"%PDF")
+            else response.text
         )
+        result = (body, response_headers, response.status_code)
+        self._response_cache[cache_key] = result
+        return result
 
     async def _assert_robots(self, url: str) -> None:
         if not self.settings.sharia_scraper_obey_robots:
@@ -372,9 +442,10 @@ class ShariaResearchPipeline:
             raise ShariaResearchError(
                 "verified_sources_missing", "No verified official source is registered."
             )
-        run_key = (
-            f"initial-research:{external.id}:{external_snapshot.content_hash[:16]}:"
-            f"{_source_registry_hash(sources)}"
+        run_key = _initial_research_run_key(
+            external.id,
+            external_snapshot.content_hash,
+            sources,
         )
         existing = await self.session.scalar(
             select(AssetResearchDossier).where(AssetResearchDossier.run_key == run_key)
@@ -397,15 +468,33 @@ class ShariaResearchPipeline:
             )
 
         now = datetime.now(UTC)
-        run = ShariaMonitoringRun(
-            run_kind="initial_research",
-            canonical_asset_id=asset.id,
-            idempotency_key=run_key,
-            status="running",
-            started_at=now,
-            items_attempted=len(sources) + 1,
+        run = await self.session.scalar(
+            select(ShariaMonitoringRun).where(
+                ShariaMonitoringRun.idempotency_key == run_key
+            )
         )
-        self.session.add(run)
+        if run is None:
+            run = ShariaMonitoringRun(
+                run_kind="initial_research",
+                canonical_asset_id=asset.id,
+                idempotency_key=run_key,
+                status="running",
+                started_at=now,
+                items_attempted=len(sources) + 1,
+            )
+            self.session.add(run)
+        else:
+            run.run_kind = "initial_research"
+            run.canonical_asset_id = asset.id
+            run.status = "running"
+            run.started_at = now
+            run.completed_at = None
+            run.items_attempted = len(sources) + 1
+            run.items_succeeded = 0
+            run.items_failed = 0
+            run.result_summary = {}
+            run.last_error_code = None
+            run.last_error_detail = None
         await self.session.flush()
         snapshots: list[SourceSnapshot] = [external_snapshot]
         failures = 0
@@ -486,7 +575,13 @@ class ShariaResearchPipeline:
         ai_row.status = "completed"
         ai_row.completed_at = datetime.now(UTC)
         dossier.state = "completed"
-        dossier.factual_profile = analysis.profile.model_dump(mode="json")
+        dossier.factual_profile = (
+            _passport_enrichment_profile(asset, analysis, successful).model_dump(
+                mode="json"
+            )
+            if external.enrichment_task_id
+            else analysis.profile.model_dump(mode="json")
+        )
         dossier.missing_information_count = len(analysis.missing_evidence)
         dossier.contradiction_count = len(analysis.contradictions)
         dossier.limitations = analysis.explicit_limitations
@@ -529,8 +624,12 @@ class ShariaResearchPipeline:
             .limit(1)
         )
         try:
-            html, headers, status = await self.fetcher.fetch(source)
-            title, headings, clean_text = _extract_document(html, source.source_url)
+            body, headers, status = await self.fetcher.fetch(source)
+            title, headings, clean_text = _extract_document(
+                body,
+                source.source_url,
+                content_type=headers.get("content-type"),
+            )
             content_hash = _sha256(_material_text(clean_text))
             diff = _meaningful_diff(previous.normalized_text if previous else "", clean_text)
             snapshot = SourceSnapshot(
@@ -547,7 +646,11 @@ class ShariaResearchPipeline:
                     for key, value in headers.items()
                     if key in {"content-type", "content-length", "etag", "last-modified"}
                 },
-                raw_content=html,
+                raw_content=(
+                    _database_safe_text(body)
+                    if isinstance(body, str)
+                    else clean_text
+                ),
                 normalized_text=clean_text,
                 title=title,
                 headings=headings,
@@ -556,7 +659,13 @@ class ShariaResearchPipeline:
                 is_material_change=bool(previous and diff.get("material")),
                 fetch_status="success",
                 scraper_version=SCRAPER_VERSION,
-                parser_result={"adaptive_selector": True, "text_length": len(clean_text)},
+                parser_result={
+                    "document_type": (
+                        "pdf" if isinstance(body, bytes) else "html"
+                    ),
+                    "adaptive_selector": isinstance(body, str),
+                    "text_length": len(clean_text),
+                },
             )
         except ShariaResearchError as exc:
             snapshot = SourceSnapshot(
@@ -612,6 +721,33 @@ class ShariaResearchPipeline:
         external: ExternalAssessment,
         analysis: ShariaFactualAnalysis,
     ) -> ReviewCase:
+        open_case = await self.session.scalar(
+            select(ReviewCase)
+            .where(
+                ReviewCase.external_assessment_id == external.id,
+                ReviewCase.done_at.is_(None),
+            )
+            .order_by(ReviewCase.created_at.desc())
+            .limit(1)
+        )
+        if open_case is not None:
+            open_case.canonical_asset_id = asset.id
+            open_case.dossier_id = dossier.id
+            open_case.methodology_id = (
+                external.methodology_id
+                or await self._methodology_id_for_external(external)
+            )
+            open_case.state = "ready_for_review"
+            open_case.priority = "high" if analysis.human_review_required else "normal"
+            open_case.risk_severity = analysis.potential_impact_severity
+            open_case.human_review_reason = analysis.human_review_reason
+            open_case.requested_evidence = analysis.missing_evidence
+            open_case.source_freshness_deadline = datetime.now(UTC) + timedelta(
+                hours=self.settings.sharia_source_scan_interval_hours
+            )
+            await self.session.flush()
+            return open_case
+
         key = f"initial-review:{external.id}:{dossier.evidence_package_hash}"
         existing = await self.session.scalar(
             select(ReviewCase).where(ReviewCase.idempotency_key == key)
@@ -619,11 +755,11 @@ class ShariaResearchPipeline:
         if existing is not None:
             return existing
         now = datetime.now(UTC)
-        source_name = (
-            "Fasset"
-            if external.source_family == "fasset_shariah_reports"
-            else "SC Malaysia"
-        )
+        source_name = {
+            "fasset_shariah_reports": "Fasset",
+            "shariah_review_bureau": "Shariah Review Bureau",
+            "sc_malaysia_sac": "SC Malaysia",
+        }.get(external.source_family, "external methodology")
         case = ReviewCase(
             case_reference=(
                 f"{'FAS' if external.source_family == 'fasset_shariah_reports' else 'SC'}-"
@@ -652,6 +788,20 @@ class ShariaResearchPipeline:
         return case
 
     async def _methodology_id_for_external(self, external: ExternalAssessment):
+        if external.methodology_id is not None:
+            methodology = await self.session.get(
+                ShariaMethodology,
+                external.methodology_id,
+            )
+            if (
+                methodology is None
+                or methodology.status != ShariaMethodologyStatus.ACTIVE
+            ):
+                raise ShariaResearchError(
+                    "source_methodology_unavailable",
+                    "The imported authority methodology is not active.",
+                )
+            return methodology.id
         code = _SOURCE_METHODOLOGY_CODES.get(external.source_family)
         if code is None:
             raise ShariaResearchError(
@@ -701,7 +851,37 @@ class ShariaResearchPipeline:
         )
 
 
-def _extract_document(html: str, url: str) -> tuple[str, list[str], str]:
+def _extract_document(
+    body: str | bytes,
+    url: str,
+    *,
+    content_type: str | None = None,
+) -> tuple[str, list[str], str]:
+    if isinstance(body, bytes) or "application/pdf" in str(content_type).casefold():
+        try:
+            raw = body if isinstance(body, bytes) else body.encode()
+            reader = PdfReader(io.BytesIO(raw))
+            text = _clean_text(
+                "\n".join((page.extract_text() or "") for page in reader.pages)
+            )
+            metadata_title = (
+                str(reader.metadata.title or "").strip()
+                if reader.metadata is not None
+                else ""
+            )
+        except Exception as exc:
+            raise ShariaResearchError(
+                "official_pdf_parse_failed",
+                "The official PDF could not be converted into reviewable text.",
+            ) from exc
+        if len(text) < 80:
+            raise ShariaResearchError(
+                "official_source_text_insufficient",
+                "The official PDF did not expose enough accessible text for evidence review.",
+            )
+        return metadata_title[:500] or url, [], text[:300_000]
+
+    html = body.replace("\x00", " ")
     document = Selector(html, url=url, adaptive=True)
     title = str(document.css("title::text").get() or "").strip()
     headings = [
@@ -716,6 +896,10 @@ def _extract_document(html: str, url: str) -> tuple[str, list[str], str]:
             "The official page did not expose enough accessible text for evidence review.",
         )
     return title[:500] or url, headings, text[:300_000]
+
+
+def _database_safe_text(value: str) -> str:
+    return value.replace("\x00", "")
 
 
 def _material_text(value: str) -> str:
@@ -781,10 +965,19 @@ def _evidence_package(
             "regulatory_scope": external.regulatory_scope,
             "source_url": external.source_url,
             "source_reference": external.source_reference,
-            "published_profile_facts": external.structured_facts,
+            "published_profile_facts": (
+                {}
+                if external.source_row_id is not None
+                else external.structured_facts
+            ),
+            "rights_state": external.rights_state,
+            "package_authority_content_withheld_from_ai": (
+                external.source_row_id is not None
+            ),
             "limitation": (
-                "Treat only the exact supplied verdict and profile facts as source claims. "
-                "Missing fields remain missing."
+                "The external status is context only. Do not use it to create "
+                "project facts or reconstruct authority reasoning. Package "
+                "authority content is withheld; missing fields remain missing."
             ),
         },
         "official_sources": [
@@ -803,6 +996,61 @@ def _evidence_package(
             "an independent religious ruling."
         ),
     }
+
+
+def _passport_enrichment_profile(
+    asset: CanonicalAsset,
+    analysis: ShariaFactualAnalysis,
+    snapshots: list[SourceSnapshot],
+) -> PassportEnrichmentProfile:
+    official_sources = [
+        {
+            "snapshot_id": str(snapshot.id),
+            "source_url": snapshot.source_url,
+            "retrieved_at": snapshot.retrieved_at.isoformat(),
+            "content_hash": snapshot.content_hash,
+        }
+        for snapshot in snapshots
+        if snapshot.official_source_id is not None and snapshot.fetch_status == "success"
+    ]
+    primary = analysis.profile.primary_activity
+    token_role = analysis.profile.token_role
+    return PassportEnrichmentProfile(
+        canonical_asset_identity={
+            "canonical_asset_id": str(asset.id),
+            "name": asset.name,
+            "symbol": asset.symbol,
+            "asset_type": asset.asset_type,
+            "native_chain": asset.native_chain,
+            "contract_addresses": dict(asset.contract_addresses or {}),
+            "identity_hash": asset.identity_hash,
+            "provider_ids": dict(asset.provider_ids or {}),
+        },
+        official_website=asset.official_website,
+        official_documentation=asset.official_documentation,
+        primary_activity=primary,
+        token_role_and_utility=token_role,
+        asset_type=asset.asset_type,
+        native_chain_or_contract={
+            "native_chain": asset.native_chain,
+            "contract_addresses": dict(asset.contract_addresses or {}),
+        },
+        governance_model=analysis.profile.treasury_and_governance,
+        tokenomics=analysis.profile.tokenomics_and_backing,
+        staking_and_rewards=analysis.profile.staking,
+        lending_borrowing=analysis.profile.lending_and_yield,
+        interest_or_yield=analysis.profile.lending_and_yield,
+        derivatives_and_prediction_products=analysis.profile.derivatives,
+        treasury_and_revenue=analysis.profile.treasury_and_governance,
+        backing_redemption_or_collateral=analysis.profile.tokenomics_and_backing,
+        official_source_registry=official_sources,
+        missing_information=list(analysis.missing_evidence),
+        contradictions=list(analysis.contradictions),
+        risk_flags=list(analysis.explicit_limitations),
+        plain_language_profile=f"{primary} {token_role}".strip(),
+        provenance="HILALMARKETS_AI_ENRICHMENT_UNVERIFIED",
+        manual_verification_required=True,
+    )
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
@@ -828,10 +1076,28 @@ def _source_registry_hash(sources: list[OfficialSource]) -> str:
     )
 
 
+def _initial_research_run_key(
+    external_assessment_id: object,
+    external_snapshot_hash: str,
+    sources: list[OfficialSource],
+) -> str:
+    fingerprint = _hash_json(
+        {
+            "external_snapshot_hash": external_snapshot_hash,
+            "source_registry_hash": _source_registry_hash(sources),
+        }
+    )
+    return f"initial-research:{external_assessment_id}:{fingerprint}"
+
+
 def _clean_text(value: object) -> str:
     return "\n".join(
         line.strip()
-        for line in re.sub(r"[ \t\r\f\v]+", " ", str(value or "")).split("\n")
+        for line in re.sub(
+            r"[ \t\r\f\v]+",
+            " ",
+            str(value or "").replace("\x00", " "),
+        ).split("\n")
         if line.strip()
     )
 

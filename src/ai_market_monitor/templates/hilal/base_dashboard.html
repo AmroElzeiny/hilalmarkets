@@ -1,5 +1,5 @@
+{%- set dashboard_locale = user.locale if user and user.locale else 'en' -%}
 <!doctype html>
-{% set dashboard_locale = user.locale if user and user.locale else 'en' %}
 <html lang="{{ dashboard_locale }}" dir="{{ 'rtl' if dashboard_locale[:2] in ['ar', 'fa', 'ur', 'he'] else 'ltr' }}" data-consent-analytics="denied" data-consent-functional="denied" data-consent-marketing="denied">
 <head>
   <script>
@@ -57,7 +57,7 @@
   <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260723-reviewer-first"></script>
   <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260723-reviewer-first"></script>
   <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260723-reviewer-first"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-x-pixel"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-reviewer-first"></script>
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

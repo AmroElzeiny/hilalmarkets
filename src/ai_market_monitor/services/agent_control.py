@@ -948,20 +948,37 @@ def deterministic_agent_response(
     draft = by_name.get("compile_strategy_draft")
     if draft and draft.status == "success":
         eligible = bool(draft.data.get("approval_eligible"))
-        return AgentFinalResponse(
-            message=(
+        scan_eligible = bool(draft.data.get("scan_eligible"))
+        if scan_eligible:
+            draft_message = (
+                "The one-time Scanner rule set is ready for review. It will return coins "
+                "that match all required current conditions and will not create a monitor."
+            )
+        elif eligible:
+            draft_message = (
                 "The deterministic draft is ready for your review. I cannot approve or "
                 "activate it; verify every rule and use the separate approval control when "
                 "it matches your idea."
-                if eligible
-                else "The deterministic draft was compiled, but its review findings still "
+            )
+        else:
+            draft_message = (
+                "The deterministic draft was compiled, but its review findings still "
                 "need your input before approval can become available."
-            ),
-            intent="draft_ready" if eligible else "clarify",
-            status="completed" if eligible else "needs_user_input",
+            )
+        return AgentFinalResponse(
+            message=draft_message,
+            intent="draft_ready" if eligible or scan_eligible else "clarify",
+            status="completed" if eligible or scan_eligible else "needs_user_input",
             evidence_refs=draft.evidence_refs,
             suggested_actions=[
-                AgentSuggestedAction(type="review_draft", label="Review deterministic draft")
+                AgentSuggestedAction(
+                    type="run_scan" if scan_eligible else "review_draft",
+                    label=(
+                        "Review and run Scanner"
+                        if scan_eligible
+                        else "Review deterministic draft"
+                    ),
+                )
             ],
             requires_user_confirmation=eligible,
         )
@@ -1157,7 +1174,17 @@ def _coordinator_instructions() -> str:
         "URLs, endpoint names, JavaScript actions, executable payloads, or private identifiers in "
         "the final message. Preserve every confirmed requirement unless the user explicitly "
         "changes it. Treat corrections as field-level changes, never as permission to discard "
-        "unrelated rules. Ask one important question at a time and never repeat a resolved one. "
+        "unrelated rules. In Scanner mode, do not require a primary trigger: compile the user's "
+        "required conditions as a current market query and return coins that match all of them. "
+        "Use the platform's 15m/current-snapshot defaults when Scanner timing is unstated, while "
+        "disclosing that assumption; preserve an explicit closed-candle requirement. Treat "
+        "halal coins and Shariah-screened assets as the server-selected screened universe, never "
+        "as a mechanic that the user must define. Treat a request for Favorites as the "
+        "authenticated user's saved screened-asset collection; inspect it when that tool is "
+        "offered, and never ask the user to define what Favorites means. Ask one important "
+        "question at a time, no more "
+        "than two questions about the same condition, and never repeat a resolved one. Infer "
+        "logically implied details when they do not alter the deterministic meaning. "
         "Account for every meaningful user clause using only the allowed coverage statuses. "
         "assistant_message and message must carry the same concise user-facing answer. Include "
         "only recorded tool names in proposed_tool_calls and only real user message IDs supplied "

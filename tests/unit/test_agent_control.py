@@ -14,7 +14,11 @@ from ai_market_monitor.db.models import (
     Strategy,
     User,
 )
-from ai_market_monitor.services.agent_control import AgentControlService
+from ai_market_monitor.schemas.agent_control import AgentToolResult
+from ai_market_monitor.services.agent_control import (
+    AgentControlService,
+    deterministic_agent_response,
+)
 from ai_market_monitor.services.agent_tools import AgentToolService
 
 
@@ -78,6 +82,31 @@ class SlowToolHarness(ControlHarness):
 class FailingToolHarness(ControlHarness):
     async def snapshot(self, exchange, quote_currency):
         raise RuntimeError("unexpected provider adapter failure")
+
+
+def test_deterministic_fallback_describes_scanner_readiness_without_approval():
+    response = deterministic_agent_response(
+        [
+            AgentToolResult(
+                status="success",
+                tool_name="compile_strategy_draft",
+                call_id="scanner-draft",
+                data={
+                    "approval_eligible": False,
+                    "scan_eligible": True,
+                    "canonical_hash": "a" * 64,
+                },
+                evidence_refs=["strategy-draft:test"],
+                authoritative=True,
+            )
+        ]
+    )
+
+    assert response.intent == "draft_ready"
+    assert response.status == "completed"
+    assert "match all required current conditions" in response.message
+    assert response.suggested_actions[0].type == "run_scan"
+    assert response.requires_user_confirmation is False
 
 
 def _settings(**updates) -> Settings:

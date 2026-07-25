@@ -110,6 +110,14 @@ The real `.env.production` file is ignored by git.
 
 ## 5. Start Production Stack
 
+Keep one stable `COMPOSE_PROJECT_NAME` in `.env.production` and use that same
+project name for every command. On an existing installation, select the project
+that already owns the authoritative PostgreSQL volume; do not rename it during
+deployment. The project name is part of each named volume's identity. For
+example, `traceedge_postgres_data` and `hilalmarkets_postgres_data` are two
+unrelated PostgreSQL databases even when both commands are run from
+`/opt/hilalmarkets`.
+
 ```bash
 export TRACEDGE_ENV_FILE=.env.production
 docker compose --env-file .env.production -f docker-compose.prod.yml build
@@ -118,6 +126,57 @@ docker compose --env-file .env.production -f docker-compose.prod.yml run --rm ap
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 ```
+
+Do not alternate between unqualified `docker compose` commands and
+`docker compose -p <another-name>` commands. Determine the existing
+authoritative project before setting `COMPOSE_PROJECT_NAME`. The repository does
+not force a project name because doing so could attach an existing installation
+to the wrong volume.
+
+Before deleting any apparently old volume, inspect all Compose projects and
+volumes:
+
+```bash
+docker compose ls
+docker volume ls \
+  --filter label=com.docker.compose.volume=postgres_data \
+  --format 'postgres_volume={{.Name}}'
+```
+
+Back up the authoritative database before changing project or volume names.
+Removing database files from `.gitignore` does not export a PostgreSQL Docker
+volume, and application SQLite files are not used by this Compose stack.
+
+After deployment, confirm the migration and governance record counts against
+the selected project:
+
+```bash
+docker compose exec -T api alembic current
+docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT code, version, status FROM sharia_methodologies ORDER BY code, version;
+SELECT source_family, mapping_state, COUNT(*) FROM external_assessments
+GROUP BY source_family, mapping_state ORDER BY source_family, mapping_state;
+SELECT state, publication_state, COUNT(*) FROM sharia_review_cases
+GROUP BY state, publication_state ORDER BY state, publication_state;
+SELECT COUNT(*) AS published_passports FROM published_asset_assessments;
+"'
+```
+
+To fetch the current SC Malaysia and Fasset source records immediately instead
+of waiting for the configured ten-day schedule:
+
+```bash
+docker compose exec -T worker celery -A ai_market_monitor.worker.app call \
+  ai_market_monitor.process_sharia_authority_imports
+docker compose logs --since=10m worker
+```
+
+The import is deliberately not an approval action. It retains official-source
+evidence, maps identities where authoritative mappings exist, and creates review
+cases. An authorized human must complete the required criteria and use-scope
+decisions and publish each approved assessment in System Brain before it becomes
+a customer-visible Passport. An empty screener with imported but unpublished
+cases is therefore fail-closed behavior, not a cache problem.
 
 The production stack contains:
 

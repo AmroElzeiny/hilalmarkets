@@ -25,16 +25,16 @@
 <body>
   <h1>HilalMarkets Playwright E2E Report</h1>
   <section class="card">
-    <p><strong>Generated:</strong> 2026-07-23T15:53:37.594212+00:00</p>
-    <p><strong>Base URL:</strong> http://127.0.0.1:39392</p>
+    <p><strong>Generated:</strong> 2026-07-24T10:27:24.673078+00:00</p>
+    <p><strong>Base URL:</strong> http://127.0.0.1:22055</p>
     <p><strong>Browser:</strong> chromium</p>
     <p><strong>Auto-started:</strong> True</p>
-    <p><strong>Command:</strong> <code>.venv\Scripts\python.exe -m pytest -q tests/browser/test_landing_analytics.py</code></p>
-    <p><strong>App command:</strong> <code>C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 39392</code></p>
+    <p><strong>Command:</strong> <code>.venv\Scripts\python.exe -m pytest tests/browser -q</code></p>
+    <p><strong>App command:</strong> <code>C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Scripts\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 22055</code></p>
   </section>
   <section class="card">
     <h2>Summary</h2>
-    <p>Run 8 / passed 8 /
+    <p>Run 33 / passed 33 /
       failed 0 / skipped 0</p>
     <p>Console errors: 0;
       API/network errors: 0;
@@ -44,14 +44,39 @@
     <h2>Tests</h2>
     <table>
       <thead><tr><th>Test</th><th>Outcome</th><th>Seconds</th></tr></thead>
-      <tbody><tr><td>tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated</td><td>passed</td><td>9.281</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission</td><td>passed</td><td>1.776</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_failed_waitlist_submission_never_emits_success_event</td><td>passed</td><td>2.053</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility</td><td>passed</td><td>4.5</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission</td><td>passed</td><td>2.245</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id</td><td>passed</td><td>13.804</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_shared_public_shell_loads_gtm_once_only_after_consent</td><td>passed</td><td>2.098</td></tr>
-<tr><td>tests/browser/test_landing_analytics.py::test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain</td><td>passed</td><td>3.039</td></tr></tbody>
+      <tbody><tr><td>tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout</td><td>passed</td><td>5.249</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection</td><td>passed</td><td>8.891</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states</td><td>passed</td><td>11.613</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_all_customer_dashboard_pages_use_the_brand_system</td><td>passed</td><td>36.365</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor</td><td>passed</td><td>17.565</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation</td><td>passed</td><td>5.082</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa</td><td>passed</td><td>12.594</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner</td><td>passed</td><td>4.684</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke</td><td>passed</td><td>3.407</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_notification_channel_handoff_links_smoke</td><td>passed</td><td>3.077</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_private_beta_billing_desktop_and_mobile_visual_qa</td><td>passed</td><td>5.142</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation</td><td>passed</td><td>5.393</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_public_product_chat_consent_grounding_inquiry_and_returning_profile</td><td>passed</td><td>10.164</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_public_product_chat_renders_safe_bold_without_executable_html</td><td>passed</td><td>2.112</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_public_product_chat_session_profile_offline_and_focus_containment</td><td>passed</td><td>4.664</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_screened_market_passport_and_mobile_visual_qa</td><td>passed</td><td>14.669</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_screening_change_opens_evidence_difference_dialog</td><td>passed</td><td>4.244</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims</td><td>passed</td><td>4.16</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa</td><td>passed</td><td>12.795</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload</td><td>passed</td><td>8.842</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board</td><td>passed</td><td>6.996</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_system_brain_reviewer_first_desktop_and_mobile</td><td>passed</td><td>7.29</td></tr>
+<tr><td>tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat</td><td>passed</td><td>4.479</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated</td><td>passed</td><td>9.459</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission</td><td>passed</td><td>2.032</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_failed_waitlist_submission_never_emits_success_event</td><td>passed</td><td>2.235</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility</td><td>passed</td><td>4.549</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission</td><td>passed</td><td>2.676</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id</td><td>passed</td><td>14.644</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_shared_public_shell_loads_gtm_once_only_after_consent</td><td>passed</td><td>1.341</td></tr>
+<tr><td>tests/browser/test_landing_analytics.py::test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain</td><td>passed</td><td>2.058</td></tr>
+<tr><td>tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa</td><td>passed</td><td>23.393</td></tr>
+<tr><td>tests/browser/test_sharia_governance_admin.py::test_system_brain_user_controls_use_branded_confirmation_dialog</td><td>passed</td><td>7.779</td></tr></tbody>
     </table>
   </section>
   <section class="card">

@@ -61,7 +61,11 @@
       <div class="brain-authority-line">
         <strong>{{ external.source_authority }}</strong>
         <span>{{ external.exact_status_wording }}</span>
-        <small>{{ external.decision_date.strftime('%d %b %Y') }} · {{ external.regulatory_scope }}</small>
+        <small>{{ external.decision_date.strftime('%d %b %Y') if external.decision_date else external.source_reference or 'Source date not recorded' }} &middot; {{ external.regulatory_scope }}</small>
+        {% if external.sac_meeting_number %}<small>SAC meeting: {{ external.sac_meeting_number }}</small>{% endif %}
+        {% if detail.source_supported_explanation %}<p>{{ detail.source_supported_explanation }}</p>{% else %}<p>No additional source-supported coin-specific explanation was retained. Nothing has been reconstructed.</p>{% endif %}
+        {% if external.source_row_id %}<small>Source row {{ external.source_row_id }} &middot; Rights: {{ (external.rights_state or 'not recorded').replace('_',' ').title() }}</small>{% endif %}
+        {% if detail.external_snapshot %}<small>Retained snapshot {{ detail.external_snapshot.id }} &middot; Evidence hash {{ detail.external_snapshot.content_hash[:16] }} &middot; Retrieved {{ detail.external_snapshot.retrieved_at.strftime('%d %b %Y %H:%M UTC') }}</small>{% endif %}
         <a href="{{ external.source_url }}" target="_blank" rel="noopener">Open authoritative source</a>
       </div>
       {% endif %}
@@ -217,7 +221,16 @@
 
     {% if case.state == 'approved' and case.publication_state in ['approved_not_published','awaiting_second_approval'] %}
     <div class="brain-terminal pending"><i data-icon="check"></i><strong>{{ case.publication_state.replace('_',' ').title() }}</strong><small>The decision is not public.</small></div>
+    {% if external and external.source_row_id and not external.commercial_display_allowed %}
+    <div class="brain-terminal danger"><strong>Public display blocked</strong><small>Written permission or legal rights clearance must be recorded before publication.</small></div>
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form class="brain-rights-clearance">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="record_rights_clearance"><input type="hidden" name="reason" value="Record reviewed commercial-display rights clearance.">
+      <label>Rights clearance reference<textarea name="rights_clearance_reference" minlength="10" maxlength="5000" required placeholder="Written permission or legal-clearance record reference"></textarea></label>
+      <button class="brain-action-button secondary brain-terminal-action" type="submit" data-confirm="Record this rights clearance in the immutable admin audit?">Record rights clearance</button>
+    </form>
+    {% else %}
     <button class="brain-action-button brain-publish-launch brain-terminal-action" type="button" data-open-publication><i data-icon="passport"></i>Review publication impact</button>
+    {% endif %}
 
     {% elif case.state == 'ready_for_review' %}
     <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form>
@@ -244,12 +257,22 @@
       <div class="brain-decision-actions brain-terminal-action">
         <button name="action" value="approve" data-confirm="Record approval without publishing?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve</button>
         <button name="action" value="approve_with_qualification" data-confirm="Record qualified approval without publishing?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve with qualification</button>
+        <button name="action" value="approve_internal_only" data-confirm="Approve internally and permanently block this review from public display?" class="secondary" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve internally; block public display</button>
         <button name="action" value="request_more_evidence" class="secondary">Request evidence</button>
         <button name="action" value="return_to_research" class="secondary">Return to research</button>
         {% if case.case_type in ['material_source_change','user_factual_report'] %}<button name="action" value="dismiss_false_positive" data-confirm="Dismiss this review trigger as a false positive and retain the audit record?" class="secondary">Dismiss false positive</button>{% endif %}
         <button name="action" value="reject_and_store" data-confirm="Reject and retain the immutable evidence?" class="danger">Reject and store</button>
       </div>
     </form>
+    {% if external and external.source_row_id and not external.commercial_display_allowed %}
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form class="brain-rights-clearance">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="record_rights_clearance">
+      <input type="hidden" name="reason" value="Record reviewed commercial-display rights clearance.">
+      <label>Rights clearance reference<textarea name="rights_clearance_reference" minlength="10" maxlength="5000" required placeholder="Written permission or legal-clearance record reference"></textarea></label>
+      <button class="brain-action-button secondary brain-terminal-action" type="submit" data-confirm="Record this rights clearance in the immutable admin audit?">Record rights clearance</button>
+    </form>
+    {% endif %}
 
     {% elif case.state == 'safety_hold' %}
     <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form>

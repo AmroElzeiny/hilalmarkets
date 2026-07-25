@@ -2,10 +2,12 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 from pydantic import HttpUrl, ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -53,8 +55,15 @@ from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMes
 
 SC_METHODOLOGY_CODE = "SC_MALAYSIA_SAC_REFERENCE"
 FASSET_METHODOLOGY_CODE = "FASSET_SHARIAH_REPORTS"
-TERMINAL_CASE_STATES = {"published", "rejected", "superseded"}
-OPEN_REMINDER_STATES = {"ready_for_review", "needs_evidence"}
+SRB_METHODOLOGY_CODE = "SHARIAH_REVIEW_BUREAU"
+TERMINAL_CASE_STATES = {"published", "rejected", "stored", "superseded"}
+OPEN_REMINDER_STATES = {
+    "draft",
+    "researching",
+    "research_failed",
+    "ready_for_review",
+    "needs_evidence",
+}
 GOVERNANCE_ROLES = {"SYSTEM_ADMIN", "RESEARCHER", "REVIEWER", "PUBLISHER"}
 EXPLANATION_REQUIRED_OUTCOMES = {
     "qualification",
@@ -100,6 +109,7 @@ class ShariaGovernanceService:
         use_case_decisions: list[dict] | None = None,
         qualifications: list[str] | None = None,
         acknowledged_gaps: list[str] | None = None,
+        internal_only: bool = False,
     ) -> ReviewDecision:
         admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
@@ -133,6 +143,15 @@ class ShariaGovernanceService:
                 "qualification_required",
                 "Approval with qualification requires at least one written qualification.",
             )
+        decision_name = (
+            "approved_internal_only"
+            if internal_only
+            else (
+                "approved_with_qualifications"
+                if with_qualifications
+                else "approved"
+            )
+        )
         decision = await self._decision(
             case,
             admin_user_id=admin.id,
@@ -140,7 +159,7 @@ class ShariaGovernanceService:
             methodology_version=context.methodology.version,
             methodology_criteria_version=context.rules.criteria_version,
             methodology_criteria_hash=context.rules.criteria_hash,
-            decision=("approved_with_qualifications" if with_qualifications else "approved"),
+            decision=decision_name,
             reason=reason,
             evidence_snapshot_ids=list(context.evidence_snapshot_ids),
             criterion_decisions=criteria,
@@ -151,14 +170,23 @@ class ShariaGovernanceService:
             actor_role="REVIEWER",
         )
         now = datetime.now(UTC)
-        case.state = "approved"
+        case.state = "stored" if internal_only else "approved"
         case.publication_state = (
-            "awaiting_second_approval"
-            if self.settings.require_second_reviewer
-            else "approved_not_published"
+            "approved_internal_only"
+            if internal_only
+            else (
+                "awaiting_second_approval"
+                if self.settings.require_second_reviewer
+                else "approved_not_published"
+            )
         )
         case.methodology_id = context.methodology.id
         case.next_reminder_at = None
+        case.done_at = now if internal_only else None
+        methodology_source = await self._ensure_approved_monitoring_source(
+            context,
+            admin_user_id=admin.id,
+        )
         self._audit(
             admin.id,
             "sharia.review_decision_approved",
@@ -169,11 +197,243 @@ class ShariaGovernanceService:
                 "decision": decision.decision,
                 "criterion_count": len(criteria),
                 "qualification_count": len(qualification_rows),
+                "methodology_monitoring_source_id": str(
+                    methodology_source.id
+                ),
                 "occurred_at": now.isoformat(),
             },
         )
         await self.session.flush()
         return decision
+
+    async def approve_internally(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+        criterion_decisions: list[dict] | None = None,
+        use_case_decisions: list[dict] | None = None,
+        qualifications: list[str] | None = None,
+        acknowledged_gaps: list[str] | None = None,
+    ) -> ReviewDecision:
+        return await self.approve_for_publication(
+            case_id,
+            admin_user_id=admin_user_id,
+            reason=reason,
+            criterion_decisions=criterion_decisions,
+            use_case_decisions=use_case_decisions,
+            qualifications=qualifications,
+            acknowledged_gaps=acknowledged_gaps,
+            internal_only=True,
+        )
+
+    async def auto_publish_external_reference(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+    ) -> PublishedAssetAssessment:
+        """Publish a provider's explicit compliant row without creating an AI ruling."""
+
+        if not self.settings.sharia_import_auto_publish:
+            raise ShariaGovernanceError(
+                "automatic_publication_disabled",
+                "External-reference automatic publication is disabled.",
+            )
+        if self.settings.sharia_import_require_admin_review:
+            raise ShariaGovernanceError(
+                "human_review_required",
+                "The configured policy still requires an individual admin review.",
+            )
+        if self.settings.require_second_reviewer:
+            raise ShariaGovernanceError(
+                "second_reviewer_policy_active",
+                "Automatic publication cannot bypass the configured second-reviewer policy.",
+            )
+        admin = await self._require_permission(admin_user_id, "SYSTEM_ADMIN")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        existing = await self.session.scalar(
+            select(PublishedAssetAssessment)
+            .join(
+                ReviewDecision,
+                ReviewDecision.id
+                == PublishedAssetAssessment.review_decision_id,
+            )
+            .where(
+                ReviewDecision.review_case_id == case.id,
+                PublishedAssetAssessment.is_active.is_(True),
+                PublishedAssetAssessment.publication_state == "published",
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            return existing
+        if case.state != "ready_for_review":
+            raise ShariaGovernanceError(
+                "case_not_ready",
+                "Canonical identity and a completed factual dossier are required.",
+            )
+        context = await self._review_context(
+            case,
+            allow_factual_uncertainty=True,
+        )
+        external = context.external
+        if (
+            external.source_row_id is None
+            or external.normalized_status != "ELIGIBLE_EXTERNAL_REFERENCE"
+        ):
+            raise ShariaGovernanceError(
+                "external_reference_not_eligible",
+                "Only an imported provider row explicitly marked compliant can use this path.",
+            )
+        criteria = self._validate_criterion_decisions(
+            [
+                {
+                    "key": definition.key,
+                    "outcome": "pass",
+                    "reviewer_explanation": "",
+                }
+                for definition in context.rules.required_criteria
+            ],
+            rules=context.rules,
+            evidence_snapshot_ids=list(context.evidence_snapshot_ids),
+            available_evidence_categories=context.available_evidence_categories,
+        )
+        use_decisions = self._validate_use_case_decisions(
+            [
+                {
+                    "key": definition.key,
+                    "decision": (
+                        "covered"
+                        if definition.key.startswith("asset_level_")
+                        or definition.key == "spot_ownership_and_monitoring"
+                        else "not_covered"
+                    ),
+                    "reason": (
+                        "Automated publication retains only the external asset-level reference "
+                        "and HilalMarkets spot monitoring scope. Other product uses remain "
+                        "separate and are not covered by this automation."
+                    ),
+                    "scope": definition.default_scope,
+                }
+                for definition in context.rules.use_cases
+            ],
+            rules=context.rules,
+            evidence_snapshot_ids=list(context.evidence_snapshot_ids),
+            available_evidence_categories=context.available_evidence_categories,
+            reviewer_user_id=admin.id,
+        )
+        reason = (
+            f"Automatically published the exact compliant asset-level reference from "
+            f"{external.source_authority}; AI factual research remains separately labelled "
+            "and does not determine the status."
+        )
+        decision = await self._decision(
+            case,
+            admin_user_id=admin.id,
+            methodology_id=context.methodology.id,
+            methodology_version=context.methodology.version,
+            methodology_criteria_version=context.rules.criteria_version,
+            methodology_criteria_hash=context.rules.criteria_hash,
+            decision="approved",
+            reason=reason,
+            evidence_snapshot_ids=list(context.evidence_snapshot_ids),
+            criterion_decisions=criteria,
+            use_case_decisions=use_decisions,
+            acknowledged_gaps=list(context.dossier.limitations or []),
+            ai_analysis_snapshot_id=context.analysis.id,
+            actor_role="EXTERNAL_REFERENCE_AUTOMATION",
+            security_metadata={
+                "source": "scheduled_external_authority_import",
+                "external_source_row_id": external.source_row_id,
+                "status_authority": external.source_authority,
+                "ai_controls_status": False,
+                "metadata_only_when_rights_restricted": True,
+            },
+        )
+        now = datetime.now(UTC)
+        case.state = "approved"
+        case.publication_state = "approved_not_published"
+        case.methodology_id = context.methodology.id
+        case.next_reminder_at = None
+        external.manual_verification_required = False
+        await self._ensure_approved_monitoring_source(
+            context,
+            admin_user_id=admin.id,
+        )
+        self._audit(
+            admin.id,
+            "sharia.external_reference_auto_approved",
+            "sharia_review_decision",
+            str(decision.id),
+            {
+                "case_id": str(case.id),
+                "source_row_id": external.source_row_id,
+                "methodology_id": str(context.methodology.id),
+                "ai_controls_status": False,
+                "occurred_at": now.isoformat(),
+            },
+        )
+        await self.session.flush()
+        return await self.publish_approved(
+            case.id,
+            admin_user_id=admin.id,
+            reason=reason,
+        )
+
+    async def record_rights_clearance(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        clearance_reference: str,
+    ) -> ExternalAssessment:
+        admin = await self._require_permission(admin_user_id, "SYSTEM_ADMIN")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None or case.external_assessment_id is None:
+            raise ShariaGovernanceError(
+                "case_external_assessment_missing",
+                "The review case has no external assessment.",
+            )
+        reference = clearance_reference.strip()
+        if len(reference) < 10:
+            raise ShariaGovernanceError(
+                "rights_clearance_reference_required",
+                "Record the written permission or legal-clearance reference.",
+            )
+        external = await self.session.get(
+            ExternalAssessment,
+            case.external_assessment_id,
+        )
+        if external is None:
+            raise ShariaGovernanceError(
+                "external_assessment_missing",
+                "The external assessment is unavailable.",
+            )
+        previous = external.rights_state
+        now = datetime.now(UTC)
+        external.rights_state = "COMMERCIAL_DISPLAY_CLEARED"
+        external.commercial_display_allowed = True
+        external.rights_clearance_reference = reference
+        external.rights_cleared_by_user_id = admin.id
+        external.rights_cleared_at = now
+        self._audit(
+            admin.id,
+            "sharia.external_rights_clearance_recorded",
+            "external_assessment",
+            str(external.id),
+            {
+                "case_id": str(case.id),
+                "previous_state": previous,
+                "new_state": external.rights_state,
+                "clearance_reference_recorded": True,
+            },
+        )
+        await self.session.flush()
+        return external
 
     async def publish_approved(
         self,
@@ -223,13 +483,40 @@ class ShariaGovernanceService:
                 "second_reviewer_required",
                 "Awaiting second approval: the publisher must differ from the reviewer.",
             )
-        context = await self._review_context(case)
+        context = await self._review_context(
+            case,
+            allow_factual_uncertainty=(
+                decision.actor_role == "EXTERNAL_REFERENCE_AUTOMATION"
+            ),
+        )
         self._validate_recorded_decision(decision, context)
         asset = context.asset
         external = context.external
         dossier = context.dossier
         analysis = context.analysis
         methodology = context.methodology
+        if (
+            self.settings.sharia_external_rights_enforcement
+            and external.source_row_id is not None
+            and not external.commercial_display_allowed
+            and not (
+                decision.actor_role == "EXTERNAL_REFERENCE_AUTOMATION"
+                and self.settings.sharia_import_metadata_only_publication
+            )
+        ):
+            raise ShariaGovernanceError(
+                "external_rights_clearance_required",
+                "Public display is blocked until written permission or legal rights "
+                "clearance is recorded.",
+            )
+        if (
+            external.normalized_status is not None
+            and external.normalized_status != "ELIGIBLE_EXTERNAL_REFERENCE"
+        ):
+            raise ShariaGovernanceError(
+                "external_status_not_publishable",
+                "This external source row is not eligible for publication.",
+            )
         now = datetime.now(UTC)
         passport = await self._passport_snapshot(
             asset=asset,
@@ -242,7 +529,11 @@ class ShariaGovernanceService:
         )
         evidence_sources = await self._assessment_sources(methodology, external, dossier)
         reviewer_user = await self.session.get(User, decision.admin_user_id)
-        reviewer = await self._admin_label(reviewer_user or admin)
+        reviewer = (
+            "External authority reference automation"
+            if decision.actor_role == "EXTERNAL_REFERENCE_AUTOMATION"
+            else await self._admin_label(reviewer_user or admin)
+        )
         qualifications = list(decision.qualifications or [])
         summary, reason_code = self._publication_copy(methodology, external)
         assessment = await ShariaScreeningService(
@@ -282,7 +573,11 @@ class ShariaGovernanceService:
                     .where(
                         PublishedAssetAssessment.canonical_asset_id == asset.id,
                         PublishedAssetAssessment.is_active.is_(True),
-                        AssetShariaAssessment.methodology_id == methodology.id,
+                        or_(
+                            AssetShariaAssessment.methodology_id == methodology.id,
+                            PublishedAssetAssessment.external_assessment_id
+                            == external.id,
+                        ),
                     )
                     .order_by(PublishedAssetAssessment.version.desc())
                 )
@@ -297,7 +592,10 @@ class ShariaGovernanceService:
             )
             .where(
                 PublishedAssetAssessment.canonical_asset_id == asset.id,
-                AssetShariaAssessment.methodology_id == methodology.id,
+                or_(
+                    AssetShariaAssessment.methodology_id == methodology.id,
+                    PublishedAssetAssessment.external_assessment_id == external.id,
+                ),
             )
             .order_by(PublishedAssetAssessment.version.desc())
             .limit(1)
@@ -480,7 +778,9 @@ class ShariaGovernanceService:
         )
         case.state = "researching"
         case.publication_state = "unpublished"
-        case.next_reminder_at = None
+        case.next_reminder_at = datetime.now(UTC) + timedelta(
+            hours=self.settings.sharia_review_reminder_hours
+        )
         await self.session.flush()
         return decision
 
@@ -886,8 +1186,12 @@ class ShariaGovernanceService:
         case.state = "researching"
         case.publication_state = "unpublished"
         case.done_at = None
-        case.due_at = datetime.now(UTC) + timedelta(
+        now = datetime.now(UTC)
+        case.due_at = now + timedelta(
             hours=self.settings.sharia_review_sla_hours
+        )
+        case.next_reminder_at = now + timedelta(
+            hours=self.settings.sharia_review_reminder_hours
         )
         self._audit(
             admin.id,
@@ -1031,7 +1335,59 @@ class ShariaGovernanceService:
 
         return await self._require_permission(user_id, permission)
 
-    async def _review_context(self, case: ReviewCase) -> GovernanceReviewContext:
+    async def _ensure_approved_monitoring_source(
+        self,
+        context: GovernanceReviewContext,
+        *,
+        admin_user_id: UUID,
+    ) -> OfficialSource:
+        normalized_url = _normalized_source_url(
+            context.external.source_url
+        )
+        source = await self.session.scalar(
+            select(OfficialSource).where(
+                OfficialSource.canonical_asset_id == context.asset.id,
+                OfficialSource.normalized_url == normalized_url,
+            )
+        )
+        if source is None:
+            source = OfficialSource(
+                canonical_asset_id=context.asset.id,
+                category="external_methodology_reference",
+                title=(
+                    f"{context.methodology.name} source for "
+                    f"{context.asset.name}"
+                ),
+                source_url=context.external.source_url,
+                normalized_url=normalized_url,
+                priority=5,
+                verification_state="verified",
+                verified_by_user_id=admin_user_id,
+                verified_at=datetime.now(UTC),
+                is_active=True,
+            )
+            self.session.add(source)
+            await self.session.flush()
+            self._audit(
+                admin_user_id,
+                "sharia.methodology_source_monitoring_registered",
+                "official_source",
+                str(source.id),
+                {
+                    "canonical_asset_id": str(context.asset.id),
+                    "external_assessment_id": str(context.external.id),
+                    "methodology_id": str(context.methodology.id),
+                    "source_category": source.category,
+                },
+            )
+        return source
+
+    async def _review_context(
+        self,
+        case: ReviewCase,
+        *,
+        allow_factual_uncertainty: bool = False,
+    ) -> GovernanceReviewContext:
         if not case.canonical_asset_id or not case.external_assessment_id or not case.dossier_id:
             raise ShariaGovernanceError(
                 "case_evidence_incomplete",
@@ -1098,11 +1454,19 @@ class ShariaGovernanceService:
             raise ShariaGovernanceError(
                 "evidence_snapshot_missing", "One or more reviewed evidence snapshots are missing."
             )
-        reviewed_ids = {str(value) for value in snapshot_ids}
-        if set(analysis.input_snapshot_ids or []) != reviewed_ids:
+        successful_reviewed_ids = {
+            str(row.id)
+            for row in snapshots
+            if row.fetch_status == "success"
+        }
+        if (
+            set(analysis.input_snapshot_ids or [])
+            != successful_reviewed_ids
+        ):
             raise ShariaGovernanceError(
                 "analysis_evidence_version_mismatch",
-                "The factual analysis was not produced from the current reviewed snapshots.",
+                "The factual analysis was not produced from the current "
+                "successful evidence snapshots.",
             )
         if case.source_freshness_deadline is not None and _as_utc(
             case.source_freshness_deadline
@@ -1114,23 +1478,39 @@ class ShariaGovernanceService:
             days=requirements.maximum_source_age_days
         )
         stale = [
-            str(row.id)
+            row
             for row in snapshots
             if row.fetch_status != "success" or _as_utc(row.retrieved_at) < stale_before
         ]
-        if stale:
+        blocking_stale = (
+            stale
+            if not allow_factual_uncertainty
+            else [
+                row
+                for row in stale
+                if row.id == external.source_snapshot_id
+            ]
+        )
+        if blocking_stale:
             raise ShariaGovernanceError(
                 "required_evidence_stale",
                 "Required evidence is unavailable or older than the methodology permits.",
             )
-        if dossier.evidence_completeness < requirements.minimum_evidence_completeness:
+        if (
+            not allow_factual_uncertainty
+            and dossier.evidence_completeness
+            < requirements.minimum_evidence_completeness
+        ):
             raise ShariaGovernanceError(
                 "evidence_completeness_below_threshold",
                 "Evidence completeness is below the methodology threshold.",
             )
         analysis_output = dict(analysis.output or {})
         contradictions = list(analysis_output.get("contradictions") or [])
-        if dossier.contradiction_count > 0 or contradictions:
+        if (
+            not allow_factual_uncertainty
+            and (dossier.contradiction_count > 0 or contradictions)
+        ):
             raise ShariaGovernanceError(
                 "critical_contradiction_unresolved",
                 "A critical contradiction remains unresolved in the reviewed evidence.",
@@ -1218,6 +1598,14 @@ class ShariaGovernanceService:
                 "development_methodology_not_publishable",
                 "Development and test methodologies cannot publish customer Passports.",
             )
+        if (
+            external.methodology_id is not None
+            and external.methodology_id != methodology.id
+        ):
+            raise ShariaGovernanceError(
+                "methodology_source_mismatch",
+                "The external assessment belongs to a different methodology version.",
+            )
         try:
             rules, requirements = ShariaScreeningService.validate_methodology_contract(
                 methodology.rules_json,
@@ -1255,6 +1643,14 @@ class ShariaGovernanceService:
                 and external.exact_status_wording == "Shariah Compliant"
                 and bool(external.structured_facts)
             )
+        elif rules.source_adapter == "srb":
+            source_matches = (
+                rules.source_family == "shariah_review_bureau"
+                and external.source_family == "shariah_review_bureau"
+                and "shariyah review bureau" in authority
+                and external.exact_status_wording == "Compliant"
+                and external.source_row_id is not None
+            )
         else:
             raise ShariaGovernanceError(
                 "source_adapter_unsupported",
@@ -1286,6 +1682,13 @@ class ShariaGovernanceService:
                 "coverage are reviewed separately and no missing source fact was inferred.",
                 "fasset_reviewed_publication",
             )
+        if rules.source_adapter == "srb":
+            return (
+                "The retained Shariah Review Bureau external reference records this asset "
+                f"as {external.exact_status_wording}. HilalMarkets factual and use-specific "
+                "review remains separate, and restricted source content is not reproduced.",
+                "srb_reviewed_publication",
+            )
         raise ShariaGovernanceError(
             "source_adapter_unsupported",
             "No publication wording adapter is configured for this methodology.",
@@ -1305,15 +1708,15 @@ class ShariaGovernanceService:
             categories.add("canonical_identity")
         if dossier.state == "completed":
             categories.add("factual_dossier")
-        if rules.source_adapter == "sc_malaysia" and any(
+        external_snapshot_available = any(
             row.id == external.source_snapshot_id and row.fetch_status == "success"
             for row in snapshots
-        ):
+        )
+        if external_snapshot_available:
+            categories.add("official_external_reference")
+        if rules.source_adapter == "sc_malaysia" and external_snapshot_available:
             categories.add("official_sc_reference")
-        if rules.source_adapter == "fasset" and any(
-            row.id == external.source_snapshot_id and row.fetch_status == "success"
-            for row in snapshots
-        ):
+        if rules.source_adapter == "fasset" and external_snapshot_available:
             categories.add("official_fasset_reference")
         official_ids = {
             row.official_source_id for row in snapshots if row.official_source_id is not None
@@ -1572,6 +1975,7 @@ class ShariaGovernanceService:
         acknowledged_gaps: list[str] | None = None,
         ai_analysis_snapshot_id: UUID | None = None,
         actor_role: str = "REVIEWER",
+        security_metadata: dict[str, Any] | None = None,
     ) -> ReviewDecision:
         version = int(
             await self.session.scalar(
@@ -1600,7 +2004,8 @@ class ShariaGovernanceService:
             application_version=getattr(
                 self.settings, "application_version", "development"
             ),
-            security_metadata={"source": "authenticated_system_brain"},
+            security_metadata=security_metadata
+            or {"source": "authenticated_system_brain"},
             decision_version=version,
             created_at=datetime.now(UTC),
         )
@@ -1682,6 +2087,22 @@ class ShariaGovernanceService:
                     ),
                 )
             ]
+        elif rules.source_adapter == "srb":
+            sources = [
+                EvidenceSourceInput(
+                    source_type="external_preliminary_research_reference",
+                    title=f"Shariah Review Bureau reference: {external.asset_name}",
+                    publisher="Shariyah Review Bureau W.L.L.",
+                    source_url=HttpUrl(external.source_url),
+                    retrieved_at=external.retrieval_date,
+                    evidence_category="official_external_reference",
+                    evidence_summary=(
+                        f"Retained status: {external.exact_status_wording}; "
+                        f"source reference: {external.source_reference or 'not dated'}. "
+                        "Restricted source report content is not reproduced."
+                    ),
+                )
+            ]
         else:
             raise ShariaGovernanceError(
                 "source_adapter_unsupported",
@@ -1743,7 +2164,7 @@ class ShariaGovernanceService:
         published_at: datetime,
     ) -> dict:
         output = dict(analysis.output or {})
-        profile = dict(output.get("profile") or dossier.factual_profile or {})
+        profile = dict(dossier.factual_profile or output.get("profile") or {})
         requirements = MethodologyEvidenceRequirements.model_validate(
             methodology.evidence_requirements_json
         )
@@ -1757,12 +2178,29 @@ class ShariaGovernanceService:
             days=requirements.review_cadence_days
         )
         rules = MethodologyRulesDefinition.model_validate(methodology.rules_json)
-        source_label = (
-            "SC Malaysia SAC reference"
-            if rules.source_adapter == "sc_malaysia"
-            else "Fasset Shariah Report"
-        )
-        authority_reference = {
+        source_label = {
+            "sc_malaysia": "SC Malaysia SAC reference",
+            "fasset": "Fasset Shariah Report",
+            "srb": "Shariah Review Bureau reference",
+        }.get(rules.source_adapter, "external methodology reference")
+        source_profile_facts: dict[str, Any] = {}
+        if rules.source_adapter == "fasset":
+            if external.source_row_id is None:
+                source_profile_facts = dict(external.structured_facts or {})
+            elif external.source_detail_extraction_state in {
+                "FETCHED_AND_VERIFIED",
+                "VERIFIED",
+            }:
+                source_profile_facts = dict(
+                    external.source_detail_fields or {}
+                )
+        authority_limitations = [
+            "The source verdict is retained exactly and is not expanded to an "
+            "unreviewed use.",
+            "Staking, lending, yield, leverage, derivatives, wrapped assets, "
+            "and bridges remain separate use decisions.",
+        ]
+        authority_reference: dict[str, Any] = {
             "label": f"{source_label}: {external.exact_status_wording}",
             "exact_wording": external.exact_status_wording,
             "authority": external.source_authority,
@@ -1771,13 +2209,20 @@ class ShariaGovernanceService:
             "source_url": external.source_url,
             "retrieval_date": external.retrieval_date.isoformat(),
             "regulatory_scope": external.regulatory_scope,
-            "published_profile_facts": dict(external.structured_facts or {}),
-            "limitations": [
-                "The source verdict is retained exactly and is not expanded to an unreviewed use.",
-                "Staking, lending, yield, leverage, derivatives, wrapped assets, and bridges "
-                "remain separate use decisions.",
-            ],
+            "published_profile_facts": source_profile_facts,
+            "rights_state": external.rights_state,
+            "limitations": authority_limitations,
         }
+        if rules.source_adapter == "sc_malaysia":
+            authority_limitations.append(
+                "The list page does not publish detailed coin-specific reasoning; none was "
+                "reconstructed."
+            )
+        if rules.source_adapter == "srb":
+            authority_limitations.append(
+                "Source report wording and summaries remain withheld unless written permission "
+                "or legal clearance explicitly permits commercial display."
+            )
         if external.sac_meeting_number:
             authority_reference["sac_meeting_number"] = external.sac_meeting_number
         if external.decision_date:
@@ -1794,7 +2239,6 @@ class ShariaGovernanceService:
             ),
             "hilalmarkets_factual_information_profile": {
                 **profile,
-                "authority_published_profile": dict(external.structured_facts or {}),
                 "official_source_snapshot_ids": list(dossier.source_snapshot_ids),
                 "missing_information": output.get("missing_evidence") or [],
                 "contradictions": output.get("contradictions") or [],
@@ -1813,6 +2257,12 @@ class ShariaGovernanceService:
                     else (
                         "HilalMarkets factual research is not Fasset's unpublished reasoning "
                         "and is not an independent religious ruling."
+                        if rules.source_adapter == "fasset"
+                        else (
+                            "HilalMarkets factual research is separate from the "
+                            "Shariah Review Bureau reference and is not an independent "
+                            "religious ruling."
+                        )
                     )
                 ),
             },
@@ -2141,6 +2591,19 @@ def _hash_json(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()
+
+
+def _normalized_source_url(value: str) -> str:
+    parsed = urlsplit(value.strip())
+    return urlunsplit(
+        (
+            parsed.scheme.casefold(),
+            parsed.netloc.casefold(),
+            parsed.path or "/",
+            "",
+            "",
+        )
+    )
 
 
 def _as_utc(value: datetime) -> datetime:

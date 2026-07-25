@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "External Asset Assessment Seed",
+  "type": "object",
+  "required": [
+    "source_row_id",
+    "methodology_id",
+    "asset_name_source",
+    "symbol_source",
+    "external_status_source",
+    "normalized_status",
+    "source_url",
+    "publication_state",
+    "auto_publish"
+  ],
+  "properties": {
+    "source_row_id": {
+      "type": "string"
+    },
+    "methodology_id": {
+      "type": "string"
+    },
+    "asset_name_source": {
+      "type": "string"
+    },
+    "symbol_source": {
+      "type": "string"
+    },
+    "canonical_symbol_candidate": {
+      "type": "string"
+    },
+    "external_status_source": {
+      "type": "string"
+    },
+    "normalized_status": {
+      "enum": [
+        "ELIGIBLE_EXTERNAL_REFERENCE",
+        "NOT_ELIGIBLE_EXTERNAL_REFERENCE"
+      ]
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "publication_state": {
+      "type": "string"
+    },
+    "auto_publish": {
+      "const": false
+    },
+    "manual_verification_required": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,142 @@
+[
+  {
+    "path": ".env.example.additions",
+    "sha256": "f3fb464d9235da00cb19e5117c98a11b4830ebab57ce3ec49aba7e3bf25ad2b6",
+    "bytes": 367
+  },
+  {
+    "path": "CODEX_IMPLEMENTATION_PROMPT.txt",
+    "sha256": "a3502fbdce1e886676cdab46977495ef8f27767b153bb5a2d01dc1a5c7b96ee2",
+    "bytes": 6691
+  },
+  {
+    "path": "README.md",
+    "sha256": "1635f2e0474feefc13578b7b552d34918859a2b81702c9afeba6b394d73ab600",
+    "bytes": 1920
+  },
+  {
+    "path": "data/ai_enrichment_queue.jsonl",
+    "sha256": "40e0a0e312902bc02568ba591bca92e3cb4d6cb752325c08534c4c08d2a41c73",
+    "bytes": 328060
+  },
+  {
+    "path": "data/fasset_compliant_assets.csv",
+    "sha256": "a93ee8e9933465ad760ee427ac75e4906b0e6b85f00eac10270818a4191f445a",
+    "bytes": 144049
+  },
+  {
+    "path": "data/fasset_compliant_assets.json",
+    "sha256": "fbf1cb3b0d7bb46b897d083dd5a73cdade70749f1f4102ef1d65edd26d2bdb3f",
+    "bytes": 252378
+  },
+  {
+    "path": "data/fasset_noncompliant_guard.csv",
+    "sha256": "536acf452f1ab35c51ef56e37be691a53edada97c404276d5903cae1457c92f7",
+    "bytes": 10101
+  },
+  {
+    "path": "data/fasset_noncompliant_guard.json",
+    "sha256": "e916ba54a0aef2dab992c4492ba04243dd389392dabc19619123b3bab28da33c",
+    "bytes": 27358
+  },
+  {
+    "path": "data/methodologies.json",
+    "sha256": "814494636beb187e5e8b9e879220a1226aa892109672de37d5eb3e45e624d302",
+    "bytes": 2348
+  },
+  {
+    "path": "data/methodology_union_matrix.csv",
+    "sha256": "522ee81e8267a7adc4f79b58a88cac247187e5549c8b5c734bae3c01c7f94fec",
+    "bytes": 35035
+  },
+  {
+    "path": "data/methodology_union_matrix.json",
+    "sha256": "3650b868e2a140a40d840019302a80cccf22b261f48b0cd73e82655840025576",
+    "bytes": 92063
+  },
+  {
+    "path": "data/passport_seed_records.jsonl",
+    "sha256": "fdd4f21723b3540e5408f835b24a1881dfb086b1a64c2989ab409c7d52f06f8e",
+    "bytes": 449731
+  },
+  {
+    "path": "data/sc_malaysia_compliant_assets.csv",
+    "sha256": "575a46f93231fbd1df739d27a94b488deb758098a3d9e95b632c3fda0677b7d6",
+    "bytes": 7762
+  },
+  {
+    "path": "data/sc_malaysia_compliant_assets.json",
+    "sha256": "1adf7136e0be4b873fcb43b36a299c982465b567331fafbdad960ec880e9104e",
+    "bytes": 15175
+  },
+  {
+    "path": "data/shariah_review_bureau_compliant_assets.csv",
+    "sha256": "47378a4da29748c0b2d6f2bc6af1b4f7481060683a7ff1f362d8533a22b76031",
+    "bytes": 19069
+  },
+  {
+    "path": "data/shariah_review_bureau_compliant_assets.json",
+    "sha256": "1cf411c70d2f5178211370657479c579e33632e1741753ceaba2c3ed0704c972",
+    "bytes": 38396
+  },
+  {
+    "path": "data/source_manifest.json",
+    "sha256": "5953c62c3899d26436c92b5ef4917938096bbb3ef3218574cc3ede838550c455",
+    "bytes": 1394
+  },
+  {
+    "path": "docs/ATTRIBUTION_AND_RIGHTS.md",
+    "sha256": "dae199a9a3811b4feda6ae41ec19b7570a430e29f4a2360616a150b28e9bea81",
+    "bytes": 1372
+  },
+  {
+    "path": "docs/FIELD_MAPPING.md",
+    "sha256": "e0f267cb0f6ccf5a703022c1ee443d6a14b9861ad04487575fba07928abffda8",
+    "bytes": 947
+  },
+  {
+    "path": "docs/PROVENANCE_AND_PUBLICATION_RULES.md",
+    "sha256": "fb1f7ca3ba4de3b51afa718496d2af9bf985d6b56ca6019151173f25a2dfe003",
+    "bytes": 1049
+  },
+  {
+    "path": "docs/REVIEW_CHECKLIST.md",
+    "sha256": "86836af66291409eef05ef123eeab611674f1ead57844913ba719867a66a6314",
+    "bytes": 718
+  },
+  {
+    "path": "docs/VALIDATION_REPORT.txt",
+    "sha256": "c877d27d8dbc4d5b8c76bb78e5a5b7834adca8479e03a81602f28e361215c494",
+    "bytes": 1224
+  },
+  {
+    "path": "manifest.json",
+    "sha256": "88fb746b67662f211f54f9dd34dbc80fcc879a62b7f97d5c4f315b1e5eba32ce",
+    "bytes": 543
+  },
+  {
+    "path": "schemas/external_assessment.schema.json",
+    "sha256": "0144cbad6cd2bd6399ddc878d53472c8ecbe20215b2a474b69249619ff58535b",
+    "bytes": 1142
+  },
+  {
+    "path": "schemas/methodology.schema.json",
+    "sha256": "d5ca384ee478be92f30ddcb24c64d42981a170791e5e9fec69a1be75747c5ba6",
+    "bytes": 993
+  },
+  {
+    "path": "schemas/passport_enrichment.schema.json",
+    "sha256": "131a6b9a3549e3c8c8fda458547404c60b0943d70f96184fbc3d5b217dcfaae1",
+    "bytes": 2899
+  },
+  {
+    "path": "scripts/inspect_bundle.py",
+    "sha256": "6f4c8d31c211c943f84661c9abdef34709a6d891648344e2afccd9facf653ead",
+    "bytes": 534
+  },
+  {
+    "path": "scripts/validate_bundle.py",
+    "sha256": "5885a218e7a00bc76811747ffc1e28b63fff4f424fa36621a25f7abb6395b232",
+    "bytes": 2152
+  }
+]

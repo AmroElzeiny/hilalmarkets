@@ -661,6 +661,7 @@ async def system_brain_review_decision(
     requested_evidence: str = Form(default=""),
     qualifications: str = Form(default=""),
     acknowledged_gaps: str = Form(default=""),
+    rights_clearance_reference: str = Form(default=""),
     criterion_key: list[str] = Form(default=[]),
     criterion_label: list[str] = Form(default=[]),
     criterion_outcome: list[str] = Form(default=[]),
@@ -731,6 +732,25 @@ async def system_brain_review_decision(
                 criterion_decisions=criteria,
                 use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
+            )
+        elif action == "approve_internal_only":
+            qualification_rows = [
+                line.strip() for line in qualifications.splitlines() if line.strip()
+            ]
+            await service.approve_internally(
+                case_id,
+                admin_user_id=principal.user_id,
+                reason=reason,
+                qualifications=qualification_rows,
+                criterion_decisions=criteria,
+                use_case_decisions=use_cases,
+                acknowledged_gaps=gap_rows,
+            )
+        elif action == "record_rights_clearance":
+            await service.record_rights_clearance(
+                case_id,
+                admin_user_id=principal.user_id,
+                clearance_reference=rights_clearance_reference or reason,
             )
         elif action == "publish":
             await service.publish_approved(

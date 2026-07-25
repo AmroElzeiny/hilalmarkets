@@ -43,6 +43,38 @@ class CanonicalAssetCandidate:
     contract_addresses: dict[str, str] = field(default_factory=dict)
     provider_ids: dict[str, str] = field(default_factory=dict)
     exchange_markets: tuple[ExchangeMarketIdentity, ...] = ()
+    accepted_source_names: tuple[str, ...] = ()
+    accepted_source_symbols: tuple[str, ...] = ()
+    source_binding_ref: str | None = None
+
+
+_VERIFIED_IDENTITY_NOTE = (
+    "Identity matched across name, symbol, native/token status, chain, and official site."
+)
+_NON_CONTRADICTORY_REVALIDATION_PREFIXES = (
+    "identity_provider_unavailable:",
+    "identity_catalog_invalid:",
+    "identity_platform_catalog_invalid:",
+    "canonical_identity_not_found:",
+    "official_source_missing:",
+)
+
+
+def can_reuse_verified_mapping(
+    external: ExternalAssessment,
+    asset: CanonicalAsset,
+) -> bool:
+    """Keep prior compound identity proof through non-contradictory outages."""
+
+    if external.canonical_asset_id != asset.id or asset.mapping_state != "verified":
+        return False
+    notes = [str(note).strip() for note in external.mapping_notes or []]
+    if _VERIFIED_IDENTITY_NOTE not in notes:
+        return False
+    return all(
+        note == _VERIFIED_IDENTITY_NOTE or note.startswith(_NON_CONTRADICTORY_REVALIDATION_PREFIXES)
+        for note in notes
+    )
 
 
 REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
@@ -54,9 +86,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://bitcoin.org/",
         official_documentation="https://developer.bitcoin.org/",
         provider_ids={"coingecko": "bitcoin"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "BTC/USDT", "BTC", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "BTC/USDT", "BTC", "USDT"),),
     ),
     "ETH": CanonicalAssetCandidate(
         name="Ethereum",
@@ -66,9 +96,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://ethereum.org/",
         official_documentation="https://ethereum.org/en/developers/docs/",
         provider_ids={"coingecko": "ethereum"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "ETH/USDT", "ETH", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "ETH/USDT", "ETH", "USDT"),),
     ),
     "SOL": CanonicalAssetCandidate(
         name="Solana",
@@ -78,9 +106,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://solana.com/",
         official_documentation="https://solana.com/docs",
         provider_ids={"coingecko": "solana"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "SOL/USDT", "SOL", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "SOL/USDT", "SOL", "USDT"),),
     ),
     "XRP": CanonicalAssetCandidate(
         name="Ripple",
@@ -90,9 +116,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://xrpl.org/",
         official_documentation="https://xrpl.org/docs/",
         provider_ids={"coingecko": "ripple"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "XRP/USDT", "XRP", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "XRP/USDT", "XRP", "USDT"),),
     ),
     "LTC": CanonicalAssetCandidate(
         name="Litecoin",
@@ -102,9 +126,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://litecoin.org/",
         official_documentation="https://litecoin.info/",
         provider_ids={"coingecko": "litecoin"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "LTC/USDT", "LTC", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "LTC/USDT", "LTC", "USDT"),),
     ),
     "BCH": CanonicalAssetCandidate(
         name="Bitcoin Cash",
@@ -114,9 +136,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://bitcoincash.org/",
         official_documentation="https://documentation.cash/",
         provider_ids={"coingecko": "bitcoin-cash"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "BCH/USDT", "BCH", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "BCH/USDT", "BCH", "USDT"),),
     ),
     "ADA": CanonicalAssetCandidate(
         name="Cardano",
@@ -126,9 +146,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://cardano.org/",
         official_documentation="https://docs.cardano.org/",
         provider_ids={"coingecko": "cardano"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "ADA/USDT", "ADA", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "ADA/USDT", "ADA", "USDT"),),
     ),
     "LINK": CanonicalAssetCandidate(
         name="Chainlink",
@@ -137,13 +155,9 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         native_chain="Ethereum",
         official_website="https://chain.link/",
         official_documentation="https://docs.chain.link/",
-        contract_addresses={
-            "ethereum": "0x514910771af9ca656af840dff83e8264ecf986ca"
-        },
+        contract_addresses={"ethereum": "0x514910771af9ca656af840dff83e8264ecf986ca"},
         provider_ids={"coingecko": "chainlink"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "LINK/USDT", "LINK", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "LINK/USDT", "LINK", "USDT"),),
     ),
     "UNI": CanonicalAssetCandidate(
         name="Uniswap",
@@ -152,13 +166,9 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         native_chain="Ethereum",
         official_website="https://uniswap.org/",
         official_documentation="https://docs.uniswap.org/",
-        contract_addresses={
-            "ethereum": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984"
-        },
+        contract_addresses={"ethereum": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984"},
         provider_ids={"coingecko": "uniswap"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "UNI/USDT", "UNI", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "UNI/USDT", "UNI", "USDT"),),
     ),
     "MATIC": CanonicalAssetCandidate(
         name="Polygon",
@@ -167,13 +177,9 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         native_chain="Ethereum and Polygon PoS",
         official_website="https://polygon.technology/",
         official_documentation="https://docs.polygon.technology/pos/concepts/tokens/matic",
-        contract_addresses={
-            "ethereum": "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0"
-        },
+        contract_addresses={"ethereum": "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0"},
         provider_ids={"coingecko": "matic-network"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "MATIC/USDT", "MATIC", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "MATIC/USDT", "MATIC", "USDT"),),
     ),
     "AVAX": CanonicalAssetCandidate(
         name="Avalanche",
@@ -183,9 +189,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://www.avax.network/",
         official_documentation="https://build.avax.network/docs/",
         provider_ids={"coingecko": "avalanche-2"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "AVAX/USDT", "AVAX", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "AVAX/USDT", "AVAX", "USDT"),),
     ),
     "DOT": CanonicalAssetCandidate(
         name="Polkadot",
@@ -195,9 +199,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://polkadot.com/",
         official_documentation="https://wiki.polkadot.network/",
         provider_ids={"coingecko": "polkadot"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "DOT/USDT", "DOT", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "DOT/USDT", "DOT", "USDT"),),
     ),
     "ATOM": CanonicalAssetCandidate(
         name="Cosmos",
@@ -207,9 +209,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://cosmos.network/",
         official_documentation="https://docs.cosmos.network/",
         provider_ids={"coingecko": "cosmos"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "ATOM/USDT", "ATOM", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "ATOM/USDT", "ATOM", "USDT"),),
     ),
     "WLD": CanonicalAssetCandidate(
         name="Worldcoin",
@@ -218,13 +218,9 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         native_chain="World Chain",
         official_website="https://world.org/",
         official_documentation="https://docs.world.org/",
-        contract_addresses={
-            "world_chain": "0x2cfc85d8e48f8eab294be644d9e25c3030863003"
-        },
+        contract_addresses={"world_chain": "0x2cfc85d8e48f8eab294be644d9e25c3030863003"},
         provider_ids={"coingecko": "worldcoin-wld"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "WLD/USDT", "WLD", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "WLD/USDT", "WLD", "USDT"),),
     ),
     "XLM": CanonicalAssetCandidate(
         name="Stellar",
@@ -234,9 +230,7 @@ REVIEWED_ASSET_CANDIDATES: dict[str, CanonicalAssetCandidate] = {
         official_website="https://stellar.org/",
         official_documentation="https://developers.stellar.org/docs/",
         provider_ids={"coingecko": "stellar"},
-        exchange_markets=(
-            ExchangeMarketIdentity("binance", "XLM/USDT", "XLM", "USDT"),
-        ),
+        exchange_markets=(ExchangeMarketIdentity("binance", "XLM/USDT", "XLM", "USDT"),),
     ),
 }
 
@@ -283,6 +277,8 @@ class CanonicalAssetMappingService:
             select(CanonicalAsset).where(CanonicalAsset.identity_hash == identity_hash)
         )
         if asset is None:
+            asset = await self._find_existing_identity(candidate)
+        if asset is None:
             asset = CanonicalAsset(
                 name=candidate.name,
                 symbol=candidate.symbol.upper(),
@@ -303,15 +299,63 @@ class CanonicalAssetMappingService:
                         "official_website",
                     ],
                     "source": "curated_official_metadata",
+                    "source_binding_ref": candidate.source_binding_ref,
                 },
             )
             self.session.add(asset)
             await self.session.flush()
+        else:
+            asset.name = candidate.name
+            asset.symbol = candidate.symbol.upper()
+            asset.asset_type = candidate.asset_type
+            asset.native_chain = candidate.native_chain
+            asset.contract_addresses = dict(candidate.contract_addresses)
+            asset.provider_ids = {
+                **dict(asset.provider_ids or {}),
+                **candidate.provider_ids,
+            }
+            asset.official_website = _normalized_url(candidate.official_website)
+            asset.official_documentation = _normalized_url(candidate.official_documentation)
+            asset.identity_hash = identity_hash
+            asset.mapping_state = "verified"
+            asset.mapping_evidence = {
+                "matched_fields": [
+                    "name",
+                    "symbol",
+                    "native_or_token_status",
+                    "native_chain_or_contract",
+                    "official_website",
+                ],
+                "source": "reviewed_identity_provider",
+                "source_binding_ref": candidate.source_binding_ref,
+            }
         external.canonical_asset_id = asset.id
         external.mapping_state = "mapped"
         external.mapping_notes = [
             "Identity matched across name, symbol, native/token status, chain, and official site."
         ]
+
+        desired_markets = {
+            (market.exchange.casefold(), market.market_symbol.upper())
+            for market in candidate.exchange_markets
+        }
+        existing_asset_markets = list(
+            (
+                await self.session.scalars(
+                    select(ExchangeMarket).where(
+                        ExchangeMarket.canonical_asset_id == asset.id,
+                        ExchangeMarket.exchange.in_({"binance", "bybit"}),
+                        ExchangeMarket.quote_asset == "USDT",
+                    )
+                )
+            ).all()
+        )
+        for existing_asset_market in existing_asset_markets:
+            if (
+                existing_asset_market.exchange.casefold(),
+                existing_asset_market.market_symbol.upper(),
+            ) not in desired_markets:
+                existing_asset_market.is_active = False
 
         for market in candidate.exchange_markets:
             existing_market = await self.session.scalar(
@@ -339,6 +383,20 @@ class CanonicalAssetMappingService:
                             }
                         ),
                     )
+                )
+            else:
+                existing_market.canonical_asset_id = asset.id
+                existing_market.base_asset = market.base_asset
+                existing_market.quote_asset = market.quote_asset
+                existing_market.market_type = "spot"
+                existing_market.is_active = True
+                existing_market.metadata_hash = _hash_json(
+                    {
+                        "exchange": market.exchange,
+                        "symbol": market.market_symbol,
+                        "base": market.base_asset,
+                        "quote": market.quote_asset,
+                    }
                 )
         await self._register_source(
             asset.id,
@@ -372,6 +430,48 @@ class CanonicalAssetMappingService:
         await self.session.flush()
         return asset
 
+    async def _find_existing_identity(
+        self,
+        candidate: CanonicalAssetCandidate,
+    ) -> CanonicalAsset | None:
+        """Reuse a verified canonical row only through compound identity evidence."""
+
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(CanonicalAsset).where(CanonicalAsset.symbol == candidate.symbol.upper())
+                )
+            ).all()
+        )
+        candidate_provider_id = str(candidate.provider_ids.get("coingecko") or "").strip()
+        candidate_website = _normalized_url(candidate.official_website)
+        matches = []
+        for row in rows:
+            if row.asset_type != candidate.asset_type:
+                continue
+            row_provider_id = str(dict(row.provider_ids or {}).get("coingecko") or "").strip()
+            provider_match = bool(
+                candidate_provider_id
+                and row_provider_id
+                and candidate_provider_id == row_provider_id
+            )
+            if provider_match:
+                matches.append(row)
+                continue
+            if _identity_text(row.name) != _identity_text(candidate.name):
+                continue
+            website_match = bool(
+                row.official_website and _normalized_url(row.official_website) == candidate_website
+            )
+            if website_match:
+                matches.append(row)
+        if len(matches) > 1:
+            raise AssetIdentityError(
+                "canonical_identity_duplicate",
+                "Multiple canonical rows match the same compound provider identity.",
+            )
+        return matches[0] if matches else None
+
     async def map_pilot(
         self,
         external: ExternalAssessment,
@@ -401,9 +501,7 @@ class CanonicalAssetMappingService:
     ) -> CanonicalAsset:
         candidate = REVIEWED_ASSET_CANDIDATES.get(external.asset_symbol.upper())
         if candidate is None:
-            problems = [
-                "No reviewed canonical metadata exists for this imported authority record."
-            ]
+            problems = ["No reviewed canonical metadata exists for this imported authority record."]
             external.mapping_state = "conflict"
             external.mapping_notes = problems
             await self._create_conflict_case(external, problems)
@@ -425,13 +523,21 @@ class CanonicalAssetMappingService:
         verified_exchange_symbols: set[str] | None,
     ) -> list[str]:
         problems: list[str] = []
-        if _identity_text(external.asset_name) != _identity_text(candidate.name):
+        accepted_names = {
+            _identity_text(candidate.name),
+            *(_identity_text(value) for value in candidate.accepted_source_names),
+        }
+        accepted_symbols = {
+            candidate.symbol.upper(),
+            *(value.upper() for value in candidate.accepted_source_symbols),
+        }
+        if _identity_text(external.asset_name) not in accepted_names:
             problems.append("Imported name does not match the canonical name.")
-        if external.asset_symbol.upper() != candidate.symbol.upper():
+        if external.asset_symbol.upper() not in accepted_symbols:
             problems.append("Imported symbol does not match the canonical symbol.")
-        if candidate.asset_type not in {"native_coin", "token"}:
+        if candidate.asset_type not in {"native_coin", "token", "network"}:
             problems.append("Native coin versus token status is missing.")
-        if candidate.asset_type == "native_coin" and not candidate.native_chain:
+        if candidate.asset_type in {"native_coin", "network"} and not candidate.native_chain:
             problems.append("Native chain is missing.")
         if candidate.asset_type == "token" and not candidate.contract_addresses:
             problems.append("Token contract addresses are missing.")

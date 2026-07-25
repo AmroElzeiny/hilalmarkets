@@ -1167,7 +1167,7 @@ async def test_advanced_dashboard_pages_render(test_context):
     await _signup(test_context, "dashboard-pages@example.com")
 
     for path, expected in [
-        ("/dashboard/strategies/new", "Guided Watchlist"),
+        ("/dashboard/strategies/new", "Market Assistant"),
         ("/dashboard/strategies/new", "AI Sheet"),
         ("/dashboard/strategies/new", "Preview mechanics"),
         ("/dashboard/strategies/new", "Visual Strategy Canvas"),

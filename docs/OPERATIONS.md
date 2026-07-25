@@ -83,7 +83,7 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `SHARIA_REVIEW_REMINDER_HOURS` | Reminder window for open review cases. Default: `6`. |
 | `SHARIA_REVIEW_SLA_HOURS` | Initial due-date window for review cases. Default: `48`. |
 | `REQUIRE_SECOND_REVIEWER` | When true, the reviewer cannot publish the same decision. Default: `false`. |
-| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Authority import and published-source monitoring interval. Default: `240` (10 days). |
+| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Authority import and approved-source monitoring interval. Default: `24` hours. |
 | `SHARIA_SCRAPER_CONCURRENCY` | Must be `1`; official sources are fetched sequentially. |
 | `SHARIA_SCRAPER_OBEY_ROBOTS` | Must remain `true` in staging and production. |
 | `SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS` | Delay between official-source requests; deployed minimum is one second. |
@@ -265,8 +265,8 @@ Scheduled tasks currently wired:
 - Dormant WhatsApp webhook/retry tasks only when the separately disabled WhatsApp feature is enabled.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
-- Idempotent SC Malaysia and Fasset authority imports every
-  `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` (240 hours by default).
+- Idempotent methodology-pack, SC Malaysia, and Fasset authority imports every
+  `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` (24 hours by default).
 - Hourly open-review reminders and minute-level Telegram retry processing.
 - Published-asset source monitoring at `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`.
 

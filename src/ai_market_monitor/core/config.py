@@ -106,12 +106,24 @@ class Settings(BaseSettings):
     sharia_review_reminder_hours: int = Field(default=6, ge=1, le=168)
     sharia_review_sla_hours: int = Field(default=48, ge=1, le=720)
     require_second_reviewer: bool = False
-    sharia_source_scan_interval_hours: int = Field(default=240, ge=1, le=720)
+    sharia_source_scan_interval_hours: int = Field(default=24, ge=1, le=720)
     sharia_scraper_concurrency: int = Field(default=1, ge=1, le=4)
     sharia_scraper_obey_robots: bool = True
     sharia_scraper_download_delay_seconds: float = Field(default=1, ge=0.2, le=60)
     sharia_pilot_symbols: str = "BTC,ETH,SOL"
     sharia_process_remaining_imports: bool = True
+    sharia_import_pack_path: str = (
+        "HilalMarkets_Sharia_Methodology_Import_Pack/"
+        "HilalMarkets_Sharia_Methodology_Import_Pack"
+    )
+    sharia_import_auto_publish: bool = False
+    sharia_import_require_admin_review: bool = True
+    sharia_import_metadata_only_publication: bool = False
+    sharia_identity_discovery_batch_size: int = Field(default=250, ge=1, le=500)
+    sharia_external_rights_enforcement: bool = True
+    sharia_ai_enrichment_enabled: bool = True
+    sharia_ai_enrichment_official_sources_only: bool = True
+    sharia_ai_enrichment_store_as_external_reason: bool = False
     tracedge_market_data_mode: Literal["ccxt", "fixture"] = "ccxt"
     tracedge_fixture_market_data_enabled: bool = False
     market_data_provider: Literal["ccxt", "memory"] = "ccxt"
@@ -453,6 +465,22 @@ class Settings(BaseSettings):
             )
         if not self.sharia_pilot_symbol_set:
             raise ValueError("SHARIA_PILOT_SYMBOLS must include at least one reviewed symbol")
+        if (
+            self.sharia_import_auto_publish
+            and not self.sharia_import_metadata_only_publication
+        ):
+            raise ValueError(
+                "SHARIA_IMPORT_METADATA_ONLY_PUBLICATION must be true when "
+                "SHARIA_IMPORT_AUTO_PUBLISH is enabled"
+            )
+        if not self.sharia_external_rights_enforcement:
+            raise ValueError("SHARIA_EXTERNAL_RIGHTS_ENFORCEMENT must remain true")
+        if not self.sharia_ai_enrichment_official_sources_only:
+            raise ValueError("SHARIA_AI_ENRICHMENT_OFFICIAL_SOURCES_ONLY must remain true")
+        if self.sharia_ai_enrichment_store_as_external_reason:
+            raise ValueError(
+                "SHARIA_AI_ENRICHMENT_STORE_AS_EXTERNAL_REASON must remain false"
+            )
         required_rate_limits = {
             "authentication",
             "ai_chat",

@@ -11,14 +11,17 @@
 
 <section class="passport-summary-header">
   <div class="passport-summary-main">
-    <div class="coin-logo passport-summary-logo"{% if passport.identity and passport.identity.logo_module_url %} data-asset-logo-module="{{ passport.identity.logo_module_url }}" data-asset-logo-symbol="{{ passport.identity.symbol }}"{% endif %}>{{ (passport.identity.symbol if passport.identity else passport.assessment.canonical_asset)[:3] }}</div>
+    <div class="coin-logo passport-summary-logo"{% if passport.identity and passport.identity.logo_module_url %} data-asset-logo-module="{{ passport.identity.logo_module_url }}" data-asset-logo-symbol="{{ passport.identity.symbol }}"{% if passport.identity.logo_url %} data-asset-logo-url="{{ passport.identity.logo_url }}"{% endif %}{% endif %}>{{ (passport.identity.symbol if passport.identity else passport.assessment.canonical_asset)[:3] }}</div>
     <div class="passport-summary-copy">
       <span class="kicker">{{ 'Historical Passport version ' ~ passport.passport_version if passport.historical.is_historical else 'Current published record' }}</span>
       <h1>{{ passport.identity.name if passport.identity else passport.assessment.asset_name or passport.assessment.canonical_asset }}</h1>
       <p>{{ passport.identity.symbol if passport.identity else passport.assessment.canonical_asset }}{% if passport.identity and passport.identity.network %} | {{ passport.identity.network }}{% endif %} | {{ 'Native asset' if passport.identity and passport.identity.native_asset else 'Token' if passport.identity and passport.identity.native_asset == false else 'Asset type not recorded' }}</p>
     </div>
   </div>
-  <div class="passport-summary-status"><span class="badge {{ status_class }}">{{ passport.assessment.status_label }}</span><span class="passport-freshness is-{{ passport.freshness }}">Evidence: {{ passport.freshness.replace('_', ' ').title() }}</span></div>
+  <div class="passport-summary-status">
+    <span class="badge {{ status_class }}">{{ passport.assessment.status_label }}</span>
+    {% if passport.last_verified_at %}<span class="passport-freshness">Research verified {{ passport.last_verified_at|short_dt(user.timezone) }}</span>{% endif %}
+  </div>
   <div class="passport-summary-facts">
     <div><small>Methodology</small><strong>{{ passport.assessment.methodology_name }} v{{ passport.assessment.methodology_version }}</strong></div>
     <div><small>Decision</small><strong>{{ passport.decision_date|short_dt(user.timezone) if passport.decision_date else 'Not recorded' }}</strong></div>
@@ -28,6 +31,16 @@
     <div><small>Next source scan</small><strong>{{ passport.next_source_scan_at|short_dt(user.timezone) if passport.next_source_scan_at else 'Not scheduled' }}</strong></div>
     <div><small>Source monitoring</small><strong>{% if passport.source_scan_frequency_hours %}{{ passport.source_scan_frequency_hours }} hour cadence{% else %}Not configured{% endif %}</strong></div>
   </div>
+  {% if passport.methodology_references|length > 1 %}
+  <div class="passport-methodology-references" aria-label="Published methodology results">
+    <small>Published methodology results</small>
+    <div class="row wrap">
+      {% for reference in passport.methodology_references %}
+      <span class="passport-methodology-reference"><strong>{{ reference.methodology_name }}</strong><span>{{ reference.status_label }}{% if reference.review_date %} | reviewed {{ reference.review_date|short_dt(user.timezone) }}{% endif %}</span></span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   {% if passport.main_qualification %}<div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Main qualification</strong><p>{{ passport.main_qualification }}</p></div></div>{% endif %}
   <div class="row wrap passport-summary-actions">
     <a class="btn btn-secondary" href="/dashboard/market"><span data-icon="arrow" data-icon-class="icon"></span>Back to market</a>
@@ -49,7 +62,7 @@
     <article class="panel"><h3>Decision summary</h3><p class="lead">{{ passport.why_this_status }}</p><ul class="passport-reason-list">{% for reason in passport.main_reasons %}<li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ reason }}</span></li>{% else %}<li>No additional plain-language reasons were retained.</li>{% endfor %}</ul></article>
     <article class="panel"><h3>Boundaries</h3><p>This is an asset-level screening record under one disclosed methodology. Lending, leverage, derivatives, third-party yield, and wrapped forms need their own coverage result.</p>{% if passport.main_qualification %}<div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><p>{{ passport.main_qualification }}</p></div></div>{% endif %}</article>
   </div>
-  {% set authority_profile = passport.hilalmarkets_factual_information_profile.get('authority_published_profile', {}) %}
+  {% set authority_profile = passport.official_methodology_reference.get('published_profile_facts', {}) %}
   {% if authority_profile %}
   <article class="panel">
     <div class="panel-head"><div><span class="kicker">Published authority profile</span><h3>Facts retained from {{ passport.official_methodology_reference.get('authority', 'the methodology source') }}</h3><p>These fields reproduce the retained source profile. Missing values are not filled or inferred.</p></div></div>
@@ -86,7 +99,7 @@
       <article class="panel"><div class="panel-head"><div><h3>Evidence sources</h3><p>Live links may change; retained snapshot references and hashes do not.</p></div></div>{% for source in passport.evidence_details %}<details class="passport-accordion"><summary><span>{{ source.title }}</span><span class="badge {{ 'badge-eligible' if source.availability == 'available' else 'badge-review' }}">{{ source.availability.replace('_', ' ').title() }}</span></summary><div class="passport-accordion-body"><p>{{ source.evidence_summary }}</p><div class="passport-evidence-facts"><span>Publisher: {{ source.publisher }}</span><span>Retrieved: {{ source.retrieved_at|short_dt(user.timezone) }}</span><span>Published: {{ source.published_at|short_dt(user.timezone) if source.published_at else 'Not recorded' }}</span></div>{% if source.source_url %}<a class="link-arrow" href="{{ source.source_url }}" target="_blank" rel="noopener">Open source <span data-icon="arrow" data-icon-class="icon-sm"></span></a>{% endif %}<details class="technical-details"><summary>Technical evidence details</summary><dl><div><dt>Snapshot reference</dt><dd>{{ source.snapshot_id or 'Legacy source record' }}</dd></div><div><dt>Content hash</dt><dd>{{ source.content_hash or 'Not retained' }}</dd></div><div><dt>Parser version</dt><dd>{{ source.parser_version or 'Not retained' }}</dd></div><div><dt>AI extraction</dt><dd>{{ source.ai_extraction_version or 'Not used or not retained' }}</dd></div></dl></details></div></details>{% else %}<div class="empty-state compact"><h3>Exact source evidence is unavailable</h3><p>Hilal Markets does not invent or substitute a missing historical source.</p></div>{% endfor %}</article>
     </div>
     <aside class="stack">
-      <article class="panel"><span class="kicker">AI factual dossier</span><h3>AI-organized factual research &mdash; not a religious decision.</h3>{% set profile = passport.hilalmarkets_factual_information_profile %}{% for key in ['primary_activity','token_utility','token_role','staking','lending_and_yield','yield','governance','treasury_and_governance','tokenomics_and_backing','derivatives','wrapped_forms'] %}{% if profile.get(key) %}<div class="method-result"><div><strong>{{ key.replace('_', ' ').title() }}</strong><small>{{ profile.get(key) }}</small></div></div>{% endif %}{% endfor %}{% if profile.get('missing_information') %}<div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Evidence gaps</strong><p>{{ profile.get('missing_information')|join(' | ') }}</p></div></div>{% endif %}<details class="technical-details"><summary>Dossier technical details</summary><p>AI output organizes source-bound facts. It cannot approve, reject, publish, or set a Sharia status.</p></details></article>
+      <article class="panel"><span class="kicker">HilalMarkets factual dossier</span><h3>AI-organized factual research &mdash; not a religious decision.</h3>{% set profile = passport.hilalmarkets_factual_information_profile %}{% for key in ['primary_activity','token_role_and_utility','asset_type','native_chain_or_contract','data_structure','smart_contract_capability','transaction_validation','consensus_mechanism','governance_model','tokenomics','staking_and_rewards','lending_borrowing','interest_or_yield','derivatives_and_prediction_products','treasury_and_revenue','backing_redemption_or_collateral','token_utility','token_role','staking','lending_and_yield','yield','governance','treasury_and_governance','tokenomics_and_backing','derivatives','wrapped_forms'] %}{% if profile.get(key) %}<div class="method-result"><div><strong>{{ key.replace('_', ' ').title() }}</strong><small>{{ profile.get(key) }}</small></div></div>{% endif %}{% endfor %}{% if profile.get('missing_information') %}<div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Evidence gaps</strong><p>{{ profile.get('missing_information')|join(' | ') }}</p></div></div>{% endif %}{% if profile.get('contradictions') %}<div class="notice notice-danger"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Unresolved contradictions</strong><p>{{ profile.get('contradictions')|join(' | ') }}</p></div></div>{% endif %}<details class="technical-details"><summary>Dossier technical details</summary><p>AI output organizes source-bound facts. It cannot approve, reject, publish, or set a Sharia status.</p></details></article>
       <article class="panel"><span class="kicker">Methodology</span><h3>{{ passport.assessment.methodology_name }}</h3><div class="rule-row"><span>Version</span><strong>{{ passport.assessment.methodology_version }}</strong></div><div class="rule-row"><span>Review date</span><strong>{{ passport.assessment.reviewed_at|short_dt(user.timezone) }}</strong></div>{% if passport.official_source_url %}<a class="btn btn-secondary btn-sm" href="{{ passport.official_source_url }}" target="_blank" rel="noopener">View official source</a>{% endif %}<a class="btn btn-secondary btn-sm" href="/how-we-screen">How We Screen</a></article>
     </aside>
   </div>

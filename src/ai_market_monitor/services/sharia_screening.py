@@ -821,6 +821,13 @@ class ShariaScreeningService:
         summary_override: str | None = None,
     ) -> AssetAssessmentSummary:
         effective_status = status_override or assessment.status
+        passport = dict(assessment.evidence_snapshot or {})
+        factual_profile = dict(
+            passport.get("hilalmarkets_factual_information_profile") or {}
+        )
+        identity = dict(factual_profile.get("canonical_asset_identity") or {})
+        provider_ids = dict(identity.get("provider_ids") or {})
+        logo_url = str(provider_ids.get("logo_url") or "").strip() or None
         return AssetAssessmentSummary(
             id=assessment.id,
             canonical_asset=assessment.canonical_asset,
@@ -838,6 +845,7 @@ class ShariaScreeningService:
             valid_until=assessment.valid_until,
             approved_status=assessment.status if status_override else None,
             safety_hold=status_override is not None,
+            logo_url=logo_url,
         )
 
     @staticmethod

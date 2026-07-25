@@ -21,6 +21,23 @@ def _run_alembic(repo_root: Path, env: dict[str, str], revision: str) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def _run_alembic_downgrade(
+    repo_root: Path,
+    env: dict[str, str],
+    revision: str,
+) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "downgrade", revision],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_sharia_migration_identifiers_fit_postgresql_limit():
     repo_root = Path(__file__).resolve().parents[2]
     migration_paths = [
@@ -40,6 +57,10 @@ def test_sharia_migration_identifiers_fit_postgresql_limit():
         / "alembic"
         / "versions"
         / "70a1395b26cf_add_system_brain_user_controls.py",
+        repo_root
+        / "alembic"
+        / "versions"
+        / "81b24a6c37de_add_methodology_import_pack_metadata.py",
     ]
     explicit_names = [
         name
@@ -81,13 +102,19 @@ def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):
             SELECT code, version, status
             FROM sharia_methodologies
             WHERE code = 'SC_MALAYSIA_SAC_REFERENCE'
+              AND status = 'active'
             """
         ).fetchone()
         additional_methodologies = connection.execute(
             """
             SELECT code, name, status, rules_json
             FROM sharia_methodologies
-            WHERE code IN ('ALL_APPROVED_METHODOLOGIES', 'FASSET_SHARIAH_REPORTS')
+            WHERE code IN (
+                'ALL_APPROVED_METHODOLOGIES',
+                'FASSET_SHARIAH_REPORTS',
+                'SHARIAH_REVIEW_BUREAU'
+            )
+              AND status = 'active'
             ORDER BY code
             """
         ).fetchall()
@@ -129,21 +156,97 @@ def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):
         "account_admin_actions",
         "account_email_deliveries",
     }.issubset(table_names)
-    assert methodology == ("SC_MALAYSIA_SAC_REFERENCE", "2026.03", "active")
+    assert methodology == (
+        "SC_MALAYSIA_SAC_REFERENCE",
+        "2026.07-pack.1",
+        "active",
+    )
     assert [(row[0], row[1], row[2]) for row in additional_methodologies] == [
         ("ALL_APPROVED_METHODOLOGIES", "All", "active"),
-        ("FASSET_SHARIAH_REPORTS", "Fasset", "active"),
+        (
+            "FASSET_SHARIAH_REPORTS",
+            "Fasset Shariah Reports",
+            "active",
+        ),
+        (
+            "SHARIAH_REVIEW_BUREAU",
+            "Shariah Review Bureau",
+            "active",
+        ),
     ]
     assert '"aggregate_view": true' in additional_methodologies[0][3]
     assert '"source_adapter": "fasset"' in additional_methodologies[1][3]
+    assert '"source_adapter": "srb"' in additional_methodologies[2][3]
     assert development_methodology == ("archived",)
     assert {
         "source_family",
         "source_reference",
         "structured_facts",
+        "methodology_id",
+        "source_row_id",
+        "rights_state",
+        "commercial_display_allowed",
+        "source_detail_extraction_state",
+        "source_detail_snapshot_id",
+        "source_detail_fields",
+        "passport_seed_snapshot",
+        "enrichment_state",
     }.issubset(external_columns)
     assert canonical_assets == 0
     assert published_assets == 0
+
+
+def test_methodology_import_pack_migration_round_trip_restores_prior_version(
+    tmp_path,
+):
+    repo_root = Path(__file__).resolve().parents[2]
+    database_path = tmp_path / "methodology-pack-round-trip.sqlite3"
+    env = os.environ.copy()
+    env.update(
+        {
+            "APP_ENV": "test",
+            "APP_SECRET_KEY": (
+                "test-secret-key-with-at-least-thirty-two-characters"
+            ),
+            "DATABASE_URL": (
+                f"sqlite+aiosqlite:///{database_path.as_posix()}"
+            ),
+            "ALLOW_MOCK_PROVIDERS": "true",
+        }
+    )
+
+    _run_alembic(repo_root, env, "head")
+    _run_alembic_downgrade(repo_root, env, "70a1395b26cf")
+
+    with sqlite3.connect(database_path) as connection:
+        active_rows = connection.execute(
+            """
+            SELECT code, version
+            FROM sharia_methodologies
+            WHERE status = 'active'
+              AND code IN (
+                'SC_MALAYSIA_SAC_REFERENCE',
+                'FASSET_SHARIAH_REPORTS',
+                'SHARIAH_REVIEW_BUREAU'
+              )
+            ORDER BY code
+            """
+        ).fetchall()
+        external_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info('external_assessments')"
+            ).fetchall()
+        }
+
+    assert active_rows == [
+        ("FASSET_SHARIAH_REPORTS", "2026.07"),
+        ("SC_MALAYSIA_SAC_REFERENCE", "2026.03"),
+    ]
+    assert "source_row_id" not in external_columns
+    assert "enrichment_state" not in external_columns
+
+    _run_alembic(repo_root, env, "head")
 
 
 def test_sharia_migration_pauses_existing_active_monitors(tmp_path):

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HilalMarkets Factual Passport Profile",
+  "type": "object",
+  "required": [
+    "canonical_asset_identity",
+    "primary_activity",
+    "token_role_and_utility",
+    "official_source_registry",
+    "missing_information",
+    "plain_language_profile"
+  ],
+  "properties": {
+    "canonical_asset_identity": {
+      "type": "object"
+    },
+    "official_website": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "official_documentation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "primary_activity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "token_role_and_utility": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "asset_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "native_chain_or_contract": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "data_structure": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "smart_contract_capability": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "transaction_validation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "consensus_mechanism": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "governance_model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tokenomics": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "staking_and_rewards": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "lending_borrowing": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "interest_or_yield": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "derivatives_and_prediction_products": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "treasury_and_revenue": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "backing_redemption_or_collateral": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "official_source_registry": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "missing_information": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "plain_language_profile": {
+      "type": "string"
+    },
+    "provenance": {
+      "const": "HILALMARKETS_AI_ENRICHMENT_UNVERIFIED"
+    },
+    "manual_verification_required": {
+      "const": true
+    }
+  },
+  "additionalProperties": false
+}

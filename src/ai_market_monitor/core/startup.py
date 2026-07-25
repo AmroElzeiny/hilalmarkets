@@ -114,11 +114,8 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 "DERIVATIVES_CONTEXT_API_URL or a tested derivatives adapter is required "
                 "when BINANCE_DERIVATIVES_ENABLED=true"
             )
-        if settings.coingecko_enabled and settings.market_metadata_api_url is None:
-            errors.append(
-                "MARKET_METADATA_API_URL or a tested CoinGecko adapter is required "
-                "when COINGECKO_ENABLED=true"
-            )
+        # Canonical Sharia identity discovery has a tested, read-only CoinGecko
+        # adapter and does not require the optional generic metadata endpoint.
         if settings.alternative_me_enabled and settings.crypto_index_api_url is None:
             errors.append(
                 "CRYPTO_INDEX_API_URL or a tested Alternative.me adapter is required "

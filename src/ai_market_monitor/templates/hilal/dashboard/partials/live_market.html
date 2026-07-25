@@ -5,12 +5,16 @@
   data-methodology-id="{{ selected_methodology_id }}"
   data-exchange="{{ selected_exchange }}"
   data-quote="{{ selected_quote_asset }}"
+  data-favorite-assets='{{ favorite_assets | tojson }}'
+  data-favorite-watchlist-id="{{ favorite_watchlist_id or '' }}"
 >
   <div class="live-market-toolbar">
+    <div class="live-market-title"><h1>Halal Assets</h1></div>
     <div class="live-market-toolbar-actions">
-      <button class="btn btn-secondary" type="button" data-saved-assets-open>
-        <span data-icon="watchlist" data-icon-class="icon"></span>
-        Saved Assets{% if saved_assets %}<span class="nav-count">{{ saved_assets|length }}</span>{% endif %}
+      <button class="btn btn-secondary favorite-list-button" type="button" data-saved-assets-open>
+        <img class="favorite-heart-icon favorite-heart-outline" src="{{ url_for('static', path='/ui-heart.svg') }}" alt="">
+        <img class="favorite-heart-icon favorite-heart-solid" src="{{ url_for('static', path='/ui-heart-filled.svg') }}" alt="">
+        Favorites<span class="nav-count" data-favorite-count {{ 'hidden' if not favorite_assets else '' }}>{{ favorite_assets|length }}</span>
       </button>
       <a class="btn btn-primary" href="/dashboard/strategies/new">
         <span data-icon="radar" data-icon-class="icon"></span>
@@ -28,7 +32,7 @@
       <span>Methodology</span>
       <span class="hm-select-control" data-hm-select>
         <select class="select" name="methodology_id" data-live-market-methodology>
-          {% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }} | v{{ method.version }}</option>{% endfor %}
+          {% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }}</option>{% endfor %}
         </select>
       </span>
     </label>
@@ -36,8 +40,8 @@
       <span>Exchange</span>
       <span class="hm-select-control" data-hm-select>
         <select class="select" name="exchange" data-live-market-exchange>
-          <option value="binance" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance</option>
-          <option value="bybit" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit</option>
+          <option value="binance" data-hm-select-icon="{{ url_for('static', path='/brand-binance.svg') }}" {{ 'selected' if selected_exchange == 'binance' else '' }}>Binance</option>
+          <option value="bybit" data-hm-select-icon="{{ url_for('static', path='/brand-bybit.svg') }}" {{ 'selected' if selected_exchange == 'bybit' else '' }}>Bybit</option>
         </select>
       </span>
     </label>
@@ -49,7 +53,7 @@
   <div class="live-market-scroll" role="region" aria-label="Live screened spot market quotes" tabindex="0">
     <div class="live-market-table" role="table" aria-rowcount="-1">
       <div class="live-market-head" role="row">
-        <span role="columnheader">Coin</span><span role="columnheader">Status</span><span role="columnheader">Bid</span><span role="columnheader">Ask</span><span role="columnheader">24h</span><span role="columnheader">Spread</span><span role="columnheader">24h volume</span><span role="columnheader">Passport</span>
+        <span role="columnheader">Coin</span><span role="columnheader">Status</span><span role="columnheader">Bid</span><span role="columnheader">Ask</span><span role="columnheader">24h</span><span role="columnheader">24h volume</span><span role="columnheader">Passport</span>
       </div>
       <div class="live-market-body" data-live-market-body aria-live="off">
         {% for _ in range(8) %}<div class="live-market-skeleton"><i></i><i></i><i></i><i></i><i></i></div>{% endfor %}

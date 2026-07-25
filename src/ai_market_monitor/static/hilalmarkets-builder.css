@@ -35,6 +35,27 @@
 .builder-shell[hidden]{display:none!important}
 body.ai-canvas-active .guided-builder-heading,body.ai-canvas-active .guided-starts{display:none}
 body.ai-canvas-active .builder-shell{margin-right:370px}
+.embedded-board-window{overflow:hidden;border:1px solid var(--line);border-radius:var(--radius);background:var(--ivory-2);box-shadow:var(--shadow-sm)}
+.embedded-board-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;border-bottom:1px solid var(--line);background:#fff}
+.embedded-board-header h3{margin:3px 0 0;color:var(--ink)}
+.strategy-board-tools{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:.78rem;font-weight:700}
+.strategy-board-tools button,.strategy-board-node [data-board-edit],.board-node-menu button{min-height:34px;padding:0 11px;border:1px solid var(--line);border-radius:10px;background:var(--emerald-50);color:var(--emerald-900);font:inherit;font-size:.76rem;font-weight:700;cursor:pointer;transition:border-color .2s,background .2s,transform .2s}
+.strategy-board-tools button:hover,.strategy-board-tools button:focus-visible,.strategy-board-node [data-board-edit]:hover,.strategy-board-node [data-board-edit]:focus-visible,.board-node-menu button:hover,.board-node-menu button:focus-visible{border-color:var(--emerald-600);background:var(--emerald-100);outline:3px solid rgba(31,139,116,.12);transform:translateY(-1px)}
+.strategy-board-surface{position:relative;min-height:560px;overflow:hidden;background:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px),var(--ivory-2);background-size:28px 28px;touch-action:none}
+.strategy-board-content{position:absolute;inset:0;width:10000px;height:8000px;transform-origin:0 0}
+.strategy-board-arrows{position:absolute;inset:0;overflow:visible;fill:none;stroke:var(--emerald-600);stroke-width:2.5;pointer-events:none}
+.strategy-board-arrows path[data-board-edge]{fill:none;stroke:var(--emerald-600);marker-end:url(#board-arrow-head)}
+.strategy-board-arrows marker path{fill:var(--emerald-600);stroke:none}
+.strategy-board-node{position:absolute;width:260px;display:grid;gap:8px;padding:17px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--ink);box-shadow:var(--shadow-sm);cursor:grab}
+.strategy-board-node.is-dragging{cursor:grabbing;box-shadow:var(--shadow)}
+.strategy-board-node.focused{border-color:var(--emerald-600);box-shadow:0 0 0 4px rgba(31,139,116,.12),var(--shadow)}
+.strategy-board-node>span{color:var(--emerald-700);font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.strategy-board-node strong{font-size:.94rem}
+.strategy-board-node p{margin:0;color:var(--muted);font-size:.78rem;line-height:1.5}
+.strategy-board-node [data-board-edit]{justify-self:start;margin-top:3px}
+.board-node-connector{position:absolute;top:50%;right:-8px;width:16px;height:16px;border:3px solid #fff;border-radius:50%;background:var(--emerald-600);box-shadow:0 0 0 1px var(--emerald-600);cursor:pointer;transform:translateY(-50%)}
+.board-node-menu{position:absolute;z-index:5;display:flex;gap:6px;padding:8px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:var(--shadow)}
+.board-node-menu[hidden]{display:none!important}
 @media(max-width:1050px){.guided-builder-heading{display:grid}.guided-builder-heading-actions,.advanced-control-launcher{width:100%}.ai-setup-chat-shell{height:auto;min-height:0}}
-@media(max-width:700px){.guided-builder-heading h1{font-size:2.2rem}.guided-starts{flex-wrap:nowrap;overflow-x:auto}.guided-starts button{white-space:nowrap}.ai-chat-head-actions{flex-wrap:nowrap}.ai-setup-chat-shell{margin:0}body.ai-canvas-active .builder-shell{margin-right:0}}
+@media(max-width:700px){.guided-builder-heading h1{font-size:2.2rem}.guided-starts{flex-wrap:nowrap;overflow-x:auto}.guided-starts button{white-space:nowrap}.ai-chat-head-actions{flex-wrap:nowrap}.ai-setup-chat-shell{margin:0}body.ai-canvas-active .builder-shell{margin-right:0}.embedded-board-header{align-items:flex-start;flex-direction:column}.strategy-board-tools{width:100%;flex-wrap:wrap}.strategy-board-surface{min-height:470px}}
 @media(prefers-reduced-motion:reduce){.guided-starts button{transition:none}}

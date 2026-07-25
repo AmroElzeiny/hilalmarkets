@@ -247,7 +247,7 @@ class SystemBrainAssistantService:
         dashboard = ShariaAdminDashboardService(session)
         overview, cases, ai_operations, errors = await asyncio.gather(
             dashboard.reviewer_overview(),
-            dashboard.list_cases(limit=60),
+            dashboard.list_cases(limit=60, include_published=True),
             CapabilityCoverageService(self.settings).operations_summary(session),
             self._operational_errors(session),
         )

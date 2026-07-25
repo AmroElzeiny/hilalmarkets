@@ -9,8 +9,8 @@ from urllib.parse import urlencode
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from ai_market_monitor.db.models import (
     ApprovedWatchlistAsset,
     AssetShariaStatusHistory,
     BillingCheckoutAttempt,
+    CanonicalAsset,
     CapabilityExtension,
     ComplianceDriftNotification,
     DashboardNotification,
@@ -86,6 +87,7 @@ from ai_market_monitor.services.monitor_operations import (
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
+    AGGREGATE_METHODOLOGY_CODE,
     DEFAULT_ALLOWED_STATUSES,
     ShariaScreeningError,
     ShariaScreeningService,
@@ -1131,6 +1133,14 @@ async def dashboard_home(
     latest_alert = await session.scalar(
         select(Alert).where(Alert.user_id == user.id).order_by(Alert.created_at.desc()).limit(1)
     )
+    latest_setup_asset = None
+    if latest_setup is not None:
+        latest_setup_asset = await session.scalar(
+            select(CanonicalAsset)
+            .where(CanonicalAsset.symbol == canonical_asset(latest_setup.symbol))
+            .order_by(CanonicalAsset.created_at.desc())
+            .limit(1)
+        )
     telegram = await session.scalar(
         select(TelegramConnection).where(TelegramConnection.user_id == user.id)
     )
@@ -1177,6 +1187,20 @@ async def dashboard_home(
         "alerts_today": alerts_today,
         "active_lifecycle_count": active_lifecycle_count,
         "latest_setup": latest_setup,
+        "latest_setup_asset_symbol": (
+            latest_setup_asset.symbol if latest_setup_asset is not None else None
+        ),
+        "latest_setup_logo_module_url": (
+            "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
+            f"dist/svgs/tokens/branded/{latest_setup_asset.symbol.upper()}.svg.js"
+            if latest_setup_asset is not None
+            else None
+        ),
+        "latest_setup_logo_url": (
+            str((latest_setup_asset.provider_ids or {}).get("logo_url") or "").strip()
+            if latest_setup_asset is not None
+            else None
+        ),
         "latest_alert": _alert_view(latest_alert) if latest_alert else None,
         "coverage": coverage,
         "telegram_connected": bool(
@@ -1249,6 +1273,19 @@ async def screened_market_page(
     preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
         "default_sharia_methodology_id"
     )
+    # The Screened Market starts with the explicit All methodology. A saved
+    # user preference remains useful after a user deliberately picks another
+    # methodology, but it must not silently replace the product default.
+    if methodology_id is None and not (methodology_id_input or "").strip():
+        aggregate = next(
+            (
+                item
+                for item in methodologies
+                if item.code == AGGREGATE_METHODOLOGY_CODE
+            ),
+            None,
+        )
+        methodology_id = aggregate.id if aggregate is not None else None
     if methodology_id is None and preference_methodology:
         try:
             methodology_id = UUID(str(preference_methodology))
@@ -1260,31 +1297,36 @@ async def screened_market_page(
             methodology_id = None
     asset_scope: set[str] | None = None
     market_data_warning: str | None = None
-    if exchange:
-        try:
-            symbols = await provider.list_symbols(exchange, [quote_asset.upper()])
-            if liquidity is not None:
-                metadata_loader = getattr(provider, "fetch_universe_metadata", None)
-                if not callable(metadata_loader):
-                    market_data_warning = (
-                        "The configured provider cannot verify the selected liquidity filter."
-                    )
-                    symbols = []
-                else:
-                    metadata = await metadata_loader(exchange, symbols)
-                    symbols = [
-                        symbol
-                        for symbol in symbols
-                        if (metadata.get(symbol.upper(), {}).get("quote_volume_24h") or 0)
-                        >= liquidity
-                    ]
-            asset_scope = {canonical_asset(symbol) for symbol in symbols}
-        except Exception:
-            asset_scope = set()
-            market_data_warning = (
-                "Exchange market data is currently unavailable. No asset was guessed or "
-                "silently included."
-            )
+    try:
+        symbols = await provider.list_symbols(
+            selected_live_exchange,
+            [quote_asset.upper()],
+        )
+        if liquidity is not None:
+            metadata_loader = getattr(provider, "fetch_universe_metadata", None)
+            if not callable(metadata_loader):
+                market_data_warning = (
+                    "The configured provider cannot verify the selected liquidity filter."
+                )
+                symbols = []
+            else:
+                metadata = await metadata_loader(
+                    selected_live_exchange,
+                    symbols,
+                )
+                symbols = [
+                    symbol
+                    for symbol in symbols
+                    if (metadata.get(symbol.upper(), {}).get("quote_volume_24h") or 0)
+                    >= liquidity
+                ]
+        asset_scope = {canonical_asset(symbol) for symbol in symbols}
+    except Exception:
+        asset_scope = set()
+        market_data_warning = (
+            "Exchange market data is currently unavailable. No asset was guessed or "
+            "silently included."
+        )
     screened = await screening.list_screened_assets(
         methodology_id=methodology_id,
         statuses=set(status_filter) if status_filter else DEFAULT_ALLOWED_STATUSES,
@@ -1346,6 +1388,15 @@ async def screened_market_page(
         }
         for row, watchlist_name in saved_asset_rows
     ]
+    default_watchlist = next((item for item in watchlists if item.is_default), None)
+    favorite_assets = sorted(
+        {
+            item["canonical_asset"]
+            for item in saved_assets
+            if default_watchlist is not None
+            and item["watchlist_id"] == default_watchlist.id
+        }
+    )
     market_query: list[tuple[str, str]] = [("view", view), ("quote_asset", quote_asset)]
     if methodology_id:
         market_query.append(("methodology_id", str(methodology_id)))
@@ -1389,6 +1440,8 @@ async def screened_market_page(
             market_data_warning=market_data_warning,
             watchlists=watchlists,
             saved_assets=saved_assets,
+            favorite_assets=favorite_assets,
+            favorite_watchlist_id=(default_watchlist.id if default_watchlist else None),
             market_previous_url=(market_page_url(screened.page - 1) if screened.page > 1 else None),
             market_next_url=(
                 market_page_url(screened.page + 1) if screened.page < maximum_page else None
@@ -1506,17 +1559,50 @@ async def add_screened_asset_to_watchlist(
     asset_slug: str,
     watchlist_id: UUID | None = Form(default=None),
     methodology_id: UUID | None = Form(default=None),
+    response_format: Literal["html", "json"] = Query(default="html", alias="format"),
+    x_csrf_token: str | None = Header(default=None),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> RedirectResponse:
+) -> Response:
+    if response_format == "json" and not csrf_token_matches(
+        settings,
+        user.id,
+        x_csrf_token,
+    ):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
     screening = ShariaScreeningService(session, settings)
     try:
         methodology = await screening.resolve_methodology(methodology_id)
     except ShariaScreeningError:
+        if response_format == "json":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "approved_methodology_required",
+                        "message": (
+                            "A current approved methodology is required to follow this asset."
+                        ),
+                    }
+                },
+            )
         return _redirect(f"/dashboard/market/{asset_slug}?error=approved_methodology_required")
     assessment = await screening.effective_assessment(methodology.id, asset_slug)
     if assessment is None or assessment.status not in DEFAULT_ALLOWED_STATUSES:
+        if response_format == "json":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "asset_not_eligible",
+                        "message": (
+                            "This asset is not currently available to follow under the selected "
+                            "methodology."
+                        ),
+                    }
+                },
+            )
         return _redirect(f"/dashboard/market/{asset_slug}?error=asset_not_eligible")
     watchlist = await session.get(ApprovedWatchlist, watchlist_id) if watchlist_id else None
     if watchlist is not None and watchlist.user_id != user.id:
@@ -1554,6 +1640,15 @@ async def add_screened_asset_to_watchlist(
             )
         )
     await session.commit()
+    if response_format == "json":
+        return JSONResponse(
+            {
+                "canonical_asset": asset,
+                "watchlist_id": str(watchlist.id),
+                "favorite": True,
+                "status_change_following": True,
+            }
+        )
     return _redirect(f"/dashboard/market/{asset}?message=added_to_approved_watchlist")
 
 

@@ -737,29 +737,65 @@ async def _send_compliance_digests() -> dict:
 
 
 async def _process_sharia_authority_imports() -> dict:
+    import asyncio
     from dataclasses import asdict
     from uuid import UUID
 
     from sqlalchemy import select
 
     from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.db.models import ExternalAssessment, ReviewCase
+    from ai_market_monitor.db.models import (
+        AssetResearchDossier,
+        CanonicalAsset,
+        ExternalAssessment,
+        ReviewCase,
+    )
     from ai_market_monitor.services.fasset_import import FassetImporter
     from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
     from ai_market_monitor.services.sc_malaysia_import import SCMalaysiaImporter
     from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
     from ai_market_monitor.services.sharia_identity import (
-        AssetIdentityError,
         CanonicalAssetMappingService,
+        can_reuse_verified_mapping,
+    )
+    from ai_market_monitor.services.sharia_identity_discovery import (
+        CoinGeckoIdentityDiscovery,
+        IdentityDiscoveryError,
+    )
+    from ai_market_monitor.services.sharia_import_pack import (
+        ShariaMethodologyImportPackService,
     )
     from ai_market_monitor.services.sharia_research import ShariaResearchPipeline
 
+    pack_import: dict = {"status": "not_run"}
+    async with SessionFactory() as session:
+        try:
+            pack_result = await ShariaMethodologyImportPackService(
+                session,
+                settings,
+            ).import_bundle()
+            await session.commit()
+            pack_import = {"status": "completed", **pack_result.as_dict()}
+        except Exception as exc:
+            await session.rollback()
+            logger.exception("Sharia methodology import pack failed")
+            pack_import = {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            }
+
+    package_enrichment = await _process_package_enrichment_queue()
     provider = CcxtMarketDataProvider(settings)
     try:
-        verified_symbols = {
-            symbol.upper()
-            for symbol in await provider.list_symbols("binance", ["USDT"])
-        }
+        exchange_symbols: dict[str, set[str]] = {}
+        for exchange_name in ("binance", "bybit"):
+            exchange_symbols[exchange_name] = {
+                symbol.upper()
+                for symbol in await provider.list_symbols(
+                    exchange_name,
+                    ["USDT"],
+                )
+            }
         imports: dict[str, dict] = {}
         for source_name, importer_type in (
             ("sc_malaysia", SCMalaysiaImporter),
@@ -784,68 +820,384 @@ async def _process_sharia_authority_imports() -> dict:
         if settings.sharia_process_remaining_imports:
             allowed = set()
         async with SessionFactory() as session:
-            query = select(ExternalAssessment).where(
-                ExternalAssessment.mapping_state == "unresolved"
+            query = (
+                select(ExternalAssessment.id)
+                .where(
+                    ExternalAssessment.normalized_status == "ELIGIBLE_EXTERNAL_REFERENCE",
+                    ExternalAssessment.source_row_id.is_not(None),
+                )
+                .order_by(ExternalAssessment.created_at.asc())
+                .limit(settings.sharia_identity_discovery_batch_size)
             )
             if allowed:
                 query = query.where(ExternalAssessment.asset_symbol.in_(allowed))
-            drafts = list((await session.scalars(query)).all())
-            mapped = 0
-            cases = 0
-            failed = 0
-            for external in drafts:
+            draft_ids = list((await session.scalars(query)).all())
+
+        discovery = CoinGeckoIdentityDiscovery(settings)
+        mapped = 0
+        cases = 0
+        failed = 0
+        research_queue: list[tuple[UUID, str]] = []
+        for external_id in draft_ids:
+            external_symbol = str(external_id)
+            async with SessionFactory() as session:
+                external = await session.get(ExternalAssessment, external_id)
+                if external is None:
+                    failed += 1
+                    continue
+                external_symbol = external.asset_symbol
+                reusable_asset = (
+                    await session.get(
+                        CanonicalAsset,
+                        external.canonical_asset_id,
+                    )
+                    if external.canonical_asset_id is not None
+                    else None
+                )
                 try:
-                    mapping = CanonicalAssetMappingService(session)
-                    if settings.sharia_process_remaining_imports:
-                        await mapping.map_registered(
-                            external,
-                            verified_exchange_symbols=verified_symbols,
-                        )
+                    if reusable_asset is not None and can_reuse_verified_mapping(
+                        external,
+                        reusable_asset,
+                    ):
+                        external.mapping_state = "mapped"
                     else:
-                        await mapping.map_pilot(
+                        candidate = await discovery.candidate_for(
                             external,
-                            verified_exchange_symbols=verified_symbols,
+                            exchange_symbols=exchange_symbols,
                         )
-                    await session.flush()
+                        await CanonicalAssetMappingService(session).map_candidate(
+                            external,
+                            candidate,
+                        )
+                    await session.commit()
                     mapped += 1
-                    result = await ShariaResearchPipeline(
-                        session, settings
-                    ).research_initial_asset(external.id)
+                except IdentityDiscoveryError as exc:
+                    external.mapping_state = "conflict"
+                    external.mapping_notes = sorted(
+                        {
+                            *list(external.mapping_notes or []),
+                            f"{exc.code}: {exc}",
+                        }
+                    )
+                    await session.commit()
+                    failed += 1
+                    continue
+                except Exception:
+                    await session.rollback()
+                    logger.exception(
+                        "Authority assessment mapping failed for %s",
+                        external_symbol,
+                    )
+                    failed += 1
+                    continue
+
+            # Build a bounded research queue after canonical identities are
+            # committed. Completed immutable dossiers remain authoritative.
+            async with SessionFactory() as session:
+                completed_dossier_id = await session.scalar(
+                    select(AssetResearchDossier.id)
+                    .where(
+                        AssetResearchDossier.external_assessment_id == external_id,
+                        AssetResearchDossier.state == "completed",
+                    )
+                    .limit(1)
+                )
+                existing_case_id = await session.scalar(
+                    select(ReviewCase.id)
+                    .where(ReviewCase.external_assessment_id == external_id)
+                    .limit(1)
+                )
+                if completed_dossier_id is not None and existing_case_id is not None:
+                    external = await session.get(
+                        ExternalAssessment,
+                        external_id,
+                    )
+                    if external is not None:
+                        external.enrichment_state = "completed"
+                    await session.commit()
+                    continue
+                research_queue.append((external_id, external_symbol))
+
+        # Separate sessions make concurrent provider waits safe. Four assets is a
+        # conservative bound for official hosts and the configured model budget.
+        research_semaphore = asyncio.Semaphore(4)
+
+        async def research_one(
+            external_id: UUID,
+            external_symbol: str,
+        ) -> tuple[int, int]:
+            async with research_semaphore, SessionFactory() as session:
+                try:
+                    result = await ShariaResearchPipeline(session, settings).research_initial_asset(
+                        external_id
+                    )
+                    external = await session.get(
+                        ExternalAssessment,
+                        external_id,
+                    )
+                    if external is not None:
+                        external.enrichment_state = (
+                            "completed" if result.ai_status == "completed" else "failed"
+                        )
                     if result.case_id:
                         case = await session.get(ReviewCase, UUID(result.case_id))
                         if case is not None:
-                            await ShariaAdminTelegramService(
-                                session, settings
-                            ).enqueue(
+                            await ShariaAdminTelegramService(session, settings).enqueue(
                                 case,
                                 notification_type="new_review_required",
                                 idempotency_key=f"new-review:{case.id}",
                             )
-                            cases += 1
-                except AssetIdentityError:
-                    failed += 1
+                    await session.commit()
+                    return (1 if result.case_id else 0, 0)
                 except Exception:
+                    await session.rollback()
                     logger.exception(
-                        "Authority assessment processing failed for %s",
-                        external.asset_symbol,
+                        "Authority assessment research failed for %s",
+                        external_symbol,
                     )
-                    failed += 1
-            await session.commit()
+                    return (0, 1)
+
+        research_results = await asyncio.gather(
+            *(
+                research_one(external_id, external_symbol)
+                for external_id, external_symbol in research_queue
+            )
+        )
+        cases += sum(value[0] for value in research_results)
+        failed += sum(value[1] for value in research_results)
         async with SessionFactory() as session:
-            delivered = await ShariaAdminTelegramService(
-                session, settings
-            ).process_due()
+            delivered = await ShariaAdminTelegramService(session, settings).process_due()
             await session.commit()
+        auto_publication = await _auto_publish_ready_imports()
         return {
+            "methodology_pack": pack_import,
             "imports": imports,
             "assets_mapped": mapped,
             "review_cases_ready": cases,
             "failed_or_waiting_identity": failed,
+            "package_enrichment_completed": package_enrichment["completed"],
+            "package_enrichment_failed": package_enrichment["failed"],
+            "package_enrichment_considered": package_enrichment["considered"],
             "telegram_attempts_processed": delivered,
+            "auto_publication": auto_publication,
             "remaining_imports_enabled": settings.sharia_process_remaining_imports,
         }
     finally:
         await provider.close()
+
+
+async def _process_package_enrichment_queue() -> dict[str, int]:
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select, update
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import (
+        AssetResearchDossier,
+        ExternalAssessment,
+    )
+    from ai_market_monitor.services.sharia_research import (
+        ShariaResearchPipeline,
+    )
+
+    async with SessionFactory() as session:
+        completed_dossier_exists = (
+            select(AssetResearchDossier.id)
+            .where(
+                AssetResearchDossier.external_assessment_id == ExternalAssessment.id,
+                AssetResearchDossier.state == "completed",
+            )
+            .exists()
+        )
+        await session.execute(
+            update(ExternalAssessment)
+            .where(
+                ExternalAssessment.enrichment_state.in_({"queued", "failed", "running"}),
+                completed_dossier_exists,
+            )
+            .values(enrichment_state="completed")
+        )
+        await session.execute(
+            update(ExternalAssessment)
+            .where(
+                ExternalAssessment.enrichment_state == "running",
+                ExternalAssessment.updated_at < datetime.now(UTC) - timedelta(minutes=30),
+            )
+            .values(enrichment_state="queued")
+        )
+        await session.commit()
+        external_ids = list(
+            (
+                await session.scalars(
+                    select(ExternalAssessment.id).where(
+                        ExternalAssessment.mapping_state == "mapped",
+                        ExternalAssessment.enrichment_state.in_({"queued", "failed"}),
+                        ExternalAssessment.enrichment_task_id.is_not(None),
+                    )
+                )
+            ).all()
+        )
+    completed = 0
+    failed = 0
+    for external_id in external_ids:
+        async with SessionFactory() as session:
+            external = await session.get(
+                ExternalAssessment,
+                external_id,
+            )
+            if external is None:
+                continue
+            external.enrichment_state = "running"
+            await session.commit()
+        async with SessionFactory() as session:
+            external = await session.get(
+                ExternalAssessment,
+                external_id,
+            )
+            if external is None:
+                continue
+            try:
+                research = await ShariaResearchPipeline(
+                    session,
+                    settings,
+                ).research_initial_asset(external_id)
+                external.enrichment_state = (
+                    "completed" if research.ai_status == "completed" else "failed"
+                )
+                if research.ai_status == "completed":
+                    completed += 1
+                else:
+                    failed += 1
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                external = await session.get(
+                    ExternalAssessment,
+                    external_id,
+                )
+                if external is None:
+                    failed += 1
+                    continue
+                external.enrichment_state = "failed"
+                await session.commit()
+                logger.exception(
+                    "Package enrichment failed for %s",
+                    external.source_row_id,
+                )
+                failed += 1
+    return {
+        "considered": len(external_ids),
+        "completed": completed,
+        "failed": failed,
+    }
+
+
+async def _auto_publish_ready_imports() -> dict[str, int | str]:
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import (
+        ExternalAssessment,
+        PublishedAssetAssessment,
+        ReviewCase,
+        ReviewDecision,
+        User,
+        UserIdentity,
+    )
+    from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
+    from ai_market_monitor.services.sharia_governance import (
+        ShariaGovernanceError,
+        ShariaGovernanceService,
+    )
+
+    if not settings.sharia_import_auto_publish:
+        return {"status": "disabled", "published": 0, "failed": 0}
+    actor_email = settings.system_brain_username
+    if not actor_email:
+        return {
+            "status": "actor_unavailable",
+            "published": 0,
+            "failed": 0,
+        }
+    async with SessionFactory() as session:
+        actor_id = await session.scalar(
+            select(User.id)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == actor_email.casefold(),
+                User.role == UserRole.ADMIN,
+            )
+            .limit(1)
+        )
+        if actor_id is None:
+            return {
+                "status": "actor_unavailable",
+                "published": 0,
+                "failed": 0,
+            }
+        case_ids = list(
+            (
+                await session.scalars(
+                    select(ReviewCase.id)
+                    .join(
+                        ExternalAssessment,
+                        ExternalAssessment.id == ReviewCase.external_assessment_id,
+                    )
+                    .where(
+                        ReviewCase.state == "ready_for_review",
+                        ReviewCase.done_at.is_(None),
+                        ExternalAssessment.source_row_id.is_not(None),
+                        ExternalAssessment.normalized_status == "ELIGIBLE_EXTERNAL_REFERENCE",
+                        ~select(PublishedAssetAssessment.id)
+                        .join(
+                            ReviewDecision,
+                            ReviewDecision.id
+                            == PublishedAssetAssessment.review_decision_id,
+                        )
+                        .where(
+                            ReviewDecision.review_case_id == ReviewCase.id,
+                            PublishedAssetAssessment.is_active.is_(True),
+                        )
+                        .exists(),
+                    )
+                    .order_by(ReviewCase.created_at.asc())
+                )
+            ).all()
+        )
+    published = 0
+    failed = 0
+    for case_id in case_ids:
+        async with SessionFactory() as session:
+            try:
+                await ShariaGovernanceService(
+                    session,
+                    settings,
+                ).auto_publish_external_reference(
+                    case_id,
+                    admin_user_id=actor_id,
+                )
+                await session.commit()
+                published += 1
+            except ShariaGovernanceError:
+                await session.rollback()
+                logger.exception(
+                    "External reference auto-publication was blocked for %s",
+                    case_id,
+                )
+                failed += 1
+            except Exception:
+                await session.rollback()
+                logger.exception(
+                    "External reference auto-publication failed for %s",
+                    case_id,
+                )
+                failed += 1
+    return {
+        "status": "completed",
+        "published": published,
+        "failed": failed,
+    }
 
 
 async def _send_sharia_review_reminders() -> dict:

@@ -72,11 +72,12 @@
       dialog.querySelector("[data-passport-quick-logo]"),
       identity.logo_module_url,
       symbol,
+      identity.logo_url,
     );
-    text("[data-passport-quick-name]", `${identity.name} · ${symbol}`);
-    text("[data-passport-quick-identity]", `${network} · ${kind}`);
+    text("[data-passport-quick-name]", `${identity.name} | ${symbol}`);
+    text("[data-passport-quick-identity]", `${network} | ${kind}`);
     text("[data-passport-quick-primary]", payload.primary_wording);
-    text("[data-passport-quick-methodology]", `${assessment.methodology_name} · v${assessment.methodology_version}`);
+    text("[data-passport-quick-methodology]", `${assessment.methodology_name} | v${assessment.methodology_version}`);
     text("[data-passport-quick-decision]", formatDate(payload.decision_date));
     text("[data-passport-quick-publication]", formatDate(payload.publication_date));
     text("[data-passport-quick-next-scan]", payload.next_source_scan_at ? formatDate(payload.next_source_scan_at, true) : "Not scheduled");
@@ -84,7 +85,11 @@
     const status = dialog.querySelector("[data-passport-quick-status]");
     status.textContent = assessment.status_label;
     status.className = statusClass(assessment.status);
-    text("[data-passport-quick-freshness]", `Evidence: ${label(payload.freshness)}`);
+    const freshness = dialog.querySelector("[data-passport-quick-freshness]");
+    freshness.hidden = !payload.last_verified_at;
+    freshness.textContent = payload.last_verified_at
+      ? `Research verified ${formatDate(payload.last_verified_at, true)}`
+      : "";
 
     const contracts = Object.entries(identity.contract_addresses || {});
     const contractRow = dialog.querySelector("[data-passport-contract-row]");
@@ -92,9 +97,9 @@
     contractRow.hidden = !contractAddress;
     if (contractAddress) {
       const short = contractAddress.length > 18
-        ? `${contractAddress.slice(0, 9)}…${contractAddress.slice(-7)}`
+        ? `${contractAddress.slice(0, 9)}...${contractAddress.slice(-7)}`
         : contractAddress;
-      text("[data-passport-contract-address]", `${contracts[0][0]} · ${short}`);
+      text("[data-passport-contract-address]", `${contracts[0][0]} | ${short}`);
     }
 
     const reasons = dialog.querySelector("[data-passport-quick-reasons]");
@@ -135,6 +140,29 @@
       uses.append(row);
     });
 
+    const methodologySection = dialog.querySelector("[data-passport-quick-methodologies-section]");
+    const methodologyList = dialog.querySelector("[data-passport-quick-methodologies]");
+    methodologyList.replaceChildren();
+    const methodologyReferences = payload.methodology_references || [];
+    methodologySection.hidden = methodologyReferences.length <= 1;
+    methodologyReferences.forEach((reference) => {
+      const row = document.createElement("div");
+      row.className = "passport-methodology-row";
+      const copy = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = reference.methodology_name;
+      const date = document.createElement("small");
+      date.textContent = reference.review_date
+        ? `Reviewed ${formatDate(reference.review_date)}`
+        : "Review date not recorded";
+      copy.append(name, date);
+      const state = document.createElement("span");
+      state.className = statusClass(reference.status);
+      state.textContent = reference.status_label;
+      row.append(copy, state);
+      methodologyList.append(row);
+    });
+
     const historyNotice = dialog.querySelector("[data-passport-history-notice]");
     historyNotice.hidden = !historical.is_historical;
     if (historical.is_historical) {
@@ -155,14 +183,6 @@
     const source = dialog.querySelector("[data-passport-official-source]");
     source.hidden = !payload.official_source_url;
     if (payload.official_source_url) source.href = payload.official_source_url;
-    const createPlan = dialog.querySelector("[data-passport-create-plan]");
-    createPlan.hidden = !payload.can_create_watch_plan;
-    createPlan.href = `/dashboard/strategies/new?asset=${encodeURIComponent(assessment.canonical_asset)}`;
-    const addWatchlist = dialog.querySelector("[data-passport-add-watchlist]");
-    addWatchlist.hidden = !payload.watchlist_action_url;
-    if (payload.watchlist_action_url) addWatchlist.action = payload.watchlist_action_url;
-    const watchlistMethodology = dialog.querySelector("[data-passport-watchlist-methodology]");
-    watchlistMethodology.value = assessment.methodology_id || "";
     const complianceChange = dialog.querySelector("[data-passport-compliance-change]");
     complianceChange.hidden = !payload.compliance_change_url;
     if (payload.compliance_change_url) complianceChange.href = payload.compliance_change_url;

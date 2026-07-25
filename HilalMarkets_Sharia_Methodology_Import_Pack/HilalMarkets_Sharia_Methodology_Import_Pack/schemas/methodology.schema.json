@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "External Methodology",
+  "type": "object",
+  "required": [
+    "methodology_id",
+    "display_name",
+    "authority",
+    "type",
+    "source_url",
+    "default_publication_gate"
+  ],
+  "properties": {
+    "methodology_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "status_language": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "must_not_infer": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "default_publication_gate": {
+      "type": "string"
+    },
+    "records_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

@@ -460,6 +460,15 @@ Migration `6f02832495ab` adds source-neutral external-assessment fields, archive
 test methodology, and seeds the versioned Fasset methodology plus the non-ruling `All` aggregate
 view. It seeds no asset conclusion and publishes no Passport.
 
+Migration `81b24a6c37de` adds immutable import-pack provenance, source-row idempotency, rights gates,
+factual-enrichment state, and separately linked live-verification snapshots. The bounded import
+service validates and retains 15 SC Malaysia, 31 Shariah Review Bureau, and 188 Fasset compliant
+source rows as three independent methodologies. Every row creates an unpublished admin review
+case and factual-enrichment task. The 52-row Fasset non-compliant guard is retained in the source
+snapshot and can never enter an eligible assessment path. Source refreshes enrich or verify the
+exact package row; they do not create a parallel assessment. See
+`docs/SHARIA_METHODOLOGY_IMPORT_PACK.md`.
+
 Governance/Passport/checkout migration `e7f8a9b0c1d2` adds exact historical references, reviewer
 roles/profiles/assignments, Passport problem reports, immutable decision details, superseding
 publication linkage, checkout attempts, and payment-email delivery state. See

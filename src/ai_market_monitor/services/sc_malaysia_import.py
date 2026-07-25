@@ -68,6 +68,8 @@ class SCImportResult:
     run_id: str
     snapshot_id: str
     created_assessments: int
+    verified_package_assessments: int
+    conflicted_package_assessments: int
     explicit_rows: int
     excluded_notice_rows: int
     idempotent_replay: bool
@@ -256,6 +258,18 @@ class SCMalaysiaImporter:
                 run_id=str(existing_run.id),
                 snapshot_id=str(snapshot.id) if snapshot else "",
                 created_assessments=0,
+                verified_package_assessments=int(
+                    existing_run.result_summary.get(
+                        "verified_package_assessments",
+                        0,
+                    )
+                ),
+                conflicted_package_assessments=int(
+                    existing_run.result_summary.get(
+                        "conflicted_package_assessments",
+                        0,
+                    )
+                ),
                 explicit_rows=int(existing_run.result_summary.get("explicit_rows", 0)),
                 excluded_notice_rows=int(
                     existing_run.result_summary.get("excluded_notice_rows", 0)
@@ -312,7 +326,43 @@ class SCMalaysiaImporter:
         await self.session.flush()
 
         created = 0
+        verified_package_assessments = 0
+        conflicted_package_assessments = 0
         for row in parsed.rows:
+            package_matches = await self._package_assessment_matches(
+                row=row,
+                source_url=source.url,
+            )
+            if len(package_matches) == 1:
+                package_assessment = package_matches[0]
+                package_assessment.source_detail_extraction_state = (
+                    "SOURCE_ROW_VERIFIED"
+                )
+                package_assessment.source_detail_snapshot_id = snapshot.id
+                package_assessment.source_detail_fields = {
+                    "exact_status_wording": row.exact_status_wording,
+                    "sac_meeting_number": row.meeting_number,
+                    "decision_date": row.decision_date.isoformat(),
+                    "exact_row_text": row.exact_row_text,
+                }
+                verified_package_assessments += 1
+                continue
+            if len(package_matches) > 1:
+                note = (
+                    "The live SC Malaysia source matched more than one retained "
+                    "package assessment by exact identity, decision, status and "
+                    "source URL. Manual identity review is required."
+                )
+                for package_assessment in package_matches:
+                    package_assessment.mapping_state = "identity_conflict"
+                    package_assessment.manual_verification_required = True
+                    notes = list(package_assessment.mapping_notes or [])
+                    if note not in notes:
+                        notes.append(note)
+                    package_assessment.mapping_notes = notes
+                conflicted_package_assessments += len(package_matches)
+                continue
+
             import_hash = _sha256(
                 "|".join(
                     [
@@ -373,6 +423,8 @@ class SCMalaysiaImporter:
         run.result_summary = {
             "explicit_rows": len(parsed.rows),
             "created_assessments": created,
+            "verified_package_assessments": verified_package_assessments,
+            "conflicted_package_assessments": conflicted_package_assessments,
             "excluded_notice_rows": excluded_notice_rows,
             "pilot_symbols": sorted(self.settings.sharia_pilot_symbol_set),
             "remaining_processing_enabled": self.settings.sharia_process_remaining_imports,
@@ -387,6 +439,10 @@ class SCMalaysiaImporter:
                 metadata_redacted={
                     "explicit_rows": len(parsed.rows),
                     "created_assessments": created,
+                    "verified_package_assessments": verified_package_assessments,
+                    "conflicted_package_assessments": (
+                        conflicted_package_assessments
+                    ),
                     "notice_only_rows_excluded": excluded_notice_rows,
                     "source_hash": source_hash,
                 },
@@ -398,10 +454,43 @@ class SCMalaysiaImporter:
             run_id=str(run.id),
             snapshot_id=str(snapshot.id),
             created_assessments=created,
+            verified_package_assessments=verified_package_assessments,
+            conflicted_package_assessments=conflicted_package_assessments,
             explicit_rows=len(parsed.rows),
             excluded_notice_rows=excluded_notice_rows,
             idempotent_replay=False,
         )
+
+    async def _package_assessment_matches(
+        self,
+        *,
+        row: SCCompliantRow,
+        source_url: str,
+    ) -> list[ExternalAssessment]:
+        candidates = list(
+            (
+                await self.session.scalars(
+                    select(ExternalAssessment).where(
+                        ExternalAssessment.source_family == "sc_malaysia_sac",
+                        ExternalAssessment.source_row_id.is_not(None),
+                        ExternalAssessment.asset_name == row.name,
+                        ExternalAssessment.asset_symbol == row.symbol,
+                        ExternalAssessment.exact_status_wording
+                        == row.exact_status_wording,
+                        ExternalAssessment.sac_meeting_number
+                        == row.meeting_number,
+                        ExternalAssessment.decision_date == row.decision_date,
+                    )
+                )
+            ).all()
+        )
+        normalized_source_url = _normalized_source_url(source_url)
+        return [
+            assessment
+            for assessment in candidates
+            if _normalized_source_url(assessment.source_url)
+            == normalized_source_url
+        ]
 
 
 def _clean_text(value: object) -> str:
@@ -409,6 +498,12 @@ def _clean_text(value: object) -> str:
         char for char in str(value or "") if unicodedata.category(char) != "Cf"
     )
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalized_source_url(value: str) -> str:
+    parsed = urlparse(value)
+    path = parsed.path.rstrip("/") or "/"
+    return f"{parsed.scheme.casefold()}://{parsed.netloc.casefold()}{path}"
 
 
 def _sha256(value: str) -> str:

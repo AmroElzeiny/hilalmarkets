@@ -1,0 +1,21 @@
+{
+  "name": "HilalMarkets Sharia Methodology Import Pack",
+  "version": "1.0.0",
+  "generated_at": "2026-07-24",
+  "counts": {
+    "methodologies": 3,
+    "sc_malaysia_compliant": 15,
+    "shariah_review_bureau_compliant": 31,
+    "fasset_compliant_source_rows": 188,
+    "fasset_noncompliant_guard_rows": 52,
+    "passport_seeds": 234,
+    "ai_enrichment_tasks": 234,
+    "union_symbols": 184
+  },
+  "entrypoints": [
+    "README.md",
+    "CODEX_IMPLEMENTATION_PROMPT.txt",
+    "scripts/validate_bundle.py",
+    "data/methodologies.json"
+  ]
+}

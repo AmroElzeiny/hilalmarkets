@@ -33,7 +33,7 @@ rollback. See
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
 persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
 and universe resolver. Bounded authority adapters retain explicit asset-level results from SC
-Malaysia and Fasset, verify canonical identity, build factual evidence dossiers, and create
+Malaysia, Shariah Review Bureau, and Fasset, verify canonical identity, build factual evidence dossiers, and create
 administrator review cases. `All` is a deduplicated customer view over active published source
 methodologies, not a separate ruling. No imported asset is customer-visible until its exact evidence,
 identity, use scope, and methodology criteria are explicitly reviewed and separately published. AI
@@ -42,6 +42,8 @@ cannot set a religious status, infer missing source facts, or publish an asset. 
 for the architecture, source boundaries, deployment order, tests, and manual review requirements.
 The multi-authority extension is documented in
 [docs/FASSET_AND_MULTI_METHODOLOGY_IMPLEMENTATION_REPORT.md](docs/FASSET_AND_MULTI_METHODOLOGY_IMPLEMENTATION_REPORT.md).
+The validated three-authority import-pack workflow and operator commands are documented in
+[docs/SHARIA_METHODOLOGY_IMPORT_PACK.md](docs/SHARIA_METHODOLOGY_IMPORT_PACK.md).
 Current and historical Passport views now share one read model, alerts retain the exact Passport
 version used at evaluation, and System Brain separates review from publication with optional
 four-eyes enforcement. The first-party checkout uses the server Plan Catalog and a durable
@@ -97,6 +99,8 @@ py -3.12 -m venv .venv
 pip install -e ".[dev]"
 Copy-Item .env.example .env
 alembic upgrade head
+python HilalMarkets_Sharia_Methodology_Import_Pack/HilalMarkets_Sharia_Methodology_Import_Pack/scripts/validate_bundle.py
+python scripts/import_sharia_methodology_pack.py
 uvicorn ai_market_monitor.main:app --reload
 ```
 

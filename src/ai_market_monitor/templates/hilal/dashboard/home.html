@@ -1,13 +1,12 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
-<div class="page-header">
+<div class="page-header home-welcome">
   <div>
-    <span class="eyebrow">Your screened market</span>
-    <h1>Assalamu Alaikum, {{ (user.display_name or 'there').split(' ')[0] }}.</h1>
-  </div>
-  <div class="page-actions">
-    <a class="btn btn-secondary" href="/dashboard/market"><span data-icon="market" data-icon-class="icon"></span>Explore Screened Market</a>
-    <a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon"></span>Create Watchlist</a>
+    <h1>Assalamu Alaikum, {{ (user.display_name or 'there').split(' ')[0] }}</h1>
+    <div class="page-actions">
+      <a class="btn btn-secondary" href="/dashboard/market"><span data-icon="market" data-icon-class="icon"></span>Explore Screened Market</a>
+      <a class="btn btn-primary" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon"></span>Create Watchlist</a>
+    </div>
   </div>
 </div>
 
@@ -41,7 +40,7 @@
       <div class="panel-head"><div><span class="kicker">Live opportunity journey</span><h2>What is forming now</h2><p>Only persisted lifecycle evidence from your active Watchlists appears here.</p></div><a class="link-arrow" href="/dashboard/activity">View all evidence <span data-icon="arrow" data-icon-class="icon-sm"></span></a></div>
       {% if overview.latest_setup %}
       <div class="opportunity-card">
-        <div class="opportunity-title"><div class="coin"><div class="coin-logo">{{ overview.latest_setup.symbol[:3] }}</div><div><h3>{{ overview.latest_setup.symbol }}</h3><small class="muted">{{ overview.latest_setup.exchange|title }} | {{ overview.latest_setup.timeframe }}</small></div></div><span class="badge badge-qualified">{{ overview.latest_setup.state.value.replace('_', ' ').title() }}</span></div>
+        <div class="opportunity-title"><div class="coin"><div class="coin-logo home-coin-logo"{% if overview.latest_setup_logo_module_url %} data-asset-logo-module="{{ overview.latest_setup_logo_module_url }}" data-asset-logo-symbol="{{ overview.latest_setup_asset_symbol }}"{% if overview.latest_setup_logo_url %} data-asset-logo-url="{{ overview.latest_setup_logo_url }}"{% endif %}{% endif %}>{{ (overview.latest_setup_asset_symbol or overview.latest_setup.symbol)[:3] }}</div><div><h3>{{ overview.latest_setup.symbol }}</h3><small class="muted">{{ overview.latest_setup.exchange|title }} | {{ overview.latest_setup.timeframe }}</small></div></div><span class="badge badge-qualified">{{ overview.latest_setup.state.value.replace('_', ' ').title() }}</span></div>
         <div class="readiness"><strong>{{ overview.latest_setup.completion_score|round|int }}%</strong><span>conditions currently complete</span></div>
         <div class="progress opportunity-journey-progress"><span data-progress="{{ overview.latest_setup.completion_score|round|int }}" data-hilal-progress><span></span></span></div>
         <div class="row-between wrap"><small class="muted">Last evaluated {{ overview.latest_setup.last_evaluated_at|short_dt(user.timezone) if overview.latest_setup.last_evaluated_at else 'not recorded' }}</small><a class="btn btn-secondary btn-sm" href="/dashboard/activity?setup={{ overview.latest_setup.id }}">Open journey</a></div>

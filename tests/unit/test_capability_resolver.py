@@ -156,6 +156,14 @@ def test_server_authored_clarification_answer_is_context_not_a_new_instruction()
     assert fragments[1].meaningful is False
 
 
+def test_platform_screened_universe_wording_is_context_not_a_market_condition():
+    universe_only = split_prompt_fragments("all halal coins")
+    technical = split_prompt_fragments("RSI below 30 on halal coins")
+
+    assert universe_only[0].meaningful is False
+    assert technical[0].meaningful is True
+
+
 def test_head_and_shoulders_prompt_resolves_pattern_sequence_without_timing_noise():
     report = CapabilityResolver().resolve_prompt(
         "I want to monitor every forming head & sholders on halal coins then once the "

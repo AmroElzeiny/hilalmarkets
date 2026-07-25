@@ -101,8 +101,10 @@ def test_builder_uses_ai_sheet_and_minimizable_canvas_assistant():
     )[1].split("</section>", 1)[0]
     assert "guided-builder-heading-line" in heading
     assert "guided-builder-heading-actions" in heading
-    assert "guided-starts" in heading
-    assert builder.count('class="guided-starts"') == 1
+    assert "Market Assistant" in heading
+    assert "guided-starts" not in heading
+    assert "ai-chat-guided-starts" in builder
+    assert 'class="guided-starts ai-chat-guided-starts"' in builder
 
 
 def test_dashboard_shell_has_notification_center_and_cache_busted_brand_assets():
@@ -152,7 +154,7 @@ def test_requested_selects_share_one_branded_accessible_component():
 
     assert activity.count("data-hm-select") == 2
     assert settings.count("data-hm-select") == 7
-    assert market.count("data-hm-select") == 2
+    assert market.count("data-hm-select>") == 2
     assert 'document.createElement("button")' in runtime
     assert 'setAttribute("role", "listbox")' in runtime
     assert 'setAttribute("aria-haspopup", "listbox")' in runtime
@@ -226,7 +228,17 @@ def test_requested_home_market_passport_and_scanner_refinements_are_bound():
     assert "opportunity-journey-progress" in home
     assert 'class="market-filter-submit"' not in market
     assert "data-live-market-methodology" in market
+    assert "Favorites" in market
+    assert "ui-heart-filled.svg" in market
+    assert "Spread" not in market
+    assert "| v{{ method.version }}" not in market
     assert "methodology.form?.requestSubmit()" in market_runtime
+    assert "marketStatusLabel" in market_runtime
+    assert "data-favorite-toggle" in market_runtime
+    assert "status_change_following" in _read("api/routers/dashboard.py")
+    assert "home-coin-logo" in home
+    assert "min-height: 80px" in dashboard_styles
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in dashboard_styles
 
     assert "passport-page-title" not in passport
     assert "Back to market" in passport.split("</section>", 1)[0]
@@ -235,6 +247,9 @@ def test_requested_home_market_passport_and_scanner_refinements_are_bound():
     assert "passport-select-control" in passport
     assert "Reviewed by" not in quick_passport
     assert "data-passport-quick-next-scan" in quick_passport
+    assert "data-passport-quick-methodologies" in quick_passport
+    assert "Add to My Screened Watchlist" not in quick_passport
+    assert "Create Watchlist" not in quick_passport
     assert "Reviewer record" not in brain
 
     assert ".opportunity-journey-progress" in dashboard_styles
@@ -250,6 +265,12 @@ def test_requested_home_market_passport_and_scanner_refinements_are_bound():
     assert "background: #cbfa4d !important;" in scanner_styles
     assert "background-image: none !important;" in scanner_styles
     assert "color: var(--hm-ink) !important;" in scanner_styles
+
+
+def test_opportunity_cards_use_the_shared_real_asset_logo_loader():
+    opportunity_card = _read("templates/hilal/macros/opportunity_card.html")
+    assert "data-asset-logo-module" in opportunity_card
+    assert "@web3icons/core" in opportunity_card
 
 
 def test_system_brain_is_reviewer_first_and_uses_five_sections():

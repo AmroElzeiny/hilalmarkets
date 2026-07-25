@@ -162,12 +162,24 @@ class AgentToolService:
                 allowed_next_actions=["answer_clarification"],
             )
 
-        report = self.resolver.resolve_prompt("\n".join(args.fragments))
+        capability_fragments = [
+            fragment
+            for fragment in args.fragments
+            if not _is_platform_screening_only_fragment(fragment)
+        ]
+        report = self.resolver.resolve_prompt("\n".join(capability_fragments))
         explicit_timeframes = _explicit_timeframes(
             " ".join([runtime.accumulated_setup, runtime.context.request_text])
         )
         default_timeframe = args.default_timeframe
-        timeframe_authorized = default_timeframe is None or default_timeframe in explicit_timeframes
+        scanner_default_timeframe = (
+            runtime.context.setup_mode == "scanner" and default_timeframe == "15m"
+        )
+        timeframe_authorized = (
+            default_timeframe is None
+            or default_timeframe in explicit_timeframes
+            or scanner_default_timeframe
+        )
         if default_timeframe and not timeframe_authorized:
             return AgentToolResult(
                 status="validation_error",
@@ -191,7 +203,11 @@ class AgentToolService:
         runtime.policy_state.candidate_capability_keys.update(candidates)
         runtime.policy_state.candidate_source_fragments.update(sources)
         unresolved = [item for item in report.fragments if item.status != "matched"]
-        missing_timeframe = not explicit_timeframes and not runtime.chat.draft_schema_json
+        missing_timeframe = (
+            not explicit_timeframes
+            and not runtime.chat.draft_schema_json
+            and runtime.context.setup_mode != "scanner"
+        )
         runtime.policy_state.resolution_complete = not unresolved and not missing_timeframe
         clarifications = [
             {
@@ -246,6 +262,16 @@ class AgentToolService:
                 item.fragment for item in report.fragments if not item.candidates
             ],
             "provider_requirements": provider_requirements,
+            "assumptions": (
+                [
+                    (
+                        "Scanner uses the platform's 15m default and current market snapshot "
+                        "because no timeframe or closed-candle requirement was stated."
+                    )
+                ]
+                if runtime.context.setup_mode == "scanner" and not explicit_timeframes
+                else []
+            ),
         }
         runtime.resolution_data = data
         context = dict(runtime.chat.context_json or {})
@@ -1113,6 +1139,21 @@ def _explicit_timeframes(value: str) -> set[str]:
         if any(phrase in lowered for phrase in phrases)
     )
     return matches
+
+
+def _is_platform_screening_only_fragment(fragment: str) -> bool:
+    lowered = _normalized(fragment)
+    if not re.search(r"\b(?:halal|shariah?|screened)\b", lowered):
+        return False
+    remainder = re.sub(
+        r"\b(?:all|only|the|our|platform|hilalmarkets|hilal markets|currently|"
+        r"halal|shariah?|screened|approved|eligible|spot|market|markets|"
+        r"coin|coins|asset|assets|token|tokens|pair|pairs|universe|"
+        r"find|show|scan|bring|me|in|on|from)\b",
+        " ",
+        lowered,
+    )
+    return not " ".join(remainder.split())
 
 
 def _required_from_source(source_fragment: str) -> bool:

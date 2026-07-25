@@ -1,8 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
+import ccxt.async_support as ccxt
+
+from ai_market_monitor.core.config import Settings
 from ai_market_monitor.market_context import MarketRegimeAnalyzer
 from ai_market_monitor.services.interfaces import Candle
-from ai_market_monitor.services.market_preview import MarketPreviewService
+from ai_market_monitor.services.market_preview import (
+    CcxtMarketDataProvider,
+    MarketPreviewService,
+)
 from tests.factories import candle_sets, load_strategy
 
 
@@ -31,6 +37,32 @@ async def test_market_preview_uses_live_rule_engine_proof_shape():
     assert proof["strategy_schema_hash"] == strategy.canonical_hash()
     assert proof["condition_tree"]["operator"] == "and"
     assert proof["risk_validation"]["state"] == "passed"
+
+
+async def test_public_market_provider_never_sends_private_exchange_credentials(
+    monkeypatch,
+):
+    captured = {}
+
+    class FakeBybit:
+        def __init__(self, config):
+            captured.update(config)
+
+    monkeypatch.setattr(ccxt, "bybit", FakeBybit)
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        database_url="sqlite+aiosqlite://",
+        bybit_api_key="invalid-public-data-key",
+        bybit_api_secret="invalid-public-data-secret",
+    )
+
+    await CcxtMarketDataProvider(settings)._client("bybit")
+
+    assert "apiKey" not in captured
+    assert "secret" not in captured
+    assert captured["options"]["defaultType"] == "spot"
+    assert captured["options"]["fetchMarkets"] == ["spot"]
 
 
 class RisingBenchmarkProvider:

@@ -1,20 +1,43 @@
 {
-  "generated_at": "2026-07-23T15:53:37.594212+00:00",
-  "started_at": "2026-07-23T15:52:31.163669+00:00",
-  "base_url": "http://127.0.0.1:39392",
+  "generated_at": "2026-07-24T10:27:24.673078+00:00",
+  "started_at": "2026-07-24T10:21:48.223356+00:00",
+  "base_url": "http://127.0.0.1:22055",
   "browser": "chromium",
   "auto_started": true,
-  "command": ".venv\\Scripts\\python.exe -m pytest -q tests/browser/test_landing_analytics.py",
-  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 39392",
+  "command": ".venv\\Scripts\\python.exe -m pytest tests/browser -q",
+  "app_command": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.venv\\Scripts\\python.exe -m uvicorn ai_market_monitor.main:app --host 127.0.0.1 --port 22055",
   "exitstatus": 0,
-  "tests_run": 8,
-  "passed": 8,
+  "tests_run": 33,
+  "passed": 33,
   "failed": 0,
   "skipped": 0,
   "console_errors": [],
   "failed_network_calls": [],
   "page_errors": [],
   "artifacts": {
+    "tests/browser/test_dashboard_e2e.py::test_system_brain_reviewer_first_desktop_and_mobile": {},
+    "tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa": {},
+    "tests/browser/test_dashboard_e2e.py::test_public_product_chat_consent_grounding_inquiry_and_returning_profile": {},
+    "tests/browser/test_dashboard_e2e.py::test_public_product_chat_session_profile_offline_and_focus_containment": {},
+    "tests/browser/test_dashboard_e2e.py::test_public_product_chat_renders_safe_bold_without_executable_html": {},
+    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {},
+    "tests/browser/test_dashboard_e2e.py::test_all_customer_dashboard_pages_use_the_brand_system": {},
+    "tests/browser/test_dashboard_e2e.py::test_screened_market_passport_and_mobile_visual_qa": {},
+    "tests/browser/test_dashboard_e2e.py::test_screening_change_opens_evidence_difference_dialog": {},
+    "tests/browser/test_dashboard_e2e.py::test_private_beta_billing_desktop_and_mobile_visual_qa": {},
+    "tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board": {},
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout": {},
+    "tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat": {},
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection": {},
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states": {},
+    "tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation": {},
+    "tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload": {},
+    "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {},
+    "tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner": {},
+    "tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims": {},
+    "tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke": {},
+    "tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa": {},
+    "tests/browser/test_dashboard_e2e.py::test_notification_channel_handoff_links_smoke": {},
     "tests/browser/test_landing_analytics.py::test_shared_public_shell_loads_gtm_once_only_after_consent": {},
     "tests/browser/test_landing_analytics.py::test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain": {},
     "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {},
@@ -22,47 +45,174 @@
     "tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility": {},
     "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {},
     "tests/browser/test_landing_analytics.py::test_failed_waitlist_submission_never_emits_success_event": {},
-    "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {}
+    "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {},
+    "tests/browser/test_sharia_governance_admin.py::test_system_brain_user_controls_use_branded_confirmation_dialog": {},
+    "tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa": {}
   },
   "tests": {
+    "tests/browser/test_dashboard_e2e.py::test_system_brain_reviewer_first_desktop_and_mobile": {
+      "outcome": "passed",
+      "duration_seconds": 7.29,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_hilalmarkets_landing_and_auth_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 12.594,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_public_product_chat_consent_grounding_inquiry_and_returning_profile": {
+      "outcome": "passed",
+      "duration_seconds": 10.164,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_public_product_chat_session_profile_offline_and_focus_containment": {
+      "outcome": "passed",
+      "duration_seconds": 4.664,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_public_product_chat_renders_safe_bold_without_executable_html": {
+      "outcome": "passed",
+      "duration_seconds": 2.112,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_dashboard_loads_after_signup_and_navigation": {
+      "outcome": "passed",
+      "duration_seconds": 5.082,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_all_customer_dashboard_pages_use_the_brand_system": {
+      "outcome": "passed",
+      "duration_seconds": 36.365,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_screened_market_passport_and_mobile_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 14.669,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_screening_change_opens_evidence_difference_dialog": {
+      "outcome": "passed",
+      "duration_seconds": 4.244,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_private_beta_billing_desktop_and_mobile_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 5.142,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_strategy_prompt_to_coverage_preview_opens_board": {
+      "outcome": "passed",
+      "duration_seconds": 6.996,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_mobile_layout": {
+      "outcome": "passed",
+      "duration_seconds": 5.249,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_visual_canvas_is_secondary_to_ai_chat": {
+      "outcome": "passed",
+      "duration_seconds": 4.479,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_optimistic_retry_and_option_selection": {
+      "outcome": "passed",
+      "duration_seconds": 8.891,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_ai_setup_chat_visual_qa_states": {
+      "outcome": "passed",
+      "duration_seconds": 11.613,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_provider_required_prompt_blocks_activation": {
+      "outcome": "passed",
+      "duration_seconds": 5.393,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_strategy_board_preserves_metadata_after_edit_save_reload": {
+      "outcome": "passed",
+      "duration_seconds": 8.842,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_approve_and_publish_executable_monitor": {
+      "outcome": "passed",
+      "duration_seconds": 17.565,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_legacy_scan_route_redirects_into_chat_scanner": {
+      "outcome": "passed",
+      "duration_seconds": 4.684,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_seeded_proof_receipt_visible_without_ai_claims": {
+      "outcome": "passed",
+      "duration_seconds": 4.16,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_monitor_and_lifecycle_smoke": {
+      "outcome": "passed",
+      "duration_seconds": 3.407,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_setup_observability_desktop_mobile_and_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 12.795,
+      "longrepr": ""
+    },
+    "tests/browser/test_dashboard_e2e.py::test_notification_channel_handoff_links_smoke": {
+      "outcome": "passed",
+      "duration_seconds": 3.077,
+      "longrepr": ""
+    },
     "tests/browser/test_landing_analytics.py::test_shared_public_shell_loads_gtm_once_only_after_consent": {
       "outcome": "passed",
-      "duration_seconds": 2.098,
+      "duration_seconds": 1.341,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain": {
       "outcome": "passed",
-      "duration_seconds": 3.039,
+      "duration_seconds": 2.058,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated": {
       "outcome": "passed",
-      "duration_seconds": 9.281,
+      "duration_seconds": 9.459,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id": {
       "outcome": "passed",
-      "duration_seconds": 13.804,
+      "duration_seconds": 14.644,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_long_entry_section_and_percentage_waitlist_visibility": {
       "outcome": "passed",
-      "duration_seconds": 4.5,
+      "duration_seconds": 4.549,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission": {
       "outcome": "passed",
-      "duration_seconds": 2.245,
+      "duration_seconds": 2.676,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_failed_waitlist_submission_never_emits_success_event": {
       "outcome": "passed",
-      "duration_seconds": 2.053,
+      "duration_seconds": 2.235,
       "longrepr": ""
     },
     "tests/browser/test_landing_analytics.py::test_contact_form_shows_branded_success_without_duplicate_client_submission": {
       "outcome": "passed",
-      "duration_seconds": 1.776,
+      "duration_seconds": 2.032,
+      "longrepr": ""
+    },
+    "tests/browser/test_sharia_governance_admin.py::test_system_brain_user_controls_use_branded_confirmation_dialog": {
+      "outcome": "passed",
+      "duration_seconds": 7.779,
+      "longrepr": ""
+    },
+    "tests/browser/test_sharia_governance_admin.py::test_sharia_governance_workspace_visual_qa": {
+      "outcome": "passed",
+      "duration_seconds": 23.393,
       "longrepr": ""
     }
   },

@@ -84,6 +84,8 @@ class FassetImportResult:
     run_id: str
     snapshot_id: str
     created_assessments: int
+    updated_package_assessments: int
+    conflicted_package_assessments: int
     explicit_compliant_profiles: int
     excluded_profiles: int
     idempotent_replay: bool
@@ -176,14 +178,28 @@ class FassetParser:
             for value in document.get_all_text(separator="\n", strip=True).splitlines()
             if (cleaned := _clean_text(value))
         ]
-        starts = [
+        detailed_starts = [
             index
             for index, value in enumerate(lines)
             if value.isdigit()
             and index + 5 < len(lines)
             and "Platform Purpose" in lines[index + 1 : index + 12]
         ]
-        if len(starts) < self.minimum_profile_count:
+        detailed = len(detailed_starts) >= self.minimum_profile_count
+        if detailed:
+            blocks = [
+                lines[
+                    start : (
+                        detailed_starts[position + 1]
+                        if position + 1 < len(detailed_starts)
+                        else len(lines)
+                    )
+                ]
+                for position, start in enumerate(detailed_starts)
+            ]
+        else:
+            blocks = self._compact_blocks(lines)
+        if len(blocks) < self.minimum_profile_count:
             raise FassetImportError(
                 "fasset_profile_count_below_minimum",
                 "The Fasset page exposed fewer complete profiles than the configured "
@@ -191,19 +207,40 @@ class FassetParser:
             )
 
         profiles_by_symbol: dict[str, FassetCompliantProfile] = {}
+        conflicted_symbols: set[str] = set()
         excluded: list[dict[str, str]] = []
-        for position, start in enumerate(starts):
-            end = starts[position + 1] if position + 1 < len(starts) else len(lines)
-            block = lines[start:end]
-            parsed = self._parse_block(block)
+        for block in blocks:
+            parsed = self._parse_block(block, require_profile_facts=detailed)
             if isinstance(parsed, FassetCompliantProfile):
+                if parsed.symbol in conflicted_symbols:
+                    excluded.append(
+                        {
+                            "profile": str(parsed.profile_number),
+                            "asset": f"{parsed.name} ({parsed.symbol})",
+                            "reason": "duplicate_symbol_identity_conflict",
+                        }
+                    )
+                    continue
                 previous = profiles_by_symbol.get(parsed.symbol)
                 if previous is not None:
                     if _identity_text(previous.name) != _identity_text(parsed.name):
-                        raise FassetImportError(
-                            "fasset_duplicate_symbol_conflict",
-                            "Fasset exposed the same symbol for different asset names.",
+                        profiles_by_symbol.pop(parsed.symbol)
+                        conflicted_symbols.add(parsed.symbol)
+                        excluded.extend(
+                            [
+                                {
+                                    "profile": str(previous.profile_number),
+                                    "asset": f"{previous.name} ({previous.symbol})",
+                                    "reason": "duplicate_symbol_identity_conflict",
+                                },
+                                {
+                                    "profile": str(parsed.profile_number),
+                                    "asset": f"{parsed.name} ({parsed.symbol})",
+                                    "reason": "duplicate_symbol_identity_conflict",
+                                },
+                            ]
                         )
+                        continue
                     excluded.append(
                         {
                             "profile": str(previous.profile_number),
@@ -226,12 +263,39 @@ class FassetParser:
             profiles=profiles,
             excluded_profiles=excluded,
             normalized_text="\n".join(lines),
-            total_profiles=len(starts),
+            total_profiles=len(blocks),
         )
+
+    @staticmethod
+    def _compact_blocks(lines: list[str]) -> list[list[str]]:
+        blocks: list[list[str]] = []
+        allowed_verdicts = {"Shariah Compliant", "Not Compliant"}
+        for index in range(len(lines) - 2):
+            name, source_symbol, verdict = lines[index : index + 3]
+            aliases = [item.strip() for item in source_symbol.upper().split("/") if item.strip()]
+            symbol = aliases[-1] if aliases else source_symbol.upper()
+            if (
+                verdict not in allowed_verdicts
+                or not name
+                or not _SYMBOL_RE.fullmatch(symbol)
+            ):
+                continue
+            blocks.append(
+                [
+                    str(len(blocks) + 1),
+                    name,
+                    source_symbol.upper(),
+                    "Shariah Verdict",
+                    verdict,
+                ]
+            )
+        return blocks
 
     @staticmethod
     def _parse_block(
         block: list[str],
+        *,
+        require_profile_facts: bool = True,
     ) -> FassetCompliantProfile | dict[str, str]:
         profile_number = int(block[0])
         name = _clean_text(block[1] if len(block) > 1 else "")
@@ -281,7 +345,9 @@ class FassetParser:
             }
             if value not in reserved_labels:
                 facts[_fact_key(label)] = value
-        if not facts.get("platform_purpose") or not facts.get("token_utility"):
+        if require_profile_facts and (
+            not facts.get("platform_purpose") or not facts.get("token_utility")
+        ):
             return {
                 "profile": str(profile_number),
                 "asset": f"{name} ({symbol})",
@@ -346,6 +412,18 @@ class FassetImporter:
                 run_id=str(existing_run.id),
                 snapshot_id=str(snapshot.id) if snapshot else "",
                 created_assessments=0,
+                updated_package_assessments=int(
+                    existing_run.result_summary.get(
+                        "updated_package_assessments",
+                        0,
+                    )
+                ),
+                conflicted_package_assessments=int(
+                    existing_run.result_summary.get(
+                        "conflicted_package_assessments",
+                        0,
+                    )
+                ),
                 explicit_compliant_profiles=int(
                     existing_run.result_summary.get("explicit_compliant_profiles", 0)
                 ),
@@ -405,7 +483,39 @@ class FassetImporter:
         await self.session.flush()
 
         created = 0
+        updated_package_assessments = 0
+        conflicted_package_assessments = 0
         for profile in parsed.profiles:
+            package_matches = await self._package_assessment_matches(
+                profile=profile,
+                source_url=source.url,
+            )
+            if len(package_matches) == 1:
+                package_assessment = package_matches[0]
+                if profile.facts:
+                    package_assessment.source_detail_extraction_state = (
+                        "FETCHED_AND_VERIFIED"
+                    )
+                    package_assessment.source_detail_snapshot_id = snapshot.id
+                    package_assessment.source_detail_fields = dict(profile.facts)
+                    updated_package_assessments += 1
+                continue
+            if len(package_matches) > 1:
+                note = (
+                    "The live Fasset source matched more than one retained package "
+                    "assessment by exact name, symbol, status and source URL. Manual "
+                    "identity review is required before source details can be attached."
+                )
+                for package_assessment in package_matches:
+                    package_assessment.mapping_state = "identity_conflict"
+                    package_assessment.manual_verification_required = True
+                    notes = list(package_assessment.mapping_notes or [])
+                    if note not in notes:
+                        notes.append(note)
+                    package_assessment.mapping_notes = notes
+                conflicted_package_assessments += len(package_matches)
+                continue
+
             import_hash = _sha256(
                 "|".join(
                     [
@@ -456,6 +566,8 @@ class FassetImporter:
             "total_profiles": parsed.total_profiles,
             "explicit_compliant_profiles": len(parsed.profiles),
             "created_assessments": created,
+            "updated_package_assessments": updated_package_assessments,
+            "conflicted_package_assessments": conflicted_package_assessments,
             "excluded_profiles": len(parsed.excluded_profiles),
             "source_family": "fasset_shariah_reports",
             "publication_boundary": "human_review_and_publication_required",
@@ -471,6 +583,10 @@ class FassetImporter:
                     "total_profiles": parsed.total_profiles,
                     "explicit_compliant_profiles": len(parsed.profiles),
                     "created_assessments": created,
+                    "updated_package_assessments": updated_package_assessments,
+                    "conflicted_package_assessments": (
+                        conflicted_package_assessments
+                    ),
                     "excluded_profiles": len(parsed.excluded_profiles),
                     "source_hash": source_hash,
                 },
@@ -482,10 +598,41 @@ class FassetImporter:
             run_id=str(run.id),
             snapshot_id=str(snapshot.id),
             created_assessments=created,
+            updated_package_assessments=updated_package_assessments,
+            conflicted_package_assessments=conflicted_package_assessments,
             explicit_compliant_profiles=len(parsed.profiles),
             excluded_profiles=len(parsed.excluded_profiles),
             idempotent_replay=False,
         )
+
+    async def _package_assessment_matches(
+        self,
+        *,
+        profile: FassetCompliantProfile,
+        source_url: str,
+    ) -> list[ExternalAssessment]:
+        candidates = list(
+            (
+                await self.session.scalars(
+                    select(ExternalAssessment).where(
+                        ExternalAssessment.source_family
+                        == "fasset_shariah_reports",
+                        ExternalAssessment.source_row_id.is_not(None),
+                        ExternalAssessment.asset_name == profile.name,
+                        ExternalAssessment.asset_symbol == profile.symbol,
+                        ExternalAssessment.exact_status_wording
+                        == profile.exact_status_wording,
+                    )
+                )
+            ).all()
+        )
+        normalized_source_url = _normalized_source_url(source_url)
+        return [
+            assessment
+            for assessment in candidates
+            if _normalized_source_url(assessment.source_url)
+            == normalized_source_url
+        ]
 
 
 def _fact_key(label: str) -> str:
@@ -494,6 +641,12 @@ def _fact_key(label: str) -> str:
 
 def _identity_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _normalized_source_url(value: str) -> str:
+    parsed = urlparse(value)
+    path = parsed.path.rstrip("/") or "/"
+    return f"{parsed.scheme.casefold()}://{parsed.netloc.casefold()}{path}"
 
 
 def _clean_text(value: object) -> str:

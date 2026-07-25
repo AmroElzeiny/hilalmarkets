@@ -16,8 +16,10 @@ from ai_market_monitor.db.models import (
     DashboardPreference,
     ExchangeMarket,
     ExternalAssessment,
+    OfficialSource,
     PublishedAssetAssessment,
     ReviewCase,
+    ReviewDecision,
     ShariaMethodology,
     ShariaMonitoringRun,
     SourceChangeEvent,
@@ -49,7 +51,10 @@ from ai_market_monitor.services.sharia_governance import (
 from ai_market_monitor.services.sharia_identity import (
     PILOT_ASSET_CANDIDATES,
     AssetIdentityError,
+    CanonicalAssetCandidate,
     CanonicalAssetMappingService,
+    ExchangeMarketIdentity,
+    can_reuse_verified_mapping,
 )
 from ai_market_monitor.services.sharia_passports import (
     ShariaPassportReadService,
@@ -58,6 +63,8 @@ from ai_market_monitor.services.sharia_passports import (
 from ai_market_monitor.services.sharia_research import (
     AIAnalysisResult,
     ShariaFactualAnalysis,
+    ShariaResearchPipeline,
+    _initial_research_run_key,
 )
 from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
@@ -424,6 +431,41 @@ async def test_sc_import_is_idempotent_and_never_publishes(test_context):
     assert public_count == 0
 
 
+async def test_sc_live_import_verifies_package_row_without_creating_a_duplicate(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        external, _, package_snapshot = await _external(session)
+        external.source_row_id = "SCMY-01-BTC"
+        external.source_family = "sc_malaysia_sac"
+        await session.commit()
+
+        result = await SCMalaysiaImporter(
+            session,
+            test_context["settings"],
+            fetcher=StaticSCFetcher(),
+        ).import_latest()
+        await session.commit()
+        await session.refresh(external)
+        external_count = int(
+            await session.scalar(select(func.count(ExternalAssessment.id))) or 0
+        )
+        publication_count = int(
+            await session.scalar(select(func.count(PublishedAssetAssessment.id))) or 0
+        )
+
+    assert result.created_assessments == 0
+    assert result.verified_package_assessments == 1
+    assert result.conflicted_package_assessments == 0
+    assert external_count == 1
+    assert external.source_snapshot_id == package_snapshot.id
+    assert external.source_detail_snapshot_id == UUID(result.snapshot_id)
+    assert external.source_detail_extraction_state == "SOURCE_ROW_VERIFIED"
+    assert external.source_detail_fields["sac_meeting_number"] == "256th"
+    assert external.source_detail_fields["decision_date"] == "2023-06-29"
+    assert publication_count == 0
+
+
 async def _external(session, *, name: str = "Bitcoin", symbol: str = "BTC"):
     run = ShariaMonitoringRun(
         run_kind="test_import",
@@ -489,10 +531,336 @@ async def test_canonical_mapping_rejects_ticker_only_match(test_context):
             select(ReviewCase).where(ReviewCase.case_type == "source_identity_conflict")
         )
         asset_count = await session.scalar(select(func.count(CanonicalAsset.id)))
+        external_id = external.id
+        await session.commit()
 
     assert external.mapping_state == "conflict"
     assert conflict is not None
     assert asset_count == 0
+    async with test_context["session_factory"]() as session:
+        persisted = await session.get(ExternalAssessment, external_id)
+        persisted_conflict = await session.scalar(
+            select(ReviewCase).where(
+                ReviewCase.external_assessment_id == external_id,
+                ReviewCase.case_type == "source_identity_conflict",
+            )
+        )
+    assert persisted is not None
+    assert persisted.mapping_state == "conflict"
+    assert persisted_conflict is not None
+
+
+async def test_canonical_mapping_reuses_compound_provider_identity(test_context):
+    async with test_context["session_factory"]() as session:
+        first_external, _, source = await _external(session)
+        first = await CanonicalAssetMappingService(session).map_candidate(
+            first_external,
+            PILOT_ASSET_CANDIDATES["BTC"],
+            verified_exchange_symbols={"BTC/USDT"},
+        )
+        second_external = ExternalAssessment(
+            source_snapshot_id=source.id,
+            source_authority=first_external.source_authority,
+            source_url=first_external.source_url,
+            asset_name="Bitcoin",
+            asset_symbol="BTC",
+            exact_status_wording="Compliant",
+            regulatory_scope="A second independent methodology reference.",
+            retrieval_date=datetime.now(UTC),
+            exact_row_text="Bitcoin (BTC) Compliant",
+            import_hash="second-bitcoin-methodology-row",
+            mapping_state="unresolved",
+        )
+        session.add(second_external)
+        await session.flush()
+        discovered = CanonicalAssetCandidate(
+            name="Bitcoin",
+            symbol="BTC",
+            asset_type="native_coin",
+            native_chain="Bitcoin Network",
+            official_website="https://bitcoin.org/",
+            official_documentation="https://developer.bitcoin.org/",
+            provider_ids={
+                "coingecko": "bitcoin",
+                "logo_url": "https://assets.coingecko.com/bitcoin.png",
+            },
+            exchange_markets=PILOT_ASSET_CANDIDATES["BTC"].exchange_markets,
+        )
+
+        second = await CanonicalAssetMappingService(session).map_candidate(
+            second_external,
+            discovered,
+            verified_exchange_symbols={"BTC/USDT"},
+        )
+        asset_count = int(
+            await session.scalar(select(func.count(CanonicalAsset.id))) or 0
+        )
+
+    assert second.id == first.id
+    assert asset_count == 1
+    assert second.native_chain == "Bitcoin Network"
+    assert second.provider_ids["logo_url"].endswith("/bitcoin.png")
+
+
+async def test_canonical_mapping_reuses_provider_identity_across_name_aliases(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        external, _, source = await _external(session)
+        external.asset_name = "Ripple"
+        external.asset_symbol = "XRP"
+        external.exact_row_text = "Ripple (XRP) Compliant"
+        first = await CanonicalAssetMappingService(session).map_candidate(
+            external,
+            CanonicalAssetCandidate(
+                name="Ripple",
+                symbol="XRP",
+                asset_type="native_coin",
+                native_chain="XRP Ledger",
+                official_website="https://xrpl.org/",
+                official_documentation="https://xrpl.org/docs/",
+                provider_ids={"coingecko": "ripple"},
+                exchange_markets=(
+                    ExchangeMarketIdentity(
+                        "binance",
+                        "XRP/USDT",
+                        "XRP",
+                        "USDT",
+                    ),
+                ),
+            ),
+            verified_exchange_symbols={"XRP/USDT"},
+        )
+        second_external = ExternalAssessment(
+            source_snapshot_id=source.id,
+            source_authority=external.source_authority,
+            source_url=external.source_url,
+            asset_name="XRP",
+            asset_symbol="XRP",
+            exact_status_wording="Compliant",
+            regulatory_scope="A second independent methodology reference.",
+            retrieval_date=datetime.now(UTC),
+            exact_row_text="XRP (XRP) Compliant",
+            import_hash="second-xrp-methodology-row",
+            mapping_state="unresolved",
+        )
+        session.add(second_external)
+        await session.flush()
+
+        second = await CanonicalAssetMappingService(session).map_candidate(
+            second_external,
+            CanonicalAssetCandidate(
+                name="XRP",
+                symbol="XRP",
+                asset_type="native_coin",
+                native_chain="XRP Ledger",
+                official_website="https://xrpl.org/docs",
+                official_documentation="https://xrpl.org/docs/",
+                provider_ids={
+                    "coingecko": "ripple",
+                    "logo_url": "https://assets.coingecko.com/xrp.png",
+                },
+                exchange_markets=(
+                    ExchangeMarketIdentity(
+                        "binance",
+                        "XRP/USDT",
+                        "XRP",
+                        "USDT",
+                    ),
+                ),
+            ),
+            verified_exchange_symbols={"XRP/USDT"},
+        )
+        asset_count = int(
+            await session.scalar(select(func.count(CanonicalAsset.id))) or 0
+        )
+
+    assert second.id == first.id
+    assert second.name == "XRP"
+    assert asset_count == 1
+    assert second.provider_ids["logo_url"].endswith("/xrp.png")
+
+
+def test_verified_mapping_survives_only_non_contradictory_provider_outage():
+    asset_id = UUID("10000000-0000-0000-0000-000000000001")
+    asset = CanonicalAsset(
+        id=asset_id,
+        name="Bitcoin",
+        symbol="BTC",
+        asset_type="native_coin",
+        official_website="https://bitcoin.org/",
+        official_documentation="https://developer.bitcoin.org/",
+        contract_addresses={},
+        provider_ids={"coingecko": "bitcoin"},
+        identity_hash="a" * 64,
+        mapping_state="verified",
+        mapping_evidence={},
+    )
+    external = ExternalAssessment(
+        canonical_asset_id=asset_id,
+        source_snapshot_id=UUID(
+            "20000000-0000-0000-0000-000000000002"
+        ),
+        source_authority="External authority",
+        source_url="https://authority.example/",
+        asset_name="Bitcoin",
+        asset_symbol="BTC",
+        exact_status_wording="Compliant",
+        regulatory_scope="Asset-level reference.",
+        retrieval_date=datetime.now(UTC),
+        exact_row_text="Bitcoin compliant",
+        import_hash="b" * 64,
+        mapping_state="conflict",
+        mapping_notes=[
+            (
+                "Identity matched across name, symbol, native/token status, "
+                "chain, and official site."
+            ),
+            (
+                "identity_provider_unavailable: The identity provider could "
+                "not complete the request."
+            ),
+        ],
+    )
+
+    assert can_reuse_verified_mapping(external, asset) is True
+
+    external.mapping_notes.append(
+        "canonical_identity_detail_mismatch: Provider identity changed."
+    )
+    assert can_reuse_verified_mapping(external, asset) is False
+
+
+class StaticProjectEvidenceFetcher:
+    async def fetch(self, source: OfficialSource):
+        return (
+            (
+                "<html><head><title>Official project information</title></head>"
+                "<body><h1>Bitcoin</h1><p>Official factual project evidence.</p></body></html>"
+            ),
+            {"content-type": "text/html"},
+            200,
+        )
+
+    async def _assert_robots(self, url: str) -> None:
+        return None
+
+
+class InitialResearchAI:
+    async def analyze(self, package):
+        analysis = ShariaFactualAnalysis.model_validate(
+            {
+                "canonical_identity_conclusion": "confirmed",
+                "profile": {
+                    "project_identity": "Bitcoin native network asset.",
+                    "primary_activity": "Peer-to-peer settlement.",
+                    "token_role": "Native network unit.",
+                    "staking": "No native proof-of-stake mechanism.",
+                    "lending_and_yield": "Third-party uses are separate.",
+                    "derivatives": "Outside the monitored spot scope.",
+                    "treasury_and_governance": "No protocol treasury.",
+                    "tokenomics_and_backing": "Protocol-defined issuance.",
+                },
+                "relevant_activity_categories": ["native_asset"],
+                "evidence_references": [],
+                "missing_evidence": [],
+                "contradictions": [],
+                "change_type": "initial_research",
+                "potential_impact_severity": "none",
+                "potentially_affected_methodology_areas": [],
+                "human_review_required": False,
+                "human_review_reason": "The factual evidence was resolved.",
+                "recommended_next_action": "no_action",
+                "confidence": 0.9,
+                "explicit_limitations": [
+                    "Factual enrichment does not determine Sharia status."
+                ],
+            }
+        )
+        return AIAnalysisResult(
+            analysis=analysis,
+            usage={"input_tokens": 20, "output_tokens": 10},
+            returned_service_tier="flex",
+            retry_count=0,
+        )
+
+
+async def test_initial_research_reuses_orphaned_run_after_worker_restart(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        external, _, source_snapshot = await _external(session)
+        asset = await CanonicalAssetMappingService(session).map_candidate(
+            external,
+            PILOT_ASSET_CANDIDATES["BTC"],
+            verified_exchange_symbols={"BTC/USDT"},
+        )
+        methodology = ShariaMethodology(
+            code=SC_METHODOLOGY_CODE,
+            name="SC Malaysia SAC Reference",
+            version="2026.1",
+            description="Versioned reference publication workflow.",
+            status=ShariaMethodologyStatus.ACTIVE,
+            governing_body="Securities Commission Malaysia SAC",
+            reviewer_group="HilalMarkets authenticated administrators",
+            published_at=datetime.now(UTC),
+            effective_from=datetime.now(UTC),
+            rules_json=_methodology_rules(),
+            evidence_requirements_json=_evidence_requirements(),
+        )
+        session.add(methodology)
+        await session.flush()
+        external.methodology_id = methodology.id
+        sources = list(
+            (
+                await session.scalars(
+                    select(OfficialSource)
+                    .where(OfficialSource.canonical_asset_id == asset.id)
+                    .order_by(
+                        OfficialSource.priority.asc(),
+                        OfficialSource.source_url.asc(),
+                    )
+                )
+            ).all()
+        )
+        run_key = _initial_research_run_key(
+            external.id,
+            source_snapshot.content_hash,
+            sources,
+        )
+        orphan = ShariaMonitoringRun(
+            run_kind="initial_research",
+            canonical_asset_id=asset.id,
+            idempotency_key=run_key,
+            status="failed",
+            started_at=datetime.now(UTC) - timedelta(minutes=5),
+            completed_at=datetime.now(UTC) - timedelta(minutes=4),
+            items_attempted=len(sources) + 1,
+            last_error_code="worker_interrupted",
+        )
+        session.add(orphan)
+        await session.flush()
+
+        result = await ShariaResearchPipeline(
+            session,
+            test_context["settings"],
+            fetcher=StaticProjectEvidenceFetcher(),
+            ai_client=InitialResearchAI(),
+        ).research_initial_asset(external.id)
+        run_count = int(
+            await session.scalar(
+                select(func.count(ShariaMonitoringRun.id)).where(
+                    ShariaMonitoringRun.idempotency_key == run_key
+                )
+            )
+            or 0
+        )
+        await session.refresh(orphan)
+
+    assert result.ai_status == "completed"
+    assert run_count == 1
+    assert orphan.status == "completed"
+    assert orphan.last_error_code is None
 
 
 async def _ready_case(session):
@@ -997,6 +1365,341 @@ async def test_fasset_publication_reuses_human_governance_and_keeps_source_layer
     )
 
 
+async def test_package_rights_gate_blocks_publication_until_admin_clearance(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        external = await session.get(
+            ExternalAssessment,
+            case.external_assessment_id,
+        )
+        assert external is not None
+        external.methodology_id = methodology.id
+        external.source_row_id = "FASSET-001-bitcoin"
+        external.normalized_status = "ELIGIBLE_EXTERNAL_REFERENCE"
+        external.publication_gate = (
+            "ADMIN_APPROVAL_AND_RIGHTS_REVIEW_REQUIRED"
+        )
+        external.rights_state = (
+            "RIGHTS_REVIEW_REQUIRED_BEFORE_COMMERCIAL_PUBLICATION"
+        )
+        external.commercial_display_allowed = False
+        reviewer = User(
+            display_name="Rights reviewer",
+            role=UserRole.ADMIN,
+        )
+        session.add(reviewer)
+        await session.flush()
+        service = ShariaGovernanceService(
+            session,
+            test_context["settings"],
+        )
+
+        await service.approve_for_publication(
+            case.id,
+            admin_user_id=reviewer.id,
+            reason=(
+                "The external row and factual dossier passed human review, "
+                "subject to the separate public-display rights gate."
+            ),
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_use_case_decisions(),
+        )
+
+        with pytest.raises(ShariaGovernanceError) as blocked:
+            await service.publish_approved(
+                case.id,
+                admin_user_id=reviewer.id,
+                reason=(
+                    "Attempt publication before the required rights clearance."
+                ),
+            )
+        assert blocked.value.code == "external_rights_clearance_required"
+
+        await service.record_rights_clearance(
+            case.id,
+            admin_user_id=reviewer.id,
+            clearance_reference=(
+                "Written commercial-display permission retained in legal "
+                "record HM-RIGHTS-2026-001."
+            ),
+        )
+        publication = await service.publish_approved(
+            case.id,
+            admin_user_id=reviewer.id,
+            reason=(
+                "Publish after the retained written rights clearance and "
+                "human review."
+            ),
+        )
+
+    assert publication.is_active is True
+    assert external.commercial_display_allowed is True
+    assert external.rights_cleared_by_user_id == reviewer.id
+    assert external.rights_cleared_at is not None
+
+
+async def test_external_reference_auto_publication_is_audited_and_keeps_ai_non_authoritative(
+    test_context,
+):
+    settings = test_context["settings"].model_copy(
+        update={
+            "sharia_import_auto_publish": True,
+            "sharia_import_require_admin_review": False,
+            "sharia_import_metadata_only_publication": True,
+            "require_second_reviewer": False,
+        }
+    )
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        external = await session.get(
+            ExternalAssessment,
+            case.external_assessment_id,
+        )
+        assert external is not None
+        external.methodology_id = methodology.id
+        external.source_row_id = "SCM-001-bitcoin"
+        external.normalized_status = "ELIGIBLE_EXTERNAL_REFERENCE"
+        external.commercial_display_allowed = False
+        admin = User(
+            display_name="Configured automation owner",
+            role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        await session.flush()
+
+        publication = await ShariaGovernanceService(
+            session,
+            settings,
+        ).auto_publish_external_reference(
+            case.id,
+            admin_user_id=admin.id,
+        )
+        decision = await session.get(
+            ReviewDecision,
+            publication.review_decision_id,
+        )
+        assessment = await session.get(
+            AssetShariaAssessment,
+            publication.asset_assessment_id,
+        )
+
+    assert decision is not None
+    assert assessment is not None
+    assert decision.actor_role == "EXTERNAL_REFERENCE_AUTOMATION"
+    assert decision.security_metadata["ai_controls_status"] is False
+    assert assessment.reviewed_by == "External authority reference automation"
+    assert assessment.status == ShariaAssetStatus.ELIGIBLE
+    assert publication.passport_snapshot["official_methodology_reference"][
+        "exact_wording"
+    ] == "Shariah-compliant"
+    assert publication.passport_snapshot[
+        "hilalmarkets_factual_information_profile"
+    ]["notice"]
+
+
+async def test_external_reference_auto_publication_is_idempotent_per_review_case(
+    test_context,
+):
+    settings = test_context["settings"].model_copy(
+        update={
+            "sharia_import_auto_publish": True,
+            "sharia_import_require_admin_review": False,
+            "sharia_import_metadata_only_publication": True,
+            "require_second_reviewer": False,
+        }
+    )
+    async with test_context["session_factory"]() as session:
+        first_case, methodology = await _ready_case(session)
+        external = await session.get(
+            ExternalAssessment,
+            first_case.external_assessment_id,
+        )
+        assert external is not None
+        external.methodology_id = methodology.id
+        external.source_row_id = "SCM-001-bitcoin"
+        external.normalized_status = "ELIGIBLE_EXTERNAL_REFERENCE"
+        admin = User(
+            display_name="Configured automation owner",
+            role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        await session.flush()
+        service = ShariaGovernanceService(session, settings)
+
+        first_publication = await service.auto_publish_external_reference(
+            first_case.id,
+            admin_user_id=admin.id,
+        )
+        second_case = ReviewCase(
+            case_reference="SC-BTC-TEST-REFRESH",
+            case_type="evidence_change",
+            state="ready_for_review",
+            publication_state="unpublished",
+            canonical_asset_id=first_case.canonical_asset_id,
+            external_assessment_id=first_case.external_assessment_id,
+            dossier_id=first_case.dossier_id,
+            methodology_id=methodology.id,
+            title="Review refreshed Bitcoin evidence",
+            priority="normal",
+            risk_severity="none",
+            human_review_reason="A refreshed external reference is ready.",
+            idempotency_key="review:btc:test:refresh",
+            next_reminder_at=datetime.now(UTC),
+        )
+        session.add(second_case)
+        await session.flush()
+
+        second_publication = await service.auto_publish_external_reference(
+            second_case.id,
+            admin_user_id=admin.id,
+        )
+        repeated_publication = await service.auto_publish_external_reference(
+            second_case.id,
+            admin_user_id=admin.id,
+        )
+        await session.refresh(first_publication)
+        second_decision = await session.get(
+            ReviewDecision,
+            second_publication.review_decision_id,
+        )
+
+    assert second_publication.id != first_publication.id
+    assert repeated_publication.id == second_publication.id
+    assert first_publication.is_active is False
+    assert second_publication.is_active is True
+    assert second_decision is not None
+    assert second_decision.review_case_id == second_case.id
+
+
+async def test_external_reference_auto_publication_retains_failed_secondary_source(
+    test_context,
+):
+    settings = test_context["settings"].model_copy(
+        update={
+            "sharia_import_auto_publish": True,
+            "sharia_import_require_admin_review": False,
+            "sharia_import_metadata_only_publication": True,
+            "require_second_reviewer": False,
+        }
+    )
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        external = await session.get(
+            ExternalAssessment,
+            case.external_assessment_id,
+        )
+        dossier = await session.get(
+            AssetResearchDossier,
+            case.dossier_id,
+        )
+        analysis = await session.scalar(
+            select(AIAnalysisSnapshot).where(
+                AIAnalysisSnapshot.dossier_id == case.dossier_id
+            )
+        )
+        assert external is not None
+        assert dossier is not None
+        assert analysis is not None
+        secondary = SourceSnapshot(
+            monitoring_run_id=dossier.monitoring_run_id,
+            source_url="https://project.example/unavailable",
+            retrieved_at=datetime.now(UTC),
+            normalized_text="",
+            content_hash="f" * 64,
+            meaningful_diff={},
+            is_material_change=False,
+            fetch_status="failed",
+            error_code="official_source_unavailable",
+            scraper_version="test",
+            parser_result={},
+        )
+        session.add(secondary)
+        await session.flush()
+        dossier.source_snapshot_ids = [
+            *dossier.source_snapshot_ids,
+            str(secondary.id),
+        ]
+        external.methodology_id = methodology.id
+        external.source_row_id = "SCM-001-bitcoin"
+        external.normalized_status = "ELIGIBLE_EXTERNAL_REFERENCE"
+        admin = User(
+            display_name="Configured automation owner",
+            role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        await session.flush()
+
+        publication = await ShariaGovernanceService(
+            session,
+            settings,
+        ).auto_publish_external_reference(
+            case.id,
+            admin_user_id=admin.id,
+        )
+
+    assert publication.is_active is True
+    assert str(secondary.id) in publication.passport_snapshot[
+        "hilalmarkets_factual_information_profile"
+    ]["official_source_snapshot_ids"]
+
+
+async def test_package_internal_approval_stores_without_public_display(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        case, methodology = await _ready_case(session)
+        external = await session.get(
+            ExternalAssessment,
+            case.external_assessment_id,
+        )
+        assert external is not None
+        external.methodology_id = methodology.id
+        external.source_row_id = "SRB-001-bitcoin"
+        external.normalized_status = "ELIGIBLE_EXTERNAL_REFERENCE"
+        external.publication_gate = (
+            "ADMIN_APPROVAL_AND_RIGHTS_CLEARANCE_REQUIRED"
+        )
+        external.rights_state = (
+            "INTERNAL_PRELIMINARY_RESEARCH_ONLY_NO_PUBLIC_REPORT_CONTENT"
+        )
+        external.commercial_display_allowed = False
+        reviewer = User(
+            display_name="Internal reviewer",
+            role=UserRole.ADMIN,
+        )
+        session.add(reviewer)
+        await session.flush()
+
+        decision = await ShariaGovernanceService(
+            session,
+            test_context["settings"],
+        ).approve_internally(
+            case.id,
+            admin_user_id=reviewer.id,
+            reason=(
+                "Retain the reviewed external record internally without "
+                "commercial public display."
+            ),
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_use_case_decisions(),
+        )
+        publication_count = int(
+            await session.scalar(
+                select(func.count(PublishedAssetAssessment.id))
+            )
+            or 0
+        )
+
+    assert decision.decision == "approved_internal_only"
+    assert case.state == "stored"
+    assert case.publication_state == "approved_internal_only"
+    assert case.done_at is not None
+    assert case.next_reminder_at is None
+    assert publication_count == 0
+
+
 async def test_review_publication_hold_and_restore_are_separate_immutable_actions(
     test_context,
 ):
@@ -1482,9 +2185,11 @@ class MaterialChangeAI:
     def __init__(self):
         self.calls = 0
         self.changed_source_counts: list[int] = []
+        self.packages: list[dict] = []
 
     async def analyze(self, package):
         self.calls += 1
+        self.packages.append(package)
         self.changed_source_counts.append(len(package["changed_sources"]))
         analysis = ShariaFactualAnalysis.model_validate(
             {
@@ -1584,7 +2289,10 @@ async def test_passport_uses_exact_persisted_authority_scan_due_at(test_context)
     if actual_due_at.tzinfo is None:
         actual_due_at = actual_due_at.replace(tzinfo=UTC)
     assert actual_due_at == exact_due_at
-    assert passport.source_scan_frequency_hours == 240
+    assert (
+        passport.source_scan_frequency_hours
+        == test_context["settings"].sharia_source_scan_interval_hours
+    )
 
 
 class BTCUniverseProvider:
@@ -1715,3 +2423,93 @@ async def test_all_changed_links_make_one_ai_call_and_create_review(test_context
     assert review.publication_state == "change_under_review"
     assert stored_publication.publication_state == "published"
     assert stored_publication.is_active is True
+
+
+async def test_internal_approval_registers_and_monitors_methodology_source(
+    test_context,
+):
+    settings = test_context["settings"].model_copy(
+        update={"sharia_admin_telegram_chat_id": "test-admin-chat"}
+    )
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        external = await session.get(
+            ExternalAssessment,
+            case.external_assessment_id,
+        )
+        assert external is not None
+        external.source_row_id = "SRB-001-bitcoin"
+        external.normalized_status = "ELIGIBLE_EXTERNAL_REFERENCE"
+        external.commercial_display_allowed = False
+        external.rights_state = (
+            "INTERNAL_PRELIMINARY_RESEARCH_ONLY_NO_PUBLIC_REPORT_CONTENT"
+        )
+        admin = User(
+            display_name="Internal monitoring reviewer",
+            role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        await session.flush()
+        await ShariaGovernanceService(
+            session,
+            settings,
+        ).approve_internally(
+            case.id,
+            admin_user_id=admin.id,
+            reason=(
+                "Retain this assessment internally and monitor all verified "
+                "sources for later human review."
+            ),
+            criterion_decisions=_criterion_decisions(),
+            use_case_decisions=_use_case_decisions(),
+        )
+        methodology_source = await session.scalar(
+            select(OfficialSource).where(
+                OfficialSource.canonical_asset_id
+                == case.canonical_asset_id,
+                OfficialSource.category
+                == "external_methodology_reference",
+            )
+        )
+        pipeline = SnapshotPipeline(session, material=True)
+        ai = MaterialChangeAI()
+        result = await ShariaSourceMonitoringService(
+            session,
+            settings,
+            research_pipeline=pipeline,
+            ai_client=ai,
+        ).run_due()
+        change_case = await session.scalar(
+            select(ReviewCase).where(
+                ReviewCase.publication_state
+                == "internal_change_under_review"
+            )
+        )
+        publication_count = int(
+            await session.scalar(
+                select(func.count(PublishedAssetAssessment.id))
+            )
+            or 0
+        )
+
+    assert methodology_source is not None
+    assert methodology_source.verification_state == "verified"
+    assert result["approved_internal_assets_considered"] == 1
+    assert result["assets_monitored"] == 1
+    assert result["review_cases_created"] == 1
+    assert ai.calls == 1
+    authority_change = next(
+        row
+        for row in ai.packages[0]["changed_sources"]
+        if row["source_category"]
+        == "external_methodology_reference"
+    )
+    assert authority_change["rights_restricted_content_withheld"] is True
+    assert authority_change["previous_text"] == ""
+    assert authority_change["current_text"] == ""
+    assert ai.packages[0]["external_authority_reference"][
+        "published_profile_facts"
+    ] == {}
+    assert change_case is not None
+    assert change_case.methodology_id == case.methodology_id
+    assert publication_count == 0

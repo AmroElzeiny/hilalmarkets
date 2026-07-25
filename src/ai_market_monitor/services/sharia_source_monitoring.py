@@ -1,6 +1,8 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,16 @@ from ai_market_monitor.services.sharia_research import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _MonitoringTarget:
+    scope_key: str
+    canonical_asset_id: UUID
+    external_assessment_id: UUID
+    methodology_id: UUID | None
+    publication: PublishedAssetAssessment | None
+    baseline_dossier_id: UUID | None
+
+
 class ShariaSourceMonitoringService:
     def __init__(
         self,
@@ -56,12 +68,54 @@ class ShariaSourceMonitoringService:
                 )
             ).all()
         )
+        published_external_ids = {
+            row.external_assessment_id
+            for row in publications
+        }
+        internal_cases = list(
+            (
+                await self.session.scalars(
+                    select(ReviewCase).where(
+                        ReviewCase.state == "stored",
+                        ReviewCase.publication_state
+                        == "approved_internal_only",
+                        ReviewCase.canonical_asset_id.is_not(None),
+                        ReviewCase.external_assessment_id.is_not(None),
+                    )
+                )
+            ).all()
+        )
+        targets = [
+            _MonitoringTarget(
+                scope_key=f"publication:{publication.id}",
+                canonical_asset_id=publication.canonical_asset_id,
+                external_assessment_id=publication.external_assessment_id,
+                methodology_id=None,
+                publication=publication,
+                baseline_dossier_id=publication.dossier_id,
+            )
+            for publication in publications
+        ]
+        targets.extend(
+            _MonitoringTarget(
+                scope_key=f"internal-approval:{case.id}",
+                canonical_asset_id=case.canonical_asset_id,
+                external_assessment_id=case.external_assessment_id,
+                methodology_id=case.methodology_id,
+                publication=None,
+                baseline_dossier_id=case.dossier_id,
+            )
+            for case in internal_cases
+            if case.external_assessment_id not in published_external_ids
+            and case.canonical_asset_id is not None
+            and case.external_assessment_id is not None
+        )
         monitored = 0
         changed = 0
         cases = 0
         failures = 0
-        for publication in publications:
-            result = await self._monitor_one(publication)
+        for target in targets:
+            result = await self._monitor_one(target)
             if result == "not_due":
                 continue
             monitored += 1
@@ -70,26 +124,31 @@ class ShariaSourceMonitoringService:
             failures += result == "failed"
         return {
             "published_assets_considered": len(publications),
+            "approved_internal_assets_considered": len(internal_cases),
             "assets_monitored": monitored,
             "assets_changed": changed,
             "review_cases_created": cases,
             "failures": failures,
         }
 
-    async def _monitor_one(self, publication: PublishedAssetAssessment) -> str:
+    async def _monitor_one(self, target: _MonitoringTarget) -> str:
         now = datetime.now(UTC)
         window_seconds = self.settings.sharia_source_scan_interval_hours * 3600
         window = int(now.timestamp() // window_seconds)
-        run_key = f"source-monitor:{publication.id}:{window}"
+        run_key = f"source-monitor:{target.scope_key}:{window}"
         if await self.session.scalar(
             select(ShariaMonitoringRun.id).where(
                 ShariaMonitoringRun.idempotency_key == run_key
             )
         ):
             return "not_due"
-        asset = await self.session.get(CanonicalAsset, publication.canonical_asset_id)
+        asset = await self.session.get(
+            CanonicalAsset,
+            target.canonical_asset_id,
+        )
         external = await self.session.get(
-            ExternalAssessment, publication.external_assessment_id
+            ExternalAssessment,
+            target.external_assessment_id,
         )
         if asset is None or external is None:
             return "failed"
@@ -123,6 +182,26 @@ class ShariaSourceMonitoringService:
             snapshots.append(await self.pipeline._fetch_source(run, source))
         successful = [row for row in snapshots if row.fetch_status == "success"]
         changed = [row for row in successful if row.is_material_change]
+        sources_by_id = {row.id: row for row in sources}
+        project_source_changed = any(
+            snapshot.official_source_id is not None
+            and sources_by_id.get(snapshot.official_source_id) is not None
+            and sources_by_id[snapshot.official_source_id].category
+            != "external_methodology_reference"
+            for snapshot in changed
+        )
+        baseline_dossier = (
+            await self.session.get(
+                AssetResearchDossier,
+                target.baseline_dossier_id,
+            )
+            if target.baseline_dossier_id is not None
+            else None
+        )
+        baseline_profile = dict(
+            (baseline_dossier.factual_profile if baseline_dossier else {})
+            or {}
+        )
         run.items_succeeded = len(successful)
         run.items_failed = len(snapshots) - len(successful)
         if not changed:
@@ -197,7 +276,11 @@ class ShariaSourceMonitoringService:
         ai_row.status = "completed"
         ai_row.completed_at = datetime.now(UTC)
         dossier.state = "ready"
-        dossier.factual_profile = analysis.profile.model_dump(mode="json")
+        dossier.factual_profile = (
+            analysis.profile.model_dump(mode="json")
+            if project_source_changed
+            else baseline_profile
+        )
         dossier.missing_information_count = len(analysis.missing_evidence)
         dossier.contradiction_count = len(analysis.contradictions)
         dossier.limitations = analysis.explicit_limitations
@@ -245,38 +328,55 @@ class ShariaSourceMonitoringService:
                 await self.session.flush()
             if review_required and review_case is None:
                 review_case = await self._material_review_case(
-                    asset, external, dossier, publication, analysis.human_review_reason,
+                    asset,
+                    external,
+                    dossier,
+                    target,
+                    analysis.human_review_reason,
                     analysis.potential_impact_severity,
                 )
             if review_case is not None:
                 event.review_case_id = review_case.id
 
         if review_case is not None:
-            severity = (
-                ComplianceChangeSeverity.CRITICAL
-                if analysis.potential_impact_severity in {"high", "critical"}
-                else ComplianceChangeSeverity.REVIEW_REQUIRED
-            )
-            await ComplianceWatchService(self.session, self.settings).ingest_change(
-                ComplianceChangeIngestRequest(
-                    canonical_asset=asset.symbol,
-                    change_type="official_source_material_change",
-                    severity=severity,
-                    source_reference=(changed[0].source_url if changed else None),
-                    title=f"Official source change for {asset.name}",
-                    summary=analysis.human_review_reason,
-                    structured_change={
-                        "review_case_id": str(review_case.id),
-                        "source_snapshot_ids": [str(row.id) for row in changed],
-                        "ai_does_not_change_status": True,
-                    },
-                    detected_at=datetime.now(UTC),
-                    detection_method="sequential_source_hash_and_bounded_ai_review",
-                    confidence_label="verified_source",
-                    idempotency_key=f"source-change-review:{review_case.id}",
-                ),
-                actor_user_id=None,
-            )
+            if target.publication is not None:
+                severity = (
+                    ComplianceChangeSeverity.CRITICAL
+                    if analysis.potential_impact_severity
+                    in {"high", "critical"}
+                    else ComplianceChangeSeverity.REVIEW_REQUIRED
+                )
+                await ComplianceWatchService(
+                    self.session,
+                    self.settings,
+                ).ingest_change(
+                    ComplianceChangeIngestRequest(
+                        canonical_asset=asset.symbol,
+                        change_type="official_source_material_change",
+                        severity=severity,
+                        source_reference=(
+                            changed[0].source_url if changed else None
+                        ),
+                        title=f"Official source change for {asset.name}",
+                        summary=analysis.human_review_reason,
+                        structured_change={
+                            "review_case_id": str(review_case.id),
+                            "source_snapshot_ids": [
+                                str(row.id) for row in changed
+                            ],
+                            "ai_does_not_change_status": True,
+                        },
+                        detected_at=datetime.now(UTC),
+                        detection_method=(
+                            "sequential_source_hash_and_bounded_ai_review"
+                        ),
+                        confidence_label="verified_source",
+                        idempotency_key=(
+                            f"source-change-review:{review_case.id}"
+                        ),
+                    ),
+                    actor_user_id=None,
+                )
             await ShariaAdminTelegramService(self.session, self.settings).enqueue(
                 review_case,
                 notification_type="material_change",
@@ -289,6 +389,16 @@ class ShariaSourceMonitoringService:
             "ai_calls": 1,
             "review_case_id": str(review_case.id) if review_case else None,
             "published_status_changed_by_ai": False,
+            "project_source_changed": project_source_changed,
+            "external_methodology_source_changed": any(
+                snapshot.official_source_id is not None
+                and sources_by_id.get(snapshot.official_source_id) is not None
+                and sources_by_id[
+                    snapshot.official_source_id
+                ].category
+                == "external_methodology_reference"
+                for snapshot in changed
+            ),
         }
         await self.session.flush()
         return "review_created" if review_case else "changed"
@@ -298,29 +408,45 @@ class ShariaSourceMonitoringService:
         asset: CanonicalAsset,
         external: ExternalAssessment,
         dossier: AssetResearchDossier,
-        publication: PublishedAssetAssessment,
+        target: _MonitoringTarget,
         reason: str,
         severity: str,
     ) -> ReviewCase:
-        key = f"material-review:{publication.id}:{dossier.evidence_package_hash}"
+        key = (
+            f"material-review:{target.scope_key}:"
+            f"{dossier.evidence_package_hash}"
+        )
         existing = await self.session.scalar(
             select(ReviewCase).where(ReviewCase.idempotency_key == key)
         )
         if existing is not None:
             return existing
         now = datetime.now(UTC)
-        assessment = await self.session.get(
-            AssetShariaAssessment, publication.asset_assessment_id
+        assessment = (
+            await self.session.get(
+                AssetShariaAssessment,
+                target.publication.asset_assessment_id,
+            )
+            if target.publication is not None
+            else None
         )
         case = ReviewCase(
             case_reference=f"CHG-{asset.symbol}-{str(dossier.id)[:8].upper()}",
             case_type="material_source_change",
             state="ready_for_review",
-            publication_state="change_under_review",
+            publication_state=(
+                "change_under_review"
+                if target.publication is not None
+                else "internal_change_under_review"
+            ),
             canonical_asset_id=asset.id,
             external_assessment_id=external.id,
             dossier_id=dossier.id,
-            methodology_id=assessment.methodology_id if assessment else None,
+            methodology_id=(
+                assessment.methodology_id
+                if assessment is not None
+                else target.methodology_id
+            ),
             title=f"Material source change: {asset.name} ({asset.symbol})",
             priority="urgent" if severity == "critical" else "high",
             risk_severity=severity,
@@ -353,6 +479,62 @@ class ShariaSourceMonitoringService:
                 )
             ).all()
         }
+        source_ids = {
+            row.official_source_id
+            for row in changed
+            if row.official_source_id is not None
+        }
+        sources = {
+            row.id: row
+            for row in (
+                await self.session.scalars(
+                    select(OfficialSource).where(
+                        OfficialSource.id.in_(source_ids)
+                    )
+                )
+            ).all()
+        }
+        changed_sources = []
+        for row in changed:
+            source = (
+                sources.get(row.official_source_id)
+                if row.official_source_id is not None
+                else None
+            )
+            category = (
+                source.category
+                if source is not None
+                else "unknown_official_source"
+            )
+            rights_restricted = (
+                category == "external_methodology_reference"
+                and not external.commercial_display_allowed
+            )
+            changed_sources.append(
+                {
+                    "snapshot_id": str(row.id),
+                    "url": row.source_url,
+                    "source_category": category,
+                    "previous_text": (
+                        ""
+                        if rights_restricted
+                        else previous[
+                            row.previous_snapshot_id
+                        ].normalized_text[:60_000]
+                        if row.previous_snapshot_id in previous
+                        else ""
+                    ),
+                    "current_text": (
+                        ""
+                        if rights_restricted
+                        else row.normalized_text[:60_000]
+                    ),
+                    "deterministic_diff": row.meaningful_diff,
+                    "rights_restricted_content_withheld": (
+                        rights_restricted
+                    ),
+                }
+            )
         return {
             "asset": {"id": str(asset.id), "name": asset.name, "symbol": asset.symbol},
             "external_authority_reference": {
@@ -367,23 +549,20 @@ class ShariaSourceMonitoringService:
                     else None
                 ),
                 "scope": external.regulatory_scope,
-                "published_profile_facts": dict(external.structured_facts or {}),
+                "published_profile_facts": (
+                    {}
+                    if external.source_row_id is not None
+                    else dict(external.structured_facts or {})
+                ),
+                "rights_state": external.rights_state,
             },
-            "changed_sources": [
-                {
-                    "snapshot_id": str(row.id),
-                    "url": row.source_url,
-                    "previous_text": previous[row.previous_snapshot_id].normalized_text[:60_000]
-                    if row.previous_snapshot_id in previous
-                    else "",
-                    "current_text": row.normalized_text[:60_000],
-                    "deterministic_diff": row.meaningful_diff,
-                }
-                for row in changed
-            ],
+            "changed_sources": changed_sources,
             "instruction": (
-                "Assess factual change impact and human-review need only. Do not alter or issue "
-                "a Sharia status."
+                "Assess factual change impact and human-review need only. "
+                "External-methodology source text is not project factual "
+                "evidence and must never be used to create project facts or "
+                "reconstruct authority reasoning. Do not alter or issue a "
+                "Sharia status."
             ),
         }
 

@@ -5,6 +5,7 @@
   const apiBase = "/api/v1/dashboard/setup-chat";
   const messagesTarget = root.querySelector("[data-ai-chat-messages]");
   const suggestionsTarget = root.querySelector("[data-ai-chat-suggestions]");
+  const guidedStarts = root.querySelector(".ai-chat-guided-starts");
   const form = root.querySelector("[data-ai-chat-form]");
   const input = root.querySelector("[data-ai-chat-input]");
   const sendButton = root.querySelector("[data-ai-chat-send]");
@@ -230,6 +231,7 @@
     const payload = assistant.payload || {};
     const startModes = Array.isArray(payload.start_modes) ? payload.start_modes : [];
     if (startModes.length) {
+      if (guidedStarts) guidedStarts.hidden = true;
       const cards = document.createElement("div");
       cards.className = "ai-chat-start-modes";
       startModes.forEach((option) => {
@@ -282,6 +284,7 @@
         label: assistant.message_type === "translation" ? `Apply: ${value}` : value,
         id: index,
       }));
+    if (guidedStarts) guidedStarts.hidden = suggestions.length > 0;
     const selected = pendingOption();
     suggestions.forEach((option) => {
       const button = document.createElement("button");
@@ -413,7 +416,7 @@
     previewContent.innerHTML = `
       <section class="ai-sheet-card">
         <h3>${icon("file-search")} Translation sheet</h3>
-        <p class="ai-sheet-lead">The chat gives the short explanation. These fields are the exact monitor definition to review.</p>
+        <p class="ai-sheet-lead">The chat gives the short explanation. These fields are the exact rule set to review.</p>
         <div class="ai-sheet-grid">
           ${fields.map((field) => `<div class="ai-sheet-field"><span>${clean(field.label)}</span><strong>${clean(field.value ?? "Not provided")}</strong></div>`).join("")}
         </div>
@@ -518,6 +521,7 @@
   function roleLabel(role, required) {
     return ({
       primary_trigger: "Primary trigger",
+      current_match_condition: "Current-match condition",
       required_filter: "Required filter",
       required_confirmation: "Required confirmation",
       optional_suggestion: "Optional suggestion",

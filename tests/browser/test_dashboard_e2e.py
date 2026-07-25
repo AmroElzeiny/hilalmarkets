@@ -43,7 +43,7 @@ def test_system_brain_reviewer_first_desktop_and_mobile(
 
     page.goto(f"{base_url}/dashboard/system-brain", wait_until="domcontentloaded")
     expect(page.get_by_test_id("system-brain-assistant")).to_be_visible()
-    expect(page.locator(".brain-sidebar nav a")).to_have_count(5)
+    expect(page.locator(".brain-sidebar nav a")).to_have_count(6)
     expect(page.get_by_role("heading", name="Needs Attention")).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_no_raw_traceback(page)

@@ -43,6 +43,7 @@ async def test_context() -> AsyncIterator[dict]:
         await connection.run_sync(Base.metadata.create_all)
 
     settings = Settings(
+        _env_file=None,
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         database_url="sqlite+aiosqlite://",

@@ -144,7 +144,7 @@ def test_hilalmarkets_dashboard_interaction_system_is_present():
         "src/ai_market_monitor/static/hilalmarkets-builder.css"
     ).read_text()
 
-    assert "Guided Watchlist" in template
+    assert "Market Assistant" in template
     assert "Advanced Controls" not in template
     assert "data-ai-setup-chat" in template
     assert "creation-card-top" in template

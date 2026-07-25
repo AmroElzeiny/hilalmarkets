@@ -8,18 +8,10 @@
 {% block content %}
 <section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
   <div class="guided-builder-heading-line">
-    <span class="eyebrow">Guided Watchlist</span>
-    <div class="guided-builder-heading-actions">
-      <button class="btn btn-secondary btn-sm" type="button" data-ai-open-canvas><span data-icon="chart" data-icon-class="icon"></span>Open Visual Canvas</button>
-    </div>
+    <h1>Market Assistant</h1>
   </div>
-  <div class="guided-starts" aria-label="Guided starting points">
-    <span>Start with</span>
-    <button type="button" data-guided-starter="I want to monitor a measurable breakout on screened spot assets.">Breakout</button>
-    <button type="button" data-guided-starter="I want to monitor a pullback on screened spot assets.">Pullback</button>
-    <button type="button" data-guided-starter="I want to monitor unusual market activity on screened spot assets.">Unusual activity</button>
-    <button type="button" data-guided-starter="I want to monitor price reaching or crossing a specific level.">Price level</button>
-    <button type="button" data-guided-starter="">My own words</button>
+  <div class="guided-builder-heading-actions">
+    <button class="btn btn-secondary btn-sm" type="button" data-ai-open-canvas><span data-icon="chart" data-icon-class="icon"></span>Open Visual Canvas</button>
   </div>
 </section>
 
@@ -39,6 +31,14 @@
       </div>
       <div class="ai-chat-messages" data-ai-chat-messages role="log" aria-live="polite" aria-label="Watchlist conversation"></div>
       <div class="ai-chat-suggestions" data-ai-chat-suggestions aria-label="Suggested replies"></div>
+      <div class="guided-starts ai-chat-guided-starts" aria-label="Suggested starting points">
+    <span>Start with</span>
+    <button type="button" data-guided-starter="I want to monitor a measurable breakout on screened spot assets.">Breakout</button>
+    <button type="button" data-guided-starter="I want to monitor a pullback on screened spot assets.">Pullback</button>
+    <button type="button" data-guided-starter="I want to monitor unusual market activity on screened spot assets.">Unusual activity</button>
+    <button type="button" data-guided-starter="I want to monitor price reaching or crossing a specific level.">Price level</button>
+    <button type="button" data-guided-starter="">My own words</button>
+  </div>
       <div class="ai-chat-error" data-ai-chat-error data-testid="ai-setup-request-error" role="alert" hidden><span data-ai-chat-error-text></span><button type="button" data-ai-chat-retry>Retry</button></div>
       <form class="ai-chat-composer" data-ai-chat-form>
         <label class="sr-only" for="ai-setup-chat-input">Describe your setup</label>

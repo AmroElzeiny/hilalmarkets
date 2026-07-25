@@ -105,12 +105,10 @@ class LiveMarketQuoteService:
         )
         by_asset = {item.canonical_asset: item for item in assessments}
         items = []
-        quoted_assets: set[str] = set()
         for quote in snapshot.items:
             assessment = by_asset.get(quote.canonical_asset)
             if assessment is None:
                 continue
-            quoted_assets.add(quote.canonical_asset)
             items.append(
                 quote.model_copy(
                     update={
@@ -121,38 +119,12 @@ class LiveMarketQuoteService:
                         "status": assessment.status.value,
                         "status_label": assessment.status_label,
                         "reviewed_at": assessment.reviewed_at,
+                        "logo_url": assessment.logo_url,
                         "passport_url": (
                             f"/dashboard/market/{assessment.canonical_asset}"
                             f"?methodology_id={assessment.methodology_id}"
                         ),
                     }
-                )
-            )
-        for assessment in assessments:
-            if assessment.canonical_asset in quoted_assets:
-                continue
-            items.append(
-                LiveSpotMarketQuote(
-                    symbol=f"{assessment.canonical_asset}/{quote_asset}",
-                    canonical_asset=assessment.canonical_asset,
-                    asset_name=assessment.asset_name or assessment.canonical_asset,
-                    exchange=exchange,
-                    quote_asset=quote_asset,
-                    methodology_id=assessment.methodology_id,
-                    methodology_name=assessment.methodology_name,
-                    methodology_version=assessment.methodology_version,
-                    status=assessment.status.value,
-                    status_label=assessment.status_label,
-                    reviewed_at=assessment.reviewed_at,
-                    passport_url=(
-                        f"/dashboard/market/{assessment.canonical_asset}"
-                        f"?methodology_id={assessment.methodology_id}"
-                    ),
-                    logo_module_url=self._logo_module_url(
-                        assessment.canonical_asset
-                    ),
-                    data_available=False,
-                    updated_at=snapshot.captured_at,
                 )
             )
         items.sort(

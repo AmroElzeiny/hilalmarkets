@@ -167,12 +167,25 @@ class ExternalAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "external_assessments"
     __table_args__ = (
         UniqueConstraint("import_hash", name="uq_external_assessment_import_hash"),
+        UniqueConstraint(
+            "methodology_id",
+            "source_row_id",
+            name="uq_external_assessment_methodology_source_row",
+        ),
         Index("ix_external_assessment_symbol_state", "asset_symbol", "mapping_state"),
         Index("ix_external_assessment_family_symbol", "source_family", "asset_symbol"),
+        Index(
+            "ix_external_assessment_enrichment_state",
+            "enrichment_state",
+            "mapping_state",
+        ),
     )
 
     canonical_asset_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("canonical_assets.id", ondelete="SET NULL")
+    )
+    methodology_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_methodologies.id", ondelete="RESTRICT")
     )
     source_snapshot_id: Mapped[UUID] = mapped_column(
         ForeignKey("source_snapshots.id", ondelete="RESTRICT"), nullable=False
@@ -193,6 +206,36 @@ class ExternalAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     exact_row_text: Mapped[str] = mapped_column(Text, nullable=False)
     structured_facts: Mapped[dict[str, Any]] = mapped_column(
         JSON, default=dict, nullable=False
+    )
+    source_row_id: Mapped[str | None] = mapped_column(String(160))
+    normalized_status: Mapped[str | None] = mapped_column(String(80))
+    publication_gate: Mapped[str | None] = mapped_column(String(120))
+    rights_state: Mapped[str | None] = mapped_column(String(160))
+    commercial_display_allowed: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    manual_verification_required: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    rights_clearance_reference: Mapped[str | None] = mapped_column(Text)
+    rights_cleared_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    rights_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_detail_extraction_state: Mapped[str | None] = mapped_column(String(120))
+    source_detail_snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("source_snapshots.id", ondelete="RESTRICT")
+    )
+    source_detail_fields: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    passport_seed_id: Mapped[str | None] = mapped_column(String(180))
+    passport_seed_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    enrichment_task_id: Mapped[str | None] = mapped_column(String(180))
+    enrichment_state: Mapped[str] = mapped_column(
+        String(40), default="not_queued", nullable=False
     )
     import_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     mapping_state: Mapped[str] = mapped_column(

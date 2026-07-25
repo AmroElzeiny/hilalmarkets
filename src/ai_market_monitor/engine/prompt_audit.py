@@ -137,6 +137,13 @@ _FILLER_WORDS = {
     "spot",
     "markets",
     "please",
+    "halal",
+    "sharia",
+    "shariah",
+    "screened",
+    "eligible",
+    "assets",
+    "tokens",
 }
 
 

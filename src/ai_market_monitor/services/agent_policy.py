@@ -559,7 +559,8 @@ def _asks_about_watch_plans(value: str) -> bool:
 def _asks_about_screened_watchlist(value: str) -> bool:
     return bool(
         re.search(
-            r"\b(?:my\s+)?(?:screened\s+)?watchlist\b|\bsaved\s+(?:assets?|coins?)\b",
+            r"\b(?:my\s+)?(?:screened\s+)?watchlist\b|\bsaved\s+(?:assets?|coins?)\b|"
+            r"\b(?:my\s+)?favou?rites?\s*(?:assets?|coins?|list)?\b",
             value,
             flags=re.IGNORECASE,
         )

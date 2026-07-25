@@ -15,7 +15,10 @@ from ai_market_monitor.schemas.agent_control import (
     RunOneTimeScanArgs,
     ValidateCapabilitySelectionArgs,
 )
-from ai_market_monitor.services.agent_policy import AgentServerContext
+from ai_market_monitor.services.agent_policy import (
+    AgentServerContext,
+    _asks_about_screened_watchlist,
+)
 from ai_market_monitor.services.agent_tools import (
     AgentToolRuntime,
     AgentToolService,
@@ -64,6 +67,12 @@ class ToolHarness:
             "symbols_scanned": 3,
             "evidence_refs": ["scan:test-result"],
         }
+
+
+def test_favorites_request_offers_the_screened_watchlist_tool():
+    assert _asks_about_screened_watchlist("Analyze only my favorite coins")
+    assert _asks_about_screened_watchlist("Show my favourites")
+    assert not _asks_about_screened_watchlist("Analyze all halal coins")
 
 
 def _settings() -> Settings:
@@ -154,6 +163,35 @@ async def test_resolution_uses_only_user_authored_fragments_and_registry_keys(te
         )
     assert rejected.status == "validation_error"
     assert unauthorized.setup_fragments == []
+
+
+async def test_scanner_resolution_uses_platform_defaults_and_screened_universe_semantics(
+    test_context,
+):
+    harness = ToolHarness()
+    service = _service(harness)
+    runtime = _runtime(
+        request_text="Find halal coins with RSI below 30",
+        setup_mode="scanner",
+    )
+    async with test_context["session_factory"]() as session:
+        result = await service.execute(
+            session,
+            runtime,
+            call_id="resolve-scanner-defaults",
+            tool_name="resolve_trading_capabilities",
+            arguments=ResolveTradingCapabilitiesArgs(
+                fragments=["halal coins", "RSI below 30"],
+                default_timeframe="15m",
+            ),
+        )
+
+    assert result.status == "success"
+    assert result.data["candidate_keys"] == ["rsi_threshold"]
+    assert result.data["clarifications"] == []
+    assert result.data["missing_parameters"] == []
+    assert result.data["assumptions"]
+    assert runtime.policy_state.resolution_complete is True
 
 
 async def test_selection_rejects_invented_numeric_values_and_unknown_capabilities(test_context):

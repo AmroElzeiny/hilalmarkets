@@ -109,7 +109,7 @@ def test_logo_catalog_path_rejects_unsafe_asset_names():
     assert LiveMarketQuoteService._logo_module_url("BTC/../../secret") is None
 
 
-async def test_screened_snapshot_uses_source_methodology_and_keeps_unavailable_assets():
+async def test_screened_snapshot_omits_assets_absent_from_selected_exchange():
     LiveMarketQuoteService.clear_cache()
     provider = QuoteProvider()
     service = LiveMarketQuoteService(provider, _settings())
@@ -152,9 +152,5 @@ async def test_screened_snapshot_uses_source_methodology_and_keeps_unavailable_a
     )
 
     assert result.methodology.id == aggregate_id
-    assert result.items[0].canonical_asset == "SOL"
-    assert result.items[0].methodology_id == source_id
-    assert result.items[0].data_available is False
-    assert result.items[0].passport_url == (
-        f"/dashboard/market/SOL?methodology_id={source_id}"
-    )
+    assert result.items == []
+    assert result.total == 0

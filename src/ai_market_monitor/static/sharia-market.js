@@ -17,6 +17,10 @@ if (root) {
   const count = document.querySelector("[data-live-market-count]");
   const eligible = document.querySelector("[data-live-market-eligible]");
   const provider = document.querySelector("[data-live-market-provider]");
+  const favoriteAssets = new Set(
+    JSON.parse(root.dataset.favoriteAssets || "[]").map((asset) => String(asset).toUpperCase()),
+  );
+  let favoriteWatchlistId = root.dataset.favoriteWatchlistId || "";
   const rows = new Map();
   const latestItems = new Map();
   const logoUrls = new Map();
@@ -65,9 +69,8 @@ if (root) {
       <strong class="live-quote" role="cell" data-bid>--</strong>
       <strong class="live-quote" role="cell" data-ask>--</strong>
       <strong class="live-change" role="cell" data-change>--</strong>
-      <span role="cell" data-spread>--</span>
       <span role="cell" data-volume>--</span>
-      <div role="cell"><button class="btn btn-secondary btn-xs" type="button" data-show-passport>Show passport</button></div>`;
+      <div class="live-market-actions" role="cell"><button class="btn btn-secondary btn-xs" type="button" data-show-passport>Show passport</button><button class="favorite-toggle" type="button" data-favorite-toggle aria-pressed="false"><img class="favorite-heart-icon favorite-heart-outline" src="/static/ui-heart.svg" alt=""><img class="favorite-heart-icon favorite-heart-solid" src="/static/ui-heart-filled.svg" alt=""><span class="sr-only" data-favorite-label>Follow status changes</span></button></div>`;
     row.querySelector("[data-coin-symbol]").textContent = item.symbol;
     row.querySelector("[data-coin-name]").textContent = item.asset_name || `${item.exchange.toUpperCase()} spot`;
     row.querySelector("[data-coin-fallback]").textContent = item.canonical_asset.slice(0, 3);
@@ -75,6 +78,38 @@ if (root) {
     observeLogo(row.querySelector("[data-coin-logo]"), item);
     rows.set(item.symbol, row);
     return row;
+  }
+
+  function updateFavoriteButton(row, item) {
+    const button = row.querySelector("[data-favorite-toggle]");
+    if (!button) return;
+    const active = favoriteAssets.has(String(item.canonical_asset || "").toUpperCase());
+    button.classList.toggle("is-favorite", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.setAttribute(
+      "aria-label",
+      active
+        ? `Remove ${item.canonical_asset} from Favorites`
+        : `Add ${item.canonical_asset} to Favorites and follow status changes`,
+    );
+    const label = button.querySelector("[data-favorite-label]");
+    if (label) label.textContent = active ? "Following status changes" : "Follow status changes";
+  }
+
+  function syncFavoriteCount() {
+    const countNode = root.querySelector("[data-favorite-count]");
+    if (!countNode) return;
+    countNode.hidden = favoriteAssets.size === 0;
+    countNode.textContent = String(favoriteAssets.size);
+  }
+
+  function marketStatusLabel(item) {
+    const fallback = item.status === "eligible"
+      ? "Halal"
+      : item.status === "eligible_with_qualifications"
+        ? "Halal with qualifications"
+        : "Screened";
+    return String(item.status_label || fallback).replace(/^eligible\b/i, "Halal");
   }
 
   async function importLogo(item) {
@@ -103,7 +138,11 @@ if (root) {
   async function loadLogo(container, item) {
     if (!container || container.dataset.logoLoaded === "true") return;
     container.dataset.logoLoaded = "true";
-    const src = await importLogo(item);
+    const directLogo = typeof item.logo_url === "string"
+      && item.logo_url.startsWith("https://")
+      ? item.logo_url
+      : null;
+    const src = directLogo || await importLogo(item);
     if (!src) return;
     const image = document.createElement("img");
     image.src = src;
@@ -141,14 +180,13 @@ if (root) {
     ask.textContent = formatPrice(item.ask);
     bid.dataset.value = finite(item.bid) ? String(item.bid) : "";
     ask.dataset.value = finite(item.ask) ? String(item.ask) : "";
-    row.querySelector("[data-spread]").textContent = finite(item.spread_bps) ? `${item.spread_bps.toFixed(2)} bps` : "--";
     row.querySelector("[data-volume]").textContent = formatCompact(item.quote_volume_24h);
     const change = row.querySelector("[data-change]");
     change.textContent = formatChange(item.percentage_24h);
     change.classList.toggle("is-positive", finite(item.percentage_24h) && item.percentage_24h > 0);
     change.classList.toggle("is-negative", finite(item.percentage_24h) && item.percentage_24h < 0);
     const screeningStatus = row.querySelector("[data-screening-status]");
-    screeningStatus.textContent = item.status_label || "Screened";
+    screeningStatus.textContent = marketStatusLabel(item);
     screeningStatus.className = `badge ${
       ["under_review", "disputed"].includes(item.status)
         ? "badge-review"
@@ -159,6 +197,7 @@ if (root) {
             : "badge-eligible"
     }`;
     row.classList.toggle("is-unavailable", !item.data_available);
+    updateFavoriteButton(row, item);
   }
 
   function searchable(value) {
@@ -266,7 +305,70 @@ if (root) {
     }, trigger);
   }
 
+  async function toggleFavorite(item, trigger) {
+    const asset = String(item.canonical_asset || "").toUpperCase();
+    if (!asset || trigger.dataset.loading === "true") return;
+    trigger.dataset.loading = "true";
+    trigger.disabled = true;
+    try {
+      if (favoriteAssets.has(asset)) {
+        if (!favoriteWatchlistId) throw new Error("Your Favorites list needs to refresh before this asset can be removed.");
+        const response = await fetch(
+          `/api/v1/sharia/watchlists/${encodeURIComponent(favoriteWatchlistId)}/assets/${encodeURIComponent(asset)}?confirmed=true`,
+          {
+            method: "DELETE",
+            credentials: "same-origin",
+            headers: { "X-CSRF-Token": document.body.dataset.csrfToken || "" },
+          },
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail?.message || payload.detail || "Could not remove this Favorite.");
+        }
+        favoriteAssets.delete(asset);
+        syncFavoriteCount();
+        window.showDashToast?.(`${asset} was removed from Favorites.`);
+      } else {
+        const values = new URLSearchParams({ methodology_id: item.methodology_id || currentMethodology?.id || methodologyId || "" });
+        const response = await fetch(
+          `/dashboard/market/${encodeURIComponent(asset)}/watchlist?format=json`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+              "X-CSRF-Token": document.body.dataset.csrfToken || "",
+              Accept: "application/json",
+            },
+            body: values.toString(),
+          },
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.detail?.message || payload.detail || "Could not add this Favorite.");
+        }
+        favoriteWatchlistId = payload.watchlist_id || favoriteWatchlistId;
+        favoriteAssets.add(asset);
+        syncFavoriteCount();
+        window.showDashToast?.(`${asset} is now followed for status changes.`);
+      }
+      const row = rows.get(item.symbol);
+      if (row) updateFavoriteButton(row, item);
+    } catch (error) {
+      window.showDashToast?.(error.message || "Could not update Favorites.", true);
+    } finally {
+      trigger.disabled = false;
+      delete trigger.dataset.loading;
+    }
+  }
+
   body.addEventListener("click", (event) => {
+    const favoriteButton = event.target.closest("[data-favorite-toggle]");
+    if (favoriteButton) {
+      const item = latestItems.get(favoriteButton.closest("[data-symbol]")?.dataset.symbol);
+      if (item) toggleFavorite(item, favoriteButton);
+      return;
+    }
     const button = event.target.closest("[data-show-passport]");
     if (!button) return;
     const item = latestItems.get(button.closest("[data-symbol]")?.dataset.symbol);

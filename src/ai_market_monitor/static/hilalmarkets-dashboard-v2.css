@@ -543,6 +543,52 @@ body.hilal-dashboard .passport-summary-actions .btn {
   justify-content: center;
 }
 
+body.hilal-dashboard .passport-methodology-references {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 14px;
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .passport-methodology-references > small {
+  color: var(--hm-muted);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+body.hilal-dashboard .passport-methodology-reference {
+  display: grid;
+  gap: 2px;
+  min-width: 170px;
+  padding: 8px 10px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 10px;
+  background: var(--hm-surface);
+}
+
+body.hilal-dashboard .passport-methodology-reference strong { color: var(--hm-ink); font-size: .8rem; }
+body.hilal-dashboard .passport-methodology-reference span { color: var(--hm-copy); font-size: .74rem; }
+
+body.hilal-dashboard .passport-methodology-list { display: grid; gap: 8px; }
+body.hilal-dashboard .passport-methodology-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 12px;
+  background: var(--hm-surface-soft);
+}
+body.hilal-dashboard .passport-methodology-row > div { display: grid; gap: 2px; min-width: 0; }
+body.hilal-dashboard .passport-methodology-row strong { color: var(--hm-ink); }
+body.hilal-dashboard .passport-methodology-row small { color: var(--hm-copy); }
+
 body.hilal-dashboard .passport-select-control {
   position: relative;
   display: block;
@@ -1421,9 +1467,17 @@ body.hilal-dashboard :where(.select, select):hover {
 body.hilal-dashboard .live-market-panel { margin-top: 0; }
 
 body.hilal-dashboard .live-market-toolbar {
-  justify-content: flex-end;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 18px 20px 0;
   border-bottom: 0;
+}
+
+body.hilal-dashboard .live-market-title h1 {
+  margin: 0;
+  color: var(--hm-ink);
+  font-size: 1.31rem;
 }
 
 body.hilal-dashboard .live-market-toolbar-actions {
@@ -1433,6 +1487,52 @@ body.hilal-dashboard .live-market-toolbar-actions {
   gap: 10px;
   flex-wrap: wrap;
 }
+
+body.hilal-dashboard .live-market-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+body.hilal-dashboard .favorite-toggle,
+body.hilal-dashboard .favorite-list-button {
+  position: relative;
+}
+
+body.hilal-dashboard .favorite-toggle {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 11px;
+  background: var(--hm-surface);
+  cursor: pointer;
+  transition: background-color var(--hm-motion), border-color var(--hm-motion), transform var(--hm-motion);
+}
+
+body.hilal-dashboard .favorite-toggle:hover,
+body.hilal-dashboard .favorite-toggle:focus-visible {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+body.hilal-dashboard .favorite-heart-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+body.hilal-dashboard .favorite-heart-solid { display: none; }
+body.hilal-dashboard .favorite-toggle.is-favorite .favorite-heart-outline,
+body.hilal-dashboard .favorite-list-button .favorite-heart-solid { display: none; }
+body.hilal-dashboard .favorite-toggle.is-favorite .favorite-heart-solid { display: block; }
+body.hilal-dashboard .favorite-toggle.is-favorite { border-color: var(--hm-apple-deep); background: var(--hm-apple-soft); }
+body.hilal-dashboard .favorite-list-button .favorite-heart-outline { display: inline-block; margin-right: 2px; }
 
 body.hilal-dashboard .market-filter-row {
   display: grid;
@@ -1453,6 +1553,21 @@ body.hilal-dashboard .sidebar-collapse [data-sidebar-collapse-icon] {
 body.hilal-dashboard .market-filter-control {
   width: 200px;
   max-width: 100%;
+  min-height: 80px;
+  height: 80px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+}
+
+body.hilal-dashboard .market-filter-control :is(.input, .hm-select-control) {
+  min-height: 44px;
+  align-self: end;
+}
+
+body.hilal-dashboard .home-coin-logo {
+  background: transparent;
+  color: var(--hm-ink);
 }
 
 body.hilal-dashboard .activity-page-tabs {
@@ -1472,7 +1587,7 @@ body.hilal-dashboard .activity-page-tabs::-webkit-scrollbar { display: none; }
 
 body.hilal-dashboard .readiness-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(170px, .8fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
   gap: 12px;
   padding: 14px;
@@ -1871,6 +1986,17 @@ body.hilal-dashboard .hm-select-trigger {
     transform 180ms ease;
 }
 
+body.hilal-dashboard .hm-select-trigger.has-brand-icon {
+  grid-template-columns: 25px minmax(0, 1fr) 42px;
+  padding-left: 12px;
+}
+
+body.hilal-dashboard .hm-select-brand-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 body.hilal-dashboard .hm-select-trigger::before {
   position: absolute;
   inset: 10px auto 10px 0;
@@ -1971,6 +2097,11 @@ body.hilal-dashboard .hm-select-option {
   font-weight: 650;
   line-height: 1.25;
   transition: background-color 150ms ease, color 150ms ease;
+}
+
+body.hilal-dashboard .hm-select-option .hm-select-brand-icon {
+  flex: 0 0 auto;
+  margin-right: 9px;
 }
 
 body.hilal-dashboard .hm-select-option::after {
@@ -2270,6 +2401,148 @@ html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
   body.hilal-dashboard .billing-current-plan {
     padding: 18px;
   }
+}
+
+/* Final workflow refinements: visible evidence, compact assistant, and
+   consent controls remain inside the authenticated application shell. */
+body.hilal-dashboard .home-welcome { align-items: flex-start; }
+body.hilal-dashboard .home-welcome h1 {
+  margin: 0;
+  color: var(--hm-ink);
+  font-size: 21px !important;
+}
+body.hilal-dashboard .home-welcome .page-actions { margin-top: 13px; }
+
+body.hilal-dashboard .guided-builder-heading {
+  align-items: start;
+  justify-items: start;
+}
+body.hilal-dashboard .guided-builder-heading-line { display: block; }
+body.hilal-dashboard .guided-builder-heading h1 {
+  margin: 0;
+  color: var(--hm-ink);
+  font-size: 21px !important;
+}
+body.hilal-dashboard .guided-builder-heading-actions {
+  display: flex;
+  justify-content: flex-start;
+  width: auto;
+}
+body.hilal-dashboard .ai-chat-guided-starts {
+  margin: 0 16px 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hm-hairline);
+}
+body.hilal-dashboard .ai-chat-head-actions { align-items: center; }
+body.hilal-dashboard .ai-chat-head-actions .ai-chat-quiet-button > span:first-child {
+  display: inline-grid;
+  place-items: center;
+}
+body.hilal-dashboard .ai-chat-message.assistant .ai-chat-bubble,
+body.hilal-dashboard .ai-chat-message.assistant .ai-chat-bubble :is(p, strong, small, span, li) {
+  color: var(--hm-ink) !important;
+}
+body.hilal-dashboard .ai-chat-composer {
+  background: var(--hm-surface-soft) !important;
+}
+body.hilal-dashboard .ai-chat-composer > button,
+body.hilal-dashboard .ai-chat-composer > button:disabled {
+  background: #cbfa4d !important;
+  box-shadow: none;
+  opacity: 1 !important;
+}
+body.hilal-dashboard .ai-chat-composer > button :is(svg, span) { color: var(--hm-ink); }
+body.hilal-dashboard .ai-chat-composer > small { color: var(--hm-ink); }
+
+body.hilal-dashboard .billing-current-meta small { font-size: .9rem; }
+
+body.hilal-dashboard .telegram-service-mark {
+  display: block;
+  width: 22px;
+  height: 22px;
+  background: var(--hm-apple-deep);
+  -webkit-mask: url("/static/brand-telegram.svg") center / contain no-repeat;
+  mask: url("/static/brand-telegram.svg") center / contain no-repeat;
+}
+
+body.hilal-dashboard .cookie-banner {
+  position: fixed;
+  z-index: 220;
+  right: 32px;
+  bottom: 18px;
+  left: calc(var(--sidebar) + 32px);
+  display: none;
+  max-width: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 18px;
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-popover);
+}
+body.hilal-dashboard .cookie-banner.is-visible { display: block; animation: hm-dialog-in 220ms cubic-bezier(.2, .75, .25, 1) both; }
+body.hilal-dashboard .cookie-banner-inner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+}
+body.hilal-dashboard .cookie-banner h2 { margin: 0 0 4px; color: var(--hm-ink); font-size: .95rem; }
+body.hilal-dashboard .cookie-banner p { margin: 0; color: var(--hm-copy); font-size: .8rem; line-height: 1.45; }
+body.hilal-dashboard .cookie-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+body.hilal-dashboard .cookie-modal-backdrop {
+  position: fixed;
+  z-index: 230;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(43, 46, 53, .48);
+  backdrop-filter: blur(6px);
+}
+body.hilal-dashboard .cookie-modal-backdrop.is-visible { display: flex; }
+body.hilal-dashboard .cookie-modal {
+  display: grid;
+  width: min(560px, 100%);
+  gap: 15px;
+  padding: 22px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 20px;
+  background: var(--hm-canvas);
+  box-shadow: var(--hm-shadow-popover);
+}
+body.hilal-dashboard .cookie-modal h2 { margin: 2px 0 0; color: var(--hm-ink); }
+body.hilal-dashboard .cookie-modal > p { margin: 0; color: var(--hm-copy); }
+body.hilal-dashboard .cookie-category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 13px;
+  background: var(--hm-surface);
+  color: var(--hm-copy);
+}
+body.hilal-dashboard .cookie-category > span { display: grid; gap: 3px; }
+body.hilal-dashboard .cookie-category strong { color: var(--hm-ink); }
+body.hilal-dashboard .cookie-category input { inline-size: 18px; block-size: 18px; accent-color: var(--hm-apple-deep); }
+body.hilal-dashboard .cookie-fixed { color: var(--hm-muted); font-size: .8rem; font-weight: 700; }
+body.hilal-dashboard .cookie-modal-actions { display: flex; justify-content: flex-end; gap: 9px; }
+
+@media (max-width: 900px) {
+  body.hilal-dashboard .cookie-banner { right: 14px; left: 14px; bottom: 14px; }
+}
+
+@media (max-width: 620px) {
+  body.hilal-dashboard .live-market-toolbar { align-items: stretch; flex-direction: column; }
+  body.hilal-dashboard .cookie-banner-inner { grid-template-columns: 1fr; }
+  body.hilal-dashboard .cookie-actions { justify-content: stretch; }
+  body.hilal-dashboard .cookie-actions .btn { flex: 1 1 135px; }
+  body.hilal-dashboard .cookie-modal-actions { flex-direction: column-reverse; }
+  body.hilal-dashboard .cookie-modal-actions .btn { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -21,6 +21,7 @@ COPY src ./src
 COPY --from=landing-build /landing/dist ./src/ai_market_monitor/static/landing
 COPY scripts ./scripts
 COPY Notion ./Notion
+COPY HilalMarkets_Sharia_Methodology_Import_Pack ./HilalMarkets_Sharia_Methodology_Import_Pack
 COPY alembic.ini ./
 COPY alembic ./alembic
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \

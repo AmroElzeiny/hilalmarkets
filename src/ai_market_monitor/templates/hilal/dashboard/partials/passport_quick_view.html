@@ -33,7 +33,7 @@
         </div>
         <div class="passport-quick-state">
           <span class="badge badge-neutral" data-passport-quick-status>Status unavailable</span>
-          <span class="passport-freshness" data-passport-quick-freshness>Evidence unavailable</span>
+          <span class="passport-freshness" data-passport-quick-freshness hidden></span>
         </div>
       </header>
 
@@ -61,6 +61,11 @@
         <div><small>Published</small><strong data-passport-quick-publication>--</strong></div>
         <div><small>Next source scan</small><strong data-passport-quick-next-scan>Not scheduled</strong></div>
       </div>
+
+      <section class="passport-quick-section" data-passport-quick-methodologies-section hidden>
+        <div class="row-between"><h3>Published methodology results</h3><span class="badge badge-info">Separate records</span></div>
+        <div class="passport-methodology-list" data-passport-quick-methodologies></div>
+      </section>
 
       <section class="passport-quick-section">
         <div class="row-between"><h3>Main reasons</h3><span class="badge badge-info">Evidence-led</span></div>
@@ -91,13 +96,8 @@
           </a>
         </div>
         <div class="row wrap passport-quick-primary-actions">
-          <form method="post" data-passport-add-watchlist hidden>
-            <input type="hidden" name="methodology_id" data-passport-watchlist-methodology>
-            <button class="btn btn-secondary" type="submit"><span data-icon="watchlist" data-icon-class="icon-sm"></span>Add to My Screened Watchlist</button>
-          </form>
           <a class="btn btn-secondary" data-passport-compliance-change href="#" hidden>View compliance change</a>
           <a class="btn btn-secondary" data-passport-full-page href="#">Open Full Passport</a>
-          <a class="btn btn-primary" data-passport-create-plan href="#">Create Watchlist</a>
         </div>
       </footer>
     </div>

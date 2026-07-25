@@ -39,6 +39,7 @@ from ai_market_monitor.schemas.sharia import (
     PassportHistoricalContext,
     PassportHistoricalReference,
     PassportIdentity,
+    PassportMethodologyReference,
     PassportProblemReportRequest,
     PassportProblemReportResponse,
     PassportQuickViewResponse,
@@ -277,6 +278,8 @@ class ShariaPassportReadService:
                 else None
             ),
             restriction_explanation=passport.restriction_explanation,
+            last_verified_at=passport.last_verified_at,
+            methodology_references=passport.methodology_references,
         )
 
     async def report_problem(
@@ -689,7 +692,29 @@ class ShariaPassportReadService:
                 "screening policy, and no safety hold."
             )
         )
+        base.methodology_references = await self._methodology_references(
+            base.assessment.canonical_asset
+        )
         return base
+
+    async def _methodology_references(
+        self,
+        asset: str,
+    ) -> list[PassportMethodologyReference]:
+        """Expose parallel published methodology results without blending them."""
+        comparison = await self.screening.methodology_comparison(asset)
+        return [
+            PassportMethodologyReference(
+                methodology_id=item.methodology.id,
+                methodology_name=item.methodology.name,
+                methodology_version=item.methodology.version,
+                status=item.status,
+                status_label=STATUS_LABELS[item.status],
+                review_date=item.review_date,
+            )
+            for item in comparison.results
+            if item.status is not None
+        ]
 
     async def _user_allowed_statuses(
         self,
@@ -804,6 +829,10 @@ class ShariaPassportReadService:
             logo_module_url=(
                 "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
                 f"dist/svgs/tokens/branded/{asset.symbol.upper()}.svg.js"
+            ),
+            logo_url=(
+                str((asset.provider_ids or {}).get("logo_url") or "").strip()
+                or None
             ),
             exchange_markets=[
                 PassportExchangeMarket(

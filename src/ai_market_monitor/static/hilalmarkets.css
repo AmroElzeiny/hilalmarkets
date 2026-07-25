@@ -45,7 +45,6 @@ img,svg{display:block;max-width:100%}
 body:not(.hm-react-site) :is(h1,h2,h3,h4,p){margin-top:0}
 body:not(.hm-react-site) :is(h1,h2,h3,h4){font-family:"Manrope",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.08;letter-spacing:-.035em}
 body:not(.hm-react-site) h1{font-weight:800}
-body:not(.hm-react-site) h2{font-size:clamp(2rem,4vw,3.65rem);font-weight:800}
 body:not(.hm-react-site) h3{font-size:1.2rem;font-weight:750}
 body:not(.hm-react-site) p{color:var(--muted)}
 body:not(.hm-react-site) strong{color:var(--ink)}
@@ -859,8 +858,8 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
 .live-market-scroll::-webkit-scrollbar{width:9px;height:9px}
 .live-market-scroll::-webkit-scrollbar-track{background:var(--emerald-50)}
 .live-market-scroll::-webkit-scrollbar-thumb{border:2px solid var(--emerald-50);border-radius:999px;background:var(--emerald-600)}
-.live-market-table{min-width:980px}
-.live-market-head,.live-market-row{display:grid;grid-template-columns:minmax(220px,1.5fr) 115px 130px 130px 90px 100px 120px 118px;align-items:center;gap:12px}
+.live-market-table{min-width:880px}
+.live-market-head,.live-market-row{display:grid;grid-template-columns:minmax(220px,1.5fr) 115px 130px 130px 90px 120px 152px;align-items:center;gap:12px}
 .live-market-head{position:sticky;z-index:4;top:0;padding:11px 20px;background:rgba(251,250,246,.97);border-bottom:1px solid var(--line);color:var(--muted);font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;backdrop-filter:blur(10px)}
 .live-market-row{min-height:72px;padding:10px 20px;border-bottom:1px solid var(--line);transition:background-color .18s ease,opacity .18s ease}
 .live-market-row:hover{background:var(--emerald-50)}

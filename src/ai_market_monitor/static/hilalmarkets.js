@@ -66,6 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const fieldLabel = wrapper.closest(".field")?.querySelector(":scope > span")
       ?.textContent?.trim() || "Select option";
     const trigger = document.createElement("button");
+    const selectedIcon = document.createElement("img");
     const selectedLabel = document.createElement("span");
     const chevron = document.createElement("span");
     const menu = document.createElement("span");
@@ -79,10 +80,13 @@ document.addEventListener("DOMContentLoaded", () => {
     trigger.setAttribute("aria-haspopup", "listbox");
     trigger.setAttribute("aria-expanded", "false");
     trigger.setAttribute("aria-controls", menuId);
+    selectedIcon.className = "hm-select-brand-icon";
+    selectedIcon.alt = "";
+    selectedIcon.hidden = true;
     selectedLabel.className = "hm-select-value";
     selectedLabel.dataset.hmSelectValue = "";
     chevron.className = "hm-select-chevron";
-    trigger.append(selectedLabel, chevron);
+    trigger.append(selectedIcon, selectedLabel, chevron);
 
     menu.id = menuId;
     menu.className = "hm-select-menu";
@@ -93,6 +97,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const sync = () => {
       const selected = select.options[select.selectedIndex];
       selectedLabel.textContent = selected?.textContent?.trim() || "Choose";
+      const selectedIconSource = selected?.dataset.hmSelectIcon || "";
+      selectedIcon.hidden = !selectedIconSource;
+      selectedIcon.src = selectedIconSource;
+      trigger.classList.toggle("has-brand-icon", Boolean(selectedIconSource));
       trigger.setAttribute(
         "aria-label",
         `${fieldLabel}: ${selectedLabel.textContent}`,
@@ -134,9 +142,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     [...select.options].forEach((nativeOption) => {
       const option = document.createElement("span");
+      const optionIcon = document.createElement("img");
+      const optionLabel = document.createElement("span");
       option.className = "hm-select-option";
       option.dataset.value = nativeOption.value;
-      option.textContent = nativeOption.textContent;
+      optionIcon.className = "hm-select-brand-icon";
+      optionIcon.alt = "";
+      optionIcon.hidden = !nativeOption.dataset.hmSelectIcon;
+      optionIcon.src = nativeOption.dataset.hmSelectIcon || "";
+      optionLabel.textContent = nativeOption.textContent;
+      option.append(optionIcon, optionLabel);
       option.setAttribute("role", "option");
       option.setAttribute("tabindex", "-1");
       option.setAttribute("aria-disabled", String(nativeOption.disabled));

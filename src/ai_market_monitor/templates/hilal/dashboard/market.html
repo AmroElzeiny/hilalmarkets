@@ -28,11 +28,11 @@
   <form method="dialog" class="saved-assets-shell" data-saved-assets-form>
     <header class="dialog-header">
       <div>
-        <span class="kicker">My Screened Watchlist</span>
-        <h2>Saved Assets</h2>
+        <span class="kicker">Favorites</span>
+        <h2>Favorites</h2>
         <p>Mark assets you want to remove. Nothing changes until you choose Save.</p>
       </div>
-      <button class="btn btn-ghost btn-icon" type="button" data-saved-assets-close aria-label="Close Saved Assets">
+      <button class="btn btn-ghost btn-icon" type="button" data-saved-assets-close aria-label="Close Favorites">
         <span data-icon="close" data-icon-class="icon"></span>
       </button>
     </header>
@@ -54,7 +54,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="empty-state compact"><h3>No saved assets</h3><p>Save a screened asset from its Passport and it will appear here.</p></div>
+    <div class="empty-state compact"><h3>No favorites yet</h3><p>Use the heart beside any screened asset to follow its status changes here.</p></div>
     {% endif %}
     <footer class="dialog-actions">
       <button class="btn btn-secondary" type="button" data-saved-assets-cancel>Cancel</button>

@@ -550,23 +550,16 @@ class CcxtMarketDataProvider:
                 raise ValueError(f"Unsupported exchange: {exchange}")
             config: dict[str, Any] = {
                 "enableRateLimit": True,
-                "options": {"defaultType": "spot"},
+                "options": {
+                    "defaultType": "spot",
+                    "fetchMarkets": ["spot"],
+                },
             }
             if key == "binance" and self.settings is not None:
-                api_key = self.settings.binance_api_key
-                api_secret = self.settings.binance_api_secret
-                if api_key is not None and api_secret is not None:
-                    config["apiKey"] = api_key.get_secret_value()
-                    config["secret"] = api_secret.get_secret_value()
                 base_url = str(self.settings.binance_rest_base_url).rstrip("/")
                 if base_url != "https://api.binance.com":
                     config["urls"] = {"api": {"public": f"{base_url}/api/v3"}}
             if key == "bybit" and self.settings is not None:
-                api_key = self.settings.bybit_api_key
-                api_secret = self.settings.bybit_api_secret
-                if api_key is not None and api_secret is not None:
-                    config["apiKey"] = api_key.get_secret_value()
-                    config["secret"] = api_secret.get_secret_value()
                 base_url = str(self.settings.bybit_rest_base_url).rstrip("/")
                 if base_url != "https://api.bybit.com":
                     config["urls"] = {"api": {"public": base_url, "private": base_url}}

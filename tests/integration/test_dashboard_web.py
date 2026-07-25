@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from pydantic import SecretStr
 from sqlalchemy import select
 
+from ai_market_monitor.core.csrf import csrf_token
 from ai_market_monitor.core.security import hash_password
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
@@ -130,7 +132,7 @@ async def test_dashboard_uses_account_locale_and_only_reports_active_telegram(te
 
     pending = await test_context["client"].get("/dashboard")
     assert pending.status_code == 200
-    assert '<html lang="ar" dir="rtl">' in pending.text
+    assert '<html lang="ar" dir="rtl"' in pending.text
     assert ">Set up<" in pending.text
     assert "<small>Not connected</small>" not in pending.text
 
@@ -251,7 +253,7 @@ async def test_consolidated_market_and_notification_pages_use_only_persisted_use
     assert watchlist_redirect.headers["location"] == "/dashboard/market?saved_assets=1"
     watchlist_page = await test_context["client"].get(watchlist_redirect.headers["location"])
     assert watchlist_page.status_code == 200
-    assert "Saved Assets" in watchlist_page.text
+    assert "Favorites" in watchlist_page.text
     assert "SOL" in watchlist_page.text
     assert "Your saved asset passports will appear here." not in watchlist_page.text
 
@@ -265,6 +267,28 @@ async def test_consolidated_market_and_notification_pages_use_only_persisted_use
     assert "Recent updates" in compliance_page.text
     assert "Screening changes" in compliance_page.text
     assert "SOL" in compliance_page.text
+
+
+async def test_market_favorite_json_flow_rejects_unresolved_methodology_without_creating_an_asset(
+    test_context,
+):
+    await _signup_and_verify(test_context, email="favorite-json-error@example.com")
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User))
+        assert user is not None
+        token = csrf_token(test_context["settings"], user.id)
+
+    response = await test_context["client"].post(
+        "/dashboard/market/SOL/watchlist?format=json",
+        data={"methodology_id": str(uuid4())},
+        headers={"X-CSRF-Token": token, "Accept": "application/json"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "approved_methodology_required"
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(ApprovedWatchlistAsset.id)) is None
 
 
 async def test_signin_success_and_failure(test_context):

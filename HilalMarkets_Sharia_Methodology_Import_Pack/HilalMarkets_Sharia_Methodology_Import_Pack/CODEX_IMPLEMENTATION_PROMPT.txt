@@ -1,0 +1,135 @@
+Inspect the complete current HilalMarkets/Trace-Edge working tree, migrations, Sharia services, admin review workflow, Passport models, source monitoring, workers, scheduler, Telegram, tests and configuration before editing. Import the attached `HilalMarkets_Sharia_Methodology_Import_Pack` by adapting it to existing domain models and services. Do not create duplicate methodology, assessment, review, Passport, scheduler, Telegram or audit systems.
+
+SOURCE OF TRUTH
+Use:
+- `data/methodologies.json`
+- `data/sc_malaysia_compliant_assets.json`
+- `data/shariah_review_bureau_compliant_assets.json`
+- `data/fasset_compliant_assets.json`
+- `data/fasset_noncompliant_guard.json`
+- `data/passport_seed_records.jsonl`
+- `data/ai_enrichment_queue.jsonl`
+- `data/methodology_union_matrix.json`
+- schemas and documentation in this package.
+
+NON-NEGOTIABLE SEMANTICS
+1. Create three independent methodology/reference profiles:
+   - SC Malaysia SAC Digital Assets Reference
+   - Shariah Review Bureau
+   - Fasset Shariah Reports
+2. Never add a coin accepted by one source to another source's methodology.
+3. Never calculate a blended halal/consensus score.
+4. Preserve exact external status wording and source attribution.
+5. Every source row is idempotent by `source_row_id`.
+6. Every imported row begins unpublished and requires authenticated admin review.
+7. AI cannot approve, publish, reject or alter an external status.
+8. Missing/unknown information fails closed as unpublished or insufficient information, never as halal or haram.
+9. Native assets, wrapped assets, staking, lending, yield and derivatives are distinct.
+10. Preserve historical versions and source snapshots.
+
+RIGHTS
+Read `docs/ATTRIBUTION_AND_RIGHTS.md`. SRB public pages contain an explicit restriction against unauthorized extraction, storage, display and commercial use. Import SRB metadata for internal review, but enforce `commercial_display_allowed=false` and block public commercial display of SRB-derived content until written permission or counsel clearance is recorded. Do not copy source articles. Fasset source detail also requires attribution and rights review.
+
+IMPORT
+- Validate the bundle before import.
+- Create/update methodologies idempotently.
+- Resolve canonical assets by full identity: source name, symbol, native chain, contract where applicable, official website and existing provider IDs. Ticker-only matching is forbidden.
+- Preserve duplicate/migrated Fasset rows instead of silently merging: MATIC/POL, RNDR/RENDER, duplicate TON/GALA/GUSD and legacy assets require explicit canonical review.
+- Use the non-compliant guard dataset to prevent accidental eligible import.
+- Create one admin review case per source assessment.
+- Present readable cards/tables, never raw JSON.
+
+PASSPORT
+Build two visibly separated sections:
+A. External Authority
+- source status
+- methodology/authority
+- assessment/decision date
+- meeting where available
+- scope
+- source URL
+- source rights state
+- concise source-supported rationale only
+
+B. HilalMarkets Factual Profile
+- canonical identity
+- official website/docs
+- primary activity
+- token role and utility
+- chain/contract
+- protocol/data structure
+- smart contracts
+- validation/consensus
+- governance
+- tokenomics
+- staking/rewards
+- lending/borrowing
+- interest/yield
+- derivatives/prediction products
+- treasury/revenue
+- backing/redemption/collateral
+- official source registry
+- missing information
+- contradictions
+- risk flags
+- last verification and next review
+
+For SC Malaysia state explicitly when coin-specific reasoning was not published. For SRB use the supplied short paraphrases internally and link to the source, subject to rights restrictions. For Fasset, extract its published report fields into `source_detail_fields` only when the exact asset panel is successfully fetched and verified; otherwise leave them unknown. Never fill source authority fields with AI.
+
+AI ENRICHMENT
+Process `data/ai_enrichment_queue.jsonl` asynchronously. For each canonical asset:
+- discover/fetch only official project website, documentation, whitepaper/tokenomics, foundation/issuer publications, governance, GitHub, staking/product, treasury and official regulatory/exchange sources;
+- store URL, title, publication/retrieval date, relevant heading, content hash and snapshot;
+- output strict data matching `schemas/passport_enrichment.schema.json`;
+- use UNKNOWN/null instead of guessing;
+- store provenance exactly as `HILALMARKETS_AI_ENRICHMENT_UNVERIFIED`;
+- require human verification;
+- write only to the HilalMarkets factual layer;
+- never reconstruct or attribute unpublished external-authority reasoning.
+
+ADMIN WORKFLOW
+Show:
+- methodology/source
+- imported status
+- canonical identity confidence
+- source snapshot
+- source-supported reason
+- AI factual profile
+- missing/contradictory evidence
+- rights warning
+- history
+- decision panel
+
+Actions:
+- Approve and Publish
+- Approve Internally but Block Public Display
+- Request More Evidence
+- Reject and Store
+
+Require reason, admin ID and timestamp. Publication must be transactional. Rejected records remain stored and excluded. An approved asset appears only inside the selected methodology's universe.
+
+COMPARISON
+Use the union matrix only to show independent methodology opinions. Display each authority separately with status, date, source and scope. Do not infer agreement for migrated symbols or duplicates.
+
+MONITORING
+After an assessment is approved, register and monitor the original methodology page plus verified official asset sources. Source changes create review cases; they never directly change status. Preserve alert/passport methodology versions.
+
+TESTS
+Add/adjust tests proving:
+- 15 SC, 31 SRB and 188 Fasset compliant source rows load;
+- 52 Fasset guard rows never become eligible;
+- import reruns are idempotent;
+- no auto-publication;
+- no cross-methodology inheritance;
+- no consensus score;
+- ticker-only mapping is rejected;
+- duplicate/migrated symbols require review;
+- AI cannot write external fields;
+- source and AI Passport sections remain separate;
+- SRB rights block is enforced;
+- non-admins cannot decide;
+- rejected records remain stored;
+- every publication is auditable;
+- existing Sharia, Watch Plan, Screened Market, Telegram and admin tests remain passing.
+
+Return a completion report with files changed, data counts imported, unresolved identity records, rights-blocked records, migrations, commands, tests/results and remaining manual review. Do not mark complete if any source row auto-publishes, any authority inherits another authority's coin, AI-generated facts appear as external reasoning, or SRB content is publicly reproduced without clearance.

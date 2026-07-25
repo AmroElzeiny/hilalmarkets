@@ -58,6 +58,7 @@ class AssetAssessmentSummary(BaseModel):
     valid_until: datetime | None
     approved_status: ShariaAssetStatus | None = None
     safety_hold: bool = False
+    logo_url: str | None = None
 
 
 class EvidenceSourceResponse(BaseModel):
@@ -105,6 +106,7 @@ class PassportIdentity(BaseModel):
     official_documentation: str | None = None
     provider_ids: dict[str, str] = Field(default_factory=dict)
     logo_module_url: str | None = None
+    logo_url: str | None = None
     exchange_markets: list[PassportExchangeMarket] = Field(default_factory=list)
     identity_state: str = "unavailable"
     identity_verified_at: datetime | None = None
@@ -197,6 +199,21 @@ class PassportHistoricalReference(BaseModel):
     strategy_version_id: UUID | None = None
 
 
+class PassportMethodologyReference(BaseModel):
+    """A separate published result for the same canonical asset.
+
+    These records deliberately retain one methodology per result. They are a
+    display aid for the Passport, never a combined eligibility decision.
+    """
+
+    methodology_id: UUID
+    methodology_name: str
+    methodology_version: str
+    status: ShariaAssetStatus
+    status_label: str
+    review_date: datetime | None = None
+
+
 class AssetPassportResponse(BaseModel):
     assessment: AssetAssessmentSummary
     why_this_status: str
@@ -235,6 +252,9 @@ class AssetPassportResponse(BaseModel):
     official_source_url: str | None = None
     can_create_watch_plan: bool = False
     restriction_explanation: str | None = None
+    methodology_references: list[PassportMethodologyReference] = Field(
+        default_factory=list
+    )
 
 
 class PassportQuickViewResponse(BaseModel):
@@ -262,6 +282,10 @@ class PassportQuickViewResponse(BaseModel):
     watchlist_action_url: str | None = None
     compliance_change_url: str | None = None
     restriction_explanation: str | None = None
+    last_verified_at: datetime | None = None
+    methodology_references: list[PassportMethodologyReference] = Field(
+        default_factory=list
+    )
 
 
 class PassportProblemReportRequest(BaseModel):
@@ -334,6 +358,7 @@ class LiveSpotMarketQuote(BaseModel):
     status_label: str = "Unavailable"
     reviewed_at: datetime | None = None
     passport_url: str | None = None
+    logo_url: str | None = None
     bid: float | None = None
     ask: float | None = None
     last: float | None = None
@@ -458,7 +483,7 @@ class EvidenceSourceInput(BaseModel):
 class AssessmentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    canonical_asset: str = Field(min_length=2, max_length=32, pattern=r"^[A-Z0-9._-]+$")
+    canonical_asset: str = Field(min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$")
     asset_name: str | None = Field(default=None, max_length=160)
     methodology_id: UUID
     status: ShariaAssetStatus
@@ -483,7 +508,7 @@ class AssessmentCreateRequest(BaseModel):
 class ComplianceChangeIngestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    canonical_asset: str = Field(min_length=2, max_length=32, pattern=r"^[A-Z0-9._-]+$")
+    canonical_asset: str = Field(min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$")
     change_type: Literal[
         "lending_or_borrowing_added",
         "interest_bearing_product_added",

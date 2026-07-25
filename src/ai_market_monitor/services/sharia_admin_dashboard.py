@@ -423,12 +423,18 @@ class ShariaAdminDashboardService:
         deadline: str | None = None,
         asset_query: str | None = None,
         limit: int = 100,
+        include_published: bool = False,
     ) -> list[dict]:
         query = select(ReviewCase).order_by(
             ReviewCase.done_at.is_not(None), ReviewCase.created_at.desc()
         )
         if state:
             query = query.where(ReviewCase.state == state)
+        elif not include_published:
+            # A completed publication belongs to the immutable case registry and
+            # audit trail, not the human-attention queue. Keep it available when
+            # an operator explicitly asks for the published state.
+            query = query.where(ReviewCase.publication_state != "published")
         if case_type:
             query = query.where(ReviewCase.case_type == case_type)
         if priority:
@@ -658,6 +664,14 @@ class ShariaAdminDashboardService:
             if case.dossier_id
             else None
         )
+        external_snapshot = (
+            await self.session.get(
+                SourceSnapshot,
+                external.source_snapshot_id,
+            )
+            if external is not None
+            else None
+        )
         methodology = (
             await self.session.get(ShariaMethodology, case.methodology_id)
             if case.methodology_id
@@ -757,7 +771,39 @@ class ShariaAdminDashboardService:
         output = dict(ai.output or {}) if ai else {}
         ai_profile = dict(output.get("profile") or {})
         retained_profile = dict((dossier.factual_profile if dossier else {}) or {})
-        profile = dict(ai_profile or retained_profile)
+        profile = dict(retained_profile or ai_profile)
+        source_fields = dict(
+            (
+                (external.structured_facts or {}).get("source_fields")
+                if external is not None
+                else {}
+            )
+            or {}
+        )
+        source_supported_explanation = next(
+            (
+                str(source_fields[key]).strip()
+                for key in (
+                    "passport_source_statement",
+                    "reason_summary_paraphrased",
+                    "status_detail",
+                    "attribution_note",
+                )
+                if source_fields.get(key)
+            ),
+            None,
+        )
+        missing_evidence = list(
+            output.get("missing_evidence")
+            or (retained_profile.get("missing_information") or [])
+            or case.requested_evidence
+            or []
+        )
+        contradictions = list(
+            output.get("contradictions")
+            or (retained_profile.get("contradictions") or [])
+            or []
+        )
         publication = await self.session.scalar(
             select(PublishedAssetAssessment)
             .where(
@@ -827,13 +873,14 @@ class ShariaAdminDashboardService:
             "case": case,
             "asset": asset,
             "external": external,
+            "external_snapshot": external_snapshot,
+            "source_supported_explanation": (
+                source_supported_explanation
+            ),
             "dossier": dossier,
             "methodology": methodology,
             "ai": ai,
-            "profile_sections": [
-                {"label": _label(key), "value": value or "Not established from current evidence."}
-                for key, value in profile.items()
-            ],
+            "profile_sections": _profile_sections(profile),
             "review_fields": _review_fields(
                 retained_profile=retained_profile,
                 ai_profile=ai_profile,
@@ -871,8 +918,8 @@ class ShariaAdminDashboardService:
                 if (row.meaningful_diff or {}).get("added")
                 or (row.meaningful_diff or {}).get("removed")
             ],
-            "missing_evidence": list(output.get("missing_evidence") or []),
-            "contradictions": list(output.get("contradictions") or []),
+            "missing_evidence": missing_evidence,
+            "contradictions": contradictions,
             "methodology_areas": list(
                 output.get("potentially_affected_methodology_areas") or []
             ),
@@ -1257,6 +1304,15 @@ _REVIEW_FIELD_LABELS = {
     "primary_activity": "Project purpose",
     "token_utility": "Token utility",
     "token_role": "Token utility",
+    "token_role_and_utility": "Token role and utility",
+    "asset_type": "Native asset or token",
+    "native_chain_or_contract": "Native chain and contracts",
+    "data_structure": "Protocol data structure",
+    "smart_contract_capability": "Smart-contract capability",
+    "transaction_validation": "Transaction validation",
+    "consensus_mechanism": "Consensus mechanism",
+    "governance_model": "Governance",
+    "tokenomics": "Tokenomics",
     "revenue_model": "Revenue or value-generation mechanism",
     "value_generation_mechanism": "Revenue or value-generation mechanism",
     "treasury_usage": "Treasury usage",
@@ -1265,11 +1321,22 @@ _REVIEW_FIELD_LABELS = {
     "lending_exposure": "Lending or interest exposure",
     "interest_exposure": "Lending or interest exposure",
     "lending_and_yield": "Lending or interest exposure",
+    "lending_borrowing": "Lending and borrowing",
+    "interest_or_yield": "Interest or yield exposure",
     "staking_mechanism": "Staking mechanism",
     "staking": "Staking mechanism",
+    "staking_and_rewards": "Staking and rewards",
     "derivative_exposure": "Derivative or synthetic exposure",
     "synthetic_exposure": "Derivative or synthetic exposure",
     "derivatives": "Derivative or synthetic exposure",
+    "derivatives_and_prediction_products": "Derivatives and prediction products",
+    "treasury_and_revenue": "Treasury and revenue",
+    "backing_redemption_or_collateral": "Backing, redemption, or collateral",
+    "official_source_registry": "Official source registry",
+    "missing_information": "Missing information",
+    "contradictions": "Contradictions",
+    "risk_flags": "Risk flags",
+    "plain_language_profile": "Plain-language factual profile",
     "wrapped_token_dependency": "Wrapped-token dependency",
     "restricted_business_exposure": "Restricted business exposure",
     "tokenomics_and_backing": "Tokenomics and backing",
@@ -1278,6 +1345,49 @@ _REVIEW_FIELD_LABELS = {
     "required_product_exclusions": "Required product-level exclusions",
     "reviewer_notes": "Reviewer notes",
 }
+
+
+def _profile_sections(profile: dict) -> list[dict[str, str]]:
+    return [
+        {
+            "label": _REVIEW_FIELD_LABELS.get(
+                str(key),
+                _label(str(key)),
+            ),
+            "value": _display_value(value),
+        }
+        for key, value in profile.items()
+        if not str(key).startswith("_")
+        and key
+        not in {
+            "provenance",
+            "manual_verification_required",
+        }
+    ]
+
+
+def _display_value(value: object) -> str:
+    if value is None or value == "":
+        return "Not established from current evidence."
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, dict):
+        parts = [
+            f"{_label(str(key))}: {_display_value(item)}"
+            for key, item in value.items()
+            if item is not None
+            and item != ""
+            and item != []
+            and item != {}
+        ]
+        return "; ".join(parts) or "No verified details retained."
+    if isinstance(value, list):
+        if not value:
+            return "None recorded."
+        if all(isinstance(item, dict) for item in value):
+            return f"{len(value)} official source record(s) retained."
+        return "; ".join(str(item) for item in value)
+    return str(value)
 
 
 def _review_fields(
@@ -1303,6 +1413,12 @@ def _review_fields(
         review = field_reviews.get(str(key))
         suggestion = ai_profile.get(key)
         retained = retained_profile.get(key)
+        current = (
+            review.get("reviewer_value")
+            if review
+            and review.get("disposition") in {"accepted", "edited"}
+            else retained
+        )
         source_refs = field_sources.get(key) or snapshot_ids
         if not isinstance(source_refs, list):
             source_refs = [str(source_refs)]
@@ -1311,13 +1427,16 @@ def _review_fields(
                 "key": str(key),
                 "label": _REVIEW_FIELD_LABELS.get(str(key), _label(str(key))),
                 "current_value": (
-                    review.get("reviewer_value")
-                    if review
-                    and review.get("disposition") in {"accepted", "edited"}
-                    else retained
+                    _display_value(current)
+                    if current is not None
+                    else None
                 ),
                 "source_status": "retained" if retained is not None else "not reviewed",
-                "ai_suggestion": suggestion,
+                "ai_suggestion": (
+                    _display_value(suggestion)
+                    if suggestion is not None
+                    else None
+                ),
                 "confidence": field_confidence.get(key, overall_confidence),
                 "source_refs": [str(item) for item in source_refs[:8]],
                 "uncertainty": output.get("human_review_reason"),

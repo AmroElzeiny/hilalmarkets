@@ -22,11 +22,16 @@
     }
   }
 
-  async function load(container, moduleUrl, symbol) {
-    if (!container || container.dataset.assetLogoLoaded === moduleUrl) return;
-    container.dataset.assetLogoLoaded = moduleUrl || "";
-    const source = await resolve(moduleUrl);
-    if (!source || container.dataset.assetLogoLoaded !== moduleUrl) return;
+  async function load(container, moduleUrl, symbol, directUrl = null) {
+    const safeDirectUrl = typeof directUrl === "string"
+      && directUrl.startsWith("https://")
+      ? directUrl
+      : null;
+    const identity = safeDirectUrl || moduleUrl || "";
+    if (!container || container.dataset.assetLogoLoaded === identity) return;
+    container.dataset.assetLogoLoaded = identity;
+    const source = safeDirectUrl || await resolve(moduleUrl);
+    if (!source || container.dataset.assetLogoLoaded !== identity) return;
     const image = document.createElement("img");
     image.src = source;
     image.alt = `${symbol || "Asset"} logo`;
@@ -40,6 +45,7 @@
         container,
         container.dataset.assetLogoModule,
         container.dataset.assetLogoSymbol,
+        container.dataset.assetLogoUrl,
       );
     });
   }

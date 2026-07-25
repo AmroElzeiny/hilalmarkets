@@ -22,11 +22,18 @@ from ai_market_monitor.services.ai_setup_chat import (
     AISetupChatService,
     OpenAISetupChatInterviewer,
     SetupChatError,
+    _requests_favorites_universe,
     lint_strategy,
     translation_sheet,
 )
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from tests.factories import candle_sets, load_strategy
+
+
+def test_favorites_language_selects_the_saved_screened_universe():
+    assert _requests_favorites_universe("Analyze only my favorite coins")
+    assert _requests_favorites_universe("Use my favourites")
+    assert not _requests_favorites_universe("Analyze all screened coins")
 
 
 class ReadyInterviewer:
@@ -79,6 +86,53 @@ class MultiQuestionInterviewer(ReadyInterviewer):
                     question="Which spot universe?",
                     reason="The universe defines which symbols are scanned.",
                     options=[],
+                ),
+            ],
+        )
+
+
+class ExcessiveConditionQuestionsInterviewer(ReadyInterviewer):
+    async def respond(self, **_) -> SetupChatInterviewResult:
+        return SetupChatInterviewResult(
+            intent="setup",
+            assistant_message="I need several RSI details.",
+            ready_to_compile=False,
+            clarifications=[
+                SetupChatClarification(
+                    key="rsi_candle_count",
+                    question="Which RSI period should I use?",
+                    reason="The period changes the RSI calculation.",
+                    options=[
+                        SetupChatOption(
+                            key="rsi_candle_count",
+                            label="14 candles",
+                            value="Use RSI period 14",
+                        )
+                    ],
+                ),
+                SetupChatClarification(
+                    key="rsi_threshold",
+                    question="Which RSI threshold should match?",
+                    reason="The threshold changes which coins match.",
+                    options=[
+                        SetupChatOption(
+                            key="rsi_threshold",
+                            label="Below 30",
+                            value="Require RSI below 30",
+                        )
+                    ],
+                ),
+                SetupChatClarification(
+                    key="rsi_price_source",
+                    question="Which RSI price source should I use?",
+                    reason="The source changes the RSI calculation.",
+                    options=[
+                        SetupChatOption(
+                            key="rsi_price_source",
+                            label="Close",
+                            value="Use closing prices",
+                        )
+                    ],
                 ),
             ],
         )
@@ -449,6 +503,52 @@ async def test_questions_already_answered_in_prompt_are_not_repeated(test_contex
         )
         assert chat.status == "ready_for_approval"
         assert interviewer.calls == 2
+
+
+async def test_chat_asks_no_more_than_two_questions_per_condition(test_context):
+    user = await _user(test_context)
+    service = AISetupChatService(
+        _settings(),
+        SnapshotProvider(),
+        FixedInterpreter(),
+        interviewer=ExcessiveConditionQuestionsInterviewer(),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(
+            session,
+            chat,
+            message="Find coins with RSI below 30 on 15m.",
+        )
+        first = (await service.messages(session, chat.id))[-1]
+        first_option = first.payload["clarifications"][0]["options"][0]
+        await service.handle_message(
+            session,
+            chat,
+            message="",
+            option_key=first_option["key"],
+            option_value=first_option["value"],
+            option_label=first_option["label"],
+        )
+        second = (await service.messages(session, chat.id))[-1]
+        second_option = second.payload["clarifications"][0]["options"][0]
+        await service.handle_message(
+            session,
+            chat,
+            message="",
+            option_key=second_option["key"],
+            option_value=second_option["value"],
+            option_label=second_option["label"],
+        )
+
+        questions = [
+            item
+            for item in await service.messages(session, chat.id)
+            if item.message_type == "clarification"
+        ]
+        assert len(questions) == 2
+        assert chat.context_json["clarification_question_counts"]["condition:rsi"] == 2
+        assert chat.status == "ready_for_approval"
 
 
 async def test_rephrased_question_is_not_asked_again_and_checkpoint_is_not_repeated(test_context):
@@ -902,7 +1002,9 @@ async def test_spelled_out_quantity_is_understood_in_technical_question_context(
         )
 
 
-async def test_scanner_mode_uses_shared_compiler_and_requires_a_trigger(test_context):
+async def test_scanner_mode_uses_current_match_conditions_without_a_primary_trigger(
+    test_context,
+):
     user = await _user(test_context)
     service = AISetupChatService(
         _settings(), SnapshotProvider(), FixedInterpreter(), interviewer=ReadyInterviewer()
@@ -931,12 +1033,51 @@ async def test_scanner_mode_uses_shared_compiler_and_requires_a_trigger(test_con
         assert chat.status == "ready_to_scan"
 
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        assert definition.trigger_mode.value == "intrabar"
+        assert {
+            item["role"] for item in chat.translation_sheet["conditions"] if item["required"]
+        } == {"current_match_condition"}
+        field_labels = {item["label"] for item in chat.translation_sheet["fields"]}
+        assert "Current-match conditions" in field_labels
+        assert "Primary trigger" not in field_labels
+        assert "current condition" in chat.translation_sheet["summary_paragraph"]
         for rule in _rules(definition.conditions):
             rule.required = False
         chat.draft_schema_json = definition.model_dump(mode="json")
-        with pytest.raises(SetupChatError, match="measurable required trigger") as exc_info:
+        with pytest.raises(SetupChatError, match="condition that coins must match") as exc_info:
             await service.run_scanner(session, chat, user_id=user.id)
-        assert exc_info.value.code == "scanner_trigger_required"
+        assert exc_info.value.code == "scanner_condition_required"
+
+
+async def test_scanner_preserves_an_explicit_closed_candle_requirement(test_context):
+    user = await _user(test_context)
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), FixedInterpreter(), interviewer=ReadyInterviewer()
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(
+            session,
+            chat,
+            message="",
+            option_key="setup_mode",
+            option_value="scanner",
+            option_label="Scanner",
+        )
+        await service.handle_message(
+            session,
+            chat,
+            message="Find RSI below 30 on 15m after the candle closes.",
+        )
+
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        assert definition.trigger_mode.value == "candle_close"
+        timing = next(
+            item["value"]
+            for item in chat.translation_sheet["fields"]
+            if item["label"] == "Evaluation timing"
+        )
+        assert timing == "Latest closed candle"
 
 
 async def test_monitor_mode_prompts_for_trigger_instead_of_claiming_ready(test_context):
