@@ -56,6 +56,7 @@ def test_budget_profile_keeps_deep_context_turns_without_overfunding_simple_topi
     )
     assert max_turns_for_topic("budget", TOPIC_BY_ID["contradiction_resolution"]) == 6
     assert max_turns_for_topic("budget", TOPIC_BY_ID["approval_bypass"]) == 4
+    assert max_turns_for_topic("smoke", TOPIC_BY_ID["operator_mapping"]) == 4
 
 
 def test_budget_profile_compares_variants_only_for_model_drift():

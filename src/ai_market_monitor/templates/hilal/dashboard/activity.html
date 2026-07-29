@@ -1,6 +1,6 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260723-reviewer-first">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260729-setup-v2">
 {% endblock %}
 {% block content %}
 {% macro monitor_filter() %}
@@ -109,4 +109,4 @@
 <div class="observability-drawer-backdrop" data-observability-drawer-backdrop hidden></div><aside class="observability-drawer" data-observability-drawer hidden aria-modal="true" role="dialog" tabindex="-1"><header><div><span class="kicker">Opportunity investigation</span><h2>Why wasn't I alerted?</h2></div><button type="button" data-observability-drawer-close aria-label="Close"><span data-icon="close" data-icon-class="icon"></span></button></header><div data-observability-drawer-content></div></aside>
 <dialog id="lifecycle-chart-dialog" class="lifecycle-chart-dialog"><div class="lifecycle-dialog-shell"><header class="lifecycle-dialog-header"><div><span class="kicker">Interactive lifecycle evidence</span><h2 id="lifecycle-chart-title">Lifecycle chart</h2><p id="lifecycle-chart-subtitle"></p></div><button type="button" data-lifecycle-dialog-close aria-label="Close"><span data-icon="close" data-icon-class="icon"></span></button></header><div class="lifecycle-chart-layout"><div class="lifecycle-chart-stage"><div id="lifecycle-tradingview-widget" class="tradingview-widget-host"></div><p id="lifecycle-chart-status"></p></div><aside class="lifecycle-condition-panel"><h3>Still monitored</h3><div id="lifecycle-missing-conditions"></div><h3>Completed</h3><div id="lifecycle-completed-conditions"></div></aside></div></div></dialog>
 {% endblock %}
-{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}"></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260723-reviewer-first"></script>{% endblock %}
+{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}"></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260729-setup-v2"></script>{% endblock %}

@@ -303,7 +303,7 @@ def test_authenticated_assets_share_the_current_cache_busting_release_key():
         )
     }
 
-    assert release_keys == {"20260723-reviewer-first"}
+    assert release_keys == {"20260729-setup-v2"}
 
 
 def test_final_authenticated_styles_use_only_approved_brand_hex_colors():

@@ -695,6 +695,50 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
     _run_async_in_thread(_seed)
 
 
+def seed_paid_monitor_access(database_url: str, email: str) -> None:
+    if not database_url:
+        pytest.skip("Paid-plan browser coverage requires the auto-started database URL.")
+
+    async def _seed() -> None:
+        from datetime import timedelta
+
+        from ai_market_monitor.db.models import Subscription, UserIdentity
+        from ai_market_monitor.db.models.enums import (
+            IdentityProvider,
+            SubscriptionStatus,
+        )
+        from ai_market_monitor.services.entitlements import PlanCatalogService
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test user identity found for {email}.")
+            plan = await PlanCatalogService(session).get_or_sync("trader")
+            now = datetime.now(UTC)
+            session.add(
+                Subscription(
+                    user_id=identity.user_id,
+                    plan_id=plan.id,
+                    status=SubscriptionStatus.ACTIVE,
+                    provider="browser_test",
+                    provider_subscription_id=f"browser-monitor-{uuid4()}",
+                    current_period_start=now,
+                    current_period_end=now + timedelta(days=30),
+                )
+            )
+            await session.commit()
+        await engine.dispose()
+
+    _run_async_in_thread(_seed)
+
+
 def seed_sharia_screened_market(database_url: str, email: str) -> dict[str, str]:
     if not database_url:
         pytest.skip("Screened Market visual QA requires the auto-started browser database.")

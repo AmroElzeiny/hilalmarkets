@@ -234,7 +234,7 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     billing = await test_context["client"].get("/dashboard/billing")
     assert billing.status_code == 200
     assert PLAN_DEFINITIONS["demo"].name in billing.text
-    assert "Current plan" in billing.text
+    assert "Your current plan" in billing.text
     assert "Paid billing is disabled" not in billing.text
     assert "What billing changes" not in billing.text
     assert "Screening evidence stays the same on every plan" not in billing.text

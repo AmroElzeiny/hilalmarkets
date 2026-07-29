@@ -116,7 +116,14 @@ async def test_evaluator_headers_fail_closed_when_test_control_is_disabled(test_
         },
     )
     assert response.status_code == 403
-    assert response.json()["detail"] == "evaluator_control_unavailable"
+    detail = response.json()["detail"]
+    # The classifier token stays first and unchanged, so the evaluator still records
+    # this as EVALUATOR_FAULT_CONTROL_UNAVAILABLE and stops before spending. The
+    # reason follows it: a bare token gave the operator nothing to act on, and a run
+    # was lost to a target started with the wrong APP_ENV while both evaluator flags
+    # were already true.
+    assert detail.startswith("evaluator_control_unavailable")
+    assert "AI_SETUP_EVALUATOR_ENABLED" in detail or "APP_ENV" in detail
 
 
 async def test_authenticated_builder_exposes_only_targeted_evaluator_selectors(test_context):

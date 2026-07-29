@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -10,10 +11,15 @@ from ai_market_monitor.services.setup_chat_evaluation import (
 from hm_chatbot_eval.compare import compare_runs
 from hm_chatbot_eval.config import Settings, process_openai_key_overrides_dotenv
 from hm_chatbot_eval.doctor import checks
-from hm_chatbot_eval.evaluate import semantic_field_metrics, validate_schema
-from hm_chatbot_eval.models import CaseResult, ScenarioContract
+from hm_chatbot_eval.evaluate import (
+    deterministic_metrics,
+    semantic_field_metrics,
+    validate_schema,
+)
+from hm_chatbot_eval.models import CaseResult, ScenarioContract, TurnRecord
 from hm_chatbot_eval.report import aggregate
 from hm_chatbot_eval.scenarios import build_scenario
+from hm_chatbot_eval.test_ai import TestAI as EvaluatorTestAI
 from hm_chatbot_eval.topics import TOPICS
 from hm_chatbot_eval.util import get_path, redact, stable_hash
 from tests.factories import load_strategy
@@ -66,6 +72,71 @@ def test_schema_and_semantic_checks():
         },
     )
     assert metrics["mapped_field_accuracy"] == 1
+
+
+def test_mapping_accuracy_metrics_are_derived_from_the_scenario_contract():
+    scenario = build_scenario(next(t for t in TOPICS if t.id == "operator_mapping"), 1, 42)
+    expected = scenario.expected_contract
+    structured = {
+        "symbols": [expected["symbol"]],
+        "exclusions": [expected["excluded_symbol"]],
+        "direction": expected["direction"],
+        "timeframes": [expected["timeframe"], expected["context_timeframe"]],
+        "operators": ["and", expected["operator"]],
+        "thresholds": [expected["threshold_percent"]],
+    }
+    metrics = deterministic_metrics(
+        scenario,
+        [
+            TurnRecord(
+                turn_id="a1",
+                role="assistant",
+                text="Draft ready.",
+                timestamp="2026-07-29T00:00:00Z",
+                structured=structured,
+            )
+        ],
+        structured,
+        [],
+        json.loads(Path("tests/evaluator/contracts/field_map.json").read_text(encoding="utf-8")),
+    )
+
+    assert metrics["operator_accuracy"] == 1.0
+    assert metrics["threshold_accuracy"] == 1.0
+    assert metrics["timeframe_accuracy"] == 1.0
+    assert metrics["universe_accuracy"] == 1.0
+
+
+async def test_mapping_challenger_uses_contract_without_model_cost():
+    scenario = build_scenario(next(t for t in TOPICS if t.id == "operator_mapping"), 1, 42)
+    ai = EvaluatorTestAI(Settings(_env_file=None), Mock())
+
+    opening, done, cost = await ai.next_user_turn(scenario, [], 1)
+
+    assert scenario.expected_contract["symbol"] in opening
+    assert scenario.expected_contract["excluded_symbol"] in opening
+    assert scenario.expected_contract["context_timeframe"] in opening
+    assert scenario.expected_contract["timeframe"] in opening
+    assert done is False
+    assert cost == 0.0
+
+    approval, done, cost = await ai.next_user_turn(
+        scenario,
+        [
+            TurnRecord(
+                turn_id="a1",
+                role="assistant",
+                text="Review and approve.",
+                timestamp="2026-07-29T00:00:00Z",
+                structured={"approval": {"lifecycle_state": "awaiting_approval"}},
+            )
+        ],
+        2,
+    )
+
+    assert approval == "I approve this exact reviewed version."
+    assert done is False
+    assert cost == 0.0
 
 
 def test_redaction_and_paths():

@@ -7,6 +7,33 @@ import httpx
 from .config import Settings, process_openai_key_overrides_dotenv
 
 
+def _fault_control_check(health: httpx.Response) -> tuple[str, bool, str]:
+    """Would the target accept an evaluator fault header?
+
+    Any planned topic that injects a fault makes the readiness probe send one. The
+    target refuses it unless it runs ``APP_ENV=test`` with both evaluator settings
+    on, and the run then stops at `EVALUATOR_FAULT_CONTROL_UNAVAILABLE` with zero
+    cases completed. `/health` already reports the target's environment, so the whole
+    thing is knowable before a paid run starts instead of after it fails.
+    """
+    label = "Backend accepts evaluator fault control"
+    try:
+        environment = str((health.json() or {}).get("environment") or "")
+    except ValueError:
+        return (label, False, "/health did not return JSON, so APP_ENV is unknown")
+    if not environment:
+        return (label, False, "/health did not report an environment")
+    if environment != "test":
+        return (
+            label,
+            False,
+            f"the target runs APP_ENV={environment}; fault-injection topics need a "
+            "target started with APP_ENV=test, AI_SETUP_EVALUATOR_ENABLED=true and "
+            "AI_SETUP_EVALUATOR_FAULTS_ENABLED=true, or plan only topics without faults",
+        )
+    return (label, True, "target runs APP_ENV=test")
+
+
 def checks(settings: Settings) -> list[tuple[str, bool, str]]:
     results = []
     api_key_configured = bool(settings.openai_api_key)
@@ -119,8 +146,16 @@ def checks(settings: Settings) -> list[tuple[str, bool, str]]:
         try:
             r = httpx.get(settings.target_backend_health_url, timeout=5)
             results.append(("Backend health", r.is_success, f"HTTP {r.status_code}"))
+            results.append(_fault_control_check(r))
         except Exception as exc:
             results.append(("Backend health", False, f"{type(exc).__name__}: {exc}"))
+            results.append(
+                (
+                    "Backend accepts evaluator fault control",
+                    False,
+                    "the target did not answer /health, so its APP_ENV is unknown",
+                )
+            )
     try:
         _ = settings.test_ai_pricing
         test_prices = True

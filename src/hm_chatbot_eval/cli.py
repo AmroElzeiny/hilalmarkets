@@ -275,6 +275,24 @@ def recorded_replay_command(
     raise typer.Exit(0 if results and summary["deterministic_preflight_status"] == "PASS" else 2)
 
 
+@app.command("launch-core")
+def launch_core_command(
+    run_id: Annotated[str, typer.Option()] = "",
+) -> None:
+    """Run the zero-cost deterministic launch grammar and semantic contracts."""
+
+    from .launch_core import run_launch_core
+
+    settings = _settings()
+    summary, run_dir = run_launch_core(
+        settings.eval_output_dir,
+        run_id=run_id or None,
+    )
+    console.print(summary)
+    console.print(f"[bold]Report:[/bold] {run_dir / 'report.html'}")
+    raise typer.Exit(0 if summary["stable_regression_status"] == "PASS" else 2)
+
+
 @app.command("batch-submit")
 def batch_submit(run_id: str) -> None:
     settings = _settings()

@@ -112,7 +112,7 @@ def test_dashboard_shell_has_notification_center_and_cache_busted_brand_assets()
     topbar = _read("templates/hilal/partials/dashboard_topbar.html")
     sidebar = _read("templates/hilal/partials/dashboard_sidebar.html")
 
-    assert "20260723-reviewer-first" in base
+    assert "20260729-setup-v2" in base
     assert "data-notification-center" in topbar
     assert 'data-icon="bell"' in topbar
     assert "data-sidebar-collapse" in sidebar
@@ -180,8 +180,9 @@ def test_notifications_billing_and_support_use_the_compact_layouts():
     assert "<h1>Notifications</h1>" not in integrations
     assert "billing-current-plan" in billing
     assert "billing-current-meta" in billing
-    assert "flex: 0 1 40%;" in styles
-    assert "width: 40%;" in styles
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in styles
+    assert "body.hilal-dashboard .billing-plan-panel .dashboard-price-card {" in styles
+    assert "width: 100%;" in styles
     assert 'class="grid grid-3"' not in support
 
 

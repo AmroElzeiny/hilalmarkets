@@ -2940,13 +2940,13 @@ body.hilal-dashboard .billing-result-mark.is-success {
 }
 
 body.hilal-dashboard .billing-result-mark.is-pending {
-  color: #6b511b;
-  background: var(--hm-amber-soft);
+  color: var(--hm-warning);
+  background: var(--hm-warning-bg);
 }
 
 body.hilal-dashboard .billing-result-mark.is-error {
   color: var(--hm-danger);
-  background: var(--hm-danger-soft);
+  background: var(--hm-danger-bg);
 }
 
 body.hilal-dashboard .billing-result-hero h1 {

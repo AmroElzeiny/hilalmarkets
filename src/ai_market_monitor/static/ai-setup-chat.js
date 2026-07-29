@@ -668,6 +668,8 @@
         body: JSON.stringify({
           approved: true,
           expected_schema_hash: chat.schema_hash,
+          expected_draft_version: chat.draft_v2?.version || null,
+          expected_semantic_hash: chat.draft_v2?.semantic_hash || null,
           confirmed_low_confidence_rule_keys: confirmed,
         }),
       });

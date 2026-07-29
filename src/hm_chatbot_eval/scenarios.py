@@ -64,8 +64,7 @@ def build_scenario(
     goal = (
         f"Build a watchlist for {symbol}, exclude {alt_symbol}, use {context_tf} context and {timeframe} "
         f"trigger logic, require a {direction_word} move of {operator_word} {threshold}%, "
-        "and keep approval explicit. "
-        f"Topic-specific objective: {topic.objective}"
+        "and keep approval explicit."
     )
     return ScenarioSpec(
         id=f"{topic.id}-{index:03d}-{seed}",

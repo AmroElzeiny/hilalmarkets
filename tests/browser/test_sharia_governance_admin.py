@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import (
+from playwright.sync_api import Page, expect
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from tests.browser.conftest import (
     _run_async_in_thread,
     assert_hilal_brand_palette,
     assert_no_horizontal_overflow,
@@ -10,9 +14,6 @@ from conftest import (
     signup,
     unique_email,
 )
-from playwright.sync_api import Page, expect
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _promote_admin_and_seed_case(database_url: str | None, email: str) -> str:

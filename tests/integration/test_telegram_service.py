@@ -7,6 +7,7 @@ from ai_market_monitor.db.models import (
     AttributionTouch,
     DashboardPreference,
     Strategy,
+    Subscription,
     TelegramCallbackReceipt,
     TelegramConnection,
     TelegramConversationState,
@@ -16,7 +17,12 @@ from ai_market_monitor.db.models import (
     UserFeedback,
     UserIdentity,
 )
-from ai_market_monitor.db.models.enums import IdentityProvider, StrategyStatus
+from ai_market_monitor.db.models.enums import (
+    IdentityProvider,
+    StrategyStatus,
+    SubscriptionStatus,
+)
+from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.telegram.service import TelegramBotService
@@ -181,6 +187,26 @@ async def test_telegram_create_approve_and_activate_monitor(test_context):
     async with test_context["session_factory"]() as db:
         service = make_service(test_context, db)
         await service.handle_start(start_message())
+        user_id = await db.scalar(
+            select(UserIdentity.user_id).where(
+                UserIdentity.provider == IdentityProvider.TELEGRAM
+            )
+        )
+        assert user_id is not None
+        plan = await PlanCatalogService(db).get_or_sync("trader")
+        now = datetime.now(UTC)
+        db.add(
+            Subscription(
+                user_id=user_id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider="test",
+                provider_subscription_id=f"telegram-monitor-{user_id}",
+                current_period_start=now,
+                current_period_end=now + timedelta(days=30),
+            )
+        )
+        await db.flush()
         await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-create",

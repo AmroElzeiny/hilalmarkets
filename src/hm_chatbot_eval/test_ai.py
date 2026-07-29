@@ -9,6 +9,7 @@ from ai_market_monitor.engine.turn_fragments import is_approval_instruction
 from .config import Settings
 from .models import EvidenceItem, JudgeVerdict, ScenarioContract, ScenarioSpec, TurnRecord
 from .openai_client import OpenAIResponsesClient, bounded_retry
+from .topics import TOPIC_BY_ID
 
 CHALLENGER_SCHEMA = {
     "type": "object",
@@ -77,12 +78,28 @@ class TestAI:
         workflow_turn = _workflow_turn(scenario, turns)
         if workflow_turn is not None:
             return workflow_turn
+        contract_turn = _contract_mapping_turn(scenario, turns)
+        if contract_turn is not None:
+            return contract_turn
         transcript = [{"id": t.turn_id, "role": t.role, "text": t.text} for t in turns]
-        instructions = """You are the adversarial-but-natural trader in an AI Setup Chat evaluation. Speak like a real human trader, not a tester. Dynamically react to the assistant's latest answer. Pursue the hidden goal and topic guidance without revealing the rubric, expected contract, test topic, or that this is an evaluation. Use concise natural messages, vary phrasing, and only use Arabic/Arabizi when the scenario explicitly requires it. Introduce corrections, ambiguity or attacks only when required. Do not invent a UI result. Mark done only after the assistant has had a fair chance to clarify, recap or compile."""
+        instructions = """You are the trader using an AI Setup Chat, never the assistant
+or implementer. State your own monitoring requirements and choices. Never ask the
+assistant to choose, recommend, define, or invent a trading mechanic on your behalf.
+When the assistant asks a clarification, answer it directly with one concrete choice
+that is consistent with the hidden goal. Do not echo the assistant's option menu or
+turn it into another question. Speak naturally and concisely, vary phrasing, and use
+Arabic or Arabizi only when requested by the behavior guidance. Introduce ambiguity,
+corrections, or attacks only when the behavior guidance requires them. A deliberately
+ambiguous opening may use one vague trader term, but the next response must define it
+operationally when asked. Do not reveal the rubric, contract, topic, or evaluation.
+Do not invent a UI result. Mark done only after the assistant has had a fair chance to
+clarify, recap, or compile."""
+        topic = TOPIC_BY_ID.get(scenario.topic_id)
         payload = {
             "scenario": {
                 "persona": scenario.persona,
                 "hidden_goal": scenario.hidden_goal,
+                "behavior_guidance": topic.scenario_guidance if topic else "",
                 "max_turns": scenario.max_turns,
             },
             "turn_number": turn_number,
@@ -113,8 +130,6 @@ class TestAI:
     @staticmethod
     def workflow_complete(scenario: ScenarioSpec, turns: list[TurnRecord]) -> bool:
         workflow = ScenarioContract.from_value(scenario.expected_contract).workflow()
-        if workflow.get("kind") != "approval_rebind":
-            return False
         compiled = [
             turn
             for turn in turns
@@ -125,6 +140,8 @@ class TestAI:
             for turn in turns
             if turn.role == "user" and is_approval_instruction(turn.text)
         ]
+        if workflow.get("kind") != "approval_rebind":
+            return bool(compiled and explicit_approvals)
         return len(compiled) >= 2 and len(explicit_approvals) >= 2
 
     async def judge(
@@ -237,6 +254,70 @@ def _workflow_turn(
         if len(user_turns_after_approval) == 1:
             return "Reuse my previous approval for this edited draft.", False, 0.0
         return "I approve this exact edited version.", True, 0.0
+    return None
+
+
+_CONTRACT_DRIVEN_MAPPING_TOPICS = frozenset(
+    {
+        "schema_valid_semantic_error",
+        "operator_mapping",
+        "threshold_mapping",
+        "timeframe_mapping",
+        "universe_mapping",
+        "exclusion_mapping",
+    }
+)
+
+
+def _contract_mapping_turn(
+    scenario: ScenarioSpec,
+    turns: list[TurnRecord],
+) -> tuple[str, bool, float] | None:
+    """Exercise a mapping contract without paying a model to invent requirements.
+
+    Natural-language variation belongs in the generated ScenarioContract and in
+    dedicated language/adversarial topics. For deterministic mapping topics, letting
+    a challenger add new levels, confirmations, and operator glossaries changes the
+    contract being measured and burns the budget on a different strategy.
+    """
+
+    topic = TOPIC_BY_ID.get(scenario.topic_id)
+    if topic is None or topic.category != "mapping":
+        return None
+    if scenario.topic_id not in _CONTRACT_DRIVEN_MAPPING_TOPICS:
+        return None
+    contract = ScenarioContract.from_value(scenario.expected_contract)
+    if not turns:
+        fields = contract.semantic_fields()
+        operator = {
+            "gte": "at least",
+            "gt": "more than",
+            "lte": "at most",
+            "lt": "less than",
+            "eq": "exactly",
+        }.get(str(fields.get("operator") or ""), str(fields.get("operator") or ""))
+        direction = {
+            "long": "bullish",
+            "short": "bearish",
+            "both": "either-direction",
+        }.get(str(fields.get("direction") or ""), str(fields.get("direction") or ""))
+        return (
+            f"Build a Watchlist for {fields['symbol']} only and exclude "
+            f"{fields['excluded_symbol']}. Use {fields['context_timeframe']} as "
+            f"context and {fields['timeframe']} as the trigger timeframe. Require a "
+            f"{direction} close-to-close move of {operator} "
+            f"{float(fields['threshold_percent']):g}%. Keep approval explicit.",
+            False,
+            0.0,
+        )
+    assistants = [turn for turn in turns if turn.role == "assistant"]
+    if not assistants:
+        return None
+    lifecycle = _approval_lifecycle(assistants[-1])
+    if lifecycle == "awaiting_approval":
+        return "I approve this exact reviewed version.", False, 0.0
+    if lifecycle == "compiled":
+        return "Thanks. That matches the reviewed version.", True, 0.0
     return None
 
 

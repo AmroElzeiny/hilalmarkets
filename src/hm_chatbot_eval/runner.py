@@ -93,18 +93,19 @@ class EvaluationRunner:
     ) -> tuple[bool, list[dict[str, Any]], FailureRecord | None]:
         """Verify auth, session creation, and UI boundaries before paid model work."""
 
-        probes: list[tuple[str, dict[str, Any]]] = []
-        seen: set[tuple[str, str]] = set()
-        for _scenario, kind, variant in work:
+        probes: dict[tuple[str, str], tuple[str, dict[str, Any], bool]] = {}
+        for scenario, kind, variant in work:
             key = (kind, stable_hash(variant))
-            if key in seen:
-                continue
-            seen.add(key)
-            probes.append((kind, variant))
+            previous = probes.get(key)
+            requires_fault_control = scenario.fault is not None
+            if previous is None:
+                probes[key] = (kind, variant, requires_fault_control)
+            elif requires_fault_control and not previous[2]:
+                probes[key] = (kind, variant, True)
 
         records: list[dict[str, Any]] = []
         last_failure: FailureRecord | None = None
-        for kind, variant in probes:
+        for kind, variant, requires_fault_control in probes.values():
             probe_name = f"{kind}:{variant.get('name', 'current')}"
             passed = False
             for attempt in range(1, self.settings.eval_readiness_attempts + 1):
@@ -114,9 +115,20 @@ class EvaluationRunner:
                     await target.start(f"readiness-{self.run_id}", variant)
                     probe_fault = (
                         "empty_once"
-                        if self.settings.target_backend_adapter == "hilalmarkets"
+                        if requires_fault_control
+                        and self.settings.target_backend_adapter == "hilalmarkets"
                         else None
                     )
+                    readiness_checks = [
+                        "authenticated_session",
+                        "long_message",
+                        (
+                            "fault_control"
+                            if requires_fault_control
+                            else "fault_control_not_required"
+                        ),
+                        "complete_turn",
+                    ]
                     reply = await target.send(
                         self._readiness_message(),
                         scenario_id=f"readiness-{self.run_id}",
@@ -135,12 +147,7 @@ class EvaluationRunner:
                                 "target": probe_name,
                                 "attempt": attempt,
                                 "status": "FAIL",
-                                "checks": [
-                                    "authenticated_session",
-                                    "long_message",
-                                    "fault_control",
-                                    "complete_turn",
-                                ],
+                                "checks": readiness_checks,
                                 "failure": probe_failure.to_dict(),
                             }
                         )
@@ -160,12 +167,7 @@ class EvaluationRunner:
                             "target": probe_name,
                             "attempt": attempt,
                             "status": "PASS",
-                            "checks": [
-                                "authenticated_session",
-                                "long_message",
-                                "fault_control",
-                                "complete_turn",
-                            ],
+                            "checks": readiness_checks,
                             "elapsed_ms": (
                                 asyncio.get_running_loop().time() - started
                             )

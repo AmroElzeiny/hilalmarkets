@@ -284,6 +284,8 @@ class Settings(BaseSettings):
     ai_setup_evaluator_target_versions: dict[str, AISetupEvaluatorTargetVersion] = Field(
         default_factory=dict
     )
+    setup_chat_launch_v2_enabled: bool = True
+    setup_chat_legacy_test_compat_enabled: bool = False
     ai_agent_control_enabled: bool = False
     ai_agent_shadow_mode: bool = False
     ai_agent_rollout_percent: int = Field(default=0, ge=0, le=100)
@@ -492,6 +494,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_capability_extension_bounds(self) -> "Settings":
+        if not self.setup_chat_launch_v2_enabled:
+            raise ValueError("SETUP_CHAT_LAUNCH_V2_ENABLED must remain true")
+        if self.is_deployed and self.setup_chat_legacy_test_compat_enabled:
+            raise ValueError(
+                "SETUP_CHAT_LEGACY_TEST_COMPAT_ENABLED is forbidden outside local tests"
+            )
         if self.ai_agent_parallel_tool_calls:
             raise ValueError("AI_AGENT_PARALLEL_TOOL_CALLS must remain false for bounded control")
         if self.ai_agent_tool_timeout_seconds > self.ai_agent_timeout_seconds:

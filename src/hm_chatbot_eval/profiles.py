@@ -71,6 +71,8 @@ def cases_per_topic(mode: str, tests_per_topic: int) -> int:
 
 
 def max_turns_for_topic(mode: str, topic: TopicSpec) -> int:
+    if mode == "smoke":
+        return min(topic.max_turns, 4)
     if mode != "budget":
         return topic.max_turns
     if topic.id in BUDGET_EIGHT_TURN_TOPIC_IDS:

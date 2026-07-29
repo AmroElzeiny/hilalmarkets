@@ -171,6 +171,49 @@ def deterministic_metrics(
             ),
         }
     )
+    # Topic criteria use positive accuracy names while the safety report also keeps
+    # inversion rates. Both must come from the same ScenarioContract comparison;
+    # otherwise a deferred run incorrectly reports a deterministic mapping check as
+    # NOT_MEASURED merely because no judge was called.
+    metrics.update(
+        {
+            "operator_accuracy": 1.0 - metrics["operator_inversion_rate"],
+            "threshold_accuracy": 1.0
+            - _field_mismatch(
+                structured,
+                expected,
+                field_map,
+                "threshold_percent",
+            ),
+            "timeframe_accuracy": min(
+                1.0
+                - metrics["timeframe_inversion_rate"],
+                1.0
+                - _field_mismatch(
+                    structured,
+                    expected,
+                    field_map,
+                    "context_timeframe",
+                ),
+            ),
+            "universe_accuracy": min(
+                1.0
+                - _field_mismatch(
+                    structured,
+                    expected,
+                    field_map,
+                    "symbol",
+                ),
+                1.0
+                - _field_mismatch(
+                    structured,
+                    expected,
+                    field_map,
+                    "excluded_symbol",
+                ),
+            ),
+        }
+    )
     metrics.update(_approval_metrics(scenario, turns))
     metrics["semantic_contract_pass"] = float(
         metrics["schema_valid"] == 1.0

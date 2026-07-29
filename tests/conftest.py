@@ -5,12 +5,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from ai_market_monitor.api.dependencies import get_market_previewer
+from ai_market_monitor.api.dependencies import (
+    get_market_data_provider,
+    get_market_previewer,
+)
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.base import Base
 from ai_market_monitor.main import create_app
 from ai_market_monitor.schemas.onboarding import MarketPreviewResponse
+from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
 
 
 class SuccessfulPreviewer:
@@ -50,9 +54,13 @@ async def test_context() -> AsyncIterator[dict]:
         billing_provider="static",
         openai_explanation_enabled=False,
         ai_agent_control_enabled=False,
+        setup_chat_legacy_test_compat_enabled=True,
         capability_extension_enabled=False,
         public_chat_ai_enabled=False,
         email_adapter="memory",
+        tracedge_market_data_mode="fixture",
+        tracedge_fixture_market_data_enabled=True,
+        allow_mock_providers=True,
         sharia_default_methodology_code=None,
         openai_model="gpt-5.4-nano",
         openai_reasoning_effort="low",
@@ -79,6 +87,9 @@ async def test_context() -> AsyncIterator[dict]:
     app = create_app(settings)
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_market_data_provider] = (
+        lambda: FixtureMarketDataProvider()
+    )
     app.dependency_overrides[get_market_previewer] = lambda: SuccessfulPreviewer()
 
     async with AsyncClient(

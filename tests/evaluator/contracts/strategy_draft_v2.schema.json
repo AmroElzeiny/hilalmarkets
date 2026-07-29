@@ -1,0 +1,760 @@
+{
+  "$defs": {
+    "ApprovalBindingV2": {
+      "additionalProperties": false,
+      "properties": {
+        "approved": {
+          "default": false,
+          "title": "Approved",
+          "type": "boolean"
+        },
+        "approved_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved At"
+        },
+        "conversation_snapshot_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Snapshot Hash"
+        },
+        "draft_version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Draft Version"
+        },
+        "semantic_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Hash"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        }
+      },
+      "title": "ApprovalBindingV2",
+      "type": "object"
+    },
+    "Comparator": {
+      "enum": [
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "eq",
+        "crosses_above",
+        "crosses_below",
+        "is_true",
+        "is_false"
+      ],
+      "title": "Comparator",
+      "type": "string"
+    },
+    "ConditionNodeType": {
+      "enum": [
+        "condition",
+        "and",
+        "or",
+        "not"
+      ],
+      "title": "ConditionNodeType",
+      "type": "string"
+    },
+    "ConditionNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_key": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Key"
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/ConditionNodeV2"
+          },
+          "maxItems": 100,
+          "title": "Children",
+          "type": "array"
+        },
+        "confirmation_timeframes": {
+          "items": {
+            "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Confirmation Timeframes",
+          "type": "array"
+        },
+        "context_timeframes": {
+          "items": {
+            "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Context Timeframes",
+          "type": "array"
+        },
+        "direction": {
+          "$ref": "#/$defs/DraftDirection",
+          "default": "neutral"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FormulaKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/ConditionNodeType"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/OperandV2"
+          },
+          "maxItems": 12,
+          "title": "Operands",
+          "type": "array"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Comparator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reference_definition": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Definition"
+        },
+        "reference_timeframe": {
+          "anyOf": [
+            {
+              "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Timeframe"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "source_fragment": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Fragment"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "trigger_timeframe": {
+          "anyOf": [
+            {
+              "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger Timeframe"
+        },
+        "unit": {
+          "default": "none",
+          "enum": [
+            "percent",
+            "price",
+            "ratio",
+            "count",
+            "index",
+            "boolean",
+            "none"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_type"
+      ],
+      "title": "ConditionNodeV2",
+      "type": "object"
+    },
+    "DraftDirection": {
+      "enum": [
+        "long",
+        "short",
+        "neutral"
+      ],
+      "title": "DraftDirection",
+      "type": "string"
+    },
+    "DraftMode": {
+      "enum": [
+        "scanner",
+        "monitor"
+      ],
+      "title": "DraftMode",
+      "type": "string"
+    },
+    "FormulaKind": {
+      "enum": [
+        "open_to_close_percentage",
+        "close_to_close_percentage",
+        "reference_to_current_percentage",
+        "high_to_low_percentage",
+        "low_to_high_percentage",
+        "previous_candle_reference",
+        "fixed_reference_level",
+        "lookback_reference_level",
+        "cross",
+        "sweep_and_reclaim",
+        "capability"
+      ],
+      "title": "FormulaKind",
+      "type": "string"
+    },
+    "MarketScopeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "exchange": {
+          "default": "binance",
+          "maxLength": 40,
+          "minLength": 2,
+          "title": "Exchange",
+          "type": "string"
+        },
+        "market_type": {
+          "const": "spot",
+          "default": "spot",
+          "title": "Market Type",
+          "type": "string"
+        },
+        "quote_asset": {
+          "default": "USDT",
+          "maxLength": 12,
+          "minLength": 2,
+          "title": "Quote Asset",
+          "type": "string"
+        }
+      },
+      "title": "MarketScopeV2",
+      "type": "object"
+    },
+    "OperandV2": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "kind": {
+          "enum": [
+            "price",
+            "constant",
+            "market_metric",
+            "indicator",
+            "reference"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "role": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "role",
+        "kind"
+      ],
+      "title": "OperandV2",
+      "type": "object"
+    },
+    "ProviderRequirementV2": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "default": false,
+          "title": "Available",
+          "type": "boolean"
+        },
+        "capability": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Capability",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "source_fragment": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Source Fragment",
+          "type": "string"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
+        }
+      },
+      "required": [
+        "provider",
+        "capability",
+        "source_fragment"
+      ],
+      "title": "ProviderRequirementV2",
+      "type": "object"
+    },
+    "SourceProvenanceV2": {
+      "additionalProperties": false,
+      "properties": {
+        "applied_fields": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Applied Fields",
+          "type": "array"
+        },
+        "fragment": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Fragment",
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "turn_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Turn Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "fragment"
+      ],
+      "title": "SourceProvenanceV2",
+      "type": "object"
+    },
+    "StrategyUniverseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "excluded_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Excluded Symbols",
+          "type": "array"
+        },
+        "included_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Included Symbols",
+          "type": "array"
+        }
+      },
+      "title": "StrategyUniverseV2",
+      "type": "object"
+    },
+    "UnresolvedFieldV2": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "default": true,
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "key": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "source_fragment": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Source Fragment",
+          "type": "string"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
+        }
+      },
+      "required": [
+        "key",
+        "source_fragment",
+        "question"
+      ],
+      "title": "UnresolvedFieldV2",
+      "type": "object"
+    },
+    "UnsupportedRequirementV2": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "default": true,
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "key": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "missing_contract": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Missing Contract",
+          "type": "string"
+        },
+        "source_fragment": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Source Fragment",
+          "type": "string"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
+        }
+      },
+      "required": [
+        "key",
+        "source_fragment",
+        "missing_contract"
+      ],
+      "title": "UnsupportedRequirementV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "approval": {
+      "$ref": "#/$defs/ApprovalBindingV2"
+    },
+    "condition_ast": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConditionNodeV2"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "draft_id": {
+      "format": "uuid",
+      "title": "Draft Id",
+      "type": "string"
+    },
+    "market_scope": {
+      "$ref": "#/$defs/MarketScopeV2"
+    },
+    "mode": {
+      "$ref": "#/$defs/DraftMode",
+      "default": "monitor"
+    },
+    "name": {
+      "default": "Untitled Monitor",
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "provider_requirements": {
+      "items": {
+        "$ref": "#/$defs/ProviderRequirementV2"
+      },
+      "maxItems": 100,
+      "title": "Provider Requirements",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "semantic_hash": {
+      "default": "",
+      "pattern": "^$|^[a-f0-9]{64}$",
+      "title": "Semantic Hash",
+      "type": "string"
+    },
+    "source_provenance": {
+      "items": {
+        "$ref": "#/$defs/SourceProvenanceV2"
+      },
+      "maxItems": 1000,
+      "title": "Source Provenance",
+      "type": "array"
+    },
+    "universe": {
+      "$ref": "#/$defs/StrategyUniverseV2"
+    },
+    "unresolved_fields": {
+      "items": {
+        "$ref": "#/$defs/UnresolvedFieldV2"
+      },
+      "maxItems": 100,
+      "title": "Unresolved Fields",
+      "type": "array"
+    },
+    "unsupported_requirements": {
+      "items": {
+        "$ref": "#/$defs/UnsupportedRequirementV2"
+      },
+      "maxItems": 100,
+      "title": "Unsupported Requirements",
+      "type": "array"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "title": "StrategyDraftV2",
+  "type": "object"
+}

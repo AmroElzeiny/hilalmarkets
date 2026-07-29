@@ -162,8 +162,23 @@ _EXCLUSION_MARKERS = (
     "drop",
     "leave out",
     "remove",
+    # The subtracting words. `BTC on 15m but not LTC` states an exclusion just as
+    # plainly as `exclude LTC`, and without them LTC was added to the watchlist the
+    # trader had just told us to keep it out of. A bare `not` stays out on purpose:
+    # `not below 30` is a comparison, not a universe rule.
+    "but not",
+    "except for",
+    "except",
+    "apart from",
+    "other than",
+    "aside from",
+    "minus",
     "استبعاد",
     "نستبعد",
+    "ما عدا",
+    "ماعدا",
+    "عدا",
+    "باستثناء",
     "ممنوع",
     "مش عايز",
     "مش عايزه",
@@ -622,7 +637,11 @@ _ACTION_REQUEST_RE = re.compile(
     # under 30` keeps its rule.
     r"^\W*(?:build|create|make|set\s+up|assemble|generate|give\s+me)\s+"
     r"(?:me\s+)?(?:a\s+|an\s+|the\s+)?[\w-]{0,20}\s*"
-    r"(?:watchlist|monitor|filter|scanner|screener|alert|setup|strategy|list|rule\s*set)\b",
+    r"(?:watchlist|monitor|filter|scanner|screener|alert|setup|strategy|list|rule\s*set)\b"
+    r"|"
+    r"^\W*(?:(?:i(?:'m|\s+am)|we(?:'re|\s+are))\s+)?"
+    r"(?:start(?:ing)?|begin(?:ning)?)\s+(?:a\s+|an\s+|the\s+|my\s+)?"
+    r"(?:watchlist|monitor|scanner|screener|alert|setup|strategy|list)\b",
     re.IGNORECASE,
 )
 
@@ -779,6 +798,21 @@ _GENERIC_SCOPE_CONTROL_RE = re.compile(
     r"(?:any\s+|more\s+|additional\s+|extra\s+|new\s+)?"
     r"(?:questions?|details?|complexity|explanations?|formulas?|indicators?|"
     r"filters?|conditions?|rules?|mechanics?|logic|assumptions?)\W*$",
+    re.IGNORECASE,
+)
+# Requests aimed at the assistant's explanation or presentation are dialogue even
+# when they quote operators, formulas, timeframes, or thresholds. Their technical
+# nouns are the subject to explain, not new market rules. This grammatical gate runs
+# before the measurable-condition shortcut so "tell me what >= means numerically"
+# cannot become an executable condition or an unsupported capability.
+_ANSWER_SHAPE_REQUEST_RE = re.compile(
+    r"\b(?:tell|show|explain|define|map|summari[sz]e|restate|recap|confirm|"
+    r"reply|respond|paste|display|describe|clarify)\b"
+    r"[^.!?]{0,100}\b(?:meaning|definition|mapping|explanation|summary|recap|"
+    r"answer|reply|output|logic|formula|math|operator|comparison|rules?)\b|"
+    r"\bmake\s+sure\s+(?:that\s+)?you\b[^.!?]{0,100}\b"
+    r"(?:map|explain|define|show|keep|preserve)\b|"
+    r"\bwhat\s+(?:does|do)\b[^.!?]{0,80}\bmean\b",
     re.IGNORECASE,
 )
 _EXPLICIT_MECHANIC_INTENT_RE = re.compile(
@@ -1146,6 +1180,11 @@ _CONTEXT_ROLE_TERMS = (
 )
 
 
+#: The two roles are each other's default: a timeframe a lone marker did not claim
+#: takes the other one.
+_OPPOSITE_ROLE = {"trigger": "context", "context": "trigger"}
+
+
 @dataclass(frozen=True, slots=True)
 class TimeframeRoles:
     """Which timeframe fires a rule, and which ones only give it context."""
@@ -1177,10 +1216,16 @@ def extract_timeframe_roles(text: str) -> TimeframeRoles:
             continue
         spans = _timeframe_spans(clause)
         kinds = {role for _position, role in markers}
-        lone_trigger_span: tuple[int, int, str] | None = None
-        if kinds == {"trigger"} and len(spans) > 1:
-            marker_positions = [position for position, role in markers if role == "trigger"]
-            lone_trigger_span = min(
+        # One marker word cannot give its role to every timeframe in the clause. It
+        # claims the timeframe beside it; the others take the opposite role. This ran
+        # for a lone `trigger` marker but not for a lone `context` one, so `using the
+        # 4h as context when the 15m candle rises` made *both* timeframes context and
+        # left the rule with no trigger at all.
+        lone_role: str | None = next(iter(kinds)) if len(kinds) == 1 else None
+        lone_span: tuple[int, int, str] | None = None
+        if lone_role is not None and len(spans) > 1:
+            marker_positions = [position for position, role in markers if role == lone_role]
+            lone_span = min(
                 spans,
                 key=lambda span: min(
                     _distance(position, span[0], span[1]) for position in marker_positions
@@ -1190,10 +1235,14 @@ def extract_timeframe_roles(text: str) -> TimeframeRoles:
             explicit_role = _explicit_timeframe_role(clause, start=start, end=end)
             if explicit_role is not None:
                 role = explicit_role
-            elif lone_trigger_span is not None:
-                role = "trigger" if (start, end, canonical) == lone_trigger_span else "context"
-            elif len(kinds) == 1:
-                role = next(iter(kinds))
+            elif lone_span is not None and lone_role is not None:
+                role = (
+                    lone_role
+                    if (start, end, canonical) == lone_span
+                    else _OPPOSITE_ROLE[lone_role]
+                )
+            elif lone_role is not None:
+                role = lone_role
             else:
                 nearest = min(markers, key=lambda item: _distance(item[0], start, end))
                 if _distance(nearest[0], start, end) > _ROLE_PROXIMITY_LIMIT:
@@ -1471,6 +1520,9 @@ def classify_fragment(text: str) -> ClassifiedFragment:
         return build("conversational")
     if is_conversational(collapsed):
         return build("conversational")
+
+    if _ANSWER_SHAPE_REQUEST_RE.search(probe):
+        return build("conversation_control", keeps_universe=False)
 
     # A question offering alternatives is not an authored rule even when its
     # examples contain percentages or operators.
@@ -1800,6 +1852,13 @@ def _excluded_symbols(text: str, symbols: tuple[str, ...]) -> tuple[str, ...]:
             re.search(r"\bkeep(?:ing)?\W*$", prefix)
             and re.match(r"^\W*out\b", suffix)
         )
+        # `not` immediately before a symbol, with nothing in between. The bare word is
+        # ambiguous in general — `not below 30` is a comparison — but a symbol cannot
+        # be compared to, so here it can only mean "keep this one out". Without it,
+        # `BTC/USDT ... but not LTC/USDT` added LTC to the watchlist, because the
+        # fragment reader cuts the sentence at `but` and the pair `but not` was gone
+        # by the time this prefix was examined.
+        adjacent_negation = bool(re.search(r"\b(?:not|nor|neither)\W*$", prefix))
         trailing_exclude = any(
             re.search(
                 rf"^\W*(?:fully\s+|hard\s+)?{re.escape(marker)}(?!\s*:)",
@@ -1809,7 +1868,11 @@ def _excluded_symbols(text: str, symbols: tuple[str, ...]) -> tuple[str, ...]:
         )
         if explicit_exclude or keep_out or (
             not explicit_include
-            and (any(marker in prefix for marker in _EXCLUSION_MARKERS) or trailing_exclude)
+            and (
+                any(marker in prefix for marker in _EXCLUSION_MARKERS)
+                or adjacent_negation
+                or trailing_exclude
+            )
         ):
             excluded.append(symbol)
     if excluded:

@@ -1,0 +1,697 @@
+{
+  "$defs": {
+    "Comparator": {
+      "enum": [
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "eq",
+        "crosses_above",
+        "crosses_below",
+        "is_true",
+        "is_false"
+      ],
+      "title": "Comparator",
+      "type": "string"
+    },
+    "ConditionNodeType": {
+      "enum": [
+        "condition",
+        "and",
+        "or",
+        "not"
+      ],
+      "title": "ConditionNodeType",
+      "type": "string"
+    },
+    "ConditionNodeV2": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_key": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capability Key"
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/ConditionNodeV2"
+          },
+          "maxItems": 100,
+          "title": "Children",
+          "type": "array"
+        },
+        "confirmation_timeframes": {
+          "items": {
+            "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Confirmation Timeframes",
+          "type": "array"
+        },
+        "context_timeframes": {
+          "items": {
+            "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Context Timeframes",
+          "type": "array"
+        },
+        "direction": {
+          "$ref": "#/$defs/DraftDirection"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FormulaKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/ConditionNodeType"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/OperandV2"
+          },
+          "maxItems": 12,
+          "title": "Operands",
+          "type": "array"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Comparator"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reference_definition": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reference Definition"
+        },
+        "reference_timeframe": {
+          "anyOf": [
+            {
+              "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reference Timeframe"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "source_fragment": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Fragment"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Turn Id"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Threshold"
+        },
+        "trigger_timeframe": {
+          "anyOf": [
+            {
+              "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Trigger Timeframe"
+        },
+        "unit": {
+          "enum": [
+            "percent",
+            "price",
+            "ratio",
+            "count",
+            "index",
+            "boolean",
+            "none"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "node_type",
+        "source_turn_id",
+        "source_fragment",
+        "required",
+        "direction",
+        "formula",
+        "operands",
+        "operator",
+        "threshold",
+        "unit",
+        "trigger_timeframe",
+        "context_timeframes",
+        "confirmation_timeframes",
+        "reference_timeframe",
+        "reference_definition",
+        "capability_key",
+        "children"
+      ],
+      "title": "ConditionNodeV2",
+      "type": "object"
+    },
+    "ConditionUpdateV2": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "replacement": {
+          "$ref": "#/$defs/ConditionNodeV2"
+        }
+      },
+      "required": [
+        "node_id",
+        "replacement"
+      ],
+      "title": "ConditionUpdateV2",
+      "type": "object"
+    },
+    "CorrectionV2": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "reason"
+      ],
+      "title": "CorrectionV2",
+      "type": "object"
+    },
+    "DraftDirection": {
+      "enum": [
+        "long",
+        "short",
+        "neutral"
+      ],
+      "title": "DraftDirection",
+      "type": "string"
+    },
+    "DraftFieldPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "exchange": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 2,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Exchange"
+        },
+        "market_type": {
+          "anyOf": [
+            {
+              "const": "spot",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Market Type"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DraftMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "quote_asset": {
+          "anyOf": [
+            {
+              "maxLength": 12,
+              "minLength": 2,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Quote Asset"
+        }
+      },
+      "required": [
+        "mode",
+        "name",
+        "exchange",
+        "quote_asset",
+        "market_type"
+      ],
+      "title": "DraftFieldPatch",
+      "type": "object"
+    },
+    "DraftMode": {
+      "enum": [
+        "scanner",
+        "monitor"
+      ],
+      "title": "DraftMode",
+      "type": "string"
+    },
+    "FormulaKind": {
+      "enum": [
+        "open_to_close_percentage",
+        "close_to_close_percentage",
+        "reference_to_current_percentage",
+        "high_to_low_percentage",
+        "low_to_high_percentage",
+        "previous_candle_reference",
+        "fixed_reference_level",
+        "lookback_reference_level",
+        "cross",
+        "sweep_and_reclaim",
+        "capability"
+      ],
+      "title": "FormulaKind",
+      "type": "string"
+    },
+    "OperandV2": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Field"
+        },
+        "kind": {
+          "enum": [
+            "price",
+            "constant",
+            "market_metric",
+            "indicator",
+            "reference"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {},
+          "required": [],
+          "title": "Parameters",
+          "type": "object"
+        },
+        "role": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "role",
+        "kind",
+        "field",
+        "name",
+        "value",
+        "parameters"
+      ],
+      "title": "OperandV2",
+      "type": "object"
+    },
+    "ReversionV2": {
+      "additionalProperties": false,
+      "properties": {
+        "target_version": {
+          "minimum": 1,
+          "title": "Target Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "target_version"
+      ],
+      "title": "ReversionV2",
+      "type": "object"
+    },
+    "UnresolvedFieldV2": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "key": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "source_fragment": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Source Fragment",
+          "type": "string"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Turn Id"
+        }
+      },
+      "required": [
+        "key",
+        "source_turn_id",
+        "source_fragment",
+        "question",
+        "blocking"
+      ],
+      "title": "UnresolvedFieldV2",
+      "type": "object"
+    },
+    "UnsupportedRequirementV2": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "key": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "missing_contract": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Missing Contract",
+          "type": "string"
+        },
+        "source_fragment": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Source Fragment",
+          "type": "string"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Turn Id"
+        }
+      },
+      "required": [
+        "key",
+        "source_turn_id",
+        "source_fragment",
+        "missing_contract",
+        "blocking"
+      ],
+      "title": "UnsupportedRequirementV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "add_conditions": {
+      "items": {
+        "$ref": "#/$defs/ConditionNodeV2"
+      },
+      "maxItems": 100,
+      "title": "Add Conditions",
+      "type": "array"
+    },
+    "add_exclusions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "Add Exclusions",
+      "type": "array"
+    },
+    "add_inclusions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "Add Inclusions",
+      "type": "array"
+    },
+    "correction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CorrectionV2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "remove_conditions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Remove Conditions",
+      "type": "array"
+    },
+    "remove_exclusions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "Remove Exclusions",
+      "type": "array"
+    },
+    "remove_inclusions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "Remove Inclusions",
+      "type": "array"
+    },
+    "replace_groups": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConditionNodeV2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reversion": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReversionV2"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "set_fields": {
+      "$ref": "#/$defs/DraftFieldPatch"
+    },
+    "source_turn_id": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Source Turn Id",
+      "type": "string"
+    },
+    "unresolved_references": {
+      "items": {
+        "$ref": "#/$defs/UnresolvedFieldV2"
+      },
+      "maxItems": 100,
+      "title": "Unresolved References",
+      "type": "array"
+    },
+    "unsupported_requirements": {
+      "items": {
+        "$ref": "#/$defs/UnsupportedRequirementV2"
+      },
+      "maxItems": 100,
+      "title": "Unsupported Requirements",
+      "type": "array"
+    },
+    "update_conditions": {
+      "items": {
+        "$ref": "#/$defs/ConditionUpdateV2"
+      },
+      "maxItems": 100,
+      "title": "Update Conditions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "source_turn_id",
+    "set_fields",
+    "add_conditions",
+    "update_conditions",
+    "remove_conditions",
+    "replace_groups",
+    "add_inclusions",
+    "add_exclusions",
+    "remove_inclusions",
+    "remove_exclusions",
+    "correction",
+    "reversion",
+    "unresolved_references",
+    "unsupported_requirements"
+  ],
+  "title": "StrategyPatch",
+  "type": "object"
+}

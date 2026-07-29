@@ -94,6 +94,7 @@ class UITarget(ChatTarget):
                 wait_until="networkidle",
                 timeout=self.settings.target_ui_timeout_ms,
             )
+        await self._dismiss_cookie_banner()
         await self._verify_authenticated_setup_chat()
         new_chat = self.page.locator(self.settings.target_ui_new_chat_selector)
         if await new_chat.count():
@@ -112,6 +113,21 @@ class UITarget(ChatTarget):
                 raise RuntimeError(
                     f"AI Setup Chat session creation returned HTTP {response.status}"
                 )
+
+    async def _dismiss_cookie_banner(self) -> None:
+        """Make the test user's explicit essential-only choice before chat actions."""
+
+        assert self.page is not None
+        button = self.page.locator(
+            "[data-cookie-banner] [data-cookie-essential]"
+        ).first
+        if not await button.is_visible():
+            return
+        await button.click()
+        await self.page.locator("[data-cookie-banner]").wait_for(
+            state="hidden",
+            timeout=self.settings.target_ui_timeout_ms,
+        )
 
     async def _verify_authenticated_setup_chat(self) -> None:
         assert self.page is not None

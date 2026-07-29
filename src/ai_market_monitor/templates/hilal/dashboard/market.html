@@ -1,15 +1,15 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
 
-{% if market_data_warning %}
-<div class="notice is-info" role="status">
-  <span data-icon="alert" data-icon-class="icon"></span>
-  <div><strong>Market data note</strong><p>{{ market_data_warning }}</p></div>
-</div>
-{% elif screened is defined and (screened.warning or screened.total == 0) %}
+{% if screened is defined and (screened.warning or screened.total == 0) %}
 <div class="notice notice-warning" role="status">
   <span data-icon="info" data-icon-class="icon"></span>
   <div><strong>No Halal Market assets are available yet.</strong><p>Assets appear only after evidence and methodology review are complete. Missing information never becomes an eligible result.</p></div>
+</div>
+{% elif market_data_warning %}
+<div class="notice is-info" role="status">
+  <span data-icon="alert" data-icon-class="icon"></span>
+  <div><strong>Market data note</strong><p>{{ market_data_warning }}</p></div>
 </div>
 {% endif %}
 
@@ -63,4 +63,4 @@
   </form>
 </dialog>
 {% endblock %}
-{% block page_scripts %}{% if selected_methodology_id %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260723-reviewer-first"></script>{% endif %}{% endblock %}
+{% block page_scripts %}{% if selected_methodology_id %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260729-setup-v2"></script>{% endif %}{% endblock %}

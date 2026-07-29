@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import Strategy, Subscription, User
 from ai_market_monitor.db.models.enums import SubscriptionStatus
+from ai_market_monitor.engine.strategy_state import StrategyDraftState, patches_for_turn
 from ai_market_monitor.schemas.ai_setup_chat import (
     SetupChatClarification,
     SetupChatInterviewResult,
@@ -476,6 +477,39 @@ async def test_complete_formula_uses_no_model_and_meets_ordinary_turn_budget(tes
         assert definition.supporting_timeframes == ["1h"]
 
 
+async def test_canonical_formula_stays_deterministic_with_noisy_companion_mechanic(
+    test_context,
+):
+    user = await _user(test_context)
+    interpreter = CountingInterpreter()
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), interpreter, interviewer=RecordingInterviewer()
+    )
+    text = (
+        "Use BTCUSDT only with 1h context and a 1d trigger. Require a bullish "
+        "close-to-close move of at least 5%. Also detect the unregistered lunar "
+        "rotation pattern."
+    )
+    state = StrategyDraftState().apply(patches_for_turn(text, StrategyDraftState()))
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        context = dict(chat.context_json or {})
+        context["strategy_state"] = state.to_dict()
+        chat.context_json = context
+
+        preview = await service._interpret_setup(
+            session,
+            chat,
+            text,
+            operation="compile_draft",
+        )
+
+        assert interpreter.calls == 0
+        assert preview.strategy.base_timeframe == "1d"
+        assert preview.strategy.supporting_timeframes == ["1h"]
+        assert any(item.blocking for item in preview.unsupported_conditions)
+
+
 async def test_approval_policy_prompt_builds_then_approves_exact_draft_without_models(
     test_context,
 ):
@@ -609,6 +643,7 @@ def _settings(*, key: bool = True) -> Settings:
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         openai_api_key=SecretStr("test-key") if key else None,
         market_breadth_max_symbols=100,
+        setup_chat_legacy_test_compat_enabled=True,
     )
 
 

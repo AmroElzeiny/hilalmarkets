@@ -74,7 +74,7 @@ def _settings(tmp_path, **overrides) -> Settings:
     )
 
 
-def _scenario(*, max_turns: int = 1) -> ScenarioSpec:
+def _scenario(*, max_turns: int = 1, fault: str | None = None) -> ScenarioSpec:
     return ScenarioSpec(
         id="readiness-case",
         topic_id="operator_mapping",
@@ -84,6 +84,7 @@ def _scenario(*, max_turns: int = 1) -> ScenarioSpec:
         expected_contract={"operator": "gte"},
         success_criteria=[],
         max_turns=max_turns,
+        fault=fault,
     )
 
 
@@ -211,7 +212,7 @@ async def test_readiness_probes_long_turn_and_fault_control_before_test_ai(tmp_p
     runner.test_ai = test_ai
     try:
         ok, records, failure = await runner._readiness_gate(
-            [(_scenario(), "backend", {"name": "current"})]
+            [(_scenario(fault="invalid_json_once"), "backend", {"name": "current"})]
         )
         assert ok is True
         assert failure is None
@@ -220,6 +221,32 @@ async def test_readiness_probes_long_turn_and_fault_control_before_test_ai(tmp_p
         assert observed[0][1] == "empty_once"
         assert test_ai.user_calls == 0
         assert test_ai.judge_calls == 0
+    finally:
+        await runner.close()
+
+
+async def test_readiness_does_not_require_fault_control_for_ordinary_scenarios(tmp_path):
+    observed: list[str | None] = []
+
+    class _ProbeTarget(_Target):
+        async def send(self, message, *, scenario_id, fault=None):
+            observed.append(fault)
+            return await super().send(message, scenario_id=scenario_id, fault=fault)
+
+    runner = _Runner(
+        _settings(tmp_path),
+        "readiness-without-faults",
+        2.5,
+        target_factory=lambda: _ProbeTarget(status=200),
+    )
+    try:
+        ok, records, failure = await runner._readiness_gate(
+            [(_scenario(), "backend", {"name": "current"})]
+        )
+        assert ok is True
+        assert failure is None
+        assert observed == [None]
+        assert "fault_control_not_required" in records[0]["checks"]
     finally:
         await runner.close()
 

@@ -193,6 +193,7 @@ async def test_development_methodology_is_never_selectable_over_approved_methodo
 
 async def test_active_methodology_without_publications_has_clear_readiness_state(test_context):
     await _signup(test_context, "empty-methodology@example.com")
+    test_context["app"].dependency_overrides[get_market_data_provider] = ApiQuoteProvider
     now = datetime.now(UTC)
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))

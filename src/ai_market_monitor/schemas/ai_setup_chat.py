@@ -6,9 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ai_market_monitor.schemas.setup_chat_evaluation import SetupChatEvaluationContract
 from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
+    StrategyDraftV2,
+)
 
 SETUP_CHAT_MESSAGE_MAX_LENGTH = 5000
-SETUP_CHAT_SOURCE_EXCERPT_MAX_LENGTH = 1000
+SETUP_CHAT_SOURCE_EXCERPT_MAX_LENGTH = STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH
 
 
 def setup_chat_source_excerpt(value: str) -> str:
@@ -114,6 +118,13 @@ class SetupChatApprovalRequest(BaseModel):
 
     approved: Literal[True]
     expected_schema_hash: str = Field(min_length=64, max_length=64)
+    expected_draft_version: int | None = Field(default=None, ge=1)
+    expected_semantic_hash: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
     confirmed_low_confidence_rule_keys: list[str] = Field(default_factory=list, max_length=100)
 
 
@@ -129,10 +140,24 @@ class SetupChatErrorEnvelope(BaseModel):
 
     error_code: str = Field(min_length=1, max_length=80)
     request_id: str = Field(min_length=1, max_length=64)
-    stage: Literal["interpret", "compile", "serialize", "provider"]
+    stage: Literal[
+        "intent",
+        "extract",
+        "patch",
+        "interpret",
+        "compile",
+        "serialize",
+        "provider",
+    ]
     retryable: bool = False
     message: str = Field(min_length=1, max_length=500)
     field: str | None = Field(default=None, max_length=200)
+    draft_id: UUID | None = None
+    draft_version: int | None = Field(default=None, ge=1)
+    semantic_hash: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
 
 
 class SetupChatMessageResponse(BaseModel):
@@ -167,6 +192,7 @@ class SetupChatSessionResponse(BaseModel):
     original_idea: str | None
     messages: list[SetupChatMessageResponse]
     draft_strategy: StrategyDefinition | None = None
+    draft_v2: StrategyDraftV2 | None = None
     schema_hash: str | None = None
     translation_sheet: dict[str, Any]
     lint_warnings: list[dict[str, Any]]

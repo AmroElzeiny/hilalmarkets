@@ -64,18 +64,38 @@ def evaluator_turn(
     if normalized_fault is None and normalized_version is None:
         yield
         return
-    if settings.app_env != "test" or not settings.ai_setup_evaluator_enabled:
-        raise AISetupEvaluatorControlError("Evaluator controls are unavailable")
+    # Each refusal names the setting that caused it. One shared message for three
+    # different causes cost a whole evaluator run: both evaluator flags were already
+    # true, the server was simply started with APP_ENV=development, and nothing in
+    # "Evaluator controls are unavailable" could tell anyone that.
+    if settings.app_env != "test":
+        raise AISetupEvaluatorControlError(
+            "Evaluator controls require APP_ENV=test; this server runs "
+            f"APP_ENV={settings.app_env}"
+        )
+    if not settings.ai_setup_evaluator_enabled:
+        raise AISetupEvaluatorControlError(
+            "Evaluator controls require AI_SETUP_EVALUATOR_ENABLED=true"
+        )
     if normalized_fault is not None:
         if not settings.ai_setup_evaluator_faults_enabled:
-            raise AISetupEvaluatorControlError("Evaluator fault injection is disabled")
+            raise AISetupEvaluatorControlError(
+                "Evaluator fault injection requires AI_SETUP_EVALUATOR_FAULTS_ENABLED=true"
+            )
         if normalized_fault not in EVALUATOR_FAULTS:
-            raise AISetupEvaluatorControlError("Unknown evaluator fault")
+            raise AISetupEvaluatorControlError(
+                f"Unknown evaluator fault {normalized_fault!r}; supported faults are "
+                + ", ".join(sorted(EVALUATOR_FAULTS))
+            )
     target = None
     if normalized_version is not None:
         target = settings.ai_setup_evaluator_target_versions.get(normalized_version)
         if target is None:
-            raise AISetupEvaluatorControlError("Unknown evaluator target version")
+            known = ", ".join(sorted(settings.ai_setup_evaluator_target_versions)) or "none"
+            raise AISetupEvaluatorControlError(
+                f"Unknown evaluator target version {normalized_version!r}; "
+                f"AI_SETUP_EVALUATOR_TARGET_VERSIONS defines {known}"
+            )
     turn_token: Token[AISetupEvaluatorTurn | None] = _turn.set(
         AISetupEvaluatorTurn(fault=normalized_fault, target=target)
     )

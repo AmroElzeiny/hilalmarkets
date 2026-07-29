@@ -29,6 +29,7 @@ from ai_market_monitor.db.models import (
     StrategySuggestion,
     StrategyTemplate,
     StrategyVersion,
+    Subscription,
     SupportRequest,
     SupportTicketMessage,
     TelegramConnection,
@@ -51,7 +52,9 @@ from ai_market_monitor.db.models.enums import (
     SetupLifecycleState,
     StrategyStatus,
     StrategyVersionStatus,
+    SubscriptionStatus,
 )
+from ai_market_monitor.services.entitlements import PlanCatalogService
 from tests.factories import candles, load_strategy
 
 
@@ -141,6 +144,30 @@ async def _connect_telegram(test_context, username: str = "traceuser") -> None:
                 username=username,
                 status=ConnectionStatus.ACTIVE,
                 connected_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+
+async def _grant_monitor_plan(test_context) -> None:
+    async with test_context["session_factory"]() as session:
+        user_id = await session.scalar(
+            select(UserIdentity.user_id).where(
+                UserIdentity.provider == IdentityProvider.EMAIL
+            )
+        )
+        assert user_id is not None
+        plan = await PlanCatalogService(session).get_or_sync("trader")
+        now = datetime.now(UTC)
+        session.add(
+            Subscription(
+                user_id=user_id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider="test",
+                provider_subscription_id=f"dashboard-monitor-{uuid4()}",
+                current_period_start=now,
+                current_period_end=now + timedelta(days=30),
             )
         )
         await session.commit()
@@ -831,6 +858,7 @@ async def test_dashboard_theme_toggle_persists_without_full_settings_submit(test
 async def test_dashboard_publish_marks_monitor_active(test_context):
     await _signup(test_context, "dashboard-publish@example.com")
     await _connect_telegram(test_context, "dashboardpublisher")
+    await _grant_monitor_plan(test_context)
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",

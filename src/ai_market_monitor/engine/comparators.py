@@ -211,11 +211,27 @@ def find_comparator(text: str) -> tuple[Comparator, int, int] | None:
 #: Every symbolic operator, and every phrase from the table, as one alternation.
 #: Built from ``OPERATOR_TERMS`` in table order so the longest phrase wins at any
 #: given position: ``no less than`` is never read as the ``less than`` inside it.
-_ANY_OPERATOR_RE = re.compile(
-    r"(?<![-=<>])(?:>=|≤|≥|<=|==|>|<)(?![-=<>])|"
-    + "|".join(rf"(?<![a-z]){re.escape(term)}(?![a-z])" for term, _c in OPERATOR_TERMS),
-    re.IGNORECASE,
+_ANY_OPERATOR_ALTERNATION = r"(?<![-=<>])(?:>=|≤|≥|<=|==|>|<)(?![-=<>])|" + "|".join(
+    rf"(?<![a-z]){re.escape(term)}(?![a-z])" for term, _c in OPERATOR_TERMS
 )
+
+_ANY_OPERATOR_RE = re.compile(_ANY_OPERATOR_ALTERNATION, re.IGNORECASE)
+
+
+def comparator_alternation() -> str:
+    """Every recognised operator as one regex alternation, longest phrase first.
+
+    Callers that must embed the operator inside a larger pattern — ``price <op>
+    50000``, ``close <op> the previous candle high`` — get the exact vocabulary
+    here instead of hand-writing one. Every hand-written copy so far understood a
+    different subset: one knew ``equal to`` but not ``at least``, another knew
+    ``above`` but not ``equal to``, so the same sentence compiled in one reader and
+    was refused by the other.
+
+    The result contains no capturing groups, so it can be wrapped in the caller's
+    own named group.
+    """
+    return _ANY_OPERATOR_ALTERNATION
 
 _SYMBOLIC_COMPARATORS: dict[str, Comparator] = {
     ">=": Comparator.GREATER_THAN_OR_EQUAL,

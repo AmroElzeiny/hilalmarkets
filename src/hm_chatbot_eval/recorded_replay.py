@@ -9,23 +9,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_market_monitor.engine.strategy_state import (
-    StrategyDraftState,
-    canonical_compiler_text,
-    is_reversion_request,
-    patches_for_turn,
-    revert_patches,
+from ai_market_monitor.engine.setup_intent import decide_setup_intent
+from ai_market_monitor.engine.strategy_compiler_v2 import (
+    StrategyV2CompileError,
+    compile_strategy_draft_v2,
+)
+from ai_market_monitor.engine.strategy_draft_v2 import (
+    DraftPatchError,
+    apply_strategy_patch,
 )
 from ai_market_monitor.engine.text_normalization import repair_utf8_mojibake
 from ai_market_monitor.engine.turn_fragments import (
     classify_turn,
-    is_approval_instruction,
     split_symbol,
 )
-from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
-from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    SetupIntent,
+    StrategyDraftV2,
+)
 from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
+)
+from ai_market_monitor.services.strategy_patch_extractor import (
+    deterministic_strategy_patch,
 )
 
 from .config import Settings
@@ -90,11 +96,9 @@ async def replay_recorded_run(
         if settings.target_schema_file
         else None
     )
-    interpreter = RuleBasedStrategyInterpreter()
     results = [
         await _replay_one(
             raw,
-            interpreter=interpreter,
             schema=schema,
             field_map=settings.target_field_map,
         )
@@ -111,7 +115,6 @@ async def replay_recorded_run(
 async def _replay_one(
     raw: dict[str, Any],
     *,
-    interpreter: RuleBasedStrategyInterpreter,
     schema: dict[str, Any] | None,
     field_map: dict[str, Any],
 ) -> RecordedReplayResult:
@@ -146,54 +149,98 @@ async def _replay_one(
             schema_errors=[],
             failures=[],
             unsupported_items=[],
-            canonical_state=StrategyDraftState().to_dict(),
+            canonical_state=StrategyDraftV2().model_dump(mode="json"),
             elapsed_ms=(time.perf_counter() - started) * 1000,
             measurement_status="NOT_MEASURED",
             measurement_issues=["no_recorded_user_turns"],
             passed=False,
         )
-    state = StrategyDraftState()
-    for text in user_turns:
-        if is_reversion_request(text):
-            reverted = revert_patches(state, source_text=text)
-            if reverted:
-                state = state.apply(reverted)
-                continue
-        state = state.apply(patches_for_turn(text, state))
+    draft = StrategyDraftV2()
+    history: list[dict[str, Any]] = []
+    replay_issues: list[str] = []
+    approval_seen = False
+    for index, text in enumerate(user_turns, 1):
+        intent = decide_setup_intent(text).intent
+        if intent == SetupIntent.APPROVAL_ACTION:
+            approval_seen = True
+            continue
+        if intent != SetupIntent.STRATEGY_PATCH:
+            continue
+        patch = deterministic_strategy_patch(
+            draft,
+            text,
+            source_turn_id=f"recorded-{index}",
+        )
+        if patch is None:
+            replay_issues.append(f"turn_{index}_requires_structured_extraction")
+            continue
+        try:
+            result = apply_strategy_patch(draft, patch, history=history)
+        except DraftPatchError as exc:
+            replay_issues.append(f"turn_{index}_patch_rejected:{exc}")
+            continue
+        if result.material_change:
+            history.append(draft.model_dump(mode="json"))
+        draft = result.draft
 
-    resolved = _json_safe_state(state)
-    compiler_text = canonical_compiler_text(
-        resolved,
-        fallback="\n".join(user_turns),
-    )
-    request = GuidedSetupRequest(
-        exchange=str(resolved.get("exchange") or "binance"),
-        quote_currency=str(resolved.get("quote_asset") or "USDT"),
-        timeframe=str(resolved.get("base_timeframe") or "15m"),
-        symbols=list(resolved.get("include_symbols") or []),
-        setup_mode="free_text",
-        setup_text=compiler_text,
-        trigger_mode="candle_close",
-        delivery_channels=["web"],
-        resolved_state=resolved,
-    )
-    preview = await interpreter.interpret(request)
+    compile_error: str | None = None
+    strategy = None
+    if not draft.blocking and draft.condition_ast is not None:
+        try:
+            strategy = compile_strategy_draft_v2(draft)
+        except StrategyV2CompileError as exc:
+            compile_error = f"{exc.code}:{exc}"
+            replay_issues.append(f"compile_error:{compile_error}")
+    activation_blocked = strategy is None
     unsupported = [
-        issue.model_dump(mode="json")
-        for issue in (*preview.ambiguities, *preview.unsupported_conditions)
+        {
+            "code": item.key,
+            "message": item.missing_contract,
+            "source_fragment": item.source_fragment,
+            "blocking": item.blocking,
+        }
+        for item in draft.unsupported_requirements
     ]
-    approval_seen = any(is_approval_instruction(turn) for turn in user_turns)
-    session_status = "needs_clarification" if preview.activation_blocked else "ready_for_approval"
-    contract = build_setup_chat_evaluation_contract(
-        preview.strategy,
-        session_status=session_status,
-        approval_eligible=not preview.activation_blocked,
-        blocking_findings=preview.activation_blocked,
-        assumptions=preview.assumptions,
-        confidence=[],
-        unsupported_capabilities=unsupported,
-    ).model_dump(mode="json")
-    schema_errors = validate_schema(contract, schema)
+    unsupported.extend(
+        {
+            "code": item.key,
+            "message": item.question,
+            "source_fragment": item.source_fragment,
+            "blocking": item.blocking,
+        }
+        for item in draft.unresolved_fields
+    )
+    if strategy is None:
+        source = next(
+            (
+                user_turns[int(issue.split("_", 2)[1]) - 1]
+                for issue in replay_issues
+                if issue.startswith("turn_")
+            ),
+            user_turns[-1],
+        )
+        unsupported.append(
+            {
+                "code": "recorded_replay_not_compiled",
+                "message": compile_error or "A structured extraction call is required.",
+                "source_fragment": source,
+                "blocking": True,
+            }
+        )
+        contract: dict[str, Any] = {}
+        schema_errors: list[str] = []
+    else:
+        session_status = "ready_for_approval"
+        contract = build_setup_chat_evaluation_contract(
+            strategy,
+            session_status=session_status,
+            approval_eligible=True,
+            blocking_findings=False,
+            assumptions=[],
+            confidence=[],
+            unsupported_capabilities=unsupported,
+        ).model_dump(mode="json")
+        schema_errors = validate_schema(contract, schema)
     evaluation_turns = [
         TurnRecord(
             turn_id=f"u{index}",
@@ -225,8 +272,11 @@ async def _replay_one(
     measurement_issues = _expected_contract_measurement_issues(
         scenario.expected_contract,
         user_turns,
-        activation_blocked=preview.activation_blocked,
+        activation_blocked=activation_blocked,
     )
+    measurement_issues.extend(replay_issues)
+    if strategy is None:
+        measurement_issues.append("no_v2_compiled_strategy")
     measured = not measurement_issues
     failures: list[str] = []
     if schema_errors:
@@ -257,29 +307,17 @@ async def _replay_one(
         topic_id=scenario.topic_id,
         target_kind=str(raw.get("target_kind") or "unknown"),
         expected_contract=scenario.expected_contract,
-        structured_output=contract,
+        structured_output=contract if strategy is not None else None,
         metrics=metrics,
         schema_errors=schema_errors,
         failures=failures,
         unsupported_items=unsupported,
-        canonical_state=state.to_dict(),
+        canonical_state=draft.model_dump(mode="json"),
         elapsed_ms=elapsed_ms,
         measurement_status="MEASURED" if measured else "NOT_MEASURED",
         measurement_issues=measurement_issues,
         passed=passed,
     )
-
-
-def _json_safe_state(state: StrategyDraftState) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for name, value in state.resolved().items():
-        if hasattr(value, "value"):
-            result[name] = value.value
-        elif isinstance(value, tuple):
-            result[name] = list(value)
-        else:
-            result[name] = value
-    return result
 
 
 _SUBSTITUTION_CONTRACTS: dict[str, tuple[str, ...]] = {
@@ -400,7 +438,16 @@ def _write_reports(
     not_measured = total_cases - measured
     passed = sum(item.passed for item in results)
     measured_failures = measured - passed
-    quality_status = "NOT_MEASURED" if not measured else ("FAIL" if measured_failures else "PASS")
+    measured_subset_status = (
+        "NOT_MEASURED" if not measured else ("FAIL" if measured_failures else "PASS")
+    )
+    quality_status = (
+        "FAIL"
+        if measured_failures
+        else "NOT_MEASURED"
+        if not_measured
+        else measured_subset_status
+    )
     summary = {
         "source_run_id": source_run_id,
         "execution_mode": "recorded_deterministic_compiler_replay",
@@ -409,7 +456,10 @@ def _write_reports(
         "not_measured_cases": not_measured,
         "passed": passed,
         "pass_rate": passed / max(1, measured),
-        "schema_valid_cases": sum(not item.schema_errors for item in results),
+        "schema_valid_cases": sum(
+            item.structured_output is not None and not item.schema_errors
+            for item in results
+        ),
         "average_semantic_field_accuracy": (
             sum(item.metrics["mapped_field_accuracy"] for item in measured_results)
             / max(1, measured)
@@ -434,14 +484,23 @@ def _write_reports(
         ),
         "total_test_cost_usd": 0.0,
         "quality_status": quality_status,
+        "measured_subset_status": measured_subset_status,
         "critical_release_status": (
-            "FAIL" if measured_failures else ("PASS" if measured else "NOT_MEASURED")
+            "FAIL"
+            if measured_failures
+            else "NOT_MEASURED"
+            if not_measured
+            else "PASS"
         ),
         "workflow_status": "COMPLETED",
         "measurement_status": "PARTIAL" if not_measured else "COMPLETE",
         "infrastructure_status": "NOT_APPLICABLE",
         "deterministic_preflight_status": (
-            "PASS" if measured and not measured_failures else "FAIL"
+            "FAIL"
+            if measured_failures
+            else "PARTIAL"
+            if not_measured
+            else "PASS"
         ),
     }
     (run_dir / "summary.json").write_text(
@@ -477,6 +536,7 @@ def _write_reports(
         f"- Schema-valid: {summary['schema_valid_cases']}\n"
         f"- Mean semantic accuracy: {summary['average_semantic_field_accuracy']:.3f}\n"
         f"- Quality: {summary['quality_status']}\n"
+        f"- Measured subset: {summary['measured_subset_status']}\n"
         f"- Critical release: {summary['critical_release_status']}\n"
         f"- Workflow: {summary['workflow_status']}\n"
         f"- Measurement: {summary['measurement_status']}\n"

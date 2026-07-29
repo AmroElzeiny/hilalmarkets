@@ -490,6 +490,23 @@ def test_unseen_conversation_paraphrases_remain_non_blocking(text: str) -> None:
     assert report.trading_conditions == ()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Tell me what each operator means numerically.",
+        "Before compiling, explain the exact formula and comparison mapping.",
+        "Make sure you map these operators exactly in your reply.",
+        "Paste the finished logic in one concise answer.",
+        "What does greater than or equal mean here?",
+        "I am starting a Watchlist.",
+    ],
+)
+def test_technical_presentation_requests_are_conversation_not_mechanics(text: str) -> None:
+    report = classify_turn(text)
+    assert report.trading_conditions == ()
+    assert all(fragment.enters_capability_resolution is False for fragment in report.fragments)
+
+
 def test_one_explicit_trigger_label_assigns_other_timeframe_as_context() -> None:
     roles = extract_timeframe_roles("Return the 1m setup / 1h trigger parameters.")
     assert roles.trigger == "1h"

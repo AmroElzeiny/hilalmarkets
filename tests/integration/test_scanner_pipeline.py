@@ -18,6 +18,7 @@ from ai_market_monitor.db.models import (
     StrategyExperiment,
     StrategyUniverse,
     StrategyVersion,
+    Subscription,
     TelegramConnection,
     User,
 )
@@ -29,7 +30,9 @@ from ai_market_monitor.db.models.enums import (
     ScanJobStatus,
     StrategyStatus,
     StrategyVersionStatus,
+    SubscriptionStatus,
 )
+from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.notifications import TelegramDeliveryService
 from ai_market_monitor.services.scanner import ScanOrchestrator, ScanScheduler
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
@@ -90,11 +93,24 @@ async def _active_strategy(session):
     user = User(display_name="Scanner User")
     session.add(user)
     await session.flush()
+    plan = await PlanCatalogService(session).get_or_sync("trader")
+    now = datetime.now(UTC)
+    session.add(
+        Subscription(
+            user_id=user.id,
+            plan_id=plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            provider="test",
+            provider_subscription_id=f"scanner-monitor-{user.id}",
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+        )
+    )
     strategy = Strategy(
         user_id=user.id,
         name=definition.name,
         status=StrategyStatus.ACTIVE,
-        activated_at=datetime.now(UTC),
+        activated_at=now,
     )
     session.add(strategy)
     await session.flush()
@@ -107,9 +123,9 @@ async def _active_strategy(session):
         schema_hash=definition.canonical_hash(),
         approved_by_user_id=user.id,
         approved_schema_hash=definition.canonical_hash(),
-        approved_at=datetime.now(UTC),
+        approved_at=now,
         preview_status="succeeded",
-        activated_at=datetime.now(UTC),
+        activated_at=now,
     )
     session.add(version)
     await session.flush()

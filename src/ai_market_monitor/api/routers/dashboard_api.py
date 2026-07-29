@@ -114,6 +114,7 @@ from ai_market_monitor.services.openai_interpreter import configured_strategy_in
 from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
 )
+from ai_market_monitor.services.setup_chat_launch import load_strategy_draft_v2
 from ai_market_monitor.services.setup_chat_lifecycle import (
     is_turn_complete,
     setup_lifecycle_state,
@@ -1013,6 +1014,11 @@ async def _setup_chat_response(
     )
     blocking_lint = any(item.get("severity") == "critical" for item in (chat.lint_warnings or []))
     chat_context = chat.context_json or {}
+    draft_v2 = (
+        load_strategy_draft_v2(chat)
+        if chat_context.get("strategy_state_authority") == "v2"
+        else None
+    )
     setup_mode: Literal["scanner", "monitor"] = (
         "scanner" if chat_context.get("setup_mode") == "scanner" else "monitor"
     )
@@ -1078,6 +1084,7 @@ async def _setup_chat_response(
             for item in messages
         ],
         draft_strategy=definition,
+        draft_v2=draft_v2,
         schema_hash=definition.canonical_hash() if definition else None,
         translation_sheet=chat.translation_sheet or {},
         lint_warnings=chat.lint_warnings or [],
@@ -1193,11 +1200,28 @@ async def send_ai_setup_chat_message(
         await session.refresh(chat)
     except AISetupEvaluatorControlError as exc:
         await session.rollback()
-        raise HTTPException(status_code=403, detail="evaluator_control_unavailable") from exc
+        # `evaluator_control_unavailable` is the token the evaluator classifies on, so
+        # it stays first and unchanged. The reason follows it, because a bare token
+        # gave the operator nothing to act on. This path is reachable only when the
+        # caller sends an evaluator header, and it reports server settings, never a
+        # secret or user data.
+        raise HTTPException(
+            status_code=403,
+            detail=f"evaluator_control_unavailable: {exc}",
+        ) from exc
     except SetupChatError as exc:
         await session.rollback()
         envelope = setup_chat_error_envelope(exc)
         chat = await service.owned_session(session, principal.user_id, chat_id)
+        if (chat.context_json or {}).get("strategy_state_authority") == "v2":
+            draft = load_strategy_draft_v2(chat)
+            envelope = envelope.model_copy(
+                update={
+                    "draft_id": draft.draft_id,
+                    "draft_version": draft.version,
+                    "semantic_hash": draft.semantic_hash,
+                }
+            )
         await service.record_turn_failure(session, chat, envelope=envelope)
         await service.attach_turn_usage(
             session,
@@ -1225,6 +1249,15 @@ async def send_ai_setup_chat_message(
             user_id=str(principal.user_id),
         )
         chat = await service.owned_session(session, principal.user_id, chat_id)
+        if (chat.context_json or {}).get("strategy_state_authority") == "v2":
+            draft = load_strategy_draft_v2(chat)
+            envelope = envelope.model_copy(
+                update={
+                    "draft_id": draft.draft_id,
+                    "draft_version": draft.version,
+                    "semantic_hash": draft.semantic_hash,
+                }
+            )
         await service.record_turn_failure(session, chat, envelope=envelope)
         await service.attach_turn_usage(
             session,
@@ -1284,6 +1317,8 @@ async def approve_ai_setup_chat(
             session,
             chat,
             expected_schema_hash=payload.expected_schema_hash,
+            expected_draft_version=payload.expected_draft_version,
+            expected_semantic_hash=payload.expected_semantic_hash,
             confirmed_low_confidence_rule_keys=set(payload.confirmed_low_confidence_rule_keys),
         )
         await session.commit()

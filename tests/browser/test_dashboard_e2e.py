@@ -6,11 +6,14 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from conftest import (
+from playwright.sync_api import Page, expect
+
+from tests.browser.conftest import (
     assert_hilal_brand_palette,
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
     seed_alert_proof,
+    seed_paid_monitor_access,
     seed_setup_observability,
     seed_sharia_screened_market,
     seed_system_brain_reviewer,
@@ -18,8 +21,6 @@ from conftest import (
     signup,
     unique_email,
 )
-from playwright.sync_api import Page, expect
-
 from tests.factories import load_strategy
 
 EXECUTABLE_PROMPT = {
@@ -255,7 +256,12 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
 
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.locator('header a[aria-label="Hilal Markets home"]')).to_be_visible()
-    expect(page.locator("header").get_by_text("Get started")).to_be_visible()
+    page.get_by_role("button", name="Menu").click()
+    expect(
+        page.get_by_role("navigation", name="Mobile navigation").get_by_text(
+            "Get started"
+        )
+    ).to_be_visible()
 
     problem = page.locator('[data-name^="03 "]').first
     corner_boxes = {}
@@ -513,6 +519,9 @@ def test_public_product_chat_session_profile_offline_and_focus_containment(
     assert page.evaluate(
         "localStorage.getItem('hm-public-chat-profile-v1')"
     ) is None
+    page.wait_for_function(
+        "() => sessionStorage.getItem('hm-public-chat-profile-v1') !== null"
+    )
     assert page.evaluate(
         "sessionStorage.getItem('hm-public-chat-profile-v1')"
     ) is not None
@@ -716,7 +725,7 @@ def test_screened_market_passport_and_mobile_visual_qa(
     expect(page.get_by_text("Find opportunities inside a screened market.")).to_have_count(0)
     live_row = page.locator(".live-market-row", has_text="SOL/USDT")
     expect(live_row).to_be_visible(timeout=15_000)
-    expect(live_row).to_contain_text("Eligible")
+    expect(live_row).to_contain_text("Halal")
     expect(page.locator("[data-live-market-error]")).to_be_hidden()
     expect(page.locator("[data-live-market-status]")).to_have_text("Live quotes connected")
     assert_no_horizontal_overflow(page)
@@ -902,15 +911,22 @@ def test_strategy_prompt_to_coverage_preview_opens_board(page: Page, base_url: s
     signup(page, base_url, unique_email("prompt-coverage"))
     _open_builder(page, base_url)
     input_box = page.locator("[data-ai-chat-input]")
-    input_box.fill("Find bullish breakouts with strong volume on 15m Binance spot.")
-    page.locator("[data-ai-chat-send]").click()
-    expect(page.locator("[data-ai-chat-suggestions] .ai-chat-chip").first).to_be_visible(
-        timeout=20_000
+    input_box.fill(
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"
     )
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and response.url.endswith("/messages")
+        )
+    ) as response_info:
+        page.locator("[data-ai-chat-send]").click()
+    assert response_info.value.status == 200
     expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
-        re.compile("measurable definition|breakout", re.I)
+        re.compile("inactive Watchlist preview", re.I)
     )
-    expect(page.locator("[data-ai-preview-empty]")).to_be_visible()
+    expect(page.locator("[data-ai-preview-content]")).to_be_visible()
+    expect(page.locator("[data-ai-chat-approve]")).to_be_enabled()
     assert_no_raw_traceback(page)
 
 
@@ -928,6 +944,61 @@ def test_ai_setup_chat_mobile_layout(page: Page, base_url: str) -> None:
     expect(page.get_by_test_id("strategy-builder-root")).to_be_visible()
     page.locator("[data-ai-return-chat]").click()
     expect(page.locator("[data-ai-setup-chat]")).not_to_have_class(re.compile("canvas-open"))
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_v2_deterministic_preview_and_exact_approval(
+    page: Page,
+    base_url: str,
+) -> None:
+    signup(page, base_url, unique_email("ai-chat-v2-launch"))
+    _open_builder(page, base_url)
+    essential_only = page.locator("[data-cookie-essential]").first
+    if essential_only.is_visible():
+        essential_only.click()
+    prompt = (
+        "Monitor BTC/USDT when the 15m candle rises open-to-close "
+        "by at least 3%"
+    )
+    page.get_by_test_id("ai-setup-input").fill(prompt)
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and "/api/v1/dashboard/setup-chat/sessions/" in response.url
+            and response.url.endswith("/messages")
+        )
+    ) as response_info:
+        page.get_by_test_id("ai-setup-send").click()
+    response = response_info.value
+    assert response.status == 200
+    backend = response.json()
+    assert backend["draft_v2"]["schema_version"] == "2.0"
+    assert backend["draft_v2"]["condition_ast"]["threshold"] == 3
+    assert backend["can_approve"] is True
+
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_contain_text(
+        "inactive", timeout=10_000
+    )
+    expect(page.get_by_test_id("ai-setup-validation-errors")).to_have_count(0)
+    expect(page.locator("[data-ai-chat-approve]")).to_be_enabled()
+    page.locator("[data-ai-open-canvas]").click()
+    expect(page.get_by_test_id("strategy-board-node").first).to_be_visible(
+        timeout=10_000
+    )
+    page.locator("[data-ai-return-chat]").click()
+
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and response.url.endswith("/approve")
+        )
+    ) as approval_info:
+        page.locator("[data-ai-chat-approve]").click()
+    approval_response = approval_info.value
+    assert approval_response.status == 200
+    approved = approval_response.json()
+    assert approved["draft_v2"]["approval"]["approved"] is True
+    expect(page).to_have_url(re.compile(r"/dashboard/strategies/.+/verify"))
     assert_no_raw_traceback(page)
 
 
@@ -968,7 +1039,9 @@ def test_ai_setup_chat_optimistic_retry_and_option_selection(page: Page, base_ur
         route.continue_()
 
     page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", intercept)
-    text = "Find bullish breakouts with strong volume on 15m Binance spot."
+    text = (
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"
+    )
     page.locator("[data-ai-chat-input]").fill(text)
     page.locator("[data-ai-chat-send]").click()
     expect(page.locator(".ai-chat-message.user.failed")).to_contain_text(
@@ -979,20 +1052,13 @@ def test_ai_setup_chat_optimistic_retry_and_option_selection(page: Page, base_ur
     )
     expect(page.locator("[data-ai-chat-input]")).to_have_value("")
     page.locator("[data-ai-chat-retry]").click()
-    expect(page.locator("[data-ai-chat-suggestions] .ai-chat-chip").first).to_be_visible(
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_contain_text(
+        "inactive",
         timeout=20_000
     )
     assert request_ids[0] == request_ids[1]
     assert page.locator(".ai-chat-message.user", has_text=text).count() == 1
-
-    chip = page.locator("[data-ai-chat-suggestions] .ai-chat-chip").first
-    label = chip.locator("strong").inner_text()
-    chip.click()
-    expect(page.locator(".ai-chat-message.user", has_text=label)).to_be_visible()
-    expect(chip).to_be_disabled()
-    expect(chip).to_have_class(re.compile("selected"))
-    expect(page.locator("[data-ai-chat-input]")).to_have_value("")
-    held_routes[0].continue_()
+    expect(page.locator("[data-ai-chat-approve]")).to_be_enabled()
     assert_no_raw_traceback(page)
 
 
@@ -1016,10 +1082,12 @@ def test_ai_setup_chat_visual_qa_states(
     )
     page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
 
-    prompt = "Find a breakout with strong volume on 15m Binance spot."
+    prompt = (
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"
+    )
     page.locator("[data-ai-chat-input]").fill(prompt)
     page.locator("[data-ai-chat-send]").click()
-    expect(page.locator(".ai-chat-chip").first).to_be_visible(timeout=20_000)
+    expect(page.locator("[data-ai-preview-content]")).to_be_visible(timeout=20_000)
     page.screenshot(path=str(output / "ai-setup-chat-option-chips.png"), full_page=True)
 
     blocked = _visual_chat_payload("needs_clarification", can_approve=False)
@@ -1124,6 +1192,9 @@ def test_strategy_board_preserves_metadata_after_edit_save_reload(
 ) -> None:
     signup(page, base_url, unique_email("metadata-preservation"))
     _create_executable_board(page, base_url)
+    essential_only = page.locator("[data-cookie-essential]").first
+    if essential_only.is_visible():
+        essential_only.click()
 
     _open_first_condition_drawer(page)
     original_source = page.get_by_test_id("condition-source-fragment").input_value()
@@ -1172,6 +1243,7 @@ def test_approve_and_publish_executable_monitor(
 ) -> None:
     email = signup(page, base_url, unique_email("publish-monitor"))
     seed_telegram_connection(browser_app.database_url, email)
+    seed_paid_monitor_access(browser_app.database_url, email)
     page.reload(wait_until="domcontentloaded")
     strategy_id = _create_executable_board(page, base_url)
     page.get_by_test_id("strategy-validate").click()
@@ -1268,7 +1340,7 @@ def test_legacy_scan_route_redirects_into_chat_scanner(page: Page, base_url: str
     expect(assistant_bubble).to_be_visible()
     assert composer.evaluate(
         "node => getComputedStyle(node).backgroundColor"
-    ) == "rgb(255, 255, 255)"
+    ) == "rgb(250, 251, 252)"
     assert assistant_bubble.evaluate(
         "node => getComputedStyle(node).backgroundColor"
     ) == "rgb(255, 255, 255)"

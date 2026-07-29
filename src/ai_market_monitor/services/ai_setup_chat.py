@@ -94,6 +94,10 @@ from ai_market_monitor.services.hybrid_capability_resolution import (
 from ai_market_monitor.services.interfaces import MarketDataProvider, StrategyInterpreter
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
+from ai_market_monitor.services.setup_chat_launch import (
+    SetupChatLaunchService,
+    SetupLaunchError,
+)
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
     ShariaScreeningService,
@@ -104,15 +108,34 @@ from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseResolver,
 )
 from ai_market_monitor.services.strategy import StrategyService
+from ai_market_monitor.services.strategy_patch_extractor import StrategyPatchExtractor
 from ai_market_monitor.services.system_brain import CapabilityCoverageService
 from ai_market_monitor.services.verified_strategy import VerifiedStrategyService
 
 
 class SetupChatError(ValueError):
-    def __init__(self, code: str, message: str, *, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 400,
+        stage: Literal[
+            "intent",
+            "extract",
+            "patch",
+            "interpret",
+            "compile",
+            "serialize",
+            "provider",
+        ] = "compile",
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.stage = stage
+        self.retryable = retryable
 
 
 MAX_CLARIFICATION_QUESTIONS_PER_CONDITION = 2
@@ -302,6 +325,26 @@ def _record_turn_runtime_stage(
     chat.context_json = context
 
 
+def _caused_by(
+    exc: BaseException,
+    types: tuple[type[BaseException], ...],
+) -> BaseException | None:
+    """The first exception in the chain that is one of ``types``.
+
+    A transport failure is usually re-raised by the code that called the provider,
+    so testing only the outermost exception misses it and the turn is reported as a
+    strategy defect instead of an infrastructure one.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, types):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def setup_chat_error_envelope(exc: BaseException) -> SetupChatErrorEnvelope:
     """Classify an unhandled turn failure into a sanitized, machine-readable envelope.
 
@@ -314,8 +357,8 @@ def setup_chat_error_envelope(exc: BaseException) -> SetupChatErrorEnvelope:
         return SetupChatErrorEnvelope(
             error_code=exc.code,
             request_id=uuid4().hex,
-            stage="compile",
-            retryable=False,
+            stage=exc.stage,
+            retryable=exc.retryable,
             message=str(exc),
         )
 
@@ -365,11 +408,56 @@ def setup_chat_error_envelope(exc: BaseException) -> SetupChatErrorEnvelope:
     if isinstance(exc, httpx.HTTPStatusError):
         status_code = exc.response.status_code
         return SetupChatErrorEnvelope(
-            error_code=("TARGET_HTTP_429" if status_code == 429 else "TARGET_HTTP_5XX"),
+            error_code=(
+                "TARGET_HTTP_409"
+                if status_code == 409
+                else "TARGET_HTTP_429"
+                if status_code == 429
+                else "TARGET_HTTP_5XX"
+            ),
             request_id=uuid4().hex,
             stage="provider",
             retryable=status_code == 429 or status_code >= 500,
             message="A required provider returned an unavailable response.",
+        )
+    # Transport failures below reach here as themselves or wrapped by a caller, so
+    # the chain is walked. Every one of them used to fall through to the final
+    # branch and be reported as `STRATEGY_COMPILE_FAILED` — a refused connection
+    # recorded as a chatbot answer. In run 20260728T132409Z that mislabelling
+    # covered 12 of 34 cases: 4 refused connections and 8 dropped responses.
+    transport = _caused_by(exc, (httpx.TransportError, ConnectionError))
+    if transport is not None:
+        if isinstance(transport, httpx.ConnectError | ConnectionRefusedError):
+            code, note = (
+                "TARGET_CONNECTION_REFUSED",
+                "A required provider refused the connection.",
+            )
+        elif isinstance(transport, httpx.RemoteProtocolError):
+            code, note = (
+                "TARGET_PARTIAL_STREAM",
+                "A required provider closed the response before it finished.",
+            )
+        else:
+            code, note = (
+                "TARGET_TRANSPORT_FAILURE",
+                "The connection to a required provider failed.",
+            )
+        return SetupChatErrorEnvelope(
+            error_code=code,
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=True,
+            message=note,
+        )
+    # `JSONDecodeError` is a `ValueError`, so it must be classified before the
+    # compile branch below or a truncated provider body reads as a strategy defect.
+    if _caused_by(exc, (json.JSONDecodeError,)) is not None:
+        return SetupChatErrorEnvelope(
+            error_code="TARGET_INVALID_JSON",
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=True,
+            message="A required provider returned a response that was not valid JSON.",
         )
     if isinstance(exc, ValidationError):
         errors = exc.errors()
@@ -615,18 +703,30 @@ class AISetupChatService:
         *,
         interviewer: SetupChatInterviewer | None = None,
         agent_client: AgentResponsesClient | None = None,
+        launch_extractor: StrategyPatchExtractor | None = None,
     ) -> None:
         self.settings = settings
         self.market_provider = market_provider
         self.strategy_interpreter = strategy_interpreter
         self.interviewer = interviewer or OpenAISetupChatInterviewer(settings)
         self.agent_client = agent_client
+        self.launch_extractor = launch_extractor
         # One turn can need the same interpretation twice: once for the inactive draft
         # emitted while questions are open, once for the final compile. The service is
         # constructed per request, so memoising here bills the model call once.
         self._interpretations: dict[tuple[str, str, str, str], InterpretationPreview] = {}
 
     async def create_session(self, session: AsyncSession, user_id: UUID) -> AISetupChatSession:
+        from ai_market_monitor.engine.strategy_draft_v2 import new_strategy_draft
+
+        launch_context: dict[str, Any] = {}
+        if not self.settings.setup_chat_legacy_test_compat_enabled:
+            launch_context = {
+                "strategy_draft_v2": new_strategy_draft().model_dump(mode="json"),
+                "strategy_draft_v2_history": [],
+                "strategy_state_authority": "v2",
+                "launch_pipeline_version": "2.0",
+            }
         chat = AISetupChatSession(
             user_id=user_id,
             status="interviewing",
@@ -635,6 +735,7 @@ class AISetupChatService:
                 "setup_fragments": [],
                 "resolved_ambiguities": {},
                 "conversation_state": SetupChatConversationState().model_dump(mode="json"),
+                **launch_context,
             },
         )
         session.add(chat)
@@ -708,10 +809,35 @@ class AISetupChatService:
         chat: AISetupChatSession,
         *,
         expected_schema_hash: str,
+        expected_draft_version: int | None = None,
+        expected_semantic_hash: str | None = None,
         confirmed_low_confidence_rule_keys: set[str] | None = None,
     ) -> None:
         """Approve the exact current draft through the existing domain gates."""
 
+        if chat.status == "approved":
+            context = dict(chat.context_json or {})
+            v2_payload = context.get("strategy_draft_v2")
+            if context.get("strategy_state_authority") == "v2" and isinstance(
+                v2_payload, dict
+            ):
+                from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
+
+                approved_v2 = StrategyDraftV2.model_validate(v2_payload)
+                if (
+                    approved_v2.approval.approved
+                    and expected_draft_version == approved_v2.version
+                    and expected_semantic_hash == approved_v2.semantic_hash
+                    and expected_schema_hash == context.get("approved_schema_hash")
+                    and chat.approved_strategy_id is not None
+                    and chat.approved_strategy_version_id is not None
+                ):
+                    return
+            raise SetupChatError(
+                "setup_changed",
+                "This approval request does not match the approved draft.",
+                status_code=409,
+            )
         if chat.status != "ready_for_approval" or not chat.draft_schema_json:
             raise SetupChatError(
                 "setup_not_ready",
@@ -746,30 +872,83 @@ class AISetupChatService:
             )
 
         context = dict(chat.context_json or {})
-        state_payload = context.get("strategy_state")
-        strategy_state = StrategyDraftState.from_dict(
-            state_payload if isinstance(state_payload, dict) else None
-        )
-        snapshot_hash = strategy_state.conversation_snapshot_hash
-        if snapshot_hash is None:
-            raise SetupChatError(
-                "approval_snapshot_missing",
-                "The draft must be recompiled before approval.",
-                status_code=409,
+        v2_payload = context.get("strategy_draft_v2")
+        strategy_state: StrategyDraftState | None = None
+        snapshot_hash: str
+        if context.get("strategy_state_authority") == "v2" and isinstance(v2_payload, dict):
+            from ai_market_monitor.engine.strategy_draft_v2 import (
+                conversation_snapshot_hash,
+                validate_draft_semantics,
             )
-        try:
-            strategy_state = strategy_state.with_approval(
-                canonical_hash=canonical_hash,
-                draft_version=strategy_state.draft_version,
-                conversation_snapshot_hash=snapshot_hash,
-                user_id=str(chat.user_id),
+            from ai_market_monitor.schemas.strategy_draft_v2 import (
+                ApprovalBindingV2,
+                StrategyDraftV2,
             )
-        except ValueError as exc:
-            raise SetupChatError(
-                "setup_changed",
-                "The draft identity changed before approval. Review the latest version.",
-                status_code=409,
-            ) from exc
+
+            draft_v2 = StrategyDraftV2.model_validate(v2_payload)
+            if not draft_v2.approval_eligible or validate_draft_semantics(draft_v2):
+                raise SetupChatError(
+                    "setup_not_ready",
+                    "Resolve every blocking V2 draft item before approval.",
+                    status_code=409,
+                )
+            if (
+                expected_draft_version != draft_v2.version
+                or expected_semantic_hash != draft_v2.semantic_hash
+            ):
+                raise SetupChatError(
+                    "setup_changed",
+                    "The V2 draft changed. Review the latest version before approval.",
+                    status_code=409,
+                )
+            approval_messages = await self.messages(session, chat.id)
+            snapshot_hash = conversation_snapshot_hash(
+                (item.role, item.content) for item in approval_messages
+            )
+            draft_v2 = StrategyDraftV2.model_validate(
+                draft_v2.model_copy(
+                    update={
+                        "approval": ApprovalBindingV2(
+                            approved=True,
+                            user_id=chat.user_id,
+                            draft_version=draft_v2.version,
+                            semantic_hash=draft_v2.semantic_hash,
+                            conversation_snapshot_hash=snapshot_hash,
+                            approved_at=datetime.now(UTC),
+                        ),
+                        "semantic_hash": draft_v2.semantic_hash,
+                    }
+                ).model_dump(mode="json")
+            )
+            context["strategy_draft_v2"] = draft_v2.model_dump(mode="json")
+            draft_version = draft_v2.version
+        else:
+            state_payload = context.get("strategy_state")
+            strategy_state = StrategyDraftState.from_dict(
+                state_payload if isinstance(state_payload, dict) else None
+            )
+            legacy_snapshot_hash = strategy_state.conversation_snapshot_hash
+            if legacy_snapshot_hash is None:
+                raise SetupChatError(
+                    "approval_snapshot_missing",
+                    "The draft must be recompiled before approval.",
+                    status_code=409,
+                )
+            snapshot_hash = legacy_snapshot_hash
+            try:
+                strategy_state = strategy_state.with_approval(
+                    canonical_hash=canonical_hash,
+                    draft_version=strategy_state.draft_version,
+                    conversation_snapshot_hash=snapshot_hash,
+                    user_id=str(chat.user_id),
+                )
+            except ValueError as exc:
+                raise SetupChatError(
+                    "setup_changed",
+                    "The draft identity changed before approval. Review the latest version.",
+                    status_code=409,
+                ) from exc
+            draft_version = strategy_state.draft_version
 
         preview = InterpretationPreview(
             strategy=definition,
@@ -785,7 +964,7 @@ class AISetupChatService:
             raw_metadata={
                 "source": "ai_setup_chat",
                 "chat_session_id": str(chat.id),
-                "draft_version": strategy_state.draft_version,
+                "draft_version": draft_version,
                 "conversation_snapshot_hash": snapshot_hash,
             },
         )
@@ -827,7 +1006,8 @@ class AISetupChatService:
             user_id=chat.user_id,
             expected_schema_hash=version.schema_hash,
         )
-        strategy_state = strategy_state.mark_compiled()
+        if strategy_state is not None:
+            strategy_state = strategy_state.mark_compiled()
         artifact_hashes = {
             str(rule.capability_artifact_hash)
             for rule in _condition_rules(definition.conditions)
@@ -839,8 +1019,9 @@ class AISetupChatService:
                 artifact_hashes=artifact_hashes,
                 strategy_version_id=version.id,
             )
-        context["strategy_state"] = strategy_state.to_dict()
-        context["approved_draft_version"] = strategy_state.draft_version
+        if strategy_state is not None:
+            context["strategy_state"] = strategy_state.to_dict()
+        context["approved_draft_version"] = draft_version
         context["approved_schema_hash"] = canonical_hash
         context["approved_conversation_snapshot_hash"] = snapshot_hash
         chat.context_json = context
@@ -944,6 +1125,29 @@ class AISetupChatService:
         option_label: str | None = None,
         client_message_id: str | None = None,
     ) -> AISetupChatSession:
+        if not self.settings.setup_chat_legacy_test_compat_enabled:
+            try:
+                return await SetupChatLaunchService(
+                    self.settings,
+                    self,
+                    extractor=self.launch_extractor,
+                ).handle(
+                    session,
+                    chat,
+                    message=message,
+                    option_key=option_key,
+                    option_value=option_value,
+                    option_label=option_label,
+                    client_message_id=client_message_id,
+                )
+            except SetupLaunchError as exc:
+                raise SetupChatError(
+                    exc.code,
+                    str(exc),
+                    status_code=exc.status_code,
+                    stage=exc.stage,
+                    retryable=exc.retryable,
+                ) from exc
         cleaned = " ".join(message.split())
         initial_strategy_turn = (
             classify_strategy_turn(cleaned) if cleaned and not option_key else None
@@ -2727,9 +2931,15 @@ class AISetupChatService:
             resolved_state=resolved_state,
         )
         state_has_formula = bool(resolved_state.get("formula"))
-        deterministic = _can_interpret_deterministically(chat, compiler_text) and (
-            state_has_formula
-            or bool(
+        # A formula already accepted into canonical state is application-owned.
+        # Surrounding conversational prose or an operator glossary must not send it
+        # back through a model that can omit settled context, direction, or universe
+        # fields. The rule interpreter still reports any genuinely unsupported
+        # companion mechanic, so this does not turn unknown wording into executable
+        # logic.
+        deterministic = state_has_formula or (
+            _can_interpret_deterministically(chat, compiler_text)
+            and bool(
                 getattr(
                     self.strategy_interpreter,
                     "deterministic_core_authority",
@@ -3696,6 +3906,10 @@ class AISetupChatService:
         instruction without losing the prior lifecycle state or preview.
         """
         current_hash = None
+        has_authoritative_draft = bool(
+            (chat.context_json or {}).get("strategy_draft_v2")
+            or chat.draft_schema_json
+        )
         if chat.draft_schema_json:
             try:
                 current_hash = StrategyDefinition.model_validate(
@@ -3716,7 +3930,7 @@ class AISetupChatService:
             payload={
                 "error": envelope.model_dump(mode="json"),
                 "can_approve": chat.status == "ready_for_approval",
-                "authoritative_draft_preserved": bool(chat.draft_schema_json),
+                "authoritative_draft_preserved": has_authoritative_draft,
                 "authoritative_draft_hash": current_hash,
                 "approval_state": _strategy_approval_state(chat),
             },

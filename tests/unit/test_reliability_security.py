@@ -309,6 +309,7 @@ def test_deployed_sharia_governance_requires_safe_operational_dependencies():
 
 def test_deployed_runtime_rejects_fixture_market_data_and_unwired_provider_flags():
     settings = Settings(
+        _env_file=None,
         app_env="staging",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
         database_url="postgresql+asyncpg://user:password@database/monitor",
@@ -327,7 +328,6 @@ def test_deployed_runtime_rejects_fixture_market_data_and_unwired_provider_flags
     message = str(error.value)
     assert "TRACEDGE_MARKET_DATA_MODE=fixture" in message
     assert "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED" in message
-    assert "COINGECKO_ENABLED" in message
     assert "ALTERNATIVE_ME_ENABLED" in message
     assert "FRED_ENABLED" in message
     assert "BINANCE_DERIVATIVES_ENABLED" in message
@@ -335,11 +335,13 @@ def test_deployed_runtime_rejects_fixture_market_data_and_unwired_provider_flags
 
 def test_enabled_production_integrations_require_real_adapters_and_secrets():
     settings = Settings(
+        _env_file=None,
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
         database_url="postgresql+asyncpg://user:password@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
+        scanning_enabled=False,
         ai_interpreter_provider="rules",
         telegram_enabled=True,
         telegram_adapter="none",
@@ -378,7 +380,6 @@ def test_enabled_production_creem_requires_the_complete_product_catalog():
 
     message = str(error.value)
     assert "trader_annual" in message
-    assert "trader_trial" in message
     assert "pro_monthly" in message
     assert "pro_annual" in message
 

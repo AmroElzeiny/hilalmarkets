@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import func, select
 
@@ -6,13 +8,19 @@ from ai_market_monitor.db.models import (
     Alert,
     ScanResult,
     SetupInstance,
+    Subscription,
     TelegramConnection,
     UsageRecord,
     User,
 )
-from ai_market_monitor.db.models.enums import ConditionType, ConnectionStatus
+from ai_market_monitor.db.models.enums import (
+    ConditionType,
+    ConnectionStatus,
+    SubscriptionStatus,
+)
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
 from ai_market_monitor.schemas.strategy import Comparator, ConditionRule, Operand, OperandKind
+from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from tests.factories import candle_sets, load_strategy
 
@@ -79,11 +87,29 @@ def telegram_connection(user: User, suffix: str) -> TelegramConnection:
     )
 
 
+async def grant_monitor_plan(session, user: User) -> None:
+    now = datetime.now(UTC)
+    plan = await PlanCatalogService(session).get_or_sync("trader")
+    session.add(
+        Subscription(
+            user_id=user.id,
+            plan_id=plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            provider="test",
+            provider_subscription_id=f"monitor-{user.id}",
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+        )
+    )
+    await session.flush()
+
+
 async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_context):
     async with test_context["session_factory"]() as session:
         user = User(display_name="On Demand")
         session.add(user)
         await session.flush()
+        await grant_monitor_plan(session, user)
         strategy = scan_strategy()
         request = OnDemandScanRequest(
             strategy=strategy,
@@ -95,9 +121,9 @@ async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_
         response = await OnDemandScanService(session, OnDemandProvider()).run(user.id, request)
 
         assert response.status == "succeeded"
-        assert response.plan_code == "demo"
-        assert response.quota_limit == 1
-        assert response.quota_remaining == 0
+        assert response.plan_code == "trader"
+        assert response.quota_limit == 10
+        assert response.quota_remaining == 9
         assert response.results
         assert response.results[0].proof_receipt["on_demand_scan"] is True
         assert response.results[0].proof_receipt["live_alert_created"] is False
@@ -113,6 +139,11 @@ async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_
         assert await session.scalar(select(func.count(ScanResult.id))) == 0
         assert await session.scalar(select(func.count(SetupInstance.id))) == 0
 
+        usage = await session.scalar(select(UsageRecord))
+        assert usage is not None
+        usage.quantity = 10
+        await session.flush()
+
         with pytest.raises(OnDemandScanError) as exc:
             await OnDemandScanService(session, OnDemandProvider()).run(user.id, request)
         assert exc.value.code == "on_demand_quota_exceeded"
@@ -124,6 +155,8 @@ async def test_on_demand_scan_api_enforces_user_and_quota(test_context):
     async with test_context["session_factory"]() as session:
         user = User(display_name="On Demand API")
         session.add(user)
+        await session.flush()
+        await grant_monitor_plan(session, user)
         await session.commit()
         strategy = scan_strategy()
 
@@ -141,6 +174,12 @@ async def test_on_demand_scan_api_enforces_user_and_quota(test_context):
     assert first.status_code == 201
     assert first.json()["results"][0]["proof_receipt"]["on_demand_scan"] is True
 
+    async with test_context["session_factory"]() as session:
+        usage = await session.scalar(select(UsageRecord).where(UsageRecord.user_id == user.id))
+        assert usage is not None
+        usage.quantity = 10
+        await session.commit()
+
     second = await test_context["client"].post(
         "/api/v1/on-demand-scans",
         json=payload,
@@ -157,6 +196,7 @@ async def test_light_scan_succeeds_without_saved_strategy_or_approval(test_conte
         user = User(display_name="Quick Scan")
         session.add(user)
         await session.flush()
+        await grant_monitor_plan(session, user)
         session.add(telegram_connection(user, "quick-scan"))
         await session.commit()
 
@@ -175,8 +215,8 @@ async def test_light_scan_succeeds_without_saved_strategy_or_approval(test_conte
     assert response.status_code == 201, response.text
     payload = response.json()
     assert payload["light_scan"] is True
-    assert payload["scan"]["plan_code"] == "demo"
-    assert payload["scan"]["quota_limit"] == 3
+    assert payload["scan"]["plan_code"] == "trader"
+    assert payload["scan"]["quota_limit"] == 10
     assert payload["scan"]["results"][0]["proof_receipt"]["light_scan"] is True
     assert payload["scan"]["results"][0]["proof_receipt"]["scan_mode"] == "light_prompt"
     async with test_context["session_factory"]() as session:
@@ -218,6 +258,7 @@ async def test_light_scan_blank_symbols_returns_broad_universe_matches_by_defaul
         user = User(display_name="Quick Scan Broad Universe")
         session.add(user)
         await session.flush()
+        await grant_monitor_plan(session, user)
         session.add(telegram_connection(user, "quick-broad"))
         await session.commit()
 
@@ -247,6 +288,7 @@ async def test_light_scan_accepts_broad_universe_and_fast_timeframes(test_contex
         user = User(display_name="Quick Scan Broad Fast")
         session.add(user)
         await session.flush()
+        await grant_monitor_plan(session, user)
         session.add(telegram_connection(user, "quick-fast"))
         await session.commit()
 
@@ -294,6 +336,7 @@ async def test_optional_failed_or_unavailable_conditions_do_not_block_confirmati
         user = User(display_name="Optional Conditions")
         session.add(user)
         await session.flush()
+        await grant_monitor_plan(session, user)
         strategy = scan_strategy().model_copy(deep=True)
         strategy.conditions.children.append(
             ConditionRule(
@@ -352,6 +395,7 @@ async def test_mandatory_unavailable_condition_is_not_returned_as_finder_match(
         user = User(display_name="Mandatory Conditions")
         session.add(user)
         await session.flush()
+        await grant_monitor_plan(session, user)
         strategy = scan_strategy().model_copy(deep=True)
         strategy.conditions.children.append(
             ConditionRule(
