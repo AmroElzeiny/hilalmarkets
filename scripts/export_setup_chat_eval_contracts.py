@@ -34,6 +34,8 @@ FIELD_MAP: dict[str, str | dict[str, str]] = {
     "unsupported_capabilities": "unsupported_capabilities",
     "provider_required_capabilities": "provider_required_capabilities",
     "approval_state": "approval",
+    "lifecycle_state": "approval.lifecycle_state",
+    "turn_complete": "approval.terminal",
     "requires_explicit_approval": "requires_explicit_approval",
     "must_not_assign_sharia_status": "must_not_assign_sharia_status",
     "strategy_version": "approval.strategy_version_number",

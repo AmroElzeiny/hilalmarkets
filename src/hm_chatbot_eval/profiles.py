@@ -31,6 +31,8 @@ BUDGET_EIGHT_TURN_TOPIC_IDS = frozenset(
         "delayed_fact_recall",
         "long_context_retention",
         "repeated_correction_cycles",
+        "confirmation_integrity",
+        "version_immutability",
     }
 )
 

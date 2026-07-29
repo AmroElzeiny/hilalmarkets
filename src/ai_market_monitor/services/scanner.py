@@ -757,7 +757,9 @@ class ScanPersistenceService:
             TrialLifecycleService(self.session, self.settings) if self.settings else None
         )
         if trial_service is not None:
-            cap_reached, cycle, _cap = await trial_service.trial_alert_cap_reached(strategy.user_id)
+            cap_reached, cycle, trial_cap = await trial_service.trial_alert_cap_reached(
+                strategy.user_id
+            )
             if cap_reached and cycle is not None:
                 if setup.state == SetupLifecycleState.CONFIRMED:
                     self.session.add(
@@ -785,7 +787,7 @@ class ScanPersistenceService:
                     title=(
                         f"{result.symbol} - {alert_type.value.replace('_', ' ').title()} Suppressed"
                     ),
-                    body="Trial alert limit reached for this 14-day cycle.",
+                    body="Trial alert limit reached for this Monitor trial.",
                     proof_receipt={
                         **result.proof_receipt(),
                         **({"scan_context": scan_context} if scan_context else {}),
@@ -822,6 +824,7 @@ class ScanPersistenceService:
                     version=version,
                     definition=definition,
                     cycle_id=cycle.id,
+                    alert_cap=trial_cap,
                 )
                 return None
         configured_budget = definition.alerts.daily_alert_budget
@@ -914,6 +917,7 @@ class ScanPersistenceService:
         version: StrategyVersion,
         definition: StrategyDefinition,
         cycle_id: UUID,
+        alert_cap: int,
     ) -> None:
         dedupe = stable_event_hash(
             {
@@ -934,9 +938,9 @@ class ScanPersistenceService:
             deduplication_key=dedupe,
             title="Trial alert limit reached",
             body=(
-                "Your trial has delivered five live setup alerts in this 14-day cycle. "
+                f"Your trial has reached its {alert_cap}-alert trial limit. "
                 "Monitoring evidence is preserved, but additional setup alerts are suppressed "
-                "until upgrade or the next eligible cycle."
+                "until you upgrade."
             ),
             proof_receipt={
                 "trial_cycle_id": str(cycle_id),

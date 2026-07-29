@@ -6,10 +6,10 @@
   <span data-icon="alert" data-icon-class="icon"></span>
   <div><strong>Market data note</strong><p>{{ market_data_warning }}</p></div>
 </div>
-{% elif screened is defined and screened.warning %}
+{% elif screened is defined and (screened.warning or screened.total == 0) %}
 <div class="notice notice-warning" role="status">
   <span data-icon="info" data-icon-class="icon"></span>
-  <div><strong>No screened assets are available yet.</strong><p>Assets appear only after evidence and methodology review are complete. Missing information never becomes an eligible result.</p></div>
+  <div><strong>No Halal Market assets are available yet.</strong><p>Assets appear only after evidence and methodology review are complete. Missing information never becomes an eligible result.</p></div>
 </div>
 {% endif %}
 

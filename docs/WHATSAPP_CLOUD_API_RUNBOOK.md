@@ -73,6 +73,10 @@ The Graph API version is intentionally configuration, not an endpoint constant.
 ```
 
 Unknown event keys and invalid Meta template names fail configuration validation.
+In staging and production, enabling WhatsApp also requires approved names for every non-opportunity
+event in the registry. `confirmed_research_event` is additionally required when opportunity alerts
+are enabled. Placeholder names fail startup; this prevents an apparently active channel from
+silently depending on unapproved or missing templates.
 
 ## Webhook Registration
 

@@ -61,11 +61,14 @@ async def _require_cloudflare_access(
         return
     access_email = request.headers.get("cf-access-authenticated-user-email", "")
     access_assertion = request.headers.get("cf-access-jwt-assertion", "")
-    expected_email = settings.system_brain_username or ""
+    allowed_emails = settings.system_brain_authorized_emails
     if (
         not access_assertion
-        or not expected_email
-        or not hmac.compare_digest(access_email.strip().casefold(), expected_email)
+        or not allowed_emails
+        or not any(
+            hmac.compare_digest(access_email.strip().casefold(), email)
+            for email in allowed_emails
+        )
     ):
         raise HTTPException(status_code=403, detail="Cloudflare Access is required.")
 

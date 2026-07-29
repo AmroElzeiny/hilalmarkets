@@ -10,14 +10,21 @@ async def _users(test_context) -> tuple[User, User]:
         return owner, other
 
 
-async def test_public_billing_catalog_excludes_private_plans(test_context) -> None:
+async def test_public_billing_catalog_exposes_only_customer_plans(test_context) -> None:
     response = await test_context["client"].get("/api/v1/billing/plans")
     assert response.status_code == 200
     assert response.json()["billing_enabled"] is False
     assert response.json()["billing_mode"] == "disabled_private_beta"
     codes = {plan["code"] for plan in response.json()["plans"]}
-    assert codes == {"demo"}
-    assert not codes & {"lifetime", "creator", "community", "trial", "admin"}
+    assert codes == {"demo", "trader", "pro"}
+    assert not codes & {
+        "lifetime",
+        "creator",
+        "community",
+        "trial",
+        "admin",
+        "pro_trial",
+    }
 
 
 async def test_billing_routes_derive_and_enforce_authenticated_owner(test_context) -> None:

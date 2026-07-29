@@ -2,11 +2,12 @@ import base64
 import binascii
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import case, func, select, update
@@ -74,6 +75,7 @@ from ai_market_monitor.engine.models import ensure_aware
 from ai_market_monitor.schemas.ai_setup_chat import (
     MarketSnapshotResponse,
     SetupChatApprovalRequest,
+    SetupChatErrorEnvelope,
     SetupChatMessageRequest,
     SetupChatMessageResponse,
     SetupChatSessionResponse,
@@ -90,7 +92,11 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
-from ai_market_monitor.services.ai_setup_chat import AISetupChatService, SetupChatError
+from ai_market_monitor.services.ai_setup_chat import (
+    AISetupChatService,
+    SetupChatError,
+    setup_chat_error_envelope,
+)
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     AISetupEvaluatorControlError,
     evaluator_turn,
@@ -107,6 +113,10 @@ from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDema
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
 from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
+)
+from ai_market_monitor.services.setup_chat_lifecycle import (
+    is_turn_complete,
+    setup_lifecycle_state,
 )
 from ai_market_monitor.services.setup_observability import (
     GroundedObservabilityExplainer,
@@ -993,6 +1003,7 @@ async def _setup_chat_response(
     chat: AISetupChatSession,
     *,
     next_url: str | None = None,
+    error: SetupChatErrorEnvelope | None = None,
 ) -> SetupChatSessionResponse:
     messages = await service.messages(session, chat.id)
     definition = (
@@ -1016,6 +1027,7 @@ async def _setup_chat_response(
             definition,
             session_status=chat.status,
             approval_eligible=can_approve,
+            blocking_findings=blocking_lint,
             assumptions=chat.assumptions or [],
             confidence=chat.rule_confidence or [],
             unsupported_capabilities=chat.unsupported_conditions or [],
@@ -1027,13 +1039,28 @@ async def _setup_chat_response(
             immutable_version_hash=(
                 approved_version.schema_hash if approved_version is not None else None
             ),
+            version_status=(
+                approved_version.status.value if approved_version is not None else None
+            ),
         )
         if definition is not None
         else None
     )
+    lifecycle_state = setup_lifecycle_state(
+        session_status=chat.status,
+        has_draft=definition is not None,
+        approval_eligible=can_approve,
+        blocking_findings=blocking_lint,
+        immutable_version_hash=(
+            approved_version.schema_hash if approved_version is not None else None
+        ),
+        version_status=(approved_version.status.value if approved_version is not None else None),
+    )
     return SetupChatSessionResponse(
         id=chat.id,
         status=chat.status,
+        lifecycle_state=lifecycle_state,
+        turn_complete=is_turn_complete(lifecycle_state),
         title=chat.title,
         original_idea=chat.original_idea,
         messages=[
@@ -1065,6 +1092,7 @@ async def _setup_chat_response(
         approved_strategy_id=chat.approved_strategy_id,
         approved_strategy_version_id=chat.approved_strategy_version_id,
         evaluation_contract=evaluation_contract,
+        error=error,
         next_url=next_url,
         updated_at=chat.updated_at,
     )
@@ -1122,6 +1150,7 @@ async def get_ai_setup_chat_session(
 async def send_ai_setup_chat_message(
     chat_id: UUID,
     payload: SetupChatMessageRequest,
+    response: Response,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -1132,13 +1161,17 @@ async def send_ai_setup_chat_message(
         alias="X-HM-Eval-Target-Version",
     ),
 ) -> SetupChatSessionResponse:
+    turn_started = monotonic()
+    usage_correlation_id = uuid4().hex
     try:
         chat = await service.owned_session(session, principal.user_id, chat_id)
-        usage_correlation_id = uuid4().hex
-        with ai_usage_correlation(usage_correlation_id), evaluator_turn(
-            settings,
-            fault=evaluator_fault,
-            target_version=evaluator_target_version,
+        with (
+            ai_usage_correlation(usage_correlation_id),
+            evaluator_turn(
+                settings,
+                fault=evaluator_fault,
+                target_version=evaluator_target_version,
+            ),
         ):
             await service.handle_message(
                 session,
@@ -1154,6 +1187,7 @@ async def send_ai_setup_chat_message(
             session,
             chat,
             correlation_id=usage_correlation_id,
+            duration_ms=round((monotonic() - turn_started) * 1000),
         )
         await session.commit()
         await session.refresh(chat)
@@ -1162,10 +1196,50 @@ async def send_ai_setup_chat_message(
         raise HTTPException(status_code=403, detail="evaluator_control_unavailable") from exc
     except SetupChatError as exc:
         await session.rollback()
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail={"code": exc.code, "message": str(exc)},
-        ) from exc
+        envelope = setup_chat_error_envelope(exc)
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        await service.record_turn_failure(session, chat, envelope=envelope)
+        await service.attach_turn_usage(
+            session,
+            chat,
+            correlation_id=usage_correlation_id,
+            duration_ms=round((monotonic() - turn_started) * 1000),
+        )
+        await session.commit()
+        await session.refresh(chat)
+        response.status_code = exc.status_code
+        return await _setup_chat_response(service, session, chat, error=envelope)
+    except Exception as exc:
+        # Anything unhandled used to escape as a bare HTTP 500 with no body, which the
+        # evaluator recorded 24 times as "HTTP 500 with no assistant message" and scored
+        # as a chatbot answer. The turn now ends with a sanitized envelope and a real
+        # assistant message; the original exception is logged under the same request id.
+        await session.rollback()
+        envelope = setup_chat_error_envelope(exc)
+        logger.exception(
+            "ai_setup_chat_turn_failed",
+            request_id=envelope.request_id,
+            stage=envelope.stage,
+            error_code=envelope.error_code,
+            chat_id=str(chat_id),
+            user_id=str(principal.user_id),
+        )
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        await service.record_turn_failure(session, chat, envelope=envelope)
+        await service.attach_turn_usage(
+            session,
+            chat,
+            correlation_id=usage_correlation_id,
+            duration_ms=round((monotonic() - turn_started) * 1000),
+        )
+        await session.commit()
+        await session.refresh(chat)
+        response.status_code = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if envelope.retryable
+            else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        return await _setup_chat_response(service, session, chat, error=envelope)
     return await _setup_chat_response(service, session, chat)
 
 
@@ -1202,115 +1276,16 @@ async def approve_ai_setup_chat(
     payload: SetupChatApprovalRequest,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
     service: AISetupChatService = Depends(get_ai_setup_chat_service),
 ) -> SetupChatSessionResponse:
     try:
         chat = await service.owned_session(session, principal.user_id, chat_id)
-        if chat.status != "ready_for_approval" or not chat.draft_schema_json:
-            raise SetupChatError(
-                "setup_not_ready",
-                "Resolve every blocking question before approving this setup.",
-                status_code=409,
-            )
-        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
-        if definition.canonical_hash() != payload.expected_schema_hash:
-            raise SetupChatError(
-                "setup_changed",
-                "The translated rules changed. Review the latest translation before approval.",
-                status_code=409,
-            )
-        low_confidence = {
-            item["rule_key"]
-            for item in (chat.rule_confidence or [])
-            if item.get("requires_confirmation")
-        }
-        confirmed = set(payload.confirmed_low_confidence_rule_keys)
-        if not low_confidence.issubset(confirmed):
-            raise SetupChatError(
-                "low_confidence_confirmation_required",
-                "Confirm every low-confidence rule before approval.",
-                status_code=409,
-            )
-        if any(item.get("severity") == "critical" for item in (chat.lint_warnings or [])):
-            raise SetupChatError(
-                "strategy_lint_blocked",
-                "Resolve critical strategy lint findings before approval.",
-                status_code=409,
-            )
-        preview = InterpretationPreview(
-            strategy=definition,
-            assumptions=chat.assumptions or [],
-            ambiguities=[
-                InterpretationIssue.model_validate(item) for item in (chat.ambiguities or [])
-            ],
-            unsupported_conditions=[
-                InterpretationIssue.model_validate(item)
-                for item in (chat.unsupported_conditions or [])
-            ],
-            interpreter=str((chat.context_json or {}).get("interpreter") or "ai-setup-chat"),
-            raw_metadata={"source": "ai_setup_chat", "chat_session_id": str(chat.id)},
+        await service.approve_draft(
+            session,
+            chat,
+            expected_schema_hash=payload.expected_schema_hash,
+            confirmed_low_confidence_rule_keys=set(payload.confirmed_low_confidence_rule_keys),
         )
-        strategy_service = StrategyService(session, settings.disclaimer_version)
-        strategy, version = await strategy_service.create_from_interpretation(
-            principal.user_id,
-            preview,
-            source_text=chat.original_idea,
-        )
-        verification_service = VerifiedStrategyService(session, settings)
-        await verification_service.prepare_version(
-            user_id=principal.user_id,
-            strategy=strategy,
-            version=version,
-        )
-        statements = await verification_service.sync_interpretation(
-            user_id=principal.user_id,
-            strategy=strategy,
-            version=version,
-        )
-        for statement in statements:
-            if (
-                statement.status == "assumed"
-                and statement.resolution_status == "unresolved"
-            ):
-                await verification_service.resolve_statement(
-                    user_id=principal.user_id,
-                    statement_id=statement.id,
-                    action="accept",
-                    resolution_text=None,
-                )
-        await verification_service.approve_interpretation(
-            user_id=principal.user_id,
-            version=version,
-        )
-        await verification_service.approval_gate(
-            user_id=principal.user_id,
-            version=version,
-        )
-        await strategy_service.approve(
-            version,
-            user_id=principal.user_id,
-            expected_schema_hash=version.schema_hash,
-        )
-        artifact_hashes = {
-            str(item["capability_artifact_hash"])
-            for item in _condition_rule_payloads(definition)
-            if item.get("capability_artifact_hash")
-        }
-        if artifact_hashes:
-            from ai_market_monitor.services.capability_extensions import (
-                CapabilityExtensionService,
-            )
-
-            await CapabilityExtensionService(settings).link_strategy_version(
-                session,
-                artifact_hashes=artifact_hashes,
-                strategy_version_id=version.id,
-            )
-        chat.status = "approved"
-        chat.approved_strategy_id = strategy.id
-        chat.approved_strategy_version_id = version.id
-        chat.approved_at = _now()
         await session.commit()
         await session.refresh(chat)
     except SetupChatError as exc:
@@ -1667,28 +1642,20 @@ async def compare_versions(
         (
             await session.scalars(
                 select(StrategyVersionVerification).where(
-                    StrategyVersionVerification.strategy_version_id.in_(
-                        [left.id, right.id]
-                    )
+                    StrategyVersionVerification.strategy_version_id.in_([left.id, right.id])
                 )
             )
         ).all()
     )
-    verification_by_version = {
-        item.strategy_version_id: item for item in verification_rows
-    }
+    verification_by_version = {item.strategy_version_id: item for item in verification_rows}
     return {
         "left": _version_payload(left),
         "right": _version_payload(right),
         "diff": diff,
         "behavior": behavior,
         "verification_effects": {
-            "left": _verification_comparison(
-                verification_by_version.get(left.id)
-            ),
-            "right": _verification_comparison(
-                verification_by_version.get(right.id)
-            ),
+            "left": _verification_comparison(verification_by_version.get(left.id)),
+            "right": _verification_comparison(verification_by_version.get(right.id)),
         },
     }
 
@@ -2077,9 +2044,7 @@ async def list_strategy_outcomes(
     versions = list(
         (
             await session.scalars(
-                select(StrategyVersion).where(
-                    StrategyVersion.strategy_id == strategy.id
-                )
+                select(StrategyVersion).where(StrategyVersion.strategy_id == strategy.id)
             )
         ).all()
     )
@@ -2098,16 +2063,20 @@ async def list_strategy_outcomes(
             )
         ).all()
     )
-    reviews = list(
-        (
-            await session.scalars(
-                select(OutcomeReview).where(
-                    OutcomeReview.user_id == principal.user_id,
-                    OutcomeReview.alert_id.in_([item.id for item in alerts]),
+    reviews = (
+        list(
+            (
+                await session.scalars(
+                    select(OutcomeReview).where(
+                        OutcomeReview.user_id == principal.user_id,
+                        OutcomeReview.alert_id.in_([item.id for item in alerts]),
+                    )
                 )
-            )
-        ).all()
-    ) if alerts else []
+            ).all()
+        )
+        if alerts
+        else []
+    )
     review_by_alert: dict[UUID, list[OutcomeReview]] = {}
     for review in reviews:
         review_by_alert.setdefault(review.alert_id, []).append(review)
@@ -2408,9 +2377,7 @@ async def explain_monitor_health(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    items = await SetupObservabilityService(session, settings).health(
-        principal.user_id, monitor_id
-    )
+    items = await SetupObservabilityService(session, settings).health(principal.user_id, monitor_id)
     if not items:
         raise HTTPException(status_code=404, detail="Monitor health evidence not found")
     health = items[0]
@@ -3245,9 +3212,7 @@ async def notification_center(
             {
                 "id": f"integration:{integration_result.id}",
                 "kind": "integration",
-                "title": (
-                    f"{channel} test {integration_result.status.replace('_', ' ')}"
-                ),
+                "title": (f"{channel} test {integration_result.status.replace('_', ' ')}"),
                 "body": "Notification-channel test result.",
                 "status": integration_result.status,
                 "created_at": integration_result.created_at,
@@ -3281,9 +3246,7 @@ async def mark_notification_center_read(
     alert_result = await session.execute(
         update(AlertDelivery)
         .where(
-            AlertDelivery.alert_id.in_(
-                select(Alert.id).where(Alert.user_id == principal.user_id)
-            ),
+            AlertDelivery.alert_id.in_(select(Alert.id).where(Alert.user_id == principal.user_id)),
             AlertDelivery.channel == DeliveryChannel.WEB,
             AlertDelivery.destination_key == f"dashboard:{principal.user_id}",
             AlertDelivery.status == DeliveryStatus.PENDING,
@@ -3292,9 +3255,7 @@ async def mark_notification_center_read(
     )
     await session.commit()
     return {
-        "dashboard_notifications": max(
-            0, int(getattr(dashboard_result, "rowcount", 0) or 0)
-        ),
+        "dashboard_notifications": max(0, int(getattr(dashboard_result, "rowcount", 0) or 0)),
         "alert_deliveries": max(0, int(getattr(alert_result, "rowcount", 0) or 0)),
     }
 
@@ -3350,9 +3311,9 @@ async def compliance_notification_difference(
         "previous_status": row.previous_status.value if row.previous_status else "not_recorded",
         "current_status": row.new_status.value,
         "title": change.title if change else f"{row.canonical_asset} screening status changed",
-        "summary": change.summary if change else str(
-            impact.get("policy_reason") or "Reviewed screening evidence changed."
-        ),
+        "summary": change.summary
+        if change
+        else str(impact.get("policy_reason") or "Reviewed screening evidence changed."),
         "change_type": change.change_type if change else "status_change",
         "methodology_version": impact.get("methodology_version"),
         "watch_plan_action": impact.get("monitor_impact") or row.behavior.value,
@@ -3470,15 +3431,10 @@ async def dashboard_scan_prompt_interpret(
     if (
         isinstance(preferred_channels, list)
         and preferred_channels
-        and not any(
-            channel in prompt_text
-            for channel in ("telegram", "web")
-        )
+        and not any(channel in prompt_text for channel in ("telegram", "web"))
     ):
         strategy.alerts.channels = [
-            channel
-            for channel in preferred_channels
-            if channel in {"telegram", "web"}
+            channel for channel in preferred_channels if channel in {"telegram", "web"}
         ] or strategy.alerts.channels
         applied_preferences.append("alert channels: " + ", ".join(strategy.alerts.channels))
     typical_maximum = preference.preferences.get("typical_max_alerts_per_hour")

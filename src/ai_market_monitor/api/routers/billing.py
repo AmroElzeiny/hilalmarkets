@@ -11,7 +11,11 @@ from ai_market_monitor.api.dependencies import UserPrincipal, get_user_principal
 from ai_market_monitor.api.route_security import public_api, signed_webhook
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, visible_public_plan_codes
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PUBLIC_PLAN_PRESENTATIONS,
+    visible_public_plan_codes,
+)
 from ai_market_monitor.db.models import BillingEvent, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
@@ -30,6 +34,7 @@ PAYMENT_SUCCESS_EVENT_TYPES = {
     "checkout.session.completed",
     "invoice.payment_succeeded",
     "payment.finished",
+    "subscription.paid",
 }
 
 
@@ -72,8 +77,10 @@ async def list_plans(
                 "code": plan.code,
                 "name": plan.name,
                 "monthly_price": str(plan.monthly_price),
+                "annual_price": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
                 "currency": plan.currency,
-                "description": plan.description,
+                "description": PUBLIC_PLAN_PRESENTATIONS[code].description,
+                "cta_label": PUBLIC_PLAN_PRESENTATIONS[code].cta_label,
                 "limits": plan.limits,
                 "features": plan.features,
             }
@@ -188,17 +195,28 @@ async def receive_billing_webhook(
     request: Request,
     x_billing_signature: str | None = Header(default=None),
     x_nowpayments_sig: str | None = Header(default=None, alias="x-nowpayments-sig"),
+    creem_signature: str | None = Header(default=None, alias="creem-signature"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     if not settings.billing_enabled:
         raise HTTPException(status_code=404, detail="Not found")
+    if provider not in {"stripe", "nowpayments", "creem"}:
+        raise HTTPException(status_code=404, detail="Not found")
     body = await request.body()
     try:
-        result = await BillingService(session, settings).process_verified_webhook(
+        result = await BillingService(
+            session,
+            settings,
+            provider_name=provider,
+        ).process_verified_webhook(
             provider=provider,
             body=body,
-            signature=x_nowpayments_sig if provider == "nowpayments" else x_billing_signature,
+            signature=(
+                x_nowpayments_sig
+                if provider == "nowpayments"
+                else (creem_signature if provider == "creem" else x_billing_signature)
+            ),
         )
         await session.commit()
         if not result.replayed and result.processing_status == "processed":

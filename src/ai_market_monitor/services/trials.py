@@ -144,10 +144,10 @@ class TrialLifecycleService:
             user_id=user_id,
             cycle=cycle,
             message_type="cycle_started",
-            title="Trial monitoring cycle started",
+            title="Monitor trial started",
             body=(
-                "Your 14-day monitoring cycle has started. It renews automatically if no "
-                "qualifying live setup alert is successfully delivered during the cycle."
+                f"Your {self.settings.trial_days}-day Monitor trial has started. "
+                "No payment method is required."
             ),
         )
         return trial
@@ -631,76 +631,21 @@ class TrialLifecycleService:
             cycle.renewal_decision = "converted_to_paid"
             cycle.closed_at = current_time
             return
-        if cycle.qualifying_alerts_delivered > 0:
-            trial.status = TrialStatus.EXPIRED
-            trial.ends_at = cycle.ends_at
-            cycle.status = "expired"
-            cycle.renewal_decision = "not_renewed_qualifying_alert_delivered"
-            cycle.renewal_reason = "qualifying_alert_delivered"
-            cycle.closed_at = current_time
-            self._audit(
-                trial.user_id,
-                "trial.expired_after_qualifying_alert",
-                "trial_cycle",
-                cycle.id,
-                {"delivered": cycle.qualifying_alerts_delivered},
-            )
-            return
-        if not await self._eligible_for_auto_renewal(trial, cycle):
-            trial.status = TrialStatus.EXPIRED
-            cycle.status = "expired"
-            cycle.renewal_decision = "not_renewed_user_ineligible"
-            cycle.closed_at = current_time
-            self._audit(
-                trial.user_id,
-                "trial.expired_without_renewal",
-                "trial_cycle",
-                cycle.id,
-                {"reason": cycle.renewal_reason},
-            )
-            return
-        reason = self._renewal_reason(cycle)
-        cycle.status = "renewed"
-        cycle.renewal_decision = "auto_renewed_no_qualifying_alert"
-        cycle.renewal_reason = reason
-        cycle.renewed_at = current_time
+        trial.status = TrialStatus.EXPIRED
+        trial.ends_at = cycle.ends_at
+        cycle.status = "expired"
+        cycle.renewal_decision = "trial_period_completed"
+        cycle.renewal_reason = "seven_day_monitor_trial_completed"
         cycle.closed_at = current_time
-        next_cycle = TrialCycle(
-            trial_id=trial.id,
-            cycle_number=cycle.cycle_number + 1,
-            starts_at=cycle.ends_at,
-            ends_at=cycle.ends_at + timedelta(days=self.settings.trial_days),
-            status="active",
-            successful_scan_coverage=Decimal("0"),
-        )
-        self.session.add(next_cycle)
-        trial.status = TrialStatus.ACTIVE
-        trial.ends_at = next_cycle.ends_at
-        title = (
-            "Trial extended because of service interruption"
-            if reason == "platform_service_credit"
-            else "Trial renewed because no matching alert was delivered"
-        )
-        body = (
-            "We extended your trial cycle as a service credit because scan or delivery coverage "
-            "was not sufficient."
-            if reason == "platform_service_credit"
-            else "No qualifying live setup alert was successfully delivered during this cycle, "
-            "so your trial has renewed for another 14-day monitoring cycle."
-        )
-        await self._create_trial_message(
-            user_id=trial.user_id,
-            cycle=next_cycle,
-            message_type="cycle_renewed",
-            title=title,
-            body=body,
-        )
         self._audit(
             trial.user_id,
-            "trial.cycle_renewed",
+            "trial.expired",
             "trial_cycle",
             cycle.id,
-            {"reason": reason, "next_cycle_ends_at": next_cycle.ends_at.isoformat()},
+            {
+                "reason": cycle.renewal_reason,
+                "qualifying_alerts_delivered": cycle.qualifying_alerts_delivered,
+            },
         )
 
     async def _fill_cycle_metrics(self, trial: Trial, cycle: TrialCycle) -> None:

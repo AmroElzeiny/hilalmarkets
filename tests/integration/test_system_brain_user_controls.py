@@ -104,7 +104,7 @@ async def test_system_brain_user_registry_has_bounded_controls_and_custom_dialog
 @pytest.mark.parametrize(
     ("tier", "months", "plan_code", "expected_status", "expected_days"),
     [
-        ("free", "", "pro_trial", SubscriptionStatus.TRIALING, 14),
+        ("free", "", "pro_trial", SubscriptionStatus.TRIALING, 7),
         ("full_access", "3", "full_access", SubscriptionStatus.ACTIVE, None),
         (
             "lifetime_partner",

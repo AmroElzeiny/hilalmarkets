@@ -124,6 +124,66 @@ async def test_setup_chat_api_creates_resumes_compiles_and_approves(test_context
     assert approved_payload["next_url"].endswith("/verify")
 
 
+async def test_authenticated_chat_approval_compiles_once_and_is_idempotent(test_context):
+    await _signup(test_context, "ai-chat-message-approval@example.com")
+    test_context["settings"].openai_api_key = SecretStr("test-key")
+    service = AISetupChatService(
+        test_context["settings"],
+        SnapshotProvider(),
+        FixedInterpreter(),
+        interviewer=ReadyInterviewer(),
+    )
+    test_context["app"].dependency_overrides[get_ai_setup_chat_service] = lambda: service
+
+    created = await test_context["client"].post("/api/v1/dashboard/setup-chat/sessions")
+    chat_id = created.json()["id"]
+    drafted = await test_context["client"].post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
+        json={
+            "message": "RSI below 30 on 15m Binance USDT spot pairs.",
+            "client_message_id": "approval-message-001",
+        },
+    )
+    assert drafted.status_code == 200, drafted.text
+    draft_payload = drafted.json()
+    assert draft_payload["status"] == "ready_for_approval"
+    draft_hash = draft_payload["schema_hash"]
+
+    approved = await test_context["client"].post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
+        json={
+            "message": "I approve",
+            "client_message_id": "approval-message-002",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    approved_payload = approved.json()
+    assert approved_payload["status"] == "approved"
+    assert approved_payload["can_approve"] is False
+    assert approved_payload["schema_hash"] == draft_hash
+    assert approved_payload["approved_strategy_id"]
+    assert approved_payload["approved_strategy_version_id"]
+    assert approved_payload["evaluation_contract"]["approval"]["approved"] is True
+    assert approved_payload["evaluation_contract"]["approval"]["lifecycle_state"] == "compiled"
+
+    message_count = len(approved_payload["messages"])
+    strategy_id = approved_payload["approved_strategy_id"]
+    version_id = approved_payload["approved_strategy_version_id"]
+    repeated = await test_context["client"].post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
+        json={
+            "message": "mowafe2",
+            "client_message_id": "approval-message-003",
+        },
+    )
+    assert repeated.status_code == 200, repeated.text
+    repeated_payload = repeated.json()
+    assert repeated_payload["status"] == "approved"
+    assert repeated_payload["approved_strategy_id"] == strategy_id
+    assert repeated_payload["approved_strategy_version_id"] == version_id
+    assert len(repeated_payload["messages"]) == message_count
+
+
 async def test_setup_chat_scanner_mode_compiles_a_temporary_rule_set(test_context):
     await _signup(test_context, "ai-chat-scanner@example.com")
     test_context["settings"].openai_api_key = SecretStr("test-key")

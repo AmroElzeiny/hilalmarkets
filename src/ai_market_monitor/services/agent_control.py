@@ -402,6 +402,7 @@ class AgentControlService:
                                 arguments=arguments,
                             )
                     except AgentPolicyViolation as exc:
+                        await self._recover_tool_transaction(session, run, runtime)
                         result = AgentToolResult(
                             status="blocked",
                             tool_name=tool_name or "unknown",
@@ -411,6 +412,7 @@ class AgentControlService:
                         stop_reason = exc.code
                         run.error_type = exc.code
                     except (TimeoutError, ValidationError, ValueError, TypeError) as exc:
+                        await self._recover_tool_transaction(session, run, runtime)
                         result = AgentToolResult(
                             status="validation_error"
                             if not isinstance(exc, TimeoutError)
@@ -426,9 +428,7 @@ class AgentControlService:
                         if isinstance(exc, TimeoutError):
                             run.timeout_outcome = "tool_timeout"
                     except Exception as exc:
-                        await session.rollback()
-                        await session.refresh(run)
-                        await session.refresh(runtime.chat)
+                        await self._recover_tool_transaction(session, run, runtime)
                         run.error_type = f"tool_error:{type(exc).__name__}"[:100]
                         result = AgentToolResult(
                             status="unavailable",
@@ -445,18 +445,24 @@ class AgentControlService:
                     duration_ms = round((monotonic() - started) * 1000)
                     run.tool_call_count += 1
                     fingerprints.setdefault(argument_hash, []).append(result.status)
-                    await self._record_tool_call(
-                        session,
-                        run,
-                        call_id=call_id,
-                        tool_name=tool_name or "unknown",
-                        argument_hash=argument_hash,
-                        arguments=arguments,
-                        policy_decision=policy_decision,
-                        result=result,
-                        duration_ms=duration_ms,
-                        retry_count=retry_count,
-                    )
+                    try:
+                        await self._record_tool_call(
+                            session,
+                            run,
+                            call_id=call_id,
+                            tool_name=tool_name or "unknown",
+                            argument_hash=argument_hash,
+                            arguments=arguments,
+                            policy_decision=policy_decision,
+                            result=result,
+                            duration_ms=duration_ms,
+                            retry_count=retry_count,
+                        )
+                    except Exception as exc:
+                        await self._recover_tool_transaction(session, run, runtime)
+                        run.error_type = f"tool_record_error:{type(exc).__name__}"[:100]
+                        stop_reason = "tool_result_recording_failed"
+                        break
                     if stop_reason:
                         break
                     input_items.extend(output_items)
@@ -661,6 +667,18 @@ class AgentControlService:
             )
         )
         await session.commit()
+
+    @staticmethod
+    async def _recover_tool_transaction(
+        session: AsyncSession,
+        run: AgentRun,
+        runtime: AgentToolRuntime,
+    ) -> None:
+        """Restore ORM objects before any state is read after a failed operation."""
+
+        await session.rollback()
+        await session.refresh(run)
+        await session.refresh(runtime.chat)
 
     async def _record_shadow_calls(
         self,
@@ -1034,19 +1052,67 @@ def deterministic_agent_response(
             suggested_actions=[AgentSuggestedAction(type="open_monitor", label="Open monitor")],
             requires_user_confirmation=False,
         )
-    warning = next((warning for item in results for warning in item.warnings), None)
     return AgentFinalResponse(
-        message=warning or (
-            "The requested action was blocked by the bounded control policy. Nothing was executed."
-            if stop_reason
-            else "I could not complete that request from authoritative tool results."
-        ),
+        message=_plain_blocked_message(results, stop_reason=stop_reason),
         intent="refusal" if stop_reason else "error",
         status="blocked" if stop_reason else "failed",
         evidence_refs=evidence,
         suggested_actions=[],
         requires_user_confirmation=False,
     )
+
+
+#: What a blocked tool needs, said the way a beginner would say it. Keyed on the
+#: action the tool itself declared, so a new warning string cannot leak by default.
+_NEXT_ACTION_MESSAGES: dict[str, str] = {
+    "answer_clarification": (
+        "I need one more detail from you before I can build this. "
+        "Tell me the exact rule in your own words — for example "
+        "\"alert me when BTCUSDT rises at least 2% on the 15m\"."
+    ),
+    "retry": (
+        "That step did not finish, so nothing was created or changed. "
+        "Send your last message again and I will pick up from there."
+    ),
+    "review_draft": (
+        "Your draft is ready to review. Check the rules, then approve it when they "
+        "match what you meant."
+    ),
+}
+
+_BLOCKED_FALLBACK = (
+    "I stopped rather than guess, so nothing was created, changed, or activated. "
+    "Describe the market event you want to watch — the coin, the timeframe, and what "
+    "has to happen — and I will set it up."
+)
+
+
+def _plain_blocked_message(
+    results: list[AgentToolResult],
+    *,
+    stop_reason: str | None,
+) -> str:
+    """A message a beginner can act on, never an internal diagnostic.
+
+    Tool warnings are written for the model and the audit log: "Capability resolution
+    accepts only exact user-authored source fragments", "The selected comparator was
+    not expressed by the user". The blocked path used the first of them verbatim as
+    the assistant's reply, so evaluator transcripts show traders being answered with
+    the compiler's internal vocabulary and no idea what to do next.
+
+    Warnings stay on the tool results for the audit trail; they never become user copy.
+    """
+    for item in results:
+        for action in item.allowed_next_actions:
+            message = _NEXT_ACTION_MESSAGES.get(action)
+            if message:
+                return message
+    if stop_reason:
+        return (
+            "I can't do that one — it falls outside what I'm allowed to act on. "
+            "Nothing was created, changed, or activated."
+        )
+    return _BLOCKED_FALLBACK
 
 
 def _bounded_budget_response() -> AgentFinalResponse:

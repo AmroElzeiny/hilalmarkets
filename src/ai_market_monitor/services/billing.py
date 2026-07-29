@@ -13,25 +13,41 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PURCHASABLE_PLAN_CODES
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
+)
 from ai_market_monitor.db.models import (
     AuditEvent,
     BillingCheckoutAttempt,
     BillingEvent,
     Plan,
     Subscription,
+    Trial,
+    UserIdentity,
 )
-from ai_market_monitor.db.models.enums import SubscriptionStatus
+from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.trials import TrialLifecycleService
 
 SENSITIVE_KEYS = {
+    "address",
+    "address_line1",
+    "address_line2",
     "card",
     "card_number",
+    "city",
     "client_secret",
+    "country",
     "cvc",
     "cvv",
+    "email",
+    "first_name",
+    "last_name",
     "payment_method",
+    "postal_code",
+    "region",
     "secret",
     "token",
 }
@@ -92,6 +108,13 @@ NOWPAYMENTS_BILLING_CAPABILITIES = BillingProviderCapabilities(
     supports_refunds=False,
     supports_invoice_receipts=True,
 )
+CREEM_BILLING_CAPABILITIES = BillingProviderCapabilities(
+    supports_recurring_billing=True,
+    supports_customer_portal=True,
+    supports_automatic_cancellation=True,
+    supports_refunds=True,
+    supports_invoice_receipts=True,
+)
 
 
 def billing_provider_capabilities(provider: str) -> BillingProviderCapabilities:
@@ -99,6 +122,7 @@ def billing_provider_capabilities(provider: str) -> BillingProviderCapabilities:
         "static": STATIC_BILLING_CAPABILITIES,
         "stripe": STRIPE_BILLING_CAPABILITIES,
         "nowpayments": NOWPAYMENTS_BILLING_CAPABILITIES,
+        "creem": CREEM_BILLING_CAPABILITIES,
     }
     try:
         return capabilities[provider]
@@ -107,6 +131,25 @@ def billing_provider_capabilities(provider: str) -> BillingProviderCapabilities:
             "billing_provider_unknown",
             "The billing provider is not supported.",
         ) from exc
+
+
+def configured_billing_provider(settings: Settings, payment_method: str) -> str:
+    if payment_method == "card":
+        provider: str = settings.billing_card_provider
+        if provider == "disabled" and settings.billing_provider in {"stripe", "creem", "static"}:
+            provider = settings.billing_provider
+    elif payment_method == "crypto":
+        provider = settings.billing_crypto_provider
+        if provider == "disabled" and settings.billing_provider == "nowpayments":
+            provider = settings.billing_provider
+    else:
+        raise BillingError("payment_method_invalid", "Choose card or crypto payment.")
+    if provider == "disabled":
+        raise BillingError(
+            "payment_method_unavailable",
+            "That payment method is not currently available.",
+        )
+    return provider
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +174,8 @@ class BillingProvider(Protocol):
         plan_name: str,
         amount: Decimal,
         currency: str,
+        billing_cycle: str,
+        customer_email: str | None,
         success_url: str,
         cancel_url: str,
     ) -> CheckoutSession: ...
@@ -160,9 +205,12 @@ class StaticBillingProvider:
         plan_name: str,
         amount: Decimal,
         currency: str,
+        billing_cycle: str,
+        customer_email: str | None,
         success_url: str,
         cancel_url: str,
     ) -> CheckoutSession:
+        del billing_cycle, customer_email
         session_id = f"static_{checkout_attempt_id.hex}"
         token = hmac.new(
             self.settings.app_secret_key.get_secret_value().encode("utf-8"),
@@ -209,10 +257,15 @@ class StripeBillingProvider:
         plan_name: str,
         amount: Decimal,
         currency: str,
+        billing_cycle: str,
+        customer_email: str | None,
         success_url: str,
         cancel_url: str,
     ) -> CheckoutSession:
-        price_id = self.settings.stripe_price_ids.get(plan_code)
+        del plan_name, amount, currency
+        price_id = self.settings.stripe_price_ids.get(
+            f"{plan_code}_{_cycle_key(billing_cycle)}"
+        ) or self.settings.stripe_price_ids.get(plan_code)
         if not price_id:
             raise BillingError(
                 "stripe_price_missing",
@@ -234,6 +287,7 @@ class StripeBillingProvider:
                 "success_url": success_url,
                 "cancel_url": cancel_url,
                 "allow_promotion_codes": "true",
+                **({"customer_email": customer_email} if customer_email else {}),
             },
         )
         return CheckoutSession(
@@ -305,9 +359,12 @@ class NowPaymentsBillingProvider:
         plan_name: str,
         amount: Decimal,
         currency: str,
+        billing_cycle: str,
+        customer_email: str | None,
         success_url: str,
         cancel_url: str,
     ) -> CheckoutSession:
+        del billing_cycle, customer_email
         api_key = self.settings.nowpayments_api_key
         if api_key is None:
             raise BillingError(
@@ -387,6 +444,144 @@ class NowPaymentsBillingProvider:
         return body
 
 
+class CreemBillingProvider:
+    provider_name = "creem"
+    capabilities = CREEM_BILLING_CAPABILITIES
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    async def create_checkout_session(
+        self,
+        *,
+        user_id: UUID,
+        checkout_attempt_id: UUID,
+        plan_code: str,
+        plan_name: str,
+        amount: Decimal,
+        currency: str,
+        billing_cycle: str,
+        customer_email: str | None,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        del plan_name, amount, currency, cancel_url
+        if not customer_email:
+            raise BillingError(
+                "billing_email_missing",
+                "A verified account email is required for card checkout.",
+            )
+        product_key = f"{plan_code}_{_cycle_key(billing_cycle)}"
+        product_id = self.settings.creem_product_ids.get(product_key)
+        if not product_id:
+            raise BillingError(
+                "creem_product_missing",
+                "This plan and billing period are not configured for card checkout.",
+            )
+        if not product_id.startswith("prod_"):
+            raise BillingError(
+                "creem_product_invalid",
+                "The configured Creem product identifier is invalid.",
+            )
+        payload = await self._post(
+            "/v1/checkouts",
+            {
+                "product_id": product_id,
+                "request_id": str(checkout_attempt_id),
+                "units": 1,
+                "customer": {"email": customer_email},
+                "success_url": success_url,
+                "metadata": {
+                    "checkout_attempt_id": str(checkout_attempt_id),
+                    "user_id": str(user_id),
+                    "plan_code": plan_code,
+                    "billing_cycle": billing_cycle,
+                },
+            },
+        )
+        checkout_url = str(payload.get("checkout_url") or "")
+        provider_session_id = str(payload.get("id") or "")
+        if not checkout_url.startswith("https://") or not provider_session_id:
+            raise BillingError(
+                "creem_checkout_invalid",
+                "Creem did not return a valid secure checkout.",
+            )
+        return CheckoutSession(
+            provider=self.provider_name,
+            checkout_url=checkout_url,
+            provider_session_id=provider_session_id,
+        )
+
+    async def create_billing_portal_session(
+        self,
+        *,
+        user_id: UUID,
+        return_url: str,
+        provider_customer_id: str | None = None,
+    ) -> BillingPortalSession:
+        del user_id, return_url
+        if not provider_customer_id:
+            raise BillingError(
+                "billing_customer_missing",
+                "A Creem customer must exist before opening the billing portal.",
+            )
+        payload = await self._post(
+            "/v1/customers/billing",
+            {"customer_id": provider_customer_id},
+        )
+        portal_url = str(payload.get("customer_portal_link") or "")
+        if not portal_url.startswith("https://"):
+            raise BillingError(
+                "creem_portal_invalid",
+                "Creem did not return a valid customer portal link.",
+            )
+        return BillingPortalSession(provider=self.provider_name, portal_url=portal_url)
+
+    async def _post(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        secret = self.settings.creem_api_key
+        if secret is None:
+            raise BillingError("creem_api_key_missing", "Creem API access is not configured.")
+        async with httpx.AsyncClient(
+            base_url=str(self.settings.creem_api_base).rstrip("/"),
+            timeout=self.settings.creem_timeout_seconds,
+            headers={
+                "x-api-key": secret.get_secret_value(),
+                "Content-Type": "application/json",
+                "User-Agent": "HilalMarkets/1.0",
+            },
+        ) as client:
+            try:
+                response = await client.post(path, json=dict(payload))
+            except httpx.TimeoutException as exc:
+                raise BillingError(
+                    "creem_timeout",
+                    "Creem checkout did not respond in time. No payment was created.",
+                ) from exc
+            except httpx.RequestError as exc:
+                raise BillingError(
+                    "creem_unavailable",
+                    "Creem checkout is temporarily unavailable.",
+                ) from exc
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise BillingError(
+                "creem_response_invalid",
+                "Creem returned an invalid response.",
+            ) from exc
+        if response.is_error:
+            raise BillingError(
+                "creem_request_failed",
+                f"Creem checkout failed with status {response.status_code}.",
+            )
+        if not isinstance(body, dict):
+            raise BillingError(
+                "creem_response_invalid",
+                "Creem returned an invalid response.",
+            )
+        return body
+
+
 class BillingWebhookVerifier:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -399,7 +594,15 @@ class BillingWebhookVerifier:
         provider: str = "generic",
         now: datetime | None = None,
     ) -> None:
-        secret = self.settings.billing_webhook_secret
+        secret = (
+            self.settings.creem_webhook_secret
+            if provider == "creem"
+            else (
+                self.settings.nowpayments_ipn_secret
+                if provider == "nowpayments" and self.settings.nowpayments_ipn_secret
+                else self.settings.billing_webhook_secret
+            )
+        )
         if secret is None:
             if self.settings.is_production:
                 raise BillingError("webhook_secret_missing", "Billing webhook secret is missing.")
@@ -486,22 +689,46 @@ class BillingService:
         session: AsyncSession,
         settings: Settings,
         provider: BillingProvider | None = None,
+        provider_name: str | None = None,
     ):
         self.session = session
         self.settings = settings
         if provider is not None:
             self.provider = provider
-        elif settings.billing_provider == "stripe":
-            self.provider = StripeBillingProvider(settings)
-        elif settings.billing_provider == "nowpayments":
-            self.provider = NowPaymentsBillingProvider(settings)
-        elif settings.is_deployed:
+        else:
+            selected_provider = provider_name or (
+                settings.billing_card_provider
+                if settings.billing_card_provider != "disabled"
+                else (
+                    settings.billing_crypto_provider
+                    if settings.billing_crypto_provider != "disabled"
+                    else settings.billing_provider
+                )
+            )
+            self.provider = self._provider(selected_provider)
+
+    def _provider(self, provider_name: str) -> BillingProvider:
+        if provider_name == "stripe":
+            self.provider = StripeBillingProvider(self.settings)
+            return self.provider
+        if provider_name == "nowpayments":
+            self.provider = NowPaymentsBillingProvider(self.settings)
+            return self.provider
+        if provider_name == "creem":
+            self.provider = CreemBillingProvider(self.settings)
+            return self.provider
+        if provider_name == "static" and (
+            not self.settings.is_deployed or not self.settings.billing_enabled
+        ):
+            self.provider = StaticBillingProvider(self.settings)
+            return self.provider
+        if self.settings.is_deployed:
             raise BillingError(
                 "billing_provider_missing",
                 "A real billing provider must be configured in staging and production.",
             )
-        else:
-            self.provider = StaticBillingProvider(settings)
+        self.provider = StaticBillingProvider(self.settings)
+        return self.provider
 
     @property
     def provider_capabilities(self) -> BillingProviderCapabilities:
@@ -540,18 +767,14 @@ class BillingService:
         billing_cycle: str,
         request_key: str,
         terms_accepted: bool,
+        billing_profile: Mapping[str, Any] | None = None,
     ) -> CheckoutAttemptResult:
-        accepted_cycles = {self.billing_cycle_code}
-        if not self.provider.capabilities.supports_recurring_billing:
-            accepted_cycles.add("monthly")  # Backward-compatible form/API input.
-        if billing_cycle not in accepted_cycles:
-            raise BillingError(
-                "billing_cycle_not_available",
-                "The requested billing cycle is not available from this provider.",
-            )
-        billing_cycle = self.billing_cycle_code
         if plan_code not in PURCHASABLE_PLAN_CODES:
             raise BillingError("plan_not_available", "This plan is not available for checkout.")
+        billing_cycle = self._normalize_billing_cycle(
+            plan_code=plan_code,
+            requested=billing_cycle,
+        )
         if not terms_accepted:
             raise BillingError(
                 "billing_terms_required",
@@ -560,20 +783,42 @@ class BillingService:
         plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
         if not plan.is_active or plan.price_monthly <= 0:
             raise BillingError("plan_not_available", "This paid plan is not available.")
-
-        current_plan = await self.session.scalar(
-            select(Plan.code)
-            .join(Subscription, Subscription.plan_id == Plan.id)
-            .where(
-                Subscription.user_id == user_id,
-                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-                (Subscription.current_period_end.is_(None))
-                | (Subscription.current_period_end > datetime.now(UTC)),
+        if billing_cycle == "trial_7_day":
+            legacy_trial = await self.session.scalar(
+                select(Trial.id).where(Trial.user_id == user_id)
             )
-            .order_by(Subscription.updated_at.desc())
-            .limit(1)
+            used_trial = await self.session.scalar(
+                select(BillingCheckoutAttempt.id).where(
+                    BillingCheckoutAttempt.user_id == user_id,
+                    BillingCheckoutAttempt.billing_cycle == "trial_7_day",
+                    BillingCheckoutAttempt.status == "completed",
+                )
+            )
+            if legacy_trial is not None or used_trial is not None:
+                raise BillingError(
+                    "trial_already_used",
+                    "The Monitor trial has already been used for this account.",
+                )
+
+        current_plans = set(
+            (
+                await self.session.scalars(
+                    select(Plan.code)
+                    .join(Subscription, Subscription.plan_id == Plan.id)
+                    .where(
+                        Subscription.user_id == user_id,
+                        Subscription.provider.notin_(("admin", "free", "trial")),
+                        Subscription.status.in_(
+                            [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+                        ),
+                        (Subscription.current_period_end.is_(None))
+                        | (Subscription.current_period_end > datetime.now(UTC)),
+                    )
+                    .order_by(Subscription.updated_at.desc())
+                )
+            ).all()
         )
-        if current_plan == plan_code:
+        if plan_code in current_plans:
             raise BillingError(
                 "already_subscribed",
                 f"Your {plan.name} plan is already active.",
@@ -602,7 +847,7 @@ class BillingService:
             )
         idempotency_key = sha256(
             (
-                f"checkout:{user_id}:{plan.id}:{billing_cycle}:"
+                f"checkout:{user_id}:{plan.id}:{self.provider.provider_name}:{billing_cycle}:"
                 f"{self.settings.billing_terms_version}:{normalized_key}"
             ).encode()
         ).hexdigest()
@@ -617,6 +862,7 @@ class BillingService:
                 .where(
                     BillingCheckoutAttempt.user_id == user_id,
                     BillingCheckoutAttempt.plan_id == plan.id,
+                    BillingCheckoutAttempt.provider == self.provider.provider_name,
                     BillingCheckoutAttempt.billing_cycle == billing_cycle,
                     BillingCheckoutAttempt.status.in_({"creating", "pending"}),
                     BillingCheckoutAttempt.expires_at > now,
@@ -635,10 +881,11 @@ class BillingService:
             status="creating",
             idempotency_key=idempotency_key,
             terms_version=self.settings.billing_terms_version,
-            amount=plan.price_monthly,
+            amount=self._checkout_amount(plan.code, plan.price_monthly, billing_cycle),
             currency=plan.currency.upper(),
             terms_accepted_at=now,
             expires_at=now + timedelta(minutes=self.settings.billing_checkout_ttl_minutes),
+            billing_profile=_sanitize_billing_profile(billing_profile),
         )
         self.session.add(attempt)
         await self.session.flush()
@@ -656,6 +903,52 @@ class BillingService:
             },
         )
         return CheckoutAttemptResult(attempt=attempt, duplicate=False)
+
+    def _normalize_billing_cycle(self, *, plan_code: str, requested: str) -> str:
+        normalized = requested.strip().lower()
+        if normalized == "trial_7_day":
+            if self.provider.provider_name != "creem" or plan_code != "trader":
+                raise BillingError(
+                    "billing_cycle_not_available",
+                    "The seven-day Monitor trial is available only through card checkout.",
+                )
+            if "trader_trial" not in self.settings.creem_product_ids:
+                raise BillingError(
+                    "creem_trial_product_missing",
+                    "The seven-day Monitor trial is not configured with the payment provider.",
+                )
+            return normalized
+        if self.provider.capabilities.supports_recurring_billing:
+            aliases = {
+                "monthly": "monthly_auto_renewal",
+                "monthly_auto_renewal": "monthly_auto_renewal",
+                "annual": "annual_auto_renewal",
+                "annual_auto_renewal": "annual_auto_renewal",
+            }
+        else:
+            aliases = {
+                "monthly": "one_time_30_day",
+                "one_time_30_day": "one_time_30_day",
+            }
+        try:
+            return aliases[normalized]
+        except KeyError as exc:
+            raise BillingError(
+                "billing_cycle_not_available",
+                "The requested billing period is not available from this provider.",
+            ) from exc
+
+    @staticmethod
+    def _checkout_amount(
+        plan_code: str,
+        monthly_amount: Decimal,
+        billing_cycle: str,
+    ) -> Decimal:
+        if billing_cycle == "trial_7_day":
+            return Decimal("0.00")
+        if billing_cycle == "annual_auto_renewal":
+            return PUBLIC_PLAN_PRESENTATIONS[plan_code].annual_price
+        return monthly_amount
 
     async def open_checkout_attempt(
         self,
@@ -684,6 +977,16 @@ class BillingService:
         plan = await self.session.get(Plan, attempt.plan_id)
         if plan is None or not plan.is_active:
             raise BillingError("plan_not_available", "The selected plan is no longer available.")
+        identity = await self.session.scalar(
+            select(UserIdentity)
+            .where(
+                UserIdentity.user_id == user_id,
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.is_primary.is_(True),
+                UserIdentity.is_verified.is_(True),
+            )
+            .limit(1)
+        )
         try:
             checkout = await self.provider.create_checkout_session(
                 user_id=user_id,
@@ -692,6 +995,12 @@ class BillingService:
                 plan_name=plan.name,
                 amount=attempt.amount,
                 currency=attempt.currency,
+                billing_cycle=attempt.billing_cycle,
+                customer_email=(
+                    identity.normalized_identifier
+                    if identity and identity.normalized_identifier
+                    else None
+                ),
                 success_url=success_url,
                 cancel_url=cancel_url,
             )
@@ -759,20 +1068,34 @@ class BillingService:
         return subscription
 
     async def billing_portal(self, *, user_id: UUID, return_url: str) -> BillingPortalSession:
-        if not self.provider.capabilities.supports_customer_portal:
-            raise BillingError(
-                "billing_portal_unavailable",
-                "The enabled payment provider does not offer a recurring-subscription portal.",
-            )
         subscription = await self.session.scalar(
             select(Subscription)
             .where(Subscription.user_id == user_id)
             .order_by(Subscription.updated_at.desc())
         )
-        return await self.provider.create_billing_portal_session(
+        if (
+            subscription is None
+            or not subscription.provider
+            or subscription.provider in {"free", "admin", "trial"}
+        ):
+            raise BillingError(
+                "billing_customer_missing",
+                "No provider-managed subscription is available for this account.",
+            )
+        provider = (
+            self.provider
+            if self.provider.provider_name == subscription.provider
+            else self._provider(subscription.provider)
+        )
+        if not provider.capabilities.supports_customer_portal:
+            raise BillingError(
+                "billing_portal_unavailable",
+                "This subscription provider does not offer a customer portal.",
+            )
+        return await provider.create_billing_portal_session(
             user_id=user_id,
             return_url=return_url,
-            provider_customer_id=subscription.provider_customer_id if subscription else None,
+            provider_customer_id=subscription.provider_customer_id,
         )
 
     async def expire_ended_access(self, *, now: datetime | None = None) -> int:
@@ -831,6 +1154,8 @@ class BillingService:
         if provider != "stripe":
             if provider == "nowpayments":
                 return BillingService._normalize_nowpayments_payload(payload)
+            if provider == "creem":
+                return BillingService._normalize_creem_payload(payload)
             return payload
         event_data = payload.get("data")
         if not isinstance(event_data, Mapping) or not isinstance(event_data.get("object"), Mapping):
@@ -879,6 +1204,79 @@ class BillingService:
             "id": payload.get("id"),
             "type": payload.get("type"),
             "data": normalized_data,
+        }
+
+    @staticmethod
+    def _normalize_creem_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        event_type = str(payload.get("eventType") or payload.get("type") or "")
+        raw_object = payload.get("object")
+        item = dict(raw_object) if isinstance(raw_object, Mapping) else {}
+        checkout = (
+            item
+            if str(item.get("object") or "") == "checkout"
+            else dict(item.get("checkout") or {})
+        )
+        subscription = (
+            item
+            if str(item.get("object") or "") == "subscription"
+            else dict(item.get("subscription") or {})
+        )
+        order = dict(item.get("order") or {})
+        product_value = subscription.get("product") or item.get("product") or order.get("product")
+        product = dict(product_value) if isinstance(product_value, Mapping) else {}
+        customer_value = subscription.get("customer") or item.get("customer")
+        customer = dict(customer_value) if isinstance(customer_value, Mapping) else {}
+        metadata: dict[str, Any] = {}
+        for source in (
+            checkout.get("metadata"),
+            subscription.get("metadata"),
+            item.get("metadata"),
+        ):
+            if isinstance(source, Mapping):
+                metadata.update(source)
+        checkout_attempt_id = metadata.get("checkout_attempt_id") or checkout.get(
+            "request_id"
+        )
+        provider_subscription_id = subscription.get("id")
+        if not provider_subscription_id and isinstance(item.get("subscription"), str):
+            provider_subscription_id = item.get("subscription")
+        status = str(
+            subscription.get("status")
+            or order.get("status")
+            or item.get("status")
+            or "pending"
+        )
+        normalized_amount = BillingService._minor_unit_amount(
+            order.get("amount") if order.get("amount") is not None else product.get("price")
+        )
+        normalized = {
+            "user_id": metadata.get("user_id"),
+            "plan_code": metadata.get("plan_code"),
+            "checkout_attempt_id": checkout_attempt_id,
+            "billing_cycle": metadata.get("billing_cycle"),
+            "provider_customer_id": customer.get("id")
+            or (
+                subscription.get("customer")
+                if isinstance(subscription.get("customer"), str)
+                else None
+            )
+            or order.get("customer"),
+            "provider_subscription_id": provider_subscription_id,
+            "provider_payment_reference": subscription.get("last_transaction_id")
+            or order.get("id")
+            or item.get("id"),
+            "status": status,
+            "current_period_start": subscription.get("current_period_start_date"),
+            "current_period_end": subscription.get("current_period_end_date"),
+            "cancel_at_period_end": event_type == "subscription.scheduled_cancel",
+            "amount": normalized_amount,
+            "currency": order.get("currency") or product.get("currency"),
+            "receipt_url": item.get("receipt_url") or order.get("receipt_url"),
+        }
+        return {
+            "id": payload.get("id"),
+            "type": event_type,
+            "data": normalized,
         }
 
     @staticmethod
@@ -933,6 +1331,15 @@ class BillingService:
         raw = payload.get("amount_paid")
         if raw is None:
             raw = payload.get("amount_total")
+        if raw is None:
+            return None
+        try:
+            return str((Decimal(str(raw)) / Decimal("100")).quantize(Decimal("0.01")))
+        except (InvalidOperation, ValueError):
+            return None
+
+    @staticmethod
+    def _minor_unit_amount(raw: Any) -> str | None:
         if raw is None:
             return None
         try:
@@ -1086,6 +1493,10 @@ class BillingService:
             "subscription.updated",
             "invoice.payment_succeeded",
             "payment.finished",
+            "subscription.paid",
+            "subscription.trialing",
+            "subscription.update",
+            "subscription.scheduled_cancel",
         }:
             subscription = await self._upsert_subscription(provider=provider, data=data)
             if subscription.status in {
@@ -1115,6 +1526,7 @@ class BillingService:
             "customer.subscription.deleted",
             "subscription.deleted",
             "subscription.canceled",
+            "subscription.expired",
         }:
             subscription = await self._upsert_subscription(
                 provider=provider, data=data, forced_status=SubscriptionStatus.CANCELED
@@ -1132,7 +1544,12 @@ class BillingService:
                 {},
             )
             return subscription
-        if event_type in {"invoice.payment_failed", "payment.failed"}:
+        if event_type in {
+            "invoice.payment_failed",
+            "payment.failed",
+            "subscription.past_due",
+            "subscription.paused",
+        }:
             subscription = await self._upsert_subscription(
                 provider=provider, data=data, forced_status=SubscriptionStatus.PAST_DUE
             )
@@ -1145,7 +1562,7 @@ class BillingService:
                 {},
             )
             return subscription
-        if event_type == "payment.refunded":
+        if event_type in {"payment.refunded", "refund.created"}:
             subscription = await self._upsert_subscription(
                 provider=provider,
                 data=data,
@@ -1169,7 +1586,7 @@ class BillingService:
             if user_id:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
             return None
-        if event_type in {"charge.refunded", "refund.created", "charge.dispute.created"}:
+        if event_type in {"charge.refunded", "charge.dispute.created", "dispute.created"}:
             user_id = self._parse_uuid(data.get("user_id"))
             if user_id:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
@@ -1184,10 +1601,13 @@ class BillingService:
     ) -> None:
         raw_attempt_id = data.get("checkout_attempt_id")
         if raw_attempt_id in (None, ""):
-            if provider == "nowpayments" or event_type in {
+            requires_checkout = provider == "nowpayments" or event_type in {
                 "checkout.session.completed",
                 "payment.finished",
-            }:
+                "subscription.paid",
+                "subscription.trialing",
+            }
+            if requires_checkout:
                 raise BillingError(
                     "checkout_reference_missing",
                     "A successful payment must match a server-created checkout attempt.",
@@ -1239,15 +1659,21 @@ class BillingService:
             raise BillingError(
                 "checkout_plan_mismatch", "The paid plan does not match the checkout attempt."
             )
+        expected_amount = (
+            plan.price_monthly
+            if attempt.billing_cycle == "trial_7_day" and event_type == "subscription.paid"
+            else attempt.amount
+        )
         if event_type in {
             "checkout.session.completed",
             "invoice.payment_succeeded",
             "payment.finished",
+            "subscription.paid",
         }:
             self._validate_paid_amount_and_currency(
                 paid_amount=data.get("amount"),
                 paid_currency=data.get("currency"),
-                expected_amount=attempt.amount,
+                expected_amount=expected_amount,
                 expected_currency=attempt.currency,
             )
         if provider == "nowpayments" and event_type == "payment.finished":
@@ -1255,7 +1681,7 @@ class BillingService:
         data["checkout_attempt_id"] = str(attempt.id)
         data["user_id"] = str(attempt.user_id)
         data["plan_code"] = plan.code
-        data["amount"] = str(attempt.amount)
+        data["amount"] = str(expected_amount)
         data["currency"] = attempt.currency
 
     def _validate_paid_amount_and_currency(
@@ -1341,6 +1767,8 @@ class BillingService:
             "checkout.session.completed",
             "invoice.payment_succeeded",
             "payment.finished",
+            "subscription.paid",
+            "subscription.trialing",
         } and normalized_status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
             attempt.status = "completed"
             attempt.completed_at = datetime.now(UTC)
@@ -1373,6 +1801,7 @@ class BillingService:
         expected = {
             "stripe": {"invoice.payment_succeeded"},
             "nowpayments": {"payment.finished"},
+            "creem": {"subscription.paid"},
             "static": {"checkout.session.completed"},
         }
         return event_type in expected.get(provider, {"invoice.payment_succeeded"})
@@ -1431,6 +1860,8 @@ class BillingService:
     def _status_from_provider(status: str) -> SubscriptionStatus:
         normalized = status.lower()
         if normalized in {"active", "paid"}:
+            return SubscriptionStatus.ACTIVE
+        if normalized == "scheduled_cancel":
             return SubscriptionStatus.ACTIVE
         if normalized in {"trialing", "trial"}:
             return SubscriptionStatus.TRIALING
@@ -1504,3 +1935,35 @@ def _sort_json(value: Any) -> Any:
     if isinstance(value, list):
         return [_sort_json(item) for item in value]
     return value
+
+
+def _cycle_key(billing_cycle: str) -> str:
+    return {
+        "monthly": "monthly",
+        "monthly_auto_renewal": "monthly",
+        "annual": "annual",
+        "annual_auto_renewal": "annual",
+        "trial_7_day": "trial",
+        "one_time_30_day": "monthly",
+    }.get(billing_cycle, billing_cycle)
+
+
+def _sanitize_billing_profile(profile: Mapping[str, Any] | None) -> dict[str, str]:
+    if not profile:
+        return {}
+    limits = {
+        "first_name": 60,
+        "last_name": 60,
+        "address_line1": 200,
+        "address_line2": 200,
+        "city": 100,
+        "region": 100,
+        "postal_code": 24,
+        "country": 80,
+    }
+    result: dict[str, str] = {}
+    for key, limit in limits.items():
+        value = str(profile.get(key) or "").strip()
+        if value:
+            result[key] = value[:limit]
+    return result

@@ -447,21 +447,43 @@ async def test_signup_with_telegram_link_sends_connected_notification(test_conte
 
 async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
     await _signup_and_verify(test_context, email="trial@example.com")
-    first = await test_context["client"].post("/dashboard/trial/claim", follow_redirects=False)
-    second = await test_context["client"].post("/dashboard/trial/claim", follow_redirects=False)
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User))
+        assert user is not None
+        token = csrf_token(test_context["settings"], user.id)
+    first = await test_context["client"].post(
+        "/dashboard/trial/claim",
+        data={"csrf_token": token},
+        follow_redirects=False,
+    )
+    second = await test_context["client"].post(
+        "/dashboard/trial/claim",
+        data={"csrf_token": token},
+        follow_redirects=False,
+    )
     assert first.headers["location"] == "/dashboard/billing?message=trial_claimed"
     assert second.headers["location"] == "/dashboard/billing?message=trial_claimed"
     async with test_context["session_factory"]() as session:
         trials = (await session.scalars(select(Trial))).all()
         assert len(trials) == 1
+        assert (trials[0].ends_at - trials[0].starts_at).days == 7
 
 
-async def test_private_beta_billing_page_blocks_paid_checkout(test_context):
+async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test_context):
     await _signup_and_verify(test_context, email="billing@example.com")
     page = await test_context["client"].get("/dashboard/billing")
     assert page.status_code == 200
     assert "Subscription and Billing" in page.text
-    assert "Paid billing is disabled" in page.text
+    assert "Paid billing is disabled" not in page.text
+    assert "What billing changes" not in page.text
+    assert "Private beta access" not in page.text
+    assert "Free forever" in page.text
+    assert 'data-billing-page-interval' in page.text
+    assert 'value="annual"' in page.text
+    assert "Try Monitor for 7 days" in page.text
+    assert "The seven-day Creem trial product is not available yet." in page.text
+    assert 'id="billing-checkout-dialog"' in page.text
+    assert "$22" in page.text
     review = await test_context["client"].get(
         "/dashboard/billing/checkout?plan_code=trader",
         follow_redirects=False,

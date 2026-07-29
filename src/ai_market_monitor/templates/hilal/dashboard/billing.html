@@ -11,70 +11,243 @@
   </div>
   <div class="billing-current-meta">
     <span><small>Access source</small><strong>{{ entitlement.source|replace('_', ' ')|title }}</strong></span>
-    {% if trial %}<span><small>Trial access until</small><strong>{{ trial.ends_at|short_dt(user.timezone) }}</strong></span>{% endif %}
-    <span><small>Renewal</small><strong>{{ 'Private beta access' if not billing_enabled else ('Automatic monthly renewal' if billing_capabilities.supports_recurring_billing else 'Manual 30-day renewal') }}</strong></span>
+    {% if trial and entitlement.source == 'trial' %}<span><small>Trial access until</small><strong>{{ trial.ends_at|short_dt(user.timezone) }}</strong></span>{% endif %}
+    <span><small>Renewal</small><strong>{{ 'Free forever' if entitlement.plan.code == 'demo' else ('No automatic renewal' if entitlement.source == 'trial' else ('Automatic renewal' if billing_capabilities.supports_recurring_billing else 'Manual 30-day renewal')) }}</strong></span>
   </div>
 </section>
 
 <section class="panel billing-plan-panel">
   <div class="panel-head">
     <div>
-      <span class="kicker">{{ 'Private beta' if not billing_enabled else 'Plans' }}</span>
-      <h2>{{ 'Billing is paused for invited beta users' if not billing_enabled else 'Choose by monitoring capacity' }}</h2>
-      <p>{{ 'Your access is provisioned without paid checkout while the beta is evaluated.' if not billing_enabled else 'Prices and limits come from the same server plan catalog used at checkout.' }}</p>
+      <span class="kicker">Plans</span>
+      <h2>Choose the level of monitoring you need</h2>
     </div>
   </div>
-  <div class="pricing-grid">
+  <fieldset class="billing-toggle dashboard-billing-toggle" aria-label="Billing interval" data-billing-page-interval>
+    <legend class="sr-only">Choose monthly or annual billing</legend>
+    <label>
+      <input type="radio" name="dashboard_billing_interval" value="monthly" {{ 'checked' if checkout_selected_interval != 'annual' else '' }}>
+      <span>Monthly</span>
+    </label>
+    <label>
+      <input type="radio" name="dashboard_billing_interval" value="annual" {{ 'checked' if checkout_selected_interval == 'annual' else '' }}>
+      <span>Annual</span>
+      <small>Save up to $44</small>
+    </label>
+  </fieldset>
+  <p class="sr-only" aria-live="polite" data-billing-page-interval-status>Prices are shown for monthly billing.</p>
+  <div class="pricing-grid dashboard-pricing-grid">
     {% for code, plan in purchase_plans.items() %}
-      {% set current = code == entitlement.plan.code %}
-      <article class="price-card {{ 'is-featured' if current else '' }}">
-        {% if current %}<span class="badge badge-dark">Current plan</span>{% endif %}
-        <span class="kicker">{{ plan.name }}</span>
-        <div class="price"><strong>${{ plan.monthly_price }}</strong><span>{% if plan.monthly_price == 0 %} free{% elif billing_capabilities.supports_recurring_billing %}/month{% else %}/30 days{% endif %}</span></div>
-        <p>{{ plan.description or 'Configurable monitoring plan.' }}</p>
-        <ul class="feature-list">
-          <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.get('active_strategies') | plan_limit }} active Watchlists</li>
-          <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ plan.limits.get('symbols_per_strategy') | plan_limit }} markets per plan</li>
-          <li><span data-icon="check" data-icon-class="icon-sm"></span>{{ 'Telegram included' if plan.features.get('telegram') else 'In-app delivery' }}</li>
-          <li><span data-icon="check" data-icon-class="icon-sm"></span>In-app evidence and lifecycle history</li>
-        </ul>
-        {% if not billing_enabled %}
-          <a class="btn btn-primary" href="/contact">Contact the beta team</a>
+      {% set presentation = plan_presentations[code] %}
+      {% set current = code in active_paid_plan_codes %}
+      <article class="price-card dashboard-price-card {{ 'is-featured' if code == 'trader' else '' }} {{ 'is-current' if current else '' }}" {% if current %}aria-current="true"{% endif %}>
+        <div class="dashboard-plan-title">
+          <h3>{{ plan.name }}</h3>
+          {% if presentation.badge %}<span class="badge plan-popular-badge">{{ presentation.badge }}</span>{% endif %}
+        </div>
+        {% if current %}<span class="current-plan-label">Current access</span>{% endif %}
+        <p class="plan-description">{{ presentation.description }}</p>
+        <div
+          class="price dashboard-plan-price"
+          data-dashboard-plan-price
+          data-monthly-price="{{ plan.monthly_price | int }}"
+          data-annual-price="{{ presentation.annual_price | int }}"
+          data-free="{{ 'true' if plan.monthly_price == 0 else 'false' }}"
+        >
+          <strong data-dashboard-plan-amount>${{ plan.monthly_price | int }}</strong>
+          <span data-dashboard-plan-period>{{ 'Free forever' if plan.monthly_price == 0 else 'per month' }}</span>
+        </div>
+
+        {% if code == 'demo' %}
+          <button class="btn btn-secondary" type="button" disabled aria-disabled="true">{{ 'Current plan' if current else 'Included with your plan' }}</button>
+        {% elif code == 'trader' and 'pro_trial' in active_paid_plan_codes %}
+          <button class="btn btn-gold" type="button" disabled aria-disabled="true">Monitor trial active</button>
+          <p class="dashboard-trial-note">Your current seven-day access will not be charged.</p>
+        {% elif code == 'trader' and trial_claimable %}
+          <button
+            class="btn btn-gold"
+            type="button"
+            data-billing-dialog-trigger
+            data-dashboard-purchase-button
+            data-plan-code="trader"
+            data-plan-name="Monitor"
+            data-billing-cycle="trial_7_day"
+            data-monthly-cycle="trial_7_day"
+            data-annual-cycle="annual"
+            data-monthly-label="Try Monitor for 7 days"
+            data-annual-label="Choose Monitor annually"
+            {% if not (billing_selection_availability.trader.purchasable and billing_selection_availability.trader.trial) %}disabled aria-disabled="true"{% endif %}
+          >Try Monitor for 7 days</button>
+          <p class="dashboard-trial-note" data-dashboard-trial-note>
+            {% if billing_selection_availability.trader.purchasable and billing_selection_availability.trader.trial %}
+              No charge for seven days. Card checkout shows when the first payment would occur.
+            {% else %}
+              The seven-day Creem trial product is not available yet.
+            {% endif %}
+          </p>
         {% elif current %}
           <button class="btn btn-gold" type="button" disabled aria-disabled="true">Current plan</button>
-        {% elif plan.monthly_price == 0 %}
-          <form method="post" action="/dashboard/billing/checkout">
-            <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
-            <input type="hidden" name="plan_code" value="{{ code }}">
-            <input type="hidden" name="checkout_request_id" value="free-plan-{{ code }}">
-            <button class="btn btn-primary" type="submit">Activate free</button>
-          </form>
         {% else %}
-          <a class="btn btn-primary" href="/dashboard/billing/checkout?plan_code={{ code|urlencode }}">Review and pay</a>
+          <button
+            class="btn btn-primary"
+            type="button"
+            data-billing-dialog-trigger
+            data-dashboard-purchase-button
+            data-plan-code="{{ code }}"
+            data-plan-name="{{ plan.name }}"
+            data-billing-cycle="monthly"
+            data-monthly-cycle="monthly"
+            data-annual-cycle="annual"
+            data-monthly-label="{{ 'Choose Monitor monthly' if code == 'trader' else 'Choose Pro monthly' }}"
+            data-annual-label="{{ 'Choose Monitor annually' if code == 'trader' else 'Choose Pro annually' }}"
+            {% if not (billing_selection_availability[code].purchasable and (billing_selection_availability[code].card_monthly or billing_selection_availability[code].crypto_monthly)) %}disabled aria-disabled="true"{% endif %}
+          >{{ 'Choose Monitor monthly' if code == 'trader' else 'Choose Pro monthly' }}</button>
+        {% endif %}
+
+        <ul class="feature-list dashboard-plan-features">
+          {% for feature in presentation.visible_features %}
+            {% set shown_feature = 'WhatsApp delivery - coming soon' if feature == 'WhatsApp delivery' and not whatsapp_operational else feature %}
+            <li class="{{ 'is-highlighted' if feature == presentation.highlighted_feature else '' }}">
+              <span data-icon="check" data-icon-class="icon-sm"></span><span>{{ shown_feature }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if presentation.additional_features %}
+          <details class="dashboard-plan-details">
+            <summary>View all features</summary>
+            <ul class="feature-list dashboard-plan-features">
+              {% for feature in presentation.additional_features %}
+                <li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ feature }}</span></li>
+              {% endfor %}
+            </ul>
+          </details>
         {% endif %}
       </article>
     {% endfor %}
   </div>
 </section>
 
-<section class="panel billing-history-panel">
-  <div class="panel-head">
-    <div><span class="kicker">Payment history</span><h2>Checkout and receipt records</h2><p>These records come from server-created checkout attempts and verified payment events.</p></div>
+<dialog
+  id="billing-checkout-dialog"
+  class="billing-dialog"
+  aria-labelledby="billing-dialog-title"
+  data-auto-open="{{ 'true' if checkout_auto_open else 'false' }}"
+  data-selected-plan="{{ checkout_selected_plan or '' }}"
+  data-selected-cycle="{{ 'trial_7_day' if checkout_trial_selected else checkout_selected_interval }}"
+>
+  <div class="billing-dialog-shell">
+    <header class="billing-dialog-header">
+      <div>
+        <span class="kicker">Secure checkout</span>
+        <h2 id="billing-dialog-title">Complete your billing details</h2>
+        <p id="billing-dialog-summary">Review the plan and choose how you want to pay.</p>
+      </div>
+      <button class="icon-btn billing-dialog-close" type="button" data-billing-dialog-close aria-label="Close billing details">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <form class="billing-dialog-form" method="post" action="/dashboard/billing/checkout" data-billing-checkout-form>
+      <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
+      <input type="hidden" name="plan_code" value="" data-billing-plan-code>
+      <input type="hidden" name="billing_cycle" value="monthly" data-billing-cycle>
+      <input type="hidden" name="checkout_request_id" value="{{ checkout_request_id }}">
+
+      <section class="billing-dialog-order" aria-label="Order summary">
+        <div><span>Plan</span><strong data-billing-plan-label>Plan</strong></div>
+        <div><span>Price</span><strong data-billing-price-label>Price shown after selection</strong></div>
+      </section>
+
+      <fieldset class="billing-period-options" data-billing-period-options>
+        <legend>Billing period</legend>
+        <label><input type="radio" name="billing_period_choice" value="monthly" checked><span>Monthly</span></label>
+        <label><input type="radio" name="billing_period_choice" value="annual"><span>Annual</span></label>
+      </fieldset>
+
+      <div class="billing-profile-grid">
+        <label><span>First name</span><input type="text" name="first_name" value="{{ billing_profile_defaults.first_name }}" maxlength="60" autocomplete="given-name" required></label>
+        <label><span>Last name</span><input type="text" name="last_name" value="{{ billing_profile_defaults.last_name }}" maxlength="60" autocomplete="family-name" required></label>
+        <label class="billing-profile-wide"><span>Account email</span><input type="email" value="{{ billing_profile_defaults.email }}" autocomplete="email" readonly aria-readonly="true"><small>Payments stay bound to your verified Hilal Markets account.</small></label>
+        <label class="billing-profile-wide"><span>Address</span><input type="text" name="address_line1" maxlength="200" autocomplete="address-line1" required></label>
+        <label class="billing-profile-wide"><span>Address line 2 <small>Optional</small></span><input type="text" name="address_line2" maxlength="200" autocomplete="address-line2"></label>
+        <label><span>City</span><input type="text" name="city" maxlength="100" autocomplete="address-level2"></label>
+        <label><span>State or region</span><input type="text" name="region" maxlength="100" autocomplete="address-level1"></label>
+        <label><span>Postal code</span><input type="text" name="postal_code" maxlength="24" autocomplete="postal-code"></label>
+        <label><span>Country</span><input type="text" name="country" maxlength="80" autocomplete="country-name" required></label>
+      </div>
+
+      <fieldset class="billing-method-options">
+        <legend>Payment method</legend>
+        <label data-billing-method-card>
+          <input type="radio" name="payment_method" value="card">
+          <span class="billing-method-card"><span data-icon="billing" data-icon-class="icon"></span><strong>Card</strong><small>Secure checkout with {{ 'Creem' if billing_method_providers.card == 'creem' else (billing_method_providers.card|title if billing_method_providers.card else 'the card provider') }}</small></span>
+        </label>
+        <label data-billing-method-crypto>
+          <input type="radio" name="payment_method" value="crypto">
+          <span class="billing-method-card"><span data-icon="wallet" data-icon-class="icon"></span><strong>Crypto</strong><small>Invoice with {{ 'NOWPayments' if billing_method_providers.crypto == 'nowpayments' else (billing_method_providers.crypto|title if billing_method_providers.crypto else 'the crypto provider') }}</small></span>
+        </label>
+      </fieldset>
+
+      <label class="checkout-consent">
+        <input type="checkbox" name="terms_accepted" value="true" required>
+        <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, including the price and renewal terms shown by the selected provider.</span>
+      </label>
+      <p class="billing-dialog-status" role="status" aria-live="polite" tabindex="-1" data-billing-dialog-status></p>
+      <div class="billing-dialog-actions">
+        <button class="btn btn-secondary" type="button" data-billing-dialog-close>Cancel</button>
+        <button class="btn btn-primary" type="submit" data-billing-submit disabled>Continue to secure payment</button>
+      </div>
+      <div class="checkout-security"><span data-icon="shield" data-icon-class="icon"></span><p>Card and wallet credentials are entered only on Creem or NOWPayments. Hilal Markets does not receive them.</p></div>
+    </form>
   </div>
-  {% if billing_history %}
-    <div class="table-wrap"><table><thead><tr><th>Plan</th><th>Provider</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead><tbody>
-    {% for row in billing_history %}<tr><td>{{ row.plan_name }}</td><td>{{ row.attempt.provider }}</td><td>{{ row.attempt.amount }} {{ row.attempt.currency }}</td><td><span class="badge badge-dark">{{ row.attempt.status.replace('_', ' ')|title }}</span></td><td>{{ row.attempt.created_at|short_dt(user.timezone) }}</td></tr>{% endfor %}
-    </tbody></table></div>
-  {% else %}<div class="empty-state"><strong>No payment history yet</strong><p>A verified checkout will appear here.</p></div>{% endif %}
-  {% if payment_receipts %}<div class="row wrap billing-receipts">{% for receipt in payment_receipts %}{% if receipt.receipt_url %}<a class="btn btn-secondary" href="{{ receipt.receipt_url }}" target="_blank" rel="noopener">Open {{ receipt.plan_code|title }} receipt</a>{% endif %}{% endfor %}</div>{% endif %}
-  {% if not billing_enabled %}<div class="notice"><span data-icon="info" data-icon-class="icon"></span><div><strong>Paid billing is disabled</strong><p>Private-beta access is provisioned by invitation; no charge or automatic renewal can be created here.</p></div></div>{% elif billing_capabilities.supports_customer_portal %}<form method="post" action="/dashboard/billing/portal"><input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}"><button class="btn btn-secondary" type="submit">Manage recurring subscription</button></form>{% else %}<div class="notice"><span data-icon="info" data-icon-class="icon"></span><div><strong>No automatic cancellation portal</strong><p>{{ billing_provider|title }} provides one-time 30-day access. It does not charge again automatically.</p></div></div>{% endif %}
+</dialog>
+<script id="billing-plan-data" type="application/json">{{ billing_plan_data|tojson }}</script>
+
+<section class="panel dashboard-plan-comparison" aria-labelledby="dashboard-plan-comparison-title">
+  <div class="panel-head">
+    <div><span class="kicker">Compare</span><h2 id="dashboard-plan-comparison-title">Plan details at a glance</h2></div>
+  </div>
+  <div class="table-wrap dashboard-comparison-desktop">
+    <table>
+      <caption class="sr-only">Explore, Monitor, and Pro plan comparison</caption>
+      <thead><tr><th scope="col">Feature</th><th scope="col">Explore</th><th scope="col">Monitor</th><th scope="col">Pro</th></tr></thead>
+      <tbody>
+        {% for feature, explore, monitor, pro in plan_comparison %}
+          <tr>
+            <th scope="row">{{ feature }}</th>
+            <td>{{ explore }}</td>
+            <td>{{ monitor }}</td>
+            <td>{{ 'Included' if feature == 'WhatsApp' and whatsapp_operational else pro }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="dashboard-comparison-mobile">
+    {% for plan_name, value_index in [('Explore', 1), ('Monitor', 2), ('Pro', 3)] %}
+      <article>
+        <h3>{{ plan_name }}</h3>
+        <dl>
+          {% for row in plan_comparison %}
+            <div><dt>{{ row[0] }}</dt><dd>{{ 'Included' if row[0] == 'WhatsApp' and plan_name == 'Pro' and whatsapp_operational else row[value_index] }}</dd></div>
+          {% endfor %}
+        </dl>
+      </article>
+    {% endfor %}
+  </div>
 </section>
 
-<div class="notice">
-  <span data-icon="info" data-icon-class="icon"></span>
-  <div>
-    <strong>What billing changes</strong>
-    <p>Paid plans expand monitoring limits and delivery features. They do not change screening conclusions or create trading advice.</p>
-  </div>
-</div>
+<section class="panel billing-history-panel">
+  {% include "hilal/dashboard/partials/billing_history.html" %}
+  {% if billing_enabled %}
+    <div class="billing-history-actions">
+      <a class="btn btn-secondary" href="/dashboard/billing/portal">
+        <span data-icon="billing" data-icon-class="icon-sm"></span>
+        Open billing portal
+      </a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260728-checkout"></script>
 {% endblock %}

@@ -40,6 +40,15 @@ def _operand_names(preview) -> set[str]:
     return names
 
 
+def _stated_directions(preview) -> set[str]:
+    """Sides the compiled conditions actually carry."""
+    return {
+        str((condition.left.parameters or {}).get("direction"))
+        for condition in preview.strategy.conditions.children
+        if (condition.left.parameters or {}).get("direction") in {"up", "down"}
+    }
+
+
 def test_prompt_understanding_corpus_has_required_size_and_families():
     cases = _load_cases()
     families = {case["source_family"] for case in cases}
@@ -89,6 +98,16 @@ async def test_prompt_understanding_corpus_interprets_generated_cases(case: dict
     if not case["should_block"]:
         expected_names = set(case["expected_condition_names"])
         assert expected_names.intersection(names), (case["prompt"], expected_names, names)
+        # `percentage_change` carries the side as a parameter instead of spelling it
+        # into the operand name, so the side has to be asserted separately — otherwise
+        # the migration off `percent_change_up` would have quietly dropped the one
+        # thing that operand's name used to guarantee.
+        if case.get("expected_direction"):
+            assert case["expected_direction"] in _stated_directions(preview), (
+                case["prompt"],
+                case["expected_direction"],
+                _stated_directions(preview),
+            )
         if case["expected_timeframe"]:
             assert any(
                 condition.timeframe == case["expected_timeframe"]

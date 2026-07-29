@@ -69,7 +69,7 @@ async def test_context() -> AsyncIterator[dict]:
             },
         },
         disclaimer_version="test-2026-06",
-        trial_days=14,
+        trial_days=7,
     )
 
     async def override_session() -> AsyncIterator[AsyncSession]:

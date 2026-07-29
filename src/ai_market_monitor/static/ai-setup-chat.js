@@ -124,6 +124,7 @@
       wrapper.className = "ai-chat-process-state mechanic";
       wrapper.setAttribute("role", "status");
       wrapper.dataset.testid = "ai-setup-assistant-message";
+      if (item.id) wrapper.dataset.messageId = item.id;
       wrapper.dataset.processState = stage;
       wrapper.innerHTML = `
         ${window.icon?.("settings", "icon") || ""}
@@ -136,6 +137,7 @@
       wrapper.className = "ai-chat-process-state";
       wrapper.setAttribute("role", "status");
       wrapper.dataset.testid = "ai-setup-assistant-message";
+      if (item.id) wrapper.dataset.messageId = item.id;
       wrapper.dataset.processState = state;
       wrapper.innerHTML = `
         ${window.icon?.("workflow", "icon") || ""}
@@ -145,6 +147,7 @@
     const wrapper = document.createElement("article");
     wrapper.className = `ai-chat-message ${user ? "user" : "assistant"}${item.pending ? " pending" : ""}${item.failed ? " failed" : ""}`;
     if (!user) wrapper.dataset.testid = "ai-setup-assistant-message";
+    if (item.id) wrapper.dataset.messageId = item.id;
     if (item.client_message_id) wrapper.dataset.clientMessageId = item.client_message_id;
     const avatarIcon = window.icon?.(user ? "user" : "spark", "icon") || "";
     const timestamp = item.created_at

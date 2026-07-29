@@ -13,6 +13,7 @@ from ai_market_monitor.db.models import (
     AlertDelivery,
     AlertInboxItem,
     AssetShariaAssessment,
+    CanonicalAsset,
     SetupConditionResult,
     SetupInstance,
     SetupLifecycleEvent,
@@ -197,6 +198,20 @@ async def lifecycle_cards(
                 assessment.status.value,
             )
 
+    asset_by_symbol: dict[str, CanonicalAsset] = {}
+    if assets:
+        canonical_assets = list(
+            (
+                await session.scalars(
+                    select(CanonicalAsset)
+                    .where(CanonicalAsset.symbol.in_(assets))
+                    .order_by(CanonicalAsset.created_at.desc())
+                )
+            ).all()
+        )
+        for asset in canonical_assets:
+            asset_by_symbol.setdefault(asset.symbol.upper(), asset)
+
     return [
         _lifecycle_card(
             setup,
@@ -214,6 +229,7 @@ async def lifecycle_cards(
             )
             if setup.sharia_methodology_id
             else None,
+            asset_by_symbol.get(setup.symbol.partition("/")[0].upper()),
         )
         for setup, strategy_name, version_number in setup_rows
     ]
@@ -237,6 +253,7 @@ def _lifecycle_card(
     deliveries: list[AlertDelivery] | None = None,
     latest_inbox_item: AlertInboxItem | None = None,
     current_sharia_status: str | None = None,
+    asset: CanonicalAsset | None = None,
 ) -> dict[str, Any]:
     deliveries = deliveries or []
     current_index = stage_index(setup.state)
@@ -300,9 +317,18 @@ def _lifecycle_card(
                 "reason": "setup detected",
             }
         )
+    asset_symbol = setup.symbol.partition("/")[0].upper()
+    logo_symbol = asset.symbol.upper() if asset is not None else asset_symbol
+    logo_url = str((asset.provider_ids or {}).get("logo_url") or "").strip() if asset else ""
     return {
         "id": setup.id,
         "symbol": setup.symbol,
+        "asset_symbol": logo_symbol,
+        "logo_module_url": (
+            "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
+            f"dist/svgs/tokens/branded/{logo_symbol}.svg.js"
+        ),
+        "logo_url": logo_url or None,
         "exchange": setup.exchange,
         "timeframe": setup.timeframe,
         "direction": setup.direction,

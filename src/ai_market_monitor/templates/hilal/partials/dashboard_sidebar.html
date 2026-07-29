@@ -34,7 +34,7 @@
     <div class="avatar">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</div>
     <div class="meta">
       <strong>{{ (user.display_name or 'Hilal Markets user') if user else 'Hilal Markets' }}</strong>
-      <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Screened market intelligence') }}</small>
+      <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Halal Market intelligence') }}</small>
     </div>
     {% if user %}
     <form method="post" action="/logout"><button class="btn btn-ghost btn-icon" type="submit" aria-label="Sign out"><span data-icon="logout" data-icon-class="icon"></span></button></form>

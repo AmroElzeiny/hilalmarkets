@@ -13,14 +13,8 @@ export type FirstTouchAttribution = {
   landing_page?: string
 }
 
-export type WaitlistErrorType =
-  | 'invalid_email'
-  | 'required_field'
-  | 'duplicate_email'
-  | 'rate_limited'
-  | 'network_error'
-  | 'server_error'
-  | 'unknown_error'
+export type BillingInterval = 'monthly' | 'annual'
+export type PublicPlanCode = 'demo' | 'trader' | 'pro'
 
 type EventParameters = Record<string, string | number | boolean | undefined>
 
@@ -33,6 +27,28 @@ type AnalyticsRuntimeConfig = {
   xPixelEnabled?: boolean
   siteUrl?: string
   debug?: boolean
+}
+
+type CommerceRuntimeConfig = {
+  billingEnabled?: boolean
+  cardCheckoutAvailable?: boolean
+  cryptoCheckoutAvailable?: boolean
+  whatsappOperational?: boolean
+  annualBillingSupported?: boolean
+  plans?: Array<{
+    code: PublicPlanCode
+    name: string
+    monthlyPrice: number
+    annualPrice: number
+    description: string
+    button: string
+    badge?: string | null
+    trialNote?: string | null
+    visibleFeatures: string[]
+    additionalFeatures: string[]
+    highlightedFeature?: string | null
+  }>
+  comparisonRows?: string[][]
 }
 
 export type LegalRuntimeConfig = {
@@ -49,6 +65,7 @@ declare global {
     HilalMarketsRuntimeConfig?: {
       analytics?: AnalyticsRuntimeConfig
       legal?: LegalRuntimeConfig
+      commerce?: CommerceRuntimeConfig
     }
     HilalAnalytics?: typeof publicAnalyticsApi
     dataLayer?: unknown[]
@@ -369,55 +386,67 @@ export function trackCtaClick(
   )
 }
 
-export function trackWaitlistFormView(formLocation: string): boolean {
-  return emitOnce(`waitlist-view:${pagePath()}:${formLocation}`, () =>
-    emitGoogle('waitlist_form_view', {
-      form_location: formLocation.slice(0, 80),
-      page_path: pagePath(),
-    }),
-  )
+function validPlanCode(value: string): value is PublicPlanCode {
+  return value === 'demo' || value === 'trader' || value === 'pro'
 }
 
-export function trackWaitlistFormStart(formLocation: string): boolean {
-  return emitOnce(`waitlist-start:${pagePath()}:${formLocation}`, () =>
-    emitGoogle('waitlist_form_start', {
-      form_location: formLocation.slice(0, 80),
-      page_path: pagePath(),
-    }),
-  )
+function validBillingInterval(value: string): value is BillingInterval {
+  return value === 'monthly' || value === 'annual'
 }
 
-export function trackWaitlistSubmitAttempt(formLocation: string): boolean {
-  return emitDebounced(`waitlist-attempt:${pagePath()}:${formLocation}`, () =>
-    emitGoogle('waitlist_submit_attempt', {
-      form_location: formLocation.slice(0, 80),
-      page_path: pagePath(),
-    }),
-  )
-}
-
-export function trackWaitlistSuccess(
-  formLocation: string,
-  submissionId = '',
+function commerceEvent(
+  event: string,
+  planCode?: string,
+  billingInterval?: string,
+  errorType?: string,
 ): boolean {
-  const eventScope = submissionId.trim().slice(0, 128)
-    || `${pagePath()}:${formLocation.slice(0, 80)}`
-  const google = emitOnce(`waitlist-success:${eventScope}`, () =>
-    emitGoogle('waitlist_signup_success', {}),
-  )
-  const meta = emitOnce(`meta-lead:${eventScope}`, () => emitMeta('Lead'))
-  return google || meta
+  const parameters: EventParameters = { page_path: pagePath() }
+  if (planCode && validPlanCode(planCode)) parameters.plan_code = planCode
+  if (billingInterval && validBillingInterval(billingInterval)) {
+    parameters.billing_interval = billingInterval
+  }
+  if (errorType) parameters.error_type = errorType.replace(/[^a-z0-9_]/gi, '').slice(0, 60)
+  return emitGoogle(event, parameters)
 }
 
-export function trackWaitlistError(
-  errorType: WaitlistErrorType,
-  formLocation: string,
+export function trackPricingSectionView(): boolean {
+  return emitOnce(`pricing-view:${googlePageViewSequence}:${pagePath()}`, () =>
+    commerceEvent('pricing_section_view'),
+  )
+}
+
+export function trackBillingIntervalChanged(interval: BillingInterval): boolean {
+  return commerceEvent('billing_interval_changed', undefined, interval)
+}
+
+export function trackPlanSelected(planCode: PublicPlanCode, interval: BillingInterval): boolean {
+  return emitDebounced(`plan-selected:${planCode}:${interval}`, () =>
+    commerceEvent('plan_selected', planCode, interval),
+  )
+}
+
+export function trackCheckoutStarted(planCode: PublicPlanCode, interval: BillingInterval): boolean {
+  return emitDebounced(`checkout-started:${planCode}:${interval}`, () =>
+    commerceEvent('checkout_started', planCode, interval),
+  )
+}
+
+export function trackCheckoutCompleted(planCode: PublicPlanCode, interval: BillingInterval): boolean {
+  return emitOnce(`checkout-completed:${planCode}:${interval}`, () =>
+    commerceEvent('checkout_completed', planCode, interval),
+  )
+}
+
+export function trackCheckoutCancelled(planCode: PublicPlanCode, interval: BillingInterval): boolean {
+  return commerceEvent('checkout_cancelled', planCode, interval)
+}
+
+export function trackCheckoutFailed(
+  planCode: PublicPlanCode,
+  interval: BillingInterval,
+  errorType: string,
 ): boolean {
-  return emitGoogle('waitlist_form_error', {
-    error_type: errorType,
-    form_location: formLocation.slice(0, 80),
-    page_path: pagePath(),
-  })
+  return commerceEvent('checkout_failed', planCode, interval, errorType)
 }
 
 function readStoredAttribution(): FirstTouchAttribution | null {
@@ -533,11 +562,13 @@ const publicAnalyticsApi = {
   trackSectionView,
   trackFaqOpen,
   trackCtaClick,
-  trackWaitlistFormView,
-  trackWaitlistFormStart,
-  trackWaitlistSubmitAttempt,
-  trackWaitlistSuccess,
-  trackWaitlistError,
+  trackPricingSectionView,
+  trackBillingIntervalChanged,
+  trackPlanSelected,
+  trackCheckoutStarted,
+  trackCheckoutCompleted,
+  trackCheckoutCancelled,
+  trackCheckoutFailed,
   captureFirstTouchAttribution,
   getFirstTouchAttribution,
 }

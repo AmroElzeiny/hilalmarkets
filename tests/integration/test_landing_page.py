@@ -21,7 +21,9 @@ async def test_landing_page_serves_supplied_react_design_without_legacy_shell(
 
     source = LANDING_SOURCE.read_text(encoding="utf-8")
     assert "A better way for Muslim crypto traders" in source
-    assert "Join the waitlist" in source
+    assert 'analyticsName="pricing"' in source
+    assert "<Pricing />" in source
+    assert "Join the waitlist" not in source
     for forbidden in ("guaranteed profits", "guaranteed returns", "fake win rate"):
         assert forbidden not in source.casefold()
 
@@ -50,8 +52,10 @@ async def test_landing_page_links_to_primary_start_paths(test_context):
         / "10Footer-1"
         / "index.tsx"
     ).read_text(encoding="utf-8")
-    assert 'href="#waitlist"' in source
-    assert "join_waitlist" in chrome
+    assert 'href="/subscribe?plan_code=demo&billing_interval=monthly"' in source
+    assert "{ label: 'Pricing', target: '#pricing' }" in chrome
+    assert "Get started" in chrome
+    assert "Sign in" in chrome
     for href in ('href="/privacy"', 'href="/terms"', 'href="/contact"'):
         assert href in footer
     assert "TODO_" not in response.text
@@ -97,6 +101,57 @@ async def test_dashboard_entry_uses_saved_session_or_signup(test_context):
     )
     assert authenticated.status_code == 303
     assert authenticated.headers["location"] == "/dashboard"
+
+
+async def test_subscription_selection_is_validated_and_preserved_through_signup(
+    test_context,
+):
+    selected = await test_context["client"].get(
+        "/subscribe?plan_code=trader&billing_interval=annual",
+        follow_redirects=False,
+    )
+    assert selected.status_code == 303
+    assert selected.headers["location"] == (
+        "/signup?plan_code=trader&billing_interval=annual"
+    )
+
+    invalid = await test_context["client"].get(
+        "/subscribe?plan_code=internal&billing_interval=annual",
+        follow_redirects=False,
+    )
+    assert invalid.status_code == 303
+    assert invalid.headers["location"] == "/#pricing"
+
+    requested = await test_context["client"].post(
+        "/signup",
+        data={
+            "first_name": "Plan",
+            "last_name": "Tester",
+            "email": "pricing-selection@example.com",
+            "password": "CorrectHorse123!",
+            "repeat_password": "CorrectHorse123!",
+            "plan_code": "trader",
+            "billing_interval": "annual",
+        },
+        follow_redirects=False,
+    )
+    assert "plan_code=trader" in requested.headers["location"]
+    assert "billing_interval=annual" in requested.headers["location"]
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    verified = await test_context["client"].post(
+        "/signup/verify",
+        data={
+            "email": "pricing-selection@example.com",
+            "code": code,
+            "plan_code": "trader",
+            "billing_interval": "annual",
+        },
+        follow_redirects=False,
+    )
+    assert verified.headers["location"] == (
+        "/dashboard/billing?selected_plan=trader&billing_interval=annual"
+        "&checkout=1&error=billing_disabled"
+    )
 
 
 async def test_dashboard_preview_pages_are_available(test_context):

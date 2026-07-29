@@ -1,54 +1,93 @@
 # Billing Setup
 
-HilalMarkets supports the billing provider abstraction in code, but the active launch
-configuration uses NOWPayments hosted crypto invoices.
+Hilal Markets supports provider-specific checkout by payment method:
 
-## NOWPayments
+- Card subscriptions: Creem.
+- Crypto payments: NOWPayments one-time 30-day invoices.
+- Stripe remains available for existing deployments.
 
-1. Create or open a NOWPayments account.
-2. Generate an API key in the NOWPayments dashboard.
-3. Set:
-   - `BILLING_ENABLED=true`
-   - `BILLING_PROVIDER=nowpayments`
-   - `NOWPAYMENTS_API_KEY`
-   - `NOWPAYMENTS_BASE_URL=https://api.nowpayments.io`
-   - `BILLING_WEBHOOK_SECRET` to the NOWPayments IPN secret from the dashboard
-4. Configure the NOWPayments IPN callback URL:
-   - `/api/v1/billing/webhooks/nowpayments`
-5. Checkout uses `POST /v1/invoice` and redirects the user to the returned hosted invoice URL.
-6. Payment confirmation must come from the NOWPayments IPN webhook, not from Telegram or a
-   dashboard button click.
+No checkout redirect grants access. A signed, idempotently recorded provider webhook must match a
+server-created checkout attempt before a subscription or receipt email is created.
 
-NOWPayments invoices in this build purchase **30 days of access once**. They do not create an
-automatically renewing subscription, do not expose a cancellation portal, and do not imply a
-future automatic charge. A new verified invoice extends access for another paid period. The
-worker expires `cancel_at_period_end` access after the verified period ends.
+## Creem Card Subscriptions
 
-NOWPayments separately documents a Recurring Payments API under `/v1/subscriptions`. This
-repository does not call that API. The capability flags describe the implemented invoice adapter,
-not every product offered by NOWPayments. Enabling recurring billing later requires a separate
-adapter, catalog reconciliation, webhook tests, cancellation behavior, and customer-facing review.
-See the [official NOWPayments API documentation](https://documenter.getpostman.com/view/7907941/2s93JusNJt).
+1. Create separate Creem products for:
+   - `trader_monthly` (customer-facing **Monitor**, monthly)
+   - `trader_annual` (customer-facing **Monitor**, annual)
+   - `pro_monthly`
+   - `pro_annual`
+2. Optionally configure `trader_trial` in Creem as a seven-day recurring trial. The application
+   does not invent or override provider product terms, and leaves the trial CTA unavailable until
+   that exact product is configured.
+3. Set server-only values:
 
-Before activation, the server matches the signed event to its own checkout attempt and validates
-the user, plan, amount, and currency. The default amount tolerance is zero and overpayments enter
-manual review unless `BILLING_ALLOW_OVERPAYMENT` is explicitly enabled. Failed, expired,
-refunded, duplicate, and mismatched events never create a second entitlement transition or
-payment-success email.
+   ```env
+   BILLING_ENABLED=true
+   BILLING_CARD_PROVIDER=creem
+   CREEM_API_KEY=<rotated server secret>
+   CREEM_WEBHOOK_SECRET=<Creem signing secret>
+   CREEM_PRODUCT_IDS={"trader_monthly":"prod_...","trader_annual":"prod_...","pro_monthly":"prod_...","pro_annual":"prod_..."}
+   CREEM_API_BASE=https://api.creem.io
+   ```
 
-NOWPayments signs IPN callbacks using the `x-nowpayments-sig` header. The server verifies it with
-HMAC-SHA512 over the alphabetically sorted JSON body using `BILLING_WEBHOOK_SECRET`.
+   A seven-day trial product is optional. Keep the trial CTA unavailable until
+   its exact provider terms have been separately verified and configured.
 
-## Stripe Legacy Support
+4. Configure the webhook URL:
+   `/api/v1/billing/webhooks/creem`
+5. Subscribe to the required checkout, subscription, payment, cancellation, refund, and dispute
+   events.
+6. Reconcile each product's price, currency, billing interval, and trial setting against the
+   application plan catalog before enabling checkout.
 
-Stripe classes remain in the billing abstraction for compatibility with existing events. When
-Stripe is intentionally selected, its subscription period and customer portal support automatic
-monthly renewal and cancellation. Do not mix Stripe wording with a NOWPayments deployment.
+The application calls `POST /v1/checkouts` for every checkout attempt. The attempt UUID is sent as
+Creem's `request_id`, so every order receives a unique hosted checkout URL while remaining
+idempotently bound to the authenticated user, plan, interval, and canonical amount.
 
-## Trial Rule
+Creem webhook signatures use HMAC-SHA256 over the raw body from the `creem-signature` header.
+`subscription.trialing` may activate the configured trial. `subscription.paid` is required for a
+paid entitlement and payment receipt. A returned success page without that signed state remains
+pending.
 
-The beta trial is a conditional 14-day monitoring cycle. The user becomes trial-eligible during
-onboarding, but the first cycle starts only when the first approved live monitor activates. If no
-qualifying live setup alert is successfully delivered during a cycle, the cycle renews automatically
-unless the no-alert outcome was caused by user-side ineligibility such as no active monitor or no
-verified alert channel.
+Official references:
+
+- <https://docs.creem.io/api-reference/endpoint/create-checkout>
+- <https://docs.creem.io/code/webhooks>
+- <https://docs.creem.io/features/trials>
+- <https://docs.creem.io/features/customer-portal>
+
+## NOWPayments Crypto Invoices
+
+Set:
+
+```env
+BILLING_ENABLED=true
+BILLING_CRYPTO_PROVIDER=nowpayments
+NOWPAYMENTS_API_KEY=<server secret>
+NOWPAYMENTS_IPN_SECRET=<IPN signing secret>
+NOWPAYMENTS_BASE_URL=https://api.nowpayments.io
+```
+
+Configure `/api/v1/billing/webhooks/nowpayments` as the IPN callback. NOWPayments invoices in this
+implementation purchase 30 days of access once. They do not create an automatically renewing
+subscription or customer cancellation portal.
+
+The server validates checkout ID, user ownership, plan, amount, currency, settlement, and the
+HMAC-SHA512 IPN signature before granting access.
+
+## Receipts
+
+One verified payment period creates at most one `PaymentEmailDelivery`. The worker sends the
+branded receipt to the user's verified primary email. Provider retries and duplicate webhooks
+reuse the same event key and cannot create duplicate logical receipts.
+
+## Deployment Safety
+
+- Keep API and webhook secrets in deployment secrets, never public runtime configuration.
+- Rotate any credential pasted into chat, tickets, or terminal history before production use.
+- Use `https://test-api.creem.io` for sandbox acceptance and `https://api.creem.io` only in
+  production.
+- Run the Alembic migration before enabling checkout.
+- Test monthly, annual, trial, cancellation, failed payment, refund, dispute, duplicate webhook,
+  and delayed webhook paths in provider sandbox.
+- Keep `BILLING_ENABLED=false` until product reconciliation and webhook delivery are complete.

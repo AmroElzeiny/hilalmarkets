@@ -159,6 +159,510 @@ body:hover *::-webkit-scrollbar-thumb {
   color: var(--color-ink);
 }
 
+/* ---- Public navigation -------------------------------------------------- */
+.site-menu-toggle {
+  min-width: 54px;
+  min-height: 44px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 14px 34px -22px rgb(43 46 53 / 60%);
+}
+
+.site-menu-toggle:hover,
+.site-menu-toggle:active {
+  background: #eef1f4;
+}
+
+.site-menu-toggle:focus-visible,
+.site-mobile-menu a:focus-visible,
+.billing-toggle label:focus-within,
+.plan-cta:focus-visible,
+.feature-expander:focus-visible {
+  outline: 3px solid var(--color-apple-deep);
+  outline-offset: 3px;
+}
+
+.site-mobile-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 20px;
+  left: 20px;
+  z-index: 60;
+  padding: 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 24px;
+  background: var(--color-surface);
+  box-shadow: 0 24px 50px -28px rgb(43 46 53 / 55%);
+}
+
+.site-mobile-menu.is-open {
+  display: grid;
+  gap: 4px;
+}
+
+.site-mobile-menu a {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: var(--color-ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.site-mobile-menu a:hover,
+.site-mobile-menu a:active {
+  background: #eef1f4;
+}
+
+.site-mobile-menu .site-mobile-primary {
+  justify-content: center;
+  margin-top: 4px;
+  background: var(--color-apple);
+}
+
+/* ---- Pricing ------------------------------------------------------------ */
+.pricing-section {
+  width: min(100%, 1240px);
+  margin-inline: auto;
+  padding: clamp(84px, 9vw, 132px) 20px;
+}
+
+.pricing-heading {
+  width: min(100%, 760px);
+  margin-inline: auto;
+  text-align: center;
+}
+
+.pricing-kicker {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--color-apple-deep);
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+.pricing-heading h2 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: clamp(34px, 4.3vw, 54px);
+  font-weight: 500;
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+}
+
+.pricing-heading p {
+  width: min(100%, 650px);
+  margin: 20px auto 0;
+  color: var(--color-ink);
+  font-size: clamp(16px, 1.5vw, 18px);
+  line-height: 1.55;
+}
+
+.billing-toggle {
+  width: fit-content;
+  margin: 34px auto 0;
+  padding: 5px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  gap: 4px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: #eef1f4;
+}
+
+.billing-toggle label {
+  position: relative;
+  min-height: 48px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 999px;
+  color: var(--color-ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.billing-toggle label.is-selected {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 10px 24px -18px rgb(43 46 53 / 65%);
+}
+
+.billing-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.billing-toggle small {
+  color: var(--color-apple-deep);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pricing-grid {
+  margin-top: 46px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 18px;
+}
+
+.pricing-card {
+  position: relative;
+  min-width: 0;
+  padding: clamp(24px, 2.6vw, 34px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-hairline);
+  border-radius: 28px;
+  background: var(--color-surface);
+  box-shadow: 0 26px 52px -40px rgb(43 46 53 / 48%);
+}
+
+.pricing-card.is-popular {
+  border-color: var(--color-apple-deep);
+  background: var(--color-surface);
+  box-shadow: 0 30px 60px -38px rgb(85 113 42 / 58%);
+}
+
+.popular-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--color-apple);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.plan-title-row {
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.plan-title-row h3 {
+  min-width: 0;
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.pricing-card-head {
+  min-height: 132px;
+}
+
+.pricing-card-head p {
+  margin-top: 14px;
+  color: var(--color-ink);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.plan-price {
+  min-height: 82px;
+  margin-top: 22px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.plan-price strong {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: clamp(38px, 4vw, 52px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: normal;
+}
+
+.plan-price span {
+  color: var(--color-ink);
+  font-size: 14px;
+}
+
+.annual-saving {
+  min-height: 22px;
+  margin-top: -10px;
+  color: var(--color-apple-deep);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.annual-saving.is-placeholder {
+  visibility: hidden;
+}
+
+.plan-cta {
+  min-height: 48px;
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-ink);
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-surface);
+  font-size: 15px;
+  font-weight: 750;
+  transition: translate 180ms ease, background-color 180ms ease;
+}
+
+.pricing-card.is-popular .plan-cta {
+  border-color: var(--color-apple);
+  background: var(--color-apple);
+  color: var(--color-ink);
+}
+
+.plan-cta:hover {
+  translate: 0 -2px;
+}
+
+.plan-cta:active {
+  translate: 0 0;
+}
+
+.billing-availability {
+  margin: 12px 2px 0;
+  color: #6b511b;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.trial-payment-note {
+  margin: 10px 2px 0;
+  color: var(--color-apple-deep);
+  font-size: 12.5px;
+  font-weight: 750;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.plan-features {
+  margin-top: 26px;
+  display: grid;
+  gap: 13px;
+}
+
+.plan-features li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.plan-features li.is-highlighted {
+  margin-inline: -8px;
+  padding: 9px 8px;
+  border: 1px solid rgb(85 113 42 / 24%);
+  border-radius: 12px;
+  background: #f4f9e8;
+  color: var(--color-ink);
+  font-weight: 750;
+}
+
+.feature-check {
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  border-radius: 50%;
+  background: #e8fbbf;
+  color: var(--color-apple-deep);
+}
+
+.plan-features-extra {
+  margin-top: 13px;
+}
+
+.feature-expander {
+  min-height: 44px;
+  margin-top: auto;
+  padding-top: 22px;
+  align-self: flex-start;
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-decoration-color: rgb(43 46 53 / 30%);
+  text-underline-offset: 5px;
+}
+
+.pricing-trust {
+  width: min(100%, 850px);
+  margin: 34px auto 0;
+  padding: 20px 24px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 18px;
+  background: #eef1f4;
+  color: var(--color-ink);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.comparison-section {
+  margin-top: clamp(60px, 7vw, 92px);
+}
+
+.comparison-heading {
+  margin-bottom: 24px;
+}
+
+.comparison-heading h3 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 500;
+}
+
+.comparison-desktop {
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  border-radius: 24px;
+  background: var(--color-surface);
+}
+
+.comparison-desktop table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.comparison-desktop th,
+.comparison-desktop td {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: left;
+  vertical-align: top;
+}
+
+.comparison-desktop thead th {
+  background: #eef1f4;
+  color: var(--color-ink);
+  font-weight: 750;
+}
+
+.comparison-desktop tbody th {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.comparison-desktop tr:last-child > * {
+  border-bottom: 0;
+}
+
+.comparison-mobile {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .pricing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pricing-card:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 767px) {
+  .pricing-section {
+    padding-inline: 16px;
+  }
+
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-card:last-child {
+    grid-column: auto;
+  }
+
+  .pricing-card-head {
+    min-height: auto;
+  }
+
+  .comparison-desktop {
+    display: none;
+  }
+
+  .comparison-mobile {
+    display: grid;
+    gap: 16px;
+  }
+
+  .comparison-mobile article {
+    overflow: hidden;
+    border: 1px solid var(--color-hairline);
+    border-radius: 22px;
+    background: var(--color-surface);
+  }
+
+  .comparison-mobile h4 {
+    padding: 18px 20px;
+    background: #eef1f4;
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+  }
+
+  .comparison-mobile dl > div {
+    padding: 13px 20px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 18px;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .comparison-mobile dt {
+    color: var(--color-ink);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .comparison-mobile dd {
+    color: var(--color-ink);
+    font-size: 13px;
+    text-align: right;
+  }
+}
+
+@media (max-width: 420px) {
+  .billing-toggle {
+    width: 100%;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .billing-toggle label {
+    padding-inline: 8px;
+    flex-direction: column;
+    gap: 1px;
+  }
+}
+
 /* ---- Responsive shell for the preserved Figma sections ----------------- */
 /* The component internals remain the supplied prototype. Only their layout */
 /* dimensions adapt below the 1440px design canvas.                          */

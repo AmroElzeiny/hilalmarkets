@@ -55,8 +55,9 @@ FULL_ACCESS_WITHOUT_WHATSAPP: dict[str, bool] = {
 
 
 def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
-    """Return the customer catalog allowed by the current release mode."""
-    return PUBLIC_PLAN_CODES if billing_enabled else ("demo",)
+    """Return public plans; checkout availability is represented separately."""
+    del billing_enabled
+    return PUBLIC_PLAN_CODES
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,30 +71,47 @@ class PlanDefinition:
     features: dict[str, bool | int | float | str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class PublicPlanPresentation:
+    annual_price: Decimal
+    description: str
+    cta_label: str
+    visible_features: tuple[str, ...]
+    additional_features: tuple[str, ...] = ()
+    badge: str | None = None
+    trial_note: str | None = None
+    highlighted_feature: str | None = None
+
+
 PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     "demo": PlanDefinition(
         code="demo",
-        name="Free",
+        name="Explore",
         monthly_price=Decimal("0.00"),
-        description="Explore screened assets and create one guided Watch Plan.",
+        description=(
+            "Explore methodology-screened assets, inspect their evidence, and follow "
+            "status changes for your favorites."
+        ),
         limits={
-            "saved_strategies": 1,
-            "active_strategies": 1,
-            "symbols_per_strategy": 50,
+            "saved_strategies": 0,
+            "active_strategies": 0,
+            "symbols_per_strategy": 0,
             "minimum_timeframe_minutes": 1,
-            "alerts_per_day": 10,
+            "alerts_per_day": 0,
             "forensic_investigations_per_month": 0,
-            "historical_previews_per_month": 3,
-            "on_demand_scans_per_month": 1,
-            "light_prompt_scans_per_day": 3,
-            "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
+            "historical_previews_per_month": 0,
+            "on_demand_scans_per_month": 0,
+            "light_prompt_scans_per_day": 0,
+            "light_prompt_symbols": 0,
+            "detailed_history_days": 0,
         },
         features={
             "telegram": True,
             "whatsapp": False,
-            "light_prompt_scan": True,
+            "light_prompt_scan": False,
             "near_miss": False,
-            "condition_proof": True,
+            "condition_proof": False,
+            "setup_lifecycle": False,
             "advanced_forensics": False,
             "custom_webhooks": False,
             "community_delivery": False,
@@ -101,19 +119,20 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     ),
     "trader": PlanDefinition(
         code="trader",
-        name="Core",
+        name="Monitor",
         monthly_price=Decimal("12.00"),
         description="Continuous guided monitoring for active individual investors.",
         limits={
-            "saved_strategies": 10,
-            "active_strategies": 3,
+            "saved_strategies": 2,
+            "active_strategies": 2,
             "symbols_per_strategy": 200,
             "minimum_timeframe_minutes": 1,
-            "alerts_per_day": 100,
-            "forensic_investigations_per_month": 20,
+            "alerts_per_day": 50,
+            "forensic_investigations_per_month": UNLIMITED_SYMBOL_CAP,
             "on_demand_scans_per_month": 10,
             "light_prompt_scans_per_day": 10,
             "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
+            "detailed_history_days": 90,
         },
         features={
             "telegram": True,
@@ -123,24 +142,26 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "condition_proof": True,
             "forward_testing": True,
             "basic_analytics": True,
+            "ai_assistant": True,
             "advanced_forensics": False,
         },
     ),
     "pro": PlanDefinition(
         code="pro",
         name="Pro",
-        monthly_price=Decimal("29.00"),
-        description="More Watch Plans, deeper diagnostics, and advanced controls.",
+        monthly_price=Decimal("22.00"),
+        description="More simultaneous market monitors, quick scans, and alert capacity.",
         limits={
-            "saved_strategies": 50,
+            "saved_strategies": 10,
             "active_strategies": 10,
-            "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
+            "symbols_per_strategy": 500,
             "minimum_timeframe_minutes": 1,
-            "alerts_per_day": 500,
-            "forensic_investigations_per_month": 500,
-            "on_demand_scans_per_month": 60,
+            "alerts_per_day": UNLIMITED_SYMBOL_CAP,
+            "forensic_investigations_per_month": UNLIMITED_SYMBOL_CAP,
+            "on_demand_scans_per_month": 100,
             "light_prompt_scans_per_day": 50,
             "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
+            "detailed_history_days": 365,
         },
         features={
             "telegram": True,
@@ -149,6 +170,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "near_miss": True,
             "full_near_miss_history": True,
             "condition_proof": True,
+            "ai_assistant": True,
             "advanced_forensics": True,
             "advanced_liquidity_filters": True,
             "setup_lifecycle": True,
@@ -279,23 +301,23 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     ),
     "pro_trial": PlanDefinition(
         code="pro_trial",
-        name="Conditional 14-Day Trial",
+        name="7-Day Monitor Trial",
         monthly_price=Decimal("0.00"),
-        description=(
-            "Renewable 14-day monitoring cycle that renews until one qualifying alert is delivered."
-        ),
+        description="Seven days of Monitor access before the first provider charge.",
         limits={
-            "saved_strategies": 1,
-            "active_strategies": 1,
-            "symbols_per_strategy": 300,
+            "saved_strategies": 2,
+            "active_strategies": 2,
+            "symbols_per_strategy": 200,
             "minimum_timeframe_minutes": 1,
-            "alerts_per_trial_cycle": 500,
-            "historical_previews_per_trial_cycle": 3,
-            "on_demand_scans_total": 1,
+            "alerts_per_day": 50,
+            "alerts_per_trial_cycle": 350,
+            "forensic_investigations_per_month": UNLIMITED_SYMBOL_CAP,
+            "historical_previews_per_trial_cycle": 10,
+            "on_demand_scans_per_month": 10,
+            "on_demand_scans_total": 10,
             "light_prompt_scans_per_day": 10,
             "light_prompt_symbols": UNLIMITED_SYMBOL_CAP,
-            "detailed_history_days": 7,
-            "forensic_investigations_per_month": 5,
+            "detailed_history_days": 90,
         },
         features={
             "telegram": True,
@@ -306,6 +328,8 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
             "why_no_alert_limited": True,
             "advanced_forensics": False,
             "forward_testing": True,
+            "basic_analytics": True,
+            "ai_assistant": True,
             "api_access": False,
             "custom_webhooks": False,
             "shared_strategies": False,
@@ -317,6 +341,103 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         },
     ),
 }
+
+
+PUBLIC_PLAN_PRESENTATIONS: dict[str, PublicPlanPresentation] = {
+    "demo": PublicPlanPresentation(
+        annual_price=Decimal("0.00"),
+        description=(
+            "For traders who want to explore assets listed as Halal under a selected "
+            "methodology, inspect the evidence, and follow changes to favorite coins."
+        ),
+        cta_label="Start free",
+        highlighted_feature="Halal assets, methodologies, and evidence reports",
+        visible_features=(
+            "Halal assets, methodologies, and evidence reports",
+            "Full Evidence Passports",
+            "Methodology reasons, sources, versions, and review dates",
+            "Methodology comparison when available",
+            "Favorite coins",
+            "In-app Halal status-change alerts for favorites",
+            "Telegram Halal status-change alerts for favorites",
+        ),
+        additional_features=(
+            "Published compliance-status changes",
+            "Standard email support",
+        ),
+    ),
+    "trader": PublicPlanPresentation(
+        annual_price=Decimal("120.00"),
+        description=(
+            "For regular traders who want AI-assisted market monitoring and clear "
+            "evidence behind every alert."
+        ),
+        cta_label="Try Monitor for 7 days",
+        badge="Most Popular",
+        trial_note="No charge for seven days. Cancel before the first payment.",
+        highlighted_feature="AI assistant for creating market monitors",
+        visible_features=(
+            "Everything in Explore",
+            "AI assistant for creating market monitors",
+            "2 active market monitors",
+            "10 quick scans per month",
+            "Up to 50 monitor alerts per day",
+            "Full Why wasn't I alerted? explanations",
+            "Complete Opportunity Journeys",
+        ),
+        additional_features=(
+            "Condition-level proof",
+            "Missed-alert investigations",
+            "In-app and Telegram monitor alerts",
+        ),
+    ),
+    "pro": PublicPlanPresentation(
+        annual_price=Decimal("220.00"),
+        description=(
+            "For active traders who need more simultaneous monitors, more quick scans, "
+            "and unlimited monitor alerts."
+        ),
+        cta_label="Choose Pro",
+        highlighted_feature="WhatsApp delivery",
+        visible_features=(
+            "Everything in Monitor",
+            "10 active market monitors",
+            "100 quick scans per month",
+            "Unlimited monitor alerts per day",
+            "WhatsApp delivery",
+        ),
+        additional_features=(
+            "AI assistant for creating market monitors",
+            "Condition-level proof",
+            "Complete Opportunity Journeys",
+            "Missed-alert investigations",
+        ),
+    ),
+}
+
+
+PUBLIC_PLAN_COMPARISON: tuple[tuple[str, str, str, str], ...] = (
+    ("Halal Assets market", "Included", "Included", "Included"),
+    ("Evidence Passports", "Full", "Full", "Full"),
+    ("Methodology reports", "Full", "Full", "Full"),
+    ("Favorite coins", "Included", "Included", "Included"),
+    (
+        "Halal status-change alerts",
+        "In-app + Telegram",
+        "In-app + Telegram",
+        "In-app + Telegram",
+    ),
+    ("AI assistant", "Not included", "Included", "Included"),
+    ("Active market monitors", "Not included", "2", "10"),
+    ("Quick scans per month", "Not included", "10", "100"),
+    ("Monitor alerts per day", "Not included", "Up to 50", "Unlimited"),
+    ("Condition proof", "Not included", "Full", "Full"),
+    ("Opportunity Journeys", "Not included", "Complete", "Complete"),
+    ("Missed-alert investigations", "Not included", "Included", "Included"),
+    ("Telegram monitor delivery", "Not included", "Included", "Included"),
+    ("WhatsApp", "Not included", "Not included", "Coming soon"),
+    ("Monitor trial", "Not included", "7 days, no charge", "Not included"),
+)
 
 
 def get_plan_definition(code: str) -> PlanDefinition:

@@ -105,6 +105,11 @@ class HilalMarketsBackendTarget(ChatTarget):
                 else None
             )
             model, usage = _assistant_runtime_metadata(assistant)
+            structured_application_error = (
+                response.status_code == 409
+                and structured is not None
+                and bool(text.strip())
+            )
             self.history.extend(
                 [
                     {"role": "user", "content": message},
@@ -113,7 +118,7 @@ class HilalMarketsBackendTarget(ChatTarget):
             )
             safe_raw = redact(raw, self.settings.redacted_keys)
             return TargetReply(
-                text=text or f"HTTP {response.status_code} with no assistant message",
+                text=text,
                 latency_ms=latency,
                 status_code=response.status_code,
                 structured=structured,
@@ -122,7 +127,11 @@ class HilalMarketsBackendTarget(ChatTarget):
                 conversation_id=self.conversation_id,
                 model=model,
                 usage=usage,
-                error=None if response.is_success else f"HTTP {response.status_code}",
+                error=(
+                    None
+                    if response.is_success or structured_application_error
+                    else f"HTTP {response.status_code}"
+                ),
             )
         except Exception as exc:
             return TargetReply(
@@ -221,7 +230,7 @@ class GenericHTTPBackendTarget(ChatTarget):
             )
             safe_raw = redact(raw, self.settings.redacted_keys)
             return TargetReply(
-                text=text or f"HTTP {response.status_code} with no assistant text",
+                text=text,
                 latency_ms=latency,
                 status_code=response.status_code,
                 structured=structured,

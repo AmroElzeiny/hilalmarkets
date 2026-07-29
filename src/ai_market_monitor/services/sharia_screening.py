@@ -419,7 +419,7 @@ class ShariaScreeningService:
         if not values:
             readiness_warning = (
                 f"{methodology.name}, version {methodology.version}, has no active published "
-                "Passports available for the Screened Market."
+                "Passports available for the Halal Market."
             )
         if asset_scope is not None:
             normalized_scope = {canonical_asset(asset) for asset in asset_scope}

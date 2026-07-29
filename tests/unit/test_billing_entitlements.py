@@ -1,6 +1,8 @@
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
@@ -15,6 +17,7 @@ from ai_market_monitor.db.models import (
     AuditEvent,
     BillingEvent,
     EntitlementSnapshot,
+    PaymentEmailDelivery,
     Plan,
     ReferralCode,
     ReferralRelationship,
@@ -45,6 +48,7 @@ from ai_market_monitor.services.billing import (
     BillingError,
     BillingService,
     BillingWebhookVerifier,
+    CreemBillingProvider,
     billing_provider_capabilities,
 )
 from ai_market_monitor.services.entitlements import (
@@ -94,11 +98,30 @@ async def test_plan_catalog_syncs_central_definitions(test_context):
         assert pro.features["limits"]["active_strategies"] == 10
 
 
+def test_public_plan_limits_match_the_published_catalog():
+    explore = PLAN_DEFINITIONS["demo"]
+    monitor = PLAN_DEFINITIONS["trader"]
+    pro = PLAN_DEFINITIONS["pro"]
+
+    assert explore.limits["saved_strategies"] == 0
+    assert explore.limits["active_strategies"] == 0
+    assert explore.limits["on_demand_scans_per_month"] == 0
+    assert explore.features["setup_lifecycle"] is False
+    assert monitor.limits["active_strategies"] == 2
+    assert monitor.limits["alerts_per_day"] == 50
+    assert monitor.limits["on_demand_scans_per_month"] == 10
+    assert monitor.limits["forensic_investigations_per_month"] == 100_000
+    assert pro.monthly_price == Decimal("22.00")
+    assert pro.limits["active_strategies"] == 10
+    assert pro.limits["alerts_per_day"] == 100_000
+    assert pro.limits["on_demand_scans_per_month"] == 100
+
+
 async def test_trial_lifecycle_uses_pro_trial_and_expires(test_context):
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        trial_days=14,
+        trial_days=7,
         delivery_settlement_grace_minutes=0,
     )
     async with test_context["session_factory"]() as session:
@@ -110,7 +133,7 @@ async def test_trial_lifecycle_uses_pro_trial_and_expires(test_context):
         await TrialLifecycleService(session, settings).start_monitoring_cycle(user.id)
         cycle = await session.scalar(select(TrialCycle).where(TrialCycle.trial_id == trial.id))
         assert cycle is not None
-        assert (cycle.ends_at - cycle.starts_at).days == 14
+        assert (cycle.ends_at - cycle.starts_at).days == 7
         expired = await TrialLifecycleService(session, settings).expire_due(
             now=cycle.ends_at + timedelta(seconds=1)
         )
@@ -118,11 +141,11 @@ async def test_trial_lifecycle_uses_pro_trial_and_expires(test_context):
         assert trial.status == TrialStatus.EXPIRED
 
 
-async def test_trial_cycle_renews_when_no_qualifying_alert_was_delivered(test_context):
+async def test_monitor_trial_expires_after_seven_days_without_auto_renewal(test_context):
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        trial_days=14,
+        trial_days=7,
         delivery_settlement_grace_minutes=0,
     )
     async with test_context["session_factory"]() as session:
@@ -152,26 +175,26 @@ async def test_trial_cycle_renews_when_no_qualifying_alert_was_delivered(test_co
             select(TrialCycle).where(TrialCycle.trial_id == trial.id)
         )
         assert first_cycle is not None
-        renewed = await trial_service.expire_due(now=first_cycle.ends_at + timedelta(seconds=1))
-        assert renewed == [trial]
-        assert trial.status == TrialStatus.ACTIVE
-        assert first_cycle.status == "renewed"
-        assert first_cycle.renewal_decision == "auto_renewed_no_qualifying_alert"
+        expired = await trial_service.expire_due(now=first_cycle.ends_at + timedelta(seconds=1))
+        assert expired == [trial]
+        assert trial.status == TrialStatus.EXPIRED
+        assert first_cycle.status == "expired"
+        assert first_cycle.renewal_decision == "trial_period_completed"
         second_cycle = await session.scalar(
             select(TrialCycle).where(
                 TrialCycle.trial_id == trial.id,
                 TrialCycle.cycle_number == 2,
             )
         )
-        assert second_cycle is not None
-        assert trial.ends_at == second_cycle.ends_at
+        assert second_cycle is None
+        assert trial.ends_at == first_cycle.ends_at
 
 
 async def test_trial_qualifying_delivery_is_attributed_once(test_context):
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        trial_days=14,
+        trial_days=7,
     )
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
@@ -243,7 +266,7 @@ async def test_trial_alert_cap_uses_current_definition_when_plan_json_is_stale(t
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        trial_days=14,
+        trial_days=7,
         trial_alerts_per_cycle=500,
     )
     async with test_context["session_factory"]() as session:
@@ -273,7 +296,7 @@ async def test_active_subscription_bypasses_trial_alert_cap(test_context):
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        trial_days=14,
+        trial_days=7,
         trial_alerts_per_cycle=1,
     )
     async with test_context["session_factory"]() as session:
@@ -300,7 +323,7 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
         await activate_subscription(session, user.id, "trader")
-        for index in range(3):
+        for index in range(2):
             session.add(
                 Strategy(
                     user_id=user.id,
@@ -311,7 +334,7 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
             )
         await session.flush()
         definition = load_strategy()
-        with pytest.raises(EntitlementError, match="Plan allows 3 active"):
+        with pytest.raises(EntitlementError, match="Plan allows 2 active"):
             await EntitlementService(session).enforce_strategy_activation(user.id, definition)
 
         second_user = await create_user(session, "Symbol limit")
@@ -430,8 +453,8 @@ async def test_billing_webhook_is_idempotent_and_downgrade_pauses_excess_strateg
         paused_count = await session.scalar(
             select(func.count(Strategy.id)).where(Strategy.status == StrategyStatus.PAUSED)
         )
-        assert active_count == 3
-        assert paused_count == 1
+        assert active_count == 2
+        assert paused_count == 2
 
 
 async def test_webhook_signature_verification(test_context):
@@ -502,6 +525,8 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         billing_webhook_secret="secret",
         billing_provider="nowpayments",
+        billing_card_provider="disabled",
+        billing_crypto_provider="nowpayments",
     )
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
@@ -517,7 +542,7 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
             "payment_id": "pay_456",
             "payment_status": "finished",
             "order_id": f"hm|{prepared.attempt.id}|pro",
-            "price_amount": "29.00",
+            "price_amount": "22.00",
             "price_currency": "USD",
             "pay_amount": "100.00",
             "actually_paid": "100.00",
@@ -565,7 +590,7 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
                         "checkout_attempt_id": str(prepared.attempt.id),
                         "provider_subscription_id": "nowpayments_second_payment",
                         "status": "active",
-                        "amount": "29.00",
+                        "amount": "22.00",
                         "currency": "USD",
                         "settlement_expected_amount": "100.00",
                         "settlement_actual_amount": "100.00",
@@ -581,6 +606,8 @@ async def test_nowpayments_partial_payment_never_grants_access(test_context):
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         billing_provider="nowpayments",
+        billing_card_provider="disabled",
+        billing_crypto_provider="nowpayments",
     )
     async with test_context["session_factory"]() as session:
         user = await create_user(session, "Partial payment user")
@@ -602,7 +629,7 @@ async def test_nowpayments_partial_payment_never_grants_access(test_context):
                     "checkout_attempt_id": str(prepared.attempt.id),
                     "provider_subscription_id": "nowpayments_partial",
                     "status": "partially_paid",
-                    "amount": "29.00",
+                    "amount": "22.00",
                     "currency": "USD",
                 },
             },
@@ -631,6 +658,8 @@ async def test_nowpayments_settlement_uses_actual_crypto_received(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         billing_provider="nowpayments",
+        billing_card_provider="disabled",
+        billing_crypto_provider="nowpayments",
         billing_payment_amount_tolerance_percent=0,
         billing_allow_overpayment=False,
     )
@@ -651,7 +680,7 @@ async def test_nowpayments_settlement_uses_actual_crypto_received(
                 "checkout_attempt_id": str(prepared.attempt.id),
                 "provider_subscription_id": f"sub-settlement-{expected_code}",
                 "status": "active",
-                "amount": "29.00",
+                "amount": "22.00",
                 "currency": "USD",
                 "settlement_expected_amount": "100.00",
                 "settlement_actual_amount": actually_paid,
@@ -668,6 +697,7 @@ async def test_nowpayments_settlement_uses_actual_crypto_received(
 def test_billing_provider_capabilities_match_real_provider_semantics():
     stripe = billing_provider_capabilities("stripe")
     nowpayments = billing_provider_capabilities("nowpayments")
+    creem = billing_provider_capabilities("creem")
 
     assert stripe.supports_recurring_billing is True
     assert stripe.supports_customer_portal is True
@@ -678,6 +708,220 @@ def test_billing_provider_capabilities_match_real_provider_semantics():
     assert nowpayments.supports_automatic_cancellation is False
     assert nowpayments.supports_refunds is False
     assert nowpayments.supports_invoice_receipts is True
+    assert creem.supports_recurring_billing is True
+    assert creem.supports_customer_portal is True
+    assert creem.supports_automatic_cancellation is True
+    assert creem.supports_refunds is True
+
+
+async def test_creem_creates_a_unique_server_bound_checkout(monkeypatch):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        creem_api_key="creem-test-key",
+        creem_product_ids={"trader_monthly": "prod_monitor_monthly"},
+    )
+    provider = CreemBillingProvider(settings)
+    recorded: list[dict] = []
+
+    async def fake_post(path, payload):
+        recorded.append({"path": path, "payload": payload})
+        return {
+            "id": f"ch_{payload['request_id']}",
+            "checkout_url": f"https://checkout.creem.io/{payload['request_id']}",
+        }
+
+    monkeypatch.setattr(provider, "_post", fake_post)
+    user_id = uuid4()
+    first_attempt = uuid4()
+    second_attempt = uuid4()
+
+    first = await provider.create_checkout_session(
+        user_id=user_id,
+        checkout_attempt_id=first_attempt,
+        plan_code="trader",
+        plan_name="Monitor",
+        amount=Decimal("12.00"),
+        currency="USD",
+        billing_cycle="monthly_auto_renewal",
+        customer_email="verified@example.com",
+        success_url="https://hilalmarkets.com/billing/success",
+        cancel_url="https://hilalmarkets.com/billing/cancel",
+    )
+    second = await provider.create_checkout_session(
+        user_id=user_id,
+        checkout_attempt_id=second_attempt,
+        plan_code="trader",
+        plan_name="Monitor",
+        amount=Decimal("12.00"),
+        currency="USD",
+        billing_cycle="monthly_auto_renewal",
+        customer_email="verified@example.com",
+        success_url="https://hilalmarkets.com/billing/success",
+        cancel_url="https://hilalmarkets.com/billing/cancel",
+    )
+
+    assert first.checkout_url != second.checkout_url
+    assert recorded[0]["path"] == "/v1/checkouts"
+    assert recorded[0]["payload"]["request_id"] == str(first_attempt)
+    assert recorded[0]["payload"]["product_id"] == "prod_monitor_monthly"
+    assert recorded[0]["payload"]["customer"] == {"email": "verified@example.com"}
+    assert "email" not in recorded[0]["payload"]["metadata"]
+
+
+async def test_signed_creem_payment_activates_once_and_queues_one_receipt(test_context):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_enabled=True,
+        billing_card_provider="creem",
+        creem_api_key="creem-test-key",
+        creem_webhook_secret="creem-webhook-secret",
+        creem_product_ids={"pro_monthly": "prod_pro_monthly"},
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Creem customer")
+        session.add(
+            UserIdentity(
+                user_id=user.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject="creem@example.com",
+                normalized_identifier="creem@example.com",
+                display_identifier="creem@example.com",
+                is_verified=True,
+                is_primary=True,
+                verified_at=datetime.now(UTC),
+                profile_data={},
+            )
+        )
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="monthly",
+            request_key="creem-paid-order",
+            terms_accepted=True,
+            billing_profile={
+                "first_name": "Creem",
+                "last_name": "Customer",
+                "address_line1": "1 Market Street",
+                "country": "Egypt",
+            },
+        )
+        payload = {
+            "id": "evt_creem_paid",
+            "eventType": "subscription.paid",
+            "object": {
+                "object": "subscription",
+                "id": "sub_creem_paid",
+                "status": "active",
+                "customer": {"id": "cus_creem"},
+                "product": {
+                    "id": "prod_pro_monthly",
+                    "price": 2200,
+                    "currency": "USD",
+                },
+                "metadata": {
+                    "checkout_attempt_id": str(prepared.attempt.id),
+                    "user_id": str(user.id),
+                    "plan_code": "pro",
+                    "billing_cycle": "monthly_auto_renewal",
+                },
+                "current_period_start_date": "2035-01-01T00:00:00+00:00",
+                "current_period_end_date": "2035-02-01T00:00:00+00:00",
+                "last_transaction_id": "txn_creem_paid",
+            },
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(
+            b"creem-webhook-secret",
+            body,
+            digestmod="sha256",
+        ).hexdigest()
+
+        first = await service.process_verified_webhook(
+            provider="creem",
+            body=body,
+            signature=signature,
+        )
+        replay = await service.process_verified_webhook(
+            provider="creem",
+            body=body,
+            signature=signature,
+        )
+
+        subscription = await session.scalar(
+            select(Subscription).where(Subscription.user_id == user.id)
+        )
+        assert first.replayed is False
+        assert replay.replayed is True
+        assert subscription is not None
+        assert subscription.provider == "creem"
+        assert subscription.status == SubscriptionStatus.ACTIVE
+        assert prepared.attempt.status == "completed"
+        assert prepared.attempt.billing_profile["country"] == "Egypt"
+        assert await session.scalar(select(func.count(PaymentEmailDelivery.id))) == 1
+
+
+async def test_signed_creem_trialing_event_activates_only_the_bound_trial(test_context):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_enabled=True,
+        billing_card_provider="creem",
+        creem_api_key="creem-test-key",
+        creem_webhook_secret="creem-webhook-secret",
+        creem_product_ids={"trader_trial": "prod_monitor_trial"},
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Creem trial")
+        service = BillingService(session, settings)
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="trader",
+            billing_cycle="trial_7_day",
+            request_key="creem-trial-order",
+            terms_accepted=True,
+        )
+        payload = {
+            "id": "evt_creem_trialing",
+            "eventType": "subscription.trialing",
+            "object": {
+                "object": "subscription",
+                "id": "sub_creem_trial",
+                "status": "trialing",
+                "customer": {"id": "cus_creem_trial"},
+                "metadata": {
+                    "checkout_attempt_id": str(prepared.attempt.id),
+                    "user_id": str(user.id),
+                    "plan_code": "trader",
+                    "billing_cycle": "trial_7_day",
+                },
+                "current_period_start_date": "2035-01-01T00:00:00+00:00",
+                "current_period_end_date": "2035-01-08T00:00:00+00:00",
+            },
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(
+            b"creem-webhook-secret",
+            body,
+            digestmod="sha256",
+        ).hexdigest()
+
+        await service.process_verified_webhook(
+            provider="creem",
+            body=body,
+            signature=signature,
+        )
+
+        subscription = await session.scalar(
+            select(Subscription).where(Subscription.user_id == user.id)
+        )
+        assert subscription is not None
+        assert subscription.status == SubscriptionStatus.TRIALING
+        assert prepared.attempt.status == "completed"
+        assert prepared.attempt.amount == Decimal("0.00")
+        assert await session.scalar(select(func.count(PaymentEmailDelivery.id))) == 0
 
 
 async def test_one_time_access_expires_at_verified_period_end(test_context):
@@ -685,6 +929,8 @@ async def test_one_time_access_expires_at_verified_period_end(test_context):
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         billing_provider="nowpayments",
+        billing_card_provider="disabled",
+        billing_crypto_provider="nowpayments",
     )
     now = datetime.now(UTC)
     async with test_context["session_factory"]() as session:
@@ -714,9 +960,9 @@ async def test_one_time_access_expires_at_verified_period_end(test_context):
 @pytest.mark.parametrize(
     ("amount", "currency", "expected_code"),
     [
-        ("28.99", "USD", "payment_underpaid"),
-        ("29.01", "USD", "payment_overpaid"),
-        ("29.00", "EUR", "payment_currency_mismatch"),
+        ("21.99", "USD", "payment_underpaid"),
+        ("22.01", "USD", "payment_overpaid"),
+        ("22.00", "EUR", "payment_currency_mismatch"),
     ],
 )
 async def test_verified_payment_must_match_checkout_amount_and_currency(
@@ -729,6 +975,8 @@ async def test_verified_payment_must_match_checkout_amount_and_currency(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         billing_provider="nowpayments",
+        billing_card_provider="disabled",
+        billing_crypto_provider="nowpayments",
         billing_payment_amount_tolerance_percent=0,
         billing_allow_overpayment=False,
     )
@@ -851,6 +1099,8 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
             billing_enabled=True,
             billing_webhook_secret="secret",
             billing_provider="nowpayments",
+            billing_card_provider="disabled",
+            billing_crypto_provider="nowpayments",
         )
         prepared = await BillingService(session, nowpayments_settings).prepare_checkout(
             user_id=user.id,
@@ -868,7 +1118,7 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
         "payment_id": "pay_admin_notice",
         "payment_status": "finished",
         "order_id": f"hm|{attempt_id}|pro",
-        "price_amount": "29.00",
+        "price_amount": "22.00",
         "price_currency": "USD",
         "pay_amount": "100.00",
         "actually_paid": "100.00",

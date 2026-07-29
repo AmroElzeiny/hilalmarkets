@@ -917,6 +917,8 @@ class StrategyRuleEngine:
         if operand.kind == OperandKind.CANDLE_PATTERN:
             return self._candle_pattern(operand, candles)
         if operand.kind == OperandKind.MARKET_METRIC:
+            if operand.name == "percentage_change":
+                return self._percentage_change(operand, candles, candle_sets)
             if operand.name in TIME_CONDITION_NAMES:
                 return evaluate_time_condition(
                     operand.name or "",
@@ -950,6 +952,59 @@ class StrategyRuleEngine:
                 condition_context,
             )
         raise KeyError(f"Unsupported operand: {operand.kind.value}:{operand.name}")
+
+    @staticmethod
+    def _percentage_change(
+        operand: Operand,
+        candles: list[Candle],
+        candle_sets: dict[str, list[Candle]],
+    ) -> float:
+        """Evaluate the explicit percentage formula stored in the strategy DSL."""
+
+        parameters = operand.parameters
+        formula = str(parameters.get("formula", ""))
+        direction = str(parameters.get("direction", "signed"))
+        reference_field = str(parameters.get("reference_field", "close"))
+        current_field = str(parameters.get("current_field", "close"))
+        reference_timeframe = str(parameters.get("reference_timeframe", ""))
+        raw_lookback = parameters.get("lookback", 1)
+        if not isinstance(raw_lookback, int | float | str):
+            raise IndicatorWarmupError("percentage change lookback must be numeric")
+        lookback = int(raw_lookback)
+        reference_candles = candle_sets.get(reference_timeframe) or candles
+        if not candles or not reference_candles:
+            raise IndicatorWarmupError("percentage change requires candle data")
+
+        current = float(getattr(candles[-1], current_field))
+        if formula == "close_to_close":
+            if len(candles) <= lookback:
+                raise IndicatorWarmupError(
+                    f"close-to-close percentage change requires {lookback + 1} candles"
+                )
+            reference = float(getattr(candles[-lookback - 1], reference_field))
+        elif formula == "reference_to_current":
+            if len(reference_candles) < lookback:
+                raise IndicatorWarmupError(
+                    f"reference percentage change requires {lookback} reference candles"
+                )
+            window = reference_candles[-lookback:]
+            if reference_field in {"swing_high", "high"}:
+                reference = max(float(candle.high) for candle in window)
+            elif reference_field in {"swing_low", "low"}:
+                reference = min(float(candle.low) for candle in window)
+            else:
+                reference = float(getattr(window[-1], reference_field))
+        else:
+            reference = float(getattr(reference_candles[-1], reference_field))
+
+        if reference == 0:
+            raise IndicatorWarmupError("percentage change reference value is zero")
+        signed_change = ((current - reference) / reference) * 100
+        if direction == "down":
+            return -signed_change
+        if direction == "up":
+            return signed_change
+        return signed_change
 
     @staticmethod
     def _price_action(operand: Operand, candles: list[Candle]) -> bool | float:
@@ -1029,9 +1084,7 @@ class StrategyRuleEngine:
             touches = sum(1 for candle in prior if abs(candle.low - low) / low <= tolerance)
             return touches >= 2 and current.low <= low * (1 + tolerance)
         if operand.name == "consolidation_range":
-            maximum_range_percent = float(
-                _operand_parameter(operand, "maximum_range_percent", 5)
-            )
+            maximum_range_percent = float(_operand_parameter(operand, "maximum_range_percent", 5))
             high = max(candle.high for candle in prior)
             low = min(candle.low for candle in prior)
             midpoint = (high + low) / 2
@@ -1192,9 +1245,7 @@ class StrategyRuleEngine:
         if operand.name == "shooting_star":
             return upper_wick >= body * 2 and body / range_size <= 0.35
         if operand.name == "doji":
-            maximum_body_percent = float(
-                _operand_parameter(operand, "maximum_body_percent", 10)
-            )
+            maximum_body_percent = float(_operand_parameter(operand, "maximum_body_percent", 10))
             return (body / range_size) * 100 <= maximum_body_percent
         if operand.name in {"inside_bar", "outside_bar"}:
             if len(candles) < 2:
@@ -1204,14 +1255,10 @@ class StrategyRuleEngine:
                 return candle.high < previous.high and candle.low > previous.low
             return candle.high > previous.high and candle.low < previous.low
         if operand.name == "strong_close_near_high":
-            minimum_close_percent = float(
-                _operand_parameter(operand, "minimum_close_percent", 75)
-            )
+            minimum_close_percent = float(_operand_parameter(operand, "minimum_close_percent", 75))
             return ((candle.close - candle.low) / range_size) * 100 >= minimum_close_percent
         if operand.name == "strong_close_near_low":
-            maximum_close_percent = float(
-                _operand_parameter(operand, "maximum_close_percent", 25)
-            )
+            maximum_close_percent = float(_operand_parameter(operand, "maximum_close_percent", 25))
             return ((candle.close - candle.low) / range_size) * 100 <= maximum_close_percent
         if operand.name == "range_expansion_candle":
             period = int(_operand_parameter(operand, "period", 20))
@@ -1673,8 +1720,7 @@ class StrategyRuleEngine:
                     "minimum_clean_path_to_target": distance / stop_distance,
                     "target_overlaps_obstacle": bool(
                         target_price is not None
-                        and abs(target_price - obstacle)
-                        <= max(atr_value, stop_distance * 0.1)
+                        and abs(target_price - obstacle) <= max(atr_value, stop_distance * 0.1)
                     ),
                 }
             )

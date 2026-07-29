@@ -48,14 +48,22 @@
       <div class="notice notice-success"><span data-icon="check" data-icon-class="icon"></span><div><strong>Already subscribed</strong><p>Your {{ plan.name }} plan is active.</p></div></div>
       <a class="btn btn-primary" href="/dashboard/billing">Open billing</a>
     {% elif checkout_attempt and checkout_attempt.checkout_url and checkout_attempt.status in ['pending','creating'] %}
-      <a class="btn btn-primary" href="{{ checkout_attempt.checkout_url }}" rel="nofollow">Continue secure payment</a>
+      <a class="btn btn-primary" href="/dashboard/billing/checkout/{{ checkout_attempt.id }}/resume">Continue secure payment</a>
       <p class="checkout-small">This existing checkout expires {{ checkout_attempt.expires_at|short_dt(user.timezone) }}.</p>
     {% else %}
       <form class="checkout-confirm-form" method="post" action="/dashboard/billing/checkout">
         <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
         <input type="hidden" name="plan_code" value="{{ plan.code }}">
         <input type="hidden" name="billing_cycle" value="{{ billing_cycle }}">
+        <input type="hidden" name="payment_method" value="card">
         <input type="hidden" name="checkout_request_id" value="{{ checkout_request_id }}">
+        <div class="billing-profile-grid">
+          <label><span>First name</span><input type="text" name="first_name" value="{{ billing_profile_defaults.first_name }}" maxlength="60" autocomplete="given-name" required></label>
+          <label><span>Last name</span><input type="text" name="last_name" value="{{ billing_profile_defaults.last_name }}" maxlength="60" autocomplete="family-name" required></label>
+          <label class="billing-profile-wide"><span>Address</span><input type="text" name="address_line1" maxlength="200" autocomplete="address-line1" required></label>
+          <label><span>City</span><input type="text" name="city" maxlength="100" autocomplete="address-level2"></label>
+          <label><span>Country</span><input type="text" name="country" maxlength="80" autocomplete="country-name" required></label>
+        </div>
         <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>{% if billing_capabilities.supports_recurring_billing %}, including recurring monthly payment{% else %}, for this one-time 30-day access payment{% endif %}.</span></label>
         <button class="btn btn-primary" type="submit"><span data-icon="shield" data-icon-class="icon-sm"></span>Continue to secure payment</button>
       </form>
@@ -64,4 +72,14 @@
     <a class="checkout-support" href="/dashboard/support">Need help? Contact support</a>
   </aside>
 </div>
+{% endblock %}
+{% block page_scripts %}
+<div
+  data-commerce-event="checkout_started"
+  data-plan-code="{{ plan.code }}"
+  data-billing-interval="{{ billing_cycle }}"
+  data-event-scope="{{ checkout_attempt.id if checkout_attempt else checkout_request_id }}"
+  hidden
+></div>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260727-pricing"></script>
 {% endblock %}

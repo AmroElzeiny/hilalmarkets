@@ -408,14 +408,14 @@ class PublicKnowledgeService:
             ),
             PublicKnowledgeEntry(
                 source_id="product:screened-market:v1",
-                title="Screened Market and My Screened Watchlist",
+                title="Halal Market and My Screened Watchlist",
                 answer=(
-                    "Screened Market shows assets allowed by the active user policy and "
+                    "Halal Market shows assets allowed by the active user policy and "
                     "methodology. My Screened Watchlist saves assets to follow or use as a "
                     "Watch Plan universe; saving an asset never overrides its current status."
                 ),
                 route_id="features",
-                keywords=("screened market", "saved assets", "screened watchlist"),
+                keywords=("halal market", "screened market", "saved assets", "screened watchlist"),
             ),
             PublicKnowledgeEntry(
                 source_id="product:evidence-passport:v1",

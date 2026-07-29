@@ -6,17 +6,33 @@ import { TrackedCta } from './Tracking'
 
 export function SiteNav() {
   const [scrolled, setScrolled] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [activeHash, setActiveHash] = useState(window.location.hash)
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12)
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
+  useEffect(() => {
+    const updateHash = () => setActiveHash(window.location.hash)
+    window.addEventListener('hashchange', updateHash)
+    return () => window.removeEventListener('hashchange', updateHash)
+  }, [])
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [menuOpen])
 
   const onLanding = window.location.pathname === '/'
   const links = [
     { label: 'How it works', target: '#how-it-works' },
     { label: 'Features', target: '#features' },
+    { label: 'Pricing', target: '#pricing' },
     { label: 'FAQ', target: '#faq' },
   ]
   return (
@@ -25,19 +41,19 @@ export function SiteNav() {
         scrolled ? 'py-2.5 backdrop-blur-md' : 'py-4'
       }`}
     >
-      <div className="mx-auto flex max-w-[1360px] items-center justify-between px-5">
+      <div className="relative mx-auto flex max-w-[1360px] items-center justify-between gap-3 px-5">
         <TrackedCta
           href="/"
           analyticsName="home_logo"
           analyticsLocation="header"
           aria-label="Hilal Markets home"
-          className="block h-[31px] w-[197px]"
+          className="block h-[27px] w-[172px] shrink-0 sm:h-[31px] sm:w-[197px]"
         >
           <FigmaLogo />
         </TrackedCta>
 
         <nav
-          className="hidden items-center gap-1 rounded-full border border-[#e1e5ea] bg-surface/90 px-2 py-1.5 shadow-[0_14px_34px_-22px_rgba(43,46,53,0.6)] backdrop-blur md:flex"
+          className="hidden items-center gap-1 rounded-full border border-[#e1e5ea] bg-surface/90 px-2 py-1.5 shadow-[0_14px_34px_-22px_rgba(43,46,53,0.6)] backdrop-blur lg:flex"
           aria-label="Primary navigation"
         >
           {links.map((link) => (
@@ -46,21 +62,73 @@ export function SiteNav() {
               href={`${onLanding ? '' : '/'}${link.target}`}
               analyticsName={link.label.toLowerCase().replace(/\s+/g, '_')}
               analyticsLocation="header"
-              className="rounded-full px-4 py-2 text-[15px] font-medium text-ink transition-colors hover:bg-[#f1f4f7]"
+              aria-current={activeHash === link.target ? 'location' : undefined}
+              className={`rounded-full px-4 py-2 text-[15px] font-medium text-ink transition-colors hover:bg-[#f1f4f7] active:bg-[#e1e5ea] focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[#55712a] ${
+                activeHash === link.target ? 'bg-[#eef1f4]' : ''
+              }`}
             >
               {link.label}
             </TrackedCta>
           ))}
         </nav>
 
-        <TrackedCta
-          href={`${onLanding ? '' : '/'}#waitlist`}
-          analyticsName="join_waitlist"
-          analyticsLocation="header"
-          className="rounded-full bg-apple px-4 py-2 font-sans text-[15px] font-bold text-[#2b2e35] shadow-[0_12px_28px_-16px_rgba(120,170,40,0.7)] transition-transform hover:-translate-y-0.5 sm:px-6 sm:py-2.5"
+        <div className="hidden items-center gap-2 lg:flex">
+          <TrackedCta
+            href="/signin"
+            analyticsName="sign_in"
+            analyticsLocation="header"
+            className="rounded-full px-4 py-2.5 text-[15px] font-semibold text-ink transition-colors hover:bg-[#eef1f4]"
+          >
+            Sign in
+          </TrackedCta>
+          <TrackedCta
+            href="/subscribe?plan_code=demo&billing_interval=monthly"
+            analyticsName="start_free"
+            analyticsLocation="header"
+            className="rounded-full bg-apple px-6 py-2.5 font-sans text-[15px] font-bold text-[#2b2e35] shadow-[0_12px_28px_-16px_rgba(120,170,40,0.7)] transition-transform hover:-translate-y-0.5"
+          >
+            Get started
+          </TrackedCta>
+        </div>
+        <button
+          type="button"
+          className="site-menu-toggle lg:hidden"
+          aria-expanded={menuOpen}
+          aria-controls="site-mobile-menu"
+          onClick={() => setMenuOpen((current) => !current)}
         >
-          Join the waitlist
-        </TrackedCta>
+          <span>{menuOpen ? 'Close' : 'Menu'}</span>
+        </button>
+        <nav
+          id="site-mobile-menu"
+          className={`site-mobile-menu lg:hidden ${menuOpen ? 'is-open' : ''}`}
+          aria-label="Mobile navigation"
+          hidden={!menuOpen}
+        >
+          {links.map((link) => (
+            <TrackedCta
+              key={link.label}
+              href={`${onLanding ? '' : '/'}${link.target}`}
+              analyticsName={link.label.toLowerCase().replace(/\s+/g, '_')}
+              analyticsLocation="mobile_header"
+              aria-current={activeHash === link.target ? 'location' : undefined}
+              onClick={() => setMenuOpen(false)}
+            >
+              {link.label}
+            </TrackedCta>
+          ))}
+          <TrackedCta href="/signin" analyticsName="sign_in" analyticsLocation="mobile_header">
+            Sign in
+          </TrackedCta>
+          <TrackedCta
+            href="/subscribe?plan_code=demo&billing_interval=monthly"
+            analyticsName="start_free"
+            analyticsLocation="mobile_header"
+            className="site-mobile-primary"
+          >
+            Get started
+          </TrackedCta>
+        </nav>
       </div>
     </header>
   )

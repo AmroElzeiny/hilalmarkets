@@ -32,6 +32,15 @@ def _operand_names(preview) -> set[str]:
     return names
 
 
+def _sides(preview) -> set[str]:
+    """Sides the compiled conditions carry as a parameter."""
+    return {
+        str((condition.left.parameters or {}).get("direction"))
+        for condition in preview.strategy.conditions.children
+        if (condition.left.parameters or {}).get("direction") in {"up", "down"}
+    }
+
+
 async def test_semantic_vocabulary_maps_candle_direction_words_safely():
     prompts = {
         "green candle": "green_candle",
@@ -65,13 +74,20 @@ async def test_semantic_vocabulary_maps_percent_moves_without_entry_or_rr():
     assert candle_down.activation_blocked is False
     assert "candle_change_percent" in _operand_names(candle_down)
 
+    # A coin-level percentage move compiles to `percentage_change`, which carries the
+    # side as a parameter. It used to compile to *both* this and `percent_change_up` —
+    # the same requirement twice, joined with AND — because two parsers each recognised
+    # the sentence and built it with a different operand. The side is asserted directly
+    # now, rather than being implied by an operand name.
     coin_up = await RuleBasedStrategyInterpreter().interpret(_guided("coin up 5% today"))
     assert coin_up.activation_blocked is False
-    assert "percent_change_up" in _operand_names(coin_up)
+    assert "percentage_change" in _operand_names(coin_up)
+    assert _sides(coin_up) == {"up"}
 
     coin_down = await RuleBasedStrategyInterpreter().interpret(_guided("coin dropped 5% today"))
     assert coin_down.activation_blocked is False
-    assert "percent_change_down" in _operand_names(coin_down)
+    assert "percentage_change" in _operand_names(coin_down)
+    assert _sides(coin_down) == {"down"}
 
 
 async def test_semantic_vocabulary_handles_volume_negation_and_requiredness():

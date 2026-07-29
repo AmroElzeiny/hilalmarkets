@@ -19,6 +19,10 @@ from ai_market_monitor.schemas.strategy import (
     OperandKind,
     StrategyDefinition,
 )
+from ai_market_monitor.services.setup_chat_lifecycle import (
+    is_terminal,
+    setup_lifecycle_state,
+)
 
 
 def build_setup_chat_evaluation_contract(
@@ -26,6 +30,7 @@ def build_setup_chat_evaluation_contract(
     *,
     session_status: str,
     approval_eligible: bool,
+    blocking_findings: bool = False,
     assumptions: Iterable[str],
     confidence: Iterable[dict[str, Any]],
     unsupported_capabilities: Iterable[dict[str, Any]],
@@ -33,10 +38,20 @@ def build_setup_chat_evaluation_contract(
     strategy_version_id: UUID | None = None,
     strategy_version_number: int | None = None,
     immutable_version_hash: str | None = None,
+    version_status: str | None = None,
 ) -> SetupChatEvaluationContract:
     """Project a validated strategy into a stable evaluator and Canvas contract."""
 
+    _assert_strategy_contract(strategy)
     canonical_hash = strategy.canonical_hash()
+    lifecycle_state = setup_lifecycle_state(
+        session_status=session_status,
+        has_draft=True,
+        approval_eligible=approval_eligible,
+        blocking_findings=blocking_findings,
+        immutable_version_hash=immutable_version_hash,
+        version_status=version_status,
+    )
     groups: list[EvaluationConditionGroup] = []
     conditions: list[EvaluationCondition] = []
     canvas_nodes: list[EvaluationCanvasNode] = []
@@ -97,7 +112,9 @@ def build_setup_chat_evaluation_contract(
         provider_required_capabilities=provider_required,
         approval=EvaluationApprovalState(
             session_status=session_status,
-            eligible=approval_eligible,
+            lifecycle_state=lifecycle_state,
+            terminal=is_terminal(lifecycle_state),
+            eligible=approval_eligible or strategy_version_id is not None,
             approved=strategy_version_id is not None,
             schema_hash=canonical_hash,
             strategy_id=strategy_id,
@@ -229,3 +246,54 @@ def _threshold(condition: ConditionRule) -> float | str | bool | dict[str, Any] 
 
 def _node_id(node: ConditionGroup | ConditionRule) -> str:
     return f"{node.node_type}:{node.key}"
+
+
+def _assert_strategy_contract(strategy: StrategyDefinition) -> None:
+    """Reject universe leakage before any executable Canvas is returned."""
+
+    included = {_market_key(symbol) for symbol in strategy.universe.include_symbols}
+    excluded = {_market_key(symbol) for symbol in strategy.universe.exclude_symbols}
+    if "" in included or "" in excluded:
+        raise ValueError("strategy universe contains an empty market symbol")
+    overlap = included & excluded
+    if overlap:
+        raise ValueError("included and excluded symbols must remain disjoint")
+    for symbol in (*included, *excluded):
+        for quote in strategy.universe.quote_currencies:
+            normalized_quote = _market_key(quote)
+            if symbol.endswith(normalized_quote * 2):
+                raise ValueError("strategy universe contains a duplicated quote asset")
+
+    for condition in _condition_rules(strategy.conditions):
+        payload = condition.model_dump(mode="json", exclude_none=True)
+        executable_values = {
+            _market_key(value)
+            for value in _scalar_values(payload.get("left"))
+            + _scalar_values(payload.get("right"))
+            + _scalar_values(payload.get("resolved_parameters"))
+            if isinstance(value, str)
+        }
+        if executable_values & excluded:
+            raise ValueError("an excluded symbol leaked into an executable condition")
+
+
+def _condition_rules(group: ConditionGroup) -> list[ConditionRule]:
+    rules: list[ConditionRule] = []
+    for child in group.children:
+        if isinstance(child, ConditionGroup):
+            rules.extend(_condition_rules(child))
+        else:
+            rules.append(child)
+    return rules
+
+
+def _scalar_values(value: Any) -> list[Any]:
+    if isinstance(value, dict):
+        return [item for nested in value.values() for item in _scalar_values(nested)]
+    if isinstance(value, list):
+        return [item for nested in value for item in _scalar_values(nested)]
+    return [value]
+
+
+def _market_key(value: str) -> str:
+    return "".join(char for char in str(value).upper() if char.isalnum())

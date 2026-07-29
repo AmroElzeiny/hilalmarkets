@@ -21,11 +21,13 @@ def test_landing_uses_one_provider_agnostic_consent_aware_analytics_module():
         "trackSectionView",
         "trackFaqOpen",
         "trackCtaClick",
-        "trackWaitlistFormView",
-        "trackWaitlistFormStart",
-        "trackWaitlistSubmitAttempt",
-        "trackWaitlistSuccess",
-        "trackWaitlistError",
+        "trackPricingSectionView",
+        "trackBillingIntervalChanged",
+        "trackPlanSelected",
+        "trackCheckoutStarted",
+        "trackCheckoutCompleted",
+        "trackCheckoutCancelled",
+        "trackCheckoutFailed",
     ):
         assert f"function {function_name}" in analytics
     assert "!consent.analytics" in analytics
@@ -143,9 +145,9 @@ def test_non_dashboard_image_elements_have_descriptive_alt_text():
             assert alt and alt.group(1).strip(), (path, image)
 
 
-def test_section_and_form_visibility_use_the_required_threshold_and_dwell_time():
+def test_section_visibility_supports_long_entry_and_configurable_percentage_modes():
     tracking = TRACKING.read_text(encoding="utf-8")
-    app = APP.read_text(encoding="utf-8")
+    pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
     assert "IntersectionObserver" in tracking
     assert "visibilityMode?: VisibilityMode" in tracking
     assert "visibilityMode: options.visibilityMode ?? 'entry'" in tracking
@@ -155,9 +157,8 @@ def test_section_and_form_visibility_use_the_required_threshold_and_dwell_time()
     assert "rootMargin: '0px 0px -20% 0px'" in tracking
     assert "observer.disconnect()" in tracking
     assert "window.clearTimeout(timer)" in tracking
-    assert "visibilityMode: 'percentage'" in app
-    assert "threshold: 0.5" in app
-    assert "dwellMs: 1000" in app
+    assert "visibilityMode: 'entry'" in pricing
+    assert "dwellMs: 1000" in pricing
 
 
 def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads():
@@ -175,6 +176,7 @@ def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads
         "feature_monitor",
         "feature_connect",
         "trust_control",
+        "pricing",
         "faq",
     }
     for section in expected_sections - {
@@ -219,21 +221,92 @@ def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads
     assert "trackFaqOpen," in analytics
 
 
-def test_waitlist_conversion_requires_a_new_server_confirmed_record():
+def test_pricing_replaces_waitlist_and_tracks_only_validated_commerce_metadata():
     app = APP.read_text(encoding="utf-8")
     analytics = ANALYTICS.read_text(encoding="utf-8")
-    created_branch = app.index("if (result.created)")
-    conversion = app.index("trackWaitlistSuccess", created_branch)
-    duplicate = app.index("trackWaitlistError('duplicate_email'", created_branch)
-    assert created_branch < conversion < duplicate
-    assert "trackWaitlistSuccess('landing_final', idempotencyKey.current)" in app
-    assert "emitGoogle('waitlist_signup_success', {})" in analytics
-    assert "emitGoogle('generate_lead'" not in analytics
-    assert "trackWaitlistSubmitAttempt" in app
-    assert "getFirstTouchAttribution()" in app
-    assert "This email is already on the waitlist. Please use a different email." in app
-    assert "status === 'duplicate' || status === 'error'" in app
-    assert "aria-invalid" in app
+    pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
+    assert "<Pricing />" in app
+    assert "Waitlist" not in app
+    assert 'id="waitlist"' not in app
+    assert "trackWaitlist" not in analytics
+    assert "trackPricingSectionView" in pricing
+    assert "trackBillingIntervalChanged" in pricing
+    assert "trackPlanSelected" in pricing
+    assert "validPlanCode" in analytics
+    assert "validBillingInterval" in analytics
+    assert "dataLayer" not in pricing
+    assert "email_address" not in pricing
+
+
+def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
+    app = APP.read_text(encoding="utf-8")
+    pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
+    chrome = (FRONTEND / "components" / "SiteChrome.tsx").read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
+
+    assert app.index('analyticsName="pricing"') < app.index('analyticsName="faq"')
+    assert "{ label: 'Pricing', target: '#pricing' }" in chrome
+    assert 'aria-label="Mobile navigation"' in chrome
+    assert 'href="/signin"' in chrome
+    for content in (
+        "Choose how deeply you want to monitor the market.",
+        "Explore",
+        "Monitor",
+        "Pro",
+        "monthlyPrice: 12",
+        "annualPrice: 120",
+        "monthlyPrice: 22",
+        "annualPrice: 220",
+        "Most Popular",
+        "Try Monitor for 7 days",
+        "No charge for seven days. Cancel before the first payment.",
+        "2 active market monitors",
+        "10 active market monitors",
+        "Up to 50 monitor alerts per day",
+        "Unlimited monitor alerts per day",
+        "WhatsApp delivery - coming soon",
+    ):
+        assert content in pricing
+    for removed in (
+        "first Watch Plan",
+        "markets per Watch Plan",
+        "90-day opportunity",
+        "1-year opportunity",
+        "Advanced Controls",
+        "Visual Canvas",
+        "Paid subscriptions are not available yet.",
+    ):
+        assert removed not in pricing
+    assert "Discord" not in pricing
+    assert 'role="status"' in pricing
+    assert 'type="radio"' in pricing
+    assert "aria-expanded={expanded}" in pricing
+    assert 'aria-controls={`plan-${plan.code}-features`}' in pricing
+    assert "/subscribe?plan_code=" in pricing
+    assert "@media (max-width: 767px)" in styles
+    assert ".comparison-mobile" in styles
+    assert ".plan-cta:focus-visible" in styles
+
+
+def test_checkout_outcome_tracking_is_consent_aware_and_contains_no_payment_data():
+    script = (
+        ROOT / "src/ai_market_monitor/static/hilalmarkets-commerce-analytics.js"
+    ).read_text(encoding="utf-8")
+    result_template = (
+        ROOT / "src/ai_market_monitor/templates/billing_result.html"
+    ).read_text(encoding="utf-8")
+    checkout_template = (
+        ROOT / "src/ai_market_monitor/templates/hilal/dashboard/checkout.html"
+    ).read_text(encoding="utf-8")
+
+    assert 'dataset.consentAnalytics !== "granted"' in script
+    assert "window.sessionStorage" in script
+    assert "checkout_started" in checkout_template
+    assert "checkout_completed" in result_template
+    assert "checkout_cancelled" in result_template
+    assert "checkout_failed" in result_template
+    for private_key in ("email", "card", "wallet", "user_id"):
+        assert private_key not in script
 
 
 def test_sheet_configuration_and_form_content_are_not_exposed_in_public_assets():

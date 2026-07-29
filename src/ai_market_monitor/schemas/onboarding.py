@@ -79,11 +79,15 @@ class GuidedSetupRequest(BaseModel):
     maximum_spread_bps: float | None = Field(default=None, ge=0, le=1000)
     forming_alerts: bool = True
     near_miss_threshold: float = Field(default=70, ge=1, le=100)
-    delivery_channels: list[Literal["telegram", "whatsapp", "web"]] = Field(
-        min_length=1
-    )
+    delivery_channels: list[Literal["telegram", "whatsapp", "web"]] = Field(min_length=1)
     maximum_alerts_per_hour: int = Field(default=50, ge=1, le=1000)
     capability_bindings: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    #: Values the conversation has already settled, keyed by
+    #: :data:`ai_market_monitor.engine.strategy_state.STATE_FIELDS`. Present only when
+    #: a multi-turn session resolved them, and authoritative when present: the
+    #: accumulated text still contains every superseded statement, so re-parsing it
+    #: would let a corrected value lose to the wording it replaced.
+    resolved_state: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_setup_source(self) -> "GuidedSetupRequest":

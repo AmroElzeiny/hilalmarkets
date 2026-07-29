@@ -13,6 +13,7 @@ from ai_market_monitor.engine.capability_compatibility import (
 )
 from ai_market_monitor.engine.prompt_aliases import normalized_phrases
 from ai_market_monitor.engine.prompt_audit import split_prompt_fragments
+from ai_market_monitor.engine.turn_fragments import classify_fragment
 from ai_market_monitor.schemas.strategy import ConditionGroup, ConditionRule, StrategyDefinition
 
 ResolutionStatus = Literal["matched", "ambiguous", "unknown"]
@@ -276,6 +277,12 @@ class CapabilityResolver:
             for part in parts:
                 if _is_structured_clarification_answer(part):
                     continue
+                # Symbols, exclusions, timeframes, directions, operators, thresholds,
+                # approval instructions and conversation carry no market mechanic. Asking
+                # the registry to identify one produces "unknown capability" questions for
+                # terms the platform already parses deterministically.
+                if not classify_fragment(part).enters_capability_resolution:
+                    continue
                 resolution = self.resolve_fragment(part, limit=limit_per_fragment)
                 if not resolution.candidates and _is_context_only(part):
                     continue
@@ -325,8 +332,9 @@ class CapabilityResolver:
         second = candidates[1] if len(candidates) > 1 else None
         ambiguous = (
             bool(unknown_terms)
-            or top.score < 72
-            or (second is not None and second.score >= 65 and top.score - second.score < 9)
+            or top.score < 100
+            or not _candidate_contract_is_exact(top, semantic_fragment)
+            or (second is not None and second.score >= 100 and top.score - second.score < 9)
         )
         if ambiguous:
             labels = " or ".join(candidate.label for candidate in candidates[:3])
@@ -426,11 +434,7 @@ class CapabilityResolver:
             raise ValueError(
                 f"Capability {capability_key} received unknown parameters: {', '.join(unknown)}"
             )
-        missing = sorted(
-            name
-            for name in schema.get("required") or []
-            if name not in selected
-        )
+        missing = sorted(name for name in schema.get("required") or [] if name not in selected)
         if missing:
             raise ValueError(
                 f"Capability {capability_key} requires parameters: {', '.join(missing)}"
@@ -641,6 +645,29 @@ def _selection_parameters(condition: ConditionRule) -> dict[str, Any]:
         if condition.right.kind.value == "constant":
             parameters["threshold"] = condition.right.value
     return parameters
+
+
+def _candidate_contract_is_exact(
+    candidate: CapabilityCandidate,
+    fragment: str,
+) -> bool:
+    """Fuzzy relevance is useful for choices, never for executable selection."""
+
+    exact_markers = ("exact:", "alias:", "ordered_alias:", "semantic:volume_ratio")
+    if any(marker.startswith(exact_markers) for marker in candidate.matched_on):
+        return True
+    if "semantic:percent_change" in candidate.matched_on:
+        lowered = fragment.casefold()
+        return bool(
+            re.search(
+                r"\b(?:open[\s-]*to[\s-]*close|close[\s-]*to[\s-]*close|"
+                r"previous\s+(?:candle\s+)?close|lookback|since\s+(?:the\s+)?"
+                r"(?:open|close|midnight)|from\s+(?:the\s+)?"
+                r"(?:open|close|high|low)|today|daily\s+move)\b",
+                lowered,
+            )
+        )
+    return False
 
 
 def _parameter_target(payload: dict[str, Any], name: str) -> dict[str, Any]:

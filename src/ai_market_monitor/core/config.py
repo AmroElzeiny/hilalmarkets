@@ -11,7 +11,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 WHATSAPP_TEMPLATE_EVENTS = frozenset(
     {
@@ -40,6 +40,30 @@ class AISetupEvaluatorTargetVersion(BaseModel):
     prompt_version: Literal["current", "context_guard_v1"] = "current"
 
 
+#: Fields whose ``.env`` value outranks the ambient environment. Restricted to
+#: credentials: a stale machine-wide copy causes an auth failure that is expensive
+#: to diagnose, while non-secret settings must stay overridable per process.
+CREDENTIAL_FIELDS: frozenset[str] = frozenset({"openai_api_key"})
+
+
+class CredentialDotEnvSource(PydanticBaseSettingsSource):
+    """Supplies only the credential fields, and only from the ``.env`` file."""
+
+    def __init__(self, dotenv_settings: PydanticBaseSettingsSource) -> None:
+        super().__init__(dotenv_settings.settings_cls)
+        self._dotenv = dotenv_settings
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError
+
+    def __call__(self) -> dict[str, Any]:
+        return {
+            name: value
+            for name, value in self._dotenv().items()
+            if name.casefold() in CREDENTIAL_FIELDS
+        }
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -47,6 +71,29 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Let ``.env`` win over the ambient environment for credentials only.
+
+        A stale machine-wide credential must not outrank the project's own file.
+        Every other setting keeps normal precedence so that per-process overrides
+        such as ``DATABASE_URL=... alembic upgrade head`` continue to work.
+        """
+        return (
+            init_settings,
+            CredentialDotEnvSource(dotenv_settings),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     app_name: str = "HilalMarkets"
     app_env: Literal["development", "test", "staging", "production"] = "development"
@@ -88,17 +135,11 @@ class Settings(BaseSettings):
     sharia_compliance_safety_under_review: bool = True
     sharia_compliance_digest_local_hour: int = Field(default=8, ge=0, le=23)
     sharia_admin_telegram_chat_id: str | None = None
-    sc_malaysia_digital_assets_url: AnyHttpUrl = AnyHttpUrl(
-        "https://www.sc.com.my/digital-assets"
-    )
-    fasset_shariah_reports_url: AnyHttpUrl = AnyHttpUrl(
-        "https://www.fasset.com/shariah-reports"
-    )
+    sc_malaysia_digital_assets_url: AnyHttpUrl = AnyHttpUrl("https://www.sc.com.my/digital-assets")
+    fasset_shariah_reports_url: AnyHttpUrl = AnyHttpUrl("https://www.fasset.com/shariah-reports")
     fasset_minimum_profile_count: int = Field(default=100, ge=1, le=1000)
     sharia_ai_model: str = "gpt-5.4-nano"
-    sharia_ai_reasoning_effort: Literal[
-        "none", "minimal", "low", "medium", "high", "xhigh"
-    ] = "low"
+    sharia_ai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "low"
     sharia_ai_service_tier: Literal["default", "flex"] = "flex"
     sharia_ai_timeout_seconds: int = Field(default=900, ge=60, le=1800)
     sharia_ai_max_retries: int = Field(default=5, ge=1, le=10)
@@ -113,8 +154,7 @@ class Settings(BaseSettings):
     sharia_pilot_symbols: str = "BTC,ETH,SOL"
     sharia_process_remaining_imports: bool = True
     sharia_import_pack_path: str = (
-        "HilalMarkets_Sharia_Methodology_Import_Pack/"
-        "HilalMarkets_Sharia_Methodology_Import_Pack"
+        "HilalMarkets_Sharia_Methodology_Import_Pack/HilalMarkets_Sharia_Methodology_Import_Pack"
     )
     sharia_import_auto_publish: bool = False
     sharia_import_require_admin_review: bool = True
@@ -133,7 +173,9 @@ class Settings(BaseSettings):
     whatsapp_enabled: bool = False
     whatsapp_adapter: Literal["none", "http"] = "none"
     billing_enabled: bool = False
-    billing_provider: Literal["static", "stripe", "nowpayments"] = "static"
+    billing_provider: Literal["static", "stripe", "nowpayments", "creem"] = "static"
+    billing_card_provider: Literal["disabled", "static", "stripe", "creem"] = "disabled"
+    billing_crypto_provider: Literal["disabled", "nowpayments"] = "disabled"
     billing_checkout_ttl_minutes: int = Field(default=30, ge=5, le=1440)
     billing_terms_version: str = "2026-07"
     billing_payment_amount_tolerance_percent: float = Field(default=0, ge=0, le=5)
@@ -187,7 +229,13 @@ class Settings(BaseSettings):
     stripe_secret_key: SecretStr | None = None
     stripe_price_ids: dict[str, str] = Field(default_factory=dict)
     stripe_api_base: AnyHttpUrl = AnyHttpUrl("https://api.stripe.com")
+    creem_api_key: SecretStr | None = None
+    creem_webhook_secret: SecretStr | None = None
+    creem_product_ids: dict[str, str] = Field(default_factory=dict)
+    creem_api_base: AnyHttpUrl = AnyHttpUrl("https://test-api.creem.io")
+    creem_timeout_seconds: int = Field(default=20, ge=3, le=60)
     nowpayments_api_key: SecretStr | None = None
+    nowpayments_ipn_secret: SecretStr | None = None
     nowpayments_base_url: AnyHttpUrl = AnyHttpUrl("https://api.nowpayments.io")
     nowpay_email: str | None = None
     nowpay_password: SecretStr | None = None
@@ -222,12 +270,12 @@ class Settings(BaseSettings):
     openai_explanation_enabled: bool = True
     ai_setup_simple_model: str | None = None
     ai_setup_complex_model: str | None = None
-    ai_setup_simple_reasoning_effort: Literal[
-        "none", "minimal", "low", "medium", "high", "xhigh"
-    ] | None = None
-    ai_setup_complex_reasoning_effort: Literal[
-        "none", "minimal", "low", "medium", "high", "xhigh"
-    ] | None = None
+    ai_setup_simple_reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None
+    ) = None
+    ai_setup_complex_reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None
+    ) = None
     ai_setup_complex_condition_threshold: int = Field(default=4, ge=2, le=20)
     ai_setup_repeated_correction_threshold: int = Field(default=2, ge=1, le=10)
     ai_setup_low_capability_confidence: float = Field(default=0.72, ge=0, le=1)
@@ -371,6 +419,7 @@ class Settings(BaseSettings):
     waitlist_google_sheets_retry_minutes: int = Field(default=15, ge=1, le=1440)
     waitlist_trust_cloudflare_country_header: bool = False
     system_brain_admin_username: str | None = None
+    system_brain_admin_emails: str = ""
     system_brain_admin_password_hash: SecretStr | None = None
     system_brain_otp_ttl_minutes: int = Field(default=10, ge=2, le=30)
     system_brain_otp_max_attempts: int = Field(default=5, ge=1, le=10)
@@ -416,8 +465,8 @@ class Settings(BaseSettings):
     dashboard_export_directory: str = "./exports"
     chart_library_cdn_url: str | None = "/static/vendor/lightweight-charts.standalone.production.js"
 
-    trial_days: int = Field(default=14, ge=0, le=90)
-    trial_alerts_per_cycle: int = Field(default=500, ge=0, le=100000)
+    trial_days: int = Field(default=7, ge=0, le=90)
+    trial_alerts_per_cycle: int = Field(default=350, ge=0, le=100000)
     delivery_settlement_grace_minutes: int = Field(default=60, ge=0, le=1440)
     scan_job_claim_timeout_seconds: int = Field(default=900, ge=60, le=86400)
     scan_job_max_attempts: int = Field(default=3, ge=1, le=10)
@@ -465,10 +514,7 @@ class Settings(BaseSettings):
             )
         if not self.sharia_pilot_symbol_set:
             raise ValueError("SHARIA_PILOT_SYMBOLS must include at least one reviewed symbol")
-        if (
-            self.sharia_import_auto_publish
-            and not self.sharia_import_metadata_only_publication
-        ):
+        if self.sharia_import_auto_publish and not self.sharia_import_metadata_only_publication:
             raise ValueError(
                 "SHARIA_IMPORT_METADATA_ONLY_PUBLICATION must be true when "
                 "SHARIA_IMPORT_AUTO_PUBLISH is enabled"
@@ -478,9 +524,7 @@ class Settings(BaseSettings):
         if not self.sharia_ai_enrichment_official_sources_only:
             raise ValueError("SHARIA_AI_ENRICHMENT_OFFICIAL_SOURCES_ONLY must remain true")
         if self.sharia_ai_enrichment_store_as_external_reason:
-            raise ValueError(
-                "SHARIA_AI_ENRICHMENT_STORE_AS_EXTERNAL_REASON must remain false"
-            )
+            raise ValueError("SHARIA_AI_ENRICHMENT_STORE_AS_EXTERNAL_REASON must remain false")
         required_rate_limits = {
             "authentication",
             "ai_chat",
@@ -520,8 +564,7 @@ class Settings(BaseSettings):
             if event_type not in WHATSAPP_TEMPLATE_EVENTS:
                 raise ValueError("WHATSAPP_TEMPLATE_NAMES contains an unknown event key")
             if isinstance(configured, dict) and any(
-                locale != "default"
-                and not re.fullmatch(r"[a-z]{2}(?:_[A-Z]{2})?", str(locale))
+                locale != "default" and not re.fullmatch(r"[a-z]{2}(?:_[A-Z]{2})?", str(locale))
                 for locale in configured
             ):
                 raise ValueError("WHATSAPP_TEMPLATE_NAMES contains an invalid locale key")
@@ -584,15 +627,24 @@ class Settings(BaseSettings):
     @property
     def sharia_pilot_symbol_set(self) -> set[str]:
         return {
-            value.strip().upper()
-            for value in self.sharia_pilot_symbols.split(",")
-            if value.strip()
+            value.strip().upper() for value in self.sharia_pilot_symbols.split(",") if value.strip()
         }
 
     @property
     def system_brain_username(self) -> str | None:
         value = (self.system_brain_admin_username or "").strip().casefold()
         return value or None
+
+    @property
+    def system_brain_authorized_emails(self) -> frozenset[str]:
+        """Configured, verified-email operators allowed into System Brain."""
+        values = (self.system_brain_username or "", self.system_brain_admin_emails)
+        return frozenset(
+            email.strip().casefold()
+            for value in values
+            for email in re.split(r"[,;\n]", value)
+            if email.strip()
+        )
 
 
 @lru_cache

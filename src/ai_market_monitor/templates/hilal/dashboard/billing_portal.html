@@ -1,0 +1,93 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block content %}
+<div class="billing-portal-page">
+  <header class="billing-portal-header">
+    <div>
+      <span class="kicker">Billing portal</span>
+      <h1>Manage your subscription</h1>
+      <p>See your current access, renewal details, payments, and provider-managed controls.</p>
+    </div>
+    <a class="btn btn-secondary" href="/dashboard/billing">
+      <span data-icon="arrow" data-icon-class="icon-sm billing-back-icon"></span>
+      Back to plans
+    </a>
+  </header>
+
+  <section class="billing-portal-summary" aria-labelledby="billing-portal-plan-title">
+    <div class="billing-portal-plan">
+      <span class="billing-portal-plan-icon"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
+      <div>
+        <span class="kicker">Current access</span>
+        <h2 id="billing-portal-plan-title">{{ entitlement.plan.name }}</h2>
+        <p>{{ entitlement.plan.description or 'Your current Hilal Markets access.' }}</p>
+      </div>
+    </div>
+    <dl class="billing-portal-facts">
+      <div>
+        <dt>Status</dt>
+        <dd>{{ subscription.status.value|replace('_', ' ')|title if subscription else entitlement.source|replace('_', ' ')|title }}</dd>
+      </div>
+      <div>
+        <dt>Payment provider</dt>
+        <dd>{{ 'Creem' if provider_name == 'creem' else ('NOWPayments' if provider_name == 'nowpayments' else (provider_name|title if provider_name else 'No provider-managed subscription')) }}</dd>
+      </div>
+      <div>
+        <dt>Next billing date</dt>
+        <dd>{{ subscription.current_period_end|short_dt(user.timezone) if subscription and subscription.current_period_end and not subscription.cancel_at_period_end else 'No upcoming automatic charge' }}</dd>
+      </div>
+      <div>
+        <dt>Renewal</dt>
+        <dd>{{ 'Ends after the current period' if subscription and subscription.cancel_at_period_end else ('Automatic renewal' if portal_available else 'No automatic renewal') }}</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="panel billing-portal-controls" aria-labelledby="billing-portal-controls-title">
+    <div class="billing-portal-controls-copy">
+      <span class="billing-portal-control-icon"><span data-icon="shield" data-icon-class="icon"></span></span>
+      <div>
+        <span class="kicker">Secure controls</span>
+        <h2 id="billing-portal-controls-title">Subscription and payment details</h2>
+        <p>Card details, cancellation, and provider invoices stay on the payment provider's secure portal.</p>
+      </div>
+    </div>
+    {% if portal_available %}
+      <form method="post" action="/dashboard/billing/portal">
+        <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
+        <button class="btn btn-primary" type="submit">
+          Open secure {{ 'Creem' if provider_name == 'creem' else provider_name|title }} portal
+          <span data-icon="arrow" data-icon-class="icon-sm"></span>
+        </button>
+      </form>
+    {% elif provider_name == 'nowpayments' %}
+      <div class="notice">
+        <span data-icon="info" data-icon-class="icon"></span>
+        <div>
+          <strong>No cancellation portal is needed</strong>
+          <p>NOWPayments purchases provide one paid access period and do not renew automatically.</p>
+        </div>
+      </div>
+    {% elif subscription and provider_name %}
+      <div class="notice notice-warning">
+        <span data-icon="info" data-icon-class="icon"></span>
+        <div>
+          <strong>Provider portal is not ready yet</strong>
+          <p>Your subscription remains visible here. Contact support if you need help managing it.</p>
+        </div>
+      </div>
+    {% else %}
+      <div class="notice">
+        <span data-icon="info" data-icon-class="icon"></span>
+        <div>
+          <strong>No paid subscription to manage</strong>
+          <p>Choose Monitor or Pro when you are ready. Your Explore access remains available.</p>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="panel billing-history-panel">
+    {% include "hilal/dashboard/partials/billing_history.html" %}
+  </section>
+</div>
+{% endblock %}

@@ -1,17 +1,15 @@
-import type { FirstTouchAttribution, WaitlistErrorType } from './analytics'
+export type PublicFormErrorType =
+  | 'invalid_email'
+  | 'required_field'
+  | 'duplicate_email'
+  | 'rate_limited'
+  | 'network_error'
+  | 'server_error'
+  | 'unknown_error'
 
 type Bootstrap = {
   csrf_token: string
-  waitlist_endpoint: string
   contact_endpoint: string
-}
-
-type WaitlistResponse = {
-  status: 'created' | 'already_registered'
-  created: boolean
-  code: 'waitlist_created' | 'duplicate_email'
-  sheet_delivery_status: 'sent' | 'queued' | 'retrying' | 'not_configured'
-  message: string
 }
 
 type ContactResponse = {
@@ -22,9 +20,9 @@ type ContactResponse = {
 let bootstrapPromise: Promise<Bootstrap> | null = null
 
 export class PublicFormError extends Error {
-  readonly category: WaitlistErrorType
+  readonly category: PublicFormErrorType
 
-  constructor(category: WaitlistErrorType) {
+  constructor(category: PublicFormErrorType) {
     super('The form could not be submitted.')
     this.category = category
   }
@@ -75,21 +73,6 @@ function idempotency(prefix: string): string {
   return `${prefix}:${random}`
 }
 
-export async function submitWaitlist(
-  email: string,
-  attribution: FirstTouchAttribution,
-  idempotencyKey: string,
-): Promise<WaitlistResponse> {
-  const config = await bootstrap()
-  return post<WaitlistResponse>(config.waitlist_endpoint, config.csrf_token, {
-    email,
-    source_page: window.location.pathname || '/',
-    attribution,
-    idempotency_key: idempotencyKey,
-    company_website: '',
-  })
-}
-
 export async function submitContact(
   values: { title: string; email: string; description: string },
   idempotencyKey: string,
@@ -101,10 +84,6 @@ export async function submitContact(
     idempotency_key: idempotencyKey,
     company_website: '',
   })
-}
-
-export function newWaitlistIdempotencyKey(): string {
-  return idempotency('waitlist')
 }
 
 export function newContactIdempotencyKey(): string {

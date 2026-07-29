@@ -1,29 +1,16 @@
-import { useCallback, useRef, useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { Reveal } from './components/Reveal'
 import { HeroFlow } from './components/HeroFlow'
 import Component03ProblemAndSolution from './imports/03ProblemAndSolution-1'
 import Component04HowHilalMarketsWorks from './imports/04HowHilalMarketsWorks'
 import Component06CoreFeatures from './imports/06CoreFeatures-1'
 import Component07TrustAndControl from './imports/07TrustAndControl'
-import {
-  getFirstTouchAttribution,
-  trackFaqOpen,
-  trackWaitlistError,
-  trackWaitlistFormStart,
-  trackWaitlistFormView,
-  trackWaitlistSubmitAttempt,
-  trackWaitlistSuccess,
-  type WaitlistErrorType,
-} from './analytics'
+import { trackFaqOpen } from './analytics'
 import { SiteFooter, SiteNav } from './components/SiteChrome'
-import { TrackedCta, TrackedSection, useVisibilityTracking } from './components/Tracking'
+import { TrackedCta, TrackedSection } from './components/Tracking'
+import Pricing from './components/Pricing'
 import ContactPage from './pages/ContactPage'
 import LegalPage from './pages/LegalPage'
-import {
-  newWaitlistIdempotencyKey,
-  PublicFormError,
-  submitWaitlist,
-} from './publicForms'
 
 /* -------------------------------------------------------------------------- */
 /*  Responsive imported-section wrapper                                       */
@@ -49,7 +36,7 @@ function ResponsiveSection({ id, bg, children }: {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Hero + Waitlist                                                             */
+/*  Hero                                                                         */
 /* -------------------------------------------------------------------------- */
 function Hero() {
   return (
@@ -83,14 +70,14 @@ function Hero() {
 
         <Reveal delay={240} className="mt-8 flex flex-col items-center gap-3">
           <TrackedCta
-            href="#waitlist"
-            analyticsName="join_waitlist"
+            href="/subscribe?plan_code=demo&billing_interval=monthly"
+            analyticsName="start_free"
             analyticsLocation="hero"
             className="inline-flex items-center justify-center rounded-full bg-[#cbfa4d] px-[49px] py-[19px] font-display text-[16px] leading-none text-[#2b2e35] shadow-[0_16px_36px_-18px_rgba(120,170,40,0.9)] transition-transform hover:-translate-y-0.5"
           >
-            Join the waitlist
+            Get started
           </TrackedCta>
-          <p className="text-[14px] text-ink/50">Be among the first to access Hilal Markets.</p>
+          <p className="text-[14px] text-ink/50">Explore screened assets with a free account.</p>
         </Reveal>
       </div>
 
@@ -216,7 +203,7 @@ function FAQ() {
     {
       id: 'alert_delivery',
       q: 'How will alerts be delivered?',
-      a: 'Users will be able to receive alerts without keeping the Hilal Markets dashboard open. Telegram, email, and WhatsApp will be available in the initial experience, with additional integrations added as the platform expands.',
+      a: 'Users can receive alerts without keeping the Hilal Markets dashboard open. Telegram and email are supported. WhatsApp delivery is coming soon and will be enabled only when the integration is operational.',
     },
     {
       id: 'strategy_privacy',
@@ -283,149 +270,6 @@ function FAQ() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Final Waitlist CTA                                                          */
-/* -------------------------------------------------------------------------- */
-function Waitlist() {
-  const bars = [1, 0.62, 0.38, 0.22, 0.12, 0.06]
-  const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'duplicate' | 'error'>('idle')
-  const [errorType, setErrorType] = useState<WaitlistErrorType>('unknown_error')
-  const idempotencyKey = useRef(newWaitlistIdempotencyKey())
-  const formVisible = useCallback(() => trackWaitlistFormView('landing_final'), [])
-  const waitlistRef = useVisibilityTracking<HTMLDivElement>(formVisible, {
-    visibilityMode: 'percentage',
-    dwellMs: 1000,
-    threshold: 0.5,
-  })
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (status === 'submitting') return
-    if (!event.currentTarget.reportValidity()) return
-    trackWaitlistSubmitAttempt('landing_final')
-    setStatus('submitting')
-
-    try {
-      const result = await submitWaitlist(
-        email,
-        getFirstTouchAttribution(),
-        idempotencyKey.current,
-      )
-      if (result.created) {
-        trackWaitlistSuccess('landing_final', idempotencyKey.current)
-        setStatus('success')
-      } else {
-        trackWaitlistError('duplicate_email', 'landing_final')
-        setStatus('duplicate')
-      }
-      idempotencyKey.current = newWaitlistIdempotencyKey()
-    } catch (error) {
-      const category = error instanceof PublicFormError ? error.category : 'unknown_error'
-      setErrorType(category)
-      trackWaitlistError(category, 'landing_final')
-      setStatus('error')
-    }
-  }
-
-  return (
-    <Reveal as="section" className="mx-auto max-w-[1200px] px-5 pb-24">
-      <div
-        id="waitlist"
-        ref={waitlistRef}
-        className="relative overflow-hidden rounded-[32px] bg-apple px-8 py-16 text-center sm:px-16"
-      >
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-end gap-3 pr-8 opacity-0" aria-hidden="true">
-          {bars.map((o, i) => (
-            <span
-              key={i}
-              className="w-8 rounded-t-lg bg-[#2b2e35]"
-              style={{ height: `${88 - i * 8}%`, opacity: o * 0.18 }}
-            />
-          ))}
-        </div>
-
-        <div className="relative mx-auto max-w-[580px]">
-          <h2 className="font-display text-[26px] leading-[1.08] tracking-[-0.03em] text-ink sm:text-[34px] md:text-[42px]">
-            Be among the first to experience Hilal Markets
-          </h2>
-          <p className="mx-auto max-w-[480px] pt-4 text-[18px] leading-[24px] text-[#2b2e35]">
-            Join the waitlist for early access and help shape a platform built around the real needs of Muslim traders.
-          </p>
-          {status === 'success' ? (
-            <div className="mx-auto mt-8 max-w-[440px] rounded-[20px] border border-ink/10 bg-white/70 px-6 py-5" role="status">
-              <p className="font-display text-[20px] text-ink">You are on the waitlist.</p>
-              <p className="mt-1 text-[14px] text-ink/65">
-                We will contact you as access becomes available.
-              </p>
-              <button
-                type="button"
-                className="mt-4 text-[13px] font-semibold text-ink underline decoration-ink/30 underline-offset-4"
-                onClick={() => {
-                  setEmail('')
-                  setStatus('idle')
-                  idempotencyKey.current = newWaitlistIdempotencyKey()
-                }}
-              >
-                Use another email
-              </button>
-            </div>
-          ) : (
-            <form
-              className="mx-auto mt-8 flex max-w-[440px] flex-col gap-3 sm:flex-row"
-              onSubmit={handleSubmit}
-            >
-              <label className="sr-only" htmlFor="waitlist-email">Email address</label>
-              <input
-                id="waitlist-email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                aria-invalid={status === 'duplicate' || status === 'error' ? true : undefined}
-                aria-describedby={status === 'duplicate' || status === 'error' ? 'waitlist-email-error' : undefined}
-                onFocus={() => trackWaitlistFormStart('landing_final')}
-                onPaste={() => trackWaitlistFormStart('landing_final')}
-                onChange={(event) => {
-                  trackWaitlistFormStart('landing_final')
-                  setEmail(event.target.value)
-                  if (status === 'duplicate' || status === 'error') setStatus('idle')
-                }}
-                placeholder="you@email.com"
-                className={`w-full rounded-full border bg-white/70 px-5 py-3.5 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/40 focus:bg-white ${
-                  status === 'duplicate' || status === 'error'
-                    ? 'border-[#8d3029] focus:border-[#8d3029] focus:ring-4 focus:ring-[#8d3029]/10'
-                    : 'border-ink/15 focus:border-ink/50'
-                }`}
-              />
-              <button
-                type="submit"
-                disabled={status === 'submitting'}
-                aria-busy={status === 'submitting'}
-                className="shrink-0 rounded-full bg-ink px-7 py-3.5 text-[15px] font-medium !text-[#fff] transition-transform hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
-              >
-                {status === 'submitting' ? 'Joining...' : 'Join the waitlist'}
-              </button>
-            </form>
-          )}
-          {(status === 'duplicate' || status === 'error') && (
-            <p id="waitlist-email-error" className="mt-3 text-[13px] font-semibold text-[#6c271f]" role="alert">
-              {status === 'duplicate'
-                ? 'This email is already on the waitlist. Please use a different email.'
-                : errorType === 'rate_limited'
-                  ? 'Please wait a moment before trying again.'
-                  : 'We could not submit your email. Please try again.'}
-            </p>
-          )}
-          <p className="pt-4 text-[14px] text-[#2b2e35]/55">
-            We will contact selected waitlist members directly as access becomes available.
-          </p>
-        </div>
-      </div>
-    </Reveal>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
 export default function App() {
   if (window.location.pathname === '/contact') return <ContactPage />
   if (window.location.pathname === '/privacy') return <LegalPage kind="privacy" />
@@ -439,8 +283,8 @@ export default function App() {
         <TrackedSection analyticsName="how_it_works"><HowItWorks /></TrackedSection>
         <Features />
         <TrackedSection analyticsName="trust_control"><TrustControl /></TrackedSection>
+        <TrackedSection analyticsName="pricing"><Pricing /></TrackedSection>
         <TrackedSection analyticsName="faq"><FAQ /></TrackedSection>
-        <Waitlist />
       </main>
       <SiteFooter />
     </div>

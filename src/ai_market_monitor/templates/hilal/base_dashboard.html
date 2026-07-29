@@ -32,7 +32,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260723-reviewer-first">
   {% block page_styles %}{% endblock %}
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260723-reviewer-first">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260723-reviewer-first">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260728-billing-portal">
 </head>
 {% set shell_prefs = (dashboard_preference.notification_preferences if dashboard_preference else {}) or {} %}
 <body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root">
@@ -43,8 +43,17 @@
     <main class="app-main">
       {% include "hilal/partials/dashboard_topbar.html" %}
       <div class="app-content">
-        {% if message %}<div class="notice notice-success" role="status"><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ message.replace('_', ' ').title() }}</p></div></div>{% endif %}
-        {% if error %}<div class="notice notice-error" role="alert"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ error.replace('_', ' ').title() }}</p></div></div>{% endif %}
+        {% set dashboard_error_messages = {
+          'billing_disabled': 'Paid subscriptions are not available yet. Your selected plan was kept and no charge was created.',
+          'billing_cycle_not_available': 'Annual checkout is not available yet. No charge was created.',
+          'plan_not_available': 'That plan is not available for checkout.',
+          'billing_customer_missing': 'There is no provider-managed subscription to open yet.',
+          'billing_portal_unavailable': 'Your payment provider does not offer an online subscription portal.',
+          'creem_api_key_missing': 'Secure card checkout is not configured yet. No payment was created.',
+          'creem_product_missing': 'That card plan and billing period are not configured yet. No payment was created.'
+        } %}
+        {% if message %}<div class="notice notice-success" role="status" tabindex="-1" data-page-status><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ message.replace('_', ' ').title() }}</p></div></div>{% endif %}
+        {% if error %}<div class="notice notice-error" role="alert" tabindex="-1" data-page-status><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ dashboard_error_messages.get(error, error.replace('_', ' ').title()) }}</p></div></div>{% endif %}
         {% block content %}{% endblock %}
       </div>
     </main>
@@ -58,6 +67,12 @@
   <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260723-reviewer-first"></script>
   <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260723-reviewer-first"></script>
   <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-reviewer-first"></script>
+  <script>
+    (() => {
+      const pageStatus = document.querySelector("[data-page-status]");
+      if (pageStatus) window.requestAnimationFrame(() => pageStatus.focus({ preventScroll: true }));
+    })();
+  </script>
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

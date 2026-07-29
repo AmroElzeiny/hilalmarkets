@@ -1,0 +1,60 @@
+<div class="panel-head billing-history-heading">
+  <div>
+    <span class="kicker">Payment history</span>
+    <h2>Your payments and receipts</h2>
+    <p>Review checkout status, payment method, total, and receipt availability.</p>
+  </div>
+</div>
+{% if billing_history %}
+  <ol class="billing-history-list" aria-label="Payment history">
+    {% for row in billing_history %}
+      {% set payment_status = row.attempt.status|lower %}
+      {% set status_class = 'badge-eligible' if payment_status == 'completed' else ('badge-review' if payment_status in ['pending', 'creating', 'processing'] else ('badge-excluded' if payment_status in ['failed', 'expired', 'cancelled', 'provider_unavailable'] else 'badge-neutral')) %}
+      <li class="billing-history-item">
+        <span class="billing-history-icon" aria-hidden="true"><span data-icon="billing" data-icon-class="icon"></span></span>
+        <div class="billing-history-primary">
+          <strong>{{ row.plan_name }}</strong>
+          <span>{{ row.attempt.created_at|short_dt(user.timezone) }}</span>
+        </div>
+        <span class="badge {{ status_class }}">{{ row.attempt.status.replace('_', ' ')|title }}</span>
+        <dl class="billing-history-facts">
+          <div>
+            <dt>Payment method</dt>
+            <dd>{{ 'Card via Creem' if row.attempt.provider == 'creem' else ('Crypto via NOWPayments' if row.attempt.provider == 'nowpayments' else row.attempt.provider|replace('_', ' ')|title) }}</dd>
+          </div>
+          <div>
+            <dt>Total</dt>
+            <dd>{{ row.attempt.amount }} {{ row.attempt.currency }}</dd>
+          </div>
+          <div>
+            <dt>Billing period</dt>
+            <dd>{{ row.attempt.billing_cycle|replace('_', ' ')|replace('auto renewal', 'auto-renewal')|title }}</dd>
+          </div>
+        </dl>
+        {% if row.can_resume %}
+          <a class="btn btn-secondary billing-history-resume" href="{{ row.resume_url }}">
+            Continue payment
+          </a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+{% else %}
+  <div class="empty-state billing-history-empty">
+    <span class="billing-history-icon" aria-hidden="true"><span data-icon="billing" data-icon-class="icon"></span></span>
+    <strong>No payments yet</strong>
+    <p>Your first secure checkout and its status will appear here.</p>
+  </div>
+{% endif %}
+{% if payment_receipts %}
+  <div class="billing-receipts" aria-label="Available receipts">
+    {% for receipt in payment_receipts %}
+      {% if receipt.receipt_url %}
+        <a class="btn btn-secondary" href="{{ receipt.receipt_url }}" target="_blank" rel="noopener">
+          <span data-icon="download" data-icon-class="icon-sm"></span>
+          {{ receipt.plan_code|title }} receipt
+        </a>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% endif %}

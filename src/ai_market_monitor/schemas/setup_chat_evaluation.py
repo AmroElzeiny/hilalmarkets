@@ -75,6 +75,21 @@ class EvaluationApprovalState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_status: str
+    #: Explicit position in the setup lifecycle. ``session_status`` is coarse and does
+    #: not distinguish an inactive compiled draft from a session still gathering
+    #: requirements, which is what made turn completion undetectable.
+    lifecycle_state: Literal[
+        "collecting",
+        "needs_clarification",
+        "ready_for_confirmation",
+        "awaiting_approval",
+        "approved",
+        "compiled",
+        "activated",
+    ] = "collecting"
+    #: True only after authenticated approval reaches a final lifecycle state.
+    #: Session ``turn_complete`` separately reports transport/UI completion.
+    terminal: bool = False
     eligible: bool
     approved: bool
     schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")

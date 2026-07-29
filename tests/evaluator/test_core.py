@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from jsonschema import Draft202012Validator
 
 from ai_market_monitor.services.setup_chat_evaluation import (
@@ -8,8 +9,9 @@ from ai_market_monitor.services.setup_chat_evaluation import (
 )
 from hm_chatbot_eval.compare import compare_runs
 from hm_chatbot_eval.config import Settings, process_openai_key_overrides_dotenv
+from hm_chatbot_eval.doctor import checks
 from hm_chatbot_eval.evaluate import semantic_field_metrics, validate_schema
-from hm_chatbot_eval.models import CaseResult
+from hm_chatbot_eval.models import CaseResult, ScenarioContract
 from hm_chatbot_eval.report import aggregate
 from hm_chatbot_eval.scenarios import build_scenario
 from hm_chatbot_eval.topics import TOPICS
@@ -28,6 +30,20 @@ def test_scenarios_are_deterministic():
     right = build_scenario(TOPICS[0], 1, 42)
     assert left == right
     assert left.id == right.id
+    assert isinstance(left.expected_contract, ScenarioContract)
+
+
+def test_doctor_keeps_unconfigured_drift_honestly_not_measured():
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="",
+        target_mode="ui",
+        target_variants_json="[]",
+    )
+    drift_check = next(item for item in checks(settings) if item[0] == "Drift variants")
+
+    assert drift_check[1] is True
+    assert "NOT_MEASURED" in drift_check[2]
 
 
 def test_schema_and_semantic_checks():
@@ -94,6 +110,25 @@ def test_exported_contract_matches_validated_strategy_and_canvas():
     assert len(contract.canvas.edges) == len(contract.canvas.nodes) - 1
     assert contract.requires_explicit_approval is True
     assert contract.sharia_status_assignment_authorized is False
+    assert contract.approval.approved is False
+    assert contract.approval.terminal is False
+
+
+def test_canvas_contract_rejects_include_exclude_overlap() -> None:
+    strategy = load_strategy()
+    symbol = strategy.universe.include_symbols[0]
+    unsafe = strategy.model_copy(
+        update={"universe": strategy.universe.model_copy(update={"exclude_symbols": [symbol]})}
+    )
+    with pytest.raises(ValueError, match="disjoint"):
+        build_setup_chat_evaluation_contract(
+            unsafe,
+            session_status="ready_for_approval",
+            approval_eligible=True,
+            assumptions=[],
+            confidence=[],
+            unsupported_capabilities=[],
+        )
 
 
 def test_canonical_field_map_covers_the_required_contract_surface():

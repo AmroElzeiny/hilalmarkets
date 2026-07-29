@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
@@ -666,6 +666,24 @@ class InterpretationIssue(BaseModel):
     options: list[str] = Field(default_factory=list)
     blocking: bool = True
     source_fragment: str | None = Field(default=None, max_length=500)
+
+    @field_validator("source_fragment", mode="before")
+    @classmethod
+    def _truncate_source_fragment(cls, value: object) -> object:
+        """Keep an over-long quote from turning a diagnostic into an outage.
+
+        ``source_fragment`` quotes the trader's wording back to them, and several
+        call sites pass the whole message when they cannot isolate a clause. A
+        message longer than this cap then raised a ValidationError while the
+        interpreter was *reporting a problem*, and the whole turn returned HTTP 500
+        with no draft preserved — the failure the finding existed to prevent.
+
+        The quote is evidence, not a contract: truncating it keeps the finding, and
+        the full text is always still on the turn itself.
+        """
+        if isinstance(value, str) and len(value) > 500:
+            return value[:500]
+        return value
 
 
 class InterpretationPreview(BaseModel):

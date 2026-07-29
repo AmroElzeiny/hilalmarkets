@@ -63,10 +63,7 @@ class UITarget(ChatTarget):
             target = urlsplit(self.settings.target_ui_url)
             origin = f"{target.scheme}://{target.netloc}"
             await self.context.add_cookies(
-                [
-                    {"name": name, "value": value, "url": origin}
-                    for name, value in cookies.items()
-                ]
+                [{"name": name, "value": value, "url": origin} for name, value in cookies.items()]
             )
         self.page = await self.context.new_page()
         self.page.on("response", self._capture_response)
@@ -100,7 +97,21 @@ class UITarget(ChatTarget):
         await self._verify_authenticated_setup_chat()
         new_chat = self.page.locator(self.settings.target_ui_new_chat_selector)
         if await new_chat.count():
-            await new_chat.first.click()
+            async with self.page.expect_response(
+                lambda response: (
+                    response.request.method == "POST"
+                    and response.url.rstrip("/").endswith(
+                        self.settings.target_backend_session_path.rstrip("/")
+                    )
+                ),
+                timeout=self.settings.target_ui_timeout_ms,
+            ) as response_info:
+                await new_chat.first.click()
+            response = await response_info.value
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"AI Setup Chat session creation returned HTTP {response.status}"
+                )
 
     async def _verify_authenticated_setup_chat(self) -> None:
         assert self.page is not None
@@ -147,20 +158,44 @@ class UITarget(ChatTarget):
         self.last_api_json = None
         self.last_status = None
         routed = await self._install_evaluator_headers(fault)
-        messages = self.page.locator(self.settings.target_ui_assistant_message_selector)
-        before = await messages.count()
         started = time.perf_counter()
         try:
             input_locator = self.page.locator(self.settings.target_ui_input_selector).first
             await input_locator.fill(message)
-            await self.page.locator(self.settings.target_ui_send_selector).first.click()
-            await self.page.wait_for_function(
-                "([selector,before]) => document.querySelectorAll(selector).length > before",
-                arg=[self.settings.target_ui_assistant_message_selector, before],
+            async with self.page.expect_response(
+                lambda response: (
+                    response.request.method == "POST"
+                    and fnmatch.fnmatch(
+                        response.url,
+                        self.settings.target_ui_chat_api_pattern,
+                    )
+                ),
+                timeout=self.settings.target_ui_timeout_ms,
+            ) as response_info:
+                await self.page.locator(self.settings.target_ui_send_selector).first.click()
+            response = await response_info.value
+            await self._capture_response(response)
+            request_payload = response.request.post_data_json
+            client_message_id = (
+                str(request_payload.get("client_message_id") or "")
+                if isinstance(request_payload, dict)
+                else ""
+            )
+            if client_message_id and not self._response_has_client_message(client_message_id):
+                raise RuntimeError(
+                    "UI response did not match the submitted client_message_id"
+                )
+            await self._await_terminal_turn()
+            assistant = _latest_assistant_message(self.last_api_json)
+            assistant_id = str((assistant or {}).get("id") or "")
+            if not assistant_id:
+                raise RuntimeError("Matching API response contained no assistant message id")
+            current = self.page.locator(f'[data-message-id="{assistant_id}"]')
+            await current.wait_for(
+                state="visible",
                 timeout=self.settings.target_ui_timeout_ms,
             )
-            current = self.page.locator(self.settings.target_ui_assistant_message_selector)
-            text = await current.nth((await current.count()) - 1).inner_text()
+            text = await current.inner_text()
             latency = (time.perf_counter() - started) * 1000
             structured = get_path(
                 self.last_api_json,
@@ -169,14 +204,13 @@ class UITarget(ChatTarget):
             if not isinstance(structured, dict):
                 structured = None
             ui_contract = await self._verify_ui_contract(structured)
-            assistant = _latest_assistant_message(self.last_api_json)
             model, usage = _assistant_runtime_metadata(assistant)
             safe_raw = redact(self.last_api_json, self.settings.redacted_keys)
             if isinstance(safe_raw, dict):
                 safe_raw = {**safe_raw, "_evaluator_ui_contract": ui_contract}
             artifacts: list[str] = []
             if self.settings.target_ui_screenshots:
-                path = self.evidence_dir / f"{scenario_id}-{before + 1}.png"
+                path = self.evidence_dir / f"{scenario_id}-{assistant_id}.png"
                 await self.page.screenshot(path=str(path), full_page=True)
                 artifacts.append(str(path))
             return TargetReply(
@@ -211,13 +245,55 @@ class UITarget(ChatTarget):
                 with suppress(Exception):
                     await self.page.unroute(self.settings.target_ui_chat_api_pattern)
 
+    async def _await_terminal_turn(self) -> None:
+        """Wait until the session reports a state that waits on the user.
+
+        A new assistant message is necessary but not sufficient: a clarification
+        checkpoint, a process-state note and a refusal all render a message while the
+        turn continues. The session's own ``turn_complete`` flag is the authority.
+        Sessions that do not report the flag are treated as already complete, so this
+        can only ever add certainty, never a hang.
+        """
+        deadline = time.perf_counter() + (self.settings.target_ui_timeout_ms / 1000)
+        while time.perf_counter() < deadline:
+            payload = self.last_api_json
+            if not isinstance(payload, dict) or "turn_complete" not in payload:
+                return
+            if bool(payload.get("turn_complete")):
+                return
+            await asyncio.sleep(0.1)
+        raise TimeoutError("UI response did not reach a terminal setup-chat state")
+
+    def _response_has_client_message(self, client_message_id: str) -> bool:
+        payload = self.last_api_json
+        if not isinstance(payload, dict):
+            return False
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            return False
+        return any(
+            isinstance(item, dict)
+            and item.get("role") == "user"
+            and item.get("client_message_id") == client_message_id
+            for item in messages
+        )
+
+    def _turn_state(self) -> dict[str, Any]:
+        payload = self.last_api_json
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            "lifecycle_state": payload.get("lifecycle_state"),
+            "turn_complete": payload.get("turn_complete"),
+        }
+
     async def _verify_ui_contract(
         self,
         structured: dict[str, Any] | None,
     ) -> dict[str, Any]:
         assert self.page is not None
         if structured is None:
-            return {"captured": False}
+            return {"captured": False, **self._turn_state()}
         expected_hash = str(structured.get("canonical_hash") or "")
         marker = self.page.locator(self.settings.target_ui_expected_marker)
         ui_hash = await marker.get_attribute("data-evaluation-contract-hash")
@@ -242,8 +318,7 @@ class UITarget(ChatTarget):
                     document.querySelectorAll(selector).length === expectedCount
                 """,
                 arg=[
-                    '[data-testid="strategy-canvas-node"],'
-                    '[data-testid="strategy-canvas-group"]',
+                    '[data-testid="strategy-canvas-node"],[data-testid="strategy-canvas-group"]',
                     len(expected_nodes),
                 ],
                 timeout=self.settings.target_ui_timeout_ms,
@@ -259,6 +334,7 @@ class UITarget(ChatTarget):
             "captured": True,
             "canonical_hash": ui_hash,
             "canvas_node_ids": sorted(actual_nodes),
+            **self._turn_state(),
         }
 
     async def close(self) -> None:

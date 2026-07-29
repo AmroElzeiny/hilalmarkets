@@ -50,7 +50,7 @@ ACCOUNT_PLAN_OPTIONS = (
     {
         "value": "free",
         "label": "Free plan",
-        "description": "A fresh 14-day trial with the trial feature limits.",
+        "description": "A fresh 7-day Monitor trial with no payment method required.",
         "rank": 1,
     },
     {
@@ -438,8 +438,8 @@ class SystemBrainUserAdminService:
         if tier == "free":
             plan_code = "pro_trial"
             plan_name = "Free plan"
-            duration_label = "14-day trial"
-            ends_at = now + timedelta(days=14)
+            duration_label = f"{self.settings.trial_days}-day Monitor trial"
+            ends_at = now + timedelta(days=self.settings.trial_days)
         else:
             plan_code = tier
             ends_at = _add_months(now, int(months or 0)) if tier == "full_access" else None

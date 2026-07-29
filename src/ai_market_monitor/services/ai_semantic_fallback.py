@@ -454,6 +454,7 @@ class AISemanticFallbackService:
 
 class AISemanticFallbackStrategyInterpreter:
     name = "rules-v2:ai-semantic-fallback"
+    deterministic_core_authority = True
 
     def __init__(
         self,

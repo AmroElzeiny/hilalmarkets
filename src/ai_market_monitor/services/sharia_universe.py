@@ -114,7 +114,7 @@ class ShariaUniverseResolver:
             )
             raise ShariaUniverseError(
                 reason,
-                "The screened market could not be verified, so no asset was made eligible.",
+                "The Halal Market could not be verified, so no asset was made eligible.",
             ) from exc
 
         self._queue_resolution_metrics(resolution, elapsed=monotonic() - started)
@@ -647,7 +647,7 @@ class ShariaUniverseResolver:
         if self.settings.sharia_screening_enforced:
             raise ShariaUniverseError(
                 "sharia_policy_required",
-                "Choose an approved screening methodology and screened market before scanning.",
+                "Choose an approved methodology and Halal Market before scanning.",
             )
         if self.settings.is_deployed or not self.settings.sharia_allow_legacy_unscreened_local:
             raise ShariaUniverseError(

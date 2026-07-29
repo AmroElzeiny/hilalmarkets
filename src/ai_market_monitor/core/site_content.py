@@ -73,7 +73,7 @@ FOOTER_NAVIGATION = (
             NavigationItem("How It Works", "public_how_it_works", "how_it_works"),
             NavigationItem("Pricing", "public_pricing", "pricing"),
             NavigationItem(
-                "Screened Market",
+                "Halal Market",
                 "screened_market_page",
                 "screened_market",
             ),
@@ -116,7 +116,7 @@ DASHBOARD_NAVIGATION = (
         (
             NavigationItem("Home", "dashboard_home", "home", "home"),
             NavigationItem(
-                "Sharia-Screened Market",
+                "Halal Market",
                 "screened_market_page",
                 "screened_market",
                 "market",
@@ -199,7 +199,7 @@ PUBLIC_PAGES = (
         "/how-it-works",
         "How It Works",
         (
-            "See how HilalMarkets turns a screened market idea into an approved, "
+            "See how HilalMarkets turns a Halal Market idea into an approved, "
             "explainable Watchlist."
         ),
         "hilal/public/how_it_works.html",
@@ -229,7 +229,7 @@ PUBLIC_PAGES = (
         "/help",
         "Help Center",
         (
-            "Get clear answers about screened markets, Watchlists, alerts, evidence, "
+            "Get clear answers about the Halal Market, Watchlists, alerts, evidence, "
             "billing, and account safety."
         ),
         "hilal/public/help.html",

@@ -107,7 +107,7 @@ def product_term(term: str) -> str:
         "expired": "Ended",
         "blocker": "What is still missing",
         "rule_evaluation": "Market check",
-        "universe": "Screened market",
+        "universe": "Halal Market",
         "alert_proof": "Why you received this alert",
         "missed_alert": "Why didn't this alert happen?",
         "completion_score": "Readiness",

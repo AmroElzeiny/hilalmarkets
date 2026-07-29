@@ -84,7 +84,8 @@ class SystemBrainAuthService:
     @property
     def configured(self) -> bool:
         return bool(
-            self.settings.system_brain_username and self.settings.system_brain_admin_password_hash
+            self.settings.system_brain_authorized_emails
+            and self.settings.system_brain_admin_password_hash
         )
 
     async def begin_login(
@@ -123,7 +124,10 @@ class SystemBrainAuthService:
             if self.settings.system_brain_admin_password_hash
             else None
         )
-        valid = hmac.compare_digest(normalized, self.settings.system_brain_username or "")
+        valid = any(
+            hmac.compare_digest(normalized, email)
+            for email in self.settings.system_brain_authorized_emails
+        )
         valid = valid and verify_password(password, password_hash)
         session.add(
             SystemBrainLoginAttempt(
@@ -271,7 +275,7 @@ class SystemBrainAuthService:
             or admin_session.revoked_at is not None
             or _aware(admin_session.expires_at) <= datetime.now(UTC)
             or not hmac.compare_digest(admin_session.session_digest, token_digest(raw_token))
-            or admin_session.email != self.settings.system_brain_username
+            or admin_session.email not in self.settings.system_brain_authorized_emails
         ):
             return None
         admin_session.last_seen_at = datetime.now(UTC)

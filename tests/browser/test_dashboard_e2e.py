@@ -185,7 +185,7 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
         "A better way for Muslim crypto traders"
     )
     expect(page.locator("#features")).to_be_attached()
-    expect(page.get_by_role("link", name="Join the waitlist").first).to_be_visible()
+    expect(page.get_by_role("link", name="Get started").first).to_be_visible()
     assert "TODO_" not in page.content()
     page.evaluate(
         """async () => {
@@ -255,7 +255,7 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
 
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.locator('header a[aria-label="Hilal Markets home"]')).to_be_visible()
-    expect(page.locator("header").get_by_text("Join the waitlist")).to_be_visible()
+    expect(page.locator("header").get_by_text("Get started")).to_be_visible()
 
     problem = page.locator('[data-name^="03 "]').first
     corner_boxes = {}
@@ -842,10 +842,25 @@ def test_private_beta_billing_desktop_and_mobile_visual_qa(
     page.goto(f"{base_url}/dashboard/billing")
     expect(page.locator(".billing-current-plan")).to_be_visible()
     expect(page.locator(".billing-current-plan").get_by_role("heading")).to_have_text(
-        "Free"
+        "Explore"
     )
-    expect(page.get_by_text("Billing is paused for invited beta users")).to_be_visible()
-    expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
+    expect(page.get_by_text("Choose the level of monitoring you need")).to_be_visible()
+    expect(page.locator(".dashboard-price-card")).to_have_count(3)
+    expect(page.get_by_role("button", name="Try Monitor for 7 days")).to_be_visible()
+    expect(
+        page.get_by_text("The seven-day Creem trial product is not available yet.")
+    ).to_be_visible()
+    expect(page.get_by_text("$22", exact=True)).to_be_visible()
+    expect(page.get_by_text("Paid billing is disabled")).to_have_count(0)
+    page.get_by_role("radio", name="Annual").check()
+    expect(page.get_by_text("$220", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Choose Monitor annually")).to_be_visible()
+    expect(
+        page.get_by_text("The seven-day Creem trial product is not available yet.")
+    ).to_be_hidden()
+    expect(page.locator(".dashboard-plan-comparison table")).to_be_visible()
+    expect(page.locator(".dashboard-plan-comparison")).to_have_css("margin-top", "18px")
+    expect(page.locator(".billing-history-panel")).to_have_css("margin-top", "18px")
     expect(page.get_by_role("link", name="Review and pay")).to_have_count(0)
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)
@@ -853,10 +868,33 @@ def test_private_beta_billing_desktop_and_mobile_visual_qa(
 
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.locator(".billing-current-plan")).to_be_visible()
-    expect(page.get_by_text("Paid billing is disabled")).to_be_visible()
+    expect(page.get_by_role("radio", name="Annual")).to_be_checked()
+    expect(page.locator(".dashboard-comparison-mobile")).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)
     page.screenshot(path=str(output / "private-beta-access-mobile-390.png"), full_page=True)
+    assert_no_raw_traceback(page)
+
+
+def test_billing_portal_is_branded_responsive_and_accessible(
+    page: Page,
+    base_url: str,
+) -> None:
+    signup(page, base_url, unique_email("billing-portal"))
+    page.goto(f"{base_url}/dashboard/billing/portal")
+    expect(page.get_by_role("heading", name="Manage your subscription")).to_be_visible()
+    expect(page.get_by_role("heading", name="Explore")).to_be_visible()
+    expect(page.get_by_text("No paid subscription to manage")).to_be_visible()
+    expect(page.get_by_role("heading", name="Your payments and receipts")).to_be_visible()
+    expect(page.get_by_text("No payments yet")).to_be_visible()
+    expect(page.get_by_role("link", name="Back to plans")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_hilal_brand_palette(page)
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator(".billing-portal-facts")).to_be_visible()
+    expect(page.get_by_role("link", name="Back to plans")).to_be_visible()
+    assert_no_horizontal_overflow(page)
     assert_no_raw_traceback(page)
 
 

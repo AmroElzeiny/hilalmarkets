@@ -90,7 +90,36 @@ async def test_system_brain_rejects_wrong_password_and_wrong_otp(test_context):
                 code="000000",
                 remote_ip="127.0.0.2",
                 user_agent="pytest",
-            )
+        )
+
+
+async def test_system_brain_accepts_each_configured_operator_email(test_context):
+    _configure(test_context)
+    settings = test_context["settings"]
+    settings.system_brain_admin_emails = "office@hilalmarkets.com"
+    assert settings.system_brain_authorized_emails == {
+        "contact@trace-edge.com",
+        "office@hilalmarkets.com",
+    }
+
+    async with test_context["session_factory"]() as session:
+        service = SystemBrainAuthService(settings)
+        pending = await service.begin_login(
+            session,
+            username="office@hilalmarkets.com",
+            password="Admin-Test-Password!",
+            remote_ip="127.0.0.9",
+        )
+        cookie = await service.verify_otp(
+            session,
+            pending_cookie=pending,
+            code="123456",
+            remote_ip="127.0.0.9",
+            user_agent="pytest",
+        )
+        principal = await service.current_session(session, cookie)
+        assert principal is not None
+        assert principal.email == "office@hilalmarkets.com"
 
 
 async def test_capability_telemetry_records_false_ranking_alias_and_cost(test_context):

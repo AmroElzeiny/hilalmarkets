@@ -1537,7 +1537,7 @@ body.hilal-dashboard .favorite-list-button .favorite-heart-outline { display: in
 body.hilal-dashboard .market-filter-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(150px, 200px));
-  align-items: end;
+  align-items: start;
   gap: 12px;
   margin: 12px 20px 18px;
 }
@@ -1555,6 +1555,7 @@ body.hilal-dashboard .market-filter-control {
   max-width: 100%;
   min-height: 80px;
   height: 80px;
+  align-self: start;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
@@ -1767,6 +1768,65 @@ body.hilal-dashboard .support-upload-control {
   color: var(--hm-ink);
   cursor: pointer;
   transition: border-color var(--hm-motion), background var(--hm-motion), transform var(--hm-motion);
+}
+
+body.hilal-dashboard .support-upload-control .icon-box {
+  display: grid;
+  place-items: center;
+}
+
+body.hilal-dashboard .support-upload-control [data-icon="upload"],
+body.hilal-dashboard .support-upload-control [data-icon="upload"] svg {
+  display: block;
+}
+
+body.hilal-dashboard .choice-chip {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+body.hilal-dashboard .choice-chip .choice-chip-label {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .choice-chip .service-icon {
+  align-self: center;
+  margin: 0;
+}
+
+body.hilal-dashboard .lifecycle-card .coin-logo {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+body.hilal-dashboard .lifecycle-card > .progress {
+  margin-top: 10px;
+}
+
+@media (max-width: 1100px) {
+  body.hilal-dashboard:not(.sidebar-collapsed) .sidebar .nav-item {
+    justify-content: flex-start;
+    padding-inline: 12px;
+    width: 100%;
+  }
+
+  body.hilal-dashboard:not(.sidebar-collapsed) .sidebar .nav-item > span:last-child {
+    display: inline !important;
+  }
+}
+
+@media (max-width: 900px) {
+  body.hilal-dashboard .sidebar.is-open .nav-item {
+    justify-content: flex-start;
+    padding-inline: 12px;
+    width: 100%;
+  }
+
+  body.hilal-dashboard .sidebar.is-open .nav-item > span:last-child {
+    display: inline !important;
+  }
 }
 
 body.hilal-dashboard .support-upload-control:hover {
@@ -2294,35 +2354,964 @@ body.hilal-dashboard .billing-current-meta strong {
   white-space: nowrap;
 }
 
-body.hilal-dashboard .billing-plan-panel .pricing-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+body.hilal-dashboard .billing-plan-panel .dashboard-pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
   gap: 18px;
 }
 
-body.hilal-dashboard .billing-plan-panel .price-card {
+body.hilal-dashboard .dashboard-billing-toggle {
+  width: fit-content;
+  margin: 0 auto 28px;
+  padding: 5px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  gap: 4px;
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+}
+
+body.hilal-dashboard .dashboard-billing-toggle label {
+  position: relative;
+  min-height: 48px;
+  padding: 8px 16px;
   display: flex;
-  flex: 0 1 40%;
-  flex-direction: column;
   align-items: center;
-  width: 40%;
-  min-width: min(100%, 310px);
-  text-align: center;
-}
-
-body.hilal-dashboard .billing-plan-panel .price-card .feature-list {
-  width: 100%;
-}
-
-body.hilal-dashboard .billing-plan-panel .price-card .feature-list li {
   justify-content: center;
+  gap: 7px;
+  color: var(--hm-ink);
+  cursor: pointer;
+  border-radius: 999px;
+  font-size: .88rem;
+  font-weight: 750;
+}
+
+body.hilal-dashboard .dashboard-billing-toggle label:has(input:checked) {
+  background: var(--hm-surface);
+  box-shadow: 0 10px 24px -18px rgba(43, 46, 53, .65);
+}
+
+body.hilal-dashboard .dashboard-billing-toggle label:has(input:focus-visible) {
+  outline: 3px solid var(--hm-apple-deep);
+  outline-offset: 2px;
+}
+
+body.hilal-dashboard .dashboard-billing-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+body.hilal-dashboard .dashboard-billing-toggle small {
+  color: var(--hm-apple-deep);
+  font-size: .7rem;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(22px, 2.4vw, 30px);
+  color: var(--hm-ink);
+  text-align: left;
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 22px;
+  box-shadow: var(--hm-shadow-xs);
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card.is-featured {
+  color: var(--hm-ink);
+  background: var(--hm-surface);
+  border-color: var(--hm-apple-deep);
+  box-shadow: 0 24px 50px -38px rgba(85, 113, 42, .58);
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card.is-featured :where(h2, h3, strong),
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card.is-featured :where(p, li, .price span, .icon-sm) {
+  color: inherit;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card.is-current {
+  box-shadow: 0 0 0 2px var(--hm-apple), var(--hm-shadow-sm);
+}
+
+body.hilal-dashboard .dashboard-plan-title {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 12px;
+}
+
+body.hilal-dashboard .dashboard-plan-title h3 {
+  margin: 0;
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.55rem;
+  font-weight: 700;
+}
+
+body.hilal-dashboard .plan-popular-badge {
+  margin-left: auto;
+  color: var(--hm-ink);
+  background: var(--hm-apple);
+  border: 1px solid rgba(85, 113, 42, .28);
+}
+
+body.hilal-dashboard .current-plan-label {
+  align-self: flex-start;
+  margin-top: 9px;
+  color: var(--hm-apple-deep);
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+body.hilal-dashboard .dashboard-price-card .plan-description {
+  min-height: 86px;
+  margin: 14px 0 0;
+  color: var(--hm-ink);
+  line-height: 1.55;
+}
+
+body.hilal-dashboard .dashboard-plan-price {
+  display: flex;
+  min-height: 82px;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+body.hilal-dashboard .dashboard-plan-price strong {
+  color: var(--hm-ink);
+  font-family: "Geometria", "Onest", sans-serif;
+  font-size: clamp(38px, 4vw, 52px);
+  font-weight: 500;
+  font-feature-settings: "kern" 1, "tnum" 1;
+  font-kerning: normal;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .dashboard-plan-price span {
+  color: var(--hm-ink);
+  font-size: .82rem;
+}
+
+body.hilal-dashboard .dashboard-trial-note {
+  min-height: 38px;
+  margin: 9px 0 0;
+  color: var(--hm-ink);
+  text-align: center;
+  font-size: .78rem;
+  font-weight: 750;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card > form,
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card > .btn {
+  width: 100%;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-price-card > form .btn {
+  width: 100%;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-plan-features {
+  width: 100%;
+  margin: 24px 0 0;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-plan-features li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 7px 0;
+  color: var(--hm-ink);
+  text-align: left;
+  line-height: 1.45;
+}
+
+body.hilal-dashboard .billing-plan-panel .dashboard-plan-features li.is-highlighted {
+  margin-inline: -8px;
+  padding: 9px 8px;
+  color: var(--hm-ink);
+  font-weight: 750;
+  background: var(--hm-apple-soft);
+  border: 1px solid rgba(85, 113, 42, .22);
+  border-radius: 12px;
+}
+
+body.hilal-dashboard .dashboard-plan-details {
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+body.hilal-dashboard .dashboard-plan-details summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--hm-ink);
+  cursor: pointer;
+  font-weight: 750;
+  text-decoration: underline;
+  text-decoration-color: rgba(43, 46, 53, .3);
+  text-underline-offset: 5px;
+}
+
+body.hilal-dashboard .dashboard-plan-details[open] summary {
+  margin-bottom: 4px;
+}
+
+body.hilal-dashboard .dashboard-plan-details .dashboard-plan-features {
+  margin-top: 0;
+}
+
+body.hilal-dashboard .dashboard-comparison-mobile {
+  display: none;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison table {
+  width: 100%;
+  overflow: hidden;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 20px;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison th,
+body.hilal-dashboard .dashboard-plan-comparison td {
+  padding: 15px 17px;
+  color: var(--hm-ink);
+  border-right: 1px solid var(--hm-hairline);
+  border-bottom: 1px solid var(--hm-hairline);
+  line-height: 1.45;
+  text-align: left;
+  vertical-align: top;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison thead th {
+  color: var(--hm-ink);
+  background: var(--hm-surface-soft);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 750;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison tbody th {
+  width: 34%;
+  color: var(--hm-ink);
+  font-weight: 700;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison :is(th, td):nth-child(3) {
+  background: rgba(203, 250, 77, .1);
+}
+
+body.hilal-dashboard .dashboard-plan-comparison thead th:nth-child(3) {
+  color: var(--hm-ink);
+  background: rgba(203, 250, 77, .28);
+}
+
+body.hilal-dashboard .dashboard-plan-comparison tr:last-child > * {
+  border-bottom: 0;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison tr > *:last-child {
+  border-right: 0;
+}
+
+body.hilal-dashboard .dashboard-plan-comparison,
+body.hilal-dashboard .billing-history-panel {
+  margin-top: 18px;
+}
+
+body.hilal-dashboard .billing-dialog {
+  width: min(760px, calc(100% - 28px));
+  max-height: min(92vh, 900px);
+  padding: 0;
+  overflow: auto;
+  color: var(--hm-ink);
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 26px;
+  box-shadow: 0 34px 90px -42px rgba(43, 46, 53, .72);
+}
+
+body.hilal-dashboard .billing-dialog::backdrop {
+  background: rgba(43, 46, 53, .56);
+  backdrop-filter: blur(5px);
+}
+
+body.hilal-dashboard .billing-dialog-shell {
+  min-width: 0;
+}
+
+body.hilal-dashboard .billing-dialog-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px clamp(20px, 4vw, 34px);
+  background: rgba(255, 255, 255, .97);
+  border-bottom: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard .billing-dialog-header h2 {
+  margin: 3px 0 0;
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+}
+
+body.hilal-dashboard .billing-dialog-header p {
+  margin: 7px 0 0;
+  color: var(--hm-muted);
+}
+
+body.hilal-dashboard .billing-dialog-close {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  color: var(--hm-ink);
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard .billing-dialog-form {
+  display: grid;
+  gap: 24px;
+  padding: clamp(20px, 4vw, 34px);
+}
+
+body.hilal-dashboard .billing-dialog-order {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 15px;
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 16px;
+}
+
+body.hilal-dashboard .billing-dialog-order > div {
+  display: grid;
+  gap: 4px;
+}
+
+body.hilal-dashboard .billing-dialog-order span {
+  color: var(--hm-muted);
+  font-size: .76rem;
+}
+
+body.hilal-dashboard .billing-dialog-order strong {
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+}
+
+body.hilal-dashboard :is(.billing-period-options, .billing-method-options) {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+body.hilal-dashboard :is(.billing-period-options, .billing-method-options) legend {
+  margin-bottom: 10px;
+  color: var(--hm-ink);
+  font-weight: 750;
+}
+
+body.hilal-dashboard .billing-period-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.hilal-dashboard .billing-period-options legend {
+  grid-column: 1 / -1;
+}
+
+body.hilal-dashboard .billing-period-options label {
+  position: relative;
+}
+
+body.hilal-dashboard .billing-period-options input,
+body.hilal-dashboard .billing-method-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+body.hilal-dashboard .billing-period-options label > span {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hm-ink);
+  cursor: pointer;
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 14px;
+  font-weight: 750;
+}
+
+body.hilal-dashboard .billing-period-options input:checked + span {
+  background: var(--hm-apple-soft);
+  border-color: var(--hm-apple-deep);
+  box-shadow: 0 0 0 1px var(--hm-apple-deep);
+}
+
+body.hilal-dashboard .billing-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+body.hilal-dashboard .billing-profile-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: var(--hm-ink);
+  font-size: .85rem;
+  font-weight: 700;
+}
+
+body.hilal-dashboard .billing-profile-grid .billing-profile-wide {
+  grid-column: 1 / -1;
+}
+
+body.hilal-dashboard .billing-profile-grid input {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 13px;
+  color: var(--hm-ink);
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 13px;
+  font: inherit;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .billing-profile-grid input[readonly] {
+  color: var(--hm-muted);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .billing-profile-grid small {
+  color: var(--hm-muted);
+  font-size: .72rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .billing-method-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-method-options legend {
+  grid-column: 1 / -1;
+}
+
+body.hilal-dashboard .billing-method-options > label {
+  position: relative;
+  min-width: 0;
+}
+
+body.hilal-dashboard .billing-method-card {
+  min-height: 96px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 3px 10px;
+  padding: 15px;
+  color: var(--hm-ink);
+  cursor: pointer;
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 16px;
+}
+
+body.hilal-dashboard .billing-method-card .icon {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: var(--hm-apple-deep);
+}
+
+body.hilal-dashboard .billing-method-card small {
+  color: var(--hm-muted);
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .billing-method-options input:checked + .billing-method-card {
+  background: var(--hm-apple-soft);
+  border-color: var(--hm-apple-deep);
+  box-shadow: 0 0 0 1px var(--hm-apple-deep);
+}
+
+body.hilal-dashboard .billing-method-options .is-unavailable .billing-method-card {
+  cursor: not-allowed;
+  opacity: .55;
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard :is(.billing-period-options, .billing-method-options) input:focus-visible + span,
+body.hilal-dashboard .billing-profile-grid input:focus-visible {
+  outline: 3px solid rgba(85, 113, 42, .35);
+  outline-offset: 2px;
+}
+
+body.hilal-dashboard .billing-dialog-status {
+  min-height: 22px;
+  margin: 0;
+  color: var(--hm-muted);
+  font-size: .82rem;
+}
+
+body.hilal-dashboard .billing-dialog-status.is-error {
+  color: var(--hm-danger);
+  font-weight: 700;
+}
+
+body.hilal-dashboard .billing-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-dialog-actions .btn {
+  min-width: 160px;
+}
+
+body.hilal-dashboard .billing-result-page {
+  width: min(100%, 920px);
+  margin: clamp(18px, 5vw, 64px) auto;
+  display: grid;
+  gap: 18px;
+}
+
+body.hilal-dashboard .billing-result-hero,
+body.hilal-dashboard .billing-result-summary {
+  padding: clamp(24px, 5vw, 54px);
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 26px;
+  box-shadow: var(--hm-shadow-sm);
+}
+
+body.hilal-dashboard .billing-result-hero {
   text-align: center;
 }
 
-body.hilal-dashboard .billing-plan-panel .price-card > form,
-body.hilal-dashboard .billing-plan-panel .price-card > .btn {
-  width: 100%;
+body.hilal-dashboard .billing-result-mark {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+  display: grid;
+  place-items: center;
+  color: var(--hm-ink);
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 22px;
+}
+
+body.hilal-dashboard .billing-result-mark.is-success {
+  color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+  border-color: rgba(85, 113, 42, .28);
+}
+
+body.hilal-dashboard .billing-result-mark.is-pending {
+  color: #6b511b;
+  background: var(--hm-amber-soft);
+}
+
+body.hilal-dashboard .billing-result-mark.is-error {
+  color: var(--hm-danger);
+  background: var(--hm-danger-soft);
+}
+
+body.hilal-dashboard .billing-result-hero h1 {
+  max-width: 680px;
+  margin: 9px auto 0;
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(2rem, 5vw, 3.35rem);
+  line-height: 1.06;
+  letter-spacing: -.04em;
+}
+
+body.hilal-dashboard .billing-result-hero > p {
+  max-width: 660px;
+  margin: 18px auto 0;
+  color: var(--hm-muted);
+  font-size: clamp(.98rem, 2vw, 1.1rem);
+  line-height: 1.7;
+}
+
+body.hilal-dashboard .billing-result-plan {
+  min-height: 42px;
+  margin-top: 22px;
+  padding: 9px 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--hm-ink);
+  background: var(--hm-apple-soft);
+  border: 1px solid rgba(85, 113, 42, .24);
+  border-radius: 999px;
+  font-weight: 750;
+}
+
+body.hilal-dashboard .billing-result-summary {
+  display: grid;
+  grid-template-columns: minmax(180px, .65fr) minmax(0, 1.35fr);
+  align-items: start;
+  gap: 30px;
+}
+
+body.hilal-dashboard .billing-result-summary h2 {
+  margin: 4px 0 0;
+  color: var(--hm-ink);
+  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.4rem;
+}
+
+body.hilal-dashboard .billing-result-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-result-facts > div {
+  min-width: 0;
+  padding: 13px;
+  display: grid;
+  gap: 4px;
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 13px;
+}
+
+body.hilal-dashboard .billing-result-facts dt {
+  color: var(--hm-muted);
+  font-size: .72rem;
+}
+
+body.hilal-dashboard .billing-result-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--hm-ink);
+  font-weight: 750;
+}
+
+body.hilal-dashboard .billing-result-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-result-security {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  color: var(--hm-muted);
+  text-align: center;
+  font-size: .8rem;
+}
+
+body.hilal-dashboard .billing-history-heading {
+  align-items: end;
+}
+
+body.hilal-dashboard .billing-history-heading h2 {
+  margin: 4px 0 0;
+  color: var(--hm-ink);
+  font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+}
+
+body.hilal-dashboard .billing-history-heading p {
+  max-width: 680px;
+  margin: 7px 0 0;
+  color: var(--hm-copy);
+}
+
+body.hilal-dashboard .billing-history-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  list-style: none;
+}
+
+body.hilal-dashboard .billing-history-item {
+  min-width: 0;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 44px minmax(160px, .85fr) auto minmax(320px, 1.4fr);
+  align-items: center;
+  gap: 14px;
+  color: var(--hm-ink);
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 17px;
+}
+
+body.hilal-dashboard .billing-history-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+  border: 1px solid rgba(85, 113, 42, .2);
+  border-radius: 13px;
+}
+
+body.hilal-dashboard .billing-history-primary {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+body.hilal-dashboard .billing-history-primary strong {
+  overflow: hidden;
+  color: var(--hm-ink);
+  font-size: .96rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .billing-history-primary span {
+  color: var(--hm-copy);
+  font-size: .76rem;
+}
+
+body.hilal-dashboard .billing-history-facts {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.hilal-dashboard .billing-history-resume {
+  grid-column: 2 / -1;
+  justify-self: end;
+}
+
+body.hilal-dashboard .billing-history-facts > div {
+  min-width: 0;
+  padding: 9px 10px;
+  background: var(--hm-surface-soft);
+  border-radius: 11px;
+}
+
+body.hilal-dashboard .billing-history-facts dt {
+  color: var(--hm-copy);
+  font-size: .68rem;
+}
+
+body.hilal-dashboard .billing-history-facts dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--hm-ink);
+  font-size: .8rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .billing-history-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  text-align: center;
+}
+
+body.hilal-dashboard .billing-history-empty p {
+  margin: 0;
+}
+
+body.hilal-dashboard .billing-receipts,
+body.hilal-dashboard .billing-history-actions {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-portal-page {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+  display: grid;
+  gap: 18px;
+}
+
+body.hilal-dashboard .billing-portal-header {
+  padding: clamp(22px, 4vw, 36px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  background: var(--hm-surface);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 24px;
+  box-shadow: var(--hm-shadow-xs);
+}
+
+body.hilal-dashboard .billing-portal-header h1 {
+  margin: 4px 0 0;
+  color: var(--hm-ink);
+  font-size: clamp(1.9rem, 4vw, 2.75rem);
+}
+
+body.hilal-dashboard .billing-portal-header p {
+  max-width: 680px;
+  margin: 10px 0 0;
+  color: var(--hm-copy);
+}
+
+body.hilal-dashboard .billing-back-icon {
+  transform: rotate(180deg);
+}
+
+body.hilal-dashboard .billing-portal-summary {
+  padding: clamp(22px, 4vw, 34px);
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(420px, 1.1fr);
+  align-items: center;
+  gap: 28px;
+  color: var(--hm-ink);
+  background: var(--hm-ink);
+  border-radius: 24px;
+  box-shadow: var(--hm-shadow-sm);
+}
+
+body.hilal-dashboard .billing-portal-plan {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+body.hilal-dashboard .billing-portal-plan-icon {
+  flex: 0 0 58px;
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  color: var(--hm-ink);
+  background: var(--hm-apple);
+  border-radius: 17px;
+}
+
+body.hilal-dashboard .billing-portal-plan .kicker {
+  color: var(--hm-apple);
+}
+
+body.hilal-dashboard .billing-portal-plan h2 {
+  margin: 3px 0 5px;
+  color: var(--hm-surface);
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+}
+
+body.hilal-dashboard .billing-portal-plan p {
+  margin: 0;
+  color: rgba(255, 255, 255, .78);
+}
+
+body.hilal-dashboard .billing-portal-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+body.hilal-dashboard .billing-portal-facts > div {
+  min-width: 0;
+  padding: 13px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 13px;
+}
+
+body.hilal-dashboard .billing-portal-facts dt {
+  color: rgba(255, 255, 255, .68);
+  font-size: .7rem;
+}
+
+body.hilal-dashboard .billing-portal-facts dd {
+  margin: 4px 0 0;
+  color: var(--hm-surface);
+  font-size: .86rem;
+  font-weight: 750;
+}
+
+body.hilal-dashboard .billing-portal-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+}
+
+body.hilal-dashboard .billing-portal-controls-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+body.hilal-dashboard .billing-portal-control-icon {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+  border-radius: 14px;
+}
+
+body.hilal-dashboard .billing-portal-controls h2 {
+  margin: 3px 0 0;
+  color: var(--hm-ink);
+  font-size: 1.35rem;
+}
+
+body.hilal-dashboard .billing-portal-controls p {
+  max-width: 650px;
+  margin: 7px 0 0;
+  color: var(--hm-copy);
+}
+
+body.hilal-dashboard .billing-portal-controls > .notice {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 html[dir="rtl"] body.hilal-dashboard .hm-select-trigger {
@@ -2360,6 +3349,30 @@ html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
   body.hilal-dashboard .billing-current-plan {
     grid-template-columns: 1fr;
   }
+
+  body.hilal-dashboard .billing-plan-panel .dashboard-pricing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.hilal-dashboard .billing-plan-panel .dashboard-price-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  body.hilal-dashboard .billing-history-item {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+
+  body.hilal-dashboard .billing-history-facts {
+    grid-column: 2 / -1;
+  }
+
+  body.hilal-dashboard .billing-history-resume {
+    grid-column: 2 / -1;
+  }
+
+  body.hilal-dashboard .billing-portal-summary {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -2372,9 +3385,107 @@ html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
     grid-template-columns: 1fr;
   }
 
-  body.hilal-dashboard .billing-plan-panel .price-card {
-    flex-basis: 100%;
+  body.hilal-dashboard .billing-plan-panel .dashboard-pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-plan-panel .dashboard-price-card:last-child {
+    grid-column: auto;
+  }
+
+  body.hilal-dashboard .dashboard-price-card .plan-description {
+    min-height: 0;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-desktop {
+    display: none;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile {
+    display: grid;
+    gap: 14px;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile article {
+    overflow: hidden;
+    background: var(--hm-surface);
+    border: 1px solid var(--hm-hairline);
+    border-radius: 18px;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile h3 {
+    margin: 0;
+    padding: 15px 17px;
+    color: var(--hm-ink);
+    background: var(--hm-surface-soft);
+    font-size: 1.1rem;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile dl > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+    padding: 11px 17px;
+    border-top: 1px solid var(--hm-hairline);
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile dt {
+    color: var(--hm-ink);
+    font-weight: 700;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile dd {
+    color: var(--hm-ink);
+    text-align: right;
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile article:nth-child(2) {
+    border-color: var(--hm-apple-deep);
+    box-shadow: 0 20px 40px -34px rgba(85, 113, 42, .7);
+  }
+
+  body.hilal-dashboard .dashboard-comparison-mobile article:nth-child(2) h3 {
+    background: rgba(203, 250, 77, .24);
+  }
+
+  body.hilal-dashboard .billing-profile-grid,
+  body.hilal-dashboard .billing-method-options {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-profile-grid .billing-profile-wide {
+    grid-column: auto;
+  }
+
+  body.hilal-dashboard .billing-result-summary {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-portal-header,
+  body.hilal-dashboard .billing-portal-controls {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-portal-header {
+    flex-direction: column;
+  }
+
+  body.hilal-dashboard .billing-portal-header .btn {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  body.hilal-dashboard .dashboard-billing-toggle {
     width: 100%;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  body.hilal-dashboard .dashboard-billing-toggle label {
+    padding-inline: 8px;
+    flex-direction: column;
+    gap: 1px;
   }
 }
 
@@ -2400,6 +3511,88 @@ html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
 
   body.hilal-dashboard .billing-current-plan {
     padding: 18px;
+  }
+
+  body.hilal-dashboard .billing-dialog {
+    width: calc(100% - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 20px;
+  }
+
+  body.hilal-dashboard .billing-dialog-header,
+  body.hilal-dashboard .billing-dialog-form {
+    padding: 18px;
+  }
+
+  body.hilal-dashboard .billing-dialog-order,
+  body.hilal-dashboard .billing-period-options {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  body.hilal-dashboard .billing-dialog-actions .btn {
+    width: 100%;
+  }
+
+  body.hilal-dashboard .billing-result-facts {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-result-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  body.hilal-dashboard .billing-result-actions .btn {
+    width: 100%;
+  }
+
+  body.hilal-dashboard .billing-method-card small {
+    font-size: .74rem;
+  }
+
+  body.hilal-dashboard .billing-history-item {
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  body.hilal-dashboard .billing-history-item > .badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  body.hilal-dashboard .billing-history-facts {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-history-resume {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+
+  body.hilal-dashboard .billing-history-facts dd {
+    white-space: normal;
+  }
+
+  body.hilal-dashboard .billing-portal-summary {
+    min-width: 0;
+  }
+
+  body.hilal-dashboard .billing-portal-plan {
+    align-items: flex-start;
+  }
+
+  body.hilal-dashboard .billing-portal-facts {
+    grid-template-columns: 1fr;
+  }
+
+  body.hilal-dashboard .billing-portal-header .btn,
+  body.hilal-dashboard .billing-portal-controls .btn {
+    width: 100%;
   }
 }
 

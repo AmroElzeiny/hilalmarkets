@@ -8,7 +8,7 @@ from typing import Any
 
 from dotenv import dotenv_values
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 def _default_model_pricing() -> dict[str, dict[str, dict[str, float]]]:
@@ -30,6 +30,29 @@ def _default_model_pricing() -> dict[str, dict[str, dict[str, float]]]:
     }
 
 
+#: Fields whose value in ``.env`` outranks the ambient environment. Kept to
+#: credentials, where a stale machine-wide copy causes a hard auth failure that is
+#: expensive to diagnose. Non-secret settings keep normal env-var precedence.
+CREDENTIAL_FIELDS: frozenset[str] = frozenset({"openai_api_key"})
+
+
+class CredentialDotEnvSource(PydanticBaseSettingsSource):
+    """Supplies only the credential fields, and only from the ``.env`` file."""
+
+    def __init__(self, dotenv_settings: PydanticBaseSettingsSource) -> None:
+        super().__init__(dotenv_settings.settings_cls)
+        self._dotenv = dotenv_settings
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError
+
+    def __call__(self) -> dict[str, Any]:
+        values = self._dotenv()
+        return {
+            name: value for name, value in values.items() if name.casefold() in CREDENTIAL_FIELDS
+        }
+
+
 def process_openai_key_overrides_dotenv(env_file: str | Path = ".env") -> bool:
     """Detect a different process-level key without exposing either credential."""
     process_value = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -40,8 +63,48 @@ def process_openai_key_overrides_dotenv(env_file: str | Path = ".env") -> bool:
     return bool(dotenv_value) and not hmac.compare_digest(process_value, dotenv_value)
 
 
+def discard_stale_process_openai_key(env_file: str | Path = ".env") -> bool:
+    """Remove an inherited key when this project's credential file is authoritative.
+
+    The process environment cannot be changed in its parent terminal, but clearing the
+    conflicting value here keeps every evaluator subprocess and HTTP client isolated
+    from a stale credential. The project `.env` remains the only evaluator key source.
+    """
+    if not process_openai_key_overrides_dotenv(env_file):
+        return False
+    os.environ.pop("OPENAI_API_KEY", None)
+    return True
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Let ``.env`` win over the ambient environment for credentials only.
+
+        A stale machine-wide ``OPENAI_API_KEY`` used to outrank the project's own
+        file and kill the run on HTTP 401. The project file is the credential of
+        record, so it is consulted first *for those fields*.
+
+        Everything else keeps normal precedence, because overriding a setting for
+        one process — ``DATABASE_URL=... alembic upgrade head`` — is ordinary and
+        must keep working.
+        """
+        return (
+            init_settings,
+            CredentialDotEnvSource(dotenv_settings),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     openai_api_key: str = ""
     test_ai_model: str = "gpt-5-mini"
@@ -50,6 +113,7 @@ class Settings(BaseSettings):
     test_ai_base_url: str = "https://api.openai.com/v1"
     test_ai_timeout_seconds: float = 120
     test_ai_max_output_tokens: int = 1200
+    eval_challenger_max_message_chars: int = Field(default=1200, ge=200, le=1600)
     test_ai_input_usd_per_1m: float = 0
     test_ai_cached_input_usd_per_1m: float = 0
     test_ai_output_usd_per_1m: float = 0
@@ -65,6 +129,8 @@ class Settings(BaseSettings):
     eval_max_concurrency: int = 2
     eval_default_tests_per_topic: int = 24
     eval_default_max_turns: int = 8
+    eval_readiness_attempts: int = Field(default=2, ge=1, le=3)
+    eval_circuit_breaker_failures: int = Field(default=2, ge=1, le=5)
     eval_redact_keys: str = "password,token,secret,api_key,authorization,cookie,set-cookie"
 
     target_mode: str = "backend"

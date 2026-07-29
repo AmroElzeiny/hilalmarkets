@@ -90,7 +90,8 @@ templates without replacing persisted models or approval boundaries.
 - `templates/hilal/base_public.html` and `base_dashboard.html` own their shells. Shared partials and
   macros render navigation, footer, consent, statuses, opportunity cards, evidence rows, and empty
   states.
-- Public Pricing and dashboard Billing expose only the free plan while billing is disabled.
+- Public Pricing and dashboard Billing may explain all public plans while billing is disabled, but
+  paid actions remain unavailable and cannot create a checkout or entitlement.
   Internal, trial, and paid catalog entries remain available to entitlement/provider tests but
   cannot be purchased through a hidden form value.
 - `hilalmarkets-consent.js` stores a versioned first-party preference. Consent defaults are emitted
@@ -214,19 +215,20 @@ absent when `WHATSAPP_ENABLED=false`, which is mandatory for private beta. See
 ## Commercial Layer
 
 `core/plans.py` is the single plan catalog for Demo, Trader, Pro, Creator, Community and the
-conditional 14-day trial. `services/entitlements.py` syncs that catalog into `Plan`, calculates the
+one-time 7-day Monitor trial. `services/entitlements.py` syncs that catalog into `Plan`, calculates the
 current entitlement from subscription/trial/default state, enforces active-strategy, symbol,
 timeframe and delivery limits, snapshots entitlement decisions, records idempotent usage, and
 pauses excess strategies after downgrades without deleting user data.
 
-`services/billing.py` provides a capability-declared billing-provider protocol. Stripe supports
-automatic subscription renewal and its customer portal; the configured NOWPayments launch path
-uses signed one-time invoices for 30-day access and no cancellation portal. The service validates
-checkout ownership, plan, amount, and currency before an idempotent `BillingEvent` can change an
-entitlement. It also handles access expiry, refunds, payload redaction, trial conversion, downgrade
-pauses.
+`services/billing.py` provides a capability-declared billing-provider protocol with independent
+card and crypto selection. Creem and Stripe provide recurring card subscriptions and customer
+portals; NOWPayments provides signed one-time crypto invoices for 30-day access with no
+cancellation portal. Every hosted checkout starts from an authenticated, server-priced,
+idempotent `BillingCheckoutAttempt`. Only a signed provider webhook bound to that attempt may
+change an entitlement or queue one logical receipt email. The service also handles access expiry,
+refunds, disputes, payload redaction, provider trials, and downgrade pauses.
 `services/trials.py`, `services/referrals.py` and `services/admin.py` cover trial eligibility,
-monitoring cycles, qualifying-alert attribution, no-alert renewal decisions, reminder state,
+the one-time monitoring cycle, qualifying-alert attribution, expiry decisions, reminder state,
 referral foundations and audited commercial overrides.
 
 ## Scanning Pipeline

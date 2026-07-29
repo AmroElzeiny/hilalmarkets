@@ -1,37 +1,59 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
-<section class="page-header">
-  <div>
-    <span class="eyebrow">Plan and billing</span>
-    <h1>{{ title }}</h1>
-    <p>Only a verified payment-provider event can activate a paid plan.</p>
-  </div>
-</section>
-
-<section class="panel billing-result-card">
-  <div class="empty-state">
-    <div class="empty-icon"><span data-icon="{{ 'check' if message == 'payment_successful' else ('clock' if message else 'alert') }}" data-icon-class="icon-lg"></span></div>
-    <h2>{{ message.replace('_', ' ').title() if message else error.replace('_', ' ').title() }}</h2>
-    {% if message == 'payment_successful' %}
-      <p>Your verified payment was recorded and the {{ plan.name if plan else 'selected' }} plan is active.</p>
-      {% if entitlement %}<span class="badge badge-dark">Active plan | {{ entitlement.plan.name }}</span>{% endif %}
-    {% elif message %}
-      <p>The provider returned you to HilalMarkets, but its signed webhook has not confirmed the payment yet. Your entitlement remains unchanged until confirmation arrives.</p>
-    {% else %}
-      <p>The billing request did not complete. No entitlement was changed.</p>
-    {% endif %}
-    {% if checkout_attempt %}
-      <dl class="billing-result-facts">
-        <div><dt>Checkout status</dt><dd>{{ checkout_attempt.status.replace('_', ' ').title() }}</dd></div>
-        <div><dt>Amount</dt><dd>{{ checkout_attempt.amount }} {{ checkout_attempt.currency }}</dd></div>
-        <div><dt>Billing</dt><dd>{{ checkout_attempt.billing_cycle.title() }}</dd></div>
-      </dl>
-    {% endif %}
-    <div class="billing-result-actions">
-      {% if message == 'payment_successful' %}<a class="btn btn-primary" href="/dashboard/strategies/new">Create a Watchlist</a>{% endif %}
-      <a class="btn btn-secondary" href="/dashboard/billing">Open Plan and Billing</a>
-      <a class="btn btn-secondary" href="/dashboard/support">Contact support</a>
+<main class="billing-result-page" tabindex="-1" data-checkout-result>
+  <section class="billing-result-hero" aria-labelledby="billing-result-title">
+    <div class="billing-result-mark is-{{ 'success' if message in ['payment_successful', 'trial_started'] else ('pending' if message else 'error') }}">
+      <span data-icon="{{ 'check' if message in ['payment_successful', 'trial_started'] else ('clock' if message else 'alert') }}" data-icon-class="icon-lg"></span>
     </div>
-  </div>
-</section>
+    <span class="kicker">Plan and billing</span>
+    <h1 id="billing-result-title">{{ title }}</h1>
+    {% if message == 'payment_successful' %}
+      <p>Your payment is verified and your {{ plan.name if plan else 'selected' }} access is active. A branded receipt has been queued for your account email.</p>
+    {% elif message == 'trial_started' %}
+      <p>Your seven-day Monitor trial is active. Creem will manage the payment method and the first charge date shown at checkout.</p>
+    {% elif message %}
+      <p>You returned from the payment provider, but its signed confirmation has not arrived yet. Your access stays unchanged until it does.</p>
+    {% else %}
+      <p>The checkout did not complete. No plan or entitlement was changed.</p>
+    {% endif %}
+    {% if entitlement and message in ['payment_successful', 'trial_started'] %}
+      <span class="billing-result-plan"><span data-icon="shield" data-icon-class="icon-sm"></span>Active access: {{ entitlement.plan.name }}</span>
+    {% endif %}
+  </section>
+
+  {% if checkout_attempt %}
+    <section class="billing-result-summary" aria-labelledby="billing-summary-title">
+      <div>
+        <span class="kicker">Order status</span>
+        <h2 id="billing-summary-title">Your checkout record</h2>
+      </div>
+      <dl class="billing-result-facts">
+        <div><dt>Status</dt><dd>{{ checkout_attempt.status.replace('_', ' ')|title }}</dd></div>
+        <div><dt>Plan</dt><dd>{{ plan.name if plan else 'Selected plan' }}</dd></div>
+        <div><dt>Amount</dt><dd>{{ checkout_attempt.amount }} {{ checkout_attempt.currency }}</dd></div>
+        <div><dt>Billing</dt><dd>{{ checkout_attempt.billing_cycle.replace('_', ' ')|title }}</dd></div>
+      </dl>
+    </section>
+  {% endif %}
+
+  <nav class="billing-result-actions" aria-label="What to do next">
+    <a class="btn btn-primary" href="/dashboard"><span data-icon="home" data-icon-class="icon-sm"></span>Go to dashboard</a>
+    <a class="btn btn-secondary" href="/dashboard/billing">Open Plan and Billing</a>
+    {% if not message %}<a class="btn btn-secondary" href="/dashboard/support">Contact support</a>{% endif %}
+  </nav>
+  <p class="billing-result-security"><span data-icon="shield" data-icon-class="icon-sm"></span>Only a verified provider webhook can change paid access.</p>
+</main>
+{% endblock %}
+{% block page_scripts %}
+{% set checkout_event = 'checkout_completed' if checkout_attempt and checkout_attempt.status == 'completed' else ('checkout_cancelled' if page == 'billing_cancel' else ('checkout_failed' if error else '')) %}
+{% if checkout_event %}
+<div
+  data-commerce-event="{{ checkout_event }}"
+  data-plan-code="{{ plan.code if plan else '' }}"
+  data-billing-interval="{{ 'annual' if checkout_attempt and 'annual' in checkout_attempt.billing_cycle else ('monthly' if checkout_attempt else '') }}"
+  data-event-scope="{{ checkout_attempt.id if checkout_attempt else page }}"
+  hidden
+></div>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260727-pricing"></script>
+{% endif %}
 {% endblock %}

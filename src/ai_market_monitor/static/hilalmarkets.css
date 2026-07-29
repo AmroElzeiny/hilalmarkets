@@ -245,6 +245,12 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .feature-list .icon{width:17px;color:var(--emerald-600)}
 .price-card.is-featured .feature-list .icon{color:var(--gold)}
 .billing-plan-panel{margin-top:18px}
+.public-plan-title{display:flex;align-items:center;gap:12px}
+.public-plan-title h3{margin:0}
+.public-plan-title .badge{margin-left:auto}
+.price-card .feature-list li.is-highlighted{margin-inline:-8px;padding:9px 8px;border:1px solid rgba(85,113,42,.24);border-radius:12px;background:#f1fadf;color:#2b2e35;font-weight:750}
+.public-plan-details{margin-top:14px}
+.public-plan-details summary{min-height:44px;display:inline-flex;align-items:center;cursor:pointer;font-weight:750;text-decoration:underline;text-underline-offset:5px}
 .checkout-heading{align-items:flex-end}
 .checkout-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);gap:18px;align-items:start}
 .checkout-review-card,.checkout-action-card{padding:26px}

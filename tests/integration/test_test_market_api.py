@@ -231,7 +231,7 @@ async def test_active_methodology_without_publications_has_clear_readiness_state
     default_market = await test_context["client"].get("/dashboard/market?view=assets")
 
     assert page.status_code == 200
-    assert "No screened assets are available yet." in page.text
+    assert "No Halal Market assets are available yet." in page.text
     assert "Open governance reviews" not in page.text
     assert "live-market-table" in page.text
     assert settings_page.status_code == 200
@@ -260,7 +260,7 @@ async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_dis
     assert saved_assets.headers["location"] == "/dashboard/market?saved_assets=1"
     market = await test_context["client"].get(saved_assets.headers["location"])
     assert market.status_code == 200
-    assert "Screened Market" in market.text
+    assert "Halal Market" in market.text
     assert "data-saved-assets-dialog" in market.text
     assert scanner.status_code == 303
     assert scanner.headers["location"] == "/dashboard/strategies/new?mode=scanner"

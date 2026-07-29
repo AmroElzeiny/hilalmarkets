@@ -85,7 +85,6 @@ def test_unknown_terms_require_clarification_but_clear_inputs_do_not():
             "Bollinger squeeze with a bullish engulfing candle",
             {"bollinger_squeeze", "bullish_engulfing"},
         ),
-        ("coins up 5% today", {"percent_change_lookback"}),
         ("five red daily candles in a row", {"red_candle"}),
         ("only during New York session", {"new_york_session"}),
     ],
@@ -99,10 +98,15 @@ def test_clear_trading_phrases_do_not_trigger_noisy_clarification(
     assert expected_keys.issubset(set(report.candidate_keys))
 
 
+def test_complete_numeric_formula_is_not_semantically_substituted() -> None:
+    report = CapabilityResolver().resolve_prompt("coins up 5% today")
+    assert report.fragments == ()
+    assert report.candidate_keys == ()
+    assert report.needs_clarification is False
+
+
 def test_unknown_words_are_not_hidden_by_a_known_condition():
-    report = CapabilityResolver().resolve_prompt(
-        "RSI below 30 with frobnicate alpha confirmation"
-    )
+    report = CapabilityResolver().resolve_prompt("RSI below 30 with frobnicate alpha confirmation")
     assert report.needs_clarification is True
     assert report.fragments[0].unknown_terms == ("frobnicate alpha",)
 
@@ -140,17 +144,14 @@ def test_bare_clarification_answers_never_become_capabilities(answer):
 
 
 def test_legacy_bare_answers_do_not_poison_a_supported_setup():
-    report = CapabilityResolver().resolve_prompt(
-        "Find coins that swept PDL on 1d\n0\nnone"
-    )
+    report = CapabilityResolver().resolve_prompt("Find coins that swept PDL on 1d\n0\nnone")
     assert report.needs_clarification is False
     assert report.candidate_keys == ("previous_daily_low_sweep",)
 
 
 def test_server_authored_clarification_answer_is_context_not_a_new_instruction():
     fragments = split_prompt_fragments(
-        "RSI above 50 on 1d\n"
-        "Clarification answer for rsi_timeframe: Use the trigger timeframe"
+        "RSI above 50 on 1d\nClarification answer for rsi_timeframe: Use the trigger timeframe"
     )
     assert fragments[0].meaningful is True
     assert fragments[1].meaningful is False
@@ -243,9 +244,7 @@ def test_ai_operands_are_rebuilt_from_capability_key():
     strategy = load_strategy().model_copy(
         update={
             "base_timeframe": "1h",
-            "conditions": load_strategy().conditions.model_copy(
-                update={"children": [ai_rule]}
-            ),
+            "conditions": load_strategy().conditions.model_copy(update={"children": [ai_rule]}),
         }
     )
 

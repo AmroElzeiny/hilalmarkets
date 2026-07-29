@@ -121,10 +121,14 @@ async def test_interpreter_treats_growth_percent_as_percent_change_not_price():
 
     assert preview.activation_blocked is False
     condition = preview.strategy.conditions.children[0]
-    assert condition.left.name == "percent_change_up"
-    assert condition.left.parameters["threshold_percent"] == 5
-    assert condition.left.parameters["lookback"] == 96
-    assert condition.comparator.value == "is_true"
+    assert condition.left.name == "percentage_change"
+    assert condition.left.parameters["formula"] == "reference_to_current"
+    assert condition.left.parameters["reference_field"] == "open"
+    assert condition.left.parameters["reference_timeframe"] == "1d"
+    assert condition.comparator == "gte"
+    assert condition.right.value == 5.0
+    assert "threshold_percent" not in condition.left.parameters
+    assert condition.left.parameters["lookback"] == 1
 
 
 async def test_interpreter_uses_exact_month_lookback_for_breakout():
@@ -153,9 +157,19 @@ async def test_interpreter_supports_previous_candle_state_and_historical_event_w
         )
     )
     event_condition = historical.strategy.conditions.children[0]
+    # This prompt states a magnitude ("a value of 1%") and a window, but no
+    # comparison and no side. It used to compile as `percentage_change ... gt 1.0`,
+    # where the `gt` was read from the word "over" in "over the past week" — a time
+    # phrase, not a comparison — and the up/down side was supplied by the caller's
+    # default. Both were invented.
+    #
+    # It now compiles to the capability that expresses exactly what was said: a 1%
+    # candle move in either direction within the window. Every fact the trader gave
+    # is preserved; nothing they did not give is added.
     assert event_condition.left.name == "candle_change_percent"
+    assert event_condition.left.parameters["threshold_percent"] == 1.0
+    assert event_condition.left.parameters["direction"] == "absolute"
     assert event_condition.timeframe == "1m"
-    assert event_condition.left.parameters["threshold_percent"] == 1
     assert event_condition.left.parameters["search_lookback"] == 10080
 
     historical_price = await RuleBasedStrategyInterpreter().interpret(
@@ -204,8 +218,7 @@ async def test_interpreter_reports_mandatory_fragments_it_cannot_convert():
 
     assert preview.activation_blocked is True
     assert any(
-        issue.code == "instruction_not_converted"
-        for issue in preview.unsupported_conditions
+        issue.code == "instruction_not_converted" for issue in preview.unsupported_conditions
     )
 
 

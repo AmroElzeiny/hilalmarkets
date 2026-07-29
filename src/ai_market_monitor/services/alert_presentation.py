@@ -143,7 +143,7 @@ class AlertPresentation:
                 body=alert.body,
                 symbol=asset,
                 direction="screening status",
-                strategy=str(proof.get("strategy_name") or "Screened market"),
+                strategy=str(proof.get("strategy_name") or "Halal Market"),
                 exchange="spot",
                 timeframe="status change",
                 setup_score=None,

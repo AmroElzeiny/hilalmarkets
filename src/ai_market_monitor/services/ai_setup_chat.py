@@ -1,11 +1,13 @@
+import asyncio
 import json
 import re
 from collections import Counter
 from datetime import UTC, datetime
 from hashlib import sha256
 from statistics import fmean, pstdev
+from time import monotonic
 from typing import Any, Literal, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from pydantic import ValidationError
@@ -31,6 +33,19 @@ from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.capability_resolver import (
     CapabilityResolutionReport,
 )
+from ai_market_monitor.engine.prompt_semantics import SUPPORTED_TIMEFRAMES
+from ai_market_monitor.engine.setup_completeness import (
+    RequirementField,
+    assess_setup_requirements,
+)
+from ai_market_monitor.engine.strategy_state import (
+    StrategyDraftState,
+    canonical_compiler_text,
+    is_reversion_request,
+    patches_for_turn,
+    revert_patches,
+)
+from ai_market_monitor.engine.turn_fragments import classify_turn as classify_strategy_turn
 from ai_market_monitor.schemas.agent_control import (
     AgentClauseCoverage,
     AgentToolResult,
@@ -42,19 +57,24 @@ from ai_market_monitor.schemas.ai_setup_chat import (
     MarketSnapshotMover,
     MarketSnapshotResponse,
     SetupChatClarification,
+    SetupChatErrorEnvelope,
     SetupChatInterviewResult,
     SetupChatOption,
     SetupChatTurnClassification,
     SetupChatTurnSegment,
+    setup_chat_source_excerpt,
 )
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
 from ai_market_monitor.schemas.strategy import (
+    Comparator,
     ConditionGroup,
     ConditionRule,
+    InterpretationIssue,
     InterpretationPreview,
     ShariaPolicyDefinition,
     StrategyDefinition,
+    StrategyDirection,
 )
 from ai_market_monitor.services.agent_control import (
     AgentControlService,
@@ -67,10 +87,12 @@ from ai_market_monitor.services.ai_setup_evaluator_control import (
     consume_evaluator_llm_fault,
     evaluator_prompt_appendix,
 )
+from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.hybrid_capability_resolution import (
     HybridCapabilityResolutionService,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider, StrategyInterpreter
+from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
@@ -81,7 +103,9 @@ from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
     ShariaUniverseResolver,
 )
+from ai_market_monitor.services.strategy import StrategyService
 from ai_market_monitor.services.system_brain import CapabilityCoverageService
+from ai_market_monitor.services.verified_strategy import VerifiedStrategyService
 
 
 class SetupChatError(ValueError):
@@ -92,6 +116,289 @@ class SetupChatError(ValueError):
 
 
 MAX_CLARIFICATION_QUESTIONS_PER_CONDITION = 2
+
+#: Ceiling on how many questions may be open at once. Run 20260725T122105Z showed
+#: sessions accumulating unbounded question sets and never reaching a draft; past
+#: this many, the remainder are recorded as assumptions on the inactive draft
+#: instead of being asked, and the user can still correct any of them by replying.
+MAX_UNRESOLVED_CLARIFICATIONS = 3
+
+#: User-facing text for a failed turn. It states what happened and what the user can
+#: do, and deliberately carries no exception detail, stack frame, or identifier
+#: beyond the request id needed to correlate with the internal log.
+_TURN_FAILURE_MESSAGE = (
+    "I hit an internal error while working on that turn and stopped rather than "
+    "guess. Nothing was created, changed, or activated. Please send that last "
+    "instruction again, or rephrase it more simply. Reference {request_id} if you "
+    "contact support."
+)
+
+
+def _advance_strategy_state(
+    stored: Any,
+    new_fragments: list[str],
+) -> StrategyDraftState:
+    """Fold this turn's new fragments into the typed state, oldest first.
+
+    A reversion fragment restores the previous value of the most recently changed
+    field instead of adding a statement, so `go back to the 15m` walks the history
+    back rather than re-parsing text that still contains the value it replaced.
+    """
+    state = StrategyDraftState.from_dict(stored if isinstance(stored, dict) else None)
+    for fragment in new_fragments:
+        text = " ".join(str(fragment).split())
+        if not text:
+            continue
+        if is_reversion_request(text):
+            reverted = revert_patches(state, source_text=text)
+            if reverted:
+                state = state.apply(reverted)
+                continue
+            # Nothing to revert; the wording may still name a value to use.
+        state = state.apply(patches_for_turn(text, state))
+    return state
+
+
+def _resolved_strategy_state(chat: AISetupChatSession) -> dict[str, Any]:
+    """The session's settled field values, JSON-safe, for the compiler."""
+    stored = (chat.context_json or {}).get("strategy_state")
+    state = StrategyDraftState.from_dict(stored if isinstance(stored, dict) else None)
+    resolved: dict[str, Any] = {}
+    for name, value in state.resolved().items():
+        if isinstance(value, StrategyDirection | Comparator):
+            resolved[name] = value.value
+        elif isinstance(value, tuple):
+            resolved[name] = list(value)
+        else:
+            resolved[name] = value
+    return resolved
+
+
+def _required_fields_known(chat: AISetupChatSession) -> frozenset[RequirementField]:
+    """Requirements already settled outside the free text.
+
+    A screened universe or approved watchlist is chosen through the application's own
+    selection flow, so the compiler holds that value even though no symbol appears in
+    the description. These count as satisfied because they are genuinely known, never
+    because the wording implied them.
+    """
+    context = chat.context_json or {}
+    known: set[RequirementField] = set()
+    if context.get("screened_universe_mode") or context.get("approved_watchlist_id"):
+        known.add("universe")
+    return frozenset(known)
+
+
+def _setup_is_complete(chat: AISetupChatSession, text: str) -> bool:
+    """True when ``text`` specifies every field the compiler cannot default."""
+    known = set(_required_fields_known(chat))
+    resolved = _resolved_strategy_state(chat)
+    if resolved.get("include_symbols"):
+        known.add("universe")
+    if resolved.get("base_timeframe"):
+        known.add("timeframe")
+    if (
+        resolved.get("mechanic_fragments")
+        or resolved.get("formula")
+        or resolved.get("formula_fragments")
+        or resolved.get("boolean_groups")
+    ):
+        known.add("trigger_condition")
+    return assess_setup_requirements(text, known_fields=frozenset(known)).is_complete
+
+
+def _can_interpret_deterministically(
+    chat: AISetupChatSession,
+    compiler_text: str,
+) -> bool:
+    """Whether the existing rule interpreter exactly owns the current contract.
+
+    This is a positive gate. Explicit formulas and locally matched registered
+    mechanics need no model judgment; unknown or ambiguous mechanics still follow
+    capability resolution and the bounded AI path.
+    """
+
+    state = StrategyDraftState.from_dict(
+        (chat.context_json or {}).get("strategy_state")
+        if isinstance((chat.context_json or {}).get("strategy_state"), dict)
+        else None
+    )
+    if not state.patches:
+        return False
+    resolved = state.resolved()
+    turn = classify_strategy_turn(compiler_text)
+    has_explicit_formula = bool(resolved.get("formula"))
+    if not turn.trading_conditions and not has_explicit_formula:
+        return False
+    resolution = get_capability_index().resolver.resolve_prompt(compiler_text)
+    if resolution.needs_clarification:
+        return False
+    if resolution.fragments and any(
+        fragment.status != "matched" for fragment in resolution.fragments
+    ):
+        return False
+    return bool(
+        has_explicit_formula
+        or resolved.get("boolean_groups")
+        or resolution.fragments
+    )
+
+
+def _strategy_approval_state(chat: AISetupChatSession) -> str:
+    context = chat.context_json or {}
+    state = StrategyDraftState.from_dict(
+        context.get("strategy_state") if isinstance(context.get("strategy_state"), dict) else None
+    )
+    return state.approval_state
+
+
+def _first_approval_blocker(chat: AISetupChatSession) -> str:
+    context = chat.context_json or {}
+    pending = context.get("awaiting_clarification")
+    if isinstance(pending, dict):
+        question = str(pending.get("question") or "").strip()
+        if question:
+            return question
+    for item in (
+        *(chat.ambiguities or []),
+        *(chat.unsupported_conditions or []),
+        *(chat.lint_warnings or []),
+    ):
+        if not isinstance(item, dict):
+            continue
+        if item.get("blocking", True) is False or item.get("severity") not in {None, "critical"}:
+            continue
+        message = str(item.get("message") or item.get("label") or "").strip()
+        if message:
+            return message
+    return "The draft is missing a measurable rule, timeframe, or market universe."
+
+
+def _text_digest(value: str) -> str:
+    """Stable digest of setup text, used to avoid recompiling an unchanged description."""
+    return sha256(" ".join(value.split()).encode("utf-8")).hexdigest()
+
+
+def _record_turn_runtime_stage(
+    chat: AISetupChatSession,
+    stage: str,
+    started: float,
+    *,
+    cache_hit: bool,
+) -> None:
+    context = dict(chat.context_json or {})
+    runtime = dict(context.get("turn_runtime") or {})
+    stages = list(runtime.get("stages") or [])
+    stages.append(
+        {
+            "stage": stage[:80],
+            "duration_ms": max(0, round((monotonic() - started) * 1000)),
+            "cache_hit": cache_hit,
+        }
+    )
+    runtime["stages"] = stages[-20:]
+    runtime["cache_hits"] = int(runtime.get("cache_hits") or 0) + int(cache_hit)
+    context["turn_runtime"] = runtime
+    chat.context_json = context
+
+
+def setup_chat_error_envelope(exc: BaseException) -> SetupChatErrorEnvelope:
+    """Classify an unhandled turn failure into a sanitized, machine-readable envelope.
+
+    The stage tells the operator which half of the pipeline broke without exposing
+    any internal detail to the caller: a timeout against a model or market provider
+    is a provider problem, a schema violation is a serialization problem, and a
+    strategy build failure is a compile problem.
+    """
+    if isinstance(exc, SetupChatError):
+        return SetupChatErrorEnvelope(
+            error_code=exc.code,
+            request_id=uuid4().hex,
+            stage="compile",
+            retryable=False,
+            message=str(exc),
+        )
+
+    name = type(exc).__name__
+    text = f"{name}: {exc}".casefold()
+
+    if any(
+        marker in text
+        for marker in (
+            "getaddrinfo failed",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "name resolution",
+        )
+    ):
+        return SetupChatErrorEnvelope(
+            error_code="TARGET_DNS_RESOLUTION_FAILURE",
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=True,
+            message="The configured provider hostname could not be resolved.",
+        )
+    if isinstance(exc, httpx.ConnectTimeout):
+        return SetupChatErrorEnvelope(
+            error_code="TARGET_CONNECT_TIMEOUT",
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=True,
+            message="The connection to a required provider timed out.",
+        )
+    if isinstance(exc, httpx.ReadTimeout):
+        return SetupChatErrorEnvelope(
+            error_code="TARGET_READ_TIMEOUT",
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=True,
+            message="A required provider did not finish its response in time.",
+        )
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) or "timeout" in text:
+        return SetupChatErrorEnvelope(
+            error_code="TARGET_TOTAL_TIMEOUT",
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=True,
+            message="The bounded setup turn exceeded its total time limit.",
+        )
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return SetupChatErrorEnvelope(
+            error_code=("TARGET_HTTP_429" if status_code == 429 else "TARGET_HTTP_5XX"),
+            request_id=uuid4().hex,
+            stage="provider",
+            retryable=status_code == 429 or status_code >= 500,
+            message="A required provider returned an unavailable response.",
+        )
+    if isinstance(exc, ValidationError):
+        errors = exc.errors()
+        location = (
+            ".".join(str(part) for part in errors[0].get("loc") or ()) or None if errors else None
+        )
+        return SetupChatErrorEnvelope(
+            error_code="TARGET_SCHEMA_VALIDATION",
+            request_id=uuid4().hex,
+            stage="serialize",
+            retryable=False,
+            message="The drafted response did not satisfy the strategy schema.",
+            field=location[:200] if location else None,
+        )
+    if isinstance(exc, ValueError):
+        return SetupChatErrorEnvelope(
+            error_code="STRATEGY_COMPILE_FAILED",
+            request_id=uuid4().hex,
+            stage="compile",
+            retryable=False,
+            message="The setup could not be compiled into deterministic monitor rules.",
+        )
+    return SetupChatErrorEnvelope(
+        error_code="STRATEGY_COMPILE_FAILED",
+        request_id=uuid4().hex,
+        stage="interpret",
+        retryable=False,
+        message="The setup could not be interpreted on this turn.",
+    )
 
 
 class SetupChatInterviewer(Protocol):
@@ -314,6 +621,10 @@ class AISetupChatService:
         self.strategy_interpreter = strategy_interpreter
         self.interviewer = interviewer or OpenAISetupChatInterviewer(settings)
         self.agent_client = agent_client
+        # One turn can need the same interpretation twice: once for the inactive draft
+        # emitted while questions are open, once for the final compile. The service is
+        # constructed per request, so memoising here bills the model call once.
+        self._interpretations: dict[tuple[str, str, str, str], InterpretationPreview] = {}
 
     async def create_session(self, session: AsyncSession, user_id: UUID) -> AISetupChatSession:
         chat = AISetupChatSession(
@@ -391,6 +702,154 @@ class AISetupChatService:
             raise SetupChatError("chat_not_found", "Setup chat was not found.", status_code=404)
         return chat
 
+    async def approve_draft(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        expected_schema_hash: str,
+        confirmed_low_confidence_rule_keys: set[str] | None = None,
+    ) -> None:
+        """Approve the exact current draft through the existing domain gates."""
+
+        if chat.status != "ready_for_approval" or not chat.draft_schema_json:
+            raise SetupChatError(
+                "setup_not_ready",
+                "Resolve every blocking question before approving this setup.",
+                status_code=409,
+            )
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        canonical_hash = definition.canonical_hash()
+        if canonical_hash != expected_schema_hash:
+            raise SetupChatError(
+                "setup_changed",
+                "The translated rules changed. Review the latest translation before approval.",
+                status_code=409,
+            )
+        low_confidence = {
+            str(item["rule_key"])
+            for item in (chat.rule_confidence or [])
+            if item.get("requires_confirmation") and item.get("rule_key")
+        }
+        confirmed = confirmed_low_confidence_rule_keys or set()
+        if not low_confidence.issubset(confirmed):
+            raise SetupChatError(
+                "low_confidence_confirmation_required",
+                "Confirm every low-confidence rule before approval.",
+                status_code=409,
+            )
+        if any(item.get("severity") == "critical" for item in (chat.lint_warnings or [])):
+            raise SetupChatError(
+                "strategy_lint_blocked",
+                "Resolve critical strategy lint findings before approval.",
+                status_code=409,
+            )
+
+        context = dict(chat.context_json or {})
+        state_payload = context.get("strategy_state")
+        strategy_state = StrategyDraftState.from_dict(
+            state_payload if isinstance(state_payload, dict) else None
+        )
+        snapshot_hash = strategy_state.conversation_snapshot_hash
+        if snapshot_hash is None:
+            raise SetupChatError(
+                "approval_snapshot_missing",
+                "The draft must be recompiled before approval.",
+                status_code=409,
+            )
+        try:
+            strategy_state = strategy_state.with_approval(
+                canonical_hash=canonical_hash,
+                draft_version=strategy_state.draft_version,
+                conversation_snapshot_hash=snapshot_hash,
+                user_id=str(chat.user_id),
+            )
+        except ValueError as exc:
+            raise SetupChatError(
+                "setup_changed",
+                "The draft identity changed before approval. Review the latest version.",
+                status_code=409,
+            ) from exc
+
+        preview = InterpretationPreview(
+            strategy=definition,
+            assumptions=chat.assumptions or [],
+            ambiguities=[
+                InterpretationIssue.model_validate(item) for item in (chat.ambiguities or [])
+            ],
+            unsupported_conditions=[
+                InterpretationIssue.model_validate(item)
+                for item in (chat.unsupported_conditions or [])
+            ],
+            interpreter=str(context.get("interpreter") or "ai-setup-chat"),
+            raw_metadata={
+                "source": "ai_setup_chat",
+                "chat_session_id": str(chat.id),
+                "draft_version": strategy_state.draft_version,
+                "conversation_snapshot_hash": snapshot_hash,
+            },
+        )
+        strategy_service = StrategyService(session, self.settings.disclaimer_version)
+        strategy, version = await strategy_service.create_from_interpretation(
+            chat.user_id,
+            preview,
+            source_text=chat.original_idea,
+        )
+        verification_service = VerifiedStrategyService(session, self.settings)
+        await verification_service.prepare_version(
+            user_id=chat.user_id,
+            strategy=strategy,
+            version=version,
+        )
+        statements = await verification_service.sync_interpretation(
+            user_id=chat.user_id,
+            strategy=strategy,
+            version=version,
+        )
+        for statement in statements:
+            if statement.status == "assumed" and statement.resolution_status == "unresolved":
+                await verification_service.resolve_statement(
+                    user_id=chat.user_id,
+                    statement_id=statement.id,
+                    action="accept",
+                    resolution_text=None,
+                )
+        await verification_service.approve_interpretation(
+            user_id=chat.user_id,
+            version=version,
+        )
+        await verification_service.approval_gate(
+            user_id=chat.user_id,
+            version=version,
+        )
+        await strategy_service.approve(
+            version,
+            user_id=chat.user_id,
+            expected_schema_hash=version.schema_hash,
+        )
+        strategy_state = strategy_state.mark_compiled()
+        artifact_hashes = {
+            str(rule.capability_artifact_hash)
+            for rule in _condition_rules(definition.conditions)
+            if rule.capability_artifact_hash
+        }
+        if artifact_hashes:
+            await CapabilityExtensionService(self.settings).link_strategy_version(
+                session,
+                artifact_hashes=artifact_hashes,
+                strategy_version_id=version.id,
+            )
+        context["strategy_state"] = strategy_state.to_dict()
+        context["approved_draft_version"] = strategy_state.draft_version
+        context["approved_schema_hash"] = canonical_hash
+        context["approved_conversation_snapshot_hash"] = snapshot_hash
+        chat.context_json = context
+        chat.status = "approved"
+        chat.approved_strategy_id = strategy.id
+        chat.approved_strategy_version_id = version.id
+        chat.approved_at = datetime.now(UTC)
+        await session.flush()
+
     async def messages(self, session: AsyncSession, chat_id: UUID) -> list[AISetupChatMessage]:
         return list(
             (
@@ -408,7 +867,11 @@ class AISetupChatService:
         chat: AISetupChatSession,
         *,
         correlation_id: str,
+        duration_ms: int | None = None,
     ) -> None:
+        runtime = dict((chat.context_json or {}).get("turn_runtime") or {})
+        if runtime.get("attach") is False:
+            return
         events = list(
             (
                 await session.scalars(
@@ -424,8 +887,6 @@ class AISetupChatService:
             for event in events
             if (event.raw_usage or {}).get("_traceedge_correlation_id") == correlation_id
         ]
-        if not correlated:
-            return
         assistant = await session.scalar(
             select(AISetupChatMessage)
             .where(
@@ -438,6 +899,7 @@ class AISetupChatService:
         if assistant is None:
             return
         models = sorted({event.model for event in correlated})
+        operation_counts = Counter(event.operation for event in correlated)
         usage = {
             "input_tokens": sum(event.input_tokens for event in correlated),
             "input_tokens_details": {
@@ -454,9 +916,20 @@ class AISetupChatService:
                 )
             ),
             "models": models,
+            "model_call_count": len(correlated),
+            "operation_counts": dict(sorted(operation_counts.items())),
+            "retry_count": sum(
+                int((event.raw_usage or {}).get("_traceedge_retry_count") or 0)
+                for event in correlated
+            ),
+            "cache_hits": int(runtime.get("cache_hits") or 0),
+            "stage_timings": list(runtime.get("stages") or [])[-20:],
+            "turn_duration_ms": max(0, int(duration_ms or 0)),
         }
         payload = dict(assistant.payload or {})
-        payload["_traceedge_model"] = models[0] if len(models) == 1 else "mixed"
+        payload["_traceedge_model"] = (
+            models[0] if len(models) == 1 else "mixed" if models else "deterministic"
+        )
         payload["usage"] = usage
         assistant.payload = payload
 
@@ -471,12 +944,64 @@ class AISetupChatService:
         option_label: str | None = None,
         client_message_id: str | None = None,
     ) -> AISetupChatSession:
+        cleaned = " ".join(message.split())
+        initial_strategy_turn = (
+            classify_strategy_turn(cleaned) if cleaned and not option_key else None
+        )
         if chat.status == "approved":
-            raise SetupChatError(
-                "chat_already_approved",
-                "This setup has already been approved. Start a new chat to create another monitor.",
-                status_code=409,
+            # Replaying the same authenticated approval is a no-op. It must not
+            # create another strategy version or turn an idempotent retry into 409.
+            if initial_strategy_turn is not None and initial_strategy_turn.is_approval:
+                context = dict(chat.context_json or {})
+                context["turn_runtime"] = {"attach": False, "cache_hits": 0, "stages": []}
+                chat.context_json = context
+                return chat
+            if initial_strategy_turn is None or not _turn_materially_updates_strategy(
+                initial_strategy_turn
+            ):
+                raise SetupChatError(
+                    "chat_already_approved",
+                    (
+                        "This setup is already approved. Submit a measurable rule change "
+                        "to create a new draft version."
+                    ),
+                    status_code=409,
+                )
+            context = dict(chat.context_json or {})
+            previous_approvals = list(context.get("previous_approvals") or [])
+            previous_approvals.append(
+                {
+                    "draft_version": context.get("approved_draft_version"),
+                    "schema_hash": context.get("approved_schema_hash"),
+                    "conversation_snapshot_hash": context.get(
+                        "approved_conversation_snapshot_hash"
+                    ),
+                    "strategy_id": (
+                        str(chat.approved_strategy_id) if chat.approved_strategy_id else None
+                    ),
+                    "strategy_version_id": (
+                        str(chat.approved_strategy_version_id)
+                        if chat.approved_strategy_version_id
+                        else None
+                    ),
+                    "approved_at": chat.approved_at.isoformat() if chat.approved_at else None,
+                    "invalidated_by": cleaned[:500],
+                }
             )
+            context["previous_approvals"] = previous_approvals[-50:]
+            context["approval_invalidated_by_material_edit"] = True
+            for key in (
+                "approved_draft_version",
+                "approved_schema_hash",
+                "approved_conversation_snapshot_hash",
+                "last_approval_refresh_key",
+            ):
+                context.pop(key, None)
+            chat.context_json = context
+            chat.status = "interviewing"
+            chat.approved_at = None
+            chat.approved_strategy_id = None
+            chat.approved_strategy_version_id = None
         if client_message_id:
             existing = await session.scalar(
                 select(AISetupChatMessage.id).where(
@@ -485,14 +1010,18 @@ class AISetupChatService:
                 )
             )
             if existing is not None:
+                context = dict(chat.context_json or {})
+                context["turn_runtime"] = {"attach": False, "cache_hits": 0, "stages": []}
+                chat.context_json = context
                 return chat
         context = dict(chat.context_json or {})
+        context["turn_runtime"] = {"attach": True, "cache_hits": 0, "stages": []}
+        chat.context_json = dict(context)
         fragments = list(context.get("setup_fragments") or [])
         fragment_count_before = len(fragments)
         resolved = dict(context.get("resolved_ambiguities") or {})
         answered_keys = set(context.get("answered_clarification_keys") or [])
         answered_fingerprints = set(context.get("answered_clarification_fingerprints") or [])
-        cleaned = " ".join(message.split())
         pending_clarification = dict(context.get("awaiting_clarification", {}) or {})
         awaiting_key = str(
             pending_clarification.get("key") or context.get("awaiting_clarification_key", "") or ""
@@ -504,11 +1033,170 @@ class AISetupChatService:
         selected_option = _selected_clarification_option(pending_model, option_value)
         prior_messages = await self.messages(session, chat.id)
         history = _conversation_history(prior_messages)
+        strategy_turn = initial_strategy_turn
+        if strategy_turn is not None and strategy_turn.is_approval:
+            await self._append_message(
+                session,
+                chat,
+                role="user",
+                message_type="approval",
+                content=cleaned,
+                payload={"approval_source": "authenticated_chat_phrase"},
+                client_message_id=client_message_id,
+            )
+            current_state = StrategyDraftState.from_dict(
+                context.get("strategy_state")
+                if isinstance(context.get("strategy_state"), dict)
+                else None
+            )
+            accumulated = "\n".join(str(item) for item in fragments)
+            compiler_text = canonical_compiler_text(current_state, fallback=accumulated)
+            if chat.status != "ready_for_approval" and _setup_is_complete(chat, compiler_text):
+                refresh_key = _text_digest(compiler_text)
+                if context.get("last_approval_refresh_key") != refresh_key:
+                    await self._compile(session, chat, compiler_text)
+                    context = dict(chat.context_json or {})
+                    context["last_approval_refresh_key"] = refresh_key
+                    chat.context_json = context
+            if chat.status != "ready_for_approval" or not chat.draft_schema_json:
+                blocker = _first_approval_blocker(chat)
+                await self._assistant(
+                    session,
+                    chat,
+                    (
+                        "I cannot approve this draft yet. "
+                        f"{blocker} Resolve that item, then approve the updated version."
+                    ),
+                    message_type="approval_blocked",
+                    payload={
+                        "approved": False,
+                        "can_approve": False,
+                        "approval_state": _strategy_approval_state(chat),
+                    },
+                )
+                return chat
+            definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+            confirmed = {
+                str(item["rule_key"])
+                for item in (chat.rule_confidence or [])
+                if item.get("requires_confirmation") and item.get("rule_key")
+            }
+            await self.approve_draft(
+                session,
+                chat,
+                expected_schema_hash=definition.canonical_hash(),
+                confirmed_low_confidence_rule_keys=confirmed,
+            )
+            await self._assistant(
+                session,
+                chat,
+                (
+                    "Your exact reviewed Watchlist version is approved. "
+                    "It has not been activated; activation remains a separate action."
+                ),
+                message_type="approval_confirmed",
+                payload={
+                    "approved": True,
+                    "approved_schema_hash": definition.canonical_hash(),
+                    "approved_strategy_id": str(chat.approved_strategy_id),
+                    "approved_strategy_version_id": str(chat.approved_strategy_version_id),
+                },
+            )
+            return chat
+        if (
+            strategy_turn is not None
+            and chat.status == "ready_for_approval"
+            and _requests_stale_approval_reuse(cleaned, strategy_turn)
+        ):
+            await self._append_message(
+                session,
+                chat,
+                role="user",
+                message_type="approval_policy",
+                content=cleaned,
+                payload={"approval_source": "stale_approval_reuse_request"},
+                client_message_id=client_message_id,
+            )
+            canonical_hash = (
+                StrategyDefinition.model_validate(chat.draft_schema_json).canonical_hash()
+                if chat.draft_schema_json
+                else None
+            )
+            await self._assistant(
+                session,
+                chat,
+                (
+                    "The previous approval cannot carry over to this edited draft. "
+                    f"Review the current version and hash {canonical_hash}, then submit "
+                    "a new explicit approval for this exact version."
+                ),
+                message_type="approval_required",
+                payload={
+                    "approved": False,
+                    "can_approve": bool(canonical_hash),
+                    "schema_hash": canonical_hash,
+                    "approval_state": _strategy_approval_state(chat),
+                },
+            )
+            return chat
         agent_enabled_for_user = self.settings.ai_agent_control_enabled and (
             self.settings.ai_agent_shadow_mode
             or _agent_rollout_enabled(chat.user_id, self.settings.ai_agent_rollout_percent)
         )
-        if agent_enabled_for_user and cleaned and not option_key:
+        deterministic_state_update = (
+            strategy_turn is not None and _is_deterministic_state_update(strategy_turn)
+        )
+        if (
+            agent_enabled_for_user
+            and cleaned
+            and not option_key
+            and pending_model is None
+            and not deterministic_state_update
+        ):
+            # Canonical state is application-owned and must be current before the
+            # model sees this turn. The agent may choose a tool, but it does not
+            # decide whether user text mutates the strategy or reconstruct state
+            # from conversation memory.
+            strategy_turn = classify_strategy_turn(cleaned)
+            mutates_strategy = (
+                not _looks_like_product_question(cleaned)
+                and not _is_explanation_request(cleaned)
+                and any(
+                    fragment.category
+                    in {
+                        "SYMBOL",
+                        "INCLUDE",
+                        "EXCLUDE",
+                        "TIMEFRAME",
+                        "DIRECTION",
+                        "OPERATOR",
+                        "THRESHOLD",
+                        "FORMULA",
+                        "REVERSION",
+                        "TRADING_MECHANIC",
+                    }
+                    for fragment in strategy_turn.fragments
+                )
+            )
+            if mutates_strategy:
+                normalized = " ".join(cleaned.casefold().split())
+                if normalized not in {
+                    " ".join(str(fragment).casefold().split()) for fragment in fragments
+                }:
+                    fragments.append(cleaned)
+                context["setup_fragments"] = fragments[-30:]
+                context["strategy_state"] = _advance_strategy_state(
+                    context.get("strategy_state"),
+                    [cleaned],
+                ).to_dict()
+                context["last_strategy_turn"] = {
+                    "text": cleaned[:1000],
+                    "fragment_kinds": [fragment.kind for fragment in strategy_turn.fragments],
+                }
+                chat.context_json = dict(context)
+                if not chat.original_idea:
+                    chat.original_idea = cleaned
+                    chat.title = _chat_title(cleaned)
             outcome = await self._run_bounded_agent(
                 session,
                 chat,
@@ -528,11 +1216,22 @@ class AISetupChatService:
                     outcome=outcome,
                 )
                 return chat
+            # The legacy fallback now starts from the same deterministic state.
+            # Count only fragments added after this point when applying fallback
+            # patches, avoiding a second copy of the current turn.
+            context = dict(chat.context_json or {})
+            fragments = list(context.get("setup_fragments") or [])
+            fragment_count_before = len(fragments)
         turn_classification: SetupChatTurnClassification | None = None
         routed_technical_fragments: list[str] = []
         if cleaned and not option_key:
             if awaiting_key == "monitor_name":
                 turn_classification = _clarification_answer_turn(cleaned)
+            elif deterministic_state_update:
+                turn_classification = _fallback_turn_classification(
+                    cleaned,
+                    active_clarification=pending_model,
+                )
             else:
                 turn_classification = await self._route_turn(
                     history=history,
@@ -554,7 +1253,12 @@ class AISetupChatService:
             routed_technical_fragments = _validated_technical_fragments(
                 cleaned, turn_classification.technical_fragments
             )
-            if _is_non_mutating_turn(turn_classification, routed_technical_fragments):
+            if _is_non_mutating_turn(
+                turn_classification, routed_technical_fragments
+            ) and not (
+                pending_model is not None
+                and turn_classification.intent == "conversation"
+            ):
                 await self._append_message(
                     session,
                     chat,
@@ -861,6 +1565,12 @@ class AISetupChatService:
             chat.original_idea = cleaned
             chat.title = _chat_title(cleaned)
         context["setup_fragments"] = fragments[-30:]
+        # The accumulated text keeps every superseded statement, so the typed state is
+        # what makes a later correction win over the wording it replaced.
+        context["strategy_state"] = _advance_strategy_state(
+            context.get("strategy_state"),
+            fragments[fragment_count_before:],
+        ).to_dict()
         context["resolved_ambiguities"] = resolved
         context["answered_clarification_keys"] = sorted(answered_keys)
         context["answered_clarification_fingerprints"] = sorted(answered_fingerprints)
@@ -896,10 +1606,7 @@ class AISetupChatService:
                     }
                 )
             context["setup_fragment_records"] = fragment_records[-100:]
-        if (
-            turn_classification is not None
-            and turn_classification.intent == "setup_revision"
-        ):
+        if turn_classification is not None and turn_classification.intent == "setup_revision":
             correction_history = list(context.get("correction_history") or [])
             correction_field = awaiting_key or "strategy_logic"
             correction = {
@@ -997,7 +1704,13 @@ class AISetupChatService:
             )
 
         accumulated = "\n".join(fragments)
-        unsupported = _unsupported_data_request(accumulated)
+        strategy_state = StrategyDraftState.from_dict(
+            context.get("strategy_state")
+            if isinstance(context.get("strategy_state"), dict)
+            else None
+        )
+        technical_setup = canonical_compiler_text(strategy_state, fallback=accumulated)
+        unsupported = _unsupported_data_request(technical_setup)
         if unsupported:
             chat.status = "needs_clarification"
             chat.unsupported_conditions = unsupported
@@ -1016,12 +1729,22 @@ class AISetupChatService:
             )
             return chat
 
+        # Produce the inactive draft before the question gates, so a fully specified
+        # setup always returns a structured object even when clarifications remain.
+        chat.context_json = dict(context)
+        await self._ensure_inactive_draft(session, chat, technical_setup)
+        context = dict(chat.context_json or {})
+
         deterministic_clarifications = _unanswered_clarifications(
-            _unresolved_ambiguities(accumulated, resolved),
+            _unresolved_ambiguities(technical_setup, resolved),
             answered_keys,
             answered_fingerprints,
         )
         deterministic_clarifications = _apply_clarification_question_budget(
+            context,
+            deterministic_clarifications,
+        )
+        deterministic_clarifications = _cap_open_clarifications(
             context,
             deterministic_clarifications,
         )
@@ -1081,7 +1804,7 @@ class AISetupChatService:
                     "clarifications": [clarification.model_dump(mode="json")],
                     "beginner_note": clarification.reason,
                     "question_progress": {"current": current, "total": total},
-                    "jargon": _beginner_explanations(accumulated),
+                    "jargon": _beginner_explanations(technical_setup),
                 },
             )
             return chat
@@ -1095,6 +1818,7 @@ class AISetupChatService:
             answered_fingerprints,
         )
         pending_ai = _apply_clarification_question_budget(context, pending_ai)
+        pending_ai = _cap_open_clarifications(context, pending_ai)
         if pending_ai:
             pending_ai = [_with_other_option(item) for item in pending_ai]
             clarification = pending_ai.pop(0)
@@ -1133,18 +1857,19 @@ class AISetupChatService:
                     "clarifications": [clarification.model_dump(mode="json")],
                     "question_progress": {"current": current, "total": total},
                     "beginner_note": clarification.reason,
-                    "jargon": _beginner_explanations(accumulated),
+                    "jargon": _beginner_explanations(technical_setup),
                 },
             )
             return chat
 
-        capability_resolution = get_capability_index().resolver.resolve_prompt(accumulated)
+        capability_resolution = get_capability_index().resolver.resolve_prompt(technical_setup)
         hybrid_resolution = await HybridCapabilityResolutionService(self.settings).resolve(
             capability_resolution,
             history=history,
             default_timeframe=_guided_setup(
-                accumulated,
+                technical_setup,
                 setup_mode=_setup_mode(chat),
+                resolved_state=_resolved_strategy_state(chat),
             ).timeframe,
             selections=dict(context.get("capability_selections") or {}),
         )
@@ -1206,6 +1931,10 @@ class AISetupChatService:
             context,
             resolver_clarifications,
         )
+        resolver_clarifications = _cap_open_clarifications(
+            context,
+            resolver_clarifications,
+        )
         if resolver_clarifications:
             resolver_clarifications = [_with_other_option(item) for item in resolver_clarifications]
             clarification = resolver_clarifications[0]
@@ -1260,29 +1989,41 @@ class AISetupChatService:
             )
             return chat
 
-        interview = await self.interviewer.respond(
-            history=history,
-            current_message=cleaned,
-            accumulated_setup=accumulated,
-            capability_context={
-                **capability_resolution.ai_context(),
-                "setup_mode": _setup_mode(chat),
-                "screened_methodology": context.get("sharia_methodology_name"),
-                "clarification_question_counts": context.get(
-                    "clarification_question_counts"
-                )
-                or {},
-                "maximum_questions_per_condition": (
-                    MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
-                ),
-            },
-        )
-        await CapabilityCoverageService(self.settings).record_usage(
-            session,
-            chat=chat,
-            operation="setup_interview",
-            usage=getattr(self.interviewer, "last_usage", None),
-        )
+        if (
+            _setup_is_complete(chat, technical_setup)
+            and _can_interpret_deterministically(chat, technical_setup)
+        ):
+            interview = SetupChatInterviewResult(
+                intent="setup",
+                assistant_message="The measurable setup is ready for deterministic review.",
+                ready_to_compile=True,
+                setup_summary=technical_setup,
+                clarifications=[],
+                suggestions=[],
+            )
+        else:
+            interview = await self.interviewer.respond(
+                history=history,
+                current_message=cleaned,
+                accumulated_setup=technical_setup,
+                capability_context={
+                    **capability_resolution.ai_context(),
+                    "setup_mode": _setup_mode(chat),
+                    "screened_methodology": context.get("sharia_methodology_name"),
+                    "clarification_question_counts": (
+                        context.get("clarification_question_counts") or {}
+                    ),
+                    "maximum_questions_per_condition": (
+                        MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
+                    ),
+                },
+            )
+            await CapabilityCoverageService(self.settings).record_usage(
+                session,
+                chat=chat,
+                operation="setup_interview",
+                usage=getattr(self.interviewer, "last_usage", None),
+            )
         if interview.intent in {"out_of_scope", "unsafe", "greeting"}:
             await self._assistant(
                 session,
@@ -1300,14 +2041,21 @@ class AISetupChatService:
             clarifications = [
                 item
                 for item in clarifications
-                if not _clarification_answered_by_prompt(item, accumulated)
+                if not _clarification_answered_by_prompt(item, technical_setup)
             ]
             clarifications = _apply_clarification_question_budget(context, clarifications)
+            clarifications = _cap_open_clarifications(context, clarifications)
             clarifications = [_with_other_option(item) for item in clarifications]
-            if interview.clarifications and not clarifications:
+            if not clarifications and (
+                bool(interview.clarifications) or _setup_is_complete(chat, technical_setup)
+            ):
+                # Either every question the model raised was already answered, or the
+                # description already specifies every field the compiler needs. Asking
+                # again would loop, which is what run 20260725T122105Z did for 41 of 42
+                # cases. Compile and present the draft; approval stays with the user.
                 interview = interview.model_copy(update={"ready_to_compile": True})
             if interview.ready_to_compile:
-                await self._finalize_translation(session, chat, accumulated, interview)
+                await self._finalize_translation(session, chat, technical_setup, interview)
                 return chat
             if not clarifications:
                 clarifications = [
@@ -1378,12 +2126,12 @@ class AISetupChatService:
                     "clarifications": [clarification.model_dump(mode="json")],
                     "suggestions": interview.suggestions,
                     "question_progress": {"current": 1, "total": len(clarifications)},
-                    "jargon": _beginner_explanations(accumulated),
+                    "jargon": _beginner_explanations(technical_setup),
                 },
             )
             return chat
 
-        await self._finalize_translation(session, chat, accumulated, interview)
+        await self._finalize_translation(session, chat, technical_setup, interview)
 
         return chat
 
@@ -1445,7 +2193,7 @@ class AISetupChatService:
                         label="My Favorites",
                         value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
                         description=(
-                            "Use only eligible assets you have favorited in Screened Market."
+                            "Use only eligible assets you have favorited in Halal Market."
                         ),
                     ),
                     SetupChatOption(
@@ -1541,8 +2289,7 @@ class AISetupChatService:
                     key="screened_watchlist",
                     question="Which Favorites list should HilalMarkets use?",
                     reason=(
-                        "Every asset is rechecked against the selected methodology before "
-                        "scanning."
+                        "Every asset is rechecked against the selected methodology before scanning."
                     ),
                     options=[
                         SetupChatOption(
@@ -1697,7 +2444,7 @@ class AISetupChatService:
             session,
             chat,
             (
-                f"Screened market set: {scope_label}. {eligible_count} currently eligible "
+                f"Halal Market set: {scope_label}. {eligible_count} currently eligible "
                 f"asset{'s' if eligible_count != 1 else ''} match this screening scope. "
                 f"If a status changes, the affected asset will be paused. "
                 + (
@@ -1715,9 +2462,7 @@ class AISetupChatService:
                     "methodology_version": context.get("sharia_methodology_version"),
                     "allowed_statuses": context.get("allowed_sharia_statuses"),
                     "eligible_count": eligible_count,
-                    "compliance_change_behavior": context.get(
-                        "compliance_change_behavior"
-                    ),
+                    "compliance_change_behavior": context.get("compliance_change_behavior"),
                 }
             },
         )
@@ -1946,26 +2691,154 @@ class AISetupChatService:
                 ),
             )
 
-    async def _compile(
-        self, session: AsyncSession, chat: AISetupChatSession, setup_text: str
-    ) -> None:
-        if self.settings.openai_api_key is None:
-            raise SetupChatError(
-                "openai_not_configured",
-                "AI Setup Chat is unavailable because OPENAI_API_KEY is not configured.",
-                status_code=503,
-            )
-        guided = _guided_setup(
-            setup_text,
-            capability_bindings=list((chat.context_json or {}).get("capability_bindings") or []),
-            setup_mode=_setup_mode(chat),
+    async def _interpret_setup(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        setup_text: str,
+        *,
+        operation: str,
+    ) -> InterpretationPreview:
+        """Interpret ``setup_text`` once per request, per text, per binding set.
+
+        A single turn can need the same interpretation twice — once for the inactive
+        draft returned while questions are still open, once for the final compile.
+        Interpreting twice would bill the model twice for an identical result.
+        """
+        bindings = list((chat.context_json or {}).get("capability_bindings") or [])
+        mode = _setup_mode(chat)
+        resolved_state = _resolved_strategy_state(chat)
+        compiler_text = canonical_compiler_text(resolved_state, fallback=setup_text)
+        cache_key = (
+            compiler_text,
+            mode,
+            json.dumps(bindings, sort_keys=True, default=str),
+            json.dumps(resolved_state, sort_keys=True, default=str),
         )
-        preview = await self.strategy_interpreter.interpret(guided)
+        started = monotonic()
+        cached = self._interpretations.get(cache_key)
+        if cached is not None:
+            _record_turn_runtime_stage(chat, operation, started, cache_hit=True)
+            return cached
+        guided = _guided_setup(
+            compiler_text,
+            capability_bindings=bindings,
+            setup_mode=mode,
+            resolved_state=resolved_state,
+        )
+        state_has_formula = bool(resolved_state.get("formula"))
+        deterministic = _can_interpret_deterministically(chat, compiler_text) and (
+            state_has_formula
+            or bool(
+                getattr(
+                    self.strategy_interpreter,
+                    "deterministic_core_authority",
+                    False,
+                )
+            )
+        )
+        if deterministic:
+            preview = await RuleBasedStrategyInterpreter().interpret(guided)
+            runtime = dict((chat.context_json or {}).get("turn_runtime") or {})
+            runtime["deterministic_interpretations"] = (
+                int(runtime.get("deterministic_interpretations") or 0) + 1
+            )
+            context = dict(chat.context_json or {})
+            context["turn_runtime"] = runtime
+            chat.context_json = context
+        else:
+            if self.settings.openai_api_key is None:
+                raise SetupChatError(
+                    "openai_not_configured",
+                    "AI Setup Chat is unavailable because OPENAI_API_KEY is not configured.",
+                    status_code=503,
+                )
+            preview = await self.strategy_interpreter.interpret(guided)
         await CapabilityCoverageService(self.settings).record_usage(
             session,
             chat=chat,
-            operation="strategy_compile",
+            operation=operation,
             usage=(preview.raw_metadata or {}).get("openai_usage"),
+        )
+        self._interpretations[cache_key] = preview
+        _record_turn_runtime_stage(chat, operation, started, cache_hit=False)
+        return preview
+
+    async def _ensure_inactive_draft(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        accumulated: str,
+    ) -> None:
+        """Compile an inactive draft as soon as the description is complete.
+
+        Structured output must not depend on the interviewer model choosing to
+        finish. Run 20260725T122105Z captured a strategy object in 1 of 42 cases
+        because ``ready_to_compile`` is model-owned: a session could already hold
+        every field the compiler needs and still loop on questions forever.
+
+        When the deterministic requirement check says every compiler-required field
+        is present, a draft is produced and returned even though questions remain
+        open. The draft is inactive — this method never touches ``status``, so
+        ``can_approve`` stays False and the approval route still refuses it. It is a
+        preview of the current reading, not a request to approve anything.
+        """
+        if not accumulated.strip():
+            return
+        if not _setup_is_complete(chat, accumulated):
+            return
+        context = dict(chat.context_json or {})
+        source_digest = _text_digest(accumulated)
+        if source_digest in {
+            context.get("compiled_source_digest"),
+            context.get("inactive_draft_source_digest"),
+        }:
+            return
+        try:
+            preview = await self._interpret_setup(
+                session, chat, accumulated, operation="inactive_draft_compile"
+            )
+            definition = StrategyDefinition.model_validate(preview.strategy.model_dump(mode="json"))
+        except (SetupChatError, ValidationError, ValueError, httpx.HTTPError) as exc:
+            # A preview must never break the turn the user is having. Record why it
+            # could not be produced so the gap is visible instead of silent.
+            context["inactive_draft_source_digest"] = source_digest
+            context["inactive_draft_error"] = type(exc).__name__
+            chat.context_json = context
+            return
+        # Interpretation records cache/model/runtime telemetry in context. Refresh
+        # before persisting draft metadata so those measurements are not overwritten
+        # by the pre-call snapshot.
+        context = dict(chat.context_json or {})
+        if _setup_mode(chat) == "monitor" and not context.get("confirmed_monitor_name"):
+            # An AI-chosen name must not look confirmed on an unapproved draft.
+            definition = definition.model_copy(update={"name": "Untitled Monitor"})
+        chat.draft_schema_json = definition.model_dump(mode="json")
+        chat.translation_sheet = translation_sheet(
+            chat.original_idea or accumulated,
+            definition,
+            preview,
+            setup_mode=_setup_mode(chat),
+        )
+        chat.lint_warnings = lint_strategy(definition, preview, setup_mode=_setup_mode(chat))
+        chat.rule_confidence = rule_confidence(definition)
+        chat.assumptions = list(preview.assumptions)
+        chat.unsupported_conditions = [
+            item.model_dump(mode="json") for item in preview.unsupported_conditions
+        ]
+        context["inactive_draft_source_digest"] = source_digest
+        context["inactive_draft"] = True
+        context.pop("inactive_draft_error", None)
+        context["schema_hash"] = definition.canonical_hash()
+        context["interpreter"] = preview.interpreter
+        chat.context_json = context
+        await session.flush()
+
+    async def _compile(
+        self, session: AsyncSession, chat: AISetupChatSession, setup_text: str
+    ) -> None:
+        preview = await self._interpret_setup(
+            session, chat, setup_text, operation="strategy_compile"
         )
         definition = StrategyDefinition.model_validate(preview.strategy.model_dump(mode="json"))
         context = dict(chat.context_json or {})
@@ -2022,9 +2895,7 @@ class AISetupChatService:
                         context.get("screened_explicit_symbols") or []
                     )
                 definition = definition.model_copy(
-                    update={
-                        "universe": definition.universe.model_copy(update=universe_update)
-                    }
+                    update={"universe": definition.universe.model_copy(update=universe_update)}
                 )
                 screening_resolution = await ShariaUniverseResolver(
                     session,
@@ -2046,8 +2917,7 @@ class AISetupChatService:
             except (KeyError, ValueError, ShariaUniverseError) as exc:
                 screening_error = {
                     "code": getattr(exc, "code", "screened_universe_required"),
-                    "message": str(exc)
-                    or "Choose and validate a screened market before approval.",
+                    "message": str(exc) or "Choose and validate a Halal Market before approval.",
                 }
         requires_monitor_name = context.get("setup_mode") == "monitor" and not context.get(
             "confirmed_monitor_name"
@@ -2086,9 +2956,7 @@ class AISetupChatService:
                     screening_resolution.included_count if screening_resolution else 0
                 ),
                 "assets_excluded_by_policy": (
-                    screening_resolution.excluded_by_policy_count
-                    if screening_resolution
-                    else 0
+                    screening_resolution.excluded_by_policy_count if screening_resolution else 0
                 ),
                 "insufficient_information": (
                     screening_resolution.insufficient_information_count
@@ -2099,9 +2967,7 @@ class AISetupChatService:
                     "compliance_change_behavior",
                     ComplianceChangeBehavior.PAUSE_ASSET.value,
                 ),
-                "policy_hash": (
-                    screening_resolution.policy_hash if screening_resolution else None
-                ),
+                "policy_hash": (screening_resolution.policy_hash if screening_resolution else None),
                 "snapshot_hash": (
                     screening_resolution.snapshot_hash if screening_resolution else None
                 ),
@@ -2159,10 +3025,60 @@ class AISetupChatService:
                 ],
             )
             _set_awaiting_clarification(context, clarification)
+        context.pop("inactive_draft", None)
+        context.pop("inactive_draft_source_digest", None)
+        context.pop("inactive_draft_error", None)
+        canonical_hash = definition.canonical_hash()
+        strategy_state = StrategyDraftState.from_dict(
+            context.get("strategy_state")
+            if isinstance(context.get("strategy_state"), dict)
+            else None
+        )
+        unresolved_definitions = tuple(
+            str(item.get("code") or item.get("field") or "unresolved_definition")
+            for item in (chat.ambiguities or [])
+            if item.get("blocking", True)
+        )
+        unsupported_capabilities = tuple(
+            str(item.get("code") or item.get("field") or "unsupported_capability")
+            for item in (chat.unsupported_conditions or [])
+            if item.get("blocking", True)
+        )
+        critical_lint = tuple(
+            str(item.get("code") or "critical_lint")
+            for item in lint
+            if item.get("severity") == "critical"
+        )
+        provider_requirements = tuple(
+            str(item.get("capability_key") or item.get("requirements") or "")
+            for item in (
+                (context.get("capability_resolution") or {}).get("provider_requirements") or []
+            )
+            if item
+        )
+        strategy_state = strategy_state.with_compilation(
+            canonical_hash=canonical_hash,
+            conversation_snapshot_hash=_text_digest(
+                json.dumps(
+                    context.get("setup_fragments") or [],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
+            unresolved_definitions=(*unresolved_definitions, *critical_lint),
+            unsupported_capabilities=unsupported_capabilities,
+            provider_requirements=provider_requirements,
+        )
+        if strategy_state.approval_state == "READY_FOR_CONFIRMATION":
+            strategy_state = strategy_state.awaiting_approval()
+        context["strategy_state"] = strategy_state.to_dict()
         chat.context_json = {
             **context,
             "interpreter": preview.interpreter,
-            "schema_hash": definition.canonical_hash(),
+            "schema_hash": canonical_hash,
+            # Records which description this draft came from so the same text is never
+            # interpreted twice and a changed description always recompiles.
+            "compiled_source_digest": _text_digest(setup_text),
         }
         await session.flush()
 
@@ -2424,6 +3340,10 @@ class AISetupChatService:
             raise SetupChatError("agent_compile_failed", "The compiler did not return a draft.")
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
         canonical_hash = definition.canonical_hash()
+        state_payload = (chat.context_json or {}).get("strategy_state")
+        strategy_state = StrategyDraftState.from_dict(
+            state_payload if isinstance(state_payload, dict) else None
+        )
         return {
             "strategy": definition.model_dump(mode="json"),
             "canonical_hash": canonical_hash,
@@ -2437,6 +3357,9 @@ class AISetupChatService:
             "scan_eligible": chat.status == "ready_to_scan",
             "approval_is_external": True,
             "previous_hash_invalidated": bool(prior_hash and prior_hash != canonical_hash),
+            "draft_version": strategy_state.draft_version,
+            "approval_state": strategy_state.approval_state,
+            "conversation_snapshot_hash": strategy_state.conversation_snapshot_hash,
         }
 
     async def _agent_market_snapshot(
@@ -2488,8 +3411,7 @@ class AISetupChatService:
             raise SetupChatError(exc.code, str(exc), status_code=409) from exc
         scanner_result = _scanner_result_payload(response)
         scanner_result["warnings"] = [
-            _safe_agent_scanner_warning(item)
-            for item in scanner_result.get("warnings", [])
+            _safe_agent_scanner_warning(item) for item in scanner_result.get("warnings", [])
         ]
         scanner_result["draft_hash"] = expected_hash
         scanner_result["evidence_refs"] = [f"on-demand-scan:{response.usage_record_id}"]
@@ -2530,8 +3452,7 @@ class AISetupChatService:
         fragment_records = list(context.get("setup_fragment_records") or [])
         setup_fragments = list(context.get("setup_fragments") or [])
         if any(
-            " ".join(str(fragment).casefold().split())
-            == " ".join(message.casefold().split())
+            " ".join(str(fragment).casefold().split()) == " ".join(message.casefold().split())
             for fragment in setup_fragments
         ):
             fragment_records.append(
@@ -2580,9 +3501,7 @@ class AISetupChatService:
                 context,
                 parsed_clarifications,
             )
-            clarifications = [
-                item.model_dump(mode="json") for item in parsed_clarifications
-            ]
+            clarifications = [item.model_dump(mode="json") for item in parsed_clarifications]
             chat.context_json = context
         if clarifications and "compile_strategy_draft" not in result_by_name:
             clarification = SetupChatClarification.model_validate(clarifications[0])
@@ -2744,8 +3663,7 @@ class AISetupChatService:
         )
         comparison["legacy_draft_hash_after"] = after_hash
         turn_intent = str(
-            ((chat.context_json or {}).get("last_turn_classification") or {}).get("intent")
-            or ""
+            ((chat.context_json or {}).get("last_turn_classification") or {}).get("intent") or ""
         )
         expected_first_tool = None
         if turn_intent == "market_snapshot":
@@ -2763,6 +3681,46 @@ class AISetupChatService:
         )
         run.comparison = comparison
         run.status = "shadow_compared"
+
+    async def record_turn_failure(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        envelope: SetupChatErrorEnvelope,
+    ) -> None:
+        """Close a failed turn with a real assistant message and no state change.
+
+        A failed turn must never leave the conversation silent, and it must never
+        advance or demote the last authoritative draft. The user can retry the
+        instruction without losing the prior lifecycle state or preview.
+        """
+        current_hash = None
+        if chat.draft_schema_json:
+            try:
+                current_hash = StrategyDefinition.model_validate(
+                    chat.draft_schema_json
+                ).canonical_hash()
+            except ValidationError:
+                current_hash = None
+        user_safe_validation = not envelope.error_code.startswith(("TARGET_", "STRATEGY_"))
+        await self._assistant(
+            session,
+            chat,
+            (
+                envelope.message
+                if user_safe_validation
+                else _TURN_FAILURE_MESSAGE.format(request_id=envelope.request_id)
+            ),
+            message_type="turn_error",
+            payload={
+                "error": envelope.model_dump(mode="json"),
+                "can_approve": chat.status == "ready_for_approval",
+                "authoritative_draft_preserved": bool(chat.draft_schema_json),
+                "authoritative_draft_hash": current_hash,
+                "approval_state": _strategy_approval_state(chat),
+            },
+        )
 
     async def _assistant(
         self,
@@ -3183,7 +4141,9 @@ def _fallback_turn_classification(
         assistant_message=assistant_message,
         technical_fragments=technical_fragments,
         clarification_answer=(value if intent == "clarification_answer" else None),
-        segments=[SetupChatTurnSegment(text=value, category=category)],
+        segments=[
+            SetupChatTurnSegment(text=setup_chat_source_excerpt(value), category=category)
+        ],
         preserve_pending_question=intent
         in {"conversation", "product_question", "option_question", "out_of_scope", "unsafe"},
         confidence=0.72,
@@ -3196,7 +4156,12 @@ def _clarification_answer_turn(value: str) -> SetupChatTurnClassification:
         assistant_message="",
         technical_fragments=[],
         clarification_answer=value,
-        segments=[SetupChatTurnSegment(text=value, category="clarification_answer")],
+        segments=[
+            SetupChatTurnSegment(
+                text=setup_chat_source_excerpt(value),
+                category="clarification_answer",
+            )
+        ],
         preserve_pending_question=False,
         confidence=1.0,
     )
@@ -3208,6 +4173,27 @@ def _normalize_turn_classification(
     current_message: str,
     active_clarification: SetupChatClarification | None,
 ) -> SetupChatTurnClassification:
+    deterministic = classify_strategy_turn(current_message)
+    deterministic_categories = {fragment.category for fragment in deterministic.fragments}
+    deterministic_dialogue = bool(deterministic.fragments) and all(
+        fragment.kind in {"conversational", "conversation_control"}
+        for fragment in deterministic.fragments
+    )
+    deterministic_dialogue = deterministic_dialogue and any(
+        fragment.kind == "conversation_control" for fragment in deterministic.fragments
+    )
+    state_categories = {
+        "SYMBOL",
+        "INCLUDE",
+        "EXCLUDE",
+        "TIMEFRAME",
+        "DIRECTION",
+        "OPERATOR",
+        "THRESHOLD",
+        "FORMULA",
+        "REVERSION",
+        "TRADING_MECHANIC",
+    }
     legacy_intent = AISetupChatService._classify(current_message)
     if legacy_intent in {"unsafe", "market_snapshot"}:
         fallback = _fallback_turn_classification(
@@ -3233,12 +4219,41 @@ def _normalize_turn_classification(
                 "preserve_pending_question": True,
             }
         )
+    if active_clarification is not None:
+        if active_clarification.key == "monitor_name":
+            return _clarification_answer_turn(current_message)
+        if (
+            not _looks_like_question(current_message)
+            and _answer_satisfies_clarification(active_clarification, current_message)
+        ):
+            return _clarification_answer_turn(current_message)
     if (
-        active_clarification is not None
-        and not _looks_like_question(current_message)
-        and _answer_satisfies_clarification(active_clarification, current_message)
+        deterministic.fragments
+        and not deterministic.is_approval
+        and not deterministic_categories.intersection(state_categories)
+        and (legacy_intent != "out_of_scope" or deterministic_dialogue)
     ):
-        return _clarification_answer_turn(current_message)
+        return classification.model_copy(
+            update={
+                "intent": "conversation",
+                "technical_fragments": [],
+                "clarification_answer": None,
+                "preserve_pending_question": True,
+            }
+        )
+    if (
+        deterministic.fragments
+        and deterministic_categories.intersection(state_categories)
+        and "TRADING_MECHANIC" not in deterministic_categories
+        and classification.intent not in {"clarification_answer", "setup_revision"}
+    ):
+        classification = classification.model_copy(
+            update={
+                "intent": "setup_instruction",
+                "technical_fragments": [current_message],
+                "clarification_answer": None,
+            }
+        )
     if classification.intent == "clarification_answer" and active_clarification is None:
         classification = classification.model_copy(
             update={
@@ -3281,6 +4296,62 @@ def _normalize_turn_classification(
     return classification
 
 
+def _is_deterministic_state_update(report: Any) -> bool:
+    """Return whether a turn can patch canonical state without model routing."""
+
+    categories = {fragment.category for fragment in report.fragments}
+    state_fields = {
+        "SYMBOL",
+        "INCLUDE",
+        "EXCLUDE",
+        "TIMEFRAME",
+        "DIRECTION",
+        "OPERATOR",
+        "THRESHOLD",
+        "FORMULA",
+        "REVERSION",
+    }
+    permitted = {
+        *state_fields,
+        "CONVERSATIONAL_TEXT",
+        "CONVERSATION_CONTROL",
+        "APPROVAL_INSTRUCTION",
+        "PRODUCT_POLICY",
+    }
+    return bool(categories.intersection(state_fields)) and categories.issubset(permitted)
+
+
+def _turn_materially_updates_strategy(report: Any) -> bool:
+    """Return whether the authenticated turn can create a new draft revision."""
+
+    material_categories = {
+        "SYMBOL",
+        "INCLUDE",
+        "EXCLUDE",
+        "TIMEFRAME",
+        "DIRECTION",
+        "OPERATOR",
+        "THRESHOLD",
+        "FORMULA",
+        "REVERSION",
+        "TRADING_MECHANIC",
+    }
+    return any(fragment.category in material_categories for fragment in report.fragments)
+
+
+def _requests_stale_approval_reuse(text: str, report: Any) -> bool:
+    """Detect attempts to carry an old approval onto the current edited draft."""
+
+    categories = {fragment.category for fragment in report.fragments}
+    if "APPROVAL_INSTRUCTION" not in categories:
+        return False
+    lowered = " ".join(text.casefold().split())
+    return bool(
+        re.search(r"\b(?:previous|prior|old|existing|earlier)\s+approv\w*\b", lowered)
+        and re.search(r"\b(?:reuse|re-use|carry|transfer|apply|keep)\b", lowered)
+    )
+
+
 def _validated_technical_fragments(
     current_message: str,
     candidates: list[str],
@@ -3292,6 +4363,24 @@ def _validated_technical_fragments(
         if not cleaned:
             continue
         if " ".join(cleaned.casefold().split()) not in normalized_message:
+            continue
+        report = classify_strategy_turn(cleaned)
+        if not any(
+            fragment.category
+            in {
+                "SYMBOL",
+                "INCLUDE",
+                "EXCLUDE",
+                "TIMEFRAME",
+                "DIRECTION",
+                "OPERATOR",
+                "THRESHOLD",
+                "FORMULA",
+                "REVERSION",
+                "TRADING_MECHANIC",
+            }
+            for fragment in report.fragments
+        ):
             continue
         if cleaned not in results:
             results.append(cleaned)
@@ -3392,14 +4481,61 @@ def _is_opaque_option_value(value: str) -> bool:
     )
 
 
+def _setup_text_limit() -> int:
+    """The schema's own cap on ``setup_text``, read from the schema.
+
+    Hard-coding it here would let the two drift apart, and the drift was invisible:
+    a long conversation built a request the schema rejected, the ValidationError
+    escaped as HTTP 500, and the trader was told to rephrase a message that was
+    never the problem.
+    """
+    for constraint in GuidedSetupRequest.model_fields["setup_text"].metadata:
+        limit = getattr(constraint, "max_length", None)
+        if isinstance(limit, int):
+            return limit
+    return 5000
+
+
+def _bounded_setup_text(text: str) -> str:
+    """Fit ``text`` inside the schema limit without cutting a line in half.
+
+    The canonical strategy state — not this transcript — is the authority for every
+    settled field (INV-01), so dropping the oldest raw lines loses no decision. Only
+    whole lines are dropped, and always the oldest, so the wording that survives is
+    still exactly what the trader typed.
+    """
+    limit = _setup_text_limit()
+    if len(text) <= limit:
+        return text
+    lines = text.split("\n")
+    kept: list[str] = []
+    size = 0
+    for line in reversed(lines):
+        extra = len(line) + (1 if kept else 0)
+        if size + extra > limit:
+            break
+        kept.append(line)
+        size += extra
+    if not kept:
+        # A single line longer than the whole budget: keep its most recent end,
+        # which is where the operative instruction sits.
+        return text[-limit:]
+    return "\n".join(reversed(kept))
+
+
 def _guided_setup(
     text: str,
     *,
     capability_bindings: list[dict[str, Any]] | None = None,
     setup_mode: Literal["scanner", "monitor"] = "monitor",
+    resolved_state: dict[str, Any] | None = None,
 ) -> GuidedSetupRequest:
+    settled = resolved_state or {}
     timeframe_match = re.search(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|8h|12h|1d)\b", text.casefold())
     timeframe = timeframe_match.group(1) if timeframe_match else "15m"
+    settled_timeframe = settled.get("base_timeframe")
+    if isinstance(settled_timeframe, str) and settled_timeframe in SUPPORTED_TIMEFRAMES:
+        timeframe = settled_timeframe
     exchange = "bybit" if "bybit" in text.casefold() else "binance"
     quote = "USDC" if "usdc" in text.casefold() else "USDT"
     symbols = sorted(
@@ -3414,19 +4550,23 @@ def _guided_setup(
         if "intrabar" in text.casefold() or (setup_mode == "scanner" and not explicit_close)
         else "candle_close"
     )
+    settled_symbols = [
+        item for item in (settled.get("include_symbols") or ()) if isinstance(item, str)
+    ]
     return GuidedSetupRequest(
         exchange=exchange,
         quote_currency=quote,
         timeframe=timeframe,
-        symbols=symbols,
+        symbols=sorted(set(settled_symbols)) or symbols,
         setup_mode="free_text",
-        setup_text=text,
+        setup_text=_bounded_setup_text(text),
         trigger_mode=trigger_mode,
         forming_alerts="forming alerts" in text.casefold(),
         near_miss_threshold=70,
         delivery_channels=["telegram"],
         maximum_alerts_per_hour=50,
         capability_bindings=capability_bindings or [],
+        resolved_state=dict(settled),
     )
 
 
@@ -3773,18 +4913,23 @@ def translation_sheet(
     required_confirmation_rules = [
         rule.label for rule in rules if roles.get(rule.key) == "required_confirmation"
     ]
-    optional_rules = [
-        rule.label for rule in rules if roles.get(rule.key) == "optional_suggestion"
-    ]
+    optional_rules = [rule.label for rule in rules if roles.get(rule.key) == "optional_suggestion"]
     current_match_rules = [
         rule.label for rule in rules if roles.get(rule.key) == "current_match_condition"
     ]
+    context_clause = (
+        f"Supporting context is read on {', '.join(definition.supporting_timeframes)}; "
+        f"the trigger is evaluated on {definition.base_timeframe}. "
+        if definition.supporting_timeframes
+        else ""
+    )
     summary = (
         (
             f"HilalMarkets will scan {definition.universe.exchange.title()} spot markets on "
             f"{definition.base_timeframe} and return coins where all "
             f"{len(current_match_rules)} required current condition"
             f"{'s' if len(current_match_rules) != 1 else ''} match. "
+            f"{context_clause}"
             f"{optional_count} rule"
             f"{'s are' if optional_count != 1 else ' is'} optional."
         )
@@ -3797,6 +4942,7 @@ def translation_sheet(
             f"{'s' if required_filters != 1 else ''} and "
             f"{required_confirmations} required confirmation"
             f"{'s' if required_confirmations != 1 else ''}. "
+            f"{context_clause}"
             f"{optional_count} rule"
             f"{'s are' if optional_count != 1 else ' is'} optional suggestions."
         )
@@ -3819,8 +4965,7 @@ def translation_sheet(
         {
             "label": "Market",
             "value": (
-                f"{definition.universe.exchange.title()} "
-                f"{definition.universe.market_type.value}"
+                f"{definition.universe.exchange.title()} {definition.universe.market_type.value}"
             ),
         },
         {"label": "Market universe", "value": watchlist},
@@ -3926,9 +5071,7 @@ def translation_sheet(
 
 def _prompt_coverage_report(preview: InterpretationPreview) -> dict[str, Any]:
     metadata = dict(preview.raw_metadata or {})
-    report = metadata.get("prompt_coverage_report") or metadata.get(
-        "openai_prompt_coverage_report"
-    )
+    report = metadata.get("prompt_coverage_report") or metadata.get("openai_prompt_coverage_report")
     return dict(report) if isinstance(report, dict) else {}
 
 
@@ -4041,8 +5184,10 @@ def _structured_intent_state(
             candidate = " ".join(
                 str(item.get("fragment") or item.get("user_text") or "").casefold().split()
             )
-            if source_normalized and candidate and (
-                source_normalized in candidate or candidate in source_normalized
+            if (
+                source_normalized
+                and candidate
+                and (source_normalized in candidate or candidate in source_normalized)
             ):
                 references.append(
                     {
@@ -4144,10 +5289,10 @@ def _structured_intent_state(
                 "stop_method": definition.risk.stop_method,
                 "maximum_stop_percent": definition.risk.maximum_stop_percent,
             }
-        ] if definition.risk.enabled else [],
-        setup_mode=(
-            "scanner" if context.get("setup_mode") == "scanner" else "monitor"
-        ),
+        ]
+        if definition.risk.enabled
+        else [],
+        setup_mode=("scanner" if context.get("setup_mode") == "scanner" else "monitor"),
         custom_terminology={
             str(key): str(value)
             for key, value in dict(context.get("resolved_ambiguities") or {}).items()
@@ -4161,9 +5306,9 @@ def _structured_intent_state(
                 if item.get("user_message_id")
             )
         )[-200:],
-        tool_results=list(
-            dict(context.get("conversation_state") or {}).get("tool_results") or []
-        )[-50:],
+        tool_results=list(dict(context.get("conversation_state") or {}).get("tool_results") or [])[
+            -50:
+        ],
         draft_version={
             "canonical_hash": definition.canonical_hash(),
             "schema_version": definition.schema_version,
@@ -4526,9 +5671,7 @@ def _apply_clarification_question_budget(
         if subject is None:
             allowed.append(clarification)
             continue
-        if counts.get(subject, 0) + planned[subject] >= (
-            MAX_CLARIFICATION_QUESTIONS_PER_CONDITION
-        ):
+        if counts.get(subject, 0) + planned[subject] >= (MAX_CLARIFICATION_QUESTIONS_PER_CONDITION):
             exhausted.append(
                 {
                     "subject": subject,
@@ -4545,9 +5688,7 @@ def _apply_clarification_question_budget(
             for item in context.get("clarification_budget_exhausted") or []
             if isinstance(item, dict)
         ]
-        identities = {
-            (str(item.get("subject")), str(item.get("key"))) for item in previous
-        }
+        identities = {(str(item.get("subject")), str(item.get("key"))) for item in previous}
         for item in exhausted:
             identity = (item["subject"], item["key"])
             if identity not in identities:
@@ -4555,6 +5696,32 @@ def _apply_clarification_question_budget(
                 identities.add(identity)
         context["clarification_budget_exhausted"] = previous[-100:]
     return allowed
+
+
+def _cap_open_clarifications(
+    context: dict[str, Any],
+    clarifications: list[SetupChatClarification],
+) -> list[SetupChatClarification]:
+    """Keep at most ``MAX_UNRESOLVED_CLARIFICATIONS`` questions open at once.
+
+    Deferred questions are not silently dropped. Each one is recorded on the session
+    so the draft can disclose that the field fell back to its documented default,
+    and the user can still override any of them in a later turn.
+    """
+    if len(clarifications) <= MAX_UNRESOLVED_CLARIFICATIONS:
+        return clarifications
+    deferred = clarifications[MAX_UNRESOLVED_CLARIFICATIONS:]
+    recorded = [
+        item for item in context.get("deferred_clarifications") or [] if isinstance(item, dict)
+    ]
+    seen = {str(item.get("key")) for item in recorded}
+    for item in deferred:
+        if item.key in seen:
+            continue
+        recorded.append({"key": item.key, "question": item.question, "reason": item.reason})
+        seen.add(item.key)
+    context["deferred_clarifications"] = recorded[-50:]
+    return clarifications[:MAX_UNRESOLVED_CLARIFICATIONS]
 
 
 def _record_clarification_question(
@@ -4793,9 +5960,7 @@ def _resolver_clarifications(
 ) -> list[SetupChatClarification]:
     clarifications: list[SetupChatClarification] = []
     for fragment in report.fragments:
-        if fragment.status == "matched" or _is_platform_screening_only_fragment(
-            fragment.fragment
-        ):
+        if fragment.status == "matched" or _is_platform_screening_only_fragment(fragment.fragment):
             continue
         lowered_fragment = fragment.fragment.casefold()
         known_ambiguities = {
@@ -4847,9 +6012,7 @@ def _resolver_clarifications(
                 action="build_mechanic",
             )
             options = (
-                [create_option, *options]
-                if not fragment.candidates
-                else [*options, create_option]
+                [create_option, *options] if not fragment.candidates else [*options, create_option]
             )
         unknown_creatable = (
             fragment.status == "unknown" and allow_mechanic_creation and not fragment.candidates

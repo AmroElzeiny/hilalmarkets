@@ -9,6 +9,11 @@ from typing import Any
 
 from ai_market_monitor.db.models.enums import ConditionType
 from ai_market_monitor.engine.capabilities import all_capabilities
+from ai_market_monitor.engine.comparators import states_upper_bound
+from ai_market_monitor.engine.grounded_patch import ungrounded_quantities
+from ai_market_monitor.engine.lookback import read_lookback
+from ai_market_monitor.engine.price_movement import movement_direction as _movement_direction
+from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES, TIMEFRAME_MINUTES
 from ai_market_monitor.schemas.strategy import (
     Comparator,
     ConditionRule,
@@ -17,35 +22,11 @@ from ai_market_monitor.schemas.strategy import (
     OperandKind,
 )
 
-SUPPORTED_TIMEFRAMES = {
-    "1m",
-    "3m",
-    "5m",
-    "15m",
-    "30m",
-    "1h",
-    "2h",
-    "4h",
-    "6h",
-    "8h",
-    "12h",
-    "1d",
-}
+#: Re-exported from `engine.timeframes`, which owns them. Kept here so the many
+#: existing importers of these names are unaffected by the move.
+__all__ = ["SUPPORTED_TIMEFRAMES", "TIMEFRAME_MINUTES"]
+
 SYNTHETIC_EVALUATOR_CAPABILITIES = {"candle_change_percent"}
-TIMEFRAME_MINUTES = {
-    "1m": 1,
-    "3m": 3,
-    "5m": 5,
-    "15m": 15,
-    "30m": 30,
-    "1h": 60,
-    "2h": 120,
-    "4h": 240,
-    "6h": 360,
-    "8h": 480,
-    "12h": 720,
-    "1d": 1440,
-}
 
 OperandParameterValue = int | float | str | bool | list[int | float | str | bool]
 
@@ -376,7 +357,17 @@ def _condition_from_group(
         threshold = _threshold_percent_near(prompt, start, end)
         if threshold is None:
             return None
-        direction = str(group.get("direction") or "up")
+        if _states_upper_bound(prompt, start, end):
+            return None
+        # The trader's own wording decides the side. The vocabulary entry's `direction`
+        # is the *catalogue's* value, and falling back to `up` compiled a rise for
+        # `coins decreasing by 3%` — the exact opposite of the request. The shared
+        # movement reader is asked first, and only its answer can invert the side.
+        stated = _movement_direction(prompt[max(0, start - 48) : end + 24])
+        direction = stated or str(group.get("direction") or "")
+        if direction not in {"up", "down"}:
+            # No side stated and none in the catalogue entry: refuse rather than pick.
+            return None
         lookback = _lookback_candles(prompt, timeframe)
         operand_name = "percent_change_down" if direction == "down" else "percent_change_up"
         label_direction = "decreased" if direction == "down" else "increased"
@@ -483,6 +474,15 @@ def _condition_from_group(
     condition_type = str(group.get("condition_type") or "")
     operand_name = str(group.get("operand_name") or "")
     if condition_type == "price_action" and operand_name:
+        catalogue_parameters = _parameter_dict(group.get("default_parameters"))
+        ungrounded = ungrounded_quantities(dict(catalogue_parameters), prompt)
+        if ungrounded:
+            # The catalogue's numbers are a starting point for the builder UI, where
+            # the trader edits them. Compiling them as a monitoring rule states a
+            # requirement they never gave: `alert me on a dump this week` became
+            # "price up 5%" — a size and a side that appear nowhere in the sentence.
+            # Refuse, so the missing number is asked for instead of assumed.
+            return None
         return _price_action_condition(
             key=str(group.get("key") or operand_name),
             label=str(group.get("default_label") or source_fragment),
@@ -490,7 +490,7 @@ def _condition_from_group(
             name=operand_name,
             source_fragment=source_fragment,
             required=required,
-            parameters=_parameter_dict(group.get("default_parameters")),
+            parameters=catalogue_parameters,
             confidence=float(group.get("confidence", 0.86)),
         )
     if condition_type == "indicator" and operand_name:
@@ -690,6 +690,18 @@ def _threshold_percent_near(prompt: str, start: int, end: int) -> float | None:
     return float(match.group(1)) if match else None
 
 
+def _states_upper_bound(prompt: str, start: int, end: int) -> bool:
+    """True when the percentage is stated as a maximum rather than a minimum.
+
+    ``percent_change_up``/``percent_change_down`` match a move of *at least* the
+    stated size; the registry has no upper-bound form. Compiling the at-least rule
+    for ``dropped at most 2.5%`` would invert the requirement, so this path refuses
+    it and leaves the wording unresolved for the trader to restate.
+    """
+    window = prompt[max(0, start - 40) : min(len(prompt), end + 56)]
+    return states_upper_bound(window)
+
+
 def _previous_candle_context(prompt: str, start: int, end: int) -> bool:
     window = prompt[max(0, start - 56) : min(len(prompt), end + 24)].casefold()
     return any(term in window for term in ("previous", "prior", "last closed", "last candle"))
@@ -724,44 +736,22 @@ def _event_search_parameters(prompt: str, timeframe: str) -> dict[str, int | str
         )
     ):
         return {}
-    lookback = _lookback_candles(prompt, timeframe)
-    return {"search_lookback": lookback} if lookback != 100 else {}
+    # Only a stated window becomes a search bound. Comparing against a default value
+    # meant a trader who asked for exactly that many bars was read as asking for none.
+    reading = read_lookback(prompt.casefold(), timeframe=timeframe)
+    return {"search_lookback": reading.candles} if reading is not None else {}
 
 
 def _lookback_candles(prompt: str, timeframe: str) -> int:
-    lowered = prompt.casefold()
-    minutes = TIMEFRAME_MINUTES.get(timeframe, 15)
-    candle_match = re.search(r"(?:last|past)\s+(\d+)\s*(?:candle|candles|bars)", lowered)
-    if candle_match:
-        return max(1, min(50_000, int(candle_match.group(1))))
-    hour_match = re.search(
-        r"(?:last|past|previous|within the last)\s+(\d+)[ -]?(?:hour|hours|h)\b",
-        lowered,
-    )
-    if hour_match:
-        return max(1, min(50_000, int((int(hour_match.group(1)) * 60) / minutes)))
-    day_match = re.search(
-        r"(?:last|past|previous|over the last|over the past)\s+(\d+)[ -]?days?",
-        lowered,
-    )
-    if day_match:
-        return max(1, min(50_000, int((int(day_match.group(1)) * 24 * 60) / minutes)))
-    if any(term in lowered for term in ("today", "since midnight", "daily move", "this day")):
-        return max(1, int((24 * 60) / minutes))
-    if any(
-        term in lowered for term in ("past day", "last day", "last 24 hours", "24h", "24 hours")
-    ):
-        return max(1, int((24 * 60) / minutes))
-    if any(
-        term in lowered for term in ("past week", "last week", "7 days", "seven days", "this week")
-    ):
-        return max(1, int((7 * 24 * 60) / minutes))
-    if any(
-        term in lowered
-        for term in ("past month", "last month", "30 days", "thirty days", "this month")
-    ):
-        return max(1, int((30 * 24 * 60) / minutes))
-    return 1
+    """The window the prompt states, or the one-candle platform convention.
+
+    This was a third full implementation of the same reading, with its own regexes for
+    candles/hours/days and its own set of duration phrases. All three disagreed about
+    some wording, so the same sentence produced different windows depending on which
+    reader happened to run.
+    """
+    reading = read_lookback(prompt.casefold(), timeframe=timeframe)
+    return reading.candles if reading is not None else 1
 
 
 def _invert_comparator(comparator: Comparator) -> Comparator:

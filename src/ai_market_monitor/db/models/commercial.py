@@ -177,6 +177,7 @@ class BillingCheckoutAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500))
+    billing_profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class PaymentEmailDelivery(UUIDPrimaryKeyMixin, Base):

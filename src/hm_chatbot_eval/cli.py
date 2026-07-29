@@ -11,7 +11,7 @@ from rich.table import Table
 
 from .batch import BatchManager
 from .compare import compare_runs
-from .config import Settings
+from .config import Settings, discard_stale_process_openai_key
 from .doctor import checks
 from .profiles import (
     cases_per_topic,
@@ -29,6 +29,7 @@ console = Console()
 
 
 def _settings() -> Settings:
+    discard_stale_process_openai_key()
     return Settings()
 
 
@@ -110,6 +111,12 @@ def run(
     tests_per_topic: Annotated[int, typer.Option()] = 24,
     topics: Annotated[str, typer.Option(help="Comma-separated topic IDs")] = "",
     seed: Annotated[int, typer.Option()] = 20260723,
+    selection_seed: Annotated[
+        int,
+        typer.Option(
+            help="Reproduce random case selection; 0 derives a fresh seed from the run ID"
+        ),
+    ] = 0,
     judge_mode: Annotated[str, typer.Option(help="online or deferred")] = "online",
     budget_usd: Annotated[float, typer.Option()] = 0,
     scenario: Annotated[str, typer.Option(help="Re-run one deterministic scenario ID")] = "",
@@ -134,6 +141,7 @@ def run(
                 seed=seed,
                 judge_mode=judge_mode,
                 only_scenario=scenario or None,
+                selection_seed=selection_seed or None,
             )
             return summary, runner.run_dir
         finally:
@@ -181,6 +189,90 @@ def replay(
     summary, run_dir = asyncio.run(execute())
     console.print(summary)
     console.print(f"Report: {run_dir / 'report.html'}")
+
+
+@app.command("replay-run")
+def replay_run_command(
+    source_run_id: str,
+    target: Annotated[
+        str, typer.Option(help="backend, ui, or all to replay every recorded target")
+    ] = "backend",
+    only_failed: Annotated[
+        bool, typer.Option("--only-failed", help="Replay only the cases that failed")
+    ] = False,
+    judge_mode: Annotated[
+        str, typer.Option(help="online, deferred, or cached-or-deferred")
+    ] = "online",
+    budget_usd: Annotated[float, typer.Option()] = 0,
+    run_id: Annotated[
+        str, typer.Option(help="Reuse a run id to resume that replay where it stopped")
+    ] = "",
+) -> None:
+    """Replay a previous run's cases, checkpointing so it can resume after a stop."""
+    from .replay import JUDGE_MODES, replay_run
+
+    if judge_mode not in JUDGE_MODES:
+        raise typer.BadParameter(f"judge_mode must be one of {', '.join(JUDGE_MODES)}")
+    settings = _settings()
+    source_dir = settings.eval_output_dir / source_run_id
+    if not (source_dir / "cases.jsonl").exists():
+        raise typer.BadParameter(f"No cases.jsonl for run {source_run_id}")
+    actual_run_id = run_id or f"replay-{source_run_id}"
+    kind = None if target == "all" else target
+
+    async def execute():
+        runner = EvaluationRunner(settings, actual_run_id, budget_usd or settings.eval_budget_usd)
+        try:
+            _, summary = await replay_run(
+                runner,
+                source_run_id=source_run_id,
+                target_kind=kind,
+                only_failed=only_failed,
+                judge_mode=judge_mode,
+            )
+            return summary, runner.run_dir
+        finally:
+            await runner.close()
+
+    summary, run_dir = asyncio.run(execute())
+    console.print(summary)
+    console.print(f"[bold]Report:[/bold] {run_dir / 'report.html'}")
+    replay_info = summary.get("replay") or {}
+    if replay_info.get("resumable"):
+        console.print(
+            f"[yellow]{replay_info['remaining_cases']} case(s) remaining.[/yellow] "
+            f"Re-run with --run-id {actual_run_id} to resume."
+        )
+    raise typer.Exit(0 if summary["release_gate"] in {"PASS", "PENDING_JUDGE"} else 2)
+
+
+@app.command("recorded-replay")
+def recorded_replay_command(
+    source_run_id: str,
+    run_id: Annotated[str, typer.Option()] = "",
+) -> None:
+    """Replay captured user turns through the local deterministic compiler only."""
+
+    from .recorded_replay import replay_recorded_run
+
+    settings = _settings()
+    actual_run_id = run_id or (
+        f"recorded-{source_run_id}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+    try:
+        results, summary, run_dir = asyncio.run(
+            replay_recorded_run(
+                settings,
+                source_run_id=source_run_id,
+                run_id=actual_run_id,
+            )
+        )
+    except Exception as exc:
+        console.print(f"[red]Recorded replay failed safely ({type(exc).__name__}).[/red]")
+        raise typer.Exit(2) from None
+    console.print(summary)
+    console.print(f"[bold]Report:[/bold] {run_dir / 'report.html'}")
+    raise typer.Exit(0 if results and summary["deterministic_preflight_status"] == "PASS" else 2)
 
 
 @app.command("batch-submit")

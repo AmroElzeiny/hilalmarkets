@@ -24,9 +24,10 @@ from ai_market_monitor.db.models import (
     UserIdentity,
     WebSession,
 )
-from ai_market_monitor.db.models.enums import IdentityProvider, UserStatus
+from ai_market_monitor.db.models.enums import IdentityProvider, UserRole, UserStatus
 from ai_market_monitor.services.account_admin import identifier_is_banned
 from ai_market_monitor.services.email_delivery import AuthEmailService
+from ai_market_monitor.services.governance_bootstrap import grant_owner_governance_roles
 
 SESSION_COOKIE_NAME = "amm_session"
 SESSION_DAYS = 30
@@ -65,7 +66,11 @@ class WebAuthService:
         )
         created = False
         if identity is None:
-            user = User(display_name=display_name or normalized.split("@", 1)[0])
+            is_configured_admin = normalized in self.settings.system_brain_authorized_emails
+            user = User(
+                display_name=display_name or normalized.split("@", 1)[0],
+                role=UserRole.ADMIN if is_configured_admin else UserRole.USER,
+            )
             self.session.add(user)
             await self.session.flush()
             identity = UserIdentity(
@@ -112,6 +117,12 @@ class WebAuthService:
             user = existing_user
             user.last_seen_at = datetime.now(UTC)
         await self.session.flush()
+        if created and user.role == UserRole.ADMIN:
+            await grant_owner_governance_roles(
+                self.session,
+                email=normalized,
+                reason="Configured System Brain administrator completed verified signup.",
+            )
         return user, created
 
     async def request_signup_email_code(
@@ -243,7 +254,11 @@ class WebAuthService:
         display_name = " ".join(
             part for part in (pending.first_name, pending.last_name) if part
         ) or normalized.split("@", 1)[0]
-        user = User(display_name=display_name)
+        is_configured_admin = normalized in self.settings.system_brain_authorized_emails
+        user = User(
+            display_name=display_name,
+            role=UserRole.ADMIN if is_configured_admin else UserRole.USER,
+        )
         self.session.add(user)
         await self.session.flush()
         self.session.add(
@@ -284,6 +299,12 @@ class WebAuthService:
         )
         pending.consumed_at = now
         await self.session.flush()
+        if is_configured_admin:
+            await grant_owner_governance_roles(
+                self.session,
+                email=normalized,
+                reason="Configured System Brain administrator completed verified signup.",
+            )
         return user
 
     async def request_email_code(

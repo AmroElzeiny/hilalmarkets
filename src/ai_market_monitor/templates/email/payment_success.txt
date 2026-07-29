@@ -1,6 +1,6 @@
-Hi {{ first_name }},
+Assalamu Alaikum {{ first_name }},
 
-Your payment succeeded and your HilalMarkets {{ plan_name }} plan is active.
+Your payment has been verified and your Hilal Markets {{ plan_name }} plan is active.
 
 Plan: {{ plan_name }}
 Billing: {{ billing_frequency|title }}
@@ -13,13 +13,13 @@ Billing: {{ billing_frequency|title }}
 Your main limits:
 {% for limit in limits %}- {{ limit.label }}: {{ limit.value }}
 {% endfor %}
-Open HilalMarkets: {{ dashboard_url }}
+Open Hilal Markets: {{ dashboard_url }}
 Create a Watch Plan: {{ create_watch_plan_url }}
 Manage billing: {{ billing_url }}
 Support: {{ support_url }}
 
 {% if renews_automatically %}Your plan renews automatically according to the billing agreement shown at checkout. Use Plan and Billing to manage it.{% else %}This payment provides 30-day access and does not renew automatically. Make another verified payment before the access period ends to continue the paid plan.{% endif %}
 
-HilalMarkets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. Review the Terms ({{ terms_url }}) and Risk Disclosure ({{ risk_url }}).
+Hilal Markets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. Review the Terms ({{ terms_url }}) and Risk Disclosure ({{ risk_url }}).
 
 {{ legal_name }}{% if company_address %}, {{ company_address }}{% endif %}

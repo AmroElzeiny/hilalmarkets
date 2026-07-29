@@ -19,6 +19,7 @@
   },
   "exclusions": "exclusions",
   "filters": "filters",
+  "lifecycle_state": "approval.lifecycle_state",
   "must_not_assign_sharia_status": "must_not_assign_sharia_status",
   "nested_groups": "condition_groups",
   "operator": {
@@ -44,6 +45,7 @@
     "path": "timeframes"
   },
   "timeframes": "timeframes",
+  "turn_complete": "approval.terminal",
   "universe": "strategy.universe",
   "unsupported_capabilities": "unsupported_capabilities",
   "version_hash": "approval.immutable_version_hash"

@@ -522,6 +522,20 @@
           "default": null,
           "title": "Immutable Version Hash"
         },
+        "lifecycle_state": {
+          "default": "collecting",
+          "enum": [
+            "collecting",
+            "needs_clarification",
+            "ready_for_confirmation",
+            "awaiting_approval",
+            "approved",
+            "compiled",
+            "activated"
+          ],
+          "title": "Lifecycle State",
+          "type": "string"
+        },
         "schema_hash": {
           "pattern": "^[a-f0-9]{64}$",
           "title": "Schema Hash",
@@ -569,6 +583,11 @@
           ],
           "default": null,
           "title": "Strategy Version Number"
+        },
+        "terminal": {
+          "default": false,
+          "title": "Terminal",
+          "type": "boolean"
         }
       },
       "required": [

@@ -187,9 +187,12 @@ async def test_budget_run_stops_cleanly_with_an_incomplete_report(tmp_path):
         )
         assert cases == []
         assert summary["release_gate"] == "INCOMPLETE"
-        assert summary["execution_status"] == "budget_exhausted"
+        assert summary["execution_status"] == "STOPPED_BUDGET"
+        assert summary["workflow_status"] == "STOPPED_BUDGET"
+        assert summary["infrastructure_status"] == "HEALTHY"
         assert summary["measured_spend_usd"] == pytest.approx(0.20)
         assert (runner.run_dir / "report.html").is_file()
+        assert (runner.run_dir / "run_plan.json").is_file()
     finally:
         await runner.close()
 
@@ -213,9 +216,11 @@ async def test_access_failure_stops_after_first_case_and_is_not_a_quality_score(
         )
         assert cases == []
         assert summary["release_gate"] == "INCOMPLETE"
-        assert summary["execution_status"] == "infrastructure_unavailable"
+        assert summary["execution_status"] == "PAUSED_AUTH"
         assert summary["cases"] == 0
         assert summary["execution_error"].startswith("Authenticated target access failed")
+        # The summary must state what actually ran, not a fixed "before any case" claim.
+        assert "Completed 0 cases before stopping." in summary["execution_error"]
     finally:
         await runner.close()
 
@@ -241,8 +246,9 @@ async def test_evaluator_openai_failure_is_identified_separately(tmp_path, monke
         )
         assert cases == []
         assert summary["release_gate"] == "INCOMPLETE"
-        assert summary["execution_status"] == "infrastructure_unavailable"
+        assert summary["execution_status"] == "PAUSED_AUTH"
         assert summary["execution_error"].startswith("Evaluator OpenAI access failed")
+        assert "EVALUATOR_AUTH_FAILURE" in summary["execution_error"]
     finally:
         await runner.close()
 

@@ -46,6 +46,15 @@ class ReadyInterviewer:
         )
 
 
+class DeterministicEditInterviewer(ReadyInterviewer):
+    def __init__(self) -> None:
+        self.route_calls = 0
+
+    async def classify_turn(self, **_) -> SetupChatInterviewResult:
+        self.route_calls += 1
+        raise AssertionError("deterministic state edits must not call model routing")
+
+
 class FixedInterpreter:
     async def interpret(self, guided) -> InterpretationPreview:
         strategy = load_strategy().model_copy(deep=True)
@@ -199,6 +208,38 @@ async def test_zero_percent_rollout_preserves_legacy_chat_path(test_context):
     )
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "ready_for_approval"
+    async with test_context["session_factory"]() as session:
+        assert int(await session.scalar(select(func.count(AgentRun.id))) or 0) == 0
+
+
+async def test_deterministic_state_edit_skips_agent_and_model_routing(test_context):
+    await _signup(test_context, "agent-deterministic-edit@example.com")
+    _configure(test_context, enabled=True)
+    interviewer = DeterministicEditInterviewer()
+    service = AISetupChatService(
+        test_context["settings"],
+        SnapshotProvider(),
+        FixedInterpreter(),
+        interviewer=interviewer,
+        agent_client=NeverAgentClient(),
+    )
+    test_context["app"].dependency_overrides[get_ai_setup_chat_service] = lambda: service
+    chat_id = await _new_chat(test_context)
+
+    response = await test_context["client"].post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
+        json={
+            "message": "Use BTCUSDT on the 1h and exclude ETHUSDT.",
+            "client_message_id": "deterministic-edit-1",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert interviewer.route_calls == 0
+    assistant = response.json()["messages"][-1]
+    assert assistant["role"] == "assistant"
+    assert assistant["payload"]["usage"]["model_call_count"] == 0
+    assert assistant["payload"]["usage"]["turn_duration_ms"] >= 0
     async with test_context["session_factory"]() as session:
         assert int(await session.scalar(select(func.count(AgentRun.id))) or 0) == 0
 

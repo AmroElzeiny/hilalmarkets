@@ -1,11 +1,14 @@
 import json
+from datetime import UTC, datetime, timedelta
+from time import monotonic
 
 import httpx
 import pytest
 from pydantic import SecretStr
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.db.models import Strategy, User
+from ai_market_monitor.db.models import Strategy, Subscription, User
+from ai_market_monitor.db.models.enums import SubscriptionStatus
 from ai_market_monitor.schemas.ai_setup_chat import (
     SetupChatClarification,
     SetupChatInterviewResult,
@@ -26,6 +29,7 @@ from ai_market_monitor.services.ai_setup_chat import (
     lint_strategy,
     translation_sheet,
 )
+from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from tests.factories import candle_sets, load_strategy
 
@@ -344,6 +348,15 @@ class FixedInterpreter:
         )
 
 
+class CountingInterpreter(FixedInterpreter):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def interpret(self, guided) -> InterpretationPreview:
+        self.calls += 1
+        return await super().interpret(guided)
+
+
 class ChangingInterpreter(FixedInterpreter):
     async def interpret(self, guided) -> InterpretationPreview:
         preview = await super().interpret(guided)
@@ -385,6 +398,192 @@ class SnapshotProvider:
 class ScannerProvider(SnapshotProvider):
     async def fetch_ohlcv(self, exchange, symbol, timeframe, limit):
         return candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+
+
+async def test_unchanged_compiler_input_uses_cached_preview_and_records_the_hit(
+    test_context,
+):
+    user = await _user(test_context)
+    interpreter = CountingInterpreter()
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), interpreter, interviewer=ReadyInterviewer()
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        context = dict(chat.context_json or {})
+        context["turn_runtime"] = {"attach": True, "cache_hits": 0, "stages": []}
+        chat.context_json = context
+
+        first = await service._interpret_setup(
+            session,
+            chat,
+            "RSI below 30 on 15m Binance USDT spot pairs.",
+            operation="compile_draft",
+        )
+        second = await service._interpret_setup(
+            session,
+            chat,
+            "RSI below 30 on 15m Binance USDT spot pairs.",
+            operation="compile_draft",
+        )
+
+        runtime = chat.context_json["turn_runtime"]
+        assert first is second
+        assert interpreter.calls == 1
+        assert runtime["cache_hits"] == 1
+        assert [item["cache_hit"] for item in runtime["stages"]] == [False, True]
+
+
+async def test_complete_formula_uses_no_model_and_meets_ordinary_turn_budget(test_context):
+    user = await _user(test_context)
+    interpreter = CountingInterpreter()
+    interviewer = RecordingInterviewer()
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), interpreter, interviewer=interviewer
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        context = dict(chat.context_json or {})
+        context.update(
+            {
+                "setup_mode": "monitor",
+                "confirmed_monitor_name": "ETH decline",
+            }
+        )
+        chat.context_json = context
+        chat.title = "ETH decline"
+
+        started = monotonic()
+        await service.handle_message(
+            session,
+            chat,
+            message=(
+                "Use ETHUSDT only and keep LTCUSDT out. Use 1h context and a "
+                "4h trigger. Short when close-to-close falls at least 0.5%."
+            ),
+        )
+        elapsed = monotonic() - started
+
+        assert chat.status == "ready_for_approval"
+        assert interpreter.calls == 0
+        assert interviewer.calls == []
+        assert elapsed < 12
+        assert chat.context_json["turn_runtime"]["deterministic_interpretations"] == 1
+        definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        assert definition.universe.include_symbols == ["ETH/USDT"]
+        assert definition.universe.exclude_symbols == ["LTC/USDT"]
+        assert definition.base_timeframe == "4h"
+        assert definition.supporting_timeframes == ["1h"]
+
+
+async def test_approval_policy_prompt_builds_then_approves_exact_draft_without_models(
+    test_context,
+):
+    user = await _user(test_context)
+    interpreter = CountingInterpreter()
+    interviewer = RecordingInterviewer()
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), interpreter, interviewer=interviewer
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(
+            session,
+            chat,
+            message=(
+                "Alright - quick setup. I want a watchlist only for ETHUSDT "
+                "(explicitly NOT LTCUSDT). Use 1h context to decide, but the trigger "
+                "is on 4h. Trigger condition: bearish move >= 0.5% (short, gte 0.5). "
+                "Approval should apply only to the exact reviewed version and hash; "
+                "do not carry it over if the draft changes. Confirm the logic and "
+                "then I'll review/approve the exact version."
+            ),
+        )
+
+        assert chat.status == "ready_for_approval"
+        assert chat.draft_schema_json is not None
+        assert interpreter.calls == 0
+        assert interviewer.calls == []
+
+        expected_hash = StrategyDefinition.model_validate(
+            chat.draft_schema_json
+        ).canonical_hash()
+
+        await service.handle_message(session, chat, message="I approve")
+        assert chat.status == "approved"
+        assert chat.context_json["approved_schema_hash"] == expected_hash
+        approved_strategy_id = chat.approved_strategy_id
+
+        await service.handle_message(session, chat, message="I approve")
+        assert chat.status == "approved"
+        assert chat.approved_strategy_id == approved_strategy_id
+        assert interpreter.calls == 0
+        assert interviewer.calls == []
+
+
+async def test_material_edit_after_approval_creates_a_new_unapproved_draft(test_context):
+    user = await _user(test_context)
+    interpreter = CountingInterpreter()
+    interviewer = RecordingInterviewer()
+    service = AISetupChatService(
+        _settings(), SnapshotProvider(), interpreter, interviewer=interviewer
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await service.handle_message(
+            session,
+            chat,
+            message=(
+                "ETHUSDT only; use 1h context and trigger on 4h; "
+                "short when close-to-close falls at least 0.5%."
+            ),
+        )
+        await service.handle_message(session, chat, message="I approve")
+        first_strategy_id = chat.approved_strategy_id
+        first_version_id = chat.approved_strategy_version_id
+        first_hash = chat.context_json["approved_schema_hash"]
+
+        await service.handle_message(
+            session,
+            chat,
+            message="Change the bearish close-to-close move threshold to 1% on 4h.",
+        )
+
+        assert chat.status == "ready_for_approval"
+        assert chat.approved_at is None
+        assert chat.approved_strategy_id is None
+        assert chat.approved_strategy_version_id is None
+        assert chat.context_json["strategy_state"]["approval_state"] == "AWAITING_APPROVAL"
+        assert chat.context_json["schema_hash"] != first_hash
+        assert chat.context_json["previous_approvals"][-1]["strategy_id"] == str(
+            first_strategy_id
+        )
+        assert chat.context_json["previous_approvals"][-1]["strategy_version_id"] == str(
+            first_version_id
+        )
+
+        await service.handle_message(
+            session,
+            chat,
+            message="Reuse my previous approval for this edited draft.",
+        )
+
+        assert chat.status == "ready_for_approval"
+        assert chat.approved_strategy_id is None
+        assert chat.approved_strategy_version_id is None
+        assert (await service.messages(session, chat.id))[-1].message_type == (
+            "approval_required"
+        )
+        assert interpreter.calls == 0
+        assert interviewer.calls == []
+
+        await service.handle_message(session, chat, message="I approve this exact version")
+
+        assert chat.status == "approved"
+        assert chat.approved_strategy_id not in {None, first_strategy_id}
+        assert chat.approved_strategy_version_id not in {None, first_version_id}
+        assert interpreter.calls == 0
+        assert interviewer.calls == []
 
 
 class UnavailableSnapshotProvider:
@@ -1109,6 +1308,20 @@ async def test_scanner_runs_the_shared_evaluator_without_creating_a_monitor(test
         _settings(), ScannerProvider(), FixedInterpreter(), interviewer=ReadyInterviewer()
     )
     async with test_context["session_factory"]() as session:
+        plan = await PlanCatalogService(session).get_or_sync("trader")
+        session.add(
+            Subscription(
+                user_id=user.id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider="test",
+                provider_customer_id=f"cus_{user.id}",
+                provider_subscription_id=f"sub_{user.id}_scanner",
+                current_period_start=datetime.now(UTC),
+                current_period_end=datetime.now(UTC) + timedelta(days=30),
+            )
+        )
+        await session.flush()
         chat = await service.create_session(session, user.id)
         await service.handle_message(
             session,

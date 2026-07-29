@@ -7,6 +7,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ai_market_monitor.schemas.setup_chat_evaluation import SetupChatEvaluationContract
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 
+SETUP_CHAT_MESSAGE_MAX_LENGTH = 5000
+SETUP_CHAT_SOURCE_EXCERPT_MAX_LENGTH = 1000
+
+
+def setup_chat_source_excerpt(value: str) -> str:
+    """Bound non-authoritative audit text without changing the canonical message."""
+
+    normalized = str(value or "").strip()
+    if len(normalized) <= SETUP_CHAT_SOURCE_EXCERPT_MAX_LENGTH:
+        return normalized
+    return normalized[: SETUP_CHAT_SOURCE_EXCERPT_MAX_LENGTH - 3].rstrip() + "..."
+
 
 class SetupChatOption(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -43,7 +55,7 @@ class SetupChatTurnSegment(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(min_length=1, max_length=1000)
+    text: str = Field(min_length=1, max_length=SETUP_CHAT_SOURCE_EXCERPT_MAX_LENGTH)
     category: Literal[
         "human_conversation",
         "product_question",
@@ -84,7 +96,7 @@ class SetupChatTurnClassification(BaseModel):
 class SetupChatMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    message: str = Field(default="", max_length=5000)
+    message: str = Field(default="", max_length=SETUP_CHAT_MESSAGE_MAX_LENGTH)
     option_key: str | None = Field(default=None, max_length=80)
     option_value: str | None = Field(default=None, max_length=500)
     option_label: str | None = Field(default=None, max_length=120)
@@ -105,6 +117,24 @@ class SetupChatApprovalRequest(BaseModel):
     confirmed_low_confidence_rule_keys: list[str] = Field(default_factory=list, max_length=100)
 
 
+class SetupChatErrorEnvelope(BaseModel):
+    """Sanitized description of a turn that failed inside the backend.
+
+    The original exception is logged internally under the same ``request_id``; none
+    of it reaches the client. A populated envelope always travels with an assistant
+    message, so a failed turn is never an empty response.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    error_code: str = Field(min_length=1, max_length=80)
+    request_id: str = Field(min_length=1, max_length=64)
+    stage: Literal["interpret", "compile", "serialize", "provider"]
+    retryable: bool = False
+    message: str = Field(min_length=1, max_length=500)
+    field: str | None = Field(default=None, max_length=200)
+
+
 class SetupChatMessageResponse(BaseModel):
     id: UUID
     role: Literal["user", "assistant", "system"]
@@ -118,6 +148,21 @@ class SetupChatMessageResponse(BaseModel):
 class SetupChatSessionResponse(BaseModel):
     id: UUID
     status: str
+    #: Explicit lifecycle position. ``status`` alone cannot distinguish a session that
+    #: is still gathering requirements from one holding an inactive compiled draft,
+    #: which is why clients could not tell when a turn had finished.
+    lifecycle_state: Literal[
+        "collecting",
+        "needs_clarification",
+        "ready_for_confirmation",
+        "awaiting_approval",
+        "approved",
+        "compiled",
+        "activated",
+    ] = "collecting"
+    #: True when this turn reached a state that waits on the user rather than on more
+    #: assistant output. Clients stop waiting on this, not on a heuristic.
+    turn_complete: bool = False
     title: str
     original_idea: str | None
     messages: list[SetupChatMessageResponse]
@@ -136,6 +181,7 @@ class SetupChatSessionResponse(BaseModel):
     approved_strategy_id: UUID | None
     approved_strategy_version_id: UUID | None
     evaluation_contract: SetupChatEvaluationContract | None = None
+    error: SetupChatErrorEnvelope | None = None
     next_url: str | None = None
     updated_at: datetime
 

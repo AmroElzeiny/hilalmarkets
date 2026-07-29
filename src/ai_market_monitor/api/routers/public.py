@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, visible_public_plan_codes
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PUBLIC_PLAN_COMPARISON,
+    PUBLIC_PLAN_PRESENTATIONS,
+    visible_public_plan_codes,
+)
 from ai_market_monitor.core.site_content import (
     COOKIE_CONSENT_VERSION,
     FOOTER_NAVIGATION,
@@ -28,7 +33,11 @@ from ai_market_monitor.core.site_content import (
     HelpArticle,
     PurchaseFaq,
 )
-from ai_market_monitor.services.billing import billing_provider_capabilities
+from ai_market_monitor.services.billing import (
+    BillingError,
+    billing_provider_capabilities,
+    configured_billing_provider,
+)
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
@@ -194,7 +203,51 @@ def _public_context(
                 "width": 1200,
                 "height": 630,
             },
+            }
+        )
+    try:
+        card_provider = configured_billing_provider(settings, "card")
+    except BillingError:
+        card_provider = None
+    try:
+        crypto_provider = configured_billing_provider(settings, "crypto")
+    except BillingError:
+        crypto_provider = None
+    primary_billing_provider = card_provider or crypto_provider or settings.billing_provider
+    plan_codes = visible_public_plan_codes(billing_enabled=settings.billing_enabled)
+    public_pricing_plans = [
+        {
+            "code": code,
+            "name": PLAN_DEFINITIONS[code].name,
+            "monthlyPrice": float(PLAN_DEFINITIONS[code].monthly_price),
+            "annualPrice": float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
+            "description": PUBLIC_PLAN_PRESENTATIONS[code].description,
+            "button": PUBLIC_PLAN_PRESENTATIONS[code].cta_label,
+            "badge": PUBLIC_PLAN_PRESENTATIONS[code].badge,
+            "trialNote": PUBLIC_PLAN_PRESENTATIONS[code].trial_note,
+            "visibleFeatures": list(PUBLIC_PLAN_PRESENTATIONS[code].visible_features),
+            "additionalFeatures": list(
+                PUBLIC_PLAN_PRESENTATIONS[code].additional_features
+            ),
+            "highlightedFeature": PUBLIC_PLAN_PRESENTATIONS[code].highlighted_feature,
         }
+        for code in plan_codes
+    ]
+    annual_billing_supported = settings.billing_enabled and (
+        (
+            card_provider == "creem"
+            and all(
+                f"{plan_code}_annual" in settings.creem_product_ids
+                for plan_code in ("trader", "pro")
+            )
+        )
+        or (
+            card_provider == "stripe"
+            and all(
+                f"{plan_code}_annual" in settings.stripe_price_ids
+                for plan_code in ("trader", "pro")
+            )
+        )
     )
     return {
         "request": request,
@@ -227,13 +280,19 @@ def _public_context(
             if telegram_username
             else None
         ),
-        "plans": {
-            code: PLAN_DEFINITIONS[code]
-            for code in visible_public_plan_codes(billing_enabled=settings.billing_enabled)
-        },
+        "plans": {code: PLAN_DEFINITIONS[code] for code in plan_codes},
+        "plan_presentations": PUBLIC_PLAN_PRESENTATIONS,
+        "plan_comparison": PUBLIC_PLAN_COMPARISON,
+        "public_pricing_plans": public_pricing_plans,
+        "public_plan_comparison": [list(row) for row in PUBLIC_PLAN_COMPARISON],
         "billing_enabled": settings.billing_enabled,
-        "billing_provider": settings.billing_provider,
-        "billing_capabilities": billing_provider_capabilities(settings.billing_provider),
+        "billing_provider": primary_billing_provider,
+        "billing_capabilities": billing_provider_capabilities(primary_billing_provider),
+        "card_checkout_available": settings.billing_enabled and card_provider is not None,
+        "crypto_checkout_available": settings.billing_enabled
+        and crypto_provider is not None,
+        "whatsapp_operational": settings.whatsapp_enabled,
+        "annual_billing_supported": annual_billing_supported,
         "purchase_faqs": PURCHASE_FAQS,
         "help_categories": HELP_CATEGORIES,
         "cookie_consent_version": (

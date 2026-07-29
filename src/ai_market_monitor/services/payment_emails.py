@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
+    BillingCheckoutAttempt,
     BillingEvent,
     PaymentEmailDelivery,
     Plan,
@@ -141,17 +142,20 @@ class PaymentEmailOutboxService:
         features = dict(plan.features or {})
         limits = dict(features.get("limits") or {})
         capabilities = billing_provider_capabilities(billing_event.provider)
+        billing_cycle = str(data.get("billing_cycle") or "").lower()
+        if billing_cycle in {"annual", "annual_auto_renewal"}:
+            billing_frequency = "annual auto-renewal"
+        elif capabilities.supports_recurring_billing:
+            billing_frequency = "monthly auto-renewal"
+        else:
+            billing_frequency = "30-day access"
         delivery = PaymentEmailDelivery(
             user_id=subscription.user_id,
             billing_event_id=billing_event.id,
             event_key=event_key,
             recipient=identity.normalized_identifier,
             plan_code=plan.code,
-            billing_frequency=(
-                "monthly auto-renewal"
-                if capabilities.supports_recurring_billing
-                else "30-day access"
-            ),
+            billing_frequency=billing_frequency,
             amount=amount,
             currency=str(data.get("currency") or plan.currency).upper()[:3],
             payment_date=billing_event.created_at or now,
@@ -255,7 +259,10 @@ class PaymentEmailOutboxService:
         if user is None or plan is None or billing_event is None:
             raise RuntimeError("Payment email user, plan, or billing event is unavailable.")
         capabilities = billing_provider_capabilities(billing_event.provider)
-        first_name = ((user.display_name or "").strip().split() or ["there"])[0]
+        first_name = await self._billing_first_name(
+            billing_event=billing_event,
+            user=user,
+        )
         return PaymentEmailRenderer(self.settings).render(
             first_name=first_name,
             plan_name=plan.name,
@@ -268,6 +275,32 @@ class PaymentEmailOutboxService:
             receipt_url=delivery.receipt_url,
             plan_limits=delivery.plan_limits,
         )
+
+    async def _billing_first_name(
+        self,
+        *,
+        billing_event: BillingEvent,
+        user: User,
+    ) -> str:
+        payload = dict(billing_event.payload_redacted or {})
+        data = dict(payload.get("data") or {})
+        try:
+            attempt_id = UUID(str(data.get("checkout_attempt_id") or ""))
+        except (TypeError, ValueError):
+            attempt_id = None
+        if attempt_id is not None:
+            attempt = await self.session.scalar(
+                select(BillingCheckoutAttempt).where(
+                    BillingCheckoutAttempt.id == attempt_id,
+                    BillingCheckoutAttempt.user_id == user.id,
+                )
+            )
+            if attempt is not None:
+                profile = dict(attempt.billing_profile or {})
+                submitted_name = str(profile.get("first_name") or "").strip()
+                if submitted_name:
+                    return submitted_name
+        return ((user.display_name or "").strip().split() or ["there"])[0]
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:

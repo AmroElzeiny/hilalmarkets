@@ -208,15 +208,25 @@ async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
 
 
 async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
+    catalog = await test_context["client"].get("/api/v1/billing/plans")
+    assert catalog.status_code == 200
+    catalog_plans = {plan["code"]: plan for plan in catalog.json()["plans"]}
+    assert set(catalog_plans) == {"demo", "trader", "pro"}
+    assert catalog_plans["trader"]["annual_price"] == "120.00"
+    assert catalog_plans["pro"]["monthly_price"] == "22.00"
+    assert catalog_plans["pro"]["annual_price"] == "220.00"
+
     pricing = await test_context["client"].get("/pricing")
     assert pricing.status_code == 200
     assert PLAN_DEFINITIONS["demo"].name in pricing.text
     assert "$0" in pricing.text
-    assert "free and invite-only" in pricing.text
-    assert "$12" not in pricing.text
+    assert "$12" in pricing.text
+    assert "$22" in pricing.text
     assert "$29" not in pricing.text
+    assert "Try Monitor for 7 days" in pricing.text
+    assert "No charge for seven days. Cancel before the first payment." in pricing.text
     assert "Choose Core" not in pricing.text
-    assert "Choose Pro" not in pricing.text
+    assert "Choose Pro" in pricing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
         assert PLAN_DEFINITIONS[internal_code].name not in pricing.text
 
@@ -225,7 +235,14 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     assert billing.status_code == 200
     assert PLAN_DEFINITIONS["demo"].name in billing.text
     assert "Current plan" in billing.text
-    assert "Paid billing is disabled" in billing.text
+    assert "Paid billing is disabled" not in billing.text
+    assert "What billing changes" not in billing.text
+    assert "Screening evidence stays the same on every plan" not in billing.text
+    assert 'data-billing-page-interval' in billing.text
+    assert "Try Monitor for 7 days" in billing.text
+    assert "No payment method needed" not in billing.text
+    assert "10 active market monitors" in billing.text
+    assert "Unlimited monitor alerts per day" in billing.text
     for code in ("trader", "pro"):
         assert f"/dashboard/billing/checkout?plan_code={code}" not in billing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):

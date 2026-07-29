@@ -43,7 +43,7 @@ def _operand_names(preview) -> set[str]:
         ("VWAP reclaim after pullback and volume spike", {"vwap", "volume_ratio"}),
         (
             "Bollinger squeeze breakout above resistance",
-            {"bollinger_squeeze", "breakout_from_consolidation", "price_rejects_resistance"},
+            {"bollinger_squeeze", "breakout_from_consolidation"},
         ),
         ("EMA 20 crosses above EMA 50 with EMA slope rising", {"ema", "ema_slope"}),
         (

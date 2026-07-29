@@ -107,7 +107,7 @@ export function HeroFlow() {
           </div>
         </div>
 
-        <TrackedCta analyticsName="build_plan" analyticsLocation="hero_flow" href="#waitlist" className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-apple px-4 py-2 text-[12px] font-bold text-[#263018] transition-transform hover:-translate-y-0.5">
+        <TrackedCta analyticsName="build_plan" analyticsLocation="hero_flow" href="/subscribe?plan_code=demo&billing_interval=monthly" className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-apple px-4 py-2 text-[12px] font-bold text-[#263018] transition-transform hover:-translate-y-0.5">
           Build plan
           <svg viewBox="0 0 12 12" className="size-3" fill="none" aria-hidden="true">
             <path d="M2 6h8M6 2l4 4-4 4" stroke="#263018" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />

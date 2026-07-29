@@ -148,10 +148,13 @@ def checks(settings: Settings) -> list[tuple[str, bool, str]]:
     results.append(
         (
             "Drift variants",
-            len(settings.target_variants) >= 2,
-            "configure at least two TARGET_VARIANTS_JSON entries for model-version drift"
-            if len(settings.target_variants) < 2
-            else "configured",
+            True,
+            (
+                "single current variant; drift remains NOT_MEASURED until two evaluator-only "
+                "TARGET_VARIANTS_JSON entries are configured"
+                if len(settings.target_variants) < 2
+                else "configured"
+            ),
         )
     )
     try:

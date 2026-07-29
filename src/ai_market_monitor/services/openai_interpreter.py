@@ -116,6 +116,7 @@ class OpenAIResponsesInterpretationClient:
 
 class OpenAIStrategyInterpreter:
     name = "openai-structured-v1"
+    deterministic_core_authority = True
 
     def __init__(
         self,

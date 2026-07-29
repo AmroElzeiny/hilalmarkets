@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Your HilalMarkets {{ plan_name }} plan is active</title>
+  <title>Your Hilal Markets {{ plan_name }} plan is active</title>
 </head>
 <body style="margin:0;background:#f5f8fb;color:#2b2e35;font-family:Onest,Arial,sans-serif">
   <div style="display:none;max-height:0;overflow:hidden">Payment confirmed. Your {{ plan_name }} plan is active.</div>
@@ -11,12 +11,12 @@
     <tr><td align="center">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#fff;border:1px solid #e1e5ea;border-radius:24px;overflow:hidden">
         <tr><td style="background:#2b2e35;padding:26px 32px;color:#fff">
-          <div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#cbfa4d">HilalMarkets</div>
+          <div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#cbfa4d">Hilal Markets</div>
           <h1 style="margin:10px 0 0;font-size:27px;line-height:1.2">Your {{ plan_name }} plan is active</h1>
         </td></tr>
         <tr><td style="padding:30px 32px">
-          <p style="margin:0 0 16px;font-size:17px">Hi {{ first_name }},</p>
-          <p style="margin:0 0 24px;line-height:1.65;color:#50555e">Your payment succeeded. Your new monitoring capacity is ready now.</p>
+          <p style="margin:0 0 16px;font-size:17px">Assalamu Alaikum {{ first_name }},</p>
+          <p style="margin:0 0 24px;line-height:1.65;color:#50555e">Your payment has been verified and your {{ plan_name }} access is ready. Thank you for trusting Hilal Markets to help you monitor with clarity.</p>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fafbfc;border-radius:14px;padding:8px 18px">
             <tr><td style="padding:10px 0;color:#7a8089">Plan</td><td align="right" style="padding:10px 0;font-weight:700">{{ plan_name }}</td></tr>
             <tr><td style="padding:10px 0;color:#7a8089">Billing</td><td align="right" style="padding:10px 0">{{ billing_frequency|title }}</td></tr>
@@ -26,12 +26,12 @@
           </table>
           {% if limits %}<h2 style="margin:26px 0 12px;font-size:18px">Main plan limits</h2>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0">{% for limit in limits %}<tr><td style="padding:8px 0;border-bottom:1px solid #e1e5ea;color:#50555e">{{ limit.label }}</td><td align="right" style="padding:8px 0;border-bottom:1px solid #e1e5ea;font-weight:700">{{ limit.value }}</td></tr>{% endfor %}</table>{% endif %}
-          <p style="margin:28px 0 12px"><a href="{{ dashboard_url }}" style="display:inline-block;background:#cbfa4d;color:#2b2e35;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:999px">Open HilalMarkets</a></p>
+          <p style="margin:28px 0 12px"><a href="{{ dashboard_url }}" style="display:inline-block;background:#cbfa4d;color:#2b2e35;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:999px">Open Hilal Markets</a></p>
           <p style="margin:0;line-height:1.8"><a href="{{ create_watch_plan_url }}" style="color:#55712a">Create a Watch Plan</a> &nbsp; <a href="{{ billing_url }}" style="color:#55712a">Manage billing</a> &nbsp; <a href="{{ support_url }}" style="color:#55712a">Support</a></p>
           {% if receipt_url %}<p style="margin:18px 0 0"><a href="{{ receipt_url }}" style="color:#55712a">Open receipt or invoice</a></p>{% endif %}
         </td></tr>
         <tr><td style="background:#fafbfc;padding:20px 32px;color:#7a8089;font-size:12px;line-height:1.6">
-          {% if renews_automatically %}Your plan renews automatically under the agreement shown at checkout.{% else %}This payment provides 30-day access and does not renew automatically.{% endif %} HilalMarkets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. <a href="{{ terms_url }}" style="color:#55712a">Terms</a> | <a href="{{ risk_url }}" style="color:#55712a">Risk Disclosure</a><br>
+          {% if renews_automatically %}Your plan renews automatically under the agreement shown at checkout.{% else %}This payment provides 30-day access and does not renew automatically.{% endif %} Hilal Markets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. <a href="{{ terms_url }}" style="color:#55712a">Terms</a> | <a href="{{ risk_url }}" style="color:#55712a">Risk Disclosure</a><br>
           {{ legal_name }}{% if company_address %}, {{ company_address }}{% endif %}
         </td></tr>
       </table>

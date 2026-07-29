@@ -23,6 +23,12 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import StrategyStatus
 from ai_market_monitor.engine.capability_index import get_capability_index
+from ai_market_monitor.engine.formula_compiler import (
+    compile_explicit_formula_group,
+    parse_percentage_formula,
+)
+from ai_market_monitor.engine.strategy_state import StrategyDraftState
+from ai_market_monitor.engine.turn_fragments import classify_turn
 from ai_market_monitor.schemas.agent_control import (
     AgentToolResult,
     CompileStrategyDraftArgs,
@@ -38,7 +44,7 @@ from ai_market_monitor.schemas.agent_control import (
     RunOneTimeScanArgs,
     ValidateCapabilitySelectionArgs,
 )
-from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.schemas.strategy import StrategyDefinition, StrategyDirection
 from ai_market_monitor.services.agent_policy import (
     AgentRuntimePolicyState,
     AgentServerContext,
@@ -146,26 +152,16 @@ class AgentToolService:
     ) -> AgentToolResult:
         del session
         args = ResolveTradingCapabilitiesArgs.model_validate(raw.model_dump())
-        unauthorized = [
-            fragment
-            for fragment in args.fragments
-            if not _is_user_authored_fragment(fragment, runtime)
-        ]
-        if unauthorized:
-            return AgentToolResult(
-                status="validation_error",
-                tool_name="resolve_trading_capabilities",
-                call_id=call_id,
-                warnings=[
-                    "Capability resolution accepts only exact user-authored source fragments."
-                ],
-                allowed_next_actions=["answer_clarification"],
-            )
-
+        # The model selects the tool, but source-fragment authority remains on the
+        # server. Re-derive candidate mechanics from exact persisted user turns so
+        # a paraphrase cannot become executable logic or produce a false
+        # "not user-authored" dead end.
+        authored_mechanics = _authoritative_mechanic_fragments(runtime)
         capability_fragments = [
             fragment
-            for fragment in args.fragments
+            for fragment in authored_mechanics
             if not _is_platform_screening_only_fragment(fragment)
+            and not _is_deterministic_core_fragment(fragment, runtime)
         ]
         report = self.resolver.resolve_prompt("\n".join(capability_fragments))
         explicit_timeframes = _explicit_timeframes(
@@ -188,16 +184,8 @@ class AgentToolService:
                 warnings=["The model cannot choose a timeframe the user did not provide."],
                 allowed_next_actions=["answer_clarification"],
             )
-        for fragment in args.fragments:
-            if _normalized(fragment) not in {
-                _normalized(item) for item in runtime.setup_fragments
-            }:
-                runtime.setup_fragments.append(fragment)
-
         candidates = {
-            candidate.capability_key
-            for item in report.fragments
-            for candidate in item.candidates
+            candidate.capability_key for item in report.fragments for candidate in item.candidates
         }
         sources = {_normalized(item.fragment) for item in report.fragments}
         runtime.policy_state.candidate_capability_keys.update(candidates)
@@ -272,6 +260,16 @@ class AgentToolService:
                 if runtime.context.setup_mode == "scanner" and not explicit_timeframes
                 else []
             ),
+            "ignored_model_fragments": [
+                fragment
+                for fragment in args.fragments
+                if not _is_user_authored_fragment(fragment, runtime)
+            ],
+            "deterministic_fragments": [
+                fragment
+                for fragment in authored_mechanics
+                if _is_deterministic_core_fragment(fragment, runtime)
+            ],
         }
         runtime.resolution_data = data
         context = dict(runtime.chat.context_json or {})
@@ -290,9 +288,7 @@ class AgentToolService:
             warnings=(
                 ["One or more fragments require user clarification."] if clarifications else []
             ),
-            allowed_next_actions=(
-                ["answer_clarification"] if clarifications else ["review_draft"]
-            ),
+            allowed_next_actions=(["answer_clarification"] if clarifications else ["review_draft"]),
         )
 
     async def _validate_capability_selection(
@@ -342,9 +338,7 @@ class AgentToolService:
                 tool_name="validate_capability_selection",
                 call_id=call_id,
                 data={"capability_key": args.capability_key},
-                warnings=[
-                    f"{capability.label} does not support {args.direction} direction."
-                ],
+                warnings=[f"{capability.label} does not support {args.direction} direction."],
                 allowed_next_actions=["answer_clarification"],
             )
         if args.direction and not _direction_is_user_authored(
@@ -367,9 +361,7 @@ class AgentToolService:
                 tool_name="validate_capability_selection",
                 call_id=call_id,
                 data={"capability_key": args.capability_key},
-                warnings=[
-                    "The required flag conflicts with the user's required/optional wording."
-                ],
+                warnings=["The required flag conflicts with the user's required/optional wording."],
                 allowed_next_actions=["answer_clarification"],
             )
         ungrounded_numbers = [
@@ -435,8 +427,7 @@ class AgentToolService:
             for item in runtime.validated_bindings
             if not (
                 item["capability_key"] == binding["capability_key"]
-                and _normalized(item["source_fragment"])
-                == _normalized(binding["source_fragment"])
+                and _normalized(item["source_fragment"]) == _normalized(binding["source_fragment"])
             )
         ]
         runtime.validated_bindings.append(binding)
@@ -465,9 +456,7 @@ class AgentToolService:
                 "required": rule.required,
                 "source_fragment": rule.source_fragment,
             },
-            evidence_refs=[
-                f"capability:{rule.capability_key}:v{rule.capability_version}"
-            ],
+            evidence_refs=[f"capability:{rule.capability_key}:v{rule.capability_version}"],
             allowed_next_actions=["review_draft"],
         )
 
@@ -842,9 +831,7 @@ class AgentToolService:
         )
         assets_by_watchlist: dict[UUID, list[str]] = {}
         for asset in assets:
-            assets_by_watchlist.setdefault(asset.watchlist_id, []).append(
-                asset.canonical_asset
-            )
+            assets_by_watchlist.setdefault(asset.watchlist_id, []).append(asset.canonical_asset)
         return AgentToolResult(
             status="success",
             tool_name="inspect_screened_watchlist",
@@ -890,9 +877,7 @@ class AgentToolService:
             )
         bounded = dict(result)
         bounded["results"] = list(result.get("results") or [])[:30]
-        bounded["common_missing_reasons"] = list(
-            result.get("common_missing_reasons") or []
-        )[:10]
+        bounded["common_missing_reasons"] = list(result.get("common_missing_reasons") or [])[:10]
         evidence_refs = [
             str(reference)[:300]
             for reference in list(result.get("evidence_refs") or [])[:30]
@@ -1079,6 +1064,51 @@ def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
     return schema
 
 
+def _authoritative_mechanic_fragments(runtime: AgentToolRuntime) -> list[str]:
+    """Return exact user-authored mechanics, never model paraphrases."""
+
+    result: list[str] = []
+    seen: set[str] = set()
+    turns = [*runtime.setup_fragments, runtime.context.request_text]
+    for turn in turns:
+        collapsed = " ".join(str(turn).split())
+        if not collapsed:
+            continue
+        if _is_deterministic_core_fragment(collapsed, runtime):
+            candidates = [collapsed]
+        else:
+            candidates = [fragment.text for fragment in classify_turn(collapsed).trading_conditions]
+        for candidate in candidates:
+            fingerprint = _normalized(candidate)
+            if fingerprint and fingerprint not in seen:
+                seen.add(fingerprint)
+                result.append(candidate)
+    return result
+
+
+def _is_deterministic_core_fragment(
+    fragment: str,
+    runtime: AgentToolRuntime,
+) -> bool:
+    """Whether the compiler can represent the fragment without registry search."""
+
+    stored = (runtime.chat.context_json or {}).get("strategy_state")
+    resolved = StrategyDraftState.from_dict(stored if isinstance(stored, dict) else None).resolved()
+    timeframe = str(resolved.get("base_timeframe") or "15m")
+    try:
+        direction = StrategyDirection(str(resolved.get("direction") or "long"))
+    except ValueError:
+        direction = StrategyDirection.LONG
+    return bool(
+        compile_explicit_formula_group(fragment, timeframe=timeframe)
+        or parse_percentage_formula(
+            fragment,
+            default_timeframe=timeframe,
+            default_direction=direction,
+        )
+    )
+
+
 def _is_user_authored_fragment(fragment: str, runtime: AgentToolRuntime) -> bool:
     needle = _normalized(fragment)
     if not needle:
@@ -1189,9 +1219,7 @@ def _numeric_value_is_user_authored(value: Any, runtime: AgentToolRuntime) -> bo
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
     number = format(float(value), "g")
-    authored = " ".join(
-        [runtime.context.request_text, runtime.accumulated_setup]
-    ).casefold()
+    authored = " ".join([runtime.context.request_text, runtime.accumulated_setup]).casefold()
     return bool(re.search(rf"(?<![\d.]){re.escape(number)}(?![\d.])", authored))
 
 
@@ -1277,6 +1305,4 @@ def redact_agent_arguments(tool_name: str, arguments: BaseModel) -> dict[str, An
 
 
 def canonical_argument_hash(tool_name: str, arguments: BaseModel) -> str:
-    return _sha256_json(
-        {"tool_name": tool_name, "arguments": arguments.model_dump(mode="json")}
-    )
+    return _sha256_json({"tool_name": tool_name, "arguments": arguments.model_dump(mode="json")})

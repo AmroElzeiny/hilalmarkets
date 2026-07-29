@@ -153,9 +153,14 @@ async def test_openai_percent_guard_preserves_percent_change_prompts():
 
     condition = preview.strategy.conditions.children[0]
     assert preview.interpreter == "rules-v2:openai_percent_guard"
-    assert condition.left.name == "percent_change_up"
-    assert condition.left.parameters["threshold_percent"] == 5
-    assert condition.left.parameters["lookback"] == 96
+    assert condition.left.name == "percentage_change"
+    assert condition.left.parameters["formula"] == "reference_to_current"
+    assert condition.left.parameters["reference_field"] == "open"
+    assert condition.left.parameters["reference_timeframe"] == "1d"
+    assert condition.comparator == "gte"
+    assert condition.right.value == 5.0
+    assert "threshold_percent" not in condition.left.parameters
+    assert condition.left.parameters["lookback"] == 1
 
 
 async def test_openai_fallback_does_not_expose_internal_provider_message():

@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
 
 DEFAULT_SECRET = "development-only-change-me-32-characters"
 
@@ -277,34 +277,114 @@ def validate_runtime_configuration(settings: Settings) -> None:
                     errors.append(f"{name} is required when WhatsApp is enabled")
                 elif _looks_like_placeholder(value):
                     errors.append(f"{name} must not use a placeholder value")
-            if (
-                settings.whatsapp_opportunity_alerts_enabled
-                and "confirmed_research_event" not in settings.whatsapp_template_names
-            ):
+            required_template_events = set(WHATSAPP_TEMPLATE_EVENTS)
+            if not settings.whatsapp_opportunity_alerts_enabled:
+                required_template_events.discard("confirmed_research_event")
+            missing_template_events = sorted(
+                required_template_events - set(settings.whatsapp_template_names)
+            )
+            if missing_template_events:
                 errors.append(
-                    "WHATSAPP_TEMPLATE_NAMES must configure confirmed_research_event when "
-                    "WhatsApp opportunity alerts are enabled"
+                    "WHATSAPP_TEMPLATE_NAMES must configure approved production templates for: "
+                    + ", ".join(missing_template_events)
                 )
+            for event_type, template_config in settings.whatsapp_template_names.items():
+                names = (
+                    template_config.values()
+                    if isinstance(template_config, dict)
+                    else [template_config]
+                )
+                if any(_looks_like_placeholder(name) for name in names):
+                    errors.append(
+                        f"WHATSAPP_TEMPLATE_NAMES.{event_type} must not use a placeholder value"
+                    )
         if settings.billing_enabled:
-            if settings.billing_provider == "static":
+            configured_providers = {
+                value
+                for value in (
+                    settings.billing_card_provider,
+                    settings.billing_crypto_provider,
+                )
+                if value != "disabled"
+            }
+            if not configured_providers:
+                configured_providers.add(settings.billing_provider)
+            if "static" in configured_providers:
                 errors.append("StaticBillingProvider is forbidden when billing is enabled")
-            if settings.billing_webhook_secret is None:
-                errors.append("BILLING_WEBHOOK_SECRET is required when billing is enabled")
-            if _looks_like_placeholder(settings.billing_webhook_secret):
+            if "stripe" in configured_providers and settings.billing_webhook_secret is None:
+                errors.append("BILLING_WEBHOOK_SECRET is required for Stripe billing")
+            if "stripe" in configured_providers and _looks_like_placeholder(
+                settings.billing_webhook_secret
+            ):
                 errors.append("BILLING_WEBHOOK_SECRET must not use a placeholder value")
-            if settings.billing_provider == "stripe" and settings.stripe_secret_key is None:
+            if "stripe" in configured_providers and settings.stripe_secret_key is None:
                 errors.append("STRIPE_SECRET_KEY is required for Stripe billing")
-            if settings.billing_provider == "stripe" and _looks_like_placeholder(
+            if "stripe" in configured_providers and _looks_like_placeholder(
                 settings.stripe_secret_key
             ):
                 errors.append("STRIPE_SECRET_KEY must not use a placeholder value")
-            if settings.billing_provider == "stripe" and not settings.stripe_price_ids:
+            if "stripe" in configured_providers and not settings.stripe_price_ids:
                 errors.append("STRIPE_PRICE_IDS must map internal plans to Stripe prices")
-            if settings.billing_provider == "nowpayments" and settings.nowpayments_api_key is None:
+            if "creem" in configured_providers and settings.creem_api_key is None:
+                errors.append("CREEM_API_KEY is required for Creem billing")
+            if "creem" in configured_providers and _looks_like_placeholder(
+                settings.creem_api_key
+            ):
+                errors.append("CREEM_API_KEY must not use a placeholder value")
+            if "creem" in configured_providers and settings.creem_webhook_secret is None:
+                errors.append("CREEM_WEBHOOK_SECRET is required for Creem billing")
+            if "creem" in configured_providers and _looks_like_placeholder(
+                settings.creem_webhook_secret
+            ):
+                errors.append("CREEM_WEBHOOK_SECRET must not use a placeholder value")
+            if "creem" in configured_providers and not settings.creem_product_ids:
+                errors.append("CREEM_PRODUCT_IDS must map plans and billing periods")
+            if "creem" in configured_providers and settings.creem_product_ids:
+                required_creem_products = {
+                    "trader_monthly",
+                    "trader_annual",
+                    "pro_monthly",
+                    "pro_annual",
+                }
+                missing_products = sorted(
+                    required_creem_products - settings.creem_product_ids.keys()
+                )
+                if missing_products:
+                    errors.append(
+                        "CREEM_PRODUCT_IDS is missing required products: "
+                        + ", ".join(missing_products)
+                    )
+                invalid_products = sorted(
+                    key
+                    for key, value in settings.creem_product_ids.items()
+                    if key in required_creem_products
+                    and not str(value).startswith("prod_")
+                )
+                if invalid_products:
+                    errors.append(
+                        "CREEM_PRODUCT_IDS contains invalid product IDs for: "
+                        + ", ".join(invalid_products)
+                    )
+            if (
+                settings.app_env == "production"
+                and "creem" in configured_providers
+                and urlsplit(str(settings.creem_api_base)).hostname != "api.creem.io"
+            ):
+                errors.append("CREEM_API_BASE must use api.creem.io in production")
+            if "nowpayments" in configured_providers and settings.nowpayments_api_key is None:
                 errors.append("NOWPAYMENTS_API_KEY is required for NOWPayments billing")
-            if settings.billing_provider == "nowpayments" and _looks_like_placeholder(
+            if "nowpayments" in configured_providers and _looks_like_placeholder(
                 settings.nowpayments_api_key
             ):
                 errors.append("NOWPAYMENTS_API_KEY must not use a placeholder value")
+            if (
+                "nowpayments" in configured_providers
+                and settings.nowpayments_ipn_secret is None
+                and settings.billing_webhook_secret is None
+            ):
+                errors.append(
+                    "NOWPAYMENTS_IPN_SECRET or BILLING_WEBHOOK_SECRET is required "
+                    "for NOWPayments billing"
+                )
     if errors:
         raise RuntimeConfigurationError("Unsafe runtime configuration:\n- " + "\n- ".join(errors))

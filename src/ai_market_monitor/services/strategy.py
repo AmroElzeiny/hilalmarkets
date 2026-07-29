@@ -274,7 +274,7 @@ class StrategyService:
             if provider is None:
                 raise StrategyGateError(
                     "screened_preview_unavailable",
-                    "The preview service cannot verify the selected screened market.",
+                    "The preview service cannot verify the selected Halal Market.",
                 )
             try:
                 resolution = await ShariaUniverseResolver(
@@ -365,7 +365,7 @@ class StrategyService:
             if policy is None or policy.methodology_id is None:
                 raise StrategyGateError(
                     "sharia_policy_required",
-                    "Choose an approved methodology and screened market before activation.",
+                    "Choose an approved methodology and Halal Market before activation.",
                 )
             try:
                 await ShariaScreeningService(self.session, settings).methodology(
@@ -381,7 +381,7 @@ class StrategyService:
             ):
                 raise StrategyGateError(
                     "screened_preview_required",
-                    "Run a successful preview against the current screened market before "
+                    "Run a successful preview against the current Halal Market before "
                     "activation.",
                 )
 

@@ -23,6 +23,8 @@ from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_CODES,
+    PUBLIC_PLAN_COMPARISON,
+    PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     visible_public_plan_codes,
 )
@@ -52,6 +54,7 @@ from ai_market_monitor.db.models import (
     StrategyTemplate,
     StrategyUniverse,
     StrategyVersion,
+    Subscription,
     SupportRequest,
     TelegramConnection,
     Trial,
@@ -67,12 +70,18 @@ from ai_market_monitor.db.models.enums import (
     MonitorShariaAssetStatus,
     ShariaAssetStatus,
     StrategyStatus,
+    SubscriptionStatus,
     UserRole,
 )
 from ai_market_monitor.engine.quality import alert_trust_score_from_proof
 from ai_market_monitor.services.activity import ActivityReadService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
-from ai_market_monitor.services.billing import BillingError, BillingService
+from ai_market_monitor.services.billing import (
+    BillingError,
+    BillingService,
+    billing_provider_capabilities,
+    configured_billing_provider,
+)
 from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
@@ -230,6 +239,69 @@ def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
 
 
+def _subscription_selection(
+    plan_code: str | None,
+    billing_interval: str | None,
+) -> tuple[str | None, Literal["monthly", "annual"]]:
+    selected_plan = plan_code if plan_code in PUBLIC_PLAN_CODES else None
+    selected_interval: Literal["monthly", "annual"] = (
+        "annual" if billing_interval == "annual" else "monthly"
+    )
+    return selected_plan, selected_interval
+
+
+def _subscription_query(
+    plan_code: str | None,
+    billing_interval: str | None,
+) -> dict[str, str]:
+    selected_plan, selected_interval = _subscription_selection(
+        plan_code,
+        billing_interval,
+    )
+    if selected_plan is None:
+        return {}
+    return {
+        "plan_code": selected_plan,
+        "billing_interval": selected_interval,
+    }
+
+
+def _subscription_destination(
+    settings: Settings,
+    *,
+    plan_code: str | None,
+    billing_interval: str | None,
+    default_message: str,
+) -> str:
+    selected_plan, selected_interval = _subscription_selection(
+        plan_code,
+        billing_interval,
+    )
+    if selected_plan is None or selected_plan == "demo":
+        return f"/dashboard?message={default_message}"
+    query = {
+        "selected_plan": selected_plan,
+        "billing_interval": selected_interval,
+        "checkout": "1",
+    }
+    if (
+        selected_plan == "trader"
+        and selected_interval == "monthly"
+        and _billing_selection_available(
+            settings,
+            provider=_billing_method_provider(settings, "card"),
+            plan_code="trader",
+            billing_cycle="trial_7_day",
+        )
+    ):
+        query["trial"] = "1"
+        return f"/dashboard/billing?{urlencode(query)}"
+    if not settings.billing_enabled:
+        query["error"] = "billing_disabled"
+        return f"/dashboard/billing?{urlencode(query)}"
+    return f"/dashboard/billing?{urlencode(query)}"
+
+
 def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
     normalized = (value or "").strip()
     if not normalized:
@@ -238,6 +310,159 @@ def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
         return UUID(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Choose a valid {label}.") from exc
+
+
+def _billing_method_provider(settings: Settings, payment_method: str) -> str | None:
+    try:
+        return configured_billing_provider(settings, payment_method)
+    except BillingError:
+        return None
+
+
+def _billing_selection_available(
+    settings: Settings,
+    *,
+    provider: str | None,
+    plan_code: str,
+    billing_cycle: str,
+) -> bool:
+    if not settings.billing_enabled or provider is None:
+        return False
+    if billing_cycle == "trial_7_day" and provider != "creem":
+        return False
+    if provider == "creem":
+        if settings.creem_api_key is None or settings.creem_webhook_secret is None:
+            return False
+        if (
+            not settings.creem_api_key.get_secret_value().strip()
+            or not settings.creem_webhook_secret.get_secret_value().strip()
+        ):
+            return False
+        key = (
+            f"{plan_code}_trial"
+            if billing_cycle == "trial_7_day"
+            else f"{plan_code}_{billing_cycle}"
+        )
+        return key in settings.creem_product_ids
+    if provider == "stripe":
+        if settings.stripe_secret_key is None:
+            return False
+        return (
+            f"{plan_code}_{billing_cycle}" in settings.stripe_price_ids
+            or plan_code in settings.stripe_price_ids
+        )
+    if provider == "nowpayments":
+        return (
+            billing_cycle == "monthly"
+            and settings.nowpayments_api_key is not None
+            and settings.nowpayments_ipn_secret is not None
+            and bool(settings.nowpayments_api_key.get_secret_value().strip())
+            and bool(settings.nowpayments_ipn_secret.get_secret_value().strip())
+        )
+    return provider == "static" and not settings.is_deployed
+
+
+async def _active_paid_plan_codes(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> frozenset[str]:
+    """Return provider-backed active plans, never administrative access."""
+    active_codes = list(
+        (
+            await session.scalars(
+                select(Plan.code)
+                .join(Subscription, Subscription.plan_id == Plan.id)
+                .where(
+                    Subscription.user_id == user_id,
+                    Subscription.provider.notin_(("admin", "free", "trial")),
+                    Subscription.status.in_(
+                        (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+                    ),
+                    (Subscription.current_period_end.is_(None))
+                    | (Subscription.current_period_end > datetime.now(UTC)),
+                )
+                .order_by(Subscription.updated_at.desc())
+            )
+        ).all()
+    )
+    return frozenset(active_codes)
+
+
+def _plan_checkout_allowed(
+    *, plan_code: str, active_paid_plan_codes: frozenset[str]
+) -> bool:
+    return plan_code not in active_paid_plan_codes
+
+
+def _billing_history_rows(
+    attempts: list[BillingCheckoutAttempt],
+    plans: dict[UUID, Plan],
+    *,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for attempt in attempts:
+        expires_at = attempt.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        can_resume = (
+            attempt.status == "pending"
+            and bool(attempt.checkout_url)
+            and bool(attempt.provider_session_id)
+            and expires_at > now
+        )
+        plan = plans.get(attempt.plan_id)
+        rows.append(
+            {
+                "attempt": attempt,
+                "plan_name": plan.name if plan is not None else "Unavailable plan",
+                "can_resume": can_resume,
+                "resume_url": f"/dashboard/billing/checkout/{attempt.id}/resume"
+                if can_resume
+                else None,
+            }
+        )
+    return rows
+
+
+def _billing_profile(
+    *,
+    first_name: str,
+    last_name: str,
+    address_line1: str,
+    address_line2: str,
+    city: str,
+    region: str,
+    postal_code: str,
+    country: str,
+) -> dict[str, str]:
+    raw = {
+        "first_name": (first_name, 60, True),
+        "last_name": (last_name, 60, True),
+        "address_line1": (address_line1, 200, True),
+        "address_line2": (address_line2, 200, False),
+        "city": (city, 100, False),
+        "region": (region, 100, False),
+        "postal_code": (postal_code, 24, False),
+        "country": (country, 80, True),
+    }
+    profile: dict[str, str] = {}
+    for key, (value, limit, required) in raw.items():
+        normalized = " ".join(value.strip().split())
+        if required and not normalized:
+            raise BillingError(
+                "billing_profile_incomplete",
+                "Complete your name, billing address, and country.",
+            )
+        if len(normalized) > limit or any(ord(character) < 32 for character in normalized):
+            raise BillingError(
+                "billing_profile_invalid",
+                "One or more billing details are invalid.",
+            )
+        if normalized:
+            profile[key] = normalized
+    return profile
 
 
 def _no_store(response: HTMLResponse) -> HTMLResponse:
@@ -540,6 +765,13 @@ async def _context(
         if telegram_username
         else "#telegram-not-configured"
     )
+    selected_plan_code, selected_billing_interval = _subscription_selection(
+        request.query_params.get("plan_code"),
+        request.query_params.get("billing_interval"),
+    )
+    auth_query = _subscription_query(selected_plan_code, selected_billing_interval)
+    if request.query_params.get("telegram_link"):
+        auth_query["telegram_link"] = request.query_params["telegram_link"]
     return {
         "request": request,
         "user": user,
@@ -564,6 +796,9 @@ async def _context(
         "unread_notification_count": unread_notification_count,
         "dashboard_theme": dashboard_theme,
         "dashboard_csrf_token": csrf_token(settings, user.id) if user else None,
+        "selected_plan_code": selected_plan_code,
+        "selected_billing_interval": selected_billing_interval,
+        "auth_link_suffix": f"?{urlencode(auth_query)}" if auth_query else "",
         **extra,
     }
 
@@ -670,6 +905,39 @@ async def _builder_screening_context(
     }
 
 
+@router.get("/subscribe", include_in_schema=False)
+async def subscribe(
+    request: Request,
+    plan_code: str = Query(..., min_length=1, max_length=20),
+    billing_interval: str = Query(default="monthly", min_length=1, max_length=20),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    selected_plan, selected_interval = _subscription_selection(
+        plan_code,
+        billing_interval,
+    )
+    if selected_plan is None:
+        return _redirect("/#pricing")
+    user = await _current_user(request, session, settings)
+    if user is None:
+        selection_query = urlencode(
+            {
+                "plan_code": selected_plan,
+                "billing_interval": selected_interval,
+            }
+        )
+        return _redirect(f"/signup?{selection_query}")
+    return _redirect(
+        _subscription_destination(
+            settings,
+            plan_code=selected_plan,
+            billing_interval=selected_interval,
+            default_message="plan_selected",
+        )
+    )
+
+
 @router.get("/signup", response_class=HTMLResponse, include_in_schema=False)
 async def signup_page(
     request: Request,
@@ -702,6 +970,8 @@ async def signup_submit(
     password: str = Form(...),
     repeat_password: str = Form(...),
     telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -726,12 +996,18 @@ async def signup_submit(
             code = getattr(exc, "code", "signup_failed")
             if code == "code_recently_sent":
                 query = {"message": "code_sent", "email": email}
+                query.update(_subscription_query(plan_code, billing_interval))
                 if telegram_link:
                     query["telegram_link"] = telegram_link
                 return _redirect(f"/signup/verify?{urlencode(query)}")
-            return _redirect(f"/signup?error={code}")
+            query = {"error": code}
+            query.update(_subscription_query(plan_code, billing_interval))
+            if telegram_link:
+                query["telegram_link"] = telegram_link
+            return _redirect(f"/signup?{urlencode(query)}")
 
     query = {"message": "code_sent", "email": email}
+    query.update(_subscription_query(plan_code, billing_interval))
     if telegram_link:
         query["telegram_link"] = telegram_link
     return _redirect(f"/signup/verify?{urlencode(query)}")
@@ -765,6 +1041,8 @@ async def signup_verify_submit(
     email: str = Form(...),
     code: str = Form(...),
     telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -783,6 +1061,7 @@ async def signup_verify_submit(
     except (WebAuthError, TelegramAccountLinkError) as exc:
         await session.rollback()
         query = {"error": getattr(exc, "code", "invalid_code"), "email": email}
+        query.update(_subscription_query(plan_code, billing_interval))
         if telegram_link:
             query["telegram_link"] = telegram_link
         return _redirect(f"/signup/verify?{urlencode(query)}")
@@ -794,7 +1073,14 @@ async def signup_verify_submit(
         source="dashboard",
     )
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
-    response = _redirect(f"/dashboard?message={message}")
+    response = _redirect(
+        _subscription_destination(
+            settings,
+            plan_code=plan_code,
+            billing_interval=billing_interval,
+            default_message=message,
+        )
+    )
     response.set_cookie(
         SESSION_COOKIE_NAME,
         cookie,
@@ -812,6 +1098,8 @@ async def signin_submit(
     email: str = Form(...),
     password: str = Form(...),
     telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -830,11 +1118,20 @@ async def signin_submit(
     except (ValueError, TelegramAccountLinkError) as exc:
         await session.rollback()
         code = getattr(exc, "code", "invalid_login")
-        return _redirect(f"/signin?error={code}")
+        query = {"error": code}
+        query.update(_subscription_query(plan_code, billing_interval))
+        if telegram_link:
+            query["telegram_link"] = telegram_link
+        return _redirect(f"/signin?{urlencode(query)}")
     response = _redirect(
-        "/dashboard?message=telegram_connected"
-        if telegram_connected
-        else "/dashboard?message=login_successful"
+        _subscription_destination(
+            settings,
+            plan_code=plan_code,
+            billing_interval=billing_interval,
+            default_message=(
+                "telegram_connected" if telegram_connected else "login_successful"
+            ),
+        )
     )
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response.set_cookie(
@@ -897,6 +1194,8 @@ async def signin_code_request(
     request: Request,
     email: str = Form(...),
     telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -909,8 +1208,13 @@ async def signin_code_request(
         await session.commit()
     except (WebAuthError, EmailDeliveryError) as exc:
         await session.rollback()
-        return _redirect(f"/signin/code?error={getattr(exc, 'code', 'email_unavailable')}")
+        query = {"error": getattr(exc, "code", "email_unavailable")}
+        query.update(_subscription_query(plan_code, billing_interval))
+        if telegram_link:
+            query["telegram_link"] = telegram_link
+        return _redirect(f"/signin/code?{urlencode(query)}")
     query = {"message": "code_sent", "email": email}
+    query.update(_subscription_query(plan_code, billing_interval))
     if telegram_link:
         query["telegram_link"] = telegram_link
     return _redirect(f"/signin/code?{urlencode(query)}")
@@ -922,6 +1226,8 @@ async def signin_code_verify(
     email: str = Form(...),
     code: str = Form(...),
     telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -944,12 +1250,20 @@ async def signin_code_verify(
             "error": getattr(exc, "code", "invalid_code"),
             "email": email,
         }
+        query.update(_subscription_query(plan_code, billing_interval))
+        if telegram_link:
+            query["telegram_link"] = telegram_link
         return _redirect(f"/signin/code?{urlencode(query)}")
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response = _redirect(
-        "/dashboard?message=telegram_connected"
-        if telegram_connected
-        else "/dashboard?message=login_successful"
+        _subscription_destination(
+            settings,
+            plan_code=plan_code,
+            billing_interval=billing_interval,
+            default_message=(
+                "telegram_connected" if telegram_connected else "login_successful"
+            ),
+        )
     )
     response.set_cookie(
         SESSION_COOKIE_NAME,
@@ -1273,7 +1587,7 @@ async def screened_market_page(
     preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
         "default_sharia_methodology_id"
     )
-    # The Screened Market starts with the explicit All methodology. A saved
+    # The Halal Market starts with the explicit All methodology. A saved
     # user preference remains useful after a user deliberately picks another
     # methodology, but it must not silently replace the product default.
     if methodology_id is None and not (methodology_id_input or "").strip():
@@ -1422,7 +1736,7 @@ async def screened_market_page(
             settings=settings,
             user=user,
             page="screened_market",
-            title="Screened Market",
+            title="Halal Market",
             screened=screened,
             methodologies=methodologies,
             selected_methodology_id=selected_methodology_id,
@@ -2468,16 +2782,35 @@ async def trial_page(
 
 @router.post("/dashboard/trial/claim", include_in_schema=False)
 async def claim_trial(
+    csrf_token_value: str = Form(..., alias="csrf_token"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
-    try:
-        await TrialLifecycleService(session, settings).activate(user.id)
-        await session.commit()
-        await AdminNotificationService(settings).send(
-            f"Trial claimed: {user.display_name or user.id}"
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token")
+    if settings.billing_enabled:
+        return _redirect(
+            "/dashboard/billing?"
+            + urlencode(
+                {
+                    "selected_plan": "trader",
+                    "billing_interval": "monthly",
+                    "checkout": "1",
+                    "trial": "1",
+                }
+            )
         )
+    try:
+        existing = await session.scalar(select(Trial).where(Trial.user_id == user.id))
+        trial_service = TrialLifecycleService(session, settings)
+        await trial_service.activate(user.id)
+        await trial_service.start_monitoring_cycle(user.id)
+        await session.commit()
+        if existing is None:
+            await AdminNotificationService(settings).send(
+                f"Monitor trial claimed: {user.display_name or user.id}"
+            )
         return _redirect("/dashboard/billing?message=trial_claimed")
     except TrialError as exc:
         await session.rollback()
@@ -2495,7 +2828,66 @@ async def billing_page(
     await PlanCatalogService(session).sync_defaults()
     entitlement = await EntitlementService(session).current(user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
+    completed_provider_trial = await session.scalar(
+        select(BillingCheckoutAttempt.id).where(
+            BillingCheckoutAttempt.user_id == user.id,
+            BillingCheckoutAttempt.billing_cycle == "trial_7_day",
+            BillingCheckoutAttempt.status == "completed",
+        )
+    )
+    primary_email = await session.scalar(
+        select(UserIdentity.normalized_identifier)
+        .where(
+            UserIdentity.user_id == user.id,
+            UserIdentity.provider == IdentityProvider.EMAIL,
+            UserIdentity.is_primary.is_(True),
+            UserIdentity.is_verified.is_(True),
+        )
+        .limit(1)
+    )
     billing = BillingService(session, settings)
+    card_provider = _billing_method_provider(settings, "card")
+    crypto_provider = _billing_method_provider(settings, "crypto")
+    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+    display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
+    billing_selection_availability = {
+        code: {
+            "purchasable": _plan_checkout_allowed(
+                plan_code=code,
+                active_paid_plan_codes=active_paid_plan_codes,
+            ),
+            "card_monthly": _billing_selection_available(
+                settings,
+                provider=card_provider,
+                plan_code=code,
+                billing_cycle="monthly",
+            ),
+            "card_annual": _billing_selection_available(
+                settings,
+                provider=card_provider,
+                plan_code=code,
+                billing_cycle="annual",
+            ),
+            "crypto_monthly": _billing_selection_available(
+                settings,
+                provider=crypto_provider,
+                plan_code=code,
+                billing_cycle="monthly",
+            ),
+            "trial": (
+                code == "trader"
+                and trial is None
+                and completed_provider_trial is None
+                and _billing_selection_available(
+                    settings,
+                    provider=card_provider,
+                    plan_code=code,
+                    billing_cycle="trial_7_day",
+                )
+            ),
+        }
+        for code in PURCHASABLE_PLAN_CODES
+    }
     attempts = list(
         (
             await session.scalars(
@@ -2544,19 +2936,154 @@ async def billing_page(
                     billing_enabled=settings.billing_enabled
                 )
             },
+            plan_presentations=PUBLIC_PLAN_PRESENTATIONS,
+            plan_comparison=PUBLIC_PLAN_COMPARISON,
+            trial_claimable=(
+                trial is None
+                and completed_provider_trial is None
+                and _plan_checkout_allowed(
+                    plan_code="trader",
+                    active_paid_plan_codes=active_paid_plan_codes,
+                )
+            ),
+            active_paid_plan_codes=active_paid_plan_codes,
+            whatsapp_operational=settings.whatsapp_enabled,
             billing_enabled=settings.billing_enabled,
             billing_provider=billing.provider.provider_name,
             billing_capabilities=billing.provider_capabilities,
             billing_cycle_code=billing.billing_cycle_code,
-            billing_history=[
-                {
-                    "attempt": attempt,
-                    "plan_name": plan.name
-                    if (plan := history_plans.get(attempt.plan_id)) is not None
-                    else "Unavailable plan",
-                }
-                for attempt in attempts
-            ],
+            checkout_selected_plan=request.query_params.get("selected_plan"),
+            checkout_selected_interval=(
+                "annual"
+                if request.query_params.get("billing_interval") == "annual"
+                else "monthly"
+            ),
+            checkout_auto_open=request.query_params.get("checkout") == "1",
+            checkout_trial_selected=request.query_params.get("trial") == "1",
+            billing_profile_defaults={
+                "first_name": display_name_parts[0] if display_name_parts else "",
+                "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",
+                "email": primary_email or "",
+            },
+            billing_method_providers={
+                "card": card_provider,
+                "crypto": crypto_provider,
+            },
+            billing_selection_availability=billing_selection_availability,
+            billing_plan_data={
+                "plans": {
+                    code: {
+                        "name": PLAN_DEFINITIONS[code].name,
+                        "monthly": str(PLAN_DEFINITIONS[code].monthly_price),
+                        "annual": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
+                        "availability": billing_selection_availability[code],
+                    }
+                    for code in PURCHASABLE_PLAN_CODES
+                },
+                "providers": {
+                    "card": card_provider,
+                    "crypto": crypto_provider,
+                },
+            },
+            checkout_request_id=uuid4().hex,
+            billing_history=_billing_history_rows(
+                attempts,
+                history_plans,
+                now=datetime.now(UTC),
+            ),
+            payment_receipts=receipts,
+        ),
+    )
+
+
+@router.get(
+    "/dashboard/billing/portal",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def dashboard_billing_portal_page(
+    request: Request,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    await PlanCatalogService(session).sync_defaults()
+    entitlement = await EntitlementService(session).current(user.id)
+    subscription = await session.scalar(
+        select(Subscription)
+        .where(Subscription.user_id == user.id)
+        .order_by(Subscription.updated_at.desc())
+    )
+    attempts = list(
+        (
+            await session.scalars(
+                select(BillingCheckoutAttempt)
+                .where(BillingCheckoutAttempt.user_id == user.id)
+                .order_by(BillingCheckoutAttempt.created_at.desc())
+                .limit(10)
+            )
+        ).all()
+    )
+    plan_ids = {attempt.plan_id for attempt in attempts}
+    history_plans = {
+        plan.id: plan
+        for plan in (
+            list((await session.scalars(select(Plan).where(Plan.id.in_(plan_ids)))).all())
+            if plan_ids
+            else []
+        )
+    }
+    receipts = list(
+        (
+            await session.scalars(
+                select(PaymentEmailDelivery)
+                .where(PaymentEmailDelivery.user_id == user.id)
+                .order_by(PaymentEmailDelivery.created_at.desc())
+                .limit(10)
+            )
+        ).all()
+    )
+    provider_name = (
+        subscription.provider
+        if subscription is not None
+        and subscription.provider not in {None, "free", "admin", "trial"}
+        else None
+    )
+    supports_customer_portal = False
+    if provider_name:
+        try:
+            supports_customer_portal = billing_provider_capabilities(
+                provider_name
+            ).supports_customer_portal
+        except BillingError:
+            supports_customer_portal = False
+    portal_available = bool(
+        settings.billing_enabled
+        and subscription is not None
+        and subscription.provider_customer_id
+        and supports_customer_portal
+    )
+    await session.commit()
+    return templates.TemplateResponse(
+        request,
+        "hilal/dashboard/billing_portal.html",
+        await _context(
+            request=request,
+            session=session,
+            settings=settings,
+            user=user,
+            page="billing",
+            title="Billing Portal",
+            entitlement=entitlement,
+            subscription=subscription,
+            provider_name=provider_name,
+            portal_available=portal_available,
+            billing_enabled=settings.billing_enabled,
+            billing_history=_billing_history_rows(
+                attempts,
+                history_plans,
+                now=datetime.now(UTC),
+            ),
             payment_receipts=receipts,
         ),
     )
@@ -2572,7 +3099,7 @@ async def dashboard_billing_portal(
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
     if not settings.billing_enabled:
-        return _redirect("/dashboard/billing?error=billing_disabled")
+        return _redirect("/dashboard/billing/portal?error=billing_disabled")
     try:
         base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
         result = await BillingService(session, settings).billing_portal(
@@ -2580,8 +3107,45 @@ async def dashboard_billing_portal(
             return_url=f"{base_url}/dashboard/billing",
         )
     except BillingError as exc:
-        return _redirect(f"/dashboard/billing?error={exc.code}")
+        return _redirect(f"/dashboard/billing/portal?error={exc.code}")
     return _redirect(result.portal_url)
+
+
+@router.get(
+    "/dashboard/billing/checkout/{attempt_id}/resume",
+    include_in_schema=False,
+)
+async def resume_billing_checkout(
+    attempt_id: UUID,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Resume only the authenticated user's still-valid provider checkout."""
+    attempt = await session.get(BillingCheckoutAttempt, attempt_id)
+    if attempt is None or attempt.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Checkout not found")
+
+    expires_at = attempt.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    checkout_url = (attempt.checkout_url or "").strip()
+    if attempt.status == "pending" and expires_at <= datetime.now(UTC):
+        attempt.status = "expired"
+        await session.commit()
+    elif (
+        attempt.status == "pending"
+        and attempt.provider_session_id
+        and checkout_url.startswith("https://")
+    ):
+        return RedirectResponse(
+            checkout_url,
+            status_code=303,
+            headers={
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+    return _redirect("/dashboard/billing?error=checkout_not_resumable")
 
 
 @router.get(
@@ -2615,8 +3179,19 @@ async def billing_checkout_review(
         checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id)
         if checkout_attempt is None or checkout_attempt.user_id != user.id:
             raise HTTPException(status_code=404, detail="Checkout not found")
-    entitlement = await EntitlementService(session).current(user.id)
+    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
     billing = BillingService(session, settings)
+    primary_email = await session.scalar(
+        select(UserIdentity.normalized_identifier)
+        .where(
+            UserIdentity.user_id == user.id,
+            UserIdentity.provider == IdentityProvider.EMAIL,
+            UserIdentity.is_primary.is_(True),
+            UserIdentity.is_verified.is_(True),
+        )
+        .limit(1)
+    )
+    display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
     await session.commit()
     features = dict(plan.features or {})
     response = templates.TemplateResponse(
@@ -2638,9 +3213,12 @@ async def billing_checkout_review(
             checkout_request_id=uuid4().hex,
             checkout_attempt=checkout_attempt,
             checkout_state=state,
-            already_subscribed=(
-                entitlement.source == "subscription" and entitlement.plan.code == plan.code
-            ),
+            already_subscribed=plan.code in active_paid_plan_codes,
+            billing_profile_defaults={
+                "first_name": display_name_parts[0] if display_name_parts else "",
+                "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",
+                "email": primary_email or "",
+            },
         ),
     )
     return _no_store(response)
@@ -2651,18 +3229,38 @@ async def billing_checkout(
     request: Request,
     plan_code: str = Form(...),
     billing_cycle: str = Form(default="monthly"),
+    payment_method: str = Form(default="card"),
     checkout_request_id: str = Form(default="free-plan"),
     terms_accepted: str | None = Form(default=None),
+    first_name: str = Form(default=""),
+    last_name: str = Form(default=""),
+    address_line1: str = Form(default=""),
+    address_line2: str = Form(default=""),
+    city: str = Form(default=""),
+    region: str = Form(default=""),
+    postal_code: str = Form(default=""),
+    country: str = Form(default=""),
     csrf_token_value: str = Form(..., alias="csrf_token"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> RedirectResponse:
+) -> Response:
+    wants_json = "application/json" in request.headers.get("accept", "").casefold()
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
     if not settings.billing_enabled:
+        if wants_json:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "code": "billing_disabled",
+                        "message": "Paid checkout is not available right now.",
+                    }
+                },
+            )
         return _redirect("/dashboard/billing?error=billing_disabled")
-    base = str(settings.public_base_url).rstrip("/")
+    base = str(settings.app_base_url or settings.public_base_url).rstrip("/")
     if plan_code not in PUBLIC_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
     try:
@@ -2676,27 +3274,40 @@ async def billing_checkout(
             await AdminNotificationService(settings).send(
                 f"Free plan: {user.display_name or user.id} {plan_code}"
             )
-            return _redirect("/dashboard/billing?message=free_plan_activated")
-        service = BillingService(session, settings)
+            redirect_url = "/dashboard/billing?message=free_plan_activated"
+            if wants_json:
+                return JSONResponse({"checkout_url": redirect_url})
+            return _redirect(redirect_url)
+        if terms_accepted != "true":
+            raise BillingError(
+                "billing_terms_required",
+                "Accept the billing terms before continuing.",
+            )
+        provider_name = configured_billing_provider(settings, payment_method)
+        service = BillingService(session, settings, provider_name=provider_name)
+        profile = _billing_profile(
+            first_name=first_name,
+            last_name=last_name,
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            region=region,
+            postal_code=postal_code,
+            country=country,
+        )
         prepared = await service.prepare_checkout(
             user_id=user.id,
             plan_code=plan_code,
             billing_cycle=billing_cycle,
             request_key=checkout_request_id,
-            terms_accepted=terms_accepted == "true",
+            terms_accepted=True,
+            billing_profile=profile,
         )
         await session.commit()
         if prepared.duplicate and prepared.attempt.checkout_url:
-            return _redirect(
-                "/dashboard/billing/checkout?"
-                + urlencode(
-                    {
-                        "plan_code": plan_code,
-                        "attempt": str(prepared.attempt.id),
-                        "state": "duplicate",
-                    }
-                )
-            )
+            if wants_json:
+                return JSONResponse({"checkout_url": prepared.attempt.checkout_url})
+            return _redirect(prepared.attempt.checkout_url)
         checkout = await service.open_checkout_attempt(
             attempt_id=prepared.attempt.id,
             user_id=user.id,
@@ -2707,12 +3318,30 @@ async def billing_checkout(
         await AdminNotificationService(settings).send(
             f"Payment link: {user.display_name or user.id} {plan_code}"
         )
+        if wants_json:
+            return JSONResponse({"checkout_url": checkout.checkout_url})
         return _redirect(checkout.checkout_url)
     except BillingError as exc:
         if session.in_transaction():
             await session.commit()
+        if wants_json:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": exc.code, "message": str(exc)}},
+            )
         return _redirect(
-            "/dashboard/billing/checkout?" + urlencode({"plan_code": plan_code, "state": exc.code})
+            "/dashboard/billing?"
+            + urlencode(
+                {
+                    "selected_plan": plan_code,
+                    "billing_interval": (
+                        "annual" if "annual" in billing_cycle else "monthly"
+                    ),
+                    "checkout": "1",
+                    "trial": "1" if billing_cycle == "trial_7_day" else "0",
+                    "error": exc.code,
+                }
+            )
         )
 
 
@@ -2788,6 +3417,12 @@ async def billing_success(
         status,
         ("Payment confirmation pending", "webhook_confirmation_delayed"),
     )
+    if (
+        checkout_attempt is not None
+        and checkout_attempt.status == "completed"
+        and checkout_attempt.billing_cycle == "trial_7_day"
+    ):
+        title, state_message = "Your Monitor trial is ready", "trial_started"
     plan = await session.get(Plan, checkout_attempt.plan_id) if checkout_attempt else None
     entitlement = await EntitlementService(session).current(user.id)
     return templates.TemplateResponse(

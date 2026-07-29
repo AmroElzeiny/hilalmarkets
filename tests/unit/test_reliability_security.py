@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import func, select
 
-from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
 from ai_market_monitor.core.logging import redact_sensitive_values
 from ai_market_monitor.core.startup import (
     RuntimeConfigurationError,
@@ -353,6 +353,36 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
     assert "StaticBillingProvider" in message
 
 
+def test_enabled_production_creem_requires_the_complete_product_catalog():
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        public_chat_enabled=False,
+        billing_enabled=True,
+        billing_card_provider="creem",
+        creem_api_key="creem-production-key",
+        creem_webhook_secret="creem-webhook-secret",
+        creem_product_ids={"trader_monthly": "prod_monitor_monthly"},
+        creem_api_base="https://api.creem.io",
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    message = str(error.value)
+    assert "trader_annual" in message
+    assert "trader_trial" in message
+    assert "pro_monthly" in message
+    assert "pro_annual" in message
+
+
 def test_enabled_production_whatsapp_requires_complete_cloud_api_configuration():
     settings = Settings(
         app_env="production",
@@ -410,6 +440,37 @@ def test_whatsapp_opportunity_delivery_requires_an_explicit_template():
         validate_runtime_configuration(settings)
 
     assert "confirmed_research_event" in str(error.value)
+
+
+def test_deployed_whatsapp_requires_complete_non_placeholder_template_registry():
+    templates = {event: f"hm_{event}_v1" for event in WHATSAPP_TEMPLATE_EVENTS}
+    templates["connection_test"] = "replace_with_approved_template"
+    settings = Settings(
+        app_env="production",
+        app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
+        database_url="postgresql+asyncpg://user:password@database/monitor",
+        public_base_url="https://monitor.example.com",
+        allow_mock_providers=False,
+        scanning_enabled=False,
+        ai_interpreter_provider="rules",
+        telegram_enabled=False,
+        billing_enabled=False,
+        whatsapp_enabled=True,
+        whatsapp_adapter="http",
+        whatsapp_graph_api_version="v23.0",
+        whatsapp_access_token="production-access-token-value",
+        whatsapp_app_secret="production-app-secret-value",
+        whatsapp_verify_token="production-webhook-verify-value",
+        whatsapp_phone_number_id="phone-number-id",
+        whatsapp_business_account_id="waba-id",
+        whatsapp_business_phone_e164="+12025550123",
+        whatsapp_template_names=templates,
+    )
+
+    with pytest.raises(RuntimeConfigurationError) as error:
+        validate_runtime_configuration(settings)
+
+    assert "connection_test must not use a placeholder" in str(error.value)
 
 
 def test_whatsapp_template_locale_keys_are_validated():

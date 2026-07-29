@@ -6,6 +6,34 @@ from typing import Any, Literal
 Severity = Literal["critical", "high", "medium", "low"]
 
 
+class ScenarioContract(dict[str, Any]):
+    """Canonical scenario expectations shared by checks and the judge.
+
+    Keeping the contract dict-compatible preserves the JSONL report format while
+    giving scenario construction, deterministic checks, and judge prompts one
+    explicit type instead of separate loosely related expectation payloads.
+    """
+
+    @classmethod
+    def from_value(cls, value: dict[str, Any] | ScenarioContract) -> ScenarioContract:
+        return value if isinstance(value, cls) else cls(value)
+
+    def semantic_fields(self, *, final: bool = False) -> dict[str, Any]:
+        """Return only target fields, with the final workflow patch when requested."""
+
+        values = {key: value for key, value in self.items() if key != "workflow"}
+        workflow = self.get("workflow")
+        if final and isinstance(workflow, dict):
+            final_fields = workflow.get("final_expected")
+            if isinstance(final_fields, dict):
+                values.update(final_fields)
+        return values
+
+    def workflow(self) -> dict[str, Any]:
+        value = self.get("workflow")
+        return dict(value) if isinstance(value, dict) else {}
+
+
 @dataclass(frozen=True)
 class SuccessCriterion:
     metric: str
@@ -39,10 +67,13 @@ class ScenarioSpec:
     seed: int
     persona: dict[str, Any]
     hidden_goal: str
-    expected_contract: dict[str, Any]
+    expected_contract: ScenarioContract | dict[str, Any]
     success_criteria: list[dict[str, Any]]
     max_turns: int
     fault: str | None = None
+
+    def __post_init__(self) -> None:
+        self.expected_contract = ScenarioContract.from_value(self.expected_contract)
 
 
 @dataclass
@@ -101,6 +132,16 @@ class CaseResult:
     passed: bool
     error: str | None = None
     artifacts: list[str] = field(default_factory=list)
+    #: Serialized :class:`hm_chatbot_eval.failures.FailureRecord` when the case ended
+    #: on an infrastructure condition rather than on a chatbot answer. Present means
+    #: the failure is not a quality signal and must not be scored as one.
+    failure: dict[str, Any] | None = None
+    measurement_status: Literal["MEASURED", "NOT_MEASURED"] = "MEASURED"
+    measurement_issues: list[str] = field(default_factory=list)
+
+    @property
+    def is_infrastructure_failure(self) -> bool:
+        return self.failure is not None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -143,4 +184,7 @@ def case_result_from_dict(data: dict[str, Any]) -> CaseResult:
         passed=data.get("passed", False),
         error=data.get("error"),
         artifacts=data.get("artifacts", []),
+        failure=data.get("failure"),
+        measurement_status=data.get("measurement_status", "MEASURED"),
+        measurement_issues=data.get("measurement_issues", []),
     )
