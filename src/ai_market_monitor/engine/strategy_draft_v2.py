@@ -161,8 +161,13 @@ def apply_strategy_patch(
         for key, item in unresolved.items()
         if _patch_resolves_unresolved(item, patch)
     )
+    # An explicitly named key is the reliable way to close an open item. The inference
+    # above stays for patches that resolve a field as a side effect of changing it.
+    resolved_keys.update(patch.remove_unresolved_keys)
     for key in resolved_keys:
-        unresolved.pop(key, None)
+        if key in unresolved:
+            unresolved.pop(key)
+            changed.append(f"unresolved.resolved:{key}")
 
     unsupported: dict[str, UnsupportedRequirementV2] = {
         unsupported_item.key: unsupported_item
@@ -172,6 +177,10 @@ def apply_strategy_patch(
         unsupported[unsupported_item.key] = unsupported_item
     if patch.correction is not None:
         unsupported.pop(patch.correction.target, None)
+    for key in patch.remove_unsupported_keys:
+        if key in unsupported:
+            unsupported.pop(key)
+            changed.append(f"unsupported.resolved:{key}")
     if patch.update_conditions or patch.remove_conditions or patch.replace_groups is not None:
         unsupported = {
             key: value

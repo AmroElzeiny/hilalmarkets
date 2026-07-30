@@ -24,7 +24,7 @@ user still learns what changed instead of being reset to a greeting.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import monotonic
 from typing import Any
 
@@ -37,11 +37,14 @@ from ai_market_monitor.engine.capability_shortlist import (
 )
 from ai_market_monitor.engine.setup_intent import decide_setup_intent
 from ai_market_monitor.engine.setup_turn_execution import (
+    ProviderGate,
+    ScreeningGate,
     SetupTurnOutcome,
     SetupTurnRejected,
     SetupTurnRequest,
     apply_setup_turn,
     conversation_from_segments,
+    validated_clarification,
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
@@ -53,6 +56,7 @@ from ai_market_monitor.schemas.setup_agent import (
     SetupConversationContext,
     SetupTurnExecutionResult,
 )
+from ai_market_monitor.schemas.setup_authorization import ClarificationContract
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
@@ -94,16 +98,34 @@ class SetupAgentError(ValueError):
 class SetupAgentTurnInput:
     """One authenticated free-text turn and the context needed to understand it."""
 
+    #: Exactly what the user typed: line breaks, list bullets and spacing intact.
+    #:
+    #: Collapsing whitespace before the model saw the turn destroyed the structure that
+    #: tells a numbered list of three rules apart from one run-on sentence, and made the
+    #: stored provenance disagree with what the user could see they had written.
     message: str
     source_turn_id: str
     draft: StrategyDraftV2
-    #: Recent user/assistant messages, oldest first. Bounded, never the full log.
+    #: Recent user/assistant messages, oldest first, **excluding this turn** — it is
+    #: already supplied as `current_user_turn`, and sending it twice invited the model
+    #: to treat its own echo as prior context.
     dialogue: tuple[dict[str, str], ...] = ()
     conversation: SetupConversationContext = field(default_factory=SetupConversationContext)
     history: tuple[dict[str, Any], ...] = ()
     setup_mode: DraftMode = DraftMode.MONITOR
     #: True when the previous turn failed, so this one routes to the better model.
     previous_turn_failed: bool = False
+    #: Final gates, supplied by the service that owns a database session.
+    screening: ScreeningGate | None = None
+    providers: ProviderGate | None = None
+
+    @property
+    def normalized_message(self) -> str:
+        """A whitespace-collapsed copy, for deterministic lexical helpers only.
+
+        Never used for spans, provenance or anything the user sees.
+        """
+        return " ".join((self.message or "").split())
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +148,11 @@ class SetupAgentTrace:
     shortlist_keys: tuple[str, ...] = ()
     lexical_hint: str = ""
     model_calls: int = 0
+    #: A question the composer asked for that the server did not authorise.
+    dropped_clarification: str | None = None
+    #: The model's own summaries, kept as diagnostics only. They are never the evidence
+    #: for a success claim: that comes from the canonical before/after diff.
+    model_intent_summaries: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -145,6 +172,8 @@ class SetupAgentTrace:
             "capability_shortlist": list(self.shortlist_keys),
             "lexical_hint": self.lexical_hint,
             "model_call_count": self.model_calls,
+            "dropped_clarification": self.dropped_clarification,
+            "model_intent_summaries_diagnostic_only": list(self.model_intent_summaries),
         }
 
 
@@ -160,6 +189,11 @@ class SetupAgentTurnResult:
     trace: SetupAgentTrace
     definition: Any | None = None
     history_snapshot: dict[str, Any] | None = None
+    #: The server-authorised question this turn asked, if any.
+    clarification: ClarificationContract | None = None
+    #: True only when the canonical draft materially changed, so the caller knows
+    #: whether to archive a previous approval.
+    material_change: bool = False
     usage: dict[str, Any] = field(default_factory=dict)
 
 
@@ -180,20 +214,25 @@ class SetupChatAgent:
     async def run_turn(self, turn: SetupAgentTurnInput) -> SetupAgentTurnResult:
         self.model_call_count = 0
         self.last_usage = {}
-        shortlist = build_capability_shortlist(turn.message)
+        # The lexical helper reads a normalised copy; the model and every span check see
+        # the raw message, line breaks and lists intact.
+        shortlist = build_capability_shortlist(turn.normalized_message)
         # The old authoritative gate survives only as a hint the model may disagree
         # with. It can no longer stop a message from being understood.
-        hint = decide_setup_intent(turn.message)
+        hint = decide_setup_intent(turn.normalized_message)
         route = select_setup_model(
             self.settings,
-            current_message=turn.message,
+            current_message=turn.normalized_message,
             history=list(turn.dialogue),
             active_clarification=(
                 {"question": turn.conversation.question_text}
                 if turn.conversation.active_question_id
                 else None
             ),
-            capability_context={"candidate_keys": sorted(shortlist.allowed_keys)},
+            # The router needs the shape of the shortlist, not just its keys. Passing
+            # keys alone left `low_capability_confidence` and `custom_terminology`
+            # permanently unreachable, so an ambiguous turn was priced as a simple one.
+            capability_context=_routing_context(shortlist),
             draft_condition_count=_condition_count(turn.draft),
             unresolved_field_count=len(turn.draft.unresolved_fields),
             previous_turn_failed=turn.previous_turn_failed,
@@ -201,17 +240,7 @@ class SetupChatAgent:
 
         started = monotonic()
         try:
-            envelope, plan_usage = await structured_call(
-                self.settings,
-                schema_model=SetupAgentPlanEnvelope,
-                schema_name="hilalmarkets_setup_turn_plan",
-                instructions=_PLANNER_INSTRUCTIONS,
-                payload=self._planner_payload(turn, shortlist, hint.intent.value),
-                model=route.model,
-                reasoning_effort=route.reasoning_effort,
-                max_output_tokens=6000,
-                transport=self.transport,
-            )
+            envelope, plan_usage = await self._plan_with_one_retry(turn, shortlist, hint, route)
         except StructuredCallError as exc:
             raise SetupAgentError(
                 exc.code,
@@ -220,7 +249,9 @@ class SetupChatAgent:
                 retryable=exc.retryable,
             ) from exc
         planner_latency = (monotonic() - started) * 1000
-        self.model_call_count += 1
+        # `_plan_with_one_retry` already counted the call it made. Counting again here
+        # reported three calls for a two-call turn, which is the number an operator uses
+        # to police per-turn cost.
         self.last_usage = {**plan_usage, **route.usage_metadata()}
 
         trace = SetupAgentTrace(
@@ -246,12 +277,11 @@ class SetupChatAgent:
 
         plan = envelope.plan
         if plan is None or not plan.requires_tool:
-            # Pure conversation. No tool, no new version, and still a real answer.
-            asked = plan.clarifications_to_ask if plan else []
+            # Pure conversation. No tool, no new version, no status change, and still a
+            # real answer. A greeting cannot touch approval because it never gets here.
             reply = SetupAgentReply(
                 message=_trimmed(envelope.direct_reply)
                 or _deterministic_conversation_reply(turn.draft),
-                clarification=asked[0] if asked else None,
             )
             return SetupAgentTurnResult(
                 reply=reply,
@@ -268,15 +298,18 @@ class SetupChatAgent:
             )
 
         try:
-            outcome = apply_setup_turn(
+            outcome = await apply_setup_turn(
                 SetupTurnRequest(
                     plan=plan,
+                    # The raw message: spans are located in what the user actually typed.
                     message=turn.message,
                     draft=turn.draft,
                     source_turn_id=turn.source_turn_id,
                     allowed_capability_keys=shortlist.allowed_keys,
                     history=list(turn.history),
                     conversation=turn.conversation,
+                    screening=turn.screening,
+                    providers=turn.providers,
                 )
             )
         except SetupTurnRejected as exc:
@@ -330,8 +363,13 @@ class SetupChatAgent:
         conversation = outcome.conversation.model_copy(
             update={"last_assistant_summary": reply.message[:1000]}
         )
-        if reply.clarification is not None:
-            conversation = conversation.with_question(reply.clarification)
+        # The composer may only ask a question the server put on the list. An id it
+        # invented, or one already answered, is dropped rather than persisted.
+        chosen = validated_clarification(outcome.result, reply.clarification_question_id)
+        if chosen is not None:
+            conversation = conversation.with_question(chosen)
+        elif reply.clarification_question_id:
+            trace = _with(trace, dropped_clarification=reply.clarification_question_id)
         return SetupAgentTurnResult(
             reply=reply,
             execution=outcome.result,
@@ -341,8 +379,44 @@ class SetupChatAgent:
             trace=trace,
             definition=outcome.definition,
             history_snapshot=outcome.history_snapshot,
+            clarification=chosen,
+            material_change=outcome.material_change,
             usage=self.last_usage,
         )
+
+    async def _plan_with_one_retry(
+        self,
+        turn: SetupAgentTurnInput,
+        shortlist: CapabilityShortlist,
+        hint: Any,
+        route: Any,
+    ) -> tuple[SetupAgentPlanEnvelope, dict[str, Any]]:
+        """Plan once, and retry once only for a transient transport failure.
+
+        A dropped connection is worth one more attempt. A schema, grounding or semantic
+        failure is not: retrying it spends money to be refused the same way.
+        """
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                envelope, usage = await structured_call(
+                    self.settings,
+                    schema_model=SetupAgentPlanEnvelope,
+                    schema_name="hilalmarkets_setup_turn_plan",
+                    instructions=_PLANNER_INSTRUCTIONS,
+                    payload=self._planner_payload(turn, shortlist, hint.intent.value),
+                    model=route.model,
+                    reasoning_effort=route.reasoning_effort,
+                    max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+                    transport=self.transport,
+                )
+            except StructuredCallError as exc:
+                if exc.retryable and attempts <= self.settings.setup_agent_planner_retries:
+                    continue
+                raise
+            self.model_call_count += 1
+            return envelope, usage
 
     def _planner_payload(
         self,
@@ -381,6 +455,8 @@ class SetupChatAgent:
             "core_primitives": _core_primitives(),
             "capability_shortlist": shortlist.to_prompt_dict(),
             "product_boundaries": _PRODUCT_BOUNDARIES,
+            "product_knowledge": product_knowledge(),
+            "operation_kinds": _OPERATION_GUIDE,
             "lexical_hint_non_authoritative": lexical_hint,
         }
 
@@ -403,14 +479,18 @@ class SetupChatAgent:
             ],
             "response_points": [item.model_dump(mode="json") for item in plan.response_points],
             "questions_to_answer": plan.questions_to_answer,
+            #: The complete platform result: compile, screening, provider and the final
+            #: status. Composing from a pre-screening compile let a reply announce a
+            #: ready draft the platform then blocked.
             "execution_result": outcome.result.model_dump(mode="json"),
-            "draft_after": {
-                "version": outcome.draft.version,
-                "conditions": _condition_labels(outcome.draft),
-                "included_symbols": outcome.draft.universe.included_symbols[:50],
-                "excluded_symbols": outcome.draft.universe.excluded_symbols[:50],
-            },
+            #: Deterministic facts about the draft, so an explanation comes from the
+            #: draft rather than from the model's memory of what it thinks it built.
+            "draft_read_model": outcome.result.draft_read_model,
+            "allowed_clarifications": [
+                item.model_dump(mode="json") for item in outcome.result.allowed_clarifications
+            ],
             "product_boundaries": _PRODUCT_BOUNDARIES,
+            "product_knowledge": product_knowledge(),
         }
 
 
@@ -535,6 +615,106 @@ def _core_primitives() -> dict[str, Any]:
     }
 
 
+def _routing_context(shortlist: CapabilityShortlist) -> dict[str, Any]:
+    """The shortlist's shape, so the router's ambiguity signals can actually fire.
+
+    Passing only the keys left `low_capability_confidence` and `custom_terminology`
+    permanently unreachable, so a turn with unknown wording or two near-equal candidates
+    was priced as a simple one.
+    """
+    scores = [item.score for item in shortlist.candidates]
+    top = max(scores, default=0.0)
+    margin = (top - sorted(scores, reverse=True)[1]) if len(scores) > 1 else top
+    return {
+        "candidate_keys": sorted(shortlist.allowed_keys),
+        "candidate_count": len(shortlist.candidates),
+        "unknown_terms": list(shortlist.unknown_terms),
+        "top_score": top,
+        "top_score_margin": margin,
+        "fragments": [
+            {
+                "fragment": item.source_fragment,
+                # Normalised against the top score so the router sees a 0..1 confidence
+                # rather than a raw registry score it cannot interpret.
+                "confidence": (item.score / top) if top else 0.0,
+                "availability": item.availability,
+                "executable": item.executable,
+            }
+            for item in shortlist.candidates
+        ],
+    }
+
+
+#: Server-owned product facts, versioned so an answer can be traced to what was told.
+#: The agent answers product questions from this, not from model memory.
+_PRODUCT_KNOWLEDGE_VERSION = "1.0"
+
+
+def product_knowledge() -> dict[str, Any]:
+    """Grounded answers to the product questions this chat actually gets asked."""
+
+    return {
+        "version": _PRODUCT_KNOWLEDGE_VERSION,
+        "what_this_chat_does": (
+            "It turns your own description of market behaviour into exact rules, shows "
+            "them to you as an inactive preview, and never runs anything until you "
+            "approve it yourself."
+        ),
+        "scanner_vs_monitor": (
+            "A Scanner checks the market once, right now. A Monitor keeps watching and "
+            "alerts you when the rules match."
+        ),
+        "how_approval_works": (
+            "Approval is a separate control you press. It binds to the exact version of "
+            "the draft you were shown, so any later edit needs approving again."
+        ),
+        "what_alerts_look_like": (
+            "An alert names the coin, the rule that matched and the candle it matched "
+            "on, in the app and on Telegram if you connect it."
+        ),
+        "sharia_status": (
+            "Sharia status comes only from the platform's own governed review with its "
+            "evidence. This chat never decides or guesses whether something is halal."
+        ),
+        "costs_nothing_to_preview": (
+            "Building and previewing a draft changes nothing in the market and places "
+            "no orders."
+        ),
+        "if_unsure": (
+            "If a fact is not listed here, say you are not certain and offer to point "
+            "the user at support rather than guessing."
+        ),
+    }
+
+
+#: How each operation kind is used, so the planner emits authorised operations rather
+#: than a free-floating patch.
+_OPERATION_GUIDE = {
+    "rule": (
+        "Every change is one entry in `operations`, and every entry names the "
+        "`authorizing_segment_id` of the STRATEGY_INSTRUCTION or CLARIFICATION_ANSWER "
+        "segment that asked for it. A SOCIAL_REPLY, USER_QUESTION, PRODUCT_QUESTION, "
+        "EXPLANATION_REQUEST, APPROVAL_INTENT or UNSUPPORTED_REQUEST segment can never "
+        "authorize an operation, and every value in an operation must appear in that "
+        "one segment's own text."
+    ),
+    "kinds": {
+        "set_fields": "change the mode, name, exchange or quote asset",
+        "add_condition": "create one new rule",
+        "update_condition": "change one existing rule, named by target_condition_id",
+        "remove_condition": "delete one existing rule",
+        "replace_groups": "replace the whole AND/OR/NOT structure",
+        "add_inclusion": "add one symbol to the watchlist",
+        "add_exclusion": "keep one symbol out",
+        "remove_inclusion": "stop watching one symbol",
+        "remove_exclusion": "stop excluding one symbol",
+        "add_unsupported": "record a market rule the platform cannot express exactly",
+        "resolve_unresolved_key": "close an open question by its exact key",
+        "remove_unsupported_key": "drop an unsupported item by its exact key",
+    },
+}
+
+
 _PRODUCT_BOUNDARIES = {
     "can": [
         "build an inactive Scanner or Monitor preview from exact market rules",
@@ -571,10 +751,18 @@ Never force the whole message into one kind. Never discard technical content bec
 conversation surrounds it. Never turn conversation into a rule.
 
 WHAT YOU MAY PROPOSE
-Set strategy_patch only when the turn genuinely changes the setup. Every threshold,
-timeframe, symbol, operator and direction in it must appear in this turn's own text,
-or belong to an existing condition you name by condition_id. If a value is not in the
-user's words, do not supply one: ask, or record it as unresolved.
+Every change is one entry in `operations`, and each entry names the
+`authorizing_segment_id` of the segment that asked for it. Only a STRATEGY_INSTRUCTION
+or a CLARIFICATION_ANSWER segment may authorize one. See operation_kinds for the list.
+
+Every threshold, timeframe, symbol, operator, direction and formula in an operation must
+appear in **that authorizing segment's own text** — not merely somewhere in the message.
+A number written inside a question does not authorize a rule. The exception is an
+`update_condition`: fields you leave unchanged are inherited from the rule you name, so
+`change that to at least 8%` does not have to restate the timeframe.
+
+If a value is not in the authorizing segment's words, do not supply one: ask, or record
+it as unresolved.
 
 For a registered mechanic, choose a capability_key from capability_shortlist and
 nothing else. If no candidate expresses the request exactly, return an
@@ -622,6 +810,15 @@ execution_result is what the server actually did, and it is your only source of 
 State a change only if it appears there. If applied is false, do not imply anything
 landed. If something was refused or unsupported, say so plainly and say why.
 
+execution_result already includes every gate: compile_status, screening_status,
+provider_status and final_chat_status. If screening blocked it or a provider is
+unavailable, the draft is not ready — do not call it ready. If approval_status is
+`approved`, the setup is still approved and nothing needs approving again.
+
+Answer questions about the current draft from draft_read_model, and product questions
+from product_knowledge. If a product fact is not in product_knowledge, say you are not
+certain rather than guessing.
+
 Cover every response_point and answer every entry in questions_to_answer. Acknowledge
 the conversational parts of the turn briefly and naturally when there were any.
 
@@ -629,9 +826,11 @@ Write for a beginner in the user's own language. Short sentences, everyday words
 field names, no error-template phrasing, no bullet lists unless they genuinely help.
 Be concise unless the user asked for detail.
 
-Ask at most one question, and only when the draft cannot go further without it. Do not
-repeat a question that execution_result shows was answered. Never ask the user to
-describe their setup when they already have.
+To ask a question, set clarification_question_id to the question_id of exactly one entry
+in allowed_clarifications, and phrase that question naturally in your message. Those are
+the only questions the server will accept; anything else is dropped. Ask nothing when
+allowed_clarifications is empty, and never ask the user to describe their setup when they
+already have.
 
 Never assign or imply a Sharia, halal or haram status. Never give trading advice,
 predictions or guarantees. Never say the strategy is running or approved: approval is a
@@ -659,26 +858,7 @@ def _trimmed(value: str | None) -> str:
 
 
 def _with(trace: SetupAgentTrace, **updates: Any) -> SetupAgentTrace:
-    current = {
-        "source_turn_id": trace.source_turn_id,
-        "planner_model": trace.planner_model,
-        "planner_reasons": trace.planner_reasons,
-        "planner_latency_ms": trace.planner_latency_ms,
-        "segments": trace.segments,
-        "plan_confidence": trace.plan_confidence,
-        "tool_called": trace.tool_called,
-        "patch_validation": trace.patch_validation,
-        "semantic_diff": trace.semantic_diff,
-        "compile_status": trace.compile_status,
-        "response_model": trace.response_model,
-        "response_latency_ms": trace.response_latency_ms,
-        "failure_stage": trace.failure_stage,
-        "shortlist_keys": trace.shortlist_keys,
-        "lexical_hint": trace.lexical_hint,
-        "model_calls": trace.model_calls,
-    }
-    current.update(updates)
-    return SetupAgentTrace(**current)  # type: ignore[arg-type]
+    return replace(trace, **updates)
 
 
 def planner_schema_json() -> str:

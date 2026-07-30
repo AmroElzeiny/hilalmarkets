@@ -480,6 +480,13 @@ class StrategyPatch(BaseModel):
     unsupported_requirements: list[UnsupportedRequirementV2] = Field(
         default_factory=list, max_length=100
     )
+    #: Open items to close, named by their exact key.
+    #:
+    #: Closing one used to depend on `CorrectionV2.target` happening to equal an
+    #: internal key, so a correction phrased in prose could clear the wrong item or
+    #: none at all. Naming the key makes the operation explicit and checkable.
+    remove_unresolved_keys: list[str] = Field(default_factory=list, max_length=100)
+    remove_unsupported_keys: list[str] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def one_mutation_mode(self) -> StrategyPatch:
@@ -496,6 +503,8 @@ class StrategyPatch(BaseModel):
                 self.correction is not None,
                 self.unresolved_references,
                 self.unsupported_requirements,
+                self.remove_unresolved_keys,
+                self.remove_unsupported_keys,
                 self.set_fields != DraftFieldPatch(),
             )
         ):

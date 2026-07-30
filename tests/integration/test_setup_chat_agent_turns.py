@@ -44,7 +44,6 @@ from ai_market_monitor.engine.strategy_draft_v2 import apply_strategy_patch
 from ai_market_monitor.schemas.setup_agent import (
     ApprovalIntent,
     ClarificationAnswer,
-    ClarificationRequest,
     ResponseDirective,
     SegmentKind,
     SetupAgentPlanEnvelope,
@@ -53,6 +52,10 @@ from ai_market_monitor.schemas.setup_agent import (
     StrategyInstructionPlan,
     TurnSegment,
     UnsupportedSegment,
+)
+from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
+    ClarificationContract,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
@@ -66,6 +69,7 @@ from ai_market_monitor.services.setup_chat_agent import (
     deterministic_summary,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
+from tests.support.setup_agent_plans import operations_from_patch
 
 #: The sentence this rebuild exists to remove. No reply may contain it.
 BANNED_READINESS_PHRASE = "describe the market behavior you want to scan or monitor"
@@ -94,7 +98,7 @@ class Script:
 
     plan: SetupAgentPlanEnvelope | None = None
     reply: str = "Done."
-    clarification: ClarificationRequest | None = None
+    clarification_question_id: str | None = None
     #: Raise this instead of answering the planner call.
     plan_failure: Exception | None = None
     #: Raise this instead of answering the composing call.
@@ -124,11 +128,7 @@ class Script:
                     json.dumps(
                         {
                             "message": self.reply,
-                            "clarification": (
-                                self.clarification.model_dump(mode="json")
-                                if self.clarification is not None
-                                else None
-                            ),
+                            "clarification_question_id": self.clarification_question_id,
                         }
                     )
                 ),
@@ -286,7 +286,7 @@ async def test_a_pure_technical_instruction_is_applied_and_compiles() -> None:
                         action=True,
                     )
                 ],
-                strategy_patch=_patch_for(message),
+                operations=operations_from_patch(_patch_for(message), segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise >= 5%")
                 ],
@@ -348,7 +348,7 @@ async def test_conversation_around_an_instruction_never_discards_the_instruction
                         action=True,
                     ),
                 ],
-                strategy_patch=_patch_for(instruction),
+                operations=operations_from_patch(_patch_for(instruction), segment_id="s2"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s2", intent_summary="15m rise >= 5%")
                 ],
@@ -395,7 +395,7 @@ async def test_an_instruction_and_a_question_are_both_handled() -> None:
                         reply=True,
                     ),
                 ],
-                strategy_patch=_patch_for(instruction),
+                operations=operations_from_patch(_patch_for(instruction), segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise >= 5%")
                 ],
@@ -453,12 +453,14 @@ async def test_a_correction_updates_the_named_condition_without_adding_one() -> 
                         reply=True,
                     ),
                 ],
-                strategy_patch=StrategyPatch(
-                    source_turn_id=TURN_ID,
-                    update_conditions=[
-                        {"node_id": existing.node_id, "replacement": replacement}  # type: ignore[list-item]
-                    ],
-                ),
+                operations=[
+                    AuthorizedPatchOperation(
+                        authorizing_segment_id="s1",
+                        kind="update_condition",
+                        condition=replacement,
+                        target_condition_id=existing.node_id,
+                    )
+                ],
                 strategy_instructions=[
                     StrategyInstructionPlan(
                         segment_id="s1",
@@ -479,48 +481,118 @@ async def test_a_correction_updates_the_named_condition_without_adding_one() -> 
     assert conditions[0].threshold == 8.0
 
 
+def _answer_plan(answer: str, *, question_id: str, operations=()) -> SetupAgentPlanEnvelope:
+    return SetupAgentPlanEnvelope(
+        plan=SetupAgentTurnPlan(
+            source_turn_id=TURN_ID,
+            segments=[
+                _segment(
+                    answer,
+                    answer,
+                    SegmentKind.CLARIFICATION_ANSWER,
+                    segment_id="s1",
+                    action=True,
+                )
+            ],
+            operations=list(operations),
+            clarification_answers=[
+                ClarificationAnswer(
+                    segment_id="s1",
+                    question_id=question_id,
+                    answer_text=answer,
+                )
+            ],
+            overall_confidence=0.9,
+        )
+    )
+
+
 @pytest.mark.parametrize("answer", ["yes", "the second one", "use the first option", "no"])
-async def test_a_clarification_answer_resolves_the_question_and_creates_no_condition(
+async def test_a_non_mutating_answer_closes_its_question_and_creates_no_condition(
     answer: str,
 ) -> None:
     """INV: an acknowledgement can resolve a pending question without adding a rule."""
-    context = SetupConversationContext(
-        active_question_id="timeframe",
-        question_text="Which timeframe should evaluate this rule?",
-        question_target="timeframe",
-        valid_answer_shape="one of: 15m; 1h",
+    contract = ClarificationContract(
+        question_id="confirm_reading",
+        question="Did I read that the way you meant?",
+        reason="A yes closes this; nothing executable changes either way.",
+        target_type="conversational",
+        expected_answer_schema="yes or no",
+        mutating=False,
     )
-    script = Script(
-        plan=SetupAgentPlanEnvelope(
-            plan=SetupAgentTurnPlan(
-                source_turn_id=TURN_ID,
-                segments=[
-                    _segment(
-                        answer,
-                        answer,
-                        SegmentKind.CLARIFICATION_ANSWER,
-                        segment_id="s1",
-                        action=True,
-                    )
-                ],
-                clarification_answers=[
-                    ClarificationAnswer(
-                        segment_id="s1",
-                        question_id="timeframe",
-                        answer_text=answer,
-                    )
-                ],
-                overall_confidence=0.9,
-            )
-        ),
-        reply="Noted.",
+    result = await _run(
+        Script(plan=_answer_plan(answer, question_id="confirm_reading"), reply="Noted."),
+        answer,
+        conversation=SetupConversationContext().with_question(contract),
     )
-    result = await _run(script, answer, conversation=context)
 
     assert result.execution is not None
-    assert "timeframe" in result.execution.answered_questions
+    assert "confirm_reading" in result.execution.answered_questions
     assert _conditions(result.draft) == [], "an answer is not a market rule"
     assert result.conversation.active_question_id is None, "the question is closed"
+    assert "confirm_reading" in result.conversation.answered_question_ids
+
+
+async def test_a_mutating_question_does_not_close_until_its_target_changes() -> None:
+    """INV: a clarification cannot clear without resolving its declared target.
+
+    Trusting `resolves_question` let an open item disappear while the draft stayed
+    blocked for exactly the reason the question existed.
+    """
+    contract = ClarificationContract(
+        question_id="timeframe",
+        question="Which timeframe should evaluate this rule?",
+        reason="The rule cannot run without one.",
+        target_type="draft_field",
+        target_field="timeframe",
+        expected_answer_schema="one of: 15m; 1h",
+        mutating=True,
+    )
+    context = SetupConversationContext().with_question(contract)
+    result = await _run(
+        Script(plan=_answer_plan("yes", question_id="timeframe"), reply="Noted."),
+        "yes",
+        conversation=context,
+    )
+
+    assert result.execution is not None
+    assert result.execution.answered_questions == [], "words alone cannot close it"
+    assert result.conversation.active_question_id == "timeframe", "it stays open"
+
+
+async def test_a_mutating_answer_that_changes_the_target_does_close_it() -> None:
+    answer = "use BTC/USDT only"
+    contract = ClarificationContract(
+        question_id="universe",
+        question="Which market should this watch?",
+        reason="The draft has no market yet.",
+        target_type="universe",
+        expected_answer_schema="one or more symbols",
+        mutating=True,
+    )
+    result = await _run(
+        Script(
+            plan=_answer_plan(
+                answer,
+                question_id="universe",
+                operations=[
+                    AuthorizedPatchOperation(
+                        authorizing_segment_id="s1",
+                        kind="add_inclusion",
+                        symbol="BTC/USDT",
+                    )
+                ],
+            ),
+            reply="Set to BTC/USDT.",
+        ),
+        answer,
+        conversation=SetupConversationContext().with_question(contract),
+    )
+
+    assert result.execution is not None
+    assert "universe" in result.execution.answered_questions
+    assert result.draft.universe.included_symbols == ["BTC/USDT"]
+    assert result.conversation.active_question_id is None
 
 
 async def test_a_reference_to_an_earlier_condition_reaches_the_planner() -> None:
@@ -544,10 +616,13 @@ async def test_a_reference_to_an_earlier_condition_reaches_the_planner() -> None
                         target=existing.node_id,
                     )
                 ],
-                strategy_patch=StrategyPatch(
-                    source_turn_id=TURN_ID,
-                    remove_conditions=[existing.node_id],
-                ),
+                operations=[
+                    AuthorizedPatchOperation(
+                        authorizing_segment_id="s1",
+                        kind="remove_condition",
+                        target_condition_id=existing.node_id,
+                    )
+                ],
                 strategy_instructions=[
                     StrategyInstructionPlan(
                         segment_id="s1",
@@ -601,7 +676,7 @@ async def test_several_independent_conditions_each_keep_their_own_semantics() ->
                         action=True,
                     )
                 ],
-                strategy_patch=_patch_for(second, base),
+                operations=operations_from_patch(_patch_for(second, base), segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s1", intent_summary="1h fall >= 2%")
                 ],
@@ -641,7 +716,7 @@ async def test_nested_boolean_structure_is_preserved_through_the_tool() -> None:
                         action=True,
                     )
                 ],
-                strategy_patch=patch,
+                operations=operations_from_patch(patch, segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s1", intent_summary="nested boolean rule")
                 ],
@@ -675,10 +750,67 @@ async def test_nested_boolean_structure_is_preserved_through_the_tool() -> None:
         "notify me when the whale ratio breaks its band",
     ],
 )
-async def test_unknown_terminology_becomes_unsupported_never_conversation(
+async def test_an_unknown_mechanic_becomes_a_blocking_unsupported_requirement(
     message: str,
 ) -> None:
-    """INV: unknown wording produces a typed refusal, not a generic chat answer."""
+    """INV: unknown *market* wording produces a typed refusal that blocks the draft."""
+    script = Script(
+        plan=SetupAgentPlanEnvelope(
+            plan=SetupAgentTurnPlan(
+                source_turn_id=TURN_ID,
+                segments=[
+                    _segment(
+                        message,
+                        message,
+                        # A market rule the platform cannot express is an *instruction*
+                        # it failed to convert, so it belongs in the draft as a blocker.
+                        SegmentKind.STRATEGY_INSTRUCTION,
+                        segment_id="s1",
+                        action=True,
+                    )
+                ],
+                operations=[
+                    AuthorizedPatchOperation(
+                        authorizing_segment_id="s1",
+                        kind="add_unsupported",
+                        missing_contract="No registered mechanic measures this exactly.",
+                    )
+                ],
+                overall_confidence=0.8,
+            )
+        ),
+        reply="I cannot express that one exactly yet.",
+    )
+    result = await _run(script, message)
+
+    assert result.execution is not None
+    assert result.execution.unsupported_requirements, "the refusal must land in the draft"
+    assert result.draft.blocking is True, "an unsupported requirement blocks eligibility"
+    assert result.execution.approval_eligible is False
+    assert BANNED_READINESS_PHRASE not in result.reply.message.casefold()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "just buy BTC for me right now",
+        "place the trade and set a stop loss",
+        "guarantee me 10% a month",
+        "should I go long here?",
+    ],
+)
+async def test_an_out_of_scope_request_answers_a_boundary_and_touches_nothing(
+    message: str,
+) -> None:
+    """INV: a boundary refusal is reply-only. It cannot block or version the draft.
+
+    `UNSUPPORTED_REQUEST` means "outside what this product does". Letting it write an
+    `UnsupportedRequirementV2` made a draft permanently unapprovable because the user
+    once asked for advice.
+    """
+    base = _draft_with(
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
+    )
     script = Script(
         plan=SetupAgentPlanEnvelope(
             plan=SetupAgentTurnPlan(
@@ -695,20 +827,22 @@ async def test_unknown_terminology_becomes_unsupported_never_conversation(
                 unsupported_segments=[
                     UnsupportedSegment(
                         segment_id="s1",
-                        missing_contract="No registered mechanic measures this exactly.",
+                        missing_contract="This product does not place trades or advise.",
                     )
                 ],
-                overall_confidence=0.8,
+                overall_confidence=0.95,
             )
         ),
-        reply="I cannot express that one exactly yet.",
+        reply="I cannot do that — I only build and watch rules you approve.",
     )
-    result = await _run(script, message)
+    result = await _run(script, message, draft=base)
 
-    assert result.execution is not None
-    assert result.execution.unsupported_requirements, "the refusal must land in the draft"
-    assert result.draft.blocking is True, "an unsupported requirement blocks eligibility"
-    assert result.execution.approval_eligible is False
+    assert result.draft.version == base.version, "no new version"
+    assert result.draft.semantic_hash == base.semantic_hash, "no semantic change"
+    assert result.draft.unsupported_requirements == [], "a boundary is not a draft blocker"
+    if result.execution is not None:
+        assert result.execution.strategy_mutated is False
+        assert result.execution.approval_status != "invalidated_by_edit"
     assert BANNED_READINESS_PHRASE not in result.reply.message.casefold()
 
 
@@ -739,7 +873,7 @@ async def test_a_capability_key_must_come_from_the_server_shortlist() -> None:
         overall_confidence=0.9,
     )
     # The offered key passes.
-    apply_setup_turn(
+    await apply_setup_turn(
         SetupTurnRequest(
             plan=plan,
             message=message,
@@ -761,7 +895,7 @@ async def test_a_capability_key_must_come_from_the_server_shortlist() -> None:
         }
     )
     with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=invented,
                 message=message,
@@ -822,7 +956,7 @@ async def test_an_excluded_symbol_is_excluded_and_never_enters_a_condition() -> 
                         action=True,
                     )
                 ],
-                strategy_patch=_patch_for(message),
+                operations=operations_from_patch(_patch_for(message), segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise, no ETH")
                 ],
@@ -868,7 +1002,7 @@ async def test_mixed_language_and_noisy_input_still_apply(
                         action=True,
                     )
                 ],
-                strategy_patch=_patch_for(instruction),
+                operations=operations_from_patch(_patch_for(instruction), segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise >= 5%")
                 ],
@@ -923,12 +1057,14 @@ async def test_approval_wording_inside_a_material_edit_never_approves() -> None:
                         target=existing.node_id,
                     ),
                 ],
-                strategy_patch=StrategyPatch(
-                    source_turn_id=TURN_ID,
-                    update_conditions=[
-                        {"node_id": existing.node_id, "replacement": replacement}  # type: ignore[list-item]
-                    ],
-                ),
+                operations=[
+                    AuthorizedPatchOperation(
+                        authorizing_segment_id="s2",
+                        kind="update_condition",
+                        condition=replacement,
+                        target_condition_id=existing.node_id,
+                    )
+                ],
                 strategy_instructions=[
                     StrategyInstructionPlan(
                         segment_id="s2",
@@ -999,7 +1135,7 @@ async def test_a_composing_failure_after_success_reports_what_actually_changed()
                         action=True,
                     )
                 ],
-                strategy_patch=_patch_for(message),
+                operations=operations_from_patch(_patch_for(message), segment_id="s1"),
                 strategy_instructions=[
                     StrategyInstructionPlan(
                         segment_id="s1", intent_summary="15m open-to-close rise of at least 5%"
@@ -1015,7 +1151,7 @@ async def test_a_composing_failure_after_success_reports_what_actually_changed()
     assert result.execution is not None
     assert result.execution.strategy_mutated is True, "the applied work survives"
     assert result.trace.failure_stage == "response_composition"
-    assert "15m open-to-close rise of at least 5%" in result.reply.message
+    assert "open to close percentage" in result.reply.message
     assert BANNED_READINESS_PHRASE not in result.reply.message.casefold()
 
 
@@ -1041,7 +1177,7 @@ def _instruction_plan(message: str, quoted: str, **overrides: Any) -> SetupAgent
     return SetupAgentTurnPlan(**base)  # type: ignore[arg-type]
 
 
-def test_a_span_that_is_not_in_the_message_is_refused() -> None:
+async def test_a_span_that_is_not_in_the_message_is_refused() -> None:
     """INV: every applied change is grounded in an exact source segment."""
     message = "Monitor BTC/USDT on the 15m"
     plan = _instruction_plan(message, "Monitor BTC/USDT on the 15m")
@@ -1059,7 +1195,7 @@ def test_a_span_that_is_not_in_the_message_is_refused() -> None:
         }
     )
     with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=fabricated,
                 message=message,
@@ -1070,7 +1206,7 @@ def test_a_span_that_is_not_in_the_message_is_refused() -> None:
     assert error.value.code == "SPAN_NOT_GROUNDED"
 
 
-def test_two_actionable_segments_may_not_claim_the_same_words() -> None:
+async def test_two_actionable_segments_may_not_claim_the_same_words() -> None:
     message = "Monitor BTC/USDT on the 15m above 50000"
     plan = SetupAgentTurnPlan(
         source_turn_id=TURN_ID,
@@ -1093,7 +1229,7 @@ def test_two_actionable_segments_may_not_claim_the_same_words() -> None:
         overall_confidence=0.9,
     )
     with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=plan,
                 message=message,
@@ -1104,15 +1240,17 @@ def test_two_actionable_segments_may_not_claim_the_same_words() -> None:
     assert error.value.code == "SPAN_NOT_GROUNDED"
 
 
-def test_a_threshold_the_message_never_states_is_refused() -> None:
+async def test_a_threshold_the_message_never_states_is_refused() -> None:
     """A value the trader did not give was chosen by the model, not by them."""
     honest = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
     patch = _patch_for(honest)
     # The same patch offered against a message that never mentions 5%.
     message = "Monitor BTC/USDT on the 15m when it rises a bit"
-    plan = _instruction_plan(message, message, strategy_patch=patch)
+    plan = _instruction_plan(
+        message, message, operations=operations_from_patch(patch, segment_id="s1")
+    )
     with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=plan,
                 message=message,
@@ -1123,17 +1261,21 @@ def test_a_threshold_the_message_never_states_is_refused() -> None:
     assert error.value.code == "VALUE_NOT_GROUNDED"
 
 
-def test_a_reference_to_a_condition_that_does_not_exist_is_refused() -> None:
+async def test_a_reference_to_a_condition_that_does_not_exist_is_refused() -> None:
     message = "remove that rule"
     plan = _instruction_plan(
         message,
         message,
-        strategy_patch=StrategyPatch(
-            source_turn_id=TURN_ID, remove_conditions=["condition_does_not_exist"]
-        ),
+        operations=[
+            AuthorizedPatchOperation(
+                authorizing_segment_id="s1",
+                kind="remove_condition",
+                target_condition_id="condition_does_not_exist",
+            )
+        ],
     )
     with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=plan,
                 message=message,
@@ -1157,14 +1299,14 @@ def test_a_reference_to_a_condition_that_does_not_exist_is_refused() -> None:
         SegmentKind.UNSUPPORTED_REQUEST,
     ],
 )
-def test_conversation_can_never_be_marked_actionable(kind: SegmentKind) -> None:
+async def test_conversation_can_never_be_marked_actionable(kind: SegmentKind) -> None:
     """INV: conversational content cannot become executable logic."""
     message = "some words here"
     with pytest.raises(ValueError, match="cannot require an action"):
         _segment(message, message, kind, segment_id="s1", action=True)
 
 
-def test_a_result_cannot_claim_it_applied_something_it_did_not() -> None:
+async def test_a_result_cannot_claim_it_applied_something_it_did_not() -> None:
     """INV: every success claim is grounded in the execution result."""
     from uuid import uuid4
 
@@ -1184,7 +1326,7 @@ def test_a_result_cannot_claim_it_applied_something_it_did_not() -> None:
         )
 
 
-def test_approval_cannot_be_eligible_before_the_draft_compiles() -> None:
+async def test_approval_cannot_be_eligible_before_the_draft_compiles() -> None:
     from uuid import uuid4
 
     from ai_market_monitor.schemas.setup_agent import SetupTurnExecutionResult
@@ -1209,7 +1351,7 @@ def test_approval_cannot_be_eligible_before_the_draft_compiles() -> None:
 # --------------------------------------------------------------------------------
 
 
-def test_a_correct_quote_with_wrong_offsets_is_still_accepted() -> None:
+async def test_a_correct_quote_with_wrong_offsets_is_still_accepted() -> None:
     """Language models cannot count characters; the server locates the span itself.
 
     A real model quoted the message perfectly and then reported offsets that were off
@@ -1217,7 +1359,7 @@ def test_a_correct_quote_with_wrong_offsets_is_still_accepted() -> None:
     the quote is the grounding check and the position is server-derived.
     """
     message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-    quoted = "the 15m candle rises open-to-close by at least 5%"
+    quoted = message
     plan = SetupAgentTurnPlan(
         source_turn_id=TURN_ID,
         segments=[
@@ -1231,13 +1373,13 @@ def test_a_correct_quote_with_wrong_offsets_is_still_accepted() -> None:
                 confidence=0.9,
             )
         ],
-        strategy_patch=_patch_for(message),
+        operations=operations_from_patch(_patch_for(message), segment_id="s1"),
         strategy_instructions=[
             StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise >= 5%")
         ],
         overall_confidence=0.9,
     )
-    outcome = apply_setup_turn(
+    outcome = await apply_setup_turn(
         SetupTurnRequest(
             plan=plan,
             message=message,
@@ -1257,7 +1399,7 @@ def test_a_correct_quote_with_wrong_offsets_is_still_accepted() -> None:
         }
     )
     with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=absent,
                 message=message,
@@ -1268,13 +1410,16 @@ def test_a_correct_quote_with_wrong_offsets_is_still_accepted() -> None:
     assert error.value.code == "SPAN_NOT_GROUNDED"
 
 
-def test_a_value_stated_outside_the_quoted_span_is_still_grounded() -> None:
-    """`on the 15m when the candle rises 5%` — a model quotes the clause, not the whole.
+async def test_a_value_outside_the_authorizing_segment_is_refused() -> None:
+    """INV: values from one segment cannot authorize another segment's mutation.
 
-    Requiring each value inside the chosen quote was stricter than the contract, which
-    says grounded in the *current message*. It refused a correct reading.
+    The authorising span has to carry the values it authorises. Message-wide grounding
+    is not authorization: in `drop LTC, and is 5% a lot on a 15m candle?` the 5% and the
+    15m belong to a *question*, and accepting them anywhere in the message let a question
+    author a rule.
     """
     message = "Monitor BTC/USDT on the 15m when the candle rises open-to-close by at least 5%"
+    # The segment quotes only the clause, leaving the timeframe outside it.
     quoted = "the candle rises open-to-close by at least 5%"
     patch = _patch_for(message)
     node = patch.add_conditions[0].model_copy(update={"source_fragment": quoted})
@@ -1289,13 +1434,48 @@ def test_a_value_stated_outside_the_quoted_span_is_still_grounded() -> None:
                 action=True,
             )
         ],
-        strategy_patch=patch.model_copy(update={"add_conditions": [node]}),
-        strategy_instructions=[
-            StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise >= 5%")
-        ],
+        operations=operations_from_patch(
+            patch.model_copy(update={"add_conditions": [node]}), segment_id="s1"
+        ),
         overall_confidence=0.9,
     )
-    outcome = apply_setup_turn(
+    with pytest.raises(SetupTurnRejected) as error:
+        await apply_setup_turn(
+            SetupTurnRequest(
+                plan=plan,
+                message=message,
+                draft=StrategyDraftV2(),
+                source_turn_id=TURN_ID,
+            )
+        )
+    assert error.value.code == "VALUE_NOT_GROUNDED"
+    assert any("trigger_timeframe" in item for item in error.value.details)
+
+
+async def test_a_segment_that_carries_its_own_values_is_accepted() -> None:
+    """The same turn works when the authorising span covers what it authorises."""
+    message = "Monitor BTC/USDT on the 15m when the candle rises open-to-close by at least 5%"
+    # The span covers the symbol, the timeframe and the size — everything it authorises.
+    quoted = message
+    patch = _patch_for(message)
+    node = patch.add_conditions[0].model_copy(update={"source_fragment": quoted})
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN_ID,
+        segments=[
+            _segment(
+                message,
+                quoted,
+                SegmentKind.STRATEGY_INSTRUCTION,
+                segment_id="s1",
+                action=True,
+            )
+        ],
+        operations=operations_from_patch(
+            patch.model_copy(update={"add_conditions": [node]}), segment_id="s1"
+        ),
+        overall_confidence=0.9,
+    )
+    outcome = await apply_setup_turn(
         SetupTurnRequest(
             plan=plan,
             message=message,
@@ -1308,43 +1488,7 @@ def test_a_value_stated_outside_the_quoted_span_is_still_grounded() -> None:
     assert condition.threshold == 5.0
 
 
-def test_a_timeframe_absent_from_the_whole_message_is_still_refused() -> None:
-    """Widening to the message must not weaken the bar: invented values still fail."""
-    message = "Monitor BTC/USDT when the candle rises open-to-close by at least 5%"
-    patch = _patch_for(
-        "Monitor BTC/USDT on the 4h when the candle rises open-to-close by at least 5%"
-    )
-    node = patch.add_conditions[0].model_copy(
-        update={"source_fragment": "the candle rises open-to-close by at least 5%"}
-    )
-    plan = SetupAgentTurnPlan(
-        source_turn_id=TURN_ID,
-        segments=[
-            _segment(
-                message,
-                "the candle rises open-to-close by at least 5%",
-                SegmentKind.STRATEGY_INSTRUCTION,
-                segment_id="s1",
-                action=True,
-            )
-        ],
-        strategy_patch=patch.model_copy(update={"add_conditions": [node]}),
-        overall_confidence=0.9,
-    )
-    with pytest.raises(SetupTurnRejected) as error:
-        apply_setup_turn(
-            SetupTurnRequest(
-                plan=plan,
-                message=message,
-                draft=StrategyDraftV2(),
-                source_turn_id=TURN_ID,
-            )
-        )
-    assert error.value.code == "VALUE_NOT_GROUNDED"
-    assert any("trigger_timeframe" in item for item in error.value.details)
-
-
-def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
+async def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
     """A real model labels the rule it is creating. That is a label, not a mutation."""
     message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
     plan = SetupAgentTurnPlan(
@@ -1359,7 +1503,7 @@ def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
                 target="cond_1",
             )
         ],
-        strategy_patch=_patch_for(message),
+        operations=operations_from_patch(_patch_for(message), segment_id="s1"),
         strategy_instructions=[
             StrategyInstructionPlan(
                 segment_id="s1", intent_summary="15m rise", target_condition_id="cond_1"
@@ -1367,7 +1511,7 @@ def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
         ],
         overall_confidence=0.9,
     )
-    outcome = apply_setup_turn(
+    outcome = await apply_setup_turn(
         SetupTurnRequest(
             plan=plan,
             message=message,
@@ -1378,13 +1522,17 @@ def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
     assert outcome.result.strategy_mutated is True
     # But an edit that names a rule which does not exist is still refused.
     with pytest.raises(SetupTurnRejected):
-        apply_setup_turn(
+        await apply_setup_turn(
             SetupTurnRequest(
                 plan=plan.model_copy(
                     update={
-                        "strategy_patch": StrategyPatch(
-                            source_turn_id=TURN_ID, remove_conditions=["cond_1"]
-                        )
+                        "operations": [
+                            AuthorizedPatchOperation(
+                                authorizing_segment_id="s1",
+                                kind="remove_condition",
+                                target_condition_id="cond_1",
+                            )
+                        ]
                     }
                 ),
                 message=message,
@@ -1394,7 +1542,7 @@ def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
         )
 
 
-def test_a_strict_schema_null_for_a_container_uses_the_default() -> None:
+async def test_a_strict_schema_null_for_a_container_uses_the_default() -> None:
     """A strict schema requires every key, so `null` means "nothing to set" here."""
     patch = StrategyPatch.model_validate(
         {
@@ -1409,7 +1557,7 @@ def test_a_strict_schema_null_for_a_container_uses_the_default() -> None:
     assert patch.correction is None
 
 
-def test_the_deterministic_summary_only_states_what_the_result_holds() -> None:
+async def test_the_deterministic_summary_only_states_what_the_result_holds() -> None:
     from uuid import uuid4
 
     from ai_market_monitor.schemas.setup_agent import (

@@ -16,7 +16,7 @@ from __future__ import annotations
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 def _accepts_none(annotation: Any) -> bool:
@@ -41,3 +41,14 @@ def drop_absent_nulls(model: type[BaseModel], data: Any) -> Any:
             and not _accepts_none(model.model_fields[key].annotation)
         )
     }
+
+
+class StrictModel(BaseModel):
+    """Base for every schema the provider fills under a strict JSON schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _absent_nulls_use_defaults(cls, data: Any) -> Any:
+        return drop_absent_nulls(cls, data)

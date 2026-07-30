@@ -32,10 +32,25 @@ For routine release confidence, `--mode budget --target both` covers every evalu
 through the authenticated backend, repeats only UI/Canvas boundary topics in Playwright, judges
 the results, and enforces a measured all-in `$2.50` cap across evaluator and chatbot model calls.
 
-Bounded Agent Control is **not** the Setup Chat path. It was a general multi-tool coordinator; the
-Setup Agent above replaced it for authenticated strategy building, and `AI_AGENT_CONTROL_ENABLED`
-defaults to false and does not affect Setup Chat. Its document is retained for history only:
-[docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
+Every change the agent proposes names the one message segment that authorised it, and each value in
+it must appear in *that segment's own words*. Message-wide grounding is not authorization: in
+`drop LTC, and is 5% a lot on a 15m candle?` the 5% and the 15m belong to a question, and a question
+can never author a rule. Grounding is typed, not substring: `1` cannot match `15m`, `2` cannot match
+`20`, `5m` cannot ground `5%`, `at least` grounds `gte`, and `open to close` grounds
+`open_to_close_percentage` through the same readers the compiler uses.
+
+Every gate — semantic validation, compilation, Sharia policy, screened universe, provider
+availability, approval eligibility and the final chat status — runs inside the deterministic
+execution phase, before the reply is written. The evidence for any "I changed X" claim comes from
+comparing the draft before and after, never from the model's own summary. An approved setup survives
+every turn that changes nothing; only a material edit invalidates it.
+
+**`AI_AGENT_CONTROL_ENABLED` is not a Setup Chat switch.** Bounded Agent Control was a general
+multi-tool coordinator; it has no authority over authenticated Setup Chat and none of the
+`AI_AGENT_*` bounds govern that traffic — the `SETUP_AGENT_*` settings do. It defaults to false, and
+turning it off is not a Setup Chat rollback. There is no Setup Chat feature flag: the agent path is
+the only writable route, so a rollback means rolling back the deployment. Its document is retained
+for history only: [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
 
 Registry, compiler, provider, scanner, ownership, entitlement, hash, approval and activation
 authority all remain in application services. The model receives no approval, activation, network,

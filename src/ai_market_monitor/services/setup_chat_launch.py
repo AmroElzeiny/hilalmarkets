@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from enum import StrEnum
 from time import monotonic
 from typing import Any, Literal
 
@@ -17,6 +18,7 @@ from ai_market_monitor.db.models.enums import (
     ShariaUniverseMode,
 )
 from ai_market_monitor.engine.setup_intent import decide_setup_intent
+from ai_market_monitor.engine.setup_turn_execution import ProviderGate, ScreeningGate
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
     compile_strategy_draft_v2,
@@ -35,6 +37,7 @@ from ai_market_monitor.schemas.setup_agent import (
 from ai_market_monitor.schemas.strategy import ShariaPolicyDefinition, StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     DraftMode,
+    ProviderRequirementV2,
     StrategyDraftV2,
     UnresolvedFieldV2,
 )
@@ -139,17 +142,16 @@ class SetupChatLaunchService:
     ) -> AISetupChatSession:
         started = monotonic()
         if client_message_id:
-            existing = await session.scalar(
-                select(AISetupChatMessage.id).where(
-                    AISetupChatMessage.session_id == chat.id,
-                    AISetupChatMessage.client_message_id == client_message_id,
-                )
-            )
-            if existing is not None:
+            replay = await self._replayed_turn(session, chat, client_message_id)
+            if replay is not None:
                 _set_runtime(chat, started, model_calls=0, cache_hits=1)
-                return chat
+                return replay
 
-        cleaned = " ".join((message or option_label or option_value or "").split())
+        # The raw text, exactly as typed. Collapsing whitespace here destroyed the line
+        # breaks and list structure that tell three numbered rules apart from one
+        # sentence, and made the stored provenance disagree with what the user wrote.
+        raw = message or option_label or option_value or ""
+        cleaned = " ".join(raw.split())
         if option_key == "setup_mode":
             return await self._select_mode(
                 session,
@@ -199,13 +201,15 @@ class SetupChatLaunchService:
             # An explicit UI answer resolves one typed field. It stays deterministic and
             # costs no model call; it can still never grant approval.
             cleaned = f"{option_key}: {option_value}"
+            raw = cleaned
 
         user_message = await self.owner._append_message(
             session,
             chat,
             role="user",
             message_type="option" if option_key else "text",
-            content=cleaned,
+            # Stored as typed, so provenance quotes what the user can see they wrote.
+            content=raw if not offered_option else cleaned,
             payload={
                 "lexical_hint": lexical_hint.intent.value,
                 "lexical_hint_confidence": lexical_hint.confidence,
@@ -221,9 +225,10 @@ class SetupChatLaunchService:
             return await self._run_agent_turn(
                 session,
                 chat,
-                message=cleaned,
+                message=raw,
                 source_turn_id=str(user_message.id),
                 started=started,
+                client_message_id=client_message_id,
             )
 
         draft = load_strategy_draft_v2(chat)
@@ -330,6 +335,53 @@ class SetupChatLaunchService:
         _set_runtime(chat, started, model_calls=model_calls, cache_hits=0)
         return chat
 
+    async def _replayed_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        client_message_id: str,
+    ) -> AISetupChatSession | None:
+        """Answer a repeated key from the stored record instead of re-running the turn.
+
+        The old check returned the chat as-is whenever the key had been seen, which meant
+        a retry after a mid-turn crash returned a session with **no assistant answer** and
+        no error — the user saw their message vanish. Now the stored status decides:
+
+        * ``COMPLETED`` — the same final answer, no model call, no second patch
+        * ``RETRYABLE_FAILURE`` — reprocess, because nothing was applied
+        * ``PLANNING`` / ``EXECUTING`` — an in-progress conflict, never a silent no-op
+        """
+        record = _turn_record(chat, client_message_id)
+        if record is None:
+            existing = await session.scalar(
+                select(AISetupChatMessage.id).where(
+                    AISetupChatMessage.session_id == chat.id,
+                    AISetupChatMessage.client_message_id == client_message_id,
+                )
+            )
+            # A message row with no record predates this bookkeeping. Treat it as done.
+            return chat if existing is not None else None
+        status = str(record.get("status") or "")
+        if status == TurnStatus.COMPLETED:
+            return chat
+        if status in {TurnStatus.PLANNING, TurnStatus.EXECUTING}:
+            raise SetupLaunchError(
+                "TURN_IN_PROGRESS",
+                "That message is still being processed. Try again in a moment.",
+                stage="interpret",
+                retryable=True,
+                status_code=409,
+            )
+        if status == TurnStatus.PERMANENT_FAILURE:
+            raise SetupLaunchError(
+                str(record.get("code") or "TURN_FAILED"),
+                str(record.get("message") or "That message could not be processed."),
+                stage="interpret",
+                status_code=422,
+            )
+        # RECEIVED or RETRYABLE_FAILURE: nothing was applied, so reprocessing is safe.
+        return None
+
     async def _run_agent_turn(
         self,
         session: AsyncSession,
@@ -338,22 +390,32 @@ class SetupChatLaunchService:
         message: str,
         source_turn_id: str,
         started: float,
+        client_message_id: str | None = None,
     ) -> AISetupChatSession:
         """One free-text turn: plan, execute once, then answer from what happened."""
 
         draft = load_strategy_draft_v2(chat)
         context = dict(chat.context_json or {})
+        _record_turn(context, client_message_id, status=TurnStatus.PLANNING)
+        chat.context_json = context
         conversation = _load_conversation_context(context)
         history = list(context.get("strategy_draft_v2_history") or [])
         turn = SetupAgentTurnInput(
             message=message,
             source_turn_id=source_turn_id,
             draft=draft,
-            dialogue=tuple(await self._recent_dialogue(session, chat)),
+            dialogue=tuple(
+                await self._recent_dialogue(session, chat, exclude_message_id=source_turn_id)
+            ),
             conversation=conversation,
             history=tuple(history),
             setup_mode=draft.mode,
             previous_turn_failed=bool(context.get("last_turn_failed")),
+            # Screening and provider availability are gates, so they run inside
+            # execution and their outcome reaches the composer. Running them after the
+            # reply let a message announce a draft the platform then blocked.
+            screening=self._screening_gate(session, chat),
+            providers=self._provider_gate(),
         )
         try:
             outcome = await self.agent.run_turn(turn)
@@ -368,6 +430,17 @@ class SetupChatLaunchService:
                 "retryable": exc.retryable,
                 "details": list(exc.details[:6]),
             }
+            _record_turn(
+                context,
+                client_message_id,
+                status=(
+                    TurnStatus.RETRYABLE_FAILURE
+                    if exc.retryable
+                    else TurnStatus.PERMANENT_FAILURE
+                ),
+                code=exc.code,
+                message=str(exc),
+            )
             chat.context_json = context
             raise SetupLaunchError(
                 exc.code,
@@ -384,7 +457,9 @@ class SetupChatLaunchService:
             usage=outcome.usage or None,
         )
 
-        if outcome.execution is not None and outcome.history_snapshot is not None:
+        # Only a material change archives an approval and clears the approved strategy
+        # ids. A turn that answered a question or asked one leaves all of that alone.
+        if outcome.material_change and outcome.history_snapshot is not None:
             history.append(outcome.history_snapshot)
             context["strategy_draft_v2_history"] = history[-100:]
             if chat.status == "approved":
@@ -401,6 +476,14 @@ class SetupChatLaunchService:
             context["last_semantic_diff"] = list(outcome.execution.semantic_diff)
             context["last_execution_result"] = outcome.execution.model_dump(mode="json")
         context["last_patch_source_turn_id"] = source_turn_id
+        # Marked complete in the same context write that stores the new draft, so a
+        # crash cannot leave a turn applied but recorded as unfinished — or the reverse.
+        _record_turn(
+            context,
+            client_message_id,
+            status=TurnStatus.COMPLETED,
+            message=outcome.reply.message,
+        )
         chat.context_json = context
         if (
             not chat.original_idea
@@ -410,7 +493,16 @@ class SetupChatLaunchService:
             chat.original_idea = message
             chat.title = _title(message)
 
-        state = await self._persist_draft_state(session, chat, outcome.draft)
+        # The execution result already decided every gate, including the final status.
+        # Persisting it rather than re-deriving one is what stops the session and the
+        # reply the user just read from disagreeing.
+        state = await self._persist_draft_state(
+            session,
+            chat,
+            outcome.draft,
+            definition=outcome.definition,
+            execution=outcome.execution,
+        )
         await self.owner._assistant(
             session,
             chat,
@@ -426,8 +518,8 @@ class SetupChatLaunchService:
                 "segments": list(outcome.trace.segments),
                 "semantic_violations": list(state.violations),
                 "clarifications": (
-                    [outcome.reply.clarification.model_dump(mode="json")]
-                    if outcome.reply.clarification is not None
+                    [outcome.clarification.model_dump(mode="json")]
+                    if outcome.clarification is not None
                     else []
                 ),
                 "can_approve": chat.status == "ready_for_approval",
@@ -438,20 +530,74 @@ class SetupChatLaunchService:
         _set_runtime(chat, started, model_calls=outcome.trace.model_calls, cache_hits=0)
         return chat
 
+    def _screening_gate(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+    ) -> ScreeningGate | None:
+        """The Sharia policy and screened-universe gate, as an execution-phase callable."""
+
+        if not self.settings.sharia_screening_enforced:
+            return None
+
+        async def gate(
+            definition: StrategyDefinition,
+        ) -> tuple[StrategyDefinition | None, str | None]:
+            try:
+                return await self._apply_screening_policy(session, chat, definition), None
+            except (KeyError, ValueError, ShariaUniverseError) as exc:
+                return None, str(exc) or "Choose and validate a Halal Market first."
+
+        return gate
+
+    def _provider_gate(self) -> ProviderGate:
+        """Mark each provider requirement available or not, from configuration.
+
+        A requirement the platform has no adapter for stays unavailable, which blocks
+        approval transparently instead of compiling a rule that cannot be evaluated.
+        """
+
+        async def gate(
+            requirements: list[ProviderRequirementV2],
+        ) -> list[ProviderRequirementV2]:
+            return [
+                item.model_copy(
+                    update={"available": self._provider_available(item.provider)}
+                )
+                for item in requirements
+            ]
+
+        return gate
+
+    def _provider_available(self, provider: str) -> bool:
+        """Only candle data is wired. Anything else blocks approval, visibly.
+
+        Claiming an unwired feed is available would compile a rule that can never be
+        evaluated, and the alert would simply never fire with no explanation.
+        """
+        name = provider.strip().casefold()
+        return name in {"", "ohlcv", "market_data", "candles", "ccxt"}
+
     async def _recent_dialogue(
         self,
         session: AsyncSession,
         chat: AISetupChatSession,
+        *,
+        exclude_message_id: str | None = None,
     ) -> list[dict[str, str]]:
-        """The last few turns, oldest first. Bounded, never the whole log."""
+        """The last few turns, oldest first. Bounded, never the whole log.
+
+        The current turn is excluded: it is already supplied as `current_user_turn`, and
+        sending it twice invited the model to treat its own echo as prior context.
+        """
 
         rows = await session.scalars(
             select(AISetupChatMessage)
             .where(AISetupChatMessage.session_id == chat.id)
             .order_by(AISetupChatMessage.sequence.desc())
-            .limit(DIALOGUE_WINDOW_MAX)
+            .limit(DIALOGUE_WINDOW_MAX + 1)
         )
-        recent = list(rows)[::-1]
+        recent = [item for item in list(rows)[::-1] if str(item.id) != exclude_message_id]
         return [
             {"role": item.role, "content": (item.content or "")[:1500]}
             for item in recent
@@ -536,31 +682,49 @@ class SetupChatLaunchService:
         session: AsyncSession,
         chat: AISetupChatSession,
         draft: StrategyDraftV2,
+        *,
+        definition: StrategyDefinition | None = None,
+        execution: SetupTurnExecutionResult | None = None,
     ) -> _DraftRenderState:
         """Write every derived field the dashboard reads, and emit no message.
 
-        Separated from message generation on purpose. A reply is now composed from
-        what execution actually did, so the two jobs cannot share a code path that
-        picks a sentence based on a compiler outcome.
+        When ``execution`` is supplied, every gate has already run inside the turn and
+        its verdict is used as-is. Re-running the compiler and screening here was how the
+        service could discover a *later* blocker that contradicted the reply the user had
+        just read.
         """
-        violations = validate_draft_semantics(draft)
-        blocking = draft.blocking or bool(violations)
-        definition: StrategyDefinition | None = None
+        violations = list(execution.semantic_violations) if execution else (
+            validate_draft_semantics(draft)
+        )
         compile_error: str | None = None
-        if not blocking:
-            try:
-                definition = compile_strategy_draft_v2(draft)
-            except StrategyV2CompileError as exc:
-                compile_error = f"{exc.code}: {exc}"
-                blocking = True
         screening_error: str | None = None
-        if definition is not None and self.settings.sharia_screening_enforced:
-            try:
-                definition = await self._apply_screening_policy(session, chat, definition)
-            except (KeyError, ValueError, ShariaUniverseError) as exc:
-                screening_error = str(exc) or "Choose and validate a Halal Market."
-                definition = None
-                blocking = True
+        if execution is not None:
+            blocking = not execution.approval_eligible
+            compile_error = (
+                f"{execution.compile_status}: {execution.safe_errors[0]}"
+                if execution.compile_status in {"blocked", "failed"} and execution.safe_errors
+                else None
+            )
+            screening_error = (
+                execution.safe_errors[0]
+                if execution.screening_status == "blocked" and execution.safe_errors
+                else None
+            )
+        else:
+            blocking = draft.blocking or bool(violations)
+            if not blocking and definition is None:
+                try:
+                    definition = compile_strategy_draft_v2(draft)
+                except StrategyV2CompileError as exc:
+                    compile_error = f"{exc.code}: {exc}"
+                    blocking = True
+            if definition is not None and self.settings.sharia_screening_enforced:
+                try:
+                    definition = await self._apply_screening_policy(session, chat, definition)
+                except (KeyError, ValueError, ShariaUniverseError) as exc:
+                    screening_error = str(exc) or "Choose and validate a Halal Market."
+                    definition = None
+                    blocking = True
 
         chat.draft_schema_json = (
             definition.model_dump(mode="json") if definition is not None else None
@@ -598,13 +762,21 @@ class SetupChatLaunchService:
         chat.rule_confidence = _rule_confidence(draft)
         chat.assumptions = []
         chat.translation_sheet = _translation_sheet(draft)
-        chat.status = (
-            "needs_clarification"
-            if blocking
-            else "ready_to_scan"
-            if draft.mode == DraftMode.SCANNER
-            else "ready_for_approval"
-        )
+        # Status is read from the validated approval binding first. Deriving it from the
+        # compiler alone reset an already-approved session to `ready_for_approval` on a
+        # turn that changed nothing, silently losing an approval the user had given.
+        if execution is not None and execution.final_chat_status:
+            chat.status = execution.final_chat_status
+        elif _draft_is_approved(draft):
+            chat.status = "approved"
+        else:
+            chat.status = (
+                "needs_clarification"
+                if blocking
+                else "ready_to_scan"
+                if draft.mode == DraftMode.SCANNER
+                else "ready_for_approval"
+            )
         # Every remaining field is exposed. Only the number of *questions* is capped:
         # hiding the rest left the user unable to see what the draft still needed.
         unresolved = [item for item in draft.unresolved_fields if item.blocking]
@@ -777,6 +949,72 @@ def _archive_approval(
     chat.approved_at = None
     chat.approved_strategy_id = None
     chat.approved_strategy_version_id = None
+
+
+class TurnStatus(StrEnum):
+    """Where one keyed turn got to. Durable, so a retry knows what already happened."""
+
+    RECEIVED = "RECEIVED"
+    PLANNING = "PLANNING"
+    EXECUTING = "EXECUTING"
+    COMPOSING = "COMPOSING"
+    COMPLETED = "COMPLETED"
+    RETRYABLE_FAILURE = "RETRYABLE_FAILURE"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+
+
+#: How many keyed turns one session remembers. Enough to make retries reliable without
+#: growing the session document without bound.
+_TURN_RECORD_LIMIT = 50
+
+
+def _turn_record(
+    chat: AISetupChatSession,
+    client_message_id: str,
+) -> dict[str, Any] | None:
+    records = (chat.context_json or {}).get("turn_records")
+    if isinstance(records, dict):
+        record = records.get(client_message_id)
+        if isinstance(record, dict):
+            return record
+    return None
+
+
+def _record_turn(
+    context: dict[str, Any],
+    client_message_id: str | None,
+    *,
+    status: TurnStatus,
+    code: str | None = None,
+    message: str | None = None,
+) -> None:
+    """Write the turn's state into the same context the draft is written to.
+
+    One document, one write: the state change and its completion status commit together,
+    so no crash can leave a patch applied but the turn marked unfinished.
+    """
+    if not client_message_id:
+        return
+    records = dict(context.get("turn_records") or {})
+    records[client_message_id] = {
+        "status": status.value,
+        "code": code,
+        "message": (message or "")[:2000] or None,
+    }
+    if len(records) > _TURN_RECORD_LIMIT:
+        for key in list(records)[: len(records) - _TURN_RECORD_LIMIT]:
+            records.pop(key, None)
+    context["turn_records"] = records
+
+
+def _draft_is_approved(draft: StrategyDraftV2) -> bool:
+    """True when the approval binding names this exact version and hash."""
+
+    return (
+        draft.approval.approved
+        and draft.approval.draft_version == draft.version
+        and draft.approval.semantic_hash == draft.semantic_hash
+    )
 
 
 def _load_conversation_context(context: dict[str, Any]) -> SetupConversationContext:

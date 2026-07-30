@@ -22,6 +22,7 @@ from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import load_strategy_draft_v2
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
 from tests.integration.test_ai_setup_chat_api import _signup
+from tests.support.setup_agent_plans import operations_from_patch
 
 
 class MarketProvider:
@@ -70,7 +71,9 @@ class StandInPlanner:
         plan = SetupAgentTurnPlan(
             source_turn_id=turn_id,
             segments=[segment],
-            strategy_patch=patch,
+            operations=(
+                operations_from_patch(patch, segment_id="s1") if patch is not None else []
+            ),
             strategy_instructions=(
                 [StrategyInstructionPlan(segment_id="s1", intent_summary=message[:200])]
                 if patch is not None
@@ -100,7 +103,10 @@ class StandInPlanner:
                 200,
                 json=self._body(
                     json.dumps(
-                        {"message": "Done — the AI Sheet is updated.", "clarification": None}
+                        {
+                            "message": "Done — the AI Sheet is updated.",
+                            "clarification_question_id": None,
+                        }
                     )
                 ),
             )
@@ -404,8 +410,10 @@ async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_contex
 
         assert current.semantic_hash == initial.semantic_hash
         assert current.version == initial.version
-        assert (result.context_json or {})["turn_runtime"]["model_call_count"] == 1
-        assert planner.plan_calls == 1
+        # One turn is bounded at one planning call plus one composing call, whichever
+        # route it takes. Never a loop.
+        assert (result.context_json or {})["turn_runtime"]["model_call_count"] <= 2
+        assert planner.plan_calls == 1, "exactly one planning call"
 
 
 def test_patch_application_is_one_patch_per_turn():

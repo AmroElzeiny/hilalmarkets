@@ -24,26 +24,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
+    ClarificationContract,
+)
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
-    StrategyPatch,
 )
-from ai_market_monitor.schemas.strict_mode import drop_absent_nulls
-
-
-class _StrictModel(BaseModel):
-    """A model the provider fills under a strict schema.
-
-    Strict schemas require every key, so a model with nothing to say sends `null`.
-    That means "no opinion", so the declared default applies.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _absent_nulls_use_defaults(cls, data: object) -> object:
-        return drop_absent_nulls(cls, data)
+from ai_market_monitor.schemas.strict_mode import StrictModel as _StrictModel
 
 #: A reply is composed, not templated, so it needs room. Still bounded: an assistant
 #: turn that runs past this is padding, not content.
@@ -268,7 +256,10 @@ class SetupAgentTurnPlan(_StrictModel):
 
     source_turn_id: str = Field(min_length=1, max_length=80)
     segments: list[TurnSegment] = Field(min_length=1, max_length=24)
-    strategy_patch: StrategyPatch | None = None
+    #: Every state change, each naming the one segment that authorises it. This
+    #: replaced a single free-floating patch: a patch grounded against the whole
+    #: message let a value written inside a *question* justify a rule.
+    operations: list[AuthorizedPatchOperation] = Field(default_factory=list, max_length=24)
     strategy_instructions: list[StrategyInstructionPlan] = Field(
         default_factory=list, max_length=24
     )
@@ -304,10 +295,12 @@ class SetupAgentTurnPlan(_StrictModel):
         for request in self.clarifications_to_ask:
             if request.segment_id is not None and request.segment_id not in known:
                 raise ValueError("clarifications_to_ask references an unknown segment")
-        if self.strategy_patch is not None and self.strategy_patch.source_turn_id != (
-            self.source_turn_id
-        ):
-            raise ValueError("the patch must carry this turn's source_turn_id")
+        for operation in self.operations:
+            if operation.authorizing_segment_id not in known:
+                raise ValueError(
+                    f"operation {operation.kind} names unknown segment "
+                    f"{operation.authorizing_segment_id!r}"
+                )
         return self
 
     @property
@@ -322,7 +315,7 @@ class SetupAgentTurnPlan(_StrictModel):
         draft version.
         """
         return bool(
-            self.strategy_patch is not None
+            self.operations
             or self.clarification_answers
             or self.unsupported_segments
             or any(item.action_required for item in self.segments)
@@ -330,7 +323,13 @@ class SetupAgentTurnPlan(_StrictModel):
 
 
 class AppliedInstruction(BaseModel):
-    """One instruction the server actually applied, with the words that caused it."""
+    """One operation the server applied, and the canonical change it produced.
+
+    ``summary`` is written from the before/after drafts, not from the model's own
+    sentence about what it meant to do. ``condition_ids`` holds only the rules this
+    operation actually touched — attaching the whole draft made a reply claim edits to
+    rules the turn never mentioned.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -338,6 +337,10 @@ class AppliedInstruction(BaseModel):
     source_text: str = Field(min_length=1, max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH)
     summary: str = Field(min_length=1, max_length=400)
     condition_ids: list[str] = Field(default_factory=list, max_length=24)
+    #: The operation kind that produced this change, for the operator trace.
+    operation: str = Field(default="", max_length=60)
+    #: Typed change records from `draft_diff`, the authoritative evidence.
+    changes: list[dict[str, object]] = Field(default_factory=list, max_length=24)
 
 
 class IgnoredSegment(BaseModel):
@@ -389,6 +392,16 @@ class SetupTurnExecutionResult(BaseModel):
     unsupported_requirements: list[dict[str, str]] = Field(default_factory=list, max_length=100)
     semantic_violations: list[str] = Field(default_factory=list, max_length=100)
     compile_status: Literal["compiled", "blocked", "not_attempted", "failed"]
+    #: Whether the Sharia policy and screened universe resolved. Every gate runs inside
+    #: execution now: the reply used to be written from a *pre*-screening compile, so a
+    #: message could announce a ready draft that screening then blocked.
+    screening_status: Literal["passed", "blocked", "not_required", "not_attempted"] = (
+        "not_required"
+    )
+    provider_status: Literal["available", "unavailable", "not_required"] = "not_required"
+    #: The status the chat will actually carry after this turn. Decided here, so the
+    #: composer and the persisted session can never disagree.
+    final_chat_status: str = Field(default="", max_length=40)
     approval_eligible: bool = False
     approval_status: Literal[
         "not_eligible",
@@ -399,6 +412,12 @@ class SetupTurnExecutionResult(BaseModel):
     #: Sanitised messages safe to show a user. Never a stack trace or internal path.
     safe_errors: list[str] = Field(default_factory=list, max_length=20)
     suggested_next_actions: list[str] = Field(default_factory=list, max_length=6)
+    #: The only questions the composer may ask. It cannot invent an executable one.
+    allowed_clarifications: list[ClarificationContract] = Field(
+        default_factory=list, max_length=6
+    )
+    #: Deterministic read model for answering questions about the current draft.
+    draft_read_model: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_consistency(self) -> SetupTurnExecutionResult:
@@ -410,6 +429,16 @@ class SetupTurnExecutionResult(BaseModel):
             raise ValueError("an unchanged draft cannot change version")
         if self.approval_eligible and self.compile_status != "compiled":
             raise ValueError("approval cannot be eligible before the draft compiles")
+        if self.approval_eligible and self.screening_status == "blocked":
+            raise ValueError("approval cannot be eligible while screening blocks the draft")
+        if self.approval_eligible and self.provider_status == "unavailable":
+            raise ValueError("approval cannot be eligible while a provider is unavailable")
+        # An approval that survived this turn must not also be reported as newly
+        # eligible or as invalidated: the three states are mutually exclusive facts.
+        if self.approval_status == "approved" and self.strategy_mutated:
+            raise ValueError("a mutated draft cannot keep its previous approval")
+        if self.approval_status == "invalidated_by_edit" and not self.strategy_mutated:
+            raise ValueError("approval cannot be invalidated without a material change")
         return self
 
 
@@ -434,26 +463,42 @@ class SetupConversationContext(BaseModel):
     last_explained_condition_ids: list[str] = Field(default_factory=list, max_length=24)
     last_changed_condition_ids: list[str] = Field(default_factory=list, max_length=24)
     last_assistant_summary: str | None = Field(default=None, max_length=1000)
+    #: The full contract of the open question, so the next turn can check that an
+    #: answer actually resolved the thing it claimed to.
+    active_question: ClarificationContract | None = None
+    #: Questions already answered in this draft. Prevents re-asking a closed one.
+    answered_question_ids: list[str] = Field(default_factory=list, max_length=24)
+    #: How many questions this draft has asked, against the per-draft limit.
+    clarifications_asked: int = Field(default=0, ge=0)
 
-    def with_question(self, request: ClarificationRequest) -> SetupConversationContext:
+    def with_question(self, contract: ClarificationContract) -> SetupConversationContext:
         return self.model_copy(
             update={
-                "active_question_id": request.question_id,
-                "question_text": request.question,
-                "question_target": request.question_id,
-                "valid_answer_shape": (
-                    "one of: " + "; ".join(request.options) if request.options else "free text"
-                ),
+                "active_question_id": contract.question_id,
+                "question_text": contract.question,
+                "question_target": contract.target_field or contract.question_id,
+                "valid_answer_shape": contract.expected_answer_schema,
+                "active_question": contract,
+                "clarifications_asked": self.clarifications_asked + 1,
             }
         )
 
     def cleared_question(self) -> SetupConversationContext:
+        """Close the open question, remembering that it was answered.
+
+        Recording the id is what stops the composer asking it again next turn.
+        """
+        answered = list(self.answered_question_ids)
+        if self.active_question_id and self.active_question_id not in answered:
+            answered.append(self.active_question_id)
         return self.model_copy(
             update={
                 "active_question_id": None,
                 "question_text": None,
                 "question_target": None,
                 "valid_answer_shape": None,
+                "active_question": None,
+                "answered_question_ids": answered[-24:],
             }
         )
 
@@ -464,8 +509,12 @@ class SetupAgentReply(_StrictModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=SETUP_REPLY_MAX_LENGTH)
-    #: A question to carry into the next turn, when one is genuinely needed.
-    clarification: ClarificationRequest | None = None
+    #: The `question_id` of one server-authorised clarification, or null.
+    #:
+    #: The composer used to return a free-form question, so it could invent an
+    #: executable clarification the server never agreed was needed — and re-ask one
+    #: already answered. It may now only choose from `allowed_clarifications`.
+    clarification_question_id: str | None = Field(default=None, max_length=120)
 
 
 class SetupAgentPlanEnvelope(_StrictModel):
