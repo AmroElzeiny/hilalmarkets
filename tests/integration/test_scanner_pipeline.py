@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -7,7 +8,9 @@ from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
+    AuditEvent,
     ConditionRuntimeState,
+    DashboardPreference,
     NearMissSnapshot,
     ScanJob,
     ScanResult,
@@ -32,11 +35,25 @@ from ai_market_monitor.db.models.enums import (
     StrategyVersionStatus,
     SubscriptionStatus,
 )
+from ai_market_monitor.schemas.strategy import StrategyDefinition, StrategyDirection
 from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.notifications import TelegramDeliveryService
+from ai_market_monitor.services.on_demand_scans import OnDemandScanService
 from ai_market_monitor.services.scanner import ScanOrchestrator, ScanScheduler
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
 from tests.factories import candle_sets, load_strategy
+
+
+def _fresh_rows(rows, _timeframe: str):
+    evaluated_at = candle_sets()["15m"][-1].timestamp
+    interval = rows[-1].timestamp - rows[-2].timestamp
+    return [
+        replace(
+            row,
+            timestamp=evaluated_at - (len(rows) - index - 1) * interval,
+        )
+        for index, row in enumerate(rows)
+    ]
 
 
 class PartialMarketProvider:
@@ -46,7 +63,9 @@ class PartialMarketProvider:
     async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
         if symbol == "FAIL/USDT":
             raise TimeoutError("fixture exchange timeout")
-        return candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+        return _fresh_rows(candle_sets(volume_multiplier=1.6)[timeframe], timeframe)[
+            -limit:
+        ]
 
 
 class SingleMarketProvider:
@@ -54,7 +73,9 @@ class SingleMarketProvider:
         return ["SOL/USDT"]
 
     async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
-        return candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+        return _fresh_rows(candle_sets(volume_multiplier=1.6)[timeframe], timeframe)[
+            -limit:
+        ]
 
 
 class CloseButBelowAlertProvider:
@@ -74,7 +95,28 @@ class CloseButBelowAlertProvider:
                 volume=latest.volume,
                 is_closed=True,
             )
-        return sets[timeframe][-limit:]
+        return _fresh_rows(sets[timeframe], timeframe)[-limit:]
+
+
+class FrozenMarketProvider:
+    def __init__(self, evaluated_at: datetime):
+        self.candles = {}
+        for timeframe, rows in candle_sets(volume_multiplier=1.6).items():
+            interval = rows[-1].timestamp - rows[-2].timestamp
+            latest = evaluated_at - interval
+            self.candles[timeframe] = [
+                replace(
+                    row,
+                    timestamp=latest - (len(rows) - index - 1) * interval,
+                )
+                for index, row in enumerate(rows)
+            ]
+
+    async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
+        return ["SOL/USDT"]
+
+    async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
+        return self.candles[timeframe][-limit:]
 
 
 class SuccessfulTelegramAdapter:
@@ -236,6 +278,152 @@ async def test_scan_schedule_is_idempotent_and_partial_job_persists_success(test
         rerun = await ScanOrchestrator(session, PartialMarketProvider()).run_job(first[0].id)
         assert rerun.status == ScanJobStatus.PARTIAL
         assert await session.scalar(select(func.count(ScanResult.id))) == 1
+
+
+async def test_neutral_monitor_creates_one_result_journey_and_alert(test_context):
+    async with test_context["session_factory"]() as session:
+        strategy, version = await _active_strategy(session)
+        definition = StrategyDefinition.model_validate(version.schema_json)
+        definition = definition.model_copy(
+            update={
+                "direction": StrategyDirection.NEUTRAL,
+                "risk": definition.risk.model_copy(update={"enabled": False}),
+                "conditions": definition.conditions.model_copy(
+                    update={"children": [definition.conditions.children[0]]}
+                ),
+            }
+        )
+        version.schema_json = definition.model_dump(mode="json")
+        version.schema_hash = definition.canonical_hash()
+        version.approved_schema_hash = version.schema_hash
+        session.add(
+            TelegramConnection(
+                user_id=strategy.user_id,
+                telegram_user_id="neutral-telegram",
+                chat_id="neutral-chat",
+                status=ConnectionStatus.ACTIVE,
+                alerts_enabled=True,
+            )
+        )
+        await session.flush()
+        jobs = await ScanScheduler(session).schedule_due(
+            scheduled_for=candle_sets()["15m"][-1].timestamp
+        )
+
+        summary = await ScanOrchestrator(
+            session,
+            SingleMarketProvider(),
+        ).run_job(jobs[0].id, worker_id="neutral-worker")
+        await session.commit()
+
+        assert summary.symbols_scanned == 1
+        assert await session.scalar(select(func.count(ScanResult.id))) == 1
+        assert await session.scalar(select(func.count(SetupInstance.id))) == 1
+        assert await session.scalar(select(func.count(Alert.id))) == 1
+        result = await session.scalar(select(ScanResult))
+        setup = await session.scalar(select(SetupInstance))
+        assert result is not None and result.direction == "neutral"
+        assert setup is not None and setup.direction == "neutral"
+
+
+async def test_worker_degrades_active_monitor_when_provider_gate_would_cancel_every_job(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        strategy, _version = await _active_strategy(session)
+        session.add(
+            DashboardPreference(
+                user_id=strategy.user_id,
+                notification_preferences={"providers": ["bybit"]},
+            )
+        )
+        await session.flush()
+        jobs = await ScanScheduler(session).schedule_due(
+            scheduled_for=candle_sets()["15m"][-1].timestamp
+        )
+
+        summary = await ScanOrchestrator(
+            session,
+            SingleMarketProvider(),
+        ).run_job(jobs[0].id, worker_id="provider-gate-worker")
+        await session.commit()
+
+        assert summary.status == ScanJobStatus.CANCELED
+        assert strategy.status == StrategyStatus.PAUSED
+        assert strategy.paused_at is not None
+        audit = await session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "strategy.runtime_degraded",
+                AuditEvent.target_id == str(strategy.id),
+            )
+        )
+        assert audit is not None
+        assert audit.metadata_redacted["code"] == "provider_disabled"
+
+
+async def test_frozen_scanner_and_monitor_evaluate_identical_semantics(test_context):
+    async with test_context["session_factory"]() as session:
+        strategy, version = await _active_strategy(session)
+        definition = load_strategy()
+        definition.universe.include_symbols = []
+        evaluated_at = datetime.now(UTC).replace(microsecond=0)
+        provider = FrozenMarketProvider(evaluated_at)
+
+        monitor_payload = await ScanOrchestrator(
+            session,
+            provider,
+            settings=test_context["settings"],
+        )._evaluate_symbol(
+            strategy,
+            version,
+            definition,
+            "SOL/USDT",
+            evaluated_at,
+        )
+        scanner_results, scanner_statuses, _manifest, _manifest_hash = (
+            await OnDemandScanService(
+                session,
+                provider,
+                settings=test_context["settings"],
+            )._evaluate_symbol(
+                definition,
+                "SOL/USDT",
+                evaluated_at,
+                strategy=strategy,
+                version=version,
+                light_scan=False,
+                include_non_confirmed=True,
+                account_balance=None,
+                screening_evidence=None,
+                screening_context={},
+            )
+        )
+
+        monitor_evaluations = monitor_payload["evaluations"]
+        assert len(monitor_evaluations) == len(scanner_results) == len(scanner_statuses) == 1
+        monitor = monitor_evaluations[0]
+        scanner = scanner_results[0]
+        assert scanner.direction == monitor.direction
+        assert scanner.outcome == monitor.outcome.value
+        assert scanner.timeframe == monitor.timeframe
+        monitor_conditions = {
+            item.condition_id: (
+                item.state.value,
+                item.required_value,
+                item.actual_value,
+            )
+            for item in monitor.near_miss.passed_conditions
+            + monitor.near_miss.missing_conditions
+        }
+        scanner_conditions = {
+            item.condition_id: (
+                item.state,
+                item.required_value,
+                item.actual_value,
+            )
+            for item in scanner.passed_conditions + scanner.missing_conditions
+        }
+        assert scanner_conditions == monitor_conditions
 
 
 async def test_telegram_delivery_is_not_sent_without_provider_message_id(test_context):

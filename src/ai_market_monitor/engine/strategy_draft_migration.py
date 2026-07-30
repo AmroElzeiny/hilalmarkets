@@ -13,11 +13,12 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
     ConditionNodeV2,
-    DraftDirection,
     DraftMode,
     FormulaKind,
     MarketScopeV2,
+    MovementDirection,
     OperandV2,
+    StrategyBias,
     StrategyDraftV2,
     StrategyUniverseV2,
     UnsupportedRequirementV2,
@@ -38,17 +39,13 @@ def migrate_legacy_draft(
         )
     definition = StrategyDefinition.model_validate(payload)
     root = _migrate_node(definition.conditions)
-    direction = {
-        StrategyDirection.LONG: DraftDirection.LONG,
-        StrategyDirection.SHORT: DraftDirection.SHORT,
-        StrategyDirection.BOTH: DraftDirection.NEUTRAL,
+    strategy_bias = {
+        StrategyDirection.LONG: StrategyBias.LONG,
+        StrategyDirection.SHORT: StrategyBias.SHORT,
+        StrategyDirection.NEUTRAL: StrategyBias.NEUTRAL,
+        StrategyDirection.BOTH: StrategyBias.NEUTRAL,
     }[definition.direction]
-    for node in root.walk():
-        if (
-            node.node_type == ConditionNodeType.CONDITION
-            and node.direction == DraftDirection.NEUTRAL
-        ):
-            node.direction = direction
+    root = _apply_strategy_bias(root, strategy_bias)
     blocked = [
         UnsupportedRequirementV2(
             key=str(item.get("code") or f"legacy_unsupported_{index}"),
@@ -121,6 +118,8 @@ def _migrate_node(node: ConditionRule | ConditionGroup) -> ConditionNodeV2:
         source_turn_id="legacy-migration",
         source_fragment=node.source_fragment or node.label,
         required=node.required,
+        movement_direction=_legacy_movement_direction(parameters.get("direction")),
+        strategy_bias=StrategyBias.NEUTRAL,
         formula=formula,
         operands=operands,
         operator=node.comparator,
@@ -138,6 +137,33 @@ def _migrate_node(node: ConditionRule | ConditionGroup) -> ConditionNodeV2:
             else None
         ),
         capability_key=capability_key,
+        capability_version=node.capability_version,
+        capability_parameters=dict(parameters),
+    )
+
+
+def _legacy_movement_direction(value: Any) -> MovementDirection:
+    lowered = str(value or "").casefold()
+    if lowered in {"up", "long", "bullish"}:
+        return MovementDirection.UP
+    if lowered in {"down", "short", "bearish"}:
+        return MovementDirection.DOWN
+    return MovementDirection.NEUTRAL
+
+
+def _apply_strategy_bias(
+    node: ConditionNodeV2,
+    bias: StrategyBias,
+) -> ConditionNodeV2:
+    if node.node_type == ConditionNodeType.CONDITION:
+        return node.model_copy(update={"strategy_bias": bias})
+    return node.model_copy(
+        update={
+            "children": [
+                _apply_strategy_bias(child, bias)
+                for child in node.children
+            ]
+        }
     )
 
 

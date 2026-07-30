@@ -21,6 +21,7 @@ from ai_market_monitor.db.models import (
     AIUsageEvent,
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
+    SetupChatTurn,
     Strategy,
 )
 from ai_market_monitor.db.models.enums import (
@@ -98,6 +99,7 @@ from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import (
     SetupChatLaunchService,
     SetupLaunchError,
+    load_strategy_draft_v2,
 )
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
@@ -728,9 +730,8 @@ class AISetupChatService:
         if not self.settings.setup_chat_legacy_test_compat_enabled:
             launch_context = {
                 "strategy_draft_v2": new_strategy_draft().model_dump(mode="json"),
-                "strategy_draft_v2_history": [],
                 "strategy_state_authority": "v2",
-                "launch_pipeline_version": "2.0",
+                "launch_pipeline_version": "3.1",
             }
         chat = AISetupChatSession(
             user_id=user_id,
@@ -751,8 +752,8 @@ class AISetupChatService:
             role="assistant",
             message_type="welcome",
             content=(
-                "Hi, I’m your HilalMarkets setup assistant. Choose Scanner for a one-time market "
-                "search or Monitor for persistent alerts. I’ll make every rule clear before "
+                "Hi, I'm your HilalMarkets setup assistant. Choose Scanner for a one-time market "
+                "search or Monitor for persistent alerts. I'll make every rule clear before "
                 "anything is created."
             ),
             payload={
@@ -814,8 +815,8 @@ class AISetupChatService:
         chat: AISetupChatSession,
         *,
         expected_schema_hash: str,
-        expected_draft_version: int | None = None,
-        expected_semantic_hash: str | None = None,
+        expected_executable_version: int | None = None,
+        expected_executable_hash: str | None = None,
         confirmed_low_confidence_rule_keys: set[str] | None = None,
     ) -> None:
         """Approve the exact current draft through the existing domain gates."""
@@ -831,8 +832,8 @@ class AISetupChatService:
                 approved_v2 = StrategyDraftV2.model_validate(v2_payload)
                 if (
                     approved_v2.approval.approved
-                    and expected_draft_version == approved_v2.version
-                    and expected_semantic_hash == approved_v2.semantic_hash
+                    and expected_executable_version == approved_v2.executable_version
+                    and expected_executable_hash == approved_v2.executable_hash
                     and expected_schema_hash == context.get("approved_schema_hash")
                     and chat.approved_strategy_id is not None
                     and chat.approved_strategy_version_id is not None
@@ -898,8 +899,8 @@ class AISetupChatService:
                     status_code=409,
                 )
             if (
-                expected_draft_version != draft_v2.version
-                or expected_semantic_hash != draft_v2.semantic_hash
+                expected_executable_version != draft_v2.executable_version
+                or expected_executable_hash != draft_v2.executable_hash
             ):
                 raise SetupChatError(
                     "setup_changed",
@@ -916,17 +917,18 @@ class AISetupChatService:
                         "approval": ApprovalBindingV2(
                             approved=True,
                             user_id=chat.user_id,
-                            draft_version=draft_v2.version,
-                            semantic_hash=draft_v2.semantic_hash,
+                            executable_version=draft_v2.executable_version,
+                            executable_hash=draft_v2.executable_hash,
                             conversation_snapshot_hash=snapshot_hash,
                             approved_at=datetime.now(UTC),
                         ),
-                        "semantic_hash": draft_v2.semantic_hash,
+                        "executable_hash": draft_v2.executable_hash,
+                        "workflow_state_hash": draft_v2.workflow_state_hash,
                     }
                 ).model_dump(mode="json")
             )
             context["strategy_draft_v2"] = draft_v2.model_dump(mode="json")
-            draft_version = draft_v2.version
+            draft_version = draft_v2.executable_version
         else:
             state_payload = context.get("strategy_state")
             strategy_state = StrategyDraftState.from_dict(
@@ -973,7 +975,11 @@ class AISetupChatService:
                 "conversation_snapshot_hash": snapshot_hash,
             },
         )
-        strategy_service = StrategyService(session, self.settings.disclaimer_version)
+        strategy_service = StrategyService(
+            session,
+            self.settings.disclaimer_version,
+            self.settings,
+        )
         strategy, version = await strategy_service.create_from_interpretation(
             chat.user_id,
             preview,
@@ -985,26 +991,15 @@ class AISetupChatService:
             strategy=strategy,
             version=version,
         )
-        statements = await verification_service.sync_interpretation(
+        await verification_service.sync_interpretation(
             user_id=chat.user_id,
             strategy=strategy,
             version=version,
         )
-        for statement in statements:
-            if statement.status == "assumed" and statement.resolution_status == "unresolved":
-                await verification_service.resolve_statement(
-                    user_id=chat.user_id,
-                    statement_id=statement.id,
-                    action="accept",
-                    resolution_text=None,
-                )
-        await verification_service.approve_interpretation(
+        await verification_service.approve_visible_draft(
             user_id=chat.user_id,
             version=version,
-        )
-        await verification_service.approval_gate(
-            user_id=chat.user_id,
-            version=version,
+            expected_schema_hash=version.schema_hash,
         )
         await strategy_service.approve(
             version,
@@ -1154,6 +1149,12 @@ class AISetupChatService:
                     stage=exc.stage,
                     retryable=exc.retryable,
                 ) from exc
+        if (chat.context_json or {}).get("strategy_state_authority") == "v2":
+            raise SetupChatError(
+                "legacy_v2_read_only",
+                "This V2 draft can only be changed through the current Setup Chat runtime.",
+                status_code=409,
+            )
         cleaned = " ".join(message.split())
         initial_strategy_turn = (
             classify_strategy_turn(cleaned) if cleaned and not option_key else None
@@ -1633,7 +1634,7 @@ class AISetupChatService:
             await self._assistant(
                 session,
                 chat,
-                "Type your answer in your own words. I’ll apply it to the question above.",
+                "Type your answer in your own words. I'll apply it to the question above.",
                 message_type="custom_answer_requested",
                 payload={"awaiting_custom_answer": True},
             )
@@ -1896,8 +1897,8 @@ class AISetupChatService:
                 (
                     "Scanner is ready. Describe the conditions coins should match right now."
                     if mode == "scanner"
-                    else "Let’s build your monitor. First, describe the market event that "
-                    "should trigger it; we’ll clarify filters and timing next."
+                    else "Let's build your monitor. First, describe the market event that "
+                    "should trigger it; we'll clarify filters and timing next."
                 ),
                 message_type="mode_selected",
                 payload={"setup_mode": mode},
@@ -1930,7 +1931,7 @@ class AISetupChatService:
                 session,
                 chat,
                 (
-                    f"I can’t validate {unsupported[0]['label']} with the configured spot-data "
+                    f"I can't validate {unsupported[0]['label']} with the configured spot-data "
                     "providers. Remove it or replace it with an OHLCV-based rule such as price, "
                     "volume, RSI, EMA, or a candle condition."
                 ),
@@ -2875,7 +2876,7 @@ class AISetupChatService:
                 bottom_movers=bottom,
                 data_source=provider_name,
                 message=(
-                    f"{captured_at:%Y-%m-%d %H:%M} UTC · {provider_name} · "
+                    f"{captured_at:%Y-%m-%d %H:%M} UTC | {provider_name} | "
                     f"{len(changes)} {selected_exchange.title()} {quote_currency} spot pairs. "
                     f"BTC/ETH: {majors}. Gainers: {leader_text}. Losers: {loser_text}. "
                     f"Breadth: {advancing} advancing, {declining} declining, {unchanged} flat; "
@@ -2895,7 +2896,7 @@ class AISetupChatService:
                     unavailable_reason or "the configured provider did not respond"
                 ),
                 message=(
-                    f"I couldn’t build the snapshot because "
+                    f"I couldn't build the snapshot because "
                     f"{unavailable_reason or 'the configured provider did not respond'}. "
                     "No values were invented. Please retry when the provider is available."
                 ),
@@ -3422,6 +3423,7 @@ class AISetupChatService:
         chat: AISetupChatSession,
         *,
         user_id: UUID,
+        idempotency_key: str | None = None,
     ) -> AISetupChatSession:
         if _setup_mode(chat) != "scanner":
             raise SetupChatError(
@@ -3437,6 +3439,7 @@ class AISetupChatService:
                 status_code=409,
             )
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        draft = load_strategy_draft_v2(chat)
         has_executable_required_rule = any(
             rule.required
             and rule.key != "clarification_required"
@@ -3459,8 +3462,13 @@ class AISetupChatService:
                 user_id,
                 OnDemandScanRequest(
                     strategy=definition,
+                    source_draft_id=draft.draft_id,
+                    source_draft_version=draft.executable_version,
+                    source_draft_hash=draft.executable_hash,
                     max_symbols=100000,
-                    idempotency_key=(f"setup-chat-scanner:{chat.id}:{definition.canonical_hash()}"),
+                    idempotency_key=(
+                        idempotency_key or f"setup-chat-scanner:{chat.id}:{uuid4()}"
+                    ),
                     light_scan=True,
                     include_non_confirmed=True,
                 ),
@@ -3602,6 +3610,7 @@ class AISetupChatService:
                 status_code=409,
             )
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
+        draft = load_strategy_draft_v2(chat)
         if definition.canonical_hash() != expected_hash:
             raise SetupChatError(
                 "strategy_hash_mismatch",
@@ -3617,6 +3626,9 @@ class AISetupChatService:
                 chat.user_id,
                 OnDemandScanRequest(
                     strategy=definition,
+                    source_draft_id=draft.draft_id,
+                    source_draft_version=draft.executable_version,
+                    source_draft_hash=draft.executable_hash,
                     max_symbols=100000,
                     idempotency_key=f"bounded-agent-scanner:{chat.id}:{expected_hash}",
                     light_scan=True,
@@ -3904,6 +3916,7 @@ class AISetupChatService:
         chat: AISetupChatSession,
         *,
         envelope: SetupChatErrorEnvelope,
+        client_message_id: str | None = None,
     ) -> None:
         """Close a failed turn with a real assistant message and no state change.
 
@@ -3941,6 +3954,28 @@ class AISetupChatService:
                 "approval_state": _strategy_approval_state(chat),
             },
         )
+        if client_message_id:
+            turn = await session.scalar(
+                select(SetupChatTurn)
+                .where(
+                    SetupChatTurn.chat_session_id == chat.id,
+                    SetupChatTurn.client_message_id == client_message_id,
+                )
+                .with_for_update()
+            )
+            if (
+                turn is not None
+                and turn.status != "COMPLETED"
+                and turn.execution_result_json is None
+            ):
+                turn.status = (
+                    "RETRYABLE_FAILURE"
+                    if envelope.retryable
+                    else "PERMANENT_FAILURE"
+                )
+                turn.failure_code = envelope.error_code
+                turn.failure_stage = envelope.stage
+                turn.failure_retryable = envelope.retryable
 
     async def _assistant(
         self,
@@ -4330,10 +4365,10 @@ def _fallback_turn_classification(
         intent = "conversation"
         category = "human_conversation"
         assistant_message = (
-            "You’re welcome. We can keep talking while we build this; your setup stays unchanged "
+            "You're welcome. We can keep talking while we build this; your setup stays unchanged "
             "until you give or confirm a rule."
             if legacy_intent != "greeting"
-            else "I’m well, thank you. Describe a crypto spot setup whenever you’re ready."
+            else "I'm well, thank you. Describe a crypto spot setup whenever you're ready."
         )
         technical_fragments = []
     elif legacy_intent == "setup":
@@ -4638,15 +4673,15 @@ def _turn_response_fallback(
         if candidates:
             labels = ", ".join(dict.fromkeys(item["label"] for item in candidates[:3]))
             return (
-                f"HilalMarkets has registered mechanics related to {labels}. I haven’t added "
+                f"HilalMarkets has registered mechanics related to {labels}. I haven't added "
                 "anything to your setup; ask me to compare them or tell me which meaning you want."
             )
         return (
-            "I can’t confirm a verified registered mechanic for that wording yet. I haven’t "
+            "I can't confirm a verified registered mechanic for that wording yet. I haven't "
             "changed your setup; describe the measurable behavior and I can check it safely."
         )
     if classification.intent == "option_question":
-        return "I’ll explain the current choices without treating your question as a rule."
+        return "I'll explain the current choices without treating your question as a rule."
     if classification.intent == "conversation":
         return (
             "Of course. We can talk normally; I only change the setup when you give or "
@@ -4659,7 +4694,7 @@ def _turn_response_fallback(
         )
     if classification.intent == "out_of_scope":
         return (
-            "I’m focused on HilalMarkets crypto spot monitoring and product help. Ask me about a "
+            "I'm focused on HilalMarkets crypto spot monitoring and product help. Ask me about a "
             "feature or describe what market behavior you want to monitor."
         )
     return "Tell me what you would like to monitor."
@@ -6014,7 +6049,7 @@ def _begin_clarification_set(
 def _clarification_checkpoint_message(total: int, remaining: int) -> str:
     return (
         f"Clarification checkpoint: {remaining} detail{'s' if remaining != 1 else ''} "
-        f"remain in this {total}-question review. I’ll ask one at a time before validation."
+        f"remain in this {total}-question review. I'll ask one at a time before validation."
     )
 
 
@@ -6210,7 +6245,7 @@ def _resolver_clarifications(
                     f"({candidate.capability_key})"
                 ),
                 description=(
-                    f"{round(candidate.confidence * 100)}% registry match · "
+                    f"{round(candidate.confidence * 100)}% registry match | "
                     f"{candidate.temporal_behavior.replace('_', ' ')}"
                 ),
             )

@@ -38,9 +38,10 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
     ConditionNodeV2,
-    DraftDirection,
     FormulaKind,
+    MovementDirection,
     OperandV2,
+    StrategyBias,
     StrategyDraftV2,
 )
 from ai_market_monitor.services.ai_setup_chat import setup_chat_error_envelope
@@ -49,6 +50,40 @@ from ai_market_monitor.services.strategy_patch_extractor import (
 )
 
 EVERY_UNIT = ("percent", "price", "ratio", "count", "index", "boolean", "none")
+
+
+def _operands_for(formula: FormulaKind) -> list[OperandV2]:
+    percentage_names = {
+        FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: "open_to_close",
+        FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: "close_to_close",
+        FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: "reference_to_current",
+        FormulaKind.HIGH_TO_LOW_PERCENTAGE: "high_to_low",
+        FormulaKind.LOW_TO_HIGH_PERCENTAGE: "low_to_high",
+    }
+    if formula in percentage_names:
+        return [
+            OperandV2(
+                role="measured_value",
+                kind="market_metric",
+                name="percentage_change",
+                parameters={"formula": percentage_names[formula]},
+            )
+        ]
+    if formula is FormulaKind.SWEEP_AND_RECLAIM:
+        return [
+            OperandV2(
+                role="sweep_state",
+                kind="market_metric",
+                name="sweep_and_reclaim",
+                parameters={"pierce_required": True, "reclaim_required": True},
+            )
+        ]
+    if formula is FormulaKind.CAPABILITY:
+        return [OperandV2(role="value", kind="market_metric", name="registered_capability")]
+    return [
+        OperandV2(role="left", kind="price", field="close"),
+        OperandV2(role="right", kind="reference", name="previous_candle_close"),
+    ]
 
 
 def _node(**overrides) -> ConditionNodeV2:
@@ -61,9 +96,10 @@ def _node(**overrides) -> ConditionNodeV2:
         "threshold": 5.0,
         "unit": "percent",
         "trigger_timeframe": "15m",
-        "operands": [OperandV2(role="measured_value", kind="price", field="close")],
+        "movement_direction": MovementDirection.UP,
     }
     payload.update(overrides)
+    payload.setdefault("operands", _operands_for(payload["formula"]))
     if payload.get("formula") is FormulaKind.CAPABILITY:
         payload.setdefault("capability_key", "registered_capability")
     return ConditionNodeV2(**payload)
@@ -91,15 +127,15 @@ def test_only_the_operators_a_formula_owns_are_accepted(
     contract = FORMULA_CONTRACTS[formula]
     unit = sorted(contract.units)[0]
     threshold = None if operator in {Comparator.IS_TRUE, Comparator.IS_FALSE} else 5.0
-    direction = next(
-        side for side in DraftDirection if side not in contract.forbidden_directions
+    movement_direction = next(
+        side for side in MovementDirection if side not in contract.forbidden_directions
     )
     errors = _violations(
         formula=formula,
         operator=operator,
         unit=unit,
         threshold=threshold,
-        direction=direction,
+        movement_direction=movement_direction,
         operands=[
             OperandV2(role="a", kind="price", field="close"),
             OperandV2(role="b", kind="reference", name="previous_candle_close"),
@@ -121,24 +157,24 @@ def test_only_the_units_a_formula_owns_are_accepted(
     contract = FORMULA_CONTRACTS[formula]
     operator = sorted(contract.operators, key=lambda item: item.value)[0]
     threshold = None if operator in {Comparator.IS_TRUE, Comparator.IS_FALSE} else 5.0
-    direction = next(
-        side for side in DraftDirection if side not in contract.forbidden_directions
+    movement_direction = next(
+        side for side in MovementDirection if side not in contract.forbidden_directions
     )
     errors = _violations(
         formula=formula,
         operator=operator,
         unit=unit,
         threshold=threshold,
-        direction=direction,
+        movement_direction=movement_direction,
     )
     mismatched = [item for item in errors if item.startswith("formula_unit_mismatch")]
     assert bool(mismatched) is (unit not in contract.units), (formula, unit, errors)
 
 
 @pytest.mark.parametrize("formula", list(FormulaKind))
-@pytest.mark.parametrize("direction", list(DraftDirection))
+@pytest.mark.parametrize("movement_direction", list(MovementDirection))
 def test_a_formula_never_measures_a_side_it_cannot_measure(
-    formula: FormulaKind, direction: DraftDirection
+    formula: FormulaKind, movement_direction: MovementDirection
 ) -> None:
     contract = FORMULA_CONTRACTS[formula]
     operator = sorted(contract.operators, key=lambda item: item.value)[0]
@@ -148,12 +184,14 @@ def test_a_formula_never_measures_a_side_it_cannot_measure(
         operator=operator,
         unit=sorted(contract.units)[0],
         threshold=threshold,
-        direction=direction,
+        movement_direction=movement_direction,
     )
     mismatched = [item for item in errors if item.startswith("formula_direction_mismatch")]
-    assert bool(mismatched) is (direction in contract.forbidden_directions), (
+    assert bool(mismatched) is (
+        movement_direction in contract.forbidden_directions
+    ), (
         formula,
-        direction,
+        movement_direction,
         errors,
     )
 
@@ -162,7 +200,11 @@ def test_a_signed_threshold_is_kept_exactly_as_the_trader_stated_it() -> None:
     """`-2%` with a long bias is a dip rule, not a defect. The sign is never overruled."""
     assert not [
         item
-        for item in _violations(direction=DraftDirection.LONG, threshold=-2.0)
+        for item in _violations(
+            movement_direction=MovementDirection.DOWN,
+            strategy_bias=StrategyBias.LONG,
+            threshold=-2.0,
+        )
         if "threshold" in item
     ]
 
@@ -179,8 +221,14 @@ def test_the_trigger_timeframe_can_never_hold_a_second_role(role: str) -> None:
 
 
 @pytest.mark.parametrize("role", ["context_timeframes", "confirmation_timeframes"])
-def test_a_distinct_supporting_timeframe_is_accepted(role: str) -> None:
-    assert _violations(trigger_timeframe="15m", **{role: ["4h"]}) == []
+def test_a_distinct_supporting_timeframe_blocks_until_it_is_executable(role: str) -> None:
+    errors = _violations(trigger_timeframe="15m", **{role: ["4h"]})
+    expected = (
+        "context_timeframe_not_executable"
+        if role == "context_timeframes"
+        else "confirmation_timeframe_not_executable"
+    )
+    assert any(item.startswith(expected) for item in errors), errors
 
 
 def test_the_same_timeframe_cannot_be_both_context_and_confirmation() -> None:
@@ -252,7 +300,17 @@ def test_a_supporting_timeframe_never_replaces_the_trigger(
     assert condition.trigger_timeframe == trigger, message
     assert tuple(condition.context_timeframes) == context, message
     assert tuple(condition.confirmation_timeframes) == confirmation, message
-    assert validate_draft_semantics(draft) == [], message
+    errors = validate_draft_semantics(draft)
+    if context:
+        assert any(
+            item.startswith("context_timeframe_not_executable") for item in errors
+        ), message
+    elif confirmation:
+        assert any(
+            item.startswith("confirmation_timeframe_not_executable") for item in errors
+        ), message
+    else:
+        assert errors == [], message
 
 
 # --------------------------------------------------------------------------------

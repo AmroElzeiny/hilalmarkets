@@ -6,12 +6,25 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 
+OnDemandResultCategory = Literal[
+    "confirmed",
+    "forming",
+    "technical_non_match",
+    "policy_exclusion",
+    "market_unavailable",
+    "stale_incomplete_data",
+    "provider_failure",
+]
+
 
 class OnDemandScanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     strategy_version_id: UUID | None = None
     strategy: StrategyDefinition | None = None
+    source_draft_id: UUID | None = None
+    source_draft_version: int | None = Field(default=None, ge=1)
+    source_draft_hash: str | None = Field(default=None, min_length=64, max_length=64)
     approved_schema_hash: str | None = Field(default=None, min_length=64, max_length=64)
     symbols: list[str] = Field(default_factory=list, max_length=100000)
     max_symbols: int = Field(default=100000, ge=1, le=100000)
@@ -24,6 +37,22 @@ class OnDemandScanRequest(BaseModel):
     def validate_strategy_source(self) -> "OnDemandScanRequest":
         if bool(self.strategy_version_id) == bool(self.strategy):
             raise ValueError("Provide exactly one of strategy_version_id or strategy")
+        draft_identity = (
+            self.source_draft_id,
+            self.source_draft_version,
+            self.source_draft_hash,
+        )
+        if any(value is not None for value in draft_identity) and any(
+            value is None for value in draft_identity
+        ):
+            raise ValueError(
+                "source_draft_id, source_draft_version, and source_draft_hash "
+                "must be provided together"
+            )
+        if self.strategy_version_id is not None and any(
+            value is not None for value in draft_identity
+        ):
+            raise ValueError("source draft identity is only valid for an inline strategy")
         if (
             self.strategy is not None
             and not self.light_scan
@@ -56,6 +85,7 @@ class OnDemandConditionSummary(BaseModel):
 
 
 class OnDemandScanMarketResult(BaseModel):
+    category: OnDemandResultCategory
     exchange: str
     symbol: str
     timeframe: str
@@ -70,7 +100,18 @@ class OnDemandScanMarketResult(BaseModel):
     proof_receipt: dict[str, Any]
 
 
+class OnDemandMarketStatus(BaseModel):
+    exchange: str
+    symbol: str
+    timeframe: str | None = None
+    direction: str | None = None
+    category: OnDemandResultCategory
+    error_code: str | None = None
+    safe_message: str | None = None
+
+
 class OnDemandScanResponse(BaseModel):
+    run_id: UUID
     status: Literal["succeeded", "partial", "failed"]
     plan_code: str
     quota_limit: int
@@ -79,6 +120,7 @@ class OnDemandScanResponse(BaseModel):
     symbols_requested: int
     symbols_scanned: int
     results: list[OnDemandScanMarketResult]
+    market_statuses: list[OnDemandMarketStatus] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     evaluated_at: datetime
     usage_record_id: UUID | None = None
@@ -91,3 +133,4 @@ class OnDemandScanResponse(BaseModel):
     sharia_methodology_version: str | None = None
     sharia_universe_snapshot_id: UUID | None = None
     sharia_universe_snapshot_hash: str | None = None
+    candle_snapshot_hash: str | None = None

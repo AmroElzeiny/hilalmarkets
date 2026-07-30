@@ -118,6 +118,14 @@ class SetupChatApprovalRequest(BaseModel):
 
     approved: Literal[True]
     expected_schema_hash: str = Field(min_length=64, max_length=64)
+    expected_executable_version: int | None = Field(default=None, ge=1)
+    expected_executable_hash: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+    # Read compatibility for clients deployed before executable/workflow separation.
     expected_draft_version: int | None = Field(default=None, ge=1)
     expected_semantic_hash: str | None = Field(
         default=None,
@@ -126,6 +134,22 @@ class SetupChatApprovalRequest(BaseModel):
         pattern=r"^[a-f0-9]{64}$",
     )
     confirmed_low_confidence_rule_keys: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def canonical_identity_required(self) -> "SetupChatApprovalRequest":
+        if self.expected_executable_version is None:
+            self.expected_executable_version = self.expected_draft_version
+        if self.expected_executable_hash is None:
+            self.expected_executable_hash = self.expected_semantic_hash
+        if self.expected_executable_version is None or self.expected_executable_hash is None:
+            raise ValueError("approval requires executable version and hash")
+        return self
+
+
+class SetupChatScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
 
 
 class SetupChatErrorEnvelope(BaseModel):
@@ -153,8 +177,8 @@ class SetupChatErrorEnvelope(BaseModel):
     message: str = Field(min_length=1, max_length=500)
     field: str | None = Field(default=None, max_length=200)
     draft_id: UUID | None = None
-    draft_version: int | None = Field(default=None, ge=1)
-    semantic_hash: str | None = Field(
+    executable_version: int | None = Field(default=None, ge=1)
+    executable_hash: str | None = Field(
         default=None,
         pattern=r"^[a-f0-9]{64}$",
     )

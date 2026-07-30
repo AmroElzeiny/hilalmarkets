@@ -21,6 +21,8 @@ class FixtureMarketDataProvider:
         "VOLUME/USDT",
         "EMAUP/USDT",
         "VWAP/USDT",
+        "BTC/USDT",
+        "ETH/USDT",
         "SOL/USDT",
         "LINK/USDT",
         "NOPE/USDT",
@@ -145,6 +147,10 @@ def _close(symbol: str, index: int, limit: int) -> float:
         return 96 + progress * 8 + (2 if index == limit - 1 else 0)
     if symbol.startswith("SHORT"):
         return 120 - progress * 20
+    if symbol.startswith("BTC"):
+        return 62_000 + progress * 3_000
+    if symbol.startswith("ETH"):
+        return 3_200 + progress * 180
     if symbol.startswith("SOL"):
         return 100 + progress * 6
     if symbol.startswith("LINK"):

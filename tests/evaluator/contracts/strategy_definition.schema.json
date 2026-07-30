@@ -183,6 +183,14 @@
           "default": null,
           "title": "Approximation Note"
         },
+        "ast_path": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "title": "Ast Path",
+          "type": "array"
+        },
         "availability": {
           "default": "available",
           "maxLength": 40,
@@ -410,6 +418,19 @@
           ],
           "default": null,
           "title": "Source Fragment"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
         },
         "timeframe": {
           "pattern": "^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$",
@@ -1050,6 +1071,7 @@
       "enum": [
         "long",
         "short",
+        "neutral",
         "both"
       ],
       "title": "StrategyDirection",

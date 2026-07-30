@@ -43,7 +43,8 @@ class LaunchCoreContract:
     threshold: float | None
     #: The trigger timeframe: the candle whose close fires the rule.
     timeframe: str
-    direction: str
+    movement_direction: str
+    strategy_bias: str = "neutral"
     include: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
     exchange: str = "binance"
@@ -54,6 +55,7 @@ class LaunchCoreContract:
     context: tuple[str, ...] = ()
     confirmation: tuple[str, ...] = ()
     reference: str | None = None
+    expected_blocking_prefix: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +85,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=5,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
             exclude=("ETH/USDT",),
         ),
@@ -94,7 +96,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=2,
             timeframe="1h",
-            direction="short",
+            movement_direction="down",
             include=("SOL/USDT",),
         ),
         LaunchCoreContract(
@@ -104,7 +106,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=4,
             timeframe="4h",
-            direction="short",
+            movement_direction="down",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -114,7 +116,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="lte",
             threshold=1.5,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("ETH/USDT",),
         ),
         LaunchCoreContract(
@@ -124,7 +126,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=3,
             timeframe="1h",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -134,7 +136,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=6,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -144,7 +146,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="crosses_above",
             threshold=50000,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -154,7 +156,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="crosses_below",
             threshold=49000,
             timeframe="15m",
-            direction="short",
+            movement_direction="down",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -167,7 +169,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gt",
             threshold=None,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -180,7 +182,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gt",
             threshold=None,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -193,7 +195,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="is_true",
             threshold=None,
             timeframe="15m",
-            direction="long",
+            movement_direction="down",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -203,7 +205,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="lt",
             threshold=48000,
             timeframe="15m",
-            direction="short",
+            movement_direction="down",
             include=("BTC/USDT",),
         ),
         LaunchCoreContract(
@@ -215,7 +217,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="eq",
             threshold=3500,
             timeframe="1h",
-            direction="neutral",
+            movement_direction="neutral",
             include=("ETH/USDC",),
             exchange="bybit",
             quote_asset="USDC",
@@ -230,10 +232,11 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=2,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("BTC/USDT",),
             context=("4h",),
             reference="15m",
+            expected_blocking_prefix="context_timeframe_not_executable:",
         ),
         LaunchCoreContract(
             id="confirmation-role-never-becomes-trigger",
@@ -245,10 +248,11 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=2,
             timeframe="15m",
-            direction="long",
+            movement_direction="up",
             include=("SOL/USDT",),
             confirmation=("1h",),
             reference="1h",
+            expected_blocking_prefix="confirmation_timeframe_not_executable:",
         ),
         LaunchCoreContract(
             id="reference-timeframe-differs-from-trigger",
@@ -257,7 +261,7 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             operator="gte",
             threshold=3,
             timeframe="1h",
-            direction="long",
+            movement_direction="up",
             include=("ETH/USDT",),
             reference="1d",
         ),
@@ -278,7 +282,8 @@ def run_launch_core(output_root: Path, *, run_id: str | None = None) -> tuple[di
     threshold_accuracy = _accuracy(results, "threshold")
     timeframe_accuracy = _accuracy(results, "timeframe_roles")
     universe_accuracy = _accuracy(results, "universe")
-    direction_accuracy = _accuracy(results, "direction")
+    movement_direction_accuracy = _accuracy(results, "movement_direction")
+    strategy_bias_accuracy = _accuracy(results, "strategy_bias")
     latencies = sorted(result.elapsed_ms for result in results)
     p95_latency_ms = (
         latencies[min(len(latencies) - 1, max(0, round(0.95 * len(latencies)) - 1))]
@@ -307,17 +312,19 @@ def run_launch_core(output_root: Path, *, run_id: str | None = None) -> tuple[di
                     threshold_accuracy,
                     timeframe_accuracy,
                     universe_accuracy,
-                    direction_accuracy,
+                    movement_direction_accuracy,
+                    strategy_bias_accuracy,
                 )
             )
-            / 6
+            / 7
         ),
         "formula_accuracy": formula_accuracy,
         "operator_accuracy": operator_accuracy,
         "threshold_accuracy": threshold_accuracy,
         "timeframe_role_accuracy": timeframe_accuracy,
         "universe_accuracy": universe_accuracy,
-        "direction_accuracy": direction_accuracy,
+        "movement_direction_accuracy": movement_direction_accuracy,
+        "strategy_bias_accuracy": strategy_bias_accuracy,
         "grouping_accuracy": float(structural_checks["nested_ast_preserved"]),
         "correction_reversion_adherence": float(
             structural_checks["correction_and_reversion"]
@@ -356,7 +363,8 @@ def _run_contract(contract: LaunchCoreContract) -> LaunchCoreResult:
         "threshold": False,
         "timeframe": False,
         "timeframe_roles": False,
-        "direction": False,
+        "movement_direction": False,
+        "strategy_bias": False,
         "universe": False,
         "schema": False,
         "semantic_invariants": False,
@@ -400,17 +408,36 @@ def _run_contract(contract: LaunchCoreContract) -> LaunchCoreResult:
                 or condition.reference_timeframe == contract.reference
             )
         )
-        checks["direction"] = condition.direction.value == contract.direction
+        checks["movement_direction"] = (
+            condition.movement_direction.value == contract.movement_direction
+        )
+        checks["strategy_bias"] = condition.strategy_bias.value == contract.strategy_bias
         checks["universe"] = (
             tuple(draft.universe.included_symbols) == contract.include
             and tuple(draft.universe.excluded_symbols) == contract.exclude
             and draft.market_scope.exchange == contract.exchange
             and draft.market_scope.quote_asset == contract.quote_asset
         )
-        checks["semantic_invariants"] = not validate_draft_semantics(draft)
-        compiled = compile_strategy_draft_v2(draft)
-        compiled_payload = compiled.model_dump(mode="json")
-        checks["schema"] = True
+        semantic_errors = validate_draft_semantics(draft)
+        if contract.expected_blocking_prefix is not None:
+            checks["semantic_invariants"] = (
+                len(semantic_errors) == 1
+                and semantic_errors[0].startswith(contract.expected_blocking_prefix)
+            )
+            try:
+                compile_strategy_draft_v2(draft)
+            except StrategyV2CompileError as exc:
+                checks["schema"] = (
+                    exc.code == "semantic_validation_failed"
+                    and contract.expected_blocking_prefix in str(exc)
+                )
+            else:
+                errors.append("expected the draft to remain explicitly blocked")
+        else:
+            checks["semantic_invariants"] = not semantic_errors
+            compiled = compile_strategy_draft_v2(draft)
+            compiled_payload = compiled.model_dump(mode="json")
+            checks["schema"] = True
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
     for name, ok in checks.items():
@@ -490,7 +517,7 @@ def _structural_checks() -> dict[str, bool]:
             changed,
             StrategyPatch(
                 source_turn_id="launch-core-reversion",
-                reversion=ReversionV2(target_version=base.version),
+                reversion=ReversionV2(target_version=base.executable_version),
             ),
             history=[base.model_dump(mode="json")],
         ).draft
@@ -499,7 +526,7 @@ def _structural_checks() -> dict[str, bool]:
             and changed.condition_ast.threshold == 8
             and reverted.condition_ast is not None
             and reverted.condition_ast.threshold == 3
-            and reverted.version == changed.version + 1
+            and reverted.executable_version == changed.executable_version + 1
             and not reverted.approval.approved
         )
 
@@ -511,8 +538,8 @@ def _structural_checks() -> dict[str, bool]:
                     "approval": ApprovalBindingV2(
                         approved=True,
                         user_id=uuid4(),
-                        draft_version=base.version,
-                        semantic_hash=base.semantic_hash,
+                        executable_version=base.executable_version,
+                        executable_hash=base.executable_hash,
                         conversation_snapshot_hash="a" * 64,
                         approved_at=datetime.now(UTC),
                     )
@@ -526,8 +553,8 @@ def _structural_checks() -> dict[str, bool]:
                         "approval": ApprovalBindingV2(
                             approved=True,
                             user_id=uuid4(),
-                            draft_version=base.version + 1,
-                            semantic_hash=base.semantic_hash,
+                            executable_version=base.executable_version + 1,
+                            executable_hash=base.executable_hash,
                             conversation_snapshot_hash="b" * 64,
                             approved_at=datetime.now(UTC),
                         )
@@ -550,7 +577,7 @@ def _structural_checks() -> dict[str, bool]:
                         missing_contract="No exact executable primitive is registered.",
                     )
                 ],
-                "semantic_hash": "",
+                "workflow_state_hash": "",
             }
         ).model_dump(mode="json")
     )

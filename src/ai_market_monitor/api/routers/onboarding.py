@@ -147,7 +147,9 @@ async def interpret_strategy(
         guided = GuidedSetupRequest.model_validate(raw_guided)
         preview = await configured_strategy_interpreter(settings).interpret(guided)
         strategy, version = await StrategyService(
-            session, settings.disclaimer_version
+            session,
+            settings.disclaimer_version,
+            settings,
         ).create_from_interpretation(principal.user_id, preview, source_text=guided.setup_text)
         await VerifiedStrategyService(session, settings).prepare_version(
             user_id=principal.user_id,
@@ -183,7 +185,11 @@ async def edit_strategy(
         strategy = await session.get(Strategy, strategy_id)
         if strategy is None:
             raise StrategyGateError("strategy_missing", "Strategy not found")
-        version = await StrategyService(session, settings.disclaimer_version).revise(
+        version = await StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        ).revise(
             strategy, request.strategy, user_id=principal.user_id
         )
         parent = (
@@ -241,7 +247,11 @@ async def approve_strategy(
         strategy = await session.get(Strategy, version.strategy_id)
         if strategy is None or strategy.user_id != principal.user_id:
             raise StrategyGateError("strategy_missing", "Strategy not found")
-        strategy_service = StrategyService(session, settings.disclaimer_version)
+        strategy_service = StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        )
         await strategy_service.validate_approval(
             version,
             user_id=principal.user_id,
@@ -253,26 +263,15 @@ async def approve_strategy(
             strategy=strategy,
             version=version,
         )
-        statements = await verification_service.sync_interpretation(
+        await verification_service.sync_interpretation(
             user_id=principal.user_id,
             strategy=strategy,
             version=version,
         )
-        for statement in statements:
-            if statement.status == "assumed" and statement.resolution_status == "unresolved":
-                await verification_service.resolve_statement(
-                    user_id=principal.user_id,
-                    statement_id=statement.id,
-                    action="accept",
-                    resolution_text="Accepted through onboarding approval.",
-                )
-        await verification_service.approve_interpretation(
+        await verification_service.approve_visible_draft(
             user_id=principal.user_id,
             version=version,
-        )
-        await verification_service.approval_gate(
-            user_id=principal.user_id,
-            version=version,
+            expected_schema_hash=request.expected_schema_hash,
         )
         await strategy_service.approve(
             version,
@@ -312,7 +311,11 @@ async def preview_strategy(
         )
         if version is None:
             raise StrategyGateError("version_missing", "Strategy version not found")
-        result = await StrategyService(session, settings.disclaimer_version).run_preview(
+        result = await StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        ).run_preview(
             version, user_id=principal.user_id, previewer=previewer
         )
         await onboarding_service.mark_previewed(onboarding, result.status == "succeeded")
@@ -342,7 +345,11 @@ async def activate_strategy(
         )
         if version is None:
             raise StrategyGateError("version_missing", "Strategy version not found")
-        strategy = await StrategyService(session, settings.disclaimer_version).activate(
+        strategy = await StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        ).activate(
             version, user_id=principal.user_id, strategy_name=request.strategy_name
         )
         await onboarding_service.complete(onboarding)

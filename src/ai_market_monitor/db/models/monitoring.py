@@ -16,7 +16,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     event,
+    select,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +33,104 @@ from ai_market_monitor.db.models.enums import (
     ScanOutcome,
     SetupLifecycleState,
 )
+
+
+class OnDemandScanRun(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "on_demand_scan_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_on_demand_scan_run_user_key",
+        ),
+        Index("ix_on_demand_scan_run_user_created", "user_id", "created_at"),
+        Index("ix_on_demand_scan_run_status_started", "status", "started_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    strategy_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("strategy_versions.id", ondelete="SET NULL")
+    )
+    usage_record_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("usage_records.id", ondelete="SET NULL")
+    )
+    sharia_universe_snapshot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sharia_universe_snapshots.id", ondelete="SET NULL")
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    draft_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    draft_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    quota_metric: Mapped[str] = mapped_column(String(80), nullable=False)
+    quota_reserved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sharia_universe_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
+    candle_snapshot_manifest: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    candle_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
+    response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    safe_message: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OnDemandScanMarketRecord(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "on_demand_scan_market_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "sequence",
+            name="uq_on_demand_scan_market_sequence",
+        ),
+        Index("ix_on_demand_scan_market_category", "run_id", "category"),
+    )
+
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("on_demand_scan_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    exchange: Mapped[str] = mapped_column(String(40), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(40), nullable=False)
+    timeframe: Mapped[str | None] = mapped_column(String(16))
+    direction: Mapped[str | None] = mapped_column(String(10))
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
+    completion_score: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    result_payload: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+@event.listens_for(OnDemandScanRun, "before_update")
+def _keep_completed_on_demand_run_immutable(
+    _mapper: Any,
+    connection: Any,
+    run: OnDemandScanRun,
+) -> None:
+    prior_status = connection.execute(
+        select(OnDemandScanRun.status).where(OnDemandScanRun.id == run.id)
+    ).scalar_one_or_none()
+    if prior_status in {"succeeded", "partial", "failed"}:
+        raise ValueError("Completed on-demand scan runs are immutable.")
+
+
+@event.listens_for(OnDemandScanMarketRecord, "before_update")
+def _keep_on_demand_market_result_immutable(
+    _mapper: Any,
+    _connection: Any,
+    _record: OnDemandScanMarketRecord,
+) -> None:
+    raise ValueError("On-demand scan market results are immutable.")
 
 
 class ScanJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):

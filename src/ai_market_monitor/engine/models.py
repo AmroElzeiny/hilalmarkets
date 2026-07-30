@@ -61,6 +61,7 @@ class ConditionEvaluation:
     previous_actual_value: Any = None
     previous_required_value: Any = None
     mechanic_evidence: dict[str, Any] | None = None
+    semantic_contract: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -91,6 +92,7 @@ class ConditionEvaluation:
             "proximity_score": round(self.proximity_score, 4),
             "error_code": self.error_code,
             "mechanic_evidence": self.mechanic_evidence,
+            "semantic_contract": self.semantic_contract,
         }
 
 

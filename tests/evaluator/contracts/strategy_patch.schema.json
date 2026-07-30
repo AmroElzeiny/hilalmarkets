@@ -42,12 +42,39 @@
           ],
           "title": "Capability Key"
         },
+        "capability_parameters": {
+          "additionalProperties": false,
+          "properties": {},
+          "required": [],
+          "title": "Capability Parameters",
+          "type": "object"
+        },
+        "capability_version": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capability Version"
+        },
         "children": {
           "items": {
             "$ref": "#/$defs/ConditionNodeV2"
           },
           "maxItems": 100,
           "title": "Children",
+          "type": "array"
+        },
+        "condition_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1000,
+          "title": "Condition Symbols",
           "type": "array"
         },
         "confirmation_timeframes": {
@@ -68,9 +95,6 @@
           "title": "Context Timeframes",
           "type": "array"
         },
-        "direction": {
-          "$ref": "#/$defs/DraftDirection"
-        },
         "formula": {
           "anyOf": [
             {
@@ -80,6 +104,22 @@
               "type": "null"
             }
           ]
+        },
+        "lookback": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lookback"
+        },
+        "movement_direction": {
+          "$ref": "#/$defs/MovementDirection"
         },
         "node_id": {
           "title": "Node Id",
@@ -158,6 +198,9 @@
           ],
           "title": "Source Turn Id"
         },
+        "strategy_bias": {
+          "$ref": "#/$defs/StrategyBias"
+        },
         "threshold": {
           "anyOf": [
             {
@@ -201,7 +244,8 @@
         "source_turn_id",
         "source_fragment",
         "required",
-        "direction",
+        "movement_direction",
+        "strategy_bias",
         "formula",
         "operands",
         "operator",
@@ -212,7 +256,11 @@
         "confirmation_timeframes",
         "reference_timeframe",
         "reference_definition",
+        "lookback",
         "capability_key",
+        "capability_version",
+        "capability_parameters",
+        "condition_symbols",
         "children"
       ],
       "title": "ConditionNodeV2",
@@ -260,15 +308,6 @@
       ],
       "title": "CorrectionV2",
       "type": "object"
-    },
-    "DraftDirection": {
-      "enum": [
-        "long",
-        "short",
-        "neutral"
-      ],
-      "title": "DraftDirection",
-      "type": "string"
     },
     "DraftFieldPatch": {
       "additionalProperties": false,
@@ -370,6 +409,16 @@
       "title": "FormulaKind",
       "type": "string"
     },
+    "MovementDirection": {
+      "enum": [
+        "up",
+        "down",
+        "neutral",
+        "not_applicable"
+      ],
+      "title": "MovementDirection",
+      "type": "string"
+    },
     "OperandV2": {
       "additionalProperties": false,
       "properties": {
@@ -421,6 +470,26 @@
           "title": "Role",
           "type": "string"
         },
+        "unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "percent",
+                "price",
+                "ratio",
+                "count",
+                "index",
+                "boolean",
+                "none"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        },
         "value": {
           "anyOf": [
             {
@@ -445,6 +514,7 @@
         "field",
         "name",
         "value",
+        "unit",
         "parameters"
       ],
       "title": "OperandV2",
@@ -465,23 +535,52 @@
       "title": "ReversionV2",
       "type": "object"
     },
+    "StrategyBias": {
+      "enum": [
+        "long",
+        "short",
+        "neutral"
+      ],
+      "title": "StrategyBias",
+      "type": "string"
+    },
     "UnresolvedFieldV2": {
       "additionalProperties": false,
       "properties": {
+        "allowed_options": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Allowed Options",
+          "type": "array"
+        },
         "blocking": {
           "title": "Blocking",
           "type": "boolean"
         },
-        "key": {
-          "maxLength": 120,
-          "minLength": 1,
-          "title": "Key",
-          "type": "string"
+        "created_workflow_revision": {
+          "minimum": 1,
+          "title": "Created Workflow Revision",
+          "type": "integer"
+        },
+        "expected_answer_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "required": [],
+          "title": "Expected Answer Schema",
+          "type": "object"
         },
         "question": {
           "maxLength": 500,
           "minLength": 1,
           "title": "Question",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reason",
           "type": "string"
         },
         "source_fragment": {
@@ -501,14 +600,66 @@
             }
           ],
           "title": "Source Turn Id"
+        },
+        "target_condition_id": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target Condition Id"
+        },
+        "target_field": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target Field"
+        },
+        "target_type": {
+          "enum": [
+            "draft_field",
+            "condition_field",
+            "condition_creation",
+            "universe",
+            "market_scope",
+            "boolean_structure",
+            "capability_parameter",
+            "reference_definition",
+            "unsupported_resolution"
+          ],
+          "title": "Target Type",
+          "type": "string"
+        },
+        "unresolved_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Unresolved Id",
+          "type": "string"
         }
       },
       "required": [
-        "key",
+        "unresolved_id",
         "source_turn_id",
         "source_fragment",
+        "target_type",
+        "target_field",
+        "target_condition_id",
+        "expected_answer_schema",
+        "allowed_options",
         "question",
-        "blocking"
+        "reason",
+        "blocking",
+        "created_workflow_revision"
       ],
       "title": "UnresolvedFieldV2",
       "type": "object"
@@ -622,6 +773,22 @@
       "title": "Remove Inclusions",
       "type": "array"
     },
+    "remove_unresolved_keys": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Remove Unresolved Keys",
+      "type": "array"
+    },
+    "remove_unsupported_keys": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Remove Unsupported Keys",
+      "type": "array"
+    },
     "replace_groups": {
       "anyOf": [
         {
@@ -690,7 +857,9 @@
     "correction",
     "reversion",
     "unresolved_references",
-    "unsupported_requirements"
+    "unsupported_requirements",
+    "remove_unresolved_keys",
+    "remove_unsupported_keys"
   ],
   "title": "StrategyPatch",
   "type": "object"

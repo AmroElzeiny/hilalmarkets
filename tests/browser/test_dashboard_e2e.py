@@ -13,6 +13,7 @@ from tests.browser.conftest import (
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
     seed_alert_proof,
+    seed_disclaimer_acceptance,
     seed_paid_monitor_access,
     seed_setup_observability,
     seed_sharia_screened_market,
@@ -921,9 +922,11 @@ def test_strategy_prompt_to_coverage_preview_opens_board(page: Page, base_url: s
         )
     ) as response_info:
         page.locator("[data-ai-chat-send]").click()
-    assert response_info.value.status == 200
+    assert response_info.value.status == 200, response_info.value.body().decode(
+        "utf-8", errors="replace"
+    )
     expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
-        re.compile("inactive Watchlist preview", re.I)
+        re.compile("inactive preview", re.I)
     )
     expect(page.locator("[data-ai-preview-content]")).to_be_visible()
     expect(page.locator("[data-ai-chat-approve]")).to_be_enabled()
@@ -972,7 +975,9 @@ def test_ai_setup_chat_v2_deterministic_preview_and_exact_approval(
     response = response_info.value
     assert response.status == 200
     backend = response.json()
-    assert backend["draft_v2"]["schema_version"] == "2.0"
+    assert backend["draft_v2"]["schema_version"] == "2.1"
+    assert backend["draft_v2"]["executable_version"] >= 2
+    assert re.fullmatch(r"[a-f0-9]{64}", backend["draft_v2"]["executable_hash"])
     assert backend["draft_v2"]["condition_ast"]["threshold"] == 3
     assert backend["can_approve"] is True
 
@@ -1242,6 +1247,7 @@ def test_approve_and_publish_executable_monitor(
     repo_root,
 ) -> None:
     email = signup(page, base_url, unique_email("publish-monitor"))
+    seed_disclaimer_acceptance(browser_app.database_url, email)
     seed_telegram_connection(browser_app.database_url, email)
     seed_paid_monitor_access(browser_app.database_url, email)
     page.reload(wait_until="domcontentloaded")
@@ -1266,12 +1272,11 @@ def test_approve_and_publish_executable_monitor(
         count = page.locator("[data-accept-statement]").count()
         page.locator("[data-accept-statement]").first.click()
         expect(page.locator("[data-accept-statement]")).to_have_count(count - 1, timeout=15_000)
-    page.locator("[data-approve-interpretation]").click()
+    expect(page.locator("[data-approve-version]")).to_be_enabled()
+    page.locator("[data-approve-version]").click()
     expect(page.locator("[data-interpretation-state]")).to_contain_text(
         "approved", timeout=15_000
     )
-    expect(page.locator("[data-approve-version]")).to_be_enabled()
-    page.locator("[data-approve-version]").click()
     expect(page.locator("[data-verified-notice]")).to_contain_text(
         re.compile("no verification blocker", re.I), timeout=15_000
     )

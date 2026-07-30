@@ -28,9 +28,17 @@ from ai_market_monitor.engine.formula_compiler import parse_percentage_formula
 from ai_market_monitor.engine.lookback import read_lookback
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
-from ai_market_monitor.engine.turn_fragments import extract_symbols, extract_timeframes
+from ai_market_monitor.engine.turn_fragments import (
+    extract_symbols,
+    extract_timeframes,
+    split_symbol,
+)
 from ai_market_monitor.schemas.strategy import Comparator, StrategyDirection
-from ai_market_monitor.schemas.strategy_draft_v2 import DraftDirection, FormulaKind
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    FormulaKind,
+    MovementDirection,
+    StrategyBias,
+)
 
 #: What a bare number in the text is measuring. A number only grounds a value of the
 #: same unit, so `5%` and `5m` can never stand in for each other.
@@ -128,7 +136,17 @@ def grounds_symbol(text: str, symbol: str) -> bool:
     """True when ``text`` names this market, in any spelling the reader accepts."""
 
     wanted = symbol.upper().replace("/", "").replace("-", "").replace("_", "")
-    return wanted in {item.upper() for item in extract_symbols(text)}
+    markets = {item.upper() for item in extract_symbols(text)}
+    if wanted in markets:
+        return True
+    # The canonical draft stores base assets in its inclusion and condition scopes,
+    # while the trader naturally names a market pair. BTC/USDT therefore authorizes
+    # BTC, but never USDT or an unrelated base.
+    return any(
+        parts is not None and parts[0] == wanted
+        for market in markets
+        if (parts := split_symbol(market)) is not None
+    )
 
 
 def grounds_timeframe(text: str, timeframe: str) -> bool:
@@ -166,17 +184,28 @@ def grounds_operator(text: str, operator: Comparator) -> bool:
     return False
 
 
-def grounds_direction(text: str, direction: DraftDirection) -> bool:
+def grounds_direction(text: str, direction: MovementDirection) -> bool:
     """True when ``text`` states this side, through the movement vocabulary.
 
     ``neutral`` needs no wording: it is the absence of a stated side.
     """
-    if direction == DraftDirection.NEUTRAL:
+    if direction in {MovementDirection.NEUTRAL, MovementDirection.NOT_APPLICABLE}:
         return True
     movement = movement_direction(text)
     if movement is not None:
-        return (movement == "up") == (direction == DraftDirection.LONG)
+        return (movement == "up") == (direction == MovementDirection.UP)
     return False
+
+
+def grounds_strategy_bias(text: str, bias: StrategyBias) -> bool:
+    """Ground an explicit trade-side intent without inferring it from price movement."""
+
+    if bias == StrategyBias.NEUTRAL:
+        return True
+    lowered = text.casefold()
+    if bias == StrategyBias.LONG:
+        return bool(re.search(r"\blong\b|\bbuy bias\b|\bbullish bias\b", lowered))
+    return bool(re.search(r"\bshort\b|\bsell bias\b|\bbearish bias\b", lowered))
 
 
 #: Wording that names each formula, read through the canonical parser rather than a
@@ -245,6 +274,8 @@ def grounds_boolean_shape(text: str, shape: str) -> bool:
     structure the model invented.
     """
     lowered = text.casefold()
+    if "and(" in shape and not re.search(r"\band\b|&&|\bboth\b|\ball\b", lowered):
+        return False
     if "or(" in shape and not re.search(r"\bor\b|\|\||\beither\b", lowered):
         return False
     return not (

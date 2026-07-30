@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ai_market_monitor.engine.capability_contract import derive_provider_requirements
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ApprovalBindingV2,
@@ -32,8 +33,15 @@ class DraftPatchError(ValueError):
 @dataclass(frozen=True, slots=True)
 class DraftPatchResult:
     draft: StrategyDraftV2
-    material_change: bool
+    executable_change: bool
+    workflow_change: bool
     changed_fields: tuple[str, ...]
+
+    @property
+    def material_change(self) -> bool:
+        """Compatibility name: material means executable, never workflow-only."""
+
+        return self.executable_change
 
 
 def new_strategy_draft(*, mode: DraftMode = DraftMode.MONITOR) -> StrategyDraftV2:
@@ -52,7 +60,8 @@ def apply_strategy_patch(
     if patch.reversion is not None:
         return _revert_to_snapshot(draft, patch, history or [])
 
-    original_hash = draft.semantic_hash
+    original_executable_hash = draft.executable_hash
+    original_workflow_hash = draft.workflow_state_hash
     changed: list[str] = []
     fields = patch.set_fields
     draft_update: dict[str, Any] = {}
@@ -153,6 +162,7 @@ def apply_strategy_patch(
     }
     for unresolved_item in patch.unresolved_references:
         unresolved[unresolved_item.key] = unresolved_item
+        changed.append(f"unresolved.added:{unresolved_item.key}")
     if patch.correction is not None:
         unresolved.pop(patch.correction.target, None)
     resolved_keys = _resolved_keys(patch)
@@ -175,6 +185,7 @@ def apply_strategy_patch(
     }
     for unsupported_item in patch.unsupported_requirements:
         unsupported[unsupported_item.key] = unsupported_item
+        changed.append(f"unsupported.added:{unsupported_item.key}")
     if patch.correction is not None:
         unsupported.pop(patch.correction.target, None)
     for key in patch.remove_unsupported_keys:
@@ -206,25 +217,53 @@ def apply_strategy_patch(
             "universe": universe,
             "market_scope": market_scope,
             "condition_ast": condition_ast,
+            "static_provider_requirements": derive_provider_requirements(condition_ast),
             "unresolved_fields": list(unresolved.values()),
             "unsupported_requirements": list(unsupported.values()),
             "source_provenance": provenance[-1000:],
+            # Validate the candidate semantics before deciding whether the old
+            # approval can survive. An executable edit cannot validate against the
+            # prior binding, while a workflow-only edit restores it below.
             "approval": ApprovalBindingV2(),
-            "semantic_hash": "",
+            "executable_hash": "",
+            "workflow_state_hash": "",
         }
     )
     candidate = StrategyDraftV2.model_validate(candidate.model_dump(mode="json"))
-    material = candidate.semantic_hash != original_hash
-    if not material:
-        return DraftPatchResult(draft=draft, material_change=False, changed_fields=())
+    executable_change = candidate.executable_hash != original_executable_hash
+    workflow_change = candidate.workflow_state_hash != original_workflow_hash
+    if not executable_change and not workflow_change:
+        return DraftPatchResult(
+            draft=draft,
+            executable_change=False,
+            workflow_change=False,
+            changed_fields=(),
+        )
     candidate = StrategyDraftV2.model_validate(
         candidate.model_copy(
-            update={"version": draft.version + 1, "semantic_hash": ""}
+            update={
+                "executable_version": (
+                    draft.executable_version + 1
+                    if executable_change
+                    else draft.executable_version
+                ),
+                "workflow_revision": (
+                    draft.workflow_revision + 1
+                    if workflow_change
+                    else draft.workflow_revision
+                ),
+                "approval": (
+                    ApprovalBindingV2() if executable_change else draft.approval
+                ),
+                "executable_hash": "",
+                "workflow_state_hash": "",
+            }
         ).model_dump(mode="json")
     )
     return DraftPatchResult(
         draft=candidate,
-        material_change=True,
+        executable_change=executable_change,
+        workflow_change=workflow_change,
         changed_fields=tuple(dict.fromkeys(changed)),
     )
 
@@ -253,6 +292,7 @@ def validate_draft_semantics(draft: StrategyDraftV2) -> list[str]:
         ):
             errors.append(f"missing_threshold:{node.node_id}")
         errors.extend(_formula_contract_errors(node))
+        errors.extend(_operand_contract_errors(node))
         errors.extend(_timeframe_role_errors(node))
         serialized = json.dumps(
             node.model_dump(
@@ -265,8 +305,8 @@ def validate_draft_semantics(draft: StrategyDraftV2) -> list[str]:
             if symbol.upper() in serialized or symbol.replace("/", "").upper() in serialized:
                 errors.append(f"excluded_symbol_leak:{node.node_id}:{symbol}")
     if draft.approval.approved and (
-        draft.approval.draft_version != draft.version
-        or draft.approval.semantic_hash != draft.semantic_hash
+        draft.approval.executable_version != draft.executable_version
+        or draft.approval.executable_hash != draft.executable_hash
     ):
         errors.append("approval_binding_mismatch")
     return list(dict.fromkeys(errors))
@@ -299,12 +339,67 @@ def _formula_contract_errors(node: ConditionNodeV2) -> list[str]:
         errors.append(
             f"formula_unit_mismatch:{node.node_id}:{node.formula.value}:{node.unit}"
         )
-    if node.direction in contract.forbidden_directions:
+    if node.movement_direction in contract.forbidden_directions:
         errors.append(
             f"formula_direction_mismatch:{node.node_id}:"
-            f"{node.formula.value}:{node.direction.value}"
+            f"{node.formula.value}:{node.movement_direction.value}"
         )
     return errors
+
+
+def _operand_contract_errors(node: ConditionNodeV2) -> list[str]:
+    """Core formulas own their operand layout; arbitrary layouts are not executable."""
+
+    if node.formula == FormulaKind.CAPABILITY:
+        return []
+    percentage_formulas = {
+        FormulaKind.OPEN_TO_CLOSE_PERCENTAGE,
+        FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE,
+        FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE,
+        FormulaKind.HIGH_TO_LOW_PERCENTAGE,
+        FormulaKind.LOW_TO_HIGH_PERCENTAGE,
+    }
+    if node.formula in percentage_formulas:
+        if len(node.operands) != 1:
+            return [f"formula_operand_mismatch:{node.node_id}:percentage_count"]
+        operand = node.operands[0]
+        expected = {
+            FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: "open_to_close",
+            FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: "close_to_close",
+            FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: "reference_to_current",
+            FormulaKind.HIGH_TO_LOW_PERCENTAGE: "high_to_low",
+            FormulaKind.LOW_TO_HIGH_PERCENTAGE: "low_to_high",
+        }[node.formula]
+        if (
+            operand.kind != "market_metric"
+            or operand.name != "percentage_change"
+            or operand.parameters.get("formula") not in {expected, node.formula.value}
+        ):
+            return [f"formula_operand_mismatch:{node.node_id}:percentage_shape"]
+    if node.formula == FormulaKind.SWEEP_AND_RECLAIM:
+        if len(node.operands) != 1:
+            return [f"formula_operand_mismatch:{node.node_id}:sweep_count"]
+        operand = node.operands[0]
+        if (
+            operand.kind != "market_metric"
+            or operand.name != "sweep_and_reclaim"
+            or operand.parameters.get("pierce_required") is not True
+            or operand.parameters.get("reclaim_required") is not True
+        ):
+            return [f"formula_operand_mismatch:{node.node_id}:sweep_shape"]
+    if node.formula in {
+        FormulaKind.PREVIOUS_CANDLE_REFERENCE,
+        FormulaKind.FIXED_REFERENCE_LEVEL,
+        FormulaKind.LOOKBACK_REFERENCE_LEVEL,
+        FormulaKind.CROSS,
+    }:
+        if not node.operands or node.operands[0].kind != "price":
+            return [f"formula_operand_mismatch:{node.node_id}:left_price"]
+        if len(node.operands) > 2:
+            return [f"formula_operand_mismatch:{node.node_id}:reference_count"]
+        if len(node.operands) == 2 and node.operands[1].kind != "reference":
+            return [f"formula_operand_mismatch:{node.node_id}:right_reference"]
+    return []
 
 
 def _timeframe_role_errors(node: ConditionNodeV2) -> list[str]:
@@ -339,6 +434,10 @@ def _timeframe_role_errors(node: ConditionNodeV2) -> list[str]:
     # measured on the candle that fires it — so it is checked for existence only.
     if node.node_type == ConditionNodeType.CONDITION and not node.trigger_timeframe:
         errors.append(f"missing_trigger_timeframe:{node.node_id}")
+    if node.context_timeframes:
+        errors.append(f"context_timeframe_not_executable:{node.node_id}")
+    if node.confirmation_timeframes:
+        errors.append(f"confirmation_timeframe_not_executable:{node.node_id}")
     return errors
 
 
@@ -554,24 +653,29 @@ def _revert_to_snapshot(
 ) -> DraftPatchResult:
     assert patch.reversion is not None
     for item in history:
+        payload = item.get("draft") if isinstance(item.get("draft"), dict) else item
         try:
-            candidate = StrategyDraftV2.model_validate(item)
+            candidate = StrategyDraftV2.model_validate(payload)
         except ValidationError:
             continue
-        if candidate.version != patch.reversion.target_version:
+        if candidate.executable_version != patch.reversion.target_version:
             continue
         restored = StrategyDraftV2.model_validate(
             candidate.model_copy(
                 update={
-                    "version": draft.version + 1,
+                    "executable_version": draft.executable_version + 1,
+                    "workflow_revision": draft.workflow_revision + 1,
                     "approval": ApprovalBindingV2(),
-                    "semantic_hash": "",
+                    "runtime_state": draft.runtime_state,
+                    "executable_hash": "",
+                    "workflow_state_hash": "",
                 }
             ).model_dump(mode="json")
         )
         return DraftPatchResult(
             draft=restored,
-            material_change=True,
+            executable_change=restored.executable_hash != draft.executable_hash,
+            workflow_change=True,
             changed_fields=("reversion",),
         )
     raise DraftPatchError(f"draft version {patch.reversion.target_version} is unavailable")

@@ -7,6 +7,10 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.schemas.setup_agent import (
+    CapabilityRoutingCandidate,
+    CapabilityRoutingContext,
+)
 
 _TIMEFRAME_RE = re.compile(r"(?<!\w)(?:[1-9]\d*)(?:m|h|d|w)(?!\w)", re.IGNORECASE)
 _CORRECTION_RE = re.compile(
@@ -77,7 +81,7 @@ def select_setup_model(
     accumulated_setup: str = "",
     history: Iterable[dict[str, str]] = (),
     active_clarification: dict[str, Any] | None = None,
-    capability_context: dict[str, Any] | None = None,
+    capability_context: CapabilityRoutingContext | dict[str, Any] | None = None,
     draft_condition_count: int = 0,
     unresolved_field_count: int = 0,
     previous_turn_failed: bool = False,
@@ -101,6 +105,8 @@ def select_setup_model(
     has_not = bool(re.search(r"\b(?:not|avoid|without|unless|except)\b", lowered))
     if condition_count >= settings.ai_setup_complex_condition_threshold:
         reasons.append("four_or_more_conditions")
+    elif condition_count > 1:
+        reasons.append("multiple_conditions")
     if (has_and and has_or) or (has_not and (has_and or has_or)):
         reasons.append("mixed_boolean_logic")
     if len(set(_TIMEFRAME_RE.findall(lowered))) > 1:
@@ -117,6 +123,8 @@ def select_setup_model(
     correction_count += bool(_CORRECTION_RE.search(current_message.strip()))
     if correction_count >= settings.ai_setup_repeated_correction_threshold:
         reasons.append("repeated_corrections")
+    elif correction_count:
+        reasons.append("existing_condition_correction")
 
     clarification_friction = sum(
         bool(_CLARIFICATION_FRICTION_RE.search(item)) for item in user_turns[-8:]
@@ -125,10 +133,11 @@ def select_setup_model(
     if active_clarification and clarification_friction >= 1:
         reasons.append("repeated_clarification_failure")
 
-    confidences = _capability_confidences(capability_context or {})
+    routing_context = _normalize_routing_context(capability_context)
+    confidences = _capability_confidences(routing_context)
     if confidences and min(confidences) < settings.ai_setup_low_capability_confidence:
         reasons.append("low_capability_confidence")
-    if _unknown_terms(capability_context or {}):
+    if routing_context.unknown_terms:
         reasons.append("custom_terminology")
     if any(ord(character) > 127 for character in combined):
         reasons.append("multilingual_or_mixed_language")
@@ -143,7 +152,11 @@ def select_setup_model(
         reasons.append("complex_existing_draft")
     if _refers_to_earlier_turn(current_message):
         reasons.append("reference_to_previous_turn")
-    if unresolved_field_count > 0 and _short_answer(current_message):
+    if re.search(r"\b(?:undo|revert|restore|go back|return to)\b", current_message, re.I):
+        reasons.append("snapshot_restoration")
+    if active_clarification and current_message.strip():
+        reasons.append("active_clarification_answer")
+    elif unresolved_field_count > 0 and _short_answer(current_message):
         # `yes` against an open question needs the question to make any sense.
         reasons.append("answering_open_question")
     if previous_turn_failed:
@@ -271,30 +284,53 @@ def _looks_contradictory(value: str) -> bool:
     )
 
 
-def _capability_confidences(context: dict[str, Any]) -> list[float]:
-    values: list[float] = []
-    fragments = context.get("fragments")
-    if isinstance(fragments, list):
-        for fragment in fragments:
-            if not isinstance(fragment, dict):
-                continue
-            selected = fragment.get("selection_confidence")
-            candidates = fragment.get("candidates")
-            top = (
-                candidates[0].get("confidence")
-                if candidates and isinstance(candidates[0], dict)
-                else None
-            )
-            confidence = selected if selected is not None else top
-            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
-                values.append(float(confidence))
-    else:
-        candidates = context.get("candidates")
-        if candidates and isinstance(candidates, list) and isinstance(candidates[0], dict):
-            confidence = candidates[0].get("confidence")
-            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
-                values.append(float(confidence))
-    return [value for value in values if 0 <= value <= 1]
+def _normalize_routing_context(
+    value: CapabilityRoutingContext | dict[str, Any] | None,
+) -> CapabilityRoutingContext:
+    if isinstance(value, CapabilityRoutingContext):
+        return value
+    if not value:
+        return CapabilityRoutingContext(candidate_count=0)
+    # Read compatibility for older non-Setup callers. The typed model is authoritative
+    # after this boundary.
+    candidates = value.get("candidates") or []
+    normalized_candidates = [
+        CapabilityRoutingCandidate(
+            key=str(item.get("key") or f"candidate_{index}"),
+            score=float(item.get("score") or 0),
+            normalized_confidence=float(
+                item.get("normalized_confidence")
+                or item.get("confidence")
+                or 0
+            ),
+            availability=str(item.get("availability") or "unknown"),
+            executable=bool(item.get("executable", False)),
+            source_fragment=str(
+                item.get("source_fragment") or item.get("fragment") or ""
+            ),
+        )
+        for index, item in enumerate(candidates)
+        if isinstance(item, dict)
+    ]
+    return CapabilityRoutingContext(
+        candidate_count=len(normalized_candidates),
+        candidate_keys=[item.key for item in normalized_candidates],
+        top_candidate_key=(
+            normalized_candidates[0].key if normalized_candidates else None
+        ),
+        top_candidate_score=float(value.get("top_candidate_score") or value.get("top_score") or 0),
+        selection_confidence=float(value.get("selection_confidence") or 0),
+        top_score_margin=float(value.get("top_score_margin") or 0),
+        unknown_terms=[str(item) for item in value.get("unknown_terms") or []],
+        candidates=normalized_candidates,
+    )
+
+
+def _capability_confidences(context: CapabilityRoutingContext) -> list[float]:
+    values = [item.normalized_confidence for item in context.candidates]
+    if context.selection_confidence:
+        values.append(context.selection_confidence)
+    return values
 
 
 def _looks_like_arabizi(value: str) -> bool:
@@ -318,21 +354,3 @@ def _looks_like_technical_typo(value: str) -> bool:
         for token in tokens
         for term in _ROUTING_TECHNICAL_TERMS
     )
-
-
-def _unknown_terms(context: dict[str, Any]) -> list[str]:
-    terms: list[str] = []
-
-    def visit(item: Any) -> None:
-        if isinstance(item, dict):
-            raw = item.get("unknown_terms")
-            if isinstance(raw, list):
-                terms.extend(str(value) for value in raw if str(value).strip())
-            for value in item.values():
-                visit(value)
-        elif isinstance(item, list | tuple):
-            for value in item:
-                visit(value)
-
-    visit(context)
-    return terms

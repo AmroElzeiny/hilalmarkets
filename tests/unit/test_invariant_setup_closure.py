@@ -17,6 +17,7 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_formula,
     grounds_number,
     grounds_operator,
+    grounds_symbol,
     grounds_timeframe,
 )
 from ai_market_monitor.engine.setup_turn_execution import (
@@ -45,8 +46,13 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     ApprovalBindingV2,
     ConditionNodeType,
     DraftDirection,
+    DraftFieldPatch,
+    DraftRuntimeStateV2,
     FormulaKind,
+    ProviderRuntimeStatusV2,
     StrategyDraftV2,
+    StrategyPatch,
+    UnresolvedFieldV2,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
 from tests.support.setup_agent_plans import operations_from_patch, segment
@@ -93,6 +99,90 @@ def _approved(draft: StrategyDraftV2) -> StrategyDraftV2:
     )
 
 
+def test_executable_workflow_and_runtime_identities_are_independent() -> None:
+    approved = _approved(_draft_with())
+    renamed = apply_strategy_patch(
+        approved,
+        StrategyPatch(
+            source_turn_id=TURN,
+            set_fields=DraftFieldPatch(name="My renamed monitor"),
+        ),
+    ).draft
+
+    assert renamed.executable_hash == approved.executable_hash
+    assert renamed.executable_version == approved.executable_version
+    assert renamed.workflow_revision == approved.workflow_revision + 1
+    assert renamed.workflow_state_hash != approved.workflow_state_hash
+    assert renamed.approval == approved.approval
+
+    runtime_refreshed = StrategyDraftV2.model_validate(
+        renamed.model_copy(
+            update={
+                "runtime_state": DraftRuntimeStateV2(
+                    provider_status=[
+                        ProviderRuntimeStatusV2(
+                            provider="temporary-provider",
+                            capability="health",
+                            status="unavailable",
+                        )
+                    ],
+                    runtime_health="degraded",
+                ),
+                "executable_hash": "",
+                "workflow_state_hash": "",
+            }
+        ).model_dump(mode="json")
+    )
+    assert runtime_refreshed.executable_hash == renamed.executable_hash
+    assert runtime_refreshed.executable_version == renamed.executable_version
+    assert runtime_refreshed.approval == renamed.approval
+
+
+def test_removing_last_provider_condition_clears_static_requirements() -> None:
+    from ai_market_monitor.engine.capabilities import all_capabilities
+    from ai_market_monitor.schemas.strategy_draft_v2 import ConditionNodeV2, OperandV2
+
+    spec = next(item for item in all_capabilities() if item.key == "market_cap_minimum")
+    condition = ConditionNodeV2(
+        node_id="market-cap",
+        node_type=ConditionNodeType.CONDITION,
+        source_turn_id=TURN,
+        source_fragment="market cap at least 100000000 on 15m",
+        formula=FormulaKind.CAPABILITY,
+        operands=[
+            OperandV2(
+                role="value",
+                kind="market_metric",
+                name="market_cap_minimum",
+            )
+        ],
+        operator=Comparator.GREATER_THAN_OR_EQUAL,
+        threshold=100_000_000,
+        unit="price",
+        trigger_timeframe="15m",
+        capability_key=spec.key,
+        capability_version=spec.capability_version,
+        capability_parameters={
+            **spec.default_parameters,
+            "threshold": 100_000_000,
+        },
+    )
+    added = apply_strategy_patch(
+        StrategyDraftV2(),
+        StrategyPatch(source_turn_id=TURN, add_conditions=[condition]),
+    ).draft
+    assert [item.provider for item in added.static_provider_requirements] == [
+        "market_cap_provider"
+    ]
+
+    removed = apply_strategy_patch(
+        added,
+        StrategyPatch(source_turn_id=TURN, remove_conditions=["market-cap"]),
+    ).draft
+    assert removed.condition_ast is None
+    assert removed.static_provider_requirements == []
+
+
 def _plan(message: str, kind: SegmentKind, *, operations=(), **extra) -> SetupAgentTurnPlan:
     return SetupAgentTurnPlan(
         source_turn_id=TURN,
@@ -110,6 +200,65 @@ def _plan(message: str, kind: SegmentKind, *, operations=(), **extra) -> SetupAg
         overall_confidence=0.9,
         **extra,
     )
+
+
+def test_planner_condition_provenance_is_bound_to_its_authorizing_segment() -> None:
+    condition = _patch(RULE).add_conditions[0].model_dump(mode="json")
+    condition["source_turn_id"] = None
+    condition["source_fragment"] = None
+    condition["node_id"] = "null"
+    condition["required"] = False
+    condition["operands"].append(
+        {
+            "role": "right",
+            "kind": "constant",
+            "value": 5,
+            "unit": "percent",
+        }
+    )
+    plan = SetupAgentTurnPlan.model_validate(
+        {
+            "source_turn_id": TURN,
+            "segments": [
+                segment(
+                    RULE,
+                    RULE,
+                    SegmentKind.STRATEGY_INSTRUCTION,
+                    segment_id="s1",
+                    action=True,
+                    reply=False,
+                ).model_dump(mode="json")
+            ],
+            "operations": [
+                {
+                    "operation_id": "add-rule-1",
+                    "authorizing_segment_id": "s1",
+                    "kind": "add_condition",
+                    "condition": condition,
+                }
+            ],
+            "overall_confidence": 0.9,
+        }
+    )
+
+    proposed = plan.operations[0].condition
+    assert proposed is not None
+    assert proposed.source_turn_id == TURN
+    assert proposed.source_fragment == RULE
+    assert proposed.node_id != "null"
+    assert proposed.required is True
+    assert len(proposed.operands) == 1
+    assert proposed.operands[0].name == "percentage_change"
+    assert proposed.operands[0].parameters["formula"] == "open_to_close"
+
+
+def test_pair_mention_grounds_the_exact_base_asset_only() -> None:
+    text = "Monitor BTC/USDT on Binance spot"
+
+    assert grounds_symbol(text, "BTC")
+    assert grounds_symbol(text, "BTCUSDT")
+    assert not grounds_symbol(text, "USDT")
+    assert not grounds_symbol(text, "ETH")
 
 
 async def _run(plan, message, draft, **kwargs):
@@ -461,27 +610,42 @@ async def test_10_a_screening_block_prevents_approval_eligibility() -> None:
 
 
 async def test_10_an_unavailable_provider_prevents_approval_eligibility() -> None:
-    from ai_market_monitor.schemas.strategy_draft_v2 import ProviderRequirementV2
+    from ai_market_monitor.schemas.strategy_draft_v2 import ProviderRuntimeStatusV2
 
     async def unavailable(requirements):
-        return [item.model_copy(update={"available": False}) for item in requirements]
+        return [
+            ProviderRuntimeStatusV2(
+                provider=item.provider,
+                capability=item.capability,
+                status="unavailable",
+            )
+            for item in requirements
+        ]
 
-    draft = _draft_with()
-    draft = StrategyDraftV2.model_validate(
-        draft.model_copy(
-            update={
-                "provider_requirements": [
-                    ProviderRequirementV2(
-                        provider="news_feed",
-                        capability="high_impact_market_news",
-                        source_fragment="news",
-                    )
-                ],
-                "semantic_hash": "",
-            }
-        ).model_dump(mode="json")
+    from ai_market_monitor.engine.capabilities import all_capabilities
+
+    spec = next(
+        item
+        for item in all_capabilities()
+        if item.provider_requirements or item.provider_required
     )
-    message = "exclude LTC/USDT"
+    provider = (
+        spec.provider_requirements[0]
+        if spec.provider_requirements
+        else spec.provider_required
+    )
+    condition = _draft_with().condition_ast.model_copy(
+        update={
+            "formula": FormulaKind.CAPABILITY,
+            "capability_key": spec.key,
+            "capability_version": spec.capability_version,
+            "capability_parameters": {},
+            "source_fragment": f"{spec.intent_examples[0]} on 15m",
+        }
+    )
+    draft = StrategyDraftV2(condition_ast=condition)
+    assert provider
+    message = f"{condition.source_fragment}; exclude LTC/USDT"
     plan = SetupAgentTurnPlan(
         source_turn_id=TURN,
         segments=[
@@ -633,6 +797,59 @@ async def test_15_an_unoffered_capability_key_is_always_refused(invented: str) -
     assert error.value.code == "CAPABILITY_NOT_OFFERED"
 
 
+async def test_resolving_unresolved_requires_the_declared_target_to_change() -> None:
+    unresolved = UnresolvedFieldV2(
+        unresolved_id="exchange",
+        source_turn_id=TURN,
+        source_fragment="Which exchange should this use?",
+        target_type="market_scope",
+        target_field="exchange",
+        expected_answer_schema={"type": "string"},
+        question="Which exchange should this use?",
+        reason="An exchange is required for exact market mapping.",
+    )
+    draft = apply_strategy_patch(
+        StrategyDraftV2(),
+        StrategyPatch(source_turn_id=TURN, unresolved_references=[unresolved]),
+    ).draft
+    message = "Use Bybit."
+    resolving_only = _plan(
+        message,
+        SegmentKind.CLARIFICATION_ANSWER,
+        operations=(
+            AuthorizedPatchOperation(
+                authorizing_segment_id="s1",
+                kind="resolve_unresolved_key",
+                target_key="exchange",
+            ),
+        ),
+    )
+    with pytest.raises(SetupTurnRejected) as error:
+        await _run(resolving_only, message, draft)
+    assert error.value.code == "UNRESOLVED_TARGET_UNCHANGED"
+
+    filled = _plan(
+        message,
+        SegmentKind.CLARIFICATION_ANSWER,
+        operations=(
+            AuthorizedPatchOperation(
+                authorizing_segment_id="s1",
+                kind="set_fields",
+                fields=DraftFieldPatch(exchange="bybit"),
+            ),
+            AuthorizedPatchOperation(
+                authorizing_segment_id="s1",
+                kind="resolve_unresolved_key",
+                target_key="exchange",
+            ),
+        ),
+    )
+    outcome = await _run(filled, message, draft)
+    assert outcome.draft.market_scope.exchange == "bybit"
+    assert outcome.draft.unresolved_fields == []
+    assert outcome.draft.executable_version == draft.executable_version + 1
+
+
 # 9. Capability parameters satisfy the registry schema and source grounding. --------
 # Enforced by `engine/capability_contract.py`.
 
@@ -649,6 +866,7 @@ def test_9_the_registry_validator_checks_operator_direction_and_grounding() -> N
         source_fragment="RSI below 30 on the 15m",
         formula=FormulaKind.CAPABILITY,
         capability_key=spec.key,
+        capability_version=spec.capability_version,
         operator=Comparator.LESS_THAN,
         threshold=30.0,
         unit="index",
@@ -676,80 +894,56 @@ def test_9_the_registry_validator_checks_operator_direction_and_grounding() -> N
         allowed_keys=frozenset(),
     )
     assert any("capability_not_offered" in item for item in unoffered.errors)
+    wrong_type = validate_capability_node(
+        node.model_copy(update={"capability_parameters": {"period": "fourteen"}}),
+        authorizing_text="RSI below 30 on the 15m",
+        allowed_keys=frozenset({spec.key}),
+    )
+    assert any("parameter_type" in item for item in wrong_type.errors)
+    unknown = validate_capability_node(
+        node.model_copy(update={"capability_parameters": {"invented": 30}}),
+        authorizing_text="RSI below 30 on the 15m",
+        allowed_keys=frozenset({spec.key}),
+    )
+    assert any("parameter_additionalProperties" in item for item in unknown.errors)
+    wrong_unit = validate_capability_node(
+        node.model_copy(update={"capability_parameters": {"period": 15}}),
+        authorizing_text="RSI below 30 on the 15m",
+        allowed_keys=frozenset({spec.key}),
+    )
+    assert any("parameter_not_grounded:period:count" in item for item in wrong_unit.errors)
 
 
 # 13. Same-key retries never duplicate work or disappear. --------------------------
 # Enforced by `_replayed_turn` and `_record_turn` in `setup_chat_launch`.
 
 
-async def test_14_one_turn_never_reports_more_than_two_model_calls() -> None:
-    """The count operators police cost with must match what actually happened.
-
-    A double increment reported three calls for a two-call turn.
-    """
-    import json
-
-    import httpx
+async def test_14_one_turn_uses_at_most_one_model_call() -> None:
+    """An exact primitive uses no model call and still executes deterministically."""
     from pydantic import SecretStr
 
     from ai_market_monitor.core.config import Settings
-    from ai_market_monitor.schemas.setup_agent import SetupAgentPlanEnvelope
     from ai_market_monitor.services.setup_chat_agent import (
         SetupAgentTurnInput,
         SetupChatAgent,
     )
 
     message = "exclude LTC/USDT"
-    plan = SetupAgentPlanEnvelope(
-        plan=SetupAgentTurnPlan(
-            source_turn_id=TURN,
-            segments=[
-                segment(
-                    message,
-                    message,
-                    SegmentKind.STRATEGY_INSTRUCTION,
-                    segment_id="s1",
-                    action=True,
-                )
-            ],
-            operations=[
-                AuthorizedPatchOperation(
-                    authorizing_segment_id="s1", kind="add_exclusion", symbol="LTC/USDT"
-                )
-            ],
-            overall_confidence=0.9,
-        )
-    )
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        text = (
-            plan.model_dump_json()
-            if body["text"]["format"]["name"] == "hilalmarkets_setup_turn_plan"
-            else json.dumps({"message": "Done.", "clarification_question_id": None})
-        )
-        return httpx.Response(
-            200,
-            json={
-                "output": [
-                    {"type": "message", "content": [{"type": "output_text", "text": text}]}
-                ],
-                "usage": {"input_tokens": 5, "output_tokens": 2},
-            },
-        )
-
     agent = SetupChatAgent(
         Settings(
+            _env_file=None,
+            app_env="test",
             app_secret_key="closure-secret-with-at-least-thirty-two-chars",
             openai_api_key=SecretStr("test-key"),
             sharia_screening_enforced=False,
-        ),
-        transport=httpx.MockTransport(handler),
+        )
     )
     result = await agent.run_turn(
         SetupAgentTurnInput(message=message, source_turn_id=TURN, draft=_draft_with())
     )
-    assert result.trace.model_calls == 2, "one planning call plus one composing call"
+    assert result.trace.model_calls == 0
+    assert result.execution is not None
+    assert result.execution.strategy_mutated is True
 
 
 def test_13_turn_statuses_cover_every_stage_the_spec_requires() -> None:
@@ -766,15 +960,15 @@ def test_13_turn_statuses_cover_every_stage_the_spec_requires() -> None:
     }
 
 
-def test_13_a_recorded_turn_round_trips_through_the_session_context() -> None:
-    from ai_market_monitor.services.setup_chat_launch import TurnStatus, _record_turn
+def test_13_turn_idempotency_no_longer_writes_session_json() -> None:
+    from ai_market_monitor.services.setup_chat_launch import TurnStatus
 
-    context: dict = {}
-    _record_turn(context, "key-1", status=TurnStatus.PLANNING)
-    assert context["turn_records"]["key-1"]["status"] == "PLANNING"
-    _record_turn(context, "key-1", status=TurnStatus.COMPLETED, message="done")
-    assert context["turn_records"]["key-1"]["status"] == "COMPLETED"
-    assert context["turn_records"]["key-1"]["message"] == "done"
-    # A turn with no key is not recorded, and nothing raises.
-    _record_turn(context, None, status=TurnStatus.COMPLETED)
-    assert list(context["turn_records"]) == ["key-1"]
+    assert {item.value for item in TurnStatus} == {
+        "RECEIVED",
+        "PLANNING",
+        "EXECUTING",
+        "COMPOSING",
+        "COMPLETED",
+        "RETRYABLE_FAILURE",
+        "PERMANENT_FAILURE",
+    }

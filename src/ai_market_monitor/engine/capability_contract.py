@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
 from ai_market_monitor.engine.semantic_grounding import (
     grounds_number,
@@ -24,16 +26,17 @@ from ai_market_monitor.engine.semantic_grounding import (
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeV2,
-    DraftDirection,
     FormulaKind,
+    MovementDirection,
     ProviderRequirementV2,
 )
 
 #: How a draft direction maps onto the registry's own vocabulary.
-_DIRECTION_WORDS: dict[DraftDirection, str] = {
-    DraftDirection.LONG: "bullish",
-    DraftDirection.SHORT: "bearish",
-    DraftDirection.NEUTRAL: "neutral",
+_DIRECTION_WORDS: dict[MovementDirection, str] = {
+    MovementDirection.UP: "bullish",
+    MovementDirection.DOWN: "bearish",
+    MovementDirection.NEUTRAL: "neutral",
+    MovementDirection.NOT_APPLICABLE: "neutral",
 }
 
 #: Parameters the platform supplies, so the trader never has to state them and they are
@@ -63,6 +66,7 @@ def validate_capability_node(
     authorizing_text: str,
     allowed_keys: frozenset[str],
     source_turn_id: str | None = None,
+    require_current_shortlist: bool = True,
 ) -> CapabilityContractResult:
     """Check one capability node against its registry contract.
 
@@ -76,7 +80,7 @@ def validate_capability_node(
     key = node.capability_key
     if not key:
         return CapabilityContractResult(errors=(f"{node.node_id}:capability_key_missing",))
-    if key not in allowed_keys:
+    if require_current_shortlist and key not in allowed_keys:
         return CapabilityContractResult(
             errors=(f"{node.node_id}:capability_not_offered:{key}",)
         )
@@ -85,13 +89,18 @@ def validate_capability_node(
         return CapabilityContractResult(errors=(f"{node.node_id}:capability_unknown:{key}",))
 
     errors: list[str] = []
+    if node.capability_version != spec.capability_version:
+        errors.append(
+            f"{node.node_id}:capability_version_mismatch:"
+            f"{node.capability_version or 'missing'}:{spec.capability_version}"
+        )
     if not spec.executable:
         errors.append(f"{node.node_id}:capability_not_executable:{key}")
     if spec.availability != "available":
         errors.append(f"{node.node_id}:capability_unavailable:{key}:{spec.availability}")
     if node.operator is not None and node.operator.value not in spec.supported_comparators:
         errors.append(f"{node.node_id}:operator_unsupported:{node.operator.value}")
-    direction_word = _DIRECTION_WORDS[node.direction]
+    direction_word = _DIRECTION_WORDS[node.movement_direction]
     if direction_word not in spec.direction_support:
         errors.append(f"{node.node_id}:direction_unsupported:{direction_word}")
     if node.trigger_timeframe and node.trigger_timeframe not in spec.supported_timeframes:
@@ -116,8 +125,7 @@ def validate_capability_node(
             capability=key,
             source_turn_id=source_turn_id,
             source_fragment=(authorizing_text or spec.label)[:500],
-            # Availability is decided by the provider check, not asserted here.
-            available=False,
+            capability_version=spec.capability_version,
         )
         for provider in (
             spec.provider_requirements
@@ -128,7 +136,7 @@ def validate_capability_node(
 
 
 def _parameters(node: ConditionNodeV2) -> dict[str, Any]:
-    merged: dict[str, Any] = {}
+    merged: dict[str, Any] = dict(node.capability_parameters)
     for operand in node.operands:
         merged.update(operand.parameters)
     return merged
@@ -142,10 +150,12 @@ def _parameter_errors(
 ) -> list[str]:
     """Required present, nothing invented, every value inside its declared bounds."""
 
-    schema = spec.parameter_schema or {}
-    declared = {
-        parameter.name: parameter for parameter in spec.parameters
+    schema = spec.parameter_schema or {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
     }
+    declared = {parameter.name: parameter for parameter in spec.parameters}
     supplied = _parameters(node)
     errors: list[str] = []
 
@@ -158,77 +168,82 @@ def _parameter_errors(
         "level": node.threshold,
         "value": node.threshold,
         "timeframe": node.trigger_timeframe,
-        "direction": node.direction.value,
+        "direction": _DIRECTION_WORDS[node.movement_direction],
         "comparator": node.operator.value if node.operator else None,
     }
-    for name, parameter in declared.items():
-        required = bool(getattr(parameter, "required", False))
-        if required and name not in supplied and node_level.get(name) is None:
-            errors.append(f"{node.node_id}:parameter_missing:{name}")
-    known = set(declared) | set(schema) | _PLATFORM_PARAMETERS
-    for name in supplied:
-        if name not in known:
-            errors.append(f"{node.node_id}:parameter_unknown:{name}")
+    raw_properties = schema.get("properties")
+    properties: dict[str, Any] = (
+        dict(raw_properties) if isinstance(raw_properties, dict) else {}
+    )
+    registry_defaults = {
+        name: rules["default"]
+        for name, rules in properties.items()
+        if isinstance(rules, dict) and "default" in rules
+    }
+    registry_defaults.update(spec.default_parameters)
+    validation_payload = {**registry_defaults, **supplied}
+    for name in set(schema.get("properties") or {}) | set(declared):
+        if name not in validation_payload and node_level.get(name) is not None:
+            validation_payload[name] = node_level[name]
+    for failure in Draft202012Validator(schema).iter_errors(validation_payload):
+        location = ".".join(str(item) for item in failure.absolute_path) or "parameters"
+        validator = str(failure.validator or "schema")
+        errors.append(f"{node.node_id}:parameter_{validator}:{location}")
 
-    for name, value in supplied.items():
-        rules = schema.get(name)
-        if isinstance(rules, dict):
-            errors.extend(_schema_errors(node.node_id, name, value, rules))
+    for name, value in validation_payload.items():
+        rules = properties.get(name) if isinstance(properties, dict) else None
+        semantic_unit = (
+            str(rules.get("x-semantic-unit"))
+            if isinstance(rules, dict) and rules.get("x-semantic-unit")
+            else _semantic_unit(name)
+        )
         # A number the trader controls has to come from the trader. Periods and levels
         # the platform fills in are exempt via `_PLATFORM_PARAMETERS`.
         if (
             isinstance(value, int | float)
             and not isinstance(value, bool)
             and name not in _PLATFORM_PARAMETERS
-            and not _grounded_quantity(authorizing_text, float(value))
+            and (
+                name in supplied
+                or name not in registry_defaults
+                or registry_defaults[name] != value
+            )
+            and not grounds_number(
+                authorizing_text,
+                float(value),
+                unit=_grounding_unit(semantic_unit),
+            )
         ):
-            errors.append(f"{node.node_id}:parameter_not_grounded:{name}")
+            errors.append(
+                f"{node.node_id}:parameter_not_grounded:{name}:{semantic_unit}"
+            )
     return errors
 
 
-def _grounded_quantity(text: str, value: float) -> bool:
-    """Accept the value under any unit the trader might have written it as."""
+def _semantic_unit(name: str) -> str:
+    lowered = name.casefold()
+    if lowered in {"period", "lookback", "window", "candles", "length"}:
+        return "count"
+    if "percent" in lowered or lowered.endswith("_pct"):
+        return "percent"
+    if lowered in {"price", "price_level", "level"}:
+        return "price"
+    if "multiplier" in lowered or lowered.endswith("_multiple"):
+        return "multiple"
+    if "timeframe" in lowered:
+        return "timeframe"
+    if "symbol" in lowered:
+        return "symbol"
+    return "plain"
 
-    return any(
-        grounds_number(text, value, unit=unit)
-        for unit in ("plain", "percent", "multiple", "price", "count")
-    )
 
-
-def _schema_errors(
-    node_id: str,
-    name: str,
-    value: Any,
-    rules: dict[str, Any],
-) -> list[str]:
-    """Type, enum and bound checks straight from the registry's declared schema."""
-
-    errors: list[str] = []
-    expected = rules.get("type")
-    if expected == "integer" and not (isinstance(value, int) and not isinstance(value, bool)):
-        errors.append(f"{node_id}:parameter_type:{name}")
-        return errors
-    if expected == "number" and not (
-        isinstance(value, int | float) and not isinstance(value, bool)
-    ):
-        errors.append(f"{node_id}:parameter_type:{name}")
-        return errors
-    if expected == "string" and not isinstance(value, str):
-        errors.append(f"{node_id}:parameter_type:{name}")
-        return errors
-    if expected == "boolean" and not isinstance(value, bool):
-        errors.append(f"{node_id}:parameter_type:{name}")
-        return errors
-    choices = rules.get("enum")
-    if isinstance(choices, list | tuple) and value not in choices:
-        errors.append(f"{node_id}:parameter_enum:{name}")
-    minimum = rules.get("minimum")
-    if isinstance(minimum, int | float) and isinstance(value, int | float) and value < minimum:
-        errors.append(f"{node_id}:parameter_minimum:{name}")
-    maximum = rules.get("maximum")
-    if isinstance(maximum, int | float) and isinstance(value, int | float) and value > maximum:
-        errors.append(f"{node_id}:parameter_maximum:{name}")
-    return errors
+def _grounding_unit(unit: str) -> str:
+    return {
+        "count": "count",
+        "percent": "percent",
+        "price": "price",
+        "multiple": "multiple",
+    }.get(unit, "plain")
 
 
 def capability_condition_errors(
@@ -237,6 +252,7 @@ def capability_condition_errors(
     authorizing_text_by_node: dict[str, str],
     allowed_keys: frozenset[str],
     source_turn_id: str | None = None,
+    changed_node_ids: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[ProviderRequirementV2]]:
     """Validate every capability node in one place, before compilation."""
 
@@ -248,10 +264,51 @@ def capability_condition_errors(
             authorizing_text=authorizing_text_by_node.get(node.node_id, ""),
             allowed_keys=allowed_keys,
             source_turn_id=source_turn_id,
+            require_current_shortlist=node.node_id in changed_node_ids,
         )
         errors.extend(result.errors)
         providers.extend(result.provider_requirements)
     return errors, providers
+
+
+def derive_provider_requirements(
+    condition_ast: ConditionNodeV2 | None,
+) -> list[ProviderRequirementV2]:
+    """Rebuild static provider contracts from the complete final AST.
+
+    This deliberately replaces, rather than appends to, stored requirements. Removing
+    the last provider-backed condition therefore produces an empty list.
+    """
+
+    if condition_ast is None:
+        return []
+    specs = _spec_by_key()
+    requirements: list[ProviderRequirementV2] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    for node in condition_ast.walk():
+        if node.node_type.value != "condition" or node.formula != FormulaKind.CAPABILITY:
+            continue
+        spec = specs.get(node.capability_key or "")
+        if spec is None:
+            continue
+        providers = spec.provider_requirements or (
+            (spec.provider_required,) if spec.provider_required else ()
+        )
+        for provider in providers:
+            identity = (provider, spec.key, spec.capability_version)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            requirements.append(
+                ProviderRequirementV2(
+                    provider=provider,
+                    capability=spec.key,
+                    capability_version=spec.capability_version,
+                    source_turn_id=node.source_turn_id,
+                    source_fragment=node.source_fragment or spec.label,
+                )
+            )
+    return requirements
 
 
 def grounded_operator_and_timeframe(

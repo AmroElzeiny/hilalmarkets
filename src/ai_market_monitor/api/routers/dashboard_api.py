@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.api.dependencies import (
     UserPrincipal,
     get_market_data_provider,
+    get_market_previewer,
 )
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token_matches
@@ -78,6 +79,7 @@ from ai_market_monitor.schemas.ai_setup_chat import (
     SetupChatErrorEnvelope,
     SetupChatMessageRequest,
     SetupChatMessageResponse,
+    SetupChatScanRequest,
     SetupChatSessionResponse,
 )
 from ai_market_monitor.schemas.on_demand import (
@@ -106,7 +108,7 @@ from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService, export_file_path
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
-from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.lifecycle_dashboard import state_label
 from ai_market_monitor.services.market_preview import timeframe_duration
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
@@ -605,14 +607,11 @@ async def _user_email(session: AsyncSession, user_id: UUID) -> str | None:
 
 
 def _strategy_payload(strategy: Strategy, version: StrategyVersion | None = None) -> dict[str, Any]:
-    effective_status = strategy.status.value
-    if strategy.active_version_id and strategy.status == StrategyStatus.DRAFT:
-        effective_status = StrategyStatus.ACTIVE.value
     return {
         "id": strategy.id,
         "name": strategy.name,
         "description": strategy.description,
-        "status": effective_status,
+        "status": strategy.status.value,
         "active_version_id": strategy.active_version_id,
         "activated_at": strategy.activated_at,
         "paused_at": strategy.paused_at,
@@ -1218,11 +1217,16 @@ async def send_ai_setup_chat_message(
             envelope = envelope.model_copy(
                 update={
                     "draft_id": draft.draft_id,
-                    "draft_version": draft.version,
-                    "semantic_hash": draft.semantic_hash,
+                    "executable_version": draft.executable_version,
+                    "executable_hash": draft.executable_hash,
                 }
             )
-        await service.record_turn_failure(session, chat, envelope=envelope)
+        await service.record_turn_failure(
+            session,
+            chat,
+            envelope=envelope,
+            client_message_id=payload.client_message_id,
+        )
         await service.attach_turn_usage(
             session,
             chat,
@@ -1254,11 +1258,16 @@ async def send_ai_setup_chat_message(
             envelope = envelope.model_copy(
                 update={
                     "draft_id": draft.draft_id,
-                    "draft_version": draft.version,
-                    "semantic_hash": draft.semantic_hash,
+                    "executable_version": draft.executable_version,
+                    "executable_hash": draft.executable_hash,
                 }
             )
-        await service.record_turn_failure(session, chat, envelope=envelope)
+        await service.record_turn_failure(
+            session,
+            chat,
+            envelope=envelope,
+            client_message_id=payload.client_message_id,
+        )
         await service.attach_turn_usage(
             session,
             chat,
@@ -1282,13 +1291,19 @@ async def send_ai_setup_chat_message(
 )
 async def run_ai_setup_chat_scanner(
     chat_id: UUID,
+    payload: SetupChatScanRequest,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     service: AISetupChatService = Depends(get_ai_setup_chat_service),
 ) -> SetupChatSessionResponse:
     try:
         chat = await service.owned_session(session, principal.user_id, chat_id)
-        await service.run_scanner(session, chat, user_id=principal.user_id)
+        await service.run_scanner(
+            session,
+            chat,
+            user_id=principal.user_id,
+            idempotency_key=payload.idempotency_key,
+        )
         await session.commit()
         await session.refresh(chat)
     except SetupChatError as exc:
@@ -1317,8 +1332,8 @@ async def approve_ai_setup_chat(
             session,
             chat,
             expected_schema_hash=payload.expected_schema_hash,
-            expected_draft_version=payload.expected_draft_version,
-            expected_semantic_hash=payload.expected_semantic_hash,
+            expected_executable_version=payload.expected_executable_version,
+            expected_executable_hash=payload.expected_executable_hash,
             confirmed_low_confidence_rule_keys=set(payload.confirmed_low_confidence_rule_keys),
         )
         await session.commit()
@@ -1394,7 +1409,9 @@ async def create_strategy(
         interpreter=payload.interpreter,
     )
     strategy, version = await StrategyService(
-        session, settings.disclaimer_version
+        session,
+        settings.disclaimer_version,
+        settings,
     ).create_from_interpretation(
         principal.user_id,
         preview,
@@ -1470,7 +1487,11 @@ async def create_strategy_version(
         if prior_version and prior_version.unsupported_conditions
         else []
     )
-    version = await StrategyService(session, settings.disclaimer_version).revise(
+    version = await StrategyService(
+        session,
+        settings.disclaimer_version,
+        settings,
+    ).revise(
         strategy,
         payload.definition,
         user_id=principal.user_id,
@@ -1553,11 +1574,16 @@ async def approve_strategy_version(
                 strategy=strategy,
                 version=version,
             )
-        await verification_service.approval_gate(
+        await verification_service.approve_visible_draft(
             user_id=principal.user_id,
             version=version,
+            expected_schema_hash=expected_hash,
         )
-        approved = await StrategyService(session, settings.disclaimer_version).approve(
+        approved = await StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        ).approve(
             version,
             user_id=principal.user_id,
             expected_schema_hash=expected_hash,
@@ -1575,6 +1601,7 @@ async def publish_strategy_version(
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    previewer: RecentMarketPreviewer = Depends(get_market_previewer),
 ) -> dict[str, Any]:
     strategy = await _owned_strategy(session, principal.user_id, strategy_id)
     version = (
@@ -1584,9 +1611,11 @@ async def publish_strategy_version(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="Strategy version not found")
-    if not await _has_active_notification_channel(session, principal.user_id):
-        raise HTTPException(status_code=409, detail="notification_channel_required")
-    expected_hash = payload.expected_schema_hash or version.schema_hash
+    if (
+        payload.expected_schema_hash is not None
+        and payload.expected_schema_hash != version.schema_hash
+    ):
+        raise HTTPException(status_code=409, detail="strategy_changed")
     try:
         definition = StrategyDefinition.model_validate(version.schema_json)
         from ai_market_monitor.cockpit_service import StrategyCockpitService
@@ -1618,46 +1647,29 @@ async def publish_strategy_version(
             user_id=principal.user_id,
             version=version,
         )
-        approved = await StrategyService(session, settings.disclaimer_version).approve(
+        strategy_service = StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        )
+        await strategy_service.run_preview(
             version,
             user_id=principal.user_id,
-            expected_schema_hash=expected_hash,
+            previewer=previewer,
         )
-        await EntitlementService(session).enforce_strategy_activation(
-            principal.user_id,
-            definition,
-            strategy_id=strategy.id,
+        activated = await strategy_service.activate(
+            version,
+            user_id=principal.user_id,
+            strategy_name=strategy.name,
         )
     except (StrategyGateError, EntitlementError, VerifiedStrategyError) as exc:
         raise HTTPException(status_code=409, detail=exc.code) from exc
-    now = _now()
-    if strategy.active_version_id and strategy.active_version_id != approved.id:
-        active_version = await session.get(StrategyVersion, strategy.active_version_id)
-        if active_version is not None:
-            active_version.status = StrategyVersionStatus.SUPERSEDED
-    strategy.status = StrategyStatus.ACTIVE
-    strategy.active_version_id = approved.id
-    strategy.activated_at = now
-    strategy.paused_at = None
-    approved.status = StrategyVersionStatus.ACTIVE
-    approved.activated_at = now
-    session.add(
-        AuditEvent(
-            actor_user_id=principal.user_id,
-            actor_type="user",
-            action="strategy.published",
-            target_type="strategy",
-            target_id=str(strategy.id),
-            metadata_redacted={"version_id": str(approved.id), "schema_hash": approved.schema_hash},
-            created_at=now,
-        )
-    )
     await session.commit()
     await session.refresh(strategy)
-    await session.refresh(approved)
+    await session.refresh(version)
     return {
-        "strategy": _strategy_payload(strategy, approved),
-        "version": _version_payload(approved),
+        "strategy": _strategy_payload(activated, version),
+        "version": _version_payload(version),
     }
 
 
@@ -1769,15 +1781,16 @@ async def approve_strategy_interpretation(
     version = await _owned_version(session, principal.user_id, version_id)
     if version.strategy_id != strategy_id:
         raise HTTPException(status_code=404, detail="Strategy version not found")
-    try:
-        verification = await VerifiedStrategyService(session, settings).approve_interpretation(
-            user_id=principal.user_id,
-            version=version,
+    verification = await session.scalar(
+        select(StrategyVersionVerification).where(
+            StrategyVersionVerification.strategy_version_id == version.id
         )
-    except VerifiedStrategyError as exc:
-        raise HTTPException(status_code=409, detail=exc.code) from exc
-    await session.commit()
-    return {"status": verification.interpretation_status}
+    )
+    return {
+        "status": verification.interpretation_status if verification else "needs_review",
+        "mutation_performed": False,
+        "approval_action": f"/strategies/{strategy_id}/approve",
+    }
 
 
 @router.post("/strategies/{strategy_id}/versions/{version_id}/save-draft")

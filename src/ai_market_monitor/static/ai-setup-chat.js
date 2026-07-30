@@ -28,6 +28,7 @@
   let loading = false;
   let lastAction = null;
   let initialized = false;
+  let pendingScanRequestId = null;
   const optimisticMessages = new Map();
 
   const newClientMessageId = () => globalThis.crypto?.randomUUID?.()
@@ -668,8 +669,8 @@
         body: JSON.stringify({
           approved: true,
           expected_schema_hash: chat.schema_hash,
-          expected_draft_version: chat.draft_v2?.version || null,
-          expected_semantic_hash: chat.draft_v2?.semantic_hash || null,
+          expected_executable_version: chat.draft_v2?.executable_version || null,
+          expected_executable_hash: chat.draft_v2?.executable_hash || null,
           confirmed_low_confidence_rule_keys: confirmed,
         }),
       });
@@ -683,9 +684,14 @@
     if (scanButton.disabled || !chat) return;
     clearError();
     lastAction = () => scanButton.click();
+    pendingScanRequestId = pendingScanRequestId || newClientMessageId();
     setLoading(true, "Scanning the configured market universe");
     try {
-      chat = await request(`/sessions/${chat.id}/scan`, {method: "POST", body: "{}"});
+      chat = await request(`/sessions/${chat.id}/scan`, {
+        method: "POST",
+        body: JSON.stringify({idempotency_key: pendingScanRequestId}),
+      });
+      pendingScanRequestId = null;
       render();
     } catch (error) {
       showError(error);

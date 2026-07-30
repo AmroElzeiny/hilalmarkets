@@ -24,9 +24,9 @@ class RiskCalculator:
             raise RiskCalculationError("Cannot calculate risk without candles")
         latest = candles[-1]
         direction = strategy.direction
-        if direction == StrategyDirection.BOTH:
+        if direction in {StrategyDirection.BOTH, StrategyDirection.NEUTRAL}:
             raise RiskCalculationError(
-                "direction_ambiguous: evaluate a both-direction strategy for one side at a time"
+                "direction_ambiguous: directional risk requires an explicit long or short side"
             )
         entry_price = latest.close
         zone_percent = strategy.entry.zone_percent or 0

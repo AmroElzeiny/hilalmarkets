@@ -1,11 +1,18 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from pydantic import SecretStr
+from sqlalchemy import func, select
 
 from ai_market_monitor.api.routers.dashboard_api import get_ai_setup_chat_service
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.db.models import User
+from ai_market_monitor.db.models import (
+    AISetupChatMessage,
+    SetupChatDraftSnapshot,
+    SetupChatTurn,
+    User,
+)
 from ai_market_monitor.engine.strategy_draft_v2 import apply_strategy_patch
 from ai_market_monitor.schemas.setup_agent import (
     SegmentKind,
@@ -17,6 +24,7 @@ from ai_market_monitor.schemas.setup_agent import (
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.services.ai_setup_chat import AISetupChatService, SetupChatError
+from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import load_strategy_draft_v2
@@ -29,12 +37,37 @@ class MarketProvider:
     async def list_symbols(self, exchange, quote_currencies):
         return ["BTC/USDT", "ETH/USDT"]
 
+    async def fetch_ohlcv(self, exchange, symbol, timeframe, limit):
+        minutes = {"1m": 1, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}.get(
+            timeframe,
+            15,
+        )
+        end = datetime.now(UTC) - timedelta(minutes=minutes)
+        return [
+            Candle(
+                timestamp=end - timedelta(minutes=minutes),
+                open=100,
+                high=101,
+                low=99,
+                close=100,
+                volume=1000,
+            ),
+            Candle(
+                timestamp=end,
+                open=100,
+                high=102,
+                low=99,
+                close=101,
+                volume=1200,
+            ),
+        ][-limit:]
+
 
 class StandInPlanner:
     """A model stand-in that segments the turn and reuses the deterministic parser.
 
     Free text now reaches the Setup Agent, so these tests drive the agent rather than
-    the patch extractor. Only the two network calls are faked: the real planner
+    the patch extractor. The one network call is faked: the real planner
     payload, the real `apply_setup_turn` checks and the real compiler all run.
     """
 
@@ -177,7 +210,7 @@ async def test_launch_pipeline_conversation_does_not_mutate_and_strategy_compile
         )
         draft = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 2
+        assert planner.plan_calls == 1, "the exact primitive needs no additional model call"
         assert chat.status == "ready_for_approval"
         assert chat.draft_schema_json is not None
         assert draft.universe.included_symbols == ["BTC/USDT"]
@@ -205,12 +238,88 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
         }
         await service.handle_message(session, chat, **kwargs)
         first = load_strategy_draft_v2(chat)
+        turn = await session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == "launch-v2-idempotent",
+            )
+        )
+        assert turn is not None
+        assert turn.status == "COMPLETED"
+        assert turn.mutation_committed is True
+        assert turn.reply_json and turn.reply_json["execution_result"]
+        assistant_count = await session.scalar(
+            select(func.count(AISetupChatMessage.id)).where(
+                AISetupChatMessage.session_id == chat.id,
+                AISetupChatMessage.role == "assistant",
+            )
+        )
+        snapshot_count = await session.scalar(
+            select(func.count(SetupChatDraftSnapshot.id)).where(
+                SetupChatDraftSnapshot.chat_session_id == chat.id,
+                SetupChatDraftSnapshot.user_id == user.id,
+            )
+        )
         await service.handle_message(session, chat, **kwargs)
         second = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 1
+        assert planner.plan_calls == 0
         assert second.version == first.version
         assert second.semantic_hash == first.semantic_hash
+        assert await session.scalar(
+            select(func.count(AISetupChatMessage.id)).where(
+                AISetupChatMessage.session_id == chat.id,
+                AISetupChatMessage.role == "assistant",
+            )
+        ) == assistant_count
+        assert snapshot_count == 1
+
+
+async def test_committed_execution_recovers_without_reapplying_or_replanning(test_context):
+    user = await _user(test_context)
+    planner = StandInPlanner()
+    service = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], planner),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        request = {
+            "message": (
+                "Monitor BTC/USDT when the 15m candle rises open-to-close "
+                "by at least 4%"
+            ),
+            "client_message_id": "launch-v2-recover-committed",
+        }
+        await service.handle_message(session, chat, **request)
+        committed = load_strategy_draft_v2(chat)
+        turn = await session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == request["client_message_id"],
+            )
+        )
+        assert turn is not None and turn.execution_result_json
+        assistant = await session.get(AISetupChatMessage, turn.assistant_message_id)
+        assert assistant is not None
+        await session.delete(assistant)
+        turn.assistant_message_id = None
+        turn.reply_json = None
+        turn.status = "COMPOSING"
+        turn.completed_at = None
+        await session.commit()
+
+        await service.handle_message(session, chat, **request)
+        recovered = load_strategy_draft_v2(chat)
+
+        assert planner.plan_calls == 0
+        assert planner.reply_calls == 0
+        assert recovered.executable_version == committed.executable_version
+        assert recovered.executable_hash == committed.executable_hash
+        assert turn.status == "COMPLETED"
+        assert turn.reply_json and turn.reply_json["execution_result"]
 
 
 async def test_repeated_identical_text_is_understood_again_but_changes_nothing(
@@ -222,7 +331,8 @@ async def test_repeated_identical_text_is_understood_again_but_changes_nothing(
     context-aware agent that is wrong — `yes` twice answers two different questions —
     so the text cache is gone. A genuine retry is still free: it is caught earlier by
     ``client_message_id``. Repeating the words costs one planning call and, because the
-    patch is already reflected, leaves the draft untouched.
+    patch is already reflected, leaves the draft untouched. Exact primitives are
+    re-read deterministically and need no planning call.
     """
     user = await _user(test_context)
     planner = StandInPlanner()
@@ -253,7 +363,7 @@ async def test_repeated_identical_text_is_understood_again_but_changes_nothing(
         )
         second = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 2, "the agent re-reads the turn in its new context"
+        assert planner.plan_calls == 0
         assert second.version == first.version, "an identical patch is not a new version"
         assert second.semantic_hash == first.semantic_hash
 
@@ -289,8 +399,8 @@ async def test_launch_pipeline_approval_binds_exact_v2_and_retries_idempotently(
             session,
             chat,
             expected_schema_hash=schema_hash,
-            expected_draft_version=draft.version,
-            expected_semantic_hash=draft.semantic_hash,
+            expected_executable_version=draft.executable_version,
+            expected_executable_hash=draft.executable_hash,
         )
         await session.flush()
 
@@ -307,12 +417,25 @@ async def test_launch_pipeline_approval_binds_exact_v2_and_retries_idempotently(
             session,
             chat,
             expected_schema_hash=schema_hash,
-            expected_draft_version=draft.version,
-            expected_semantic_hash=draft.semantic_hash,
+            expected_executable_version=draft.executable_version,
+            expected_executable_hash=draft.executable_hash,
         )
 
         assert chat.approved_strategy_id == strategy_id
         assert chat.approved_strategy_version_id == version_id
+
+        await service.handle_message(
+            session,
+            chat,
+            message="Thanks, that is clear.",
+            client_message_id="launch-v2-approved-conversation",
+        )
+        after_conversation = load_strategy_draft_v2(chat)
+        assert chat.status == "approved"
+        assert after_conversation.executable_hash == approved.executable_hash
+        assert after_conversation.executable_version == approved.executable_version
+        assert after_conversation.workflow_revision == approved.workflow_revision
+        assert after_conversation.approval == approved.approval
 
         await service.handle_message(
             session,
@@ -410,9 +533,8 @@ async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_contex
 
         assert current.semantic_hash == initial.semantic_hash
         assert current.version == initial.version
-        # One turn is bounded at one planning call plus one composing call, whichever
-        # route it takes. Never a loop.
-        assert (result.context_json or {})["turn_runtime"]["model_call_count"] <= 2
+        # One turn is bounded at one planning call. Mutation wording is deterministic.
+        assert (result.context_json or {})["turn_runtime"]["model_call_count"] <= 1
         assert planner.plan_calls == 1, "exactly one planning call"
 
 
@@ -446,7 +568,7 @@ async def test_launch_v2_http_contract_compiles_and_approves_exact_draft(test_co
     )
     assert created.status_code == 201
     chat_id = created.json()["id"]
-    assert created.json()["draft_v2"]["schema_version"] == "2.0"
+    assert created.json()["draft_v2"]["schema_version"] == "2.1"
 
     response = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
@@ -467,8 +589,8 @@ async def test_launch_v2_http_contract_compiles_and_approves_exact_draft(test_co
     approval_payload = {
         "approved": True,
         "expected_schema_hash": payload["schema_hash"],
-        "expected_draft_version": payload["draft_v2"]["version"],
-        "expected_semantic_hash": payload["draft_v2"]["semantic_hash"],
+        "expected_executable_version": payload["draft_v2"]["executable_version"],
+        "expected_executable_hash": payload["draft_v2"]["executable_hash"],
         "confirmed_low_confidence_rule_keys": [],
     }
     approved = await test_context["client"].post(
@@ -538,6 +660,6 @@ async def test_launch_v2_http_error_keeps_authoritative_draft_identity(test_cont
     assert body["error"]["error_code"] == "TARGET_READ_TIMEOUT"
     assert body["error"]["stage"] == "extract"
     assert body["error"]["draft_id"] == before["draft_id"]
-    assert body["error"]["draft_version"] == before["version"]
-    assert body["error"]["semantic_hash"] == before["semantic_hash"]
-    assert body["draft_v2"]["semantic_hash"] == before["semantic_hash"]
+    assert body["error"]["executable_version"] == before["executable_version"]
+    assert body["error"]["executable_hash"] == before["executable_hash"]
+    assert body["draft_v2"]["executable_hash"] == before["executable_hash"]

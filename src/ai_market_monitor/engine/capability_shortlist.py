@@ -30,12 +30,19 @@ SHORTLIST_LIMIT = 12
 #: Candidates per fragment asked of the resolver before merging and trimming.
 _PER_FRAGMENT_LIMIT = 6
 
+# Provider contracts backed by the production market-data adapter. Capabilities that
+# require anything else are not offered to the planner as executable choices.
+SETUP_RUNTIME_PROVIDER_REQUIREMENTS = frozenset(
+    {"", "ohlcv", "market_data", "candles", "ccxt"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ShortlistCandidate:
     """One capability the model may choose, with everything needed to choose well."""
 
     capability_key: str
+    capability_version: str
     label: str
     #: What it measures, in the registry's own words.
     description: str
@@ -61,6 +68,7 @@ class ShortlistCandidate:
         """The compact form sent to the model. Field names are the contract."""
         return {
             "capability_key": self.capability_key,
+            "capability_version": self.capability_version,
             "label": self.label,
             "description": self.description,
             "supported_operators": list(self.supported_operators),
@@ -114,6 +122,7 @@ def build_capability_shortlist(
     message: str,
     *,
     limit: int = SHORTLIST_LIMIT,
+    available_provider_requirements: frozenset[str] | None = None,
 ) -> CapabilityShortlist:
     """Retrieve the capability keys relevant to ``message``.
 
@@ -141,6 +150,18 @@ def build_capability_shortlist(
         for candidate in resolution.candidates:
             spec = by_key.get(candidate.capability_key)
             if spec is None:
+                continue
+            provider_requirements = (
+                spec.provider_requirements
+                or ((spec.provider_required,) if spec.provider_required else ())
+            )
+            if (
+                available_provider_requirements is not None
+                and any(
+                    requirement.casefold() not in available_provider_requirements
+                    for requirement in provider_requirements
+                )
+            ):
                 continue
             existing = best.get(candidate.capability_key)
             if existing is not None and existing.score >= candidate.score:
@@ -180,6 +201,7 @@ def _candidate(
 ) -> ShortlistCandidate:
     return ShortlistCandidate(
         capability_key=spec.key,
+        capability_version=spec.capability_version,
         label=spec.label,
         description=spec.description,
         supported_operators=spec.supported_comparators,

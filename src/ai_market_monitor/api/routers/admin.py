@@ -5,7 +5,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.api.dependencies import AdminPrincipal, get_admin_principal, require_admin
+from ai_market_monitor.api.dependencies import (
+    AdminPrincipal,
+    get_admin_principal,
+    get_market_previewer,
+    require_admin,
+)
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import AuditEvent, Incident, SupportRequest
@@ -16,6 +21,7 @@ from ai_market_monitor.services.admin_dashboard import (
     AdminDashboardService,
 )
 from ai_market_monitor.services.billing import BillingError
+from ai_market_monitor.services.interfaces import RecentMarketPreviewer
 from ai_market_monitor.services.reliability import ReliabilityError
 from ai_market_monitor.services.support import SupportError
 from ai_market_monitor.services.trials import TrialError
@@ -86,7 +92,8 @@ async def user_detail(
         return await dashboard(session, settings).user_detail(user_id)
     except AdminDashboardError as exc:
         raise HTTPException(
-            status_code=404, detail={"code": exc.code, "message": str(exc)}
+            status_code=404,
+            detail={"code": exc.code, "message": str(exc)},
         ) from exc
 
 
@@ -215,18 +222,21 @@ async def resume_strategy(
     principal: AdminPrincipal = Depends(require_admin),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    previewer: RecentMarketPreviewer = Depends(get_market_previewer),
 ) -> dict:
     try:
         strategy = await dashboard(session, settings).resume_strategy(
             strategy_id=strategy_id,
             admin_user_id=principal.user_id,
             reason=request.reason,
+            previewer=previewer,
         )
         await session.commit()
         return {"strategy_id": strategy.id, "status": strategy.status}
     except AdminDashboardError as exc:
         raise HTTPException(
-            status_code=404, detail={"code": exc.code, "message": str(exc)}
+            status_code=404 if exc.code == "strategy_missing" else 409,
+            detail={"code": exc.code, "message": str(exc)},
         ) from exc
 
 

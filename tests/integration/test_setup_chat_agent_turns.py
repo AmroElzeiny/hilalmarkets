@@ -19,8 +19,8 @@ happened to be reported:
   generic conversational answer
 
 The model is scripted through a mock transport, so the *real* planner payload, the
-*real* deterministic tool and the *real* compiler all run. Only the two network calls
-are faked. Assertions look at what the server did, never at the assistant's wording.
+*real* deterministic tool and the *real* compiler all run. The sole network call is
+faked. Assertions look at what the server did, never at the assistant's wording.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 import pytest
 from pydantic import SecretStr
+from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.engine.capability_shortlist import build_capability_shortlist
@@ -79,9 +80,12 @@ TURN_ID = "turn-00000001"
 
 def _settings() -> Settings:
     return Settings(
+        _env_file=None,
+        app_env="test",
         app_secret_key="setup-agent-secret-with-at-least-32-characters",
         openai_api_key=SecretStr("test-key"),
         sharia_screening_enforced=False,
+        setup_agent_max_estimated_cost_usd_per_turn=5,
     )
 
 
@@ -409,7 +413,10 @@ async def test_an_instruction_and_a_question_are_both_handled() -> None:
 
     assert result.execution is not None
     assert result.execution.strategy_mutated is True
-    assert question in script.composer_payloads[0]["questions_to_answer"]
+    assert result.plan is not None
+    assert question in result.plan.questions_to_answer
+    assert script.composer_payloads == []
+    assert result.trace.model_calls == 1
     kinds = {item.kind for item in result.execution.ignored_non_actionable_segments}
     assert SegmentKind.USER_QUESTION in kinds
 
@@ -907,6 +914,81 @@ async def test_a_capability_key_must_come_from_the_server_shortlist() -> None:
     assert error.value.code == "CAPABILITY_NOT_OFFERED"
 
 
+async def test_snapshot_restore_requires_exact_owned_snapshot_identity() -> None:
+    original = _draft_with(
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
+    )
+    changed_patch = deterministic_strategy_patch(
+        original,
+        "Also require the 1h candle to fall close-to-close by at most -2%",
+        source_turn_id="turn-00000002",
+    )
+    assert changed_patch is not None
+    changed = apply_strategy_patch(original, changed_patch).draft
+    message = "Undo that and restore the prior setup."
+    segment = _segment(
+        message,
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        segment_id="restore",
+        action=True,
+    )
+    operation = AuthorizedPatchOperation(
+        operation_id="restore-prior",
+        authorizing_segment_id="restore",
+        kind="restore_snapshot",
+        target_snapshot_id="snapshot-owned",
+        target_executable_version=original.executable_version,
+    )
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN_ID,
+        segments=[segment],
+        operations=[operation],
+        overall_confidence=0.99,
+    )
+    history = [
+        {
+            "snapshot_id": "snapshot-owned",
+            "executable_version": original.executable_version,
+            "draft": original.model_dump(mode="json"),
+        }
+    ]
+
+    restored = await apply_setup_turn(
+        SetupTurnRequest(
+            plan=plan,
+            message=message,
+            draft=changed,
+            source_turn_id=TURN_ID,
+            history=history,
+        )
+    )
+
+    assert restored.draft.executable_version == changed.executable_version + 1
+    assert restored.draft.executable_hash == original.executable_hash
+    assert restored.draft.approval.approved is False
+    assert restored.result.operation_results[0].operation_id == "restore-prior"
+
+    unowned = plan.model_copy(
+        update={
+            "operations": [
+                operation.model_copy(update={"target_snapshot_id": "snapshot-other-user"})
+            ]
+        }
+    )
+    with pytest.raises(SetupTurnRejected) as error:
+        await apply_setup_turn(
+            SetupTurnRequest(
+                plan=unowned,
+                message=message,
+                draft=changed,
+                source_turn_id=TURN_ID,
+                history=history,
+            )
+        )
+    assert error.value.code == "VALUE_NOT_GROUNDED"
+
+
 async def test_the_planner_is_always_given_the_shortlist_and_the_boundaries() -> None:
     message = "alert me when RSI drops below 30 on the 15m"
     script = Script(
@@ -1119,8 +1201,8 @@ async def test_a_provider_failure_while_planning_preserves_the_draft(
     assert error.value.retryable is True
 
 
-async def test_a_composing_failure_after_success_reports_what_actually_changed() -> None:
-    """The work is durable, so it is described from the result, not thrown away."""
+async def test_success_is_composed_deterministically_without_a_second_ai_call() -> None:
+    """An exact primitive is parsed and reported without a provider call."""
     message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
     script = Script(
         plan=SetupAgentPlanEnvelope(
@@ -1144,15 +1226,81 @@ async def test_a_composing_failure_after_success_reports_what_actually_changed()
                 overall_confidence=0.95,
             )
         ),
-        reply_failure=httpx.ReadTimeout("composer timed out"),
+        reply_failure=httpx.ReadTimeout("a forbidden composer call would time out"),
     )
     result = await _run(script, message)
 
     assert result.execution is not None
     assert result.execution.strategy_mutated is True, "the applied work survives"
-    assert result.trace.failure_stage == "response_composition"
-    assert "open to close percentage" in result.reply.message
-    assert BANNED_READINESS_PHRASE not in result.reply.message.casefold()
+    assert result.trace.response_model == "deterministic_summary"
+    assert result.trace.model_calls == 0
+    assert script.planner_payloads == []
+    assert script.composer_payloads == []
+    assert "open to close percentage" in result.reply.message_without_question
+    assert (
+        BANNED_READINESS_PHRASE
+        not in result.reply.message_without_question.casefold()
+    )
+
+
+async def test_redis_success_bookkeeping_failure_never_repeats_the_model_call() -> None:
+    instruction = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
+    question = "what does the timeframe change?"
+    message = f"{instruction} - also {question}"
+    script = Script(
+        plan=SetupAgentPlanEnvelope(
+            plan=SetupAgentTurnPlan(
+                source_turn_id=TURN_ID,
+                segments=[
+                    _segment(
+                        message,
+                        instruction,
+                        SegmentKind.STRATEGY_INSTRUCTION,
+                        segment_id="s1",
+                        action=True,
+                    ),
+                    _segment(
+                        message,
+                        question,
+                        SegmentKind.USER_QUESTION,
+                        segment_id="s2",
+                        reply=True,
+                    ),
+                ],
+                operations=operations_from_patch(_patch_for(instruction), segment_id="s1"),
+                strategy_instructions=[
+                    StrategyInstructionPlan(
+                        segment_id="s1",
+                        intent_summary="15m open-to-close rise of at least 5%",
+                    )
+                ],
+                questions_to_answer=[question],
+                overall_confidence=0.95,
+            )
+        )
+    )
+
+    class RedisWithFailedSuccessWrite:
+        async def eval(self, *args, **kwargs):
+            return 1
+
+        async def delete(self, *args, **kwargs):
+            raise RedisError("shared state unavailable")
+
+    agent = SetupChatAgent(_settings(), transport=script.transport())
+    agent._circuit_redis = RedisWithFailedSuccessWrite()  # type: ignore[assignment]
+    result = await agent.run_turn(
+        SetupAgentTurnInput(
+            message=message,
+            source_turn_id=TURN_ID,
+            draft=StrategyDraftV2(),
+        )
+    )
+
+    assert result.trace.model_calls == 1
+    assert len(script.planner_payloads) == 1
+    assert result.execution is not None
+    assert result.execution.strategy_mutated is True
 
 
 # --------------------------------------------------------------------------------

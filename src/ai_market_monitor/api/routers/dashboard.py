@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.api.dependencies import get_market_data_provider, get_market_previewer
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
@@ -87,7 +87,7 @@ from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
 from ai_market_monitor.services.email_delivery import EmailDeliveryError
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
-from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
 from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
@@ -2313,9 +2313,15 @@ async def resume_monitor(
     strategy_id: UUID,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    previewer: RecentMarketPreviewer = Depends(get_market_previewer),
 ) -> RedirectResponse:
     try:
-        await MonitorOperationService(session).resume(
+        await MonitorOperationService(
+            session,
+            settings=settings,
+            previewer=previewer,
+        ).resume(
             user_id=user.id,
             strategy_id=strategy_id,
             actor_type="dashboard_user",

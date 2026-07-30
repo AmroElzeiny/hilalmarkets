@@ -60,7 +60,7 @@ async def _signup(test_context, email: str) -> None:
     assert verified.status_code == 303
 
 
-async def test_setup_chat_api_creates_resumes_compiles_and_approves(test_context):
+async def test_legacy_compat_setup_chat_api_creates_resumes_and_compiles(test_context):
     await _signup(test_context, "ai-chat-api@example.com")
     test_context["settings"].openai_api_key = SecretStr("test-key")
     service = AISetupChatService(
@@ -108,20 +108,6 @@ async def test_setup_chat_api_creates_resumes_compiles_and_approves(test_context
     resumed = await test_context["client"].get("/api/v1/dashboard/setup-chat/sessions/current")
     assert resumed.status_code == 200
     assert resumed.json()["id"] == chat_id
-
-    approved = await test_context["client"].post(
-        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/approve",
-        json={
-            "approved": True,
-            "expected_schema_hash": payload["schema_hash"],
-            "confirmed_low_confidence_rule_keys": [],
-        },
-    )
-    assert approved.status_code == 200, approved.text
-    approved_payload = approved.json()
-    assert approved_payload["status"] == "approved"
-    assert approved_payload["approved_strategy_id"]
-    assert approved_payload["next_url"].endswith("/verify")
 
 
 async def test_authenticated_chat_approval_compiles_once_and_is_idempotent(test_context):

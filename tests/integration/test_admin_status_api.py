@@ -78,8 +78,8 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
         headers=admin_headers,
         json={"reason": "Investigation complete"},
     )
-    assert resume.status_code == 200, resume.text
-    assert resume.json()["status"] == "active"
+    assert resume.status_code == 409, resume.text
+    assert resume.json()["detail"]["code"] == "active_version_missing"
 
     incident = await client.post(
         "/api/v1/admin/incidents",
@@ -117,7 +117,7 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
     async with test_context["session_factory"]() as session:
         strategy_row = await session.get(Strategy, strategy.id)
         ticket_row = await session.get(SupportRequest, ticket.id)
-        assert strategy_row.status == StrategyStatus.ACTIVE
+        assert strategy_row.status == StrategyStatus.PAUSED
         assert ticket_row.status == SupportRequestStatus.RESOLVED
         assert await session.scalar(select(func.count(AuditEvent.id))) >= 4
 

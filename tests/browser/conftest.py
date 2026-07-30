@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 TEST_PASSWORD = "TraceEdge1!"
+BROWSER_DISCLAIMER_VERSION = "2026-06-01"
 REPORTS: dict[str, Any] = {
     "started_at": datetime.now(UTC).isoformat(),
     "tests": {},
@@ -187,6 +188,7 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "APP_SECRET_KEY": "browser-e2e-secret-key-32-characters-minimum",
             "DATABASE_URL": database_url,
             "PUBLIC_BASE_URL": base_url,
+            "DISCLAIMER_VERSION": BROWSER_DISCLAIMER_VERSION,
             "ALLOW_MOCK_PROVIDERS": "true",
             "SCANNING_ENABLED": "false",
             "TRACEDGE_MARKET_DATA_MODE": "fixture",
@@ -731,6 +733,41 @@ def seed_paid_monitor_access(database_url: str, email: str) -> None:
                     provider_subscription_id=f"browser-monitor-{uuid4()}",
                     current_period_start=now,
                     current_period_end=now + timedelta(days=30),
+                )
+            )
+            await session.commit()
+        await engine.dispose()
+
+    _run_async_in_thread(_seed)
+
+
+def seed_disclaimer_acceptance(database_url: str, email: str) -> None:
+    if not database_url:
+        pytest.skip("Disclaimer acceptance coverage requires the auto-started database URL.")
+
+    async def _seed() -> None:
+        from ai_market_monitor.db.models import DisclaimerAcceptance, UserIdentity
+        from ai_market_monitor.db.models.enums import IdentityProvider
+
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            identity = await session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == email.lower(),
+                )
+            )
+            if identity is None:
+                raise AssertionError(f"No browser test user identity found for {email}.")
+            session.add(
+                DisclaimerAcceptance(
+                    user_id=identity.user_id,
+                    identity_id=identity.id,
+                    disclaimer_version=BROWSER_DISCLAIMER_VERSION,
+                    acceptance_source="browser_test",
+                    accepted_at=datetime.now(UTC),
+                    user_agent="browser-e2e",
                 )
             )
             await session.commit()

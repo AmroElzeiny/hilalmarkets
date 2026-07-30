@@ -6570,10 +6570,17 @@
       renderVersions(payload.versions, payload.version, payload.verification?.semantic_diff);
       renderHealth(payload.health || {});
       const blockers = safeArray(payload.activation_blockers);
+      const approvalBlockers = blockers.filter((item) => item.code !== "interpretation_review");
       const approve = workspace.querySelector("[data-approve-version]");
       const activate = workspace.querySelector("[data-activate-version]");
-      if (approve) approve.disabled = blockers.length > 0;
-      if (activate) activate.disabled = blockers.length > 0;
+      if (approve) {
+        approve.hidden = Boolean(payload.version.approved_at);
+        approve.disabled = approvalBlockers.length > 0;
+      }
+      if (activate) {
+        activate.hidden = Boolean(payload.version.active);
+        activate.disabled = blockers.length > 0 || !payload.version.approved_at;
+      }
       setNotice(
         blockers.length
           ? blockers.map((item) => item.message).join(" ")
@@ -6618,11 +6625,6 @@
           setBusy(button, true, "Saving...");
           await api(`/strategies/${strategyId}/interpretation/${id}/resolve`, { method: "POST", body: JSON.stringify({ action: "answer", resolution_text: input.value.trim() }) });
           await loadWorkspace();
-        } else if (button.matches("[data-approve-interpretation]")) {
-          setBusy(button, true, "Approving...");
-          await api(`/strategies/${strategyId}/versions/${versionId}/interpretation/approve`, { method: "POST", body: "{}" });
-          showToast("Interpretation approved. The exact reviewed version is recorded.");
-          await loadWorkspace();
         } else if (button.matches("[data-rerun-test]")) {
           setBusy(button, true, "Running...");
           await api(`/strategies/${strategyId}/tests/${button.dataset.rerunTest}/run?version_id=${versionId}`, { method: "POST", body: "{}" });
@@ -6659,7 +6661,7 @@
         } else if (button.matches("[data-approve-version]")) {
           setBusy(button, true, "Approving...");
           await api(`/strategies/${strategyId}/approve`, { method: "POST", body: JSON.stringify({ strategy_version_id: versionId, expected_schema_hash: state.version.schema_hash }) });
-          showToast("Version approved. No active strategy was silently replaced.");
+          showToast("Exact visible version and its interpretation approved. No monitor was activated.");
           await loadWorkspace();
         } else if (button.matches("[data-activate-version]")) {
           if (!window.confirm("Activate this exact approved strategy version for continuous monitoring?")) return;

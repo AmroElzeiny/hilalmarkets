@@ -17,6 +17,7 @@ from ai_market_monitor.db.models import (
     ChartSnapshot,
     DashboardNotification,
     DashboardPreference,
+    DisclaimerAcceptance,
     EdgeHealthSnapshot,
     ReferralRelationship,
     ScanJob,
@@ -29,6 +30,7 @@ from ai_market_monitor.db.models import (
     StrategySuggestion,
     StrategyTemplate,
     StrategyVersion,
+    StrategyVersionVerification,
     Subscription,
     SupportRequest,
     SupportTicketMessage,
@@ -192,12 +194,38 @@ async def _approve_verified_interpretation(
             json={"action": "accept"},
         )
         assert resolved.status_code == 200
+async def _accept_current_disclaimer(test_context) -> None:
+    async with test_context["session_factory"]() as session:
+        identity = await session.scalar(
+            select(UserIdentity).where(UserIdentity.provider == IdentityProvider.EMAIL)
+        )
+        assert identity is not None
+        session.add(
+            DisclaimerAcceptance(
+                user_id=identity.user_id,
+                identity_id=identity.id,
+                disclaimer_version=test_context["settings"].disclaimer_version,
+                acceptance_source="dashboard_test",
+                accepted_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+
+async def _approve_strategy_version(
+    test_context,
+    strategy_id: str,
+    version_id: str,
+    schema_hash: str,
+) -> None:
     approved = await test_context["client"].post(
-        f"/api/v1/dashboard/strategies/{strategy_id}/versions/"
-        f"{version_id}/interpretation/approve",
-        json={},
+        f"/api/v1/dashboard/strategies/{strategy_id}/approve",
+        json={
+            "strategy_version_id": version_id,
+            "expected_schema_hash": schema_hash,
+        },
     )
-    assert approved.status_code == 200
+    assert approved.status_code == 200, approved.text
 
 
 async def test_dashboard_api_uses_session_cookie_for_current_user(test_context):
@@ -859,6 +887,7 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
     await _signup(test_context, "dashboard-publish@example.com")
     await _connect_telegram(test_context, "dashboardpublisher")
     await _grant_monitor_plan(test_context)
+    await _accept_current_disclaimer(test_context)
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
@@ -881,6 +910,12 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
         payload["strategy"]["id"],
         payload["version"]["id"],
     )
+    await _approve_strategy_version(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+        payload["version"]["schema_hash"],
+    )
 
     published = await test_context["client"].post(
         f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
@@ -901,9 +936,26 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
     detail = await test_context["client"].get(f"/dashboard/strategies/{payload['strategy']['id']}")
     assert "<strong>active</strong>" in detail.text
 
+    paused = await test_context["client"].post(
+        f"/dashboard/monitors/{payload['strategy']['id']}/pause",
+        follow_redirects=False,
+    )
+    assert paused.status_code == 303
+    assert "message=monitor_paused" in paused.headers["location"]
+    resumed = await test_context["client"].post(
+        f"/dashboard/monitors/{payload['strategy']['id']}/resume",
+        follow_redirects=False,
+    )
+    assert resumed.status_code == 303
+    assert "message=monitor_resumed" in resumed.headers["location"]
+    async with test_context["session_factory"]() as session:
+        strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
+        assert strategy.status == StrategyStatus.ACTIVE
+
 
 async def test_dashboard_publish_requires_notification_channel(test_context):
     await _signup(test_context, "dashboard-publish-no-channel@example.com")
+    await _accept_current_disclaimer(test_context)
     definition = load_strategy().model_dump(mode="json")
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
@@ -911,6 +963,17 @@ async def test_dashboard_publish_requires_notification_channel(test_context):
     )
     assert created.status_code == 201
     payload = created.json()
+    await _approve_verified_interpretation(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+    )
+    await _approve_strategy_version(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+        payload["version"]["schema_hash"],
+    )
 
     published = await test_context["client"].post(
         f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
@@ -925,6 +988,190 @@ async def test_dashboard_publish_requires_notification_channel(test_context):
     async with test_context["session_factory"]() as session:
         strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
         assert strategy.status != StrategyStatus.ACTIVE
+
+
+async def test_standalone_interpretation_approval_is_read_only_and_exact_approval_binds_it(
+    test_context,
+):
+    await _signup(test_context, "dashboard-single-approval@example.com")
+    definition = load_strategy().model_dump(mode="json")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={"definition": definition, "source_text": "single approval test"},
+    )
+    payload = created.json()
+    strategy_id = payload["strategy"]["id"]
+    version_id = payload["version"]["id"]
+
+    compatibility = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{strategy_id}/versions/"
+        f"{version_id}/interpretation/approve",
+        json={},
+    )
+
+    assert compatibility.status_code == 200
+    assert compatibility.json()["mutation_performed"] is False
+    async with test_context["session_factory"]() as session:
+        verification = await session.scalar(
+            select(StrategyVersionVerification).where(
+                StrategyVersionVerification.strategy_version_id == UUID(version_id)
+            )
+        )
+        assert verification is not None
+        assert verification.interpretation_status == "needs_review"
+
+    await _approve_verified_interpretation(test_context, strategy_id, version_id)
+    await _approve_strategy_version(
+        test_context,
+        strategy_id,
+        version_id,
+        payload["version"]["schema_hash"],
+    )
+
+    async with test_context["session_factory"]() as session:
+        verification = await session.scalar(
+            select(StrategyVersionVerification).where(
+                StrategyVersionVerification.strategy_version_id == UUID(version_id)
+            )
+        )
+        version = await session.get(StrategyVersion, UUID(version_id))
+        assert verification is not None
+        assert verification.interpretation_status == "approved"
+        assert version is not None
+        assert version.status == StrategyVersionStatus.APPROVED
+
+
+async def test_dashboard_never_reports_draft_monitor_as_active_from_pointer_alone(
+    test_context,
+):
+    await _signup(test_context, "dashboard-no-fake-active@example.com")
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={
+            "definition": load_strategy().model_dump(mode="json"),
+            "source_text": "status truth test",
+        },
+    )
+    payload = created.json()
+    async with test_context["session_factory"]() as session:
+        strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
+        assert strategy is not None
+        strategy.active_version_id = UUID(payload["version"]["id"])
+        strategy.status = StrategyStatus.DRAFT
+        await session.commit()
+
+    listed = await test_context["client"].get("/api/v1/dashboard/strategies")
+
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["status"] == "draft"
+
+
+async def test_activation_blocks_when_runtime_provider_is_disabled(test_context):
+    await _signup(test_context, "dashboard-provider-disabled@example.com")
+    await _connect_telegram(test_context, "providerdisabled")
+    await _grant_monitor_plan(test_context)
+    await _accept_current_disclaimer(test_context)
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={
+            "definition": load_strategy().model_dump(mode="json"),
+            "source_text": "provider activation gate",
+        },
+    )
+    payload = created.json()
+    await _approve_verified_interpretation(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+    )
+    await _approve_strategy_version(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+        payload["version"]["schema_hash"],
+    )
+    async with test_context["session_factory"]() as session:
+        preference = await session.scalar(select(DashboardPreference))
+        assert preference is not None
+        preference.notification_preferences = {
+            **preference.notification_preferences,
+            "providers": ["bybit"],
+        }
+        await session.commit()
+
+    published = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
+        json={
+            "strategy_version_id": payload["version"]["id"],
+            "expected_schema_hash": payload["version"]["schema_hash"],
+        },
+    )
+
+    assert published.status_code == 409
+    assert published.json()["detail"] == "provider_disabled"
+    async with test_context["session_factory"]() as session:
+        strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
+        assert strategy is not None
+        assert strategy.status != StrategyStatus.ACTIVE
+
+
+async def test_resume_rechecks_provider_gate_and_remains_paused(test_context):
+    await _signup(test_context, "dashboard-resume-provider@example.com")
+    await _connect_telegram(test_context, "resumeprovider")
+    await _grant_monitor_plan(test_context)
+    await _accept_current_disclaimer(test_context)
+    created = await test_context["client"].post(
+        "/api/v1/dashboard/strategies",
+        json={
+            "definition": load_strategy().model_dump(mode="json"),
+            "source_text": "provider resume gate",
+        },
+    )
+    payload = created.json()
+    await _approve_verified_interpretation(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+    )
+    await _approve_strategy_version(
+        test_context,
+        payload["strategy"]["id"],
+        payload["version"]["id"],
+        payload["version"]["schema_hash"],
+    )
+    published = await test_context["client"].post(
+        f"/api/v1/dashboard/strategies/{payload['strategy']['id']}/publish",
+        json={
+            "strategy_version_id": payload["version"]["id"],
+            "expected_schema_hash": payload["version"]["schema_hash"],
+        },
+    )
+    assert published.status_code == 200
+    paused = await test_context["client"].post(
+        f"/dashboard/monitors/{payload['strategy']['id']}/pause",
+        follow_redirects=False,
+    )
+    assert paused.status_code == 303
+    async with test_context["session_factory"]() as session:
+        preference = await session.scalar(select(DashboardPreference))
+        assert preference is not None
+        preference.notification_preferences = {
+            **preference.notification_preferences,
+            "providers": ["bybit"],
+        }
+        await session.commit()
+
+    resumed = await test_context["client"].post(
+        f"/dashboard/monitors/{payload['strategy']['id']}/resume",
+        follow_redirects=False,
+    )
+
+    assert resumed.status_code == 303
+    assert "error=provider_disabled" in resumed.headers["location"]
+    async with test_context["session_factory"]() as session:
+        strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
+        assert strategy is not None
+        assert strategy.status == StrategyStatus.PAUSED
 
 
 async def test_dashboard_export_downloads_json_and_csv(test_context):
@@ -1433,6 +1680,9 @@ async def test_cockpit_feedback_inbox_proof_and_timeline(test_context):
 
 async def test_cockpit_universe_preview_and_version_experiment(test_context):
     await _signup(test_context, "cockpit-experiment@example.com")
+    await _connect_telegram(test_context, "cockpitexperiment")
+    await _grant_monitor_plan(test_context)
+    await _accept_current_disclaimer(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
         DashboardFakeMarketProvider()
     )
@@ -1454,6 +1704,17 @@ async def test_cockpit_universe_preview_and_version_experiment(test_context):
     )
     assert revised.status_code == 201
     second_version_id = revised.json()["version"]["id"]
+    await _approve_verified_interpretation(
+        test_context,
+        strategy_id,
+        second_version_id,
+    )
+    await _approve_strategy_version(
+        test_context,
+        strategy_id,
+        second_version_id,
+        revised_definition.canonical_hash(),
+    )
 
     universe = await test_context["client"].post(
         f"/api/v1/dashboard/cockpit/strategies/{strategy_id}/universe-preview",

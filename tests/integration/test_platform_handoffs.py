@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import func, select
 
 from ai_market_monitor.core.platforms import Platform, PlatformCapability, capability_rule
@@ -21,7 +22,10 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
 )
 from ai_market_monitor.services.dashboard_links import DashboardLinkService
-from ai_market_monitor.services.monitor_operations import MonitorOperationService
+from ai_market_monitor.services.monitor_operations import (
+    MonitorOperationError,
+    MonitorOperationService,
+)
 from ai_market_monitor.services.notifications import NotificationDispatcher
 from tests.factories import load_strategy
 
@@ -292,7 +296,13 @@ async def test_shared_monitor_operations_pause_resume_and_audit(test_context):
         assert strategy.status == StrategyStatus.PAUSED
         assert strategy.paused_at is not None
 
-        await service.resume(user_id=user.id, strategy_id=strategy.id, actor_type="telegram_user")
-        assert strategy.status == StrategyStatus.ACTIVE
-        assert strategy.paused_at is None
-        assert await session.scalar(select(func.count(AuditEvent.id))) == 2
+        with pytest.raises(MonitorOperationError) as captured:
+            await service.resume(
+                user_id=user.id,
+                strategy_id=strategy.id,
+                actor_type="telegram_user",
+            )
+        assert captured.value.code == "active_version_missing"
+        assert strategy.status == StrategyStatus.PAUSED
+        assert strategy.paused_at is not None
+        assert await session.scalar(select(func.count(AuditEvent.id))) == 1

@@ -10,7 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.ai_explanations import OpenAISuggestionNarrator
-from ai_market_monitor.api.dependencies import UserPrincipal, get_market_data_provider
+from ai_market_monitor.api.dependencies import (
+    UserPrincipal,
+    get_market_data_provider,
+    get_market_previewer,
+)
 from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings, get_settings
@@ -29,7 +33,8 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService
-from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
+from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.verified_strategy import (
     VerifiedStrategyError,
     VerifiedStrategyService,
@@ -531,18 +536,41 @@ async def promote_experiment_version(
     payload: PromoteExperimentRequest,
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    previewer: RecentMarketPreviewer = Depends(get_market_previewer),
 ) -> dict[str, Any]:
     experiment = await session.get(StrategyExperiment, experiment_id)
     if experiment is None or experiment.user_id != principal.user_id:
         raise HTTPException(status_code=404, detail="Experiment not found")
     version = await _owned_version(session, principal.user_id, payload.version_id)
     try:
+        strategy = await _owned_strategy(
+            session,
+            principal.user_id,
+            experiment.strategy_id,
+        )
+        strategy_service = StrategyService(
+            session,
+            settings.disclaimer_version,
+            settings,
+        )
+        await strategy_service.run_preview(
+            version,
+            user_id=principal.user_id,
+            previewer=previewer,
+        )
+        await strategy_service.activate(
+            version,
+            user_id=principal.user_id,
+            strategy_name=strategy.name,
+        )
         await StrategyCockpitService(session).promote_experiment_version(
             experiment=experiment,
             version=version,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (StrategyGateError, ValueError) as exc:
+        detail = exc.code if isinstance(exc, StrategyGateError) else str(exc)
+        raise HTTPException(status_code=409, detail=detail) from exc
     session.add(
         AuditEvent(
             actor_user_id=principal.user_id,

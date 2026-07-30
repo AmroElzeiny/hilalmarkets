@@ -1,36 +1,14 @@
-from pydantic import SecretStr
-
 from ai_market_monitor.api.routers.dashboard_api import get_ai_setup_chat_service
-from ai_market_monitor.schemas.ai_setup_chat import SetupChatInterviewResult
-from ai_market_monitor.schemas.strategy import InterpretationPreview
 from ai_market_monitor.services.ai_setup_chat import AISetupChatService
+from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from hm_chatbot_eval.config import Settings as EvaluatorSettings
 from hm_chatbot_eval.targets.backend import HilalMarketsBackendTarget
-from tests.factories import load_strategy
-
-
-class ReadyInterviewer:
-    async def respond(self, **_) -> SetupChatInterviewResult:
-        return SetupChatInterviewResult(
-            intent="setup",
-            assistant_message="The validated rule sheet is ready for review.",
-            ready_to_compile=True,
-            setup_summary="Monitor the supplied measurable setup.",
-        )
-
-
-class FixedInterpreter:
-    async def interpret(self, _) -> InterpretationPreview:
-        return InterpretationPreview(
-            strategy=load_strategy(),
-            assumptions=[],
-            interpreter="evaluator-integration-compiler",
-        )
-
-
-class SnapshotProvider:
-    async def list_symbols(self, exchange, quote_currencies):
-        return ["SOL/USDT", "LINK/USDT"]
+from tests.integration.test_setup_chat_launch_v2 import (
+    MarketProvider,
+    StandInPlanner,
+    _agent,
+    _launch_settings,
+)
 
 
 async def _signup(test_context, email: str) -> None:
@@ -56,12 +34,12 @@ async def _signup(test_context, email: str) -> None:
 
 async def test_real_backend_adapter_uses_owned_session_compile_contract(test_context):
     await _signup(test_context, "evaluator-adapter@example.com")
-    test_context["settings"].openai_api_key = SecretStr("test-key")
+    launch_settings = _launch_settings(test_context["settings"])
     service = AISetupChatService(
-        test_context["settings"],
-        SnapshotProvider(),
-        FixedInterpreter(),
-        interviewer=ReadyInterviewer(),
+        launch_settings,
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
     )
     test_context["app"].dependency_overrides[get_ai_setup_chat_service] = lambda: service
     settings = EvaluatorSettings(
@@ -74,7 +52,10 @@ async def test_real_backend_adapter_uses_owned_session_compile_contract(test_con
     )
     await target.start("integration-001", {"name": "current"})
     reply = await target.send(
-        "RSI below 30 on 15m Binance USDT spot pairs.",
+        (
+            "Monitor BTC/USDT when the 15m candle rises open-to-close "
+            "by at least 3%"
+        ),
         scenario_id="integration-001",
     )
     assert reply.status_code == 200
@@ -85,11 +66,15 @@ async def test_real_backend_adapter_uses_owned_session_compile_contract(test_con
     assert reply.structured["canonical_hash"] == reply.structured["approval"]["schema_hash"]
     assert reply.structured["approval"]["eligible"] is True
     assert reply.structured["canvas"]["nodes"]
+    assert reply.raw is not None
+    draft_v2 = reply.raw["draft_v2"]
     approved = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{target.conversation_id}/approve",
         json={
             "approved": True,
             "expected_schema_hash": reply.structured["canonical_hash"],
+            "expected_executable_version": draft_v2["executable_version"],
+            "expected_executable_hash": draft_v2["executable_hash"],
             "confirmed_low_confidence_rule_keys": [],
         },
     )

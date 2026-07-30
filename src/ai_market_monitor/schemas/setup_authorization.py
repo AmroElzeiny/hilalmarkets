@@ -16,6 +16,8 @@ text, plus fields explicitly inherited from a named existing condition.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -23,6 +25,7 @@ from pydantic import Field, model_validator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeV2,
     DraftFieldPatch,
+    UnresolvedFieldV2,
 )
 from ai_market_monitor.schemas.strict_mode import StrictModel
 
@@ -38,9 +41,12 @@ OperationKind = Literal[
     "add_exclusion",
     "remove_inclusion",
     "remove_exclusion",
+    "add_unresolved",
+    "update_unresolved",
     "add_unsupported",
     "resolve_unresolved_key",
     "remove_unsupported_key",
+    "restore_snapshot",
 ]
 
 
@@ -51,6 +57,7 @@ class AuthorizedPatchOperation(StrictModel):
     malformed operation and is refused rather than partially applied.
     """
 
+    operation_id: str = Field(min_length=1, max_length=80)
     #: The segment whose text authorises this change. Never optional: an operation with
     #: no author is an operation nobody asked for.
     authorizing_segment_id: str = Field(min_length=1, max_length=80)
@@ -71,6 +78,41 @@ class AuthorizedPatchOperation(StrictModel):
     #: Named explicitly rather than matched from free text. A correction whose target
     #: was prose could clear the wrong open item, or none at all.
     target_key: str | None = Field(default=None, max_length=120)
+    #: `add_unresolved`, `update_unresolved`
+    unresolved: UnresolvedFieldV2 | None = None
+    #: `restore_snapshot`; the server resolves and verifies both values against
+    #: immutable session-owned history.
+    target_snapshot_id: str | None = Field(default=None, max_length=80)
+    target_executable_version: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_missing_operation_id(cls, data: object) -> object:
+        """Give pre-migration server-built operations a stable evidence identity.
+
+        The strict model schema still requires ``operation_id`` from the planner.
+        This adapter is only for trusted Python producers and persisted legacy plans
+        that predate operation-level attribution.
+        """
+
+        if not isinstance(data, dict) or data.get("operation_id"):
+            return data
+        migrated = dict(data)
+        encoded = json.dumps(
+            {
+                key: (
+                    value.model_dump(mode="json")
+                    if hasattr(value, "model_dump")
+                    else value
+                )
+                for key, value in migrated.items()
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode()
+        migrated["operation_id"] = f"legacy_{hashlib.sha256(encoded).hexdigest()[:24]}"
+        return migrated
 
     @model_validator(mode="after")
     def validate_payload(self) -> AuthorizedPatchOperation:
@@ -84,20 +126,41 @@ class AuthorizedPatchOperation(StrictModel):
             "add_exclusion": ("symbol",),
             "remove_inclusion": ("symbol",),
             "remove_exclusion": ("symbol",),
+            "add_unresolved": ("unresolved",),
+            "update_unresolved": ("unresolved", "target_key"),
             "add_unsupported": ("missing_contract",),
             "resolve_unresolved_key": ("target_key",),
             "remove_unsupported_key": ("target_key",),
+            "restore_snapshot": (
+                "target_snapshot_id",
+                "target_executable_version",
+            ),
         }
         for name in required[self.kind]:
             if getattr(self, name) is None:
                 raise ValueError(f"{self.kind} requires {name}")
+        payload_fields = {
+            "fields",
+            "condition",
+            "target_condition_id",
+            "symbol",
+            "missing_contract",
+            "target_key",
+            "unresolved",
+            "target_snapshot_id",
+            "target_executable_version",
+        }
+        allowed = set(required[self.kind])
+        unexpected = sorted(
+            name
+            for name in payload_fields - allowed
+            if getattr(self, name) is not None
+        )
+        if unexpected:
+            raise ValueError(
+                f"{self.kind} cannot carry payload fields: {', '.join(unexpected)}"
+            )
         return self
-
-    @property
-    def mutates_executable_state(self) -> bool:
-        """True when this operation changes what the monitor would fire on."""
-        return self.kind not in {"resolve_unresolved_key", "remove_unsupported_key"}
-
 
 #: What kind of thing a clarification is asking about, so an answer can be checked
 #: against the slot it claims to fill.
@@ -105,8 +168,14 @@ ClarificationTargetType = Literal[
     "conversational",
     "draft_field",
     "condition_field",
+    "condition_creation",
     "universe",
+    "market_scope",
+    "boolean_structure",
+    "capability_parameter",
+    "reference_definition",
     "unsupported_requirement",
+    "unsupported_resolution",
 ]
 
 
@@ -138,6 +207,10 @@ class ClarificationContract(StrictModel):
             raise ValueError("a conversational question cannot be mutating")
         if self.target_type == "condition_field" and not self.target_condition_id:
             raise ValueError("a condition question must name its condition")
-        if self.target_type in {"draft_field", "condition_field"} and not self.target_field:
+        if self.target_type in {
+            "draft_field",
+            "condition_field",
+            "capability_parameter",
+        } and not self.target_field:
             raise ValueError("a field question must name its field")
         return self

@@ -11,7 +11,10 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
 )
 from ai_market_monitor.engine.dedup import AlertFatigueGuard
-from ai_market_monitor.engine.evaluator import StrategyRuleEngine
+from ai_market_monitor.engine.evaluator import (
+    StrategyRuleEngine,
+    strategy_evaluation_directions,
+)
 from ai_market_monitor.engine.forensics import AlertEvidence, ForensicInvestigationService
 from ai_market_monitor.engine.forward_test import ForwardTestEngine
 from ai_market_monitor.engine.models import EvaluationState
@@ -54,6 +57,64 @@ def test_identical_market_data_produces_identical_proofs():
     assert first.conditions[-1].actual_value == 1.42
     assert first.conditions[-1].required_value == 1.5
     assert first.conditions[-1].state == EvaluationState.FAILED
+
+
+def test_evaluator_proof_retains_compiled_semantic_contract_and_provenance():
+    strategy = load_strategy()
+    strategy.risk.enabled = False
+    rule = ConditionRule(
+        key="provenance_rule",
+        label="Close above zero",
+        condition_type=strategy.conditions.children[0].condition_type,
+        timeframe="15m",
+        left=Operand(kind=OperandKind.PRICE, field="close"),
+        comparator=Comparator.GREATER_THAN,
+        right=Operand(kind=OperandKind.CONSTANT, value=0),
+        resolved_parameters={
+            "formula": "fixed_reference_level",
+            "movement_direction": "neutral",
+            "strategy_bias": "neutral",
+            "unit": "price",
+            "reference_timeframe": "15m",
+            "reference_definition": "fixed price level 0",
+            "lookback": 20,
+        },
+        source_turn_id="turn-proof-1234",
+        source_fragment="close is above zero",
+        ast_path=[1, 0],
+    )
+    strategy.conditions = ConditionGroup(
+        key="proof_root",
+        operator=LogicalOperator.AND,
+        children=[rule],
+    )
+    sets = candle_sets()
+
+    result = StrategyRuleEngine().evaluate(
+        strategy,
+        market(),
+        sets,
+        evaluation_time=sets["15m"][-1].timestamp,
+        strategy_version="semantic-proof",
+    )
+
+    contract = result.proof_receipt()["conditions"][0]["semantic_contract"]
+    assert contract == {
+        "formula": "fixed_reference_level",
+        "operator": "gt",
+        "threshold": 0,
+        "movement_direction": "neutral",
+        "strategy_bias": "neutral",
+        "unit": "price",
+        "timeframe_role": "trigger",
+        "trigger_timeframe": "15m",
+        "reference_timeframe": "15m",
+        "reference_definition": "fixed price level 0",
+        "lookback": 20,
+        "ast_path": [1, 0],
+        "source_turn_id": "turn-proof-1234",
+        "source_fragment": "close is above zero",
+    }
 
 
 def test_confirmed_setup_generates_complete_proof_and_risk():
@@ -325,6 +386,13 @@ def test_both_direction_strategy_can_be_evaluated_for_each_explicit_side():
     assert long_result.strategy_schema_hash == short_result.strategy_schema_hash
     assert long_result.risk.stop_price < long_result.risk.entry_price
     assert short_result.risk.stop_price > short_result.risk.entry_price
+
+
+def test_neutral_direction_is_one_runtime_evaluation_not_long_and_short():
+    strategy = load_strategy()
+    strategy.direction = StrategyDirection.NEUTRAL
+
+    assert strategy_evaluation_directions(strategy) == (None,)
 
 
 def test_risk_failure_is_preserved_in_proof_and_blocks_confirmation():

@@ -1,24 +1,43 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from time import monotonic
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import ValidationError
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.db.models import AISetupChatMessage, AISetupChatSession
+from ai_market_monitor.db.models import (
+    AISetupChatMessage,
+    AISetupChatSession,
+    SetupChatDraftSnapshot,
+    SetupChatTurn,
+)
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
     ShariaAssetStatus,
     ShariaUniverseMode,
 )
+from ai_market_monitor.engine.capability_shortlist import (
+    SETUP_RUNTIME_PROVIDER_REQUIREMENTS,
+)
 from ai_market_monitor.engine.setup_intent import decide_setup_intent
-from ai_market_monitor.engine.setup_turn_execution import ProviderGate, ScreeningGate
+from ai_market_monitor.engine.setup_turn_execution import (
+    ProviderGate,
+    RuntimePreflight,
+    ScreeningGate,
+)
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
     compile_strategy_draft_v2,
@@ -38,6 +57,7 @@ from ai_market_monitor.schemas.strategy import ShariaPolicyDefinition, StrategyD
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     DraftMode,
     ProviderRequirementV2,
+    ProviderRuntimeStatusV2,
     StrategyDraftV2,
     UnresolvedFieldV2,
 )
@@ -45,6 +65,7 @@ from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
     SetupAgentTurnInput,
     SetupChatAgent,
+    deterministic_summary,
 )
 from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
@@ -128,6 +149,11 @@ class SetupChatLaunchService:
         #: server-offered field answers, which need no model call at all.
         self.agent = agent or SetupChatAgent(settings)
         self.extractor = extractor or LaunchStrategyPatchExtractor(settings)
+        self._preflight_redis: Redis | None = (
+            None
+            if settings.app_env == "test"
+            else Redis.from_url(settings.redis_url, decode_responses=True)
+        )
 
     async def handle(
         self,
@@ -141,11 +167,17 @@ class SetupChatLaunchService:
         client_message_id: str | None,
     ) -> AISetupChatSession:
         started = monotonic()
+        turn_record: SetupChatTurn | None = None
         if client_message_id:
             replay = await self._replayed_turn(session, chat, client_message_id)
             if replay is not None:
                 _set_runtime(chat, started, model_calls=0, cache_hits=1)
                 return replay
+            turn_record = await self._get_or_create_turn(
+                session,
+                chat,
+                client_message_id,
+            )
 
         # The raw text, exactly as typed. Collapsing whitespace here destroyed the line
         # breaks and list structure that tell three numbered rules apart from one
@@ -153,7 +185,7 @@ class SetupChatLaunchService:
         raw = message or option_label or option_value or ""
         cleaned = " ".join(raw.split())
         if option_key == "setup_mode":
-            return await self._select_mode(
+            selected_chat = await self._select_mode(
                 session,
                 chat,
                 value=option_value or cleaned,
@@ -161,6 +193,8 @@ class SetupChatLaunchService:
                 client_message_id=client_message_id,
                 started=started,
             )
+            await self._complete_db_turn(session, selected_chat, turn_record)
+            return selected_chat
         if option_key in {
             "screened_universe_mode",
             "screened_watchlist",
@@ -185,6 +219,7 @@ class SetupChatLaunchService:
                 key=option_key,
                 value=option_value or cleaned,
             )
+            await self._complete_db_turn(session, chat, turn_record)
             _set_runtime(chat, started, model_calls=0, cache_hits=0)
             return chat
         if option_key == "monitor_name":
@@ -203,23 +238,34 @@ class SetupChatLaunchService:
             cleaned = f"{option_key}: {option_value}"
             raw = cleaned
 
-        user_message = await self.owner._append_message(
-            session,
-            chat,
-            role="user",
-            message_type="option" if option_key else "text",
-            # Stored as typed, so provenance quotes what the user can see they wrote.
-            content=raw if not offered_option else cleaned,
-            payload={
-                "lexical_hint": lexical_hint.intent.value,
-                "lexical_hint_confidence": lexical_hint.confidence,
-                "lexical_hint_reason": lexical_hint.reason,
-                "launch_pipeline": "setup_agent_v3",
-                "option_key": option_key,
-                "option_value": option_value,
-            },
-            client_message_id=client_message_id,
+        user_message = (
+            await session.get(AISetupChatMessage, turn_record.source_message_id)
+            if turn_record is not None and turn_record.source_message_id is not None
+            else None
         )
+        if user_message is None:
+            user_message = await self.owner._append_message(
+                session,
+                chat,
+                role="user",
+                message_type="option" if option_key else "text",
+                # Stored as typed, so provenance quotes what the user can see they wrote.
+                content=raw if not offered_option else cleaned,
+                payload={
+                    "lexical_hint": lexical_hint.intent.value,
+                    "lexical_hint_confidence": lexical_hint.confidence,
+                    "lexical_hint_reason": lexical_hint.reason,
+                    "launch_pipeline": "setup_agent_v3",
+                    "option_key": option_key,
+                    "option_value": option_value,
+                },
+                client_message_id=client_message_id,
+            )
+        if turn_record is not None:
+            turn_record.source_message_id = user_message.id
+            turn_record.status = TurnStatus.PLANNING.value
+            await session.flush()
+            await session.commit()
 
         if not offered_option:
             return await self._run_agent_turn(
@@ -229,6 +275,7 @@ class SetupChatLaunchService:
                 source_turn_id=str(user_message.id),
                 started=started,
                 client_message_id=client_message_id,
+                turn_record=turn_record,
             )
 
         draft = load_strategy_draft_v2(chat)
@@ -236,7 +283,7 @@ class SetupChatLaunchService:
         input_fingerprint = hashlib.sha256(cleaned.casefold().encode()).hexdigest()
         if (
             context.get("last_v2_patch_input_hash") == input_fingerprint
-            and context.get("last_v2_patch_result_hash") == draft.semantic_hash
+            and context.get("last_v2_patch_result_hash") == draft.executable_hash
         ):
             await self.owner._assistant(
                 session,
@@ -259,7 +306,8 @@ class SetupChatLaunchService:
                 message=cleaned,
                 source_turn_id=str(user_message.id),
             )
-            history = list(context.get("strategy_draft_v2_history") or [])
+            history = await self._snapshot_history(session, chat)
+            context = dict(chat.context_json or {})
             result = apply_strategy_patch(draft, patch, history=history)
             await CapabilityCoverageService(self.settings).record_usage(
                 session,
@@ -295,8 +343,16 @@ class SetupChatLaunchService:
                 model_calls=int(getattr(self.extractor, "model_call_count", 0)),
                 cache_hits=0,
             )
+            await self._complete_db_turn(session, chat, turn_record)
             return chat
         except StrategyPatchExtractionError as exc:
+            await self._fail_db_turn(
+                session,
+                turn_record,
+                code=exc.code,
+                stage="extract",
+                retryable=exc.retryable,
+            )
             raise SetupLaunchError(
                 exc.code,
                 str(exc),
@@ -305,6 +361,13 @@ class SetupChatLaunchService:
                 status_code=503 if exc.retryable else 422,
             ) from exc
         except DraftPatchError as exc:
+            await self._fail_db_turn(
+                session,
+                turn_record,
+                code="STRATEGY_PATCH_REJECTED",
+                stage="patch",
+                retryable=False,
+            )
             raise SetupLaunchError(
                 "STRATEGY_PATCH_REJECTED",
                 str(exc),
@@ -313,18 +376,22 @@ class SetupChatLaunchService:
             ) from exc
 
         if result.material_change:
-            history.append(draft.model_dump(mode="json"))
-            context["strategy_draft_v2_history"] = history[-100:]
+            await self._store_snapshot(
+                session,
+                chat,
+                draft.model_dump(mode="json"),
+                source_turn_id=str(user_message.id),
+            )
             if chat.status == "approved":
                 _archive_approval(chat, context, cleaned)
         context["strategy_draft_v2"] = result.draft.model_dump(mode="json")
         context["strategy_state_authority"] = "v2"
-        context["launch_pipeline_version"] = "2.0"
+        context["launch_pipeline_version"] = "3.1"
         context["last_semantic_diff"] = list(result.changed_fields)
         context["last_intent"] = f"offered_option:{option_key}"
         context["last_patch_source_turn_id"] = str(user_message.id)
         context["last_v2_patch_input_hash"] = input_fingerprint
-        context["last_v2_patch_result_hash"] = result.draft.semantic_hash
+        context["last_v2_patch_result_hash"] = result.draft.executable_hash
         chat.context_json = context
         if not chat.original_idea:
             chat.original_idea = cleaned
@@ -333,7 +400,280 @@ class SetupChatLaunchService:
         await self._render_current_draft(session, chat, result.draft)
         model_calls = int(getattr(self.extractor, "model_call_count", 0))
         _set_runtime(chat, started, model_calls=model_calls, cache_hits=0)
+        await self._complete_db_turn(session, chat, turn_record)
         return chat
+
+    def _turn_stage_callback(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn: SetupChatTurn,
+        *,
+        message: str,
+        source_turn_id: str,
+    ) -> Any:
+        async def persist(stage: str, payload: dict[str, Any]) -> None:
+            turn.status = stage
+            turn.planner_model = str(payload.get("planner_model") or "") or None
+            plan = payload.get("plan")
+            if isinstance(plan, dict):
+                turn.plan_json = plan
+            execution = payload.get("execution_result")
+            if isinstance(execution, dict):
+                result = SetupTurnExecutionResult.model_validate(execution)
+                draft = StrategyDraftV2.model_validate(payload.get("draft_after"))
+                conversation = SetupConversationContext.model_validate(
+                    payload.get("conversation_after")
+                )
+                definition_payload = payload.get("definition")
+                definition = (
+                    StrategyDefinition.model_validate(definition_payload)
+                    if isinstance(definition_payload, dict)
+                    else None
+                )
+                history_snapshot = payload.get("history_snapshot")
+                if bool(payload.get("material_change")) and isinstance(
+                    history_snapshot, dict
+                ):
+                    await self._store_snapshot(
+                        session,
+                        chat,
+                        history_snapshot,
+                        source_turn_id=source_turn_id,
+                    )
+                context = dict(chat.context_json or {})
+                if bool(payload.get("material_change")) and chat.status == "approved":
+                    _archive_approval(chat, context, message)
+                context.pop("strategy_draft_v2_history", None)
+                context["strategy_draft_v2"] = draft.model_dump(mode="json")
+                context["strategy_state_authority"] = "v2"
+                context["launch_pipeline_version"] = "3.1"
+                context["setup_conversation_context"] = conversation.model_dump(
+                    mode="json"
+                )
+                context["last_semantic_diff"] = list(result.semantic_diff)
+                context["last_execution_result"] = result.model_dump(mode="json")
+                context["last_patch_source_turn_id"] = source_turn_id
+                context["last_turn_failed"] = False
+                context.pop("last_turn_failure", None)
+                chat.context_json = context
+                if not chat.original_idea and result.strategy_mutated:
+                    chat.original_idea = message
+                    chat.title = _title(message)
+                await self._persist_draft_state(
+                    session,
+                    chat,
+                    draft,
+                    definition=definition,
+                    execution=result,
+                )
+                turn.execution_result_json = {
+                    "execution_result": execution,
+                    "draft_after": draft.model_dump(mode="json"),
+                    "conversation_after": conversation.model_dump(mode="json"),
+                    "definition": definition_payload,
+                    "material_change": bool(payload.get("material_change")),
+                }
+                turn.mutation_committed = (
+                    draft.executable_version != turn.executable_version_before
+                    or draft.workflow_revision != turn.workflow_revision_before
+                )
+                turn.executable_version_after = draft.executable_version
+                turn.workflow_revision_after = draft.workflow_revision
+            await session.flush()
+            await session.commit()
+
+        return persist
+
+    async def _complete_db_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn: SetupChatTurn | None,
+        *,
+        reply: dict[str, Any] | None = None,
+    ) -> None:
+        if turn is None:
+            return
+        draft = load_strategy_draft_v2(chat)
+        assistant = await session.scalar(
+            select(AISetupChatMessage)
+            .where(
+                AISetupChatMessage.session_id == chat.id,
+                AISetupChatMessage.role == "assistant",
+            )
+            .order_by(AISetupChatMessage.sequence.desc())
+            .limit(1)
+        )
+        turn.assistant_message_id = assistant.id if assistant is not None else None
+        turn.reply_json = reply or (
+            {
+                "message": assistant.content,
+                "payload": assistant.payload,
+            }
+            if assistant is not None
+            else {}
+        )
+        # The execution checkpoint owns this flag. A no-change execution has evidence
+        # but no committed mutation, and completing it must not rewrite that fact.
+        turn.mutation_committed = turn.mutation_committed or (
+            draft.executable_version != turn.executable_version_before
+            or draft.workflow_revision != turn.workflow_revision_before
+        )
+        turn.executable_version_after = draft.executable_version
+        turn.workflow_revision_after = draft.workflow_revision
+        turn.status = TurnStatus.COMPLETED.value
+        turn.failure_code = None
+        turn.failure_stage = None
+        turn.failure_retryable = None
+        turn.completed_at = datetime.now(UTC)
+        await session.flush()
+
+    async def _get_or_create_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        client_message_id: str,
+    ) -> SetupChatTurn:
+        existing = await session.scalar(
+            select(SetupChatTurn)
+            .where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == client_message_id,
+            )
+            .with_for_update()
+        )
+        if existing is not None:
+            return existing
+        draft = load_strategy_draft_v2(chat)
+        created = SetupChatTurn(
+            chat_session_id=chat.id,
+            client_message_id=client_message_id,
+            status=TurnStatus.RECEIVED.value,
+            executable_version_before=draft.executable_version,
+            workflow_revision_before=draft.workflow_revision,
+        )
+        try:
+            async with session.begin_nested():
+                session.add(created)
+                await session.flush()
+        except IntegrityError:
+            concurrent = await session.scalar(
+                select(SetupChatTurn)
+                .where(
+                    SetupChatTurn.chat_session_id == chat.id,
+                    SetupChatTurn.client_message_id == client_message_id,
+                )
+                .with_for_update()
+            )
+            if concurrent is None:
+                raise
+            return concurrent
+        return created
+
+    async def _store_snapshot(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        payload: dict[str, Any],
+        *,
+        source_turn_id: str | None,
+    ) -> SetupChatDraftSnapshot:
+        draft = StrategyDraftV2.model_validate(payload)
+        existing = await session.scalar(
+            select(SetupChatDraftSnapshot).where(
+                SetupChatDraftSnapshot.chat_session_id == chat.id,
+                SetupChatDraftSnapshot.user_id == chat.user_id,
+                SetupChatDraftSnapshot.executable_version == draft.executable_version,
+                SetupChatDraftSnapshot.executable_hash == draft.executable_hash,
+            )
+        )
+        if existing is not None:
+            return existing
+        snapshot = SetupChatDraftSnapshot(
+            chat_session_id=chat.id,
+            user_id=chat.user_id,
+            source_turn_id=UUID(source_turn_id) if source_turn_id else None,
+            executable_version=draft.executable_version,
+            executable_hash=draft.executable_hash,
+            draft_json=draft.model_dump(mode="json"),
+            created_at=datetime.now(UTC),
+        )
+        session.add(snapshot)
+        await session.flush()
+        return snapshot
+
+    async def _snapshot_history(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+    ) -> list[dict[str, Any]]:
+        """Load only immutable snapshots owned by this user and chat.
+
+        Legacy session JSON is imported once, validated fail-closed, then removed as a
+        writable authority. Unprovable payloads are ignored and can never be restored.
+        """
+
+        context = dict(chat.context_json or {})
+        legacy = context.pop("strategy_draft_v2_history", None)
+        if isinstance(legacy, list):
+            for item in legacy:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    await self._store_snapshot(
+                        session,
+                        chat,
+                        item,
+                        source_turn_id=None,
+                    )
+                except ValidationError:
+                    continue
+            context["strategy_snapshot_history_migrated_at"] = datetime.now(UTC).isoformat()
+            chat.context_json = context
+            await session.flush()
+        rows = list(
+            await session.scalars(
+                select(SetupChatDraftSnapshot)
+                .where(
+                    SetupChatDraftSnapshot.chat_session_id == chat.id,
+                    SetupChatDraftSnapshot.user_id == chat.user_id,
+                )
+                .order_by(SetupChatDraftSnapshot.executable_version.asc())
+            )
+        )
+        return [
+            {
+                "snapshot_id": str(item.id),
+                "executable_version": item.executable_version,
+                "draft": item.draft_json,
+            }
+            for item in rows
+        ]
+
+    async def _fail_db_turn(
+        self,
+        session: AsyncSession,
+        turn: SetupChatTurn | None,
+        *,
+        code: str,
+        stage: str,
+        retryable: bool,
+        details: tuple[str, ...] = (),
+    ) -> None:
+        if turn is None:
+            return
+        turn.status = (
+            TurnStatus.RETRYABLE_FAILURE.value
+            if retryable
+            else TurnStatus.PERMANENT_FAILURE.value
+        )
+        turn.failure_code = code
+        turn.failure_stage = stage
+        turn.failure_retryable = retryable
+        turn.failure_details_json = [str(item)[:300] for item in details[:12]]
+        await session.flush()
+        await session.commit()
 
     async def _replayed_turn(
         self,
@@ -351,7 +691,14 @@ class SetupChatLaunchService:
         * ``RETRYABLE_FAILURE`` — reprocess, because nothing was applied
         * ``PLANNING`` / ``EXECUTING`` — an in-progress conflict, never a silent no-op
         """
-        record = _turn_record(chat, client_message_id)
+        record = await session.scalar(
+            select(SetupChatTurn)
+            .where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == client_message_id,
+            )
+            .with_for_update()
+        )
         if record is None:
             existing = await session.scalar(
                 select(AISetupChatMessage.id).where(
@@ -359,12 +706,55 @@ class SetupChatLaunchService:
                     AISetupChatMessage.client_message_id == client_message_id,
                 )
             )
-            # A message row with no record predates this bookkeeping. Treat it as done.
-            return chat if existing is not None else None
-        status = str(record.get("status") or "")
-        if status == TurnStatus.COMPLETED:
+            if existing is not None:
+                raise SetupLaunchError(
+                    "LEGACY_TURN_STATE_UNKNOWN",
+                    (
+                        "This older message has no durable turn result. Start a new "
+                        "message rather than replaying an unknown state."
+                    ),
+                    stage="interpret",
+                    status_code=409,
+                )
+            return None
+        status = str(record.status or "")
+        if status == TurnStatus.COMPLETED.value:
             return chat
-        if status in {TurnStatus.PLANNING, TurnStatus.EXECUTING}:
+        if (
+            status
+            in {
+                TurnStatus.COMPOSING.value,
+                TurnStatus.RETRYABLE_FAILURE.value,
+            }
+            and isinstance(record.execution_result_json, dict)
+        ):
+            stored = record.execution_result_json.get("execution_result")
+            if isinstance(stored, dict):
+                result = SetupTurnExecutionResult.model_validate(stored)
+                message = deterministic_summary(result)
+                await self.owner._assistant(
+                    session,
+                    chat,
+                    message,
+                    message_type=_agent_message_type(result),
+                    payload={
+                        "execution_result": stored,
+                        "draft_v2": record.execution_result_json.get("draft_after"),
+                        "recovered_from_committed_turn": True,
+                    },
+                )
+                await self._complete_db_turn(
+                    session,
+                    chat,
+                    record,
+                    reply={"message": message, "execution_result": stored},
+                )
+                return chat
+        if status in {
+            TurnStatus.PLANNING.value,
+            TurnStatus.EXECUTING.value,
+            TurnStatus.COMPOSING.value,
+        }:
             raise SetupLaunchError(
                 "TURN_IN_PROGRESS",
                 "That message is still being processed. Try again in a moment.",
@@ -372,14 +762,21 @@ class SetupChatLaunchService:
                 retryable=True,
                 status_code=409,
             )
-        if status == TurnStatus.PERMANENT_FAILURE:
+        if status == TurnStatus.PERMANENT_FAILURE.value:
             raise SetupLaunchError(
-                str(record.get("code") or "TURN_FAILED"),
-                str(record.get("message") or "That message could not be processed."),
+                str(record.failure_code or "TURN_FAILED"),
+                "That message could not be processed.",
                 stage="interpret",
                 status_code=422,
             )
-        # RECEIVED or RETRYABLE_FAILURE: nothing was applied, so reprocessing is safe.
+        if status == TurnStatus.RETRYABLE_FAILURE.value:
+            record.retry_count += 1
+            record.status = TurnStatus.RECEIVED.value
+            record.failure_code = None
+            record.failure_stage = None
+            record.failure_retryable = None
+            await session.flush()
+        # RECEIVED or retryable-without-mutation: reprocessing is safe.
         return None
 
     async def _run_agent_turn(
@@ -391,15 +788,15 @@ class SetupChatLaunchService:
         source_turn_id: str,
         started: float,
         client_message_id: str | None = None,
+        turn_record: SetupChatTurn | None = None,
     ) -> AISetupChatSession:
         """One free-text turn: plan, execute once, then answer from what happened."""
 
         draft = load_strategy_draft_v2(chat)
         context = dict(chat.context_json or {})
-        _record_turn(context, client_message_id, status=TurnStatus.PLANNING)
-        chat.context_json = context
         conversation = _load_conversation_context(context)
-        history = list(context.get("strategy_draft_v2_history") or [])
+        history = await self._snapshot_history(session, chat)
+        context = dict(chat.context_json or {})
         turn = SetupAgentTurnInput(
             message=message,
             source_turn_id=source_turn_id,
@@ -416,6 +813,18 @@ class SetupChatLaunchService:
             # reply let a message announce a draft the platform then blocked.
             screening=self._screening_gate(session, chat),
             providers=self._provider_gate(),
+            runtime_preflight=self._runtime_preflight(),
+            stage_callback=(
+                self._turn_stage_callback(
+                    session,
+                    chat,
+                    turn_record,
+                    message=message,
+                    source_turn_id=source_turn_id,
+                )
+                if turn_record is not None
+                else None
+            ),
         )
         try:
             outcome = await self.agent.run_turn(turn)
@@ -430,16 +839,13 @@ class SetupChatLaunchService:
                 "retryable": exc.retryable,
                 "details": list(exc.details[:6]),
             }
-            _record_turn(
-                context,
-                client_message_id,
-                status=(
-                    TurnStatus.RETRYABLE_FAILURE
-                    if exc.retryable
-                    else TurnStatus.PERMANENT_FAILURE
-                ),
+            await self._fail_db_turn(
+                session,
+                turn_record,
                 code=exc.code,
-                message=str(exc),
+                stage=exc.stage,
+                retryable=exc.retryable,
+                details=exc.details,
             )
             chat.context_json = context
             raise SetupLaunchError(
@@ -457,17 +863,63 @@ class SetupChatLaunchService:
             usage=outcome.usage or None,
         )
 
-        # Only a material change archives an approval and clears the approved strategy
-        # ids. A turn that answered a question or asked one leaves all of that alone.
-        if outcome.material_change and outcome.history_snapshot is not None:
-            history.append(outcome.history_snapshot)
-            context["strategy_draft_v2_history"] = history[-100:]
+        if outcome.execution is None:
+            # Conversation, product questions and explanations are read-only turns.
+            # They must not compile, screen, refresh providers, rewrite derived UI or
+            # disturb an approval.
+            context["setup_conversation_context"] = outcome.conversation.model_dump(
+                mode="json"
+            )
+            context["last_turn_trace"] = outcome.trace.to_dict()
+            context["last_turn_failed"] = False
+            context.pop("last_turn_failure", None)
+            chat.context_json = context
+            await self.owner._assistant(
+                session,
+                chat,
+                outcome.message,
+                message_type="conversation",
+                payload={
+                    "execution_result": None,
+                    "segments": list(outcome.trace.segments),
+                    "turn_trace": outcome.trace.to_dict(),
+                    "model_call_count": outcome.trace.model_calls,
+                },
+            )
+            _set_runtime(
+                chat,
+                started,
+                model_calls=outcome.trace.model_calls,
+                cache_hits=0,
+            )
+            await self._complete_db_turn(
+                session,
+                chat,
+                turn_record,
+                reply={"message": outcome.message, "execution_result": None},
+            )
+            return chat
+
+        # A durable turn checkpoint already stored the canonical mutation and archived
+        # its immutable pre-change snapshot before the composer ran. The no-key fallback
+        # below exists only for internal callers that cannot provide idempotency.
+        checkpointed = bool(
+            turn_record is not None and turn_record.execution_result_json is not None
+        )
+        if checkpointed:
+            context = dict(chat.context_json or {})
+        if not checkpointed and outcome.material_change and outcome.history_snapshot:
+            await self._store_snapshot(
+                session,
+                chat,
+                outcome.history_snapshot,
+                source_turn_id=source_turn_id,
+            )
             if chat.status == "approved":
                 _archive_approval(chat, context, message)
-
         context["strategy_draft_v2"] = outcome.draft.model_dump(mode="json")
         context["strategy_state_authority"] = "v2"
-        context["launch_pipeline_version"] = "3.0"
+        context["launch_pipeline_version"] = "3.1"
         context["setup_conversation_context"] = outcome.conversation.model_dump(mode="json")
         context["last_turn_trace"] = outcome.trace.to_dict()
         context["last_turn_failed"] = False
@@ -478,12 +930,6 @@ class SetupChatLaunchService:
         context["last_patch_source_turn_id"] = source_turn_id
         # Marked complete in the same context write that stores the new draft, so a
         # crash cannot leave a turn applied but recorded as unfinished — or the reverse.
-        _record_turn(
-            context,
-            client_message_id,
-            status=TurnStatus.COMPLETED,
-            message=outcome.reply.message,
-        )
         chat.context_json = context
         if (
             not chat.original_idea
@@ -506,7 +952,7 @@ class SetupChatLaunchService:
         await self.owner._assistant(
             session,
             chat,
-            outcome.reply.message,
+            outcome.message,
             message_type=_agent_message_type(outcome.execution),
             payload={
                 "draft_v2": outcome.draft.model_dump(mode="json"),
@@ -525,6 +971,19 @@ class SetupChatLaunchService:
                 "can_approve": chat.status == "ready_for_approval",
                 "turn_trace": outcome.trace.to_dict(),
                 "model_call_count": outcome.trace.model_calls,
+            },
+        )
+        await self._complete_db_turn(
+            session,
+            chat,
+            turn_record,
+            reply={
+                "message": outcome.message,
+                "execution_result": (
+                    outcome.execution.model_dump(mode="json")
+                    if outcome.execution is not None
+                    else None
+                ),
             },
         )
         _set_runtime(chat, started, model_calls=outcome.trace.model_calls, cache_hits=0)
@@ -559,10 +1018,16 @@ class SetupChatLaunchService:
 
         async def gate(
             requirements: list[ProviderRequirementV2],
-        ) -> list[ProviderRequirementV2]:
+        ) -> list[ProviderRuntimeStatusV2]:
             return [
-                item.model_copy(
-                    update={"available": self._provider_available(item.provider)}
+                ProviderRuntimeStatusV2(
+                    provider=item.provider,
+                    capability=item.capability,
+                    status=(
+                        "available"
+                        if self._provider_available(item.provider)
+                        else "unavailable"
+                    ),
                 )
                 for item in requirements
             ]
@@ -576,7 +1041,187 @@ class SetupChatLaunchService:
         evaluated, and the alert would simply never fire with no explanation.
         """
         name = provider.strip().casefold()
-        return name in {"", "ohlcv", "market_data", "candles", "ccxt"}
+        return name in SETUP_RUNTIME_PROVIDER_REQUIREMENTS
+
+    def _runtime_preflight(self) -> RuntimePreflight:
+        """Verify the configured adapter for this exact exchange/symbol/timeframe set.
+
+        Compilation and provider availability are separate facts. A transient provider
+        failure leaves the draft compile-ready but runtime-unverified; a confirmed
+        unsupported market blocks it.
+        """
+
+        async def preflight(
+            definition: StrategyDefinition,
+        ) -> list[ProviderRuntimeStatusV2]:
+            key = self._runtime_preflight_key(definition)
+            cached = await self._read_preflight_cache(key)
+            if cached is not None:
+                return cached
+
+            checked_at = datetime.now(UTC)
+            provider_name = type(self.owner.market_provider).__name__
+            try:
+                listed = await asyncio.wait_for(
+                    self.owner.market_provider.list_symbols(
+                        definition.universe.exchange,
+                        definition.universe.quote_currencies,
+                    ),
+                    timeout=5,
+                )
+                normalized_listed = {
+                    _normalized_market_symbol(item) for item in listed
+                }
+                requested = [
+                    _normalized_market_symbol(item)
+                    for item in definition.universe.include_symbols
+                ]
+                missing = [item for item in requested if item not in normalized_listed]
+                if missing:
+                    statuses = [
+                        ProviderRuntimeStatusV2(
+                            provider=provider_name,
+                            capability="exchange_symbol_timeframe_preflight",
+                            status="unavailable",
+                            checked_at=checked_at,
+                            safe_error="One or more selected markets are unavailable.",
+                        )
+                    ]
+                else:
+                    sample = requested[0] if requested else next(
+                        iter(normalized_listed),
+                        "",
+                    )
+                    if not sample:
+                        statuses = [
+                            ProviderRuntimeStatusV2(
+                                provider=provider_name,
+                                capability="exchange_symbol_timeframe_preflight",
+                                status="unavailable",
+                                checked_at=checked_at,
+                                safe_error="No market is available for this exchange scope.",
+                            )
+                        ]
+                    else:
+                        for timeframe in dict.fromkeys(
+                            [
+                                definition.base_timeframe,
+                                *definition.supporting_timeframes,
+                            ]
+                        ):
+                            candles = await asyncio.wait_for(
+                                self.owner.market_provider.fetch_ohlcv(
+                                    definition.universe.exchange,
+                                    sample,
+                                    timeframe,
+                                    2,
+                                ),
+                                timeout=5,
+                            )
+                            if len(candles) < 2:
+                                statuses = [
+                                    ProviderRuntimeStatusV2(
+                                        provider=provider_name,
+                                        capability=(
+                                            "exchange_symbol_timeframe_preflight"
+                                        ),
+                                        status="unavailable",
+                                        checked_at=checked_at,
+                                        safe_error=(
+                                            f"Market data is unavailable for {timeframe}."
+                                        ),
+                                    )
+                                ]
+                                break
+                        else:
+                            statuses = [
+                                ProviderRuntimeStatusV2(
+                                    provider=provider_name,
+                                    capability="exchange_symbol_timeframe_preflight",
+                                    status="available",
+                                    checked_at=checked_at,
+                                )
+                            ]
+            except (TimeoutError, ConnectionError, OSError):
+                statuses = [
+                    ProviderRuntimeStatusV2(
+                        provider=provider_name,
+                        capability="exchange_symbol_timeframe_preflight",
+                        status="unknown",
+                        checked_at=checked_at,
+                        safe_error="Market-data runtime could not be verified.",
+                    )
+                ]
+            except Exception:
+                statuses = [
+                    ProviderRuntimeStatusV2(
+                        provider=provider_name,
+                        capability="exchange_symbol_timeframe_preflight",
+                        status="unknown",
+                        checked_at=checked_at,
+                        safe_error="Market-data runtime verification failed safely.",
+                    )
+                ]
+            await self._write_preflight_cache(key, statuses)
+            return statuses
+
+        return preflight
+
+    def _runtime_preflight_key(self, definition: StrategyDefinition) -> str:
+        payload = {
+            "provider": type(self.owner.market_provider).__name__,
+            "exchange": definition.universe.exchange,
+            "quotes": definition.universe.quote_currencies,
+            "symbols": sorted(definition.universe.include_symbols),
+            "timeframes": [
+                definition.base_timeframe,
+                *definition.supporting_timeframes,
+            ],
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return f"hm:setup-agent:provider-preflight:{digest}"
+
+    async def _read_preflight_cache(
+        self,
+        key: str,
+    ) -> list[ProviderRuntimeStatusV2] | None:
+        if self._preflight_redis is None:
+            return None
+        try:
+            payload = await self._preflight_redis.get(key)
+        except RedisError:
+            return None
+        if not payload:
+            return None
+        try:
+            return [
+                ProviderRuntimeStatusV2.model_validate(item)
+                for item in json.loads(payload)
+            ]
+        except (TypeError, ValueError, ValidationError):
+            return None
+
+    async def _write_preflight_cache(
+        self,
+        key: str,
+        statuses: list[ProviderRuntimeStatusV2],
+    ) -> None:
+        if self._preflight_redis is None:
+            return
+        ttl = 300 if all(item.status == "available" for item in statuses) else 30
+        try:
+            await self._preflight_redis.set(
+                key,
+                json.dumps(
+                    [item.model_dump(mode="json") for item in statuses],
+                    sort_keys=True,
+                ),
+                ex=ttl,
+            )
+        except RedisError:
+            return
 
     async def _recent_dialogue(
         self,
@@ -648,9 +1293,11 @@ class SetupChatLaunchService:
                             if selected == DraftMode.SCANNER
                             else "Untitled Monitor"
                         ),
-                        "version": current.version + 1,
+                        "executable_version": current.executable_version + 1,
+                        "workflow_revision": current.workflow_revision + 1,
                         "approval": {"approved": False},
-                        "semantic_hash": "",
+                        "executable_hash": "",
+                        "workflow_state_hash": "",
                     }
                 ).model_dump(mode="json")
             )
@@ -926,6 +1573,10 @@ def load_strategy_draft_v2(chat: AISetupChatSession) -> StrategyDraftV2:
     )
 
 
+def _normalized_market_symbol(value: str) -> str:
+    return value.upper().replace("-", "/").split(":", 1)[0].strip()
+
+
 def _archive_approval(
     chat: AISetupChatSession,
     context: dict[str, Any],
@@ -963,57 +1614,13 @@ class TurnStatus(StrEnum):
     PERMANENT_FAILURE = "PERMANENT_FAILURE"
 
 
-#: How many keyed turns one session remembers. Enough to make retries reliable without
-#: growing the session document without bound.
-_TURN_RECORD_LIMIT = 50
-
-
-def _turn_record(
-    chat: AISetupChatSession,
-    client_message_id: str,
-) -> dict[str, Any] | None:
-    records = (chat.context_json or {}).get("turn_records")
-    if isinstance(records, dict):
-        record = records.get(client_message_id)
-        if isinstance(record, dict):
-            return record
-    return None
-
-
-def _record_turn(
-    context: dict[str, Any],
-    client_message_id: str | None,
-    *,
-    status: TurnStatus,
-    code: str | None = None,
-    message: str | None = None,
-) -> None:
-    """Write the turn's state into the same context the draft is written to.
-
-    One document, one write: the state change and its completion status commit together,
-    so no crash can leave a patch applied but the turn marked unfinished.
-    """
-    if not client_message_id:
-        return
-    records = dict(context.get("turn_records") or {})
-    records[client_message_id] = {
-        "status": status.value,
-        "code": code,
-        "message": (message or "")[:2000] or None,
-    }
-    if len(records) > _TURN_RECORD_LIMIT:
-        for key in list(records)[: len(records) - _TURN_RECORD_LIMIT]:
-            records.pop(key, None)
-    context["turn_records"] = records
-
-
 def _draft_is_approved(draft: StrategyDraftV2) -> bool:
     """True when the approval binding names this exact version and hash."""
 
     return (
         draft.approval.approved
-        and draft.approval.draft_version == draft.version
-        and draft.approval.semantic_hash == draft.semantic_hash
+        and draft.approval.executable_version == draft.executable_version
+        and draft.approval.executable_hash == draft.executable_hash
     )
 
 
@@ -1047,7 +1654,10 @@ def _no_change_summary(draft: StrategyDraftV2) -> str:
     pending = next((item for item in draft.unresolved_fields if item.blocking), None)
     if pending is not None:
         return f"That did not change the draft. Still needed: {pending.question}"
-    return f"That did not change the draft. It stays at version {draft.version}."
+    return (
+        "That did not change the executable setup. It stays at version "
+        f"{draft.executable_version}."
+    )
 
 
 def _translation_sheet(draft: StrategyDraftV2) -> dict[str, Any]:
@@ -1066,11 +1676,15 @@ def _translation_sheet(draft: StrategyDraftV2) -> dict[str, Any]:
                         "timeframe": node.trigger_timeframe or "Not provided",
                         "operator": node.operator.value if node.operator else "Not provided",
                         "threshold": node.threshold,
+                        "movement_direction": node.movement_direction.value,
+                        "strategy_bias": node.strategy_bias.value,
                         "source_fragment": node.source_fragment,
                     }
                 )
     return {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
+        "executable_version": draft.executable_version,
+        "workflow_revision": draft.workflow_revision,
         "monitor_name": draft.name,
         "exchange": draft.market_scope.exchange,
         "market_type": draft.market_scope.market_type,

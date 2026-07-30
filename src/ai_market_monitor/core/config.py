@@ -290,14 +290,13 @@ class Settings(BaseSettings):
     setup_chat_legacy_test_compat_enabled: bool = False
 
     # --- Setup Agent bounds. These are the ones that control Setup Chat traffic. ---
-    #: One planning call, plus at most this many retries, and only for a transport
-    #: failure. A schema or grounding failure is never retried: it would be refused the
-    #: same way and cost the same money.
-    setup_agent_planner_retries: int = Field(default=1, ge=0, le=2)
+    #: Retained for environment compatibility only. Authenticated Setup Chat never
+    #: retries a model call inside one free-text turn.
+    setup_agent_planner_retries: int = Field(default=0, ge=0, le=2)
     setup_agent_planner_max_output_tokens: int = Field(default=6000, ge=512, le=16000)
     setup_agent_composer_max_output_tokens: int = Field(default=1600, ge=256, le=4000)
-    setup_agent_planner_timeout_seconds: int = Field(default=60, ge=5, le=180)
-    setup_agent_composer_timeout_seconds: int = Field(default=30, ge=5, le=120)
+    setup_agent_planner_timeout_seconds: int = Field(default=10, ge=5, le=12)
+    setup_agent_composer_timeout_seconds: int = Field(default=10, ge=5, le=12)
     setup_agent_max_estimated_cost_usd_per_turn: float = Field(default=0.05, gt=0, le=5)
     #: Consecutive provider failures before the agent stops trying for a while.
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)

@@ -239,12 +239,35 @@ class VerifiedStrategyService:
         return row
 
     async def approve_interpretation(
-        self, *, user_id: UUID, version: StrategyVersion
+        self,
+        *,
+        user_id: UUID,
+        version: StrategyVersion,
+        accept_visible_draft_assumptions: bool = False,
     ) -> StrategyVersionVerification:
         strategy = await self.owned_strategy(user_id, version.strategy_id)
         statements = await self.sync_interpretation(
             user_id=user_id, strategy=strategy, version=version
         )
+        if accept_visible_draft_assumptions:
+            accepted_at = datetime.now(UTC)
+            for item in statements:
+                if item.status != "assumed" or item.resolution_status != "unresolved":
+                    continue
+                item.status = "confirmed"
+                item.resolution_status = "accepted"
+                item.resolution_text = "Accepted with the exact visible draft approval."
+                item.resolved_at = accepted_at
+                self._audit(
+                    user_id=user_id,
+                    action="strategy.interpretation_accepted_with_draft",
+                    target_type="strategy_interpretation_statement",
+                    target_id=item.id,
+                    metadata={
+                        "version_id": str(version.id),
+                        "schema_hash": version.schema_hash,
+                    },
+                )
         unresolved = [
             item
             for item in statements
@@ -264,9 +287,34 @@ class VerifiedStrategyService:
             action="strategy.interpretation_approved",
             target_type="strategy_version",
             target_id=version.id,
-            metadata={"schema_hash": version.schema_hash},
+            metadata={
+                "schema_hash": version.schema_hash,
+                "accepted_with_visible_draft": accept_visible_draft_assumptions,
+            },
         )
         await self.session.flush()
+        return verification
+
+    async def approve_visible_draft(
+        self,
+        *,
+        user_id: UUID,
+        version: StrategyVersion,
+        expected_schema_hash: str,
+    ) -> StrategyVersionVerification:
+        """Bind interpretation acceptance to the exact customer-visible draft approval."""
+
+        if expected_schema_hash != version.schema_hash:
+            raise VerifiedStrategyError(
+                "strategy_changed",
+                "The strategy changed since it was displayed; review it again.",
+            )
+        verification = await self.approve_interpretation(
+            user_id=user_id,
+            version=version,
+            accept_visible_draft_assumptions=True,
+        )
+        await self.approval_gate(user_id=user_id, version=version)
         return verification
 
     async def create_test_case(
@@ -1796,9 +1844,22 @@ def _activation_blockers(
         if item.status in CRITICAL_INTERPRETATION_STATES
         or (item.status == "assumed" and item.resolution_status == "unresolved")
     ]
-    if unresolved or verification.interpretation_status != "approved":
+    critical = [
+        item for item in unresolved if item.status in CRITICAL_INTERPRETATION_STATES
+    ]
+    if critical:
         blockers.append(
-            {"code": "interpretation_review", "message": "Approve the interpretation audit."}
+            {
+                "code": "interpretation_unresolved",
+                "message": "Resolve every ambiguous or unsupported interpretation item.",
+            }
+        )
+    elif unresolved or verification.interpretation_status != "approved":
+        blockers.append(
+            {
+                "code": "interpretation_review",
+                "message": "Approve this exact version to accept its visible interpretation.",
+            }
         )
     if any(item.status in FINAL_TEST_FAILURES for item in runs):
         blockers.append(

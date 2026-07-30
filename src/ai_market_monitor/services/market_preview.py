@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -19,6 +22,15 @@ DEFAULT_PREVIEW_SYMBOLS_BY_QUOTE = {
 }
 
 
+@dataclass(frozen=True)
+class CandleDataQuality:
+    usable: bool
+    code: str | None
+    safe_message: str | None
+    manifest: dict[str, Any]
+    manifest_hash: str
+
+
 def timeframe_duration(timeframe: str) -> timedelta:
     value = int(timeframe[:-1])
     unit = timeframe[-1]
@@ -29,6 +41,106 @@ def timeframe_duration(timeframe: str) -> timedelta:
     if unit == "d":
         return timedelta(days=value)
     raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+
+def assess_candle_data_quality(
+    definition: StrategyDefinition,
+    candle_sets: dict[str, list[Candle]],
+    evaluation_time: datetime,
+) -> CandleDataQuality:
+    """Apply one freshness/completeness contract to Scanner and Monitor."""
+
+    evaluated_at = ensure_aware(evaluation_time)
+    required_timeframes = list(
+        dict.fromkeys([definition.base_timeframe, *definition.supporting_timeframes])
+    )
+    manifest: dict[str, Any] = {}
+    error_code: str | None = None
+    safe_message: str | None = None
+    for timeframe in required_timeframes:
+        candles = list(candle_sets.get(timeframe) or [])
+        ordered = all(
+            ensure_aware(left.timestamp) < ensure_aware(right.timestamp)
+            for left, right in zip(candles[:-1], candles[1:], strict=True)
+        )
+        eligible = [
+            candle
+            for candle in candles
+            if ensure_aware(candle.timestamp) <= evaluated_at
+            and (
+                definition.trigger_mode.value != "candle_close"
+                or timeframe != definition.base_timeframe
+                or candle.is_closed
+            )
+        ]
+        observed_through: datetime | None = None
+        age_seconds: int | None = None
+        if eligible:
+            latest = eligible[-1]
+            observed_through = ensure_aware(latest.timestamp)
+            if latest.is_closed:
+                observed_through += timeframe_duration(timeframe)
+            age_seconds = max(0, int((evaluated_at - observed_through).total_seconds()))
+        maximum_age = max(
+            300,
+            int(timeframe_duration(timeframe).total_seconds()) * 2,
+        )
+        payload = [
+            {
+                "timestamp": ensure_aware(item.timestamp).isoformat(),
+                "open": item.open,
+                "high": item.high,
+                "low": item.low,
+                "close": item.close,
+                "volume": item.volume,
+                "is_closed": item.is_closed,
+            }
+            for item in candles
+        ]
+        timeframe_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        manifest[timeframe] = {
+            "count": len(candles),
+            "first_timestamp": (
+                ensure_aware(candles[0].timestamp).isoformat() if candles else None
+            ),
+            "last_timestamp": (
+                ensure_aware(candles[-1].timestamp).isoformat() if candles else None
+            ),
+            "observed_through": (
+                observed_through.isoformat() if observed_through is not None else None
+            ),
+            "age_seconds": age_seconds,
+            "maximum_age_seconds": maximum_age,
+            "ordered_unique": ordered,
+            "snapshot_hash": timeframe_hash,
+        }
+        if not candles or not eligible:
+            error_code = error_code or "candle_data_missing"
+            safe_message = safe_message or f"{timeframe} candle data is unavailable."
+        elif not ordered:
+            error_code = error_code or "candle_data_invalid"
+            safe_message = safe_message or f"{timeframe} candle data is not ordered."
+        elif len(candles) < definition.universe.min_historical_candles:
+            error_code = error_code or "candle_history_incomplete"
+            safe_message = safe_message or (
+                f"{timeframe} needs at least "
+                f"{definition.universe.min_historical_candles} candles."
+            )
+        elif age_seconds is not None and age_seconds > maximum_age:
+            error_code = error_code or "candle_data_stale"
+            safe_message = safe_message or f"{timeframe} candle data is stale."
+    manifest_hash = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return CandleDataQuality(
+        usable=error_code is None,
+        code=error_code,
+        safe_message=safe_message,
+        manifest=manifest,
+        manifest_hash=manifest_hash,
+    )
 
 
 def market_snapshot_from_candles(

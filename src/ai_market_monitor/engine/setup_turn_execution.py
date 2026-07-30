@@ -21,6 +21,8 @@ the final chat status, and the only thing the reply may state as fact.
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -31,12 +33,15 @@ from ai_market_monitor.engine.capability_contract import (
     capability_condition_errors,
     grounded_operator_and_timeframe,
 )
-from ai_market_monitor.engine.draft_diff import DraftChange, diff_drafts, is_material
+from ai_market_monitor.engine.draft_diff import DraftChange, diff_drafts
 from ai_market_monitor.engine.semantic_grounding import (
+    grounds_boolean_shape,
     grounds_direction,
     grounds_formula,
+    grounds_lookback,
     grounds_number,
     grounds_operator,
+    grounds_strategy_bias,
     grounds_symbol,
     grounds_timeframe,
 )
@@ -53,6 +58,7 @@ from ai_market_monitor.schemas.setup_agent import (
     ACTIONABLE_SEGMENT_KINDS,
     AppliedInstruction,
     IgnoredSegment,
+    OperationExecutionResult,
     SegmentKind,
     SetupAgentTurnPlan,
     SetupConversationContext,
@@ -71,6 +77,8 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     DraftMode,
     FormulaKind,
     ProviderRequirementV2,
+    ProviderRuntimeStatusV2,
+    ReversionV2,
     StrategyDraftV2,
     StrategyPatch,
     UnsupportedRequirementV2,
@@ -79,7 +87,12 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
 ExecutionStatus = Literal["applied", "no_change", "rejected", "blocked", "conversation_only"]
 CompileStatus = Literal["compiled", "blocked", "not_attempted", "failed"]
 ScreeningStatus = Literal["passed", "blocked", "not_required", "not_attempted"]
-ProviderStatus = Literal["available", "unavailable", "not_required"]
+ProviderStatus = Literal[
+    "available",
+    "unavailable",
+    "runtime_unverified",
+    "not_required",
+]
 ApprovalStatus = Literal["not_eligible", "eligible", "approved", "invalidated_by_edit"]
 
 #: How many questions one draft may ask.
@@ -118,8 +131,23 @@ ScreeningGate = Callable[
 
 #: Marks each provider requirement available or not.
 ProviderGate = Callable[
-    [list[ProviderRequirementV2]], Awaitable[list[ProviderRequirementV2]]
+    [list[ProviderRequirementV2]], Awaitable[list[ProviderRuntimeStatusV2]]
 ]
+RuntimePreflight = Callable[
+    [StrategyDefinition], Awaitable[list[ProviderRuntimeStatusV2]]
+]
+
+
+def _provider_status(
+    statuses: list[ProviderRuntimeStatusV2],
+) -> ProviderStatus:
+    if not statuses:
+        return "not_required"
+    if any(item.status == "unavailable" for item in statuses):
+        return "unavailable"
+    if any(item.status == "unknown" for item in statuses):
+        return "runtime_unverified"
+    return "available"
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +167,7 @@ class SetupTurnRequest:
     #: ``not_required`` rather than being quietly assumed to have passed.
     screening: ScreeningGate | None = None
     providers: ProviderGate | None = None
+    runtime_preflight: RuntimePreflight | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,22 +195,51 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     _verify_authorization(plan, segments, request)
 
     before = request.draft
-    patch = _build_patch(plan, segments, request)
     draft = before
-    if patch is not None:
+    operation_results: list[OperationExecutionResult] = []
+    changes: list[DraftChange] = []
+    for operation in plan.operations:
+        operation_before = draft
+        operation_plan = plan.model_copy(
+            update={"operations": [operation], "unsupported_segments": []}
+        )
+        patch = _build_patch(operation_plan, segments, request)
+        if patch is None:
+            operation_results.append(
+                _operation_result(
+                    operation,
+                    before=operation_before,
+                    after=operation_before,
+                    changes=[],
+                    applied=False,
+                )
+            )
+            continue
         try:
-            outcome = apply_strategy_patch(draft, patch, history=request.history)
+            outcome = apply_strategy_patch(operation_before, patch, history=request.history)
         except (DraftPatchError, ValidationError) as exc:
             raise SetupTurnRejected(
                 "PATCH_REJECTED",
                 "That change could not be applied to the current draft.",
-                details=(str(exc)[:500],),
+                details=(f"{operation.operation_id}:{str(exc)[:450]}",),
             ) from exc
         draft = outcome.draft
+        operation_changes = diff_drafts(operation_before, draft)
+        changes.extend(operation_changes)
+        operation_results.append(
+            _operation_result(
+                operation,
+                before=operation_before,
+                after=draft,
+                changes=operation_changes,
+                applied=bool(operation_changes),
+            )
+        )
 
-    changes = diff_drafts(before, draft)
-    material = is_material(changes)
-    strategy_mutated = draft.semantic_hash != before.semantic_hash
+    _verify_resolved_targets(plan, before, draft)
+    strategy_mutated = draft.executable_hash != before.executable_hash
+    workflow_mutated = draft.workflow_revision != before.workflow_revision
+    material = strategy_mutated
     history_snapshot = before.model_dump(mode="json") if strategy_mutated else None
 
     answered = _resolved_questions(plan, before, draft, request.conversation)
@@ -189,14 +247,20 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     safe_errors: list[str] = []
 
     # --- Every gate, before anything is composed. -------------------------------
-    capability_errors, provider_requirements = _capability_gate(plan, segments, draft, request)
+    capability_errors, provider_requirements = _capability_gate(
+        plan,
+        segments,
+        before,
+        draft,
+        request,
+    )
     violations.extend(capability_errors)
 
     definition: StrategyDefinition | None = None
     compile_status: CompileStatus = "not_attempted"
     if draft.condition_ast is None:
         compile_status = "not_attempted"
-    elif violations or draft.blocking:
+    elif violations or draft.authoring_blocking:
         compile_status = "blocked"
     else:
         try:
@@ -219,26 +283,58 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             definition = secured
 
     provider_status: ProviderStatus = "not_required"
+    resolved_provider_statuses: list[ProviderRuntimeStatusV2] = []
     if provider_requirements:
-        resolved = (
+        resolved_provider_statuses = (
             await request.providers(provider_requirements)
             if request.providers is not None
-            else provider_requirements
+            else [
+                ProviderRuntimeStatusV2(
+                    provider=item.provider,
+                    capability=item.capability,
+                    status="unknown",
+                )
+                for item in provider_requirements
+            ]
         )
-        draft = StrategyDraftV2.model_validate(
-            draft.model_copy(
-                update={"provider_requirements": resolved, "semantic_hash": ""}
-            ).model_dump(mode="json")
-        )
-        provider_status = (
-            "available" if all(item.available for item in resolved) else "unavailable"
-        )
+        provider_status = _provider_status(resolved_provider_statuses)
         if provider_status == "unavailable":
             definition = None
             safe_errors.append(
                 "One rule needs a data feed this account cannot use yet, so the draft "
                 "cannot run."
             )
+        elif provider_status == "runtime_unverified":
+            safe_errors.append(
+                "The rule compiles, but its market-data runtime could not be verified "
+                "yet. Retry before approval."
+            )
+    if definition is not None and request.runtime_preflight is not None:
+        preflight_statuses = await request.runtime_preflight(definition)
+        resolved_provider_statuses.extend(preflight_statuses)
+        provider_status = _provider_status(resolved_provider_statuses)
+        if provider_status == "unavailable":
+            definition = None
+            safe_errors.append(
+                "The selected exchange, symbols, or timeframes are unavailable from "
+                "the configured market-data provider."
+            )
+        elif provider_status == "runtime_unverified":
+            safe_errors.append(
+                "The strategy is compile-ready, but exchange runtime availability "
+                "could not be verified yet."
+            )
+    draft = StrategyDraftV2.model_validate(
+        draft.model_copy(
+            update={
+                "runtime_state": draft.runtime_state.model_copy(
+                    update={"provider_status": resolved_provider_statuses}
+                ),
+                "executable_hash": "",
+                "workflow_state_hash": "",
+            }
+        ).model_dump(mode="json")
+    )
 
     approval_eligible = (
         compile_status == "compiled"
@@ -268,26 +364,29 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         final_chat_status=final_chat_status,
     )
 
-    applied_instructions = _applied_instructions(plan, segments, changes, patch)
+    applied_instructions = _applied_instructions(plan, segments, operation_results)
     allowed = _allowed_clarifications(draft, request.conversation, answered)
     result = SetupTurnExecutionResult(
         status=_status(
-            strategy_mutated=strategy_mutated,
-            patch_present=patch is not None,
+            state_mutated=strategy_mutated or workflow_mutated,
+            patch_present=bool(plan.operations),
             answered=bool(answered),
             blocked=compile_status in {"blocked", "failed"}
             or screening_status == "blocked"
-            or provider_status == "unavailable",
+            or provider_status in {"unavailable", "runtime_unverified"},
         ),
         applied=bool(applied_instructions or answered),
         strategy_mutated=strategy_mutated,
         draft_id=draft.draft_id,
-        previous_version=before.version,
-        current_version=draft.version,
-        previous_semantic_hash=before.semantic_hash,
-        current_semantic_hash=draft.semantic_hash,
+        previous_executable_version=before.executable_version,
+        current_executable_version=draft.executable_version,
+        previous_workflow_revision=before.workflow_revision,
+        current_workflow_revision=draft.workflow_revision,
+        previous_executable_hash=before.executable_hash,
+        current_executable_hash=draft.executable_hash,
         semantic_diff=[change.kind for change in changes],
         applied_instructions=applied_instructions,
+        operation_results=operation_results,
         ignored_non_actionable_segments=_ignored_segments(plan),
         answered_questions=answered,
         unresolved_fields=[
@@ -410,37 +509,277 @@ def _verify_operation_grounding(
     """
 
     existing = _existing_conditions(request.draft)
+    unresolved = {item.key: item for item in request.draft.unresolved_fields}
+    unsupported = {item.key: item for item in request.draft.unsupported_requirements}
+    handlers = {
+        "set_fields": _ground_set_fields,
+        "add_condition": _ground_condition_operation,
+        "update_condition": _ground_condition_operation,
+        "remove_condition": _ground_remove_condition,
+        "replace_groups": _ground_condition_operation,
+        "add_inclusion": _ground_symbol_operation,
+        "add_exclusion": _ground_symbol_operation,
+        "remove_inclusion": _ground_symbol_operation,
+        "remove_exclusion": _ground_symbol_operation,
+        "add_unresolved": _ground_unresolved_operation,
+        "update_unresolved": _ground_unresolved_operation,
+        "resolve_unresolved_key": _ground_resolve_unresolved,
+        "add_unsupported": _ground_unsupported_operation,
+        "remove_unsupported_key": _ground_remove_unsupported,
+        "restore_snapshot": _ground_restore_snapshot,
+    }
     errors: list[str] = []
     for operation in plan.operations:
         segment = segments[operation.authorizing_segment_id]
-        text = segment.exact_source_text
-        if (
-            operation.kind in {"add_inclusion", "add_exclusion"}
-            and operation.symbol
-            and not grounds_symbol(text, operation.symbol)
-        ):
-            errors.append(f"{operation.kind}:{operation.symbol}:not_in_segment")
-        if operation.kind == "add_condition" and operation.condition is not None:
-            errors.extend(_condition_grounding(operation.condition, text, request.source_turn_id))
-        if operation.kind == "replace_groups" and operation.condition is not None:
-            for node in operation.condition.walk():
-                if node.node_type == ConditionNodeType.CONDITION and node.node_id not in existing:
-                    errors.extend(_condition_grounding(node, text, request.source_turn_id))
-        if operation.kind == "update_condition" and operation.condition is not None:
-            errors.extend(
-                _update_grounding(
-                    existing.get(operation.target_condition_id or ""),
-                    operation.condition,
-                    text,
-                    request.source_turn_id,
-                )
+        handler = handlers[operation.kind]
+        errors.extend(
+            handler(
+                operation,
+                segment,
+                request,
+                existing,
+                unresolved,
+                unsupported,
             )
+        )
     if errors:
         raise SetupTurnRejected(
             "VALUE_NOT_GROUNDED",
             "A value in that change does not appear in the words that asked for it.",
             details=tuple(dict.fromkeys(errors))[:12],
         )
+
+
+def _ground_set_fields(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del request, existing, unresolved, unsupported
+    assert operation.fields is not None
+    text = segment.exact_source_text.casefold()
+    errors: list[str] = []
+    for field_name, value in operation.fields.model_dump(exclude_none=True).items():
+        rendered = str(value.value if hasattr(value, "value") else value).casefold()
+        if field_name == "name":
+            grounded = rendered in text
+        elif field_name == "market_type":
+            grounded = "spot" in text
+        elif field_name == "mode":
+            grounded = rendered in text
+        else:
+            grounded = bool(re.search(rf"(?<!\w){re.escape(rendered)}(?!\w)", text))
+        if not grounded:
+            errors.append(f"{operation.operation_id}:set_fields:{field_name}:not_grounded")
+    return errors
+
+
+def _ground_symbol_operation(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del existing, unresolved, unsupported
+    text = segment.exact_source_text
+    symbol = operation.symbol or ""
+    if not grounds_symbol(text, symbol):
+        return [f"{operation.operation_id}:{operation.kind}:{symbol}:not_grounded"]
+    lowered = text.casefold()
+    intent_patterns = {
+        "add_inclusion": r"\binclude\b|\badd\b|\bonly\b|\bwatch\b|\bmonitor\b|\bscan\b",
+        "add_exclusion": (
+            r"\bexclud(?:e|es|ed|ing)\b|\bavoid\b|\bblock\b|\bexcept\b|\bnot\b"
+        ),
+        "remove_inclusion": r"\bremove\b|\bstop including\b|\bdrop\b|\bno longer include\b",
+        "remove_exclusion": r"\ballow\b|\bstop excluding\b|\bunblock\b|\binclude again\b",
+    }
+    action_grounded = bool(re.search(intent_patterns[operation.kind], lowered))
+    if operation.kind == "add_inclusion" and not action_grounded:
+        # A condition scoped to BTC/USDT necessarily includes BTC/USDT. This is
+        # allowed only when that same actionable segment also creates the rule.
+        action_grounded = any(
+            candidate.authorizing_segment_id == operation.authorizing_segment_id
+            and candidate.kind in {"add_condition", "replace_groups"}
+            for candidate in request.plan.operations
+        )
+    return [] if action_grounded else [
+        f"{operation.operation_id}:{operation.kind}:action_not_grounded"
+    ]
+
+
+def _ground_condition_operation(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del unresolved, unsupported
+    assert operation.condition is not None
+    text = segment.exact_source_text
+    if operation.kind == "update_condition":
+        return _update_grounding(
+            existing.get(operation.target_condition_id or ""),
+            operation.condition,
+            text,
+            request.source_turn_id,
+        )
+    errors: list[str] = []
+    nodes = operation.condition.walk()
+    if operation.condition.node_type != ConditionNodeType.CONDITION:
+        shape = _boolean_shape(operation.condition)
+        if not grounds_boolean_shape(text, shape):
+            errors.append(f"{operation.operation_id}:boolean_shape:not_grounded")
+    for node in nodes:
+        if node.node_type != ConditionNodeType.CONDITION:
+            continue
+        previous = existing.get(node.node_id)
+        if operation.kind == "replace_groups" and previous == node:
+            continue
+        errors.extend(
+            _update_grounding(previous, node, text, request.source_turn_id)
+            if previous is not None
+            else _condition_grounding(node, text, request.source_turn_id)
+        )
+    return errors
+
+
+def _ground_remove_condition(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del unresolved, unsupported
+    target = operation.target_condition_id or ""
+    if target not in existing:
+        return [f"{operation.operation_id}:remove_condition:target_missing"]
+    allowed_references = {
+        segment.target_condition_id,
+        *request.conversation.last_changed_condition_ids,
+        *request.conversation.last_explained_condition_ids,
+    }
+    if target not in allowed_references:
+        return [f"{operation.operation_id}:remove_condition:target_not_resolved_by_server"]
+    if not re.search(
+        r"\bremove\b|\bdelete\b|\bdrop\b|\bundo\b|\bwithout\b",
+        segment.exact_source_text.casefold(),
+    ):
+        return [f"{operation.operation_id}:remove_condition:action_not_grounded"]
+    return []
+
+
+def _ground_unresolved_operation(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del request, existing, unsupported
+    item = operation.unresolved
+    if item is None or not _quoted_in(item.source_fragment, segment.exact_source_text):
+        return [f"{operation.operation_id}:{operation.kind}:source_not_grounded"]
+    if operation.kind == "update_unresolved" and operation.target_key not in unresolved:
+        return [f"{operation.operation_id}:update_unresolved:target_missing"]
+    return []
+
+
+def _ground_resolve_unresolved(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del existing, unsupported
+    target = operation.target_key or ""
+    item = unresolved.get(target)
+    if item is None:
+        return [f"{operation.operation_id}:resolve_unresolved_key:target_missing"]
+    active = request.conversation.active_question
+    if active is not None and active.question_id == target:
+        return []
+    if segment.kind != SegmentKind.CLARIFICATION_ANSWER:
+        return [f"{operation.operation_id}:resolve_unresolved_key:not_an_answer"]
+    return []
+
+
+def _ground_unsupported_operation(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del request, existing, unresolved, unsupported
+    if segment.kind != SegmentKind.STRATEGY_INSTRUCTION:
+        return [f"{operation.operation_id}:add_unsupported:reply_only_segment"]
+    return [] if operation.missing_contract else [
+        f"{operation.operation_id}:add_unsupported:missing_contract"
+    ]
+
+
+def _ground_remove_unsupported(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del request, existing, unresolved
+    target = operation.target_key or ""
+    if target not in unsupported:
+        return [f"{operation.operation_id}:remove_unsupported_key:target_missing"]
+    if not re.search(
+        r"\bdrop\b|\bremove\b|\breplace\b|\bforget\b|\bdo not use\b",
+        segment.exact_source_text.casefold(),
+    ):
+        return [f"{operation.operation_id}:remove_unsupported_key:action_not_grounded"]
+    return []
+
+
+def _ground_restore_snapshot(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del existing, unresolved, unsupported
+    if not re.search(
+        r"\bundo\b|\brestore\b|\bgo back\b|\breturn to\b|\brevert\b",
+        segment.exact_source_text.casefold(),
+    ):
+        return [f"{operation.operation_id}:restore_snapshot:action_not_grounded"]
+    owned = next(
+        (
+            item
+            for item in request.history
+            if str(item.get("snapshot_id") or "") == operation.target_snapshot_id
+            and int(item.get("executable_version") or 0)
+            == operation.target_executable_version
+            and isinstance(item.get("draft"), dict)
+        ),
+        None,
+    )
+    if owned is None:
+        return [f"{operation.operation_id}:restore_snapshot:target_not_owned"]
+    return []
 
 
 def _quoted_in(fragment: str, text: str) -> bool:
@@ -486,8 +825,26 @@ def _condition_grounding(
     for timeframe in (*node.context_timeframes, *node.confirmation_timeframes):
         if not grounds_timeframe(text, timeframe):
             errors.append(f"{node.node_id}:supporting_timeframe:{timeframe}")
-    if not grounds_direction(fragment, node.direction):
-        errors.append(f"{node.node_id}:direction")
+    if not grounds_direction(fragment, node.movement_direction):
+        errors.append(f"{node.node_id}:movement_direction")
+    if not grounds_strategy_bias(fragment, node.strategy_bias):
+        errors.append(f"{node.node_id}:strategy_bias")
+    if not node.required and not re.search(
+        r"\boptional\b|\bnot required\b|\bprefer\b",
+        fragment.casefold(),
+    ):
+        errors.append(f"{node.node_id}:required")
+    if node.lookback is not None and not grounds_lookback(
+        fragment,
+        node.lookback,
+        timeframe=node.reference_timeframe or node.trigger_timeframe,
+    ):
+        errors.append(f"{node.node_id}:lookback")
+    for symbol in node.condition_symbols:
+        if not grounds_symbol(fragment, symbol):
+            errors.append(f"{node.node_id}:condition_symbol:{symbol}")
+    errors.extend(_operand_grounding(node, fragment))
+    errors.extend(_reference_grounding(node, fragment))
     return errors
 
 
@@ -498,14 +855,47 @@ def _threshold_unit(node: ConditionNodeV2) -> str:
 
 #: Fields a correction may change. Anything it leaves alone is inherited from the rule
 #: it names and does not have to be restated.
-_UPDATE_FIELDS = (
-    "threshold",
-    "trigger_timeframe",
-    "operator",
+_CONDITION_SEMANTIC_FIELDS = (
+    "node_type",
+    "required",
+    "movement_direction",
+    "strategy_bias",
     "formula",
-    "direction",
+    "operands",
+    "operator",
+    "threshold",
     "unit",
+    "trigger_timeframe",
+    "context_timeframes",
+    "confirmation_timeframes",
+    "reference_timeframe",
+    "reference_definition",
+    "lookback",
+    "capability_key",
+    "capability_version",
+    "capability_parameters",
+    "condition_symbols",
+    "children",
 )
+
+
+def diff_condition_fields(
+    previous: ConditionNodeV2 | None,
+    resulting: ConditionNodeV2,
+) -> tuple[str, ...]:
+    """Every semantic field changed by a condition replacement."""
+
+    if previous is None:
+        return tuple(
+            name
+            for name in _CONDITION_SEMANTIC_FIELDS
+            if getattr(resulting, name) not in (None, (), [], {}, "")
+        )
+    return tuple(
+        name
+        for name in _CONDITION_SEMANTIC_FIELDS
+        if getattr(previous, name) != getattr(resulting, name)
+    )
 
 
 def _update_grounding(
@@ -524,14 +914,16 @@ def _update_grounding(
     if not replacement.source_fragment or not _quoted_in(replacement.source_fragment, text):
         errors.append(f"{replacement.node_id}:source_fragment")
         return errors
-    for name in _UPDATE_FIELDS:
-        was = getattr(existing, name)
+    changed = diff_condition_fields(existing, replacement)
+    for name in changed:
         now = getattr(replacement, name)
-        if was == now:
-            continue
-        if name == "threshold" and now is not None:
+        if name == "node_type":
+            errors.append(f"{replacement.node_id}:node_type_requires_group_replacement")
+        elif name == "threshold" and now is not None:
             if not grounds_number(text, now, unit=_threshold_unit(replacement)):
                 errors.append(f"{replacement.node_id}:threshold")
+        elif name == "unit" and not _grounds_unit(text, now):
+            errors.append(f"{replacement.node_id}:unit")
         elif name == "trigger_timeframe" and now:
             if not grounds_timeframe(text, now):
                 errors.append(f"{replacement.node_id}:trigger_timeframe")
@@ -541,14 +933,228 @@ def _update_grounding(
         elif name == "formula" and now is not None:
             if not grounds_formula(text, now):
                 errors.append(f"{replacement.node_id}:formula")
-        elif name == "direction" and not grounds_direction(text, now):
-            errors.append(f"{replacement.node_id}:direction")
+        elif name == "movement_direction" and not grounds_direction(text, now):
+            errors.append(f"{replacement.node_id}:movement_direction")
+        elif name == "strategy_bias" and not grounds_strategy_bias(text, now):
+            errors.append(f"{replacement.node_id}:strategy_bias")
+        elif name in {"context_timeframes", "confirmation_timeframes"}:
+            for timeframe in now:
+                if not grounds_timeframe(text, timeframe):
+                    errors.append(f"{replacement.node_id}:{name}:{timeframe}")
+        elif name == "reference_timeframe" and now:
+            if not grounds_timeframe(text, now):
+                errors.append(f"{replacement.node_id}:reference_timeframe")
+        elif name == "lookback" and now is not None:
+            if not grounds_lookback(
+                text,
+                now,
+                timeframe=replacement.reference_timeframe
+                or replacement.trigger_timeframe,
+            ):
+                errors.append(f"{replacement.node_id}:lookback")
+        elif name == "operands":
+            errors.extend(_operand_grounding(replacement, text))
+        elif name in {"reference_definition"}:
+            errors.extend(_reference_grounding(replacement, text))
+        elif name == "condition_symbols":
+            for symbol in replacement.condition_symbols:
+                if not grounds_symbol(text, symbol):
+                    errors.append(f"{replacement.node_id}:condition_symbol:{symbol}")
+        elif name == "children":
+            if not grounds_boolean_shape(text, _boolean_shape(replacement)):
+                errors.append(f"{replacement.node_id}:boolean_shape")
+        elif (
+            name == "required"
+            and not (
+                re.search(r"\boptional\b|\bnot required\b|\bprefer\b", text.casefold())
+                if now is False
+                else re.search(r"\brequired\b|\bmust\b|\bneed\b", text.casefold())
+            )
+        ):
+            errors.append(f"{replacement.node_id}:required")
     return errors
+
+
+def _grounds_unit(text: str, unit: str) -> bool:
+    lowered = text.casefold()
+    patterns = {
+        "percent": r"%|\bpercent(?:age)?\b",
+        "price": r"\bprice\b|\bopen\b|\bclose\b|\bhigh\b|\blow\b|\blevel\b",
+        "ratio": r"\bratio\b|\bmultiple\b|\bx\b",
+        "count": r"\bcount\b|\bcandles?\b|\bperiods?\b|\blookback\b",
+        "index": r"\bindex\b|\brsi\b",
+        "boolean": r"\btrue\b|\bfalse\b|\bsweep\b|\breclaim\b|\bmatch\b",
+        "none": r"\bno threshold\b|\bboolean\b",
+    }
+    return bool(re.search(patterns[unit], lowered))
+
+
+def _operand_grounding(node: ConditionNodeV2, text: str) -> list[str]:
+    errors: list[str] = []
+    errors.extend(_primitive_operand_contract_errors(node))
+    for index, operand in enumerate(node.operands):
+        if operand.kind == "constant" and isinstance(operand.value, int | float):
+            unit = operand.unit or node.unit
+            if not grounds_number(text, float(operand.value), unit=_grounding_number_unit(unit)):
+                errors.append(f"{node.node_id}:operand:{index}:constant")
+        for parameter_name, value in operand.parameters.items():
+            # Capability-specific units are checked by the registry validator.
+            if (
+                isinstance(value, int | float)
+                and not isinstance(value, bool)
+                and node.formula != FormulaKind.CAPABILITY
+                and not _platform_owns_primitive_parameter(
+                    node,
+                    parameter_name=parameter_name,
+                    value=value,
+                )
+                and not grounds_number(text, float(value), unit="plain")
+            ):
+                errors.append(f"{node.node_id}:operand:{index}:parameter")
+    return errors
+
+
+def _primitive_operand_contract_errors(node: ConditionNodeV2) -> list[str]:
+    """Reject operand shapes that change a core formula's deterministic meaning."""
+
+    if node.formula == FormulaKind.CAPABILITY:
+        return []
+    percentage_formulas = {
+        FormulaKind.OPEN_TO_CLOSE_PERCENTAGE,
+        FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE,
+        FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE,
+        FormulaKind.HIGH_TO_LOW_PERCENTAGE,
+        FormulaKind.LOW_TO_HIGH_PERCENTAGE,
+    }
+    if node.formula in percentage_formulas:
+        if len(node.operands) != 1:
+            return [f"{node.node_id}:operands:percentage_requires_one_metric"]
+        operand = node.operands[0]
+        expected = {
+            FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: "open_to_close",
+            FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: "close_to_close",
+            FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: "reference_to_current",
+            FormulaKind.HIGH_TO_LOW_PERCENTAGE: "high_to_low",
+            FormulaKind.LOW_TO_HIGH_PERCENTAGE: "low_to_high",
+        }[node.formula]
+        if (
+            operand.kind != "market_metric"
+            or operand.name != "percentage_change"
+            or operand.parameters.get("formula") not in {expected, node.formula.value}
+        ):
+            return [f"{node.node_id}:operands:percentage_contract"]
+    if node.formula == FormulaKind.SWEEP_AND_RECLAIM:
+        if len(node.operands) != 1:
+            return [f"{node.node_id}:operands:sweep_requires_one_metric"]
+        operand = node.operands[0]
+        if (
+            operand.kind != "market_metric"
+            or operand.name != "sweep_and_reclaim"
+            or operand.parameters.get("pierce_required") is not True
+            or operand.parameters.get("reclaim_required") is not True
+        ):
+            return [f"{node.node_id}:operands:sweep_contract"]
+    if node.formula in {
+        FormulaKind.PREVIOUS_CANDLE_REFERENCE,
+        FormulaKind.FIXED_REFERENCE_LEVEL,
+        FormulaKind.LOOKBACK_REFERENCE_LEVEL,
+        FormulaKind.CROSS,
+    }:
+        if not node.operands or node.operands[0].kind != "price":
+            return [f"{node.node_id}:operands:left_price_required"]
+        if len(node.operands) > 2:
+            return [f"{node.node_id}:operands:too_many_reference_operands"]
+        if len(node.operands) == 2 and node.operands[1].kind != "reference":
+            return [f"{node.node_id}:operands:right_reference_required"]
+    return []
+
+
+def _platform_owns_primitive_parameter(
+    node: ConditionNodeV2,
+    *,
+    parameter_name: str,
+    value: object,
+) -> bool:
+    """Defaults implied by a deterministic core formula, not trader parameters."""
+
+    if node.formula == FormulaKind.CAPABILITY:
+        return False
+    return (parameter_name == "lookback" and value == 1) or (
+        parameter_name == "closed_only" and value is True
+    )
+
+
+def _grounding_number_unit(unit: str | None) -> str:
+    return {
+        "percent": "percent",
+        "price": "price",
+        "ratio": "multiple",
+        "count": "count",
+        "index": "index",
+    }.get(str(unit or ""), "plain")
+
+
+def _reference_grounding(node: ConditionNodeV2, text: str) -> list[str]:
+    if not node.reference_definition:
+        return []
+    lowered = text.casefold()
+    reference = node.reference_definition.casefold()
+    formula_patterns = {
+        FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: r"\bopen[\s-]*to[\s-]*close\b",
+        FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: r"\bclose[\s-]*to[\s-]*close\b",
+        FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: (
+            r"\breference\b.*\bcurrent\b|\bfrom\b.*\bto\b.*\bcurrent\b"
+        ),
+        FormulaKind.HIGH_TO_LOW_PERCENTAGE: r"\bhigh[\s-]*to[\s-]*low\b",
+        FormulaKind.LOW_TO_HIGH_PERCENTAGE: r"\blow[\s-]*to[\s-]*high\b",
+        FormulaKind.PREVIOUS_CANDLE_REFERENCE: (
+            r"\bprevious candle\b|\bprior candle\b|\blast closed\b"
+        ),
+        FormulaKind.FIXED_REFERENCE_LEVEL: r"\bfixed\b|\blevel\b|\bprice\b",
+        FormulaKind.LOOKBACK_REFERENCE_LEVEL: (
+            r"\blookback\b|\bprevious\s+\d+\s+candles?\b|\bhighest\b|\blowest\b"
+        ),
+    }
+    formula_pattern = (
+        formula_patterns.get(node.formula) if node.formula is not None else None
+    )
+    if formula_pattern is not None:
+        return (
+            []
+            if re.search(formula_pattern, lowered)
+            else [f"{node.node_id}:reference_definition"]
+        )
+    markers = {
+        "previous_candle": r"\bprevious candle\b|\bprior candle\b|\blast closed\b",
+        "previous_day": r"\bprevious day\b|\byesterday\b",
+        "previous_week": r"\bprevious week\b|\blast week\b",
+        "swing_high": r"\bswing high\b",
+        "swing_low": r"\bswing low\b",
+        "session_high": r"\bsession high\b",
+        "session_low": r"\bsession low\b",
+    }
+    matching = next((pattern for key, pattern in markers.items() if key in reference), None)
+    if matching and not re.search(matching, lowered):
+        return [f"{node.node_id}:reference_definition"]
+    if not matching and not _quoted_in(node.reference_definition, text):
+        return [f"{node.node_id}:reference_definition"]
+    return []
+
+
+def _boolean_shape(node: ConditionNodeV2) -> str:
+    if node.node_type == ConditionNodeType.CONDITION:
+        return node.node_id
+    return (
+        f"{node.node_type.value}("
+        + ",".join(_boolean_shape(child) for child in node.children)
+        + ")"
+    )
 
 
 def _capability_gate(
     plan: SetupAgentTurnPlan,
     segments: dict[str, TurnSegment],
+    before: StrategyDraftV2,
     draft: StrategyDraftV2,
     request: SetupTurnRequest,
 ) -> tuple[list[str], list[ProviderRequirementV2]]:
@@ -562,24 +1168,34 @@ def _capability_gate(
     ]
     if not nodes:
         return [], []
-    authorizing: dict[str, str] = {}
+    previous = _existing_conditions(before)
+    changed_node_ids = frozenset(
+        node.node_id
+        for node in nodes
+        if previous.get(node.node_id) != node
+    )
+    authorizing: dict[str, str] = {
+        node.node_id: node.source_fragment or ""
+        for node in nodes
+    }
     for operation in plan.operations:
         segment = segments.get(operation.authorizing_segment_id)
         if segment is None or operation.condition is None:
             continue
         for node in operation.condition.walk():
             authorizing[node.node_id] = segment.exact_source_text
-    errors, providers = capability_condition_errors(
+    errors, _providers = capability_condition_errors(
         nodes,
         authorizing_text_by_node=authorizing,
         allowed_keys=request.allowed_capability_keys,
         source_turn_id=request.source_turn_id,
+        changed_node_ids=changed_node_ids,
     )
     for node in nodes:
         text = authorizing.get(node.node_id)
         if text:
             errors.extend(grounded_operator_and_timeframe(node, authorizing_text=text))
-    return errors, providers
+    return errors, list(draft.static_provider_requirements)
 
 
 # --------------------------------------------------------------------------------
@@ -608,6 +1224,8 @@ def _build_patch(
     unsupported: list[UnsupportedRequirementV2] = []
     resolved_keys: list[str] = []
     removed_unsupported: list[str] = []
+    unresolved_items: list[Any] = []
+    reversion: ReversionV2 | None = None
 
     for operation in plan.operations:
         segment = segments[operation.authorizing_segment_id]
@@ -650,25 +1268,21 @@ def _build_patch(
             )
         elif operation.kind == "resolve_unresolved_key" and operation.target_key:
             resolved_keys.append(operation.target_key)
+        elif operation.kind == "add_unresolved" and operation.unresolved is not None:
+            unresolved_items.append(operation.unresolved)
+        elif (
+            operation.kind == "update_unresolved"
+            and operation.unresolved is not None
+            and operation.target_key
+        ):
+            resolved_keys.append(operation.target_key)
+            unresolved_items.append(operation.unresolved)
         elif operation.kind == "remove_unsupported_key" and operation.target_key:
             removed_unsupported.append(operation.target_key)
-
-    # Plan-level unsupported segments only count when their segment is an instruction.
-    # An `UNSUPPORTED_REQUEST` — "place the trade for me" — is a boundary answer, not a
-    # draft blocker, so it must not change the draft at all.
-    for item in plan.unsupported_segments:
-        author = segments.get(item.segment_id)
-        if author is None or author.kind != SegmentKind.STRATEGY_INSTRUCTION:
-            continue
-        unsupported.append(
-            UnsupportedRequirementV2(
-                key=f"unsupported_{item.segment_id}",
-                source_turn_id=request.source_turn_id,
-                source_fragment=author.exact_source_text,
-                missing_contract=item.missing_contract,
-                blocking=item.blocking,
+        elif operation.kind == "restore_snapshot" and operation.target_executable_version:
+            reversion = ReversionV2(
+                target_version=operation.target_executable_version,
             )
-        )
 
     if not any(
         (
@@ -684,6 +1298,8 @@ def _build_patch(
             unsupported,
             resolved_keys,
             removed_unsupported,
+            unresolved_items,
+            reversion is not None,
         )
     ):
         return None
@@ -700,8 +1316,10 @@ def _build_patch(
         remove_inclusions=remove_include,
         remove_exclusions=remove_exclude,
         unsupported_requirements=unsupported,
+        unresolved_references=unresolved_items,
         remove_unresolved_keys=resolved_keys,
         remove_unsupported_keys=removed_unsupported,
+        reversion=reversion,
     )
 
 
@@ -718,8 +1336,8 @@ def _has_valid_approval(draft: StrategyDraftV2) -> bool:
     """
     return (
         draft.approval.approved
-        and draft.approval.draft_version == draft.version
-        and draft.approval.semantic_hash == draft.semantic_hash
+        and draft.approval.executable_version == draft.executable_version
+        and draft.approval.executable_hash == draft.executable_hash
     )
 
 
@@ -776,11 +1394,11 @@ def _assert_lifecycle(
     was written down.
     """
     if not material:
-        if after.semantic_hash != before.semantic_hash:
+        if after.executable_hash != before.executable_hash:
             raise SetupTurnRejected(
                 "LIFECYCLE_VIOLATION",
                 "That turn changed the strategy without a material instruction.",
-                details=("non_material_turn_changed_semantic_hash",),
+                details=("non_material_turn_changed_executable_hash",),
             )
         if before.approval.approved and approval_status != "approved":
             raise SetupTurnRejected(
@@ -840,6 +1458,48 @@ def _resolved_questions(
     return list(dict.fromkeys(closed))
 
 
+def _verify_resolved_targets(
+    plan: SetupAgentTurnPlan,
+    before: StrategyDraftV2,
+    after: StrategyDraftV2,
+) -> None:
+    """A resolve operation may remove a blocker only after its typed target changed."""
+
+    pending = {item.key: item for item in before.unresolved_fields}
+    failures: list[str] = []
+    for operation in plan.operations:
+        if operation.kind != "resolve_unresolved_key" or not operation.target_key:
+            continue
+        item = pending.get(operation.target_key)
+        if item is None:
+            continue
+        contract = ClarificationContract(
+            question_id=item.key,
+            question=item.question,
+            reason=item.reason,
+            target_type=item.target_type,
+            target_field=item.target_field,
+            target_condition_id=item.target_condition_id,
+            expected_answer_schema=json.dumps(
+                item.expected_answer_schema,
+                sort_keys=True,
+                separators=(",", ":"),
+            )[:200],
+            mutating=True,
+            allowed_options=item.allowed_options[:6],
+        )
+        if not _target_resolved(contract, before, after):
+            failures.append(
+                f"{operation.operation_id}:resolve_unresolved_key:target_unchanged"
+            )
+    if failures:
+        raise SetupTurnRejected(
+            "UNRESOLVED_TARGET_UNCHANGED",
+            "That answer did not fill the field its clarification asked for.",
+            details=tuple(failures),
+        )
+
+
 def _target_resolved(
     contract: ClarificationContract,
     before: StrategyDraftV2,
@@ -847,7 +1507,7 @@ def _target_resolved(
 ) -> bool:
     """Did the thing this question was about actually change?"""
 
-    if contract.target_type == "unsupported_requirement":
+    if contract.target_type in {"unsupported_requirement", "unsupported_resolution"}:
         keys = {item.key for item in after.unsupported_requirements}
         return contract.question_id not in keys
     if contract.target_type == "universe":
@@ -855,7 +1515,7 @@ def _target_resolved(
             after.universe.included_symbols != before.universe.included_symbols
             or after.universe.excluded_symbols != before.universe.excluded_symbols
         )
-    if contract.target_type == "draft_field":
+    if contract.target_type in {"draft_field", "market_scope"}:
         field_name = contract.target_field or ""
         for holder_before, holder_after in (
             (before, after),
@@ -864,7 +1524,11 @@ def _target_resolved(
             if hasattr(holder_after, field_name):
                 return getattr(holder_after, field_name) != getattr(holder_before, field_name)
         return False
-    if contract.target_type == "condition_field":
+    if contract.target_type in {
+        "condition_field",
+        "capability_parameter",
+        "reference_definition",
+    }:
         node_id = contract.target_condition_id or ""
         old = _existing_conditions(before).get(node_id)
         new = _existing_conditions(after).get(node_id)
@@ -875,6 +1539,18 @@ def _target_resolved(
             return True
         return getattr(new, contract.target_field or "", None) != getattr(
             old, contract.target_field or "", None
+        )
+    if contract.target_type == "condition_creation":
+        return len(_existing_conditions(after)) > len(_existing_conditions(before))
+    if contract.target_type == "boolean_structure":
+        return (
+            _boolean_shape(after.condition_ast)
+            if after.condition_ast is not None
+            else ""
+        ) != (
+            _boolean_shape(before.condition_ast)
+            if before.condition_ast is not None
+            else ""
         )
     # A field the draft records as unresolved is resolved when it leaves that list.
     return contract.question_id not in {item.key for item in after.unresolved_fields}
@@ -901,23 +1577,17 @@ def _allowed_clarifications(
             ClarificationContract(
                 question_id=item.key,
                 question=item.question,
-                reason="This exact field is required before the draft can run.",
-                target_type="draft_field" if item.key != "conditions" else "condition_field",
-                target_field=item.key,
-                target_condition_id=(
-                    next(
-                        (
-                            node.node_id
-                            for node in (draft.condition_ast.walk() if draft.condition_ast else [])
-                            if node.node_type == ConditionNodeType.CONDITION
-                        ),
-                        None,
-                    )
-                    if item.key == "conditions"
-                    else None
-                ),
-                expected_answer_schema="the exact value for this field",
+                reason=item.reason,
+                target_type=item.target_type,
+                target_field=item.target_field,
+                target_condition_id=item.target_condition_id,
+                expected_answer_schema=json.dumps(
+                    item.expected_answer_schema,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )[:200],
                 mutating=True,
+                allowed_options=item.allowed_options[:6],
             )
         )
     for blocker in draft.unsupported_requirements:
@@ -962,93 +1632,71 @@ def validated_clarification(
 def _applied_instructions(
     plan: SetupAgentTurnPlan,
     segments: dict[str, TurnSegment],
-    changes: list[DraftChange],
-    patch: StrategyPatch | None,
+    operation_results: list[OperationExecutionResult],
 ) -> list[AppliedInstruction]:
     """One record per operation, described from the canonical diff.
 
     The model's ``intent_summary`` is deliberately unused here: it says what the model
     meant to do, and a reply built on it could describe a change the compiler refused.
     """
-    if patch is None or not changes:
-        return []
-    by_kind = _changes_by_operation(changes)
+    by_id = {item.operation_id: item for item in operation_results if item.applied}
     applied: list[AppliedInstruction] = []
     for operation in plan.operations:
         segment = segments.get(operation.authorizing_segment_id)
         if segment is None:
             continue
-        matched = by_kind.get(operation.kind, [])
-        if not matched:
+        result = by_id.get(operation.operation_id)
+        if result is None:
             continue
+        descriptions = [
+            str(item.get("description") or item.get("kind") or "updated")
+            for item in result.changes
+        ]
         applied.append(
             AppliedInstruction(
+                operation_id=operation.operation_id,
                 segment_id=operation.authorizing_segment_id,
                 source_text=segment.exact_source_text,
-                summary="; ".join(change.describe() for change in matched)[:400],
-                condition_ids=list(
-                    dict.fromkeys(
-                        node_id for change in matched for node_id in change.condition_ids
-                    )
-                )[:24],
+                summary="; ".join(descriptions)[:400],
+                condition_ids=result.affected_condition_ids[:24],
                 operation=operation.kind,
-                changes=[change.to_dict() for change in matched],
+                changes=result.changes,
             )
         )
-    if applied:
-        return applied
-    # Every change came from something with no one-to-one operation (a resolved open
-    # item, say). Still reported, attributed to the actionable segments.
-    return [
-        AppliedInstruction(
-            segment_id=segment.segment_id,
-            source_text=segment.exact_source_text,
-            summary="; ".join(change.describe() for change in changes)[:400],
-            condition_ids=list(
-                dict.fromkeys(
-                    node_id for change in changes for node_id in change.condition_ids
-                )
-            )[:24],
-            operation="derived",
-            changes=[change.to_dict() for change in changes],
-        )
-        for segment in plan.actionable_segments[:1]
-    ]
+    return applied
 
 
-#: Which canonical change kinds each operation is responsible for.
-_OPERATION_CHANGES: dict[str, frozenset[str]] = {
-    "add_condition": frozenset({"condition_added"}),
-    "update_condition": frozenset(
-        {
-            "condition_updated",
-            "timeframe_changed",
-            "operator_changed",
-            "threshold_changed",
-            "direction_changed",
-            "formula_changed",
-        }
-    ),
-    "remove_condition": frozenset({"condition_removed"}),
-    "replace_groups": frozenset({"group_replaced", "condition_added", "condition_removed"}),
-    "add_inclusion": frozenset({"symbol_included"}),
-    "add_exclusion": frozenset({"symbol_excluded"}),
-    "remove_inclusion": frozenset({"symbol_include_removed"}),
-    "remove_exclusion": frozenset({"symbol_exclude_removed"}),
-    "set_fields": frozenset({"mode_changed", "market_scope_changed"}),
-    "add_unsupported": frozenset({"unsupported_added"}),
-    "resolve_unresolved_key": frozenset({"unresolved_resolved"}),
-    "remove_unsupported_key": frozenset({"unsupported_resolved"}),
-}
-
-
-def _changes_by_operation(changes: list[DraftChange]) -> dict[str, list[DraftChange]]:
-    grouped: dict[str, list[DraftChange]] = {}
-    for kind, owned in _OPERATION_CHANGES.items():
-        matched = [change for change in changes if change.kind in owned]
-        if matched:
-            grouped[kind] = matched
-    return grouped
+def _operation_result(
+    operation: Any,
+    *,
+    before: StrategyDraftV2,
+    after: StrategyDraftV2,
+    changes: list[DraftChange],
+    applied: bool,
+) -> OperationExecutionResult:
+    return OperationExecutionResult(
+        operation_id=operation.operation_id,
+        authorizing_segment_id=operation.authorizing_segment_id,
+        operation_kind=operation.kind,
+        applied=applied,
+        rejected=False,
+        before_executable_hash=before.executable_hash,
+        after_executable_hash=after.executable_hash,
+        workflow_revision_before=before.workflow_revision,
+        workflow_revision_after=after.workflow_revision,
+        changes=[
+            {
+                **item.to_dict(),
+                "description": item.describe(),
+            }
+            for item in changes
+        ],
+        affected_condition_ids=list(
+            dict.fromkeys(
+                node_id for change in changes for node_id in change.condition_ids
+            )
+        ),
+    )
 
 
 def draft_read_model(draft: StrategyDraftV2, changes: list[DraftChange]) -> dict[str, Any]:
@@ -1064,7 +1712,8 @@ def draft_read_model(draft: StrategyDraftV2, changes: list[DraftChange]) -> dict
             "operator": node.operator.value if node.operator else None,
             "threshold": node.threshold,
             "unit": node.unit,
-            "direction": node.direction.value,
+            "movement_direction": node.movement_direction.value,
+            "strategy_bias": node.strategy_bias.value,
             "trigger_timeframe": node.trigger_timeframe,
             "context_timeframes": list(node.context_timeframes),
             "confirmation_timeframes": list(node.confirmation_timeframes),
@@ -1076,7 +1725,10 @@ def draft_read_model(draft: StrategyDraftV2, changes: list[DraftChange]) -> dict
         if node.node_type == ConditionNodeType.CONDITION
     ]
     return {
-        "version": draft.version,
+        "executable_version": draft.executable_version,
+        "workflow_revision": draft.workflow_revision,
+        "executable_hash": draft.executable_hash,
+        "workflow_state_hash": draft.workflow_state_hash,
         "mode": draft.mode.value,
         "included_symbols": draft.universe.included_symbols[:50],
         "excluded_symbols": draft.universe.excluded_symbols[:50],
@@ -1213,14 +1865,14 @@ def _ignored_segments(plan: SetupAgentTurnPlan) -> list[IgnoredSegment]:
 
 def _status(
     *,
-    strategy_mutated: bool,
+    state_mutated: bool,
     patch_present: bool,
     answered: bool,
     blocked: bool,
 ) -> ExecutionStatus:
-    if strategy_mutated and blocked:
+    if state_mutated and blocked:
         return "blocked"
-    if strategy_mutated or answered:
+    if state_mutated or answered:
         return "applied"
     if patch_present:
         return "no_change"
@@ -1253,7 +1905,7 @@ def _next_actions(
         actions.append("answer_open_question")
     if any(item.blocking for item in draft.unsupported_requirements):
         actions.append("restate_unsupported_requirement")
-    if any(not item.available for item in draft.provider_requirements):
+    if any(item.status != "available" for item in draft.runtime_state.provider_status):
         actions.append("provider_unavailable")
     if compile_status == "not_attempted" and draft.condition_ast is None:
         actions.append("describe_one_measurable_rule")

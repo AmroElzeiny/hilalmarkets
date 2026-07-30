@@ -50,6 +50,20 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.services.interfaces import Candle
 
 
+def strategy_evaluation_directions(
+    strategy: StrategyDefinition,
+) -> tuple[StrategyDirection | None, ...]:
+    """Return the exact runtime fan-out for one strategy.
+
+    ``neutral`` is a real single evaluation. Only the explicit legacy ``both`` mode
+    fans out to long and short.
+    """
+
+    if strategy.direction == StrategyDirection.BOTH:
+        return (StrategyDirection.LONG, StrategyDirection.SHORT)
+    return (None,)
+
+
 def _operand_parameter(
     operand: Operand,
     key: str,
@@ -845,6 +859,7 @@ class StrategyRuleEngine:
                 previous_actual_value=previous_actual,
                 previous_required_value=previous_required,
                 mechanic_evidence=self._mechanic_evidence(condition),
+                semantic_contract=self._semantic_contract(condition),
             )
         except IndicatorWarmupError as exc:
             return self._pending(condition, evaluation_time, str(exc), market_timestamp, latency)
@@ -1464,7 +1479,35 @@ class StrategyRuleEngine:
             cap_score_on_fail=condition.cap_score_on_fail,
             error_code=code,
             mechanic_evidence=StrategyRuleEngine._mechanic_evidence(condition),
+            semantic_contract=StrategyRuleEngine._semantic_contract(condition),
         )
+
+    @staticmethod
+    def _semantic_contract(condition: ConditionRule) -> dict[str, Any]:
+        parameters = condition.resolved_parameters
+        threshold: Any = None
+        if condition.right is not None:
+            threshold = (
+                condition.right.value
+                if condition.right.kind == OperandKind.CONSTANT
+                else condition.right.model_dump(mode="json")
+            )
+        return {
+            "formula": parameters.get("formula"),
+            "operator": condition.comparator.value,
+            "threshold": threshold,
+            "movement_direction": parameters.get("movement_direction"),
+            "strategy_bias": parameters.get("strategy_bias"),
+            "unit": parameters.get("unit"),
+            "timeframe_role": "trigger",
+            "trigger_timeframe": condition.timeframe,
+            "reference_timeframe": parameters.get("reference_timeframe"),
+            "reference_definition": parameters.get("reference_definition"),
+            "lookback": parameters.get("lookback"),
+            "ast_path": list(condition.ast_path),
+            "source_turn_id": condition.source_turn_id,
+            "source_fragment": condition.source_fragment,
+        }
 
     @staticmethod
     def _mechanic_evidence(condition: ConditionRule) -> dict[str, Any] | None:

@@ -18,6 +18,9 @@ jobs stay separate:
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -64,6 +67,26 @@ class SegmentKind(StrEnum):
     UNSUPPORTED_REQUEST = "UNSUPPORTED_REQUEST"
 
 
+class CapabilityRoutingCandidate(_StrictModel):
+    key: str = Field(min_length=1, max_length=120)
+    score: float = Field(ge=0)
+    normalized_confidence: float = Field(ge=0, le=1)
+    availability: str = Field(min_length=1, max_length=40)
+    executable: bool
+    source_fragment: str = Field(default="", max_length=500)
+
+
+class CapabilityRoutingContext(_StrictModel):
+    candidate_count: int = Field(ge=0)
+    candidate_keys: list[str] = Field(default_factory=list, max_length=100)
+    top_candidate_key: str | None = Field(default=None, max_length=120)
+    top_candidate_score: float = Field(default=0, ge=0)
+    selection_confidence: float = Field(default=0, ge=0, le=1)
+    top_score_margin: float = Field(default=0, ge=0)
+    unknown_terms: list[str] = Field(default_factory=list, max_length=50)
+    candidates: list[CapabilityRoutingCandidate] = Field(default_factory=list, max_length=100)
+
+
 #: Segment kinds that may lead to a change in executable state. Everything else is
 #: answered in words and can never reach the compiler.
 ACTIONABLE_SEGMENT_KINDS: frozenset[SegmentKind] = frozenset(
@@ -84,6 +107,153 @@ REPLY_BEARING_SEGMENT_KINDS: frozenset[SegmentKind] = frozenset(
         SegmentKind.UNSUPPORTED_REQUEST,
     }
 )
+
+
+def _bind_condition_tree_provenance(
+    raw_node: dict[str, object],
+    *,
+    source_turn_id: str,
+    source_fragment: str,
+    node_id_seed: str | None = None,
+    node_path: tuple[int, ...] = (),
+) -> dict[str, object]:
+    """Return a copied proposed tree with authoritative server-owned metadata."""
+
+    node = dict(raw_node)
+    if node_id_seed:
+        rendered_path = ".".join(map(str, node_path)) or "root"
+        node["node_id"] = (
+            "condition_"
+            + hashlib.sha256(f"{node_id_seed}:{rendered_path}".encode()).hexdigest()[:16]
+        )
+    node["source_turn_id"] = source_turn_id
+    proposed_fragment = node.get("source_fragment")
+    grounded_fragment = (
+        proposed_fragment
+        if isinstance(proposed_fragment, str)
+        and proposed_fragment.strip()
+        and " ".join(proposed_fragment.split()).casefold()
+        in " ".join(source_fragment.split()).casefold()
+        else source_fragment
+    )
+    node["source_fragment"] = grounded_fragment
+    if node.get("node_type") == "condition":
+        node["required"] = bool(
+            not re.search(
+                r"\boptional\b|\bnot required\b|\bprefer\b",
+                grounded_fragment,
+                re.IGNORECASE,
+            )
+        )
+    node["operands"] = _canonicalize_core_operand_metadata(node)
+    children = node.get("children")
+    if isinstance(children, list):
+        node["children"] = [
+            _bind_condition_tree_provenance(
+                child,
+                source_turn_id=source_turn_id,
+                source_fragment=source_fragment,
+                node_id_seed=node_id_seed,
+                node_path=(*node_path, index),
+            )
+            if isinstance(child, dict)
+            else child
+            for index, child in enumerate(children)
+        ]
+    return node
+
+
+def _canonicalize_core_operand_metadata(
+    raw_node: dict[str, object],
+) -> list[object]:
+    """Fill metadata fixed by a named core formula, never trader-controlled values."""
+
+    operands = raw_node.get("operands")
+    if not isinstance(operands, list):
+        return []
+    formula = raw_node.get("formula")
+    percentage_formulas: dict[object, dict[str, object]] = {
+        "open_to_close_percentage": {
+            "formula": "open_to_close",
+            "reference_field": "open",
+            "current_field": "close",
+            "lookback": 1,
+            "scale": "percent",
+            "closed_only": True,
+        },
+        "close_to_close_percentage": {
+            "formula": "close_to_close",
+            "reference_field": "close",
+            "current_field": "close",
+            "lookback": 1,
+            "scale": "percent",
+            "closed_only": True,
+        },
+        "reference_to_current_percentage": {
+            "formula": "reference_to_current",
+            "scale": "percent",
+        },
+        "high_to_low_percentage": {
+            "formula": "high_to_low",
+            "reference_field": "high",
+            "current_field": "low",
+            "scale": "percent",
+        },
+        "low_to_high_percentage": {
+            "formula": "low_to_high",
+            "reference_field": "low",
+            "current_field": "high",
+            "scale": "percent",
+        },
+    }
+    if formula in percentage_formulas:
+        return [
+            {
+                "role": "measured_value",
+                "kind": "market_metric",
+                "name": "percentage_change",
+                "unit": "percent",
+                "parameters": percentage_formulas[formula],
+            }
+        ]
+    if formula == "sweep_and_reclaim":
+        return [
+            {
+                "role": "sweep_state",
+                "kind": "market_metric",
+                "name": "sweep_and_reclaim",
+                "unit": "boolean",
+                "parameters": {
+                    "pierce_required": True,
+                    "reclaim_required": True,
+                },
+            }
+        ]
+    canonical: list[object] = []
+    for raw_operand in operands:
+        if not isinstance(raw_operand, dict):
+            canonical.append(raw_operand)
+            continue
+        operand = dict(raw_operand)
+        if operand.get("kind") == "market_metric":
+            parameters = (
+                dict(operand["parameters"])
+                if isinstance(operand.get("parameters"), dict)
+                else {}
+            )
+            if formula in percentage_formulas:
+                if not operand.get("field") and not operand.get("name"):
+                    operand["name"] = "percentage_change"
+                for key, value in percentage_formulas[formula].items():
+                    parameters.setdefault(key, value)
+            elif formula == "sweep_and_reclaim":
+                if not operand.get("field") and not operand.get("name"):
+                    operand["name"] = "sweep_and_reclaim"
+                parameters.setdefault("pierce_required", True)
+                parameters.setdefault("reclaim_required", True)
+            operand["parameters"] = parameters
+        canonical.append(operand)
+    return canonical
 
 
 class TurnSegment(_StrictModel):
@@ -273,12 +443,71 @@ class SetupAgentTurnPlan(_StrictModel):
     response_points: list[ResponseDirective] = Field(default_factory=list, max_length=12)
     overall_confidence: float = Field(ge=0, le=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def bind_condition_provenance(cls, data: object) -> object:
+        """Replace model-authored condition provenance with server-known spans.
+
+        The planner chooses an authorizing segment, but it is not authoritative for
+        provenance fields inside the proposed condition tree. Requiring it to repeat
+        those fields caused otherwise valid strict-schema plans to fail before the
+        deterministic operation-grounding layer could inspect them. The plan already
+        carries the current turn id and exact segment spans, so bind those facts here.
+        All executable condition fields remain subject to typed grounding later.
+        """
+
+        if not isinstance(data, dict):
+            return data
+        source_turn_id = data.get("source_turn_id")
+        raw_segments = data.get("segments")
+        raw_operations = data.get("operations")
+        if (
+            not isinstance(source_turn_id, str)
+            or not isinstance(raw_segments, list)
+            or not isinstance(raw_operations, list)
+        ):
+            return data
+        segment_text = {
+            item.get("segment_id"): item.get("exact_source_text")
+            for item in raw_segments
+            if isinstance(item, dict)
+            and isinstance(item.get("segment_id"), str)
+            and isinstance(item.get("exact_source_text"), str)
+        }
+        migrated = dict(data)
+        operations: list[object] = []
+        for item in raw_operations:
+            if not isinstance(item, dict) or not isinstance(item.get("condition"), dict):
+                operations.append(item)
+                continue
+            exact_text = segment_text.get(item.get("authorizing_segment_id"))
+            if not exact_text:
+                operations.append(item)
+                continue
+            operation = dict(item)
+            operation["condition"] = _bind_condition_tree_provenance(
+                item["condition"],
+                source_turn_id=source_turn_id,
+                source_fragment=exact_text,
+                node_id_seed=(
+                    f"{source_turn_id}:{item.get('operation_id')}"
+                    if item.get("kind") == "add_condition"
+                    else None
+                ),
+            )
+            operations.append(operation)
+        migrated["operations"] = operations
+        return migrated
+
     @model_validator(mode="after")
     def validate_internal_references(self) -> SetupAgentTurnPlan:
         ids = [segment.segment_id for segment in self.segments]
         if len(ids) != len(set(ids)):
             raise ValueError("segment_id values must be unique within one plan")
         known = set(ids)
+        operation_ids = [item.operation_id for item in self.operations]
+        if len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("operation_id values must be unique within one plan")
         for collection, label in (
             (self.strategy_instructions, "strategy_instructions"),
             (self.clarification_answers, "clarification_answers"),
@@ -333,6 +562,7 @@ class AppliedInstruction(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    operation_id: str = Field(min_length=1, max_length=80)
     segment_id: str = Field(min_length=1, max_length=80)
     source_text: str = Field(min_length=1, max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH)
     summary: str = Field(min_length=1, max_length=400)
@@ -341,6 +571,21 @@ class AppliedInstruction(BaseModel):
     operation: str = Field(default="", max_length=60)
     #: Typed change records from `draft_diff`, the authoritative evidence.
     changes: list[dict[str, object]] = Field(default_factory=list, max_length=24)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_missing_operation_id(cls, data: object) -> object:
+        if not isinstance(data, dict) or data.get("operation_id"):
+            return data
+        migrated = dict(data)
+        encoded = json.dumps(
+            migrated,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode()
+        migrated["operation_id"] = f"legacy_{hashlib.sha256(encoded).hexdigest()[:24]}"
+        return migrated
 
 
 class IgnoredSegment(BaseModel):
@@ -356,6 +601,25 @@ class IgnoredSegment(BaseModel):
     source_text: str = Field(min_length=1, max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH)
     kind: SegmentKind
     reason: str = Field(min_length=1, max_length=300)
+
+
+class OperationExecutionResult(BaseModel):
+    """Canonical before/after evidence for one authorized operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1, max_length=80)
+    authorizing_segment_id: str = Field(min_length=1, max_length=80)
+    operation_kind: str = Field(min_length=1, max_length=60)
+    applied: bool
+    rejected: bool
+    before_executable_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    after_executable_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    workflow_revision_before: int = Field(ge=1)
+    workflow_revision_after: int = Field(ge=1)
+    changes: list[dict[str, object]] = Field(default_factory=list, max_length=100)
+    affected_condition_ids: list[str] = Field(default_factory=list, max_length=100)
+    safe_error: str | None = Field(default=None, max_length=500)
 
 
 class SetupTurnExecutionResult(BaseModel):
@@ -378,12 +642,18 @@ class SetupTurnExecutionResult(BaseModel):
     applied: bool
     strategy_mutated: bool
     draft_id: UUID
-    previous_version: int = Field(ge=1)
-    current_version: int = Field(ge=1)
-    previous_semantic_hash: str = Field(pattern=r"^$|^[a-f0-9]{64}$")
-    current_semantic_hash: str = Field(pattern=r"^$|^[a-f0-9]{64}$")
+    previous_executable_version: int = Field(ge=1)
+    current_executable_version: int = Field(ge=1)
+    previous_workflow_revision: int = Field(ge=1)
+    current_workflow_revision: int = Field(ge=1)
+    previous_executable_hash: str = Field(pattern=r"^$|^[a-f0-9]{64}$")
+    current_executable_hash: str = Field(pattern=r"^$|^[a-f0-9]{64}$")
     semantic_diff: list[str] = Field(default_factory=list, max_length=200)
     applied_instructions: list[AppliedInstruction] = Field(default_factory=list, max_length=24)
+    operation_results: list[OperationExecutionResult] = Field(
+        default_factory=list,
+        max_length=24,
+    )
     ignored_non_actionable_segments: list[IgnoredSegment] = Field(
         default_factory=list, max_length=24
     )
@@ -398,7 +668,12 @@ class SetupTurnExecutionResult(BaseModel):
     screening_status: Literal["passed", "blocked", "not_required", "not_attempted"] = (
         "not_required"
     )
-    provider_status: Literal["available", "unavailable", "not_required"] = "not_required"
+    provider_status: Literal[
+        "available",
+        "unavailable",
+        "runtime_unverified",
+        "not_required",
+    ] = "not_required"
     #: The status the chat will actually carry after this turn. Decided here, so the
     #: composer and the persisted session can never disagree.
     final_chat_status: str = Field(default="", max_length=40)
@@ -419,19 +694,53 @@ class SetupTurnExecutionResult(BaseModel):
     #: Deterministic read model for answering questions about the current draft.
     draft_read_model: dict[str, object] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_identity(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        aliases = {
+            "previous_version": "previous_executable_version",
+            "current_version": "current_executable_version",
+            "previous_semantic_hash": "previous_executable_hash",
+            "current_semantic_hash": "current_executable_hash",
+        }
+        for old, new in aliases.items():
+            if old in migrated:
+                migrated.setdefault(new, migrated.pop(old))
+        migrated.setdefault(
+            "previous_workflow_revision",
+            migrated.get("previous_executable_version", 1),
+        )
+        migrated.setdefault(
+            "current_workflow_revision",
+            migrated.get("current_executable_version", 1),
+        )
+        return migrated
+
     @model_validator(mode="after")
     def validate_consistency(self) -> SetupTurnExecutionResult:
         if self.applied and not self.applied_instructions and not self.answered_questions:
             raise ValueError("an applied result must record what it applied")
-        if self.strategy_mutated and self.current_version <= self.previous_version:
+        if (
+            self.strategy_mutated
+            and self.current_executable_version <= self.previous_executable_version
+        ):
             raise ValueError("a mutated draft must carry a newer version")
-        if not self.strategy_mutated and self.current_version != self.previous_version:
+        if (
+            not self.strategy_mutated
+            and self.current_executable_version != self.previous_executable_version
+        ):
             raise ValueError("an unchanged draft cannot change version")
         if self.approval_eligible and self.compile_status != "compiled":
             raise ValueError("approval cannot be eligible before the draft compiles")
         if self.approval_eligible and self.screening_status == "blocked":
             raise ValueError("approval cannot be eligible while screening blocks the draft")
-        if self.approval_eligible and self.provider_status == "unavailable":
+        if self.approval_eligible and self.provider_status in {
+            "unavailable",
+            "runtime_unverified",
+        }:
             raise ValueError("approval cannot be eligible while a provider is unavailable")
         # An approval that survived this turn must not also be reported as newly
         # eligible or as invalidated: the three states are mutually exclusive facts.
@@ -440,6 +749,22 @@ class SetupTurnExecutionResult(BaseModel):
         if self.approval_status == "invalidated_by_edit" and not self.strategy_mutated:
             raise ValueError("approval cannot be invalidated without a material change")
         return self
+
+    @property
+    def previous_version(self) -> int:
+        return self.previous_executable_version
+
+    @property
+    def current_version(self) -> int:
+        return self.current_executable_version
+
+    @property
+    def previous_semantic_hash(self) -> str:
+        return self.previous_executable_hash
+
+    @property
+    def current_semantic_hash(self) -> str:
+        return self.current_executable_hash
 
 
 class SetupConversationContext(BaseModel):
@@ -508,13 +833,39 @@ class SetupAgentReply(_StrictModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    message: str = Field(min_length=1, max_length=SETUP_REPLY_MAX_LENGTH)
+    message_without_question: str = Field(
+        min_length=1,
+        max_length=SETUP_REPLY_MAX_LENGTH,
+    )
     #: The `question_id` of one server-authorised clarification, or null.
     #:
     #: The composer used to return a free-form question, so it could invent an
     #: executable clarification the server never agreed was needed — and re-ask one
     #: already answered. It may now only choose from `allowed_clarifications`.
-    clarification_question_id: str | None = Field(default=None, max_length=120)
+    selected_clarification_id: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_reply(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        if "message" in migrated:
+            migrated.setdefault("message_without_question", migrated.pop("message"))
+        if "clarification_question_id" in migrated:
+            migrated.setdefault(
+                "selected_clarification_id",
+                migrated.pop("clarification_question_id"),
+            )
+        return migrated
+
+    @property
+    def message(self) -> str:
+        return self.message_without_question
+
+    @property
+    def clarification_question_id(self) -> str | None:
+        return self.selected_clarification_id
 
 
 class SetupAgentPlanEnvelope(_StrictModel):

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
     compile_strategy_draft_v2,
+    validate_compiled_equivalence,
 )
 from ai_market_monitor.engine.strategy_draft_migration import migrate_legacy_draft
 from ai_market_monitor.engine.strategy_draft_v2 import (
@@ -126,6 +127,8 @@ def test_multi_condition_nodes_keep_independent_semantics_and_grouping():
 
     assert compiled.conditions.operator.value == "or"
     assert compiled.conditions.children[1].operator.value == "not"
+    assert compiled.conditions.children[0].ast_path == [0]
+    assert compiled.conditions.children[1].children[0].ast_path == [1, 0]
     assert compiled.base_timeframe == "15m"
     assert compiled.supporting_timeframes == ["1h"]
 
@@ -234,9 +237,63 @@ def test_trigger_context_confirmation_and_reference_roles_remain_distinct():
     assert draft.condition_ast.confirmation_timeframes == ["1h"]
     assert draft.condition_ast.reference_timeframe == "15m"
 
+    errors = validate_draft_semantics(draft)
+    assert any(item.startswith("context_timeframe_not_executable:") for item in errors)
+    assert any(
+        item.startswith("confirmation_timeframe_not_executable:") for item in errors
+    )
+    with pytest.raises(StrategyV2CompileError) as captured:
+        compile_strategy_draft_v2(draft)
+    assert captured.value.code == "semantic_validation_failed"
+
+
+def test_neutral_strategy_compiles_as_one_neutral_evaluation():
+    draft = StrategyDraftV2(
+        condition_ast=_condition(direction=DraftDirection.NEUTRAL)
+    )
+
     compiled = compile_strategy_draft_v2(draft)
-    assert compiled.base_timeframe == "15m"
-    assert compiled.supporting_timeframes == ["4h", "1h"]
+
+    assert compiled.direction.value == "neutral"
+
+
+def test_compiler_preserves_source_turn_and_explicit_lookback_and_detects_drift():
+    condition = _condition().model_copy(
+        update={
+            "source_turn_id": "turn-provenance-1234",
+            "lookback": 20,
+        }
+    )
+    draft = StrategyDraftV2(condition_ast=condition)
+
+    compiled = compile_strategy_draft_v2(draft)
+    rule = compiled.conditions.children[0]
+
+    assert rule.source_turn_id == "turn-provenance-1234"
+    assert rule.source_fragment == condition.source_fragment
+    assert rule.resolved_parameters["lookback"] == 20
+    assert validate_compiled_equivalence(draft, compiled) == []
+
+    drifted_rule = rule.model_copy(
+        update={
+            "source_turn_id": "turn-wrong",
+            "resolved_parameters": {
+                **rule.resolved_parameters,
+                "lookback": 19,
+            },
+        }
+    )
+    drifted = compiled.model_copy(
+        update={
+            "conditions": compiled.conditions.model_copy(
+                update={"children": [drifted_rule]}
+            )
+        }
+    )
+
+    errors = validate_compiled_equivalence(draft, drifted)
+    assert "source_turn_id:move" in errors
+    assert "lookback:move" in errors
 
 
 def test_latest_correction_wins_and_invalidates_approval():

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 
@@ -7,6 +8,7 @@ import pytest
 from pydantic import SecretStr
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.plans import timeframe_to_minutes
 from ai_market_monitor.db.models import Strategy, Subscription, User
 from ai_market_monitor.db.models.enums import SubscriptionStatus
 from ai_market_monitor.engine.strategy_state import StrategyDraftState, patches_for_turn
@@ -398,7 +400,13 @@ class SnapshotProvider:
 
 class ScannerProvider(SnapshotProvider):
     async def fetch_ohlcv(self, exchange, symbol, timeframe, limit):
-        return candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+        rows = candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+        interval = timedelta(minutes=timeframe_to_minutes(timeframe))
+        latest = datetime.now(UTC) - interval
+        return [
+            replace(row, timestamp=latest - (len(rows) - index - 1) * interval)
+            for index, row in enumerate(rows)
+        ]
 
 
 async def test_unchanged_compiler_input_uses_cached_preview_and_records_the_hit(
@@ -654,6 +662,36 @@ async def _user(test_context) -> User:
         await session.commit()
         await session.refresh(user)
         return user
+
+
+async def test_legacy_compat_runtime_is_read_only_for_v2_owned_chat(test_context):
+    user = await _user(test_context)
+    service = AISetupChatService(
+        _settings(),
+        SnapshotProvider(),
+        FixedInterpreter(),
+        interviewer=ReadyInterviewer(),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        original_context = {
+            "strategy_state_authority": "v2",
+            "strategy_draft_v2": {"sentinel": "immutable"},
+        }
+        chat.context_json = original_context
+        messages_before = list(await service.messages(session, chat.id))
+
+        with pytest.raises(SetupChatError) as caught:
+            await service.handle_message(
+                session,
+                chat,
+                message="Change the threshold to 10%.",
+            )
+
+        assert caught.value.code == "legacy_v2_read_only"
+        assert caught.value.status_code == 409
+        assert chat.context_json == original_context
+        assert list(await service.messages(session, chat.id)) == messages_before
 
 
 async def test_vague_prompt_clarifies_then_compiles_and_persists(test_context):

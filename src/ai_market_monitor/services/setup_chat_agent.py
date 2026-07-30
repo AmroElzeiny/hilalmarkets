@@ -9,37 +9,44 @@ a fixed sentence:
 A user who had just written three lines of exact market logic got told to describe a
 setup. That is the defect this module exists to remove.
 
-Here the model is the first semantic layer and the server is the only executable
-authority. One turn costs at most:
+Here exact core primitives are parsed deterministically first. Everything else reaches
+the model as the semantic layer, and the server remains the only executable authority.
+A mutating free-text turn costs at most:
 
-* one planning call — divide the turn into segments, propose at most one patch
-* one deterministic execution — :func:`apply_setup_turn`, which can refuse anything
-* one composing call — write the reply from what the server actually did
+* zero calls for an exact deterministic primitive, otherwise one planning call
+* one deterministic execution through :func:`apply_setup_turn`
+* one deterministic response built from the execution evidence
 
-No tool loops, no second opinion, no fallback orchestrator. When planning succeeds but
-composing fails, the reply is built deterministically from the execution result, so the
-user still learns what changed instead of being reset to a greeting.
+No tool loops, no second opinion, no fallback orchestrator, and no second provider call
+to word a successful mutation.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from time import monotonic
-from typing import Any
+from typing import Any, cast
 
 import httpx
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.engine.capability_shortlist import (
+    SETUP_RUNTIME_PROVIDER_REQUIREMENTS,
     CapabilityShortlist,
     build_capability_shortlist,
 )
 from ai_market_monitor.engine.setup_intent import decide_setup_intent
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
+    RuntimePreflight,
     ScreeningGate,
-    SetupTurnOutcome,
     SetupTurnRejected,
     SetupTurnRequest,
     apply_setup_turn,
@@ -48,25 +55,41 @@ from ai_market_monitor.engine.setup_turn_execution import (
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
+from ai_market_monitor.engine.turn_fragments import classify_turn
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
+    CapabilityRoutingCandidate,
+    CapabilityRoutingContext,
+    SegmentKind,
     SetupAgentPlanEnvelope,
     SetupAgentReply,
     SetupAgentTurnPlan,
     SetupConversationContext,
     SetupTurnExecutionResult,
+    StrategyInstructionPlan,
+    TurnSegment,
 )
-from ai_market_monitor.schemas.setup_authorization import ClarificationContract
+from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
+    ClarificationContract,
+)
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
+    DraftFieldPatch,
     DraftMode,
+    SetupIntent,
     StrategyDraftV2,
+    StrategyPatch,
 )
 from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.openai_structured_call import (
     StructuredCallError,
+    estimate_structured_call_cost,
     structured_call,
+)
+from ai_market_monitor.services.strategy_patch_extractor import (
+    deterministic_strategy_patch,
 )
 
 
@@ -118,6 +141,8 @@ class SetupAgentTurnInput:
     #: Final gates, supplied by the service that owns a database session.
     screening: ScreeningGate | None = None
     providers: ProviderGate | None = None
+    runtime_preflight: RuntimePreflight | None = None
+    stage_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
 
     @property
     def normalized_message(self) -> str:
@@ -196,6 +221,15 @@ class SetupAgentTurnResult:
     material_change: bool = False
     usage: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def message(self) -> str:
+        if self.clarification is None:
+            return self.reply.message_without_question
+        return (
+            f"{self.reply.message_without_question.rstrip()}\n\n"
+            f"{self.clarification.question}"
+        )
+
 
 class SetupChatAgent:
     """One specialized agent with exactly one state-changing tool."""
@@ -210,54 +244,183 @@ class SetupChatAgent:
         self.transport = transport
         self.model_call_count = 0
         self.last_usage: dict[str, Any] = {}
+        self._circuit_redis: Redis | None = (
+            None
+            if settings.app_env == "test"
+            else Redis.from_url(settings.redis_url, decode_responses=True)
+        )
+
+    @property
+    def _circuit_key(self) -> str:
+        provider = (
+            f"{str(self.settings.openai_base_url).rstrip('/')}:"
+            f"{self.settings.openai_model}"
+        )
+        digest = hashlib.sha256(provider.encode("utf-8")).hexdigest()[:24]
+        return f"hm:setup-agent:circuit:{digest}"
+
+    async def _before_provider_call(self) -> None:
+        if self._circuit_redis is None:
+            return
+        cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
+        script = """
+        local state = redis.call('HGET', KEYS[1], 'state') or 'CLOSED'
+        if state == 'CLOSED' then
+          return 1
+        end
+        if state == 'HALF_OPEN' then
+          return 0
+        end
+        local opened_at = tonumber(redis.call('HGET', KEYS[1], 'opened_at') or '0')
+        if (tonumber(ARGV[1]) - opened_at) < tonumber(ARGV[2]) then
+          return 0
+        end
+        redis.call('HSET', KEYS[1], 'state', 'HALF_OPEN')
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+        return 1
+        """
+        try:
+            allowed = await cast(
+                Awaitable[Any],
+                self._circuit_redis.eval(
+                    script,
+                    1,
+                    self._circuit_key,
+                    str(time.time()),
+                    str(cooldown),
+                    str(max(cooldown * 3, 300)),
+                ),
+            )
+        except RedisError as exc:
+            raise StructuredCallError(
+                "SETUP_AGENT_CIRCUIT_STATE_UNAVAILABLE",
+                "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
+                retryable=True,
+                stage="provider",
+            ) from exc
+        if not bool(allowed):
+            raise StructuredCallError(
+                "SETUP_AGENT_CIRCUIT_OPEN",
+                "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
+                retryable=True,
+                stage="provider",
+            )
+
+    async def _provider_succeeded(self) -> None:
+        if self._circuit_redis is None:
+            return
+        try:
+            await self._circuit_redis.delete(self._circuit_key)
+        except RedisError:
+            # The provider result is already complete and authoritative. Losing the
+            # success marker may leave the circuit conservative for a later turn, but
+            # must never discard this result or cause a second paid model call.
+            return
+
+    async def _provider_failed(self, exc: StructuredCallError) -> None:
+        if not exc.retryable or self._circuit_redis is None:
+            return
+        threshold = self.settings.setup_agent_circuit_breaker_failures
+        cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
+        script = """
+        local failures = redis.call('HINCRBY', KEYS[1], 'failures', 1)
+        local state = redis.call('HGET', KEYS[1], 'state') or 'CLOSED'
+        if state == 'HALF_OPEN' or failures >= tonumber(ARGV[1]) then
+          redis.call(
+            'HSET',
+            KEYS[1],
+            'state',
+            'OPEN',
+            'opened_at',
+            ARGV[2]
+          )
+        end
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+        return failures
+        """
+        try:
+            await cast(
+                Awaitable[Any],
+                self._circuit_redis.eval(
+                    script,
+                    1,
+                    self._circuit_key,
+                    str(threshold),
+                    str(time.time()),
+                    str(max(cooldown * 3, 300)),
+                ),
+            )
+        except RedisError:
+            # Preserve the original provider classification. Redis health is diagnosed
+            # separately and must not turn a provider timeout into another error.
+            return
 
     async def run_turn(self, turn: SetupAgentTurnInput) -> SetupAgentTurnResult:
         self.model_call_count = 0
         self.last_usage = {}
         # The lexical helper reads a normalised copy; the model and every span check see
         # the raw message, line breaks and lists intact.
-        shortlist = build_capability_shortlist(turn.normalized_message)
+        shortlist = build_capability_shortlist(
+            turn.normalized_message,
+            available_provider_requirements=SETUP_RUNTIME_PROVIDER_REQUIREMENTS,
+        )
         # The old authoritative gate survives only as a hint the model may disagree
         # with. It can no longer stop a message from being understood.
         hint = decide_setup_intent(turn.normalized_message)
-        route = select_setup_model(
-            self.settings,
-            current_message=turn.normalized_message,
-            history=list(turn.dialogue),
-            active_clarification=(
-                {"question": turn.conversation.question_text}
-                if turn.conversation.active_question_id
-                else None
-            ),
-            # The router needs the shape of the shortlist, not just its keys. Passing
-            # keys alone left `low_capability_confidence` and `custom_terminology`
-            # permanently unreachable, so an ambiguous turn was priced as a simple one.
-            capability_context=_routing_context(shortlist),
-            draft_condition_count=_condition_count(turn.draft),
-            unresolved_field_count=len(turn.draft.unresolved_fields),
-            previous_turn_failed=turn.previous_turn_failed,
-        )
-
         started = monotonic()
-        try:
-            envelope, plan_usage = await self._plan_with_one_retry(turn, shortlist, hint, route)
-        except StructuredCallError as exc:
-            raise SetupAgentError(
-                exc.code,
-                str(exc),
-                stage="planning",
-                retryable=exc.retryable,
-            ) from exc
+        envelope = (
+            _deterministic_plan_envelope(turn)
+            if hint.intent is SetupIntent.STRATEGY_PATCH
+            else None
+        )
+        if envelope is not None:
+            planner_model = "deterministic_primitives"
+            planner_reasons: tuple[str, ...] = ("exact_core_primitive",)
+            plan_usage: dict[str, Any] = {
+                "_setup_planner_attempts": 0,
+                "_setup_reserved_cost_usd": 0.0,
+            }
+        else:
+            route = select_setup_model(
+                self.settings,
+                current_message=turn.normalized_message,
+                history=list(turn.dialogue),
+                active_clarification=(
+                    {"question": turn.conversation.question_text}
+                    if turn.conversation.active_question_id
+                    else None
+                ),
+                # The router needs the shape of the shortlist, not just its keys. Passing
+                # keys alone left `low_capability_confidence` and `custom_terminology`
+                # permanently unreachable, so an ambiguous turn was priced as a simple
+                # one.
+                capability_context=_routing_context(shortlist),
+                draft_condition_count=_condition_count(turn.draft),
+                unresolved_field_count=len(turn.draft.unresolved_fields),
+                previous_turn_failed=turn.previous_turn_failed,
+            )
+            try:
+                envelope, plan_usage = await self._plan_once(turn, shortlist, hint, route)
+            except StructuredCallError as exc:
+                raise SetupAgentError(
+                    exc.code,
+                    str(exc),
+                    stage="planning",
+                    retryable=exc.retryable,
+                    details=exc.details,
+                ) from exc
+            planner_model = route.model
+            planner_reasons = route.reasons
+            plan_usage = {**plan_usage, **route.usage_metadata()}
         planner_latency = (monotonic() - started) * 1000
-        # `_plan_with_one_retry` already counted the call it made. Counting again here
-        # reported three calls for a two-call turn, which is the number an operator uses
-        # to police per-turn cost.
-        self.last_usage = {**plan_usage, **route.usage_metadata()}
+        # `_plan_once` already counted its model call. Counting again here would make
+        # the per-turn cost and latency telemetry inaccurate.
+        self.last_usage = plan_usage
 
         trace = SetupAgentTrace(
             source_turn_id=turn.source_turn_id,
-            planner_model=route.model,
-            planner_reasons=route.reasons,
+            planner_model=planner_model,
+            planner_reasons=planner_reasons,
             planner_latency_ms=planner_latency,
             plan_confidence=envelope.plan.overall_confidence if envelope.plan else 1.0,
             segments=tuple(
@@ -276,11 +439,19 @@ class SetupChatAgent:
         )
 
         plan = envelope.plan
+        if turn.stage_callback is not None:
+            await turn.stage_callback(
+                "EXECUTING" if plan is not None and plan.requires_tool else "COMPOSING",
+                {
+                    "planner_model": planner_model,
+                    "plan": plan.model_dump(mode="json") if plan is not None else None,
+                },
+            )
         if plan is None or not plan.requires_tool:
             # Pure conversation. No tool, no new version, no status change, and still a
             # real answer. A greeting cannot touch approval because it never gets here.
             reply = SetupAgentReply(
-                message=_trimmed(envelope.direct_reply)
+                message_without_question=_trimmed(envelope.direct_reply)
                 or _deterministic_conversation_reply(turn.draft),
             )
             return SetupAgentTurnResult(
@@ -310,6 +481,7 @@ class SetupChatAgent:
                     conversation=turn.conversation,
                     screening=turn.screening,
                     providers=turn.providers,
+                    runtime_preflight=turn.runtime_preflight,
                 )
             )
         except SetupTurnRejected as exc:
@@ -327,49 +499,57 @@ class SetupChatAgent:
             semantic_diff=tuple(outcome.result.semantic_diff),
             compile_status=outcome.result.compile_status,
         )
+        if turn.stage_callback is not None:
+            await turn.stage_callback(
+                "COMPOSING",
+                {
+                    "planner_model": planner_model,
+                    "plan": plan.model_dump(mode="json"),
+                    "execution_result": outcome.result.model_dump(mode="json"),
+                    "draft_after": outcome.draft.model_dump(mode="json"),
+                    "conversation_after": outcome.conversation.model_dump(mode="json"),
+                    "definition": (
+                        outcome.definition.model_dump(mode="json")
+                        if outcome.definition is not None
+                        else None
+                    ),
+                    "history_snapshot": outcome.history_snapshot,
+                    "material_change": outcome.material_change,
+                },
+            )
 
         composed_started = monotonic()
-        try:
-            reply, reply_usage = await structured_call(
-                self.settings,
-                schema_model=SetupAgentReply,
-                schema_name="hilalmarkets_setup_reply",
-                instructions=_COMPOSER_INSTRUCTIONS,
-                payload=self._composer_payload(turn, plan, outcome),
-                model=route.model,
-                reasoning_effort=route.reasoning_effort,
-                max_output_tokens=1600,
-                transport=self.transport,
-            )
-            self.model_call_count += 1
-            self.last_usage = {
-                **_merged_usage(self.last_usage, reply_usage),
-                **route.usage_metadata(),
-            }
-            response_model = route.model
-        except StructuredCallError:
-            # The work is already done and durable. Describing it from the execution
-            # result is always better than discarding a successful turn, and far
-            # better than a generic reset message.
-            reply = SetupAgentReply(message=deterministic_summary(outcome.result))
-            response_model = "deterministic_summary"
-            trace = _with(trace, failure_stage="response_composition")
+        reply = SetupAgentReply(
+            message_without_question=deterministic_summary(outcome.result),
+            selected_clarification_id=(
+                outcome.result.allowed_clarifications[0].question_id
+                if outcome.result.allowed_clarifications
+                else None
+            ),
+        )
+        response_model = "deterministic_summary"
         trace = _with(
             trace,
             response_model=response_model,
             response_latency_ms=(monotonic() - composed_started) * 1000,
             model_calls=self.model_call_count,
         )
-        conversation = outcome.conversation.model_copy(
-            update={"last_assistant_summary": reply.message[:1000]}
-        )
+        conversation = outcome.conversation
         # The composer may only ask a question the server put on the list. An id it
         # invented, or one already answered, is dropped rather than persisted.
-        chosen = validated_clarification(outcome.result, reply.clarification_question_id)
+        chosen = validated_clarification(outcome.result, reply.selected_clarification_id)
         if chosen is not None:
             conversation = conversation.with_question(chosen)
-        elif reply.clarification_question_id:
-            trace = _with(trace, dropped_clarification=reply.clarification_question_id)
+        elif reply.selected_clarification_id:
+            trace = _with(trace, dropped_clarification=reply.selected_clarification_id)
+        final_message = (
+            f"{reply.message_without_question.rstrip()}\n\n{chosen.question}"
+            if chosen is not None
+            else reply.message_without_question
+        )
+        conversation = conversation.model_copy(
+            update={"last_assistant_summary": final_message[:1000]}
+        )
         return SetupAgentTurnResult(
             reply=reply,
             execution=outcome.result,
@@ -384,39 +564,55 @@ class SetupChatAgent:
             usage=self.last_usage,
         )
 
-    async def _plan_with_one_retry(
+    async def _plan_once(
         self,
         turn: SetupAgentTurnInput,
         shortlist: CapabilityShortlist,
         hint: Any,
         route: Any,
     ) -> tuple[SetupAgentPlanEnvelope, dict[str, Any]]:
-        """Plan once, and retry once only for a transient transport failure.
-
-        A dropped connection is worth one more attempt. A schema, grounding or semantic
-        failure is not: retrying it spends money to be refused the same way.
-        """
-        attempts = 0
-        while True:
-            attempts += 1
-            try:
-                envelope, usage = await structured_call(
-                    self.settings,
-                    schema_model=SetupAgentPlanEnvelope,
-                    schema_name="hilalmarkets_setup_turn_plan",
-                    instructions=_PLANNER_INSTRUCTIONS,
-                    payload=self._planner_payload(turn, shortlist, hint.intent.value),
-                    model=route.model,
-                    reasoning_effort=route.reasoning_effort,
-                    max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
-                    transport=self.transport,
-                )
-            except StructuredCallError as exc:
-                if exc.retryable and attempts <= self.settings.setup_agent_planner_retries:
-                    continue
-                raise
-            self.model_call_count += 1
-            return envelope, usage
+        """Make at most one bounded structured model call for a free-text turn."""
+        planner_payload = self._planner_payload(turn, shortlist, hint.intent.value)
+        reserved_cost = estimate_structured_call_cost(
+            self.settings,
+            instructions=_PLANNER_INSTRUCTIONS,
+            payload=planner_payload,
+            model=route.model,
+            max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+        )
+        if reserved_cost > self.settings.setup_agent_max_estimated_cost_usd_per_turn:
+            raise StructuredCallError(
+                "SETUP_AGENT_COST_LIMIT",
+                "The planner call would exceed the configured per-turn AI budget.",
+                stage="planning",
+            )
+        try:
+            await self._before_provider_call()
+            envelope, usage = await structured_call(
+                self.settings,
+                schema_model=SetupAgentPlanEnvelope,
+                schema_name="hilalmarkets_setup_turn_plan",
+                instructions=_PLANNER_INSTRUCTIONS,
+                payload=planner_payload,
+                model=route.model,
+                reasoning_effort=route.reasoning_effort,
+                max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+                timeout_seconds=self.settings.setup_agent_planner_timeout_seconds,
+                estimated_cost_limit=self.settings.setup_agent_max_estimated_cost_usd_per_turn,
+                stage="planning",
+                transport=self.transport,
+            )
+        except StructuredCallError as exc:
+            self.model_call_count = 1
+            await self._provider_failed(exc)
+            raise
+        self.model_call_count = 1
+        await self._provider_succeeded()
+        return envelope, {
+            **usage,
+            "_setup_reserved_cost_usd": reserved_cost,
+            "_setup_planner_attempts": 1,
+        }
 
     def _planner_payload(
         self,
@@ -432,7 +628,8 @@ class SetupChatAgent:
             "setup_mode": turn.setup_mode.value,
             "draft": {
                 "draft_id": str(draft.draft_id),
-                "version": draft.version,
+                "executable_version": draft.executable_version,
+                "workflow_revision": draft.workflow_revision,
                 "name": draft.name,
                 "included_symbols": draft.universe.included_symbols[:50],
                 "excluded_symbols": draft.universe.excluded_symbols[:50],
@@ -449,6 +646,14 @@ class SetupChatAgent:
                 for item in draft.unsupported_requirements
             ],
             "recent_semantic_diff": list(turn.conversation.last_changed_condition_ids)[:12],
+            "available_snapshots": [
+                {
+                    "snapshot_id": str(item.get("snapshot_id") or ""),
+                    "executable_version": int(item.get("executable_version") or 0),
+                }
+                for item in turn.history[-20:]
+                if item.get("snapshot_id") and item.get("executable_version")
+            ],
             "conversation_context": turn.conversation.model_dump(mode="json"),
             "approval_eligible": draft.approval_eligible,
             "semantic_violations": validate_draft_semantics(draft),
@@ -460,38 +665,136 @@ class SetupChatAgent:
             "lexical_hint_non_authoritative": lexical_hint,
         }
 
-    def _composer_payload(
-        self,
-        turn: SetupAgentTurnInput,
-        plan: SetupAgentTurnPlan,
-        outcome: SetupTurnOutcome,
-    ) -> dict[str, Any]:
-        return {
-            "current_user_turn": turn.message,
-            "recent_dialogue": list(turn.dialogue)[-DIALOGUE_WINDOW_MAX:],
-            "segments": [
-                {
-                    "segment_id": item.segment_id,
-                    "kind": item.kind.value,
-                    "text": item.exact_source_text,
-                }
-                for item in plan.segments
+
+def _deterministic_plan_envelope(
+    turn: SetupAgentTurnInput,
+) -> SetupAgentPlanEnvelope | None:
+    """Authorize an exact primitive without asking a model to restate its values.
+
+    This is deliberately narrow. Long, mixed, corrective and reversion turns still go
+    to the planner because a whole-message segment would be too coarse to authorize
+    them safely.
+    """
+
+    if (
+        not turn.message.strip()
+        or len(turn.message) > 500
+        or turn.conversation.active_question_id is not None
+        or turn.message.rstrip().endswith(("?", "؟"))
+        or re.search(
+            r"\b(?:thanks?|thank\s+you|appreciate|sorry|hello|hey)\b",
+            turn.message,
+            re.IGNORECASE,
+        )
+    ):
+        return None
+    report = classify_turn(turn.normalized_message)
+    if not report.fragments or any(
+        not fragment.contributes_strategy_state for fragment in report.fragments
+    ):
+        return None
+    patch = deterministic_strategy_patch(
+        turn.draft,
+        turn.message,
+        source_turn_id=turn.source_turn_id,
+    )
+    if patch is None or patch.correction is not None or patch.reversion is not None:
+        return None
+    operations = _authorized_operations_from_patch(patch, segment_id="deterministic")
+    if not operations or len(operations) > 24:
+        return None
+    segment = TurnSegment(
+        segment_id="deterministic",
+        exact_source_text=turn.message,
+        start_offset=0,
+        end_offset=len(turn.message),
+        kind=SegmentKind.STRATEGY_INSTRUCTION,
+        action_required=True,
+        confidence=1.0,
+    )
+    return SetupAgentPlanEnvelope(
+        plan=SetupAgentTurnPlan(
+            source_turn_id=turn.source_turn_id,
+            segments=[segment],
+            operations=operations,
+            strategy_instructions=[
+                StrategyInstructionPlan(
+                    segment_id=segment.segment_id,
+                    intent_summary="Exact deterministic strategy instruction",
+                )
             ],
-            "response_points": [item.model_dump(mode="json") for item in plan.response_points],
-            "questions_to_answer": plan.questions_to_answer,
-            #: The complete platform result: compile, screening, provider and the final
-            #: status. Composing from a pre-screening compile let a reply announce a
-            #: ready draft the platform then blocked.
-            "execution_result": outcome.result.model_dump(mode="json"),
-            #: Deterministic facts about the draft, so an explanation comes from the
-            #: draft rather than from the model's memory of what it thinks it built.
-            "draft_read_model": outcome.result.draft_read_model,
-            "allowed_clarifications": [
-                item.model_dump(mode="json") for item in outcome.result.allowed_clarifications
-            ],
-            "product_boundaries": _PRODUCT_BOUNDARIES,
-            "product_knowledge": product_knowledge(),
+            overall_confidence=1.0,
+        )
+    )
+
+
+def _authorized_operations_from_patch(
+    patch: StrategyPatch,
+    *,
+    segment_id: str,
+) -> list[AuthorizedPatchOperation]:
+    """Translate a trusted deterministic patch into segment-bound operations."""
+
+    operations: list[AuthorizedPatchOperation] = []
+
+    def add(kind: str, **payload: Any) -> None:
+        raw = {
+            "authorizing_segment_id": segment_id,
+            "kind": kind,
+            **payload,
         }
+        encoded = json.dumps(
+            {
+                key: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+                for key, value in raw.items()
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode()
+        operations.append(
+            AuthorizedPatchOperation.model_validate(
+                {
+                    "operation_id": (
+                        f"det_{len(operations) + 1:02d}_"
+                        f"{hashlib.sha256(encoded).hexdigest()[:16]}"
+                    ),
+                    **raw,
+                }
+            )
+        )
+
+    if patch.set_fields != DraftFieldPatch():
+        add("set_fields", fields=patch.set_fields)
+    for condition in patch.add_conditions:
+        add("add_condition", condition=condition)
+    for update in patch.update_conditions:
+        add(
+            "update_condition",
+            condition=update.replacement,
+            target_condition_id=update.node_id,
+        )
+    for node_id in patch.remove_conditions:
+        add("remove_condition", target_condition_id=node_id)
+    if patch.replace_groups is not None:
+        add("replace_groups", condition=patch.replace_groups)
+    for symbol in patch.add_inclusions:
+        add("add_inclusion", symbol=symbol)
+    for symbol in patch.add_exclusions:
+        add("add_exclusion", symbol=symbol)
+    for symbol in patch.remove_inclusions:
+        add("remove_inclusion", symbol=symbol)
+    for symbol in patch.remove_exclusions:
+        add("remove_exclusion", symbol=symbol)
+    for unresolved in patch.unresolved_references:
+        add("add_unresolved", unresolved=unresolved)
+    for item in patch.unsupported_requirements:
+        add("add_unsupported", missing_contract=item.missing_contract)
+    for key in patch.remove_unresolved_keys:
+        add("resolve_unresolved_key", target_key=key)
+    for key in patch.remove_unsupported_keys:
+        add("remove_unsupported_key", target_key=key)
+    return operations
 
 
 def deterministic_summary(result: SetupTurnExecutionResult) -> str:
@@ -567,7 +870,8 @@ def _condition_labels(draft: StrategyDraftV2) -> list[dict[str, Any]]:
                 "operator": node.operator.value if node.operator else None,
                 "threshold": node.threshold,
                 "unit": node.unit,
-                "direction": node.direction.value,
+                "movement_direction": node.movement_direction.value,
+                "strategy_bias": node.strategy_bias.value,
                 "trigger_timeframe": node.trigger_timeframe,
                 "context_timeframes": list(node.context_timeframes),
                 "confirmation_timeframes": list(node.confirmation_timeframes),
@@ -615,7 +919,7 @@ def _core_primitives() -> dict[str, Any]:
     }
 
 
-def _routing_context(shortlist: CapabilityShortlist) -> dict[str, Any]:
+def _routing_context(shortlist: CapabilityShortlist) -> CapabilityRoutingContext:
     """The shortlist's shape, so the router's ambiguity signals can actually fire.
 
     Passing only the keys left `low_capability_confidence` and `custom_terminology`
@@ -625,24 +929,27 @@ def _routing_context(shortlist: CapabilityShortlist) -> dict[str, Any]:
     scores = [item.score for item in shortlist.candidates]
     top = max(scores, default=0.0)
     margin = (top - sorted(scores, reverse=True)[1]) if len(scores) > 1 else top
-    return {
-        "candidate_keys": sorted(shortlist.allowed_keys),
-        "candidate_count": len(shortlist.candidates),
-        "unknown_terms": list(shortlist.unknown_terms),
-        "top_score": top,
-        "top_score_margin": margin,
-        "fragments": [
-            {
-                "fragment": item.source_fragment,
-                # Normalised against the top score so the router sees a 0..1 confidence
-                # rather than a raw registry score it cannot interpret.
-                "confidence": (item.score / top) if top else 0.0,
-                "availability": item.availability,
-                "executable": item.executable,
-            }
-            for item in shortlist.candidates
+    ordered = sorted(shortlist.candidates, key=lambda item: item.score, reverse=True)
+    return CapabilityRoutingContext(
+        candidate_keys=sorted(shortlist.allowed_keys),
+        candidate_count=len(ordered),
+        unknown_terms=list(shortlist.unknown_terms),
+        top_candidate_key=ordered[0].capability_key if ordered else None,
+        top_candidate_score=top,
+        selection_confidence=min(1.0, top / 100.0),
+        top_score_margin=margin,
+        candidates=[
+            CapabilityRoutingCandidate(
+                key=item.capability_key,
+                score=item.score,
+                normalized_confidence=min(1.0, item.score / 100.0),
+                availability=item.availability,
+                executable=item.executable,
+                source_fragment=item.source_fragment,
+            )
+            for item in ordered
         ],
-    }
+    )
 
 
 #: Server-owned product facts, versioned so an answer can be traced to what was told.
@@ -691,7 +998,8 @@ def product_knowledge() -> dict[str, Any]:
 #: than a free-floating patch.
 _OPERATION_GUIDE = {
     "rule": (
-        "Every change is one entry in `operations`, and every entry names the "
+        "Every change is one entry in `operations` with a stable unique operation_id, "
+        "and every entry names the "
         "`authorizing_segment_id` of the STRATEGY_INSTRUCTION or CLARIFICATION_ANSWER "
         "segment that asked for it. A SOCIAL_REPLY, USER_QUESTION, PRODUCT_QUESTION, "
         "EXPLANATION_REQUEST, APPROVAL_INTENT or UNSUPPORTED_REQUEST segment can never "
@@ -708,9 +1016,12 @@ _OPERATION_GUIDE = {
         "add_exclusion": "keep one symbol out",
         "remove_inclusion": "stop watching one symbol",
         "remove_exclusion": "stop excluding one symbol",
+        "add_unresolved": "persist one typed missing value before asking about it",
+        "update_unresolved": "replace one typed unresolved contract",
         "add_unsupported": "record a market rule the platform cannot express exactly",
         "resolve_unresolved_key": "close an open question by its exact key",
         "remove_unsupported_key": "drop an unsupported item by its exact key",
+        "restore_snapshot": "request a server-verified immutable prior executable version",
     },
 }
 
@@ -751,22 +1062,25 @@ Never force the whole message into one kind. Never discard technical content bec
 conversation surrounds it. Never turn conversation into a rule.
 
 WHAT YOU MAY PROPOSE
-Every change is one entry in `operations`, and each entry names the
+Every change is one entry in `operations` with a unique stable operation_id, and each
+entry names the
 `authorizing_segment_id` of the segment that asked for it. Only a STRATEGY_INSTRUCTION
 or a CLARIFICATION_ANSWER segment may authorize one. See operation_kinds for the list.
 
-Every threshold, timeframe, symbol, operator, direction and formula in an operation must
+Every threshold, timeframe, symbol, operator, movement_direction, explicit strategy_bias
+and formula in an operation must
 appear in **that authorizing segment's own text** — not merely somewhere in the message.
 A number written inside a question does not authorize a rule. The exception is an
 `update_condition`: fields you leave unchanged are inherited from the rule you name, so
 `change that to at least 8%` does not have to restate the timeframe.
 
-If a value is not in the authorizing segment's words, do not supply one: ask, or record
-it as unresolved.
+If a value is not in the authorizing segment's words, do not supply one. Create an
+add_unresolved operation with a typed target, answer schema and smallest useful
+canonical question. Use condition_creation when the missing item is a whole rule.
 
 For a registered mechanic, choose a capability_key from capability_shortlist and
 nothing else. If no candidate expresses the request exactly, return an
-unsupported_segments entry with the user's own wording, or ask one clarification.
+add_unsupported operation with the user's own wording, or add one typed unresolved item.
 Never invent a key. Never substitute a mechanic that is merely similar — a near miss
 watches the wrong market and looks like success.
 
@@ -775,17 +1089,25 @@ For the core primitives listed in core_primitives, use no capability_key at all.
 CLARIFICATION ANSWERS
 If conversation_context has an active_question_id and this turn answers it, record a
 clarification_answers entry. An answer resolves that question; it does not become a
-new condition. "yes" is not a market rule.
+new condition. "yes" is not a market rule. A mutating answer must also include the
+operation that fills the unresolved target, then resolve_unresolved_key.
 
 REFERENCES
 Use recent_dialogue and conversation_context to resolve "that one", "the second
 option", "the one we just added", "make it stricter". Point at the existing
-condition_id rather than rebuilding the rule.
+condition_id rather than rebuilding the rule. For undo or restore language, propose
+restore_snapshot; the server, not you, resolves and verifies the history target.
 
 target_condition_id names a condition that ALREADY EXISTS in draft.conditions. Leave it
 null when you are creating a new rule — there is no id for a rule that does not exist
-yet. To change an existing rule use update_conditions with its exact node_id; to delete
-one use remove_conditions. An id that is not in draft.conditions is refused.
+yet. To change an existing rule use update_condition with its exact node_id; to delete
+one use remove_condition. An id that is not in draft.conditions is refused.
+
+DIRECTION
+movement_direction is up, down, neutral or not_applicable. strategy_bias is long,
+short or neutral. Default strategy_bias to neutral unless the trader explicitly says
+long or short. A falling market does not imply short, and a rising market does not
+imply long.
 
 APPROVAL
 You may record approval_intent. You can never approve. Approval happens only through
@@ -826,11 +1148,11 @@ Write for a beginner in the user's own language. Short sentences, everyday words
 field names, no error-template phrasing, no bullet lists unless they genuinely help.
 Be concise unless the user asked for detail.
 
-To ask a question, set clarification_question_id to the question_id of exactly one entry
-in allowed_clarifications, and phrase that question naturally in your message. Those are
-the only questions the server will accept; anything else is dropped. Ask nothing when
-allowed_clarifications is empty, and never ask the user to describe their setup when they
-already have.
+Write no clarification question inside message_without_question. To ask one, set
+selected_clarification_id to the question_id of exactly one entry in
+allowed_clarifications. The server appends that contract's canonical question after
+validating the id. Ask nothing when allowed_clarifications is empty, and never ask the
+user to describe their setup when they already have.
 
 Never assign or imply a Sharia, halal or haram status. Never give trading advice,
 predictions or guarantees. Never say the strategy is running or approved: approval is a
@@ -851,6 +1173,20 @@ def _merged_usage(first: dict[str, Any], second: dict[str, Any]) -> dict[str, An
         else:
             merged.setdefault(key, value)
     return merged
+
+
+def _estimated_usage_cost(
+    usage: dict[str, Any],
+    settings: Settings,
+    model: str,
+) -> float:
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    pricing = settings.openai_model_pricing_usd_per_million.get(model) or {}
+    return (
+        input_tokens * float(pricing.get("input", 0))
+        + output_tokens * float(pricing.get("output", 0))
+    ) / 1_000_000
 
 
 def _trimmed(value: str | None) -> str:

@@ -825,7 +825,7 @@ class WhatsAppConversationService:
             return WhatsAppSessionText(
                 to=connection.wa_id, body=f"Open this Watch Plan securely: {url}"
             )
-        operations = MonitorOperationService(self.session)
+        operations = MonitorOperationService(self.session, settings=self.settings)
         try:
             if action == "pause":
                 strategy = await operations.pause(

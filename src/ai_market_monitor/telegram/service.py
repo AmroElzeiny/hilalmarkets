@@ -51,6 +51,10 @@ from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import BillingError, BillingService
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
+from ai_market_monitor.services.monitor_operations import (
+    MonitorOperationError,
+    MonitorOperationService,
+)
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.onboarding import OnboardingError, OnboardingService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
@@ -1881,7 +1885,11 @@ class TelegramBotService:
         if version is None:
             raise StrategyGateError("version_missing", "Strategy version not found")
         onboarding = await self.session.get(OnboardingSession, conversation.onboarding_session_id)
-        service = StrategyService(self.session, self.settings.disclaimer_version)
+        service = StrategyService(
+            self.session,
+            self.settings.disclaimer_version,
+            self.settings,
+        )
         strategy = await self.session.get(Strategy, version.strategy_id)
         if strategy is None or strategy.user_id != user_id:
             raise StrategyGateError("strategy_missing", "Strategy not found")
@@ -1891,25 +1899,17 @@ class TelegramBotService:
             strategy=strategy,
             version=version,
         )
-        statements = await verification_service.sync_interpretation(
+        await verification_service.sync_interpretation(
             user_id=user_id,
             strategy=strategy,
             version=version,
         )
         try:
-            for statement in statements:
-                if statement.status == "assumed" and statement.resolution_status == "unresolved":
-                    await verification_service.resolve_statement(
-                        user_id=user_id,
-                        statement_id=statement.id,
-                        action="accept",
-                        resolution_text="Accepted through the Telegram approval summary.",
-                    )
-            await verification_service.approve_interpretation(
+            await verification_service.approve_visible_draft(
                 user_id=user_id,
                 version=version,
+                expected_schema_hash=state_data["schema_hash"],
             )
-            await verification_service.approval_gate(user_id=user_id, version=version)
         except VerifiedStrategyError as exc:
             raise StrategyGateError(exc.code, str(exc)) from exc
         await service.approve(
@@ -1952,7 +1952,11 @@ class TelegramBotService:
         version = await self.session.get(StrategyVersion, UUID(state_data["strategy_version_id"]))
         if version is None:
             raise StrategyGateError("version_missing", "Strategy version not found")
-        strategy_service = StrategyService(self.session, self.settings.disclaimer_version)
+        strategy_service = StrategyService(
+            self.session,
+            self.settings.disclaimer_version,
+            self.settings,
+        )
         if version.preview_status != "succeeded":
             retry_preview = await strategy_service.run_preview(
                 version, user_id=user_id, previewer=self.previewer
@@ -2463,26 +2467,52 @@ class TelegramBotService:
         strategy = await self.session.get(Strategy, strategy_id)
         if strategy is None or strategy.user_id != user_id:
             return self._plain(message, "Monitor not found.", buttons=self._back_buttons())
-        now = datetime.now(UTC)
         if action == "pause":
             if strategy.status != StrategyStatus.ACTIVE:
                 return self._plain(message, "Only active monitors can be paused.")
-            strategy.status = StrategyStatus.PAUSED
-            strategy.paused_at = now
+            await MonitorOperationService(
+                self.session,
+                settings=self.settings,
+                previewer=self.previewer,
+            ).pause(
+                user_id=user_id,
+                strategy_id=strategy.id,
+                actor_type="telegram_user",
+            )
             await self.session.commit()
             return await self._my_monitors(message, conversation)
         if action == "resume":
             if strategy.status != StrategyStatus.PAUSED:
                 return self._plain(message, "Only paused monitors can be resumed.")
-            strategy.status = (
-                StrategyStatus.ACTIVE if strategy.active_version_id else StrategyStatus.DRAFT
-            )
-            strategy.paused_at = None
+            try:
+                await MonitorOperationService(
+                    self.session,
+                    settings=self.settings,
+                    previewer=self.previewer,
+                ).resume(
+                    user_id=user_id,
+                    strategy_id=strategy.id,
+                    actor_type="telegram_user",
+                )
+            except MonitorOperationError as exc:
+                await self.session.rollback()
+                return self._plain(
+                    message,
+                    f"This monitor remains paused: {escape(str(exc))}",
+                    buttons=self._back_buttons(),
+                )
             await self.session.commit()
             return await self._my_monitors(message, conversation)
         if action == "delete":
-            strategy.status = StrategyStatus.ARCHIVED
-            strategy.archived_at = now
+            await MonitorOperationService(
+                self.session,
+                settings=self.settings,
+                previewer=self.previewer,
+            ).delete(
+                user_id=user_id,
+                strategy_id=strategy.id,
+                actor_type="telegram_user",
+            )
             await self.session.commit()
             return await self._my_monitors(message, conversation)
         if action == "edit":

@@ -1,10 +1,13 @@
 import asyncio
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -12,29 +15,40 @@ from ai_market_monitor.core.plans import PlanDefinition, timeframe_to_minutes
 from ai_market_monitor.db.models import (
     AuditEvent,
     NearMissSnapshot,
+    OnDemandScanMarketRecord,
+    OnDemandScanRun,
     Strategy,
     StrategyVersion,
     UsageRecord,
+    User,
 )
 from ai_market_monitor.db.models.enums import ScanOutcome, StrategyVersionStatus
 from ai_market_monitor.engine.dedup import stable_event_hash
-from ai_market_monitor.engine.evaluator import StrategyRuleEngine
+from ai_market_monitor.engine.evaluator import (
+    StrategyRuleEngine,
+    strategy_evaluation_directions,
+)
 from ai_market_monitor.engine.models import ConditionEvaluation, ensure_aware
 from ai_market_monitor.provider_context import ProviderContextService
 from ai_market_monitor.schemas.on_demand import (
     OnDemandConditionSummary,
+    OnDemandMarketStatus,
+    OnDemandResultCategory,
     OnDemandScanMarketResult,
     OnDemandScanRequest,
     OnDemandScanResponse,
 )
-from ai_market_monitor.schemas.strategy import StrategyDefinition, StrategyDirection
+from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.entitlements import (
     EntitlementContext,
     EntitlementService,
     UsageService,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
-from ai_market_monitor.services.market_preview import market_snapshot_from_candles
+from ai_market_monitor.services.market_preview import (
+    assess_candle_data_quality,
+    market_snapshot_from_candles,
+)
 from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
     ShariaUniverseResolver,
@@ -48,7 +62,26 @@ class OnDemandScanError(ValueError):
         self.code = code
 
 
+class OnDemandMarketDataError(OnDemandScanError):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        category: OnDemandResultCategory,
+    ):
+        super().__init__(code, message)
+        self.category = category
+
+
 class OnDemandScanService:
+    """Durable one-time Scanner execution.
+
+    Quota is reserved before provider work. It is released only when no market could
+    be evaluated because of policy, stale/incomplete data, or provider/runtime failure.
+    A completed technical non-match is a successful scan and consumes quota.
+    """
+
     def __init__(
         self,
         session: AsyncSession,
@@ -64,7 +97,106 @@ class OnDemandScanService:
         self.context = ProviderContextService(provider, self.settings)
 
     async def run(self, user_id: UUID, request: OnDemandScanRequest) -> OnDemandScanResponse:
+        definition, _strategy, version = await self._load_definition(user_id, request)
+        idempotency_key = request.idempotency_key or f"scan-{uuid4()}"
+        request_hash = stable_event_hash(
+            {
+                "request": request.model_dump(mode="json"),
+                "definition_hash": definition.canonical_hash(),
+            }
+        )
+        existing = await self.session.scalar(
+            select(OnDemandScanRun).where(
+                OnDemandScanRun.user_id == user_id,
+                OnDemandScanRun.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            return await self._existing_run_response(existing, request_hash)
+
+        now = datetime.now(UTC)
+        definition_hash = definition.canonical_hash()
+        run = OnDemandScanRun(
+            user_id=user_id,
+            strategy_version_id=version.id if version else None,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            draft_id=(
+                request.source_draft_id
+                or (
+                    version.id
+                    if version
+                    else uuid5(
+                        NAMESPACE_URL,
+                        f"hilalmarkets:inline-draft:{definition_hash}",
+                    )
+                )
+            ),
+            draft_version=(
+                request.source_draft_version
+                if request.source_draft_version is not None
+                else version.version_number if version else 1
+            ),
+            draft_hash=(
+                request.source_draft_hash
+                if request.source_draft_hash is not None
+                else (
+                    version.approved_schema_hash
+                    if version and version.approved_schema_hash
+                    else request.approved_schema_hash or definition_hash
+                )
+            ),
+            definition_hash=definition_hash,
+            provider=type(self.provider).__name__,
+            status="running",
+            quota_metric=(
+                "light_prompt_scans" if request.light_scan else "on_demand_scans"
+            ),
+            quota_reserved=False,
+            candle_snapshot_manifest={},
+            created_at=now,
+            started_at=now,
+        )
+        self.session.add(run)
+        try:
+            await self.session.flush()
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.session.scalar(
+                select(OnDemandScanRun).where(
+                    OnDemandScanRun.user_id == user_id,
+                    OnDemandScanRun.idempotency_key == idempotency_key,
+                )
+            )
+            if existing is None:
+                raise
+            return await self._existing_run_response(existing, request_hash)
+
+        try:
+            response = await self._run_once(user_id, request, run=run)
+        except OnDemandScanError as exc:
+            await self._fail_run(run, exc.code, str(exc))
+            raise
+        except Exception as exc:
+            await self._fail_run(run, "scanner_runtime_failure", "Scanner is unavailable.")
+            raise OnDemandScanError(
+                "scanner_runtime_failure",
+                "Scanner is unavailable. Start a new run to retry.",
+            ) from exc
+        return await self._complete_run(run, response)
+
+    async def _run_once(
+        self,
+        user_id: UUID,
+        request: OnDemandScanRequest,
+        *,
+        run: OnDemandScanRun,
+    ) -> OnDemandScanResponse:
         definition, strategy, version = await self._load_definition(user_id, request)
+        await self.session.scalar(
+            select(User.id).where(User.id == user_id).with_for_update()
+        )
         context = await EntitlementService(self.session).current(user_id)
         metric = "light_prompt_scans" if request.light_scan else "on_demand_scans"
         quota_limit, quota_used, period_start, period_end = await self._quota(
@@ -100,6 +232,22 @@ class OnDemandScanService:
             )
         definition = self._apply_symbol_override(definition, request)
         self._enforce_scan_limits(context.plan, definition, request)
+        usage = await UsageService(self.session).record(
+            user_id,
+            metric,
+            period_start=period_start,
+            period_end=period_end,
+            idempotency_key=f"on-demand-scan-run:{run.id}",
+            subject_type="strategy_version" if version else "inline_strategy",
+            subject_id=str(version.id) if version else definition.canonical_hash(),
+            metadata={
+                "run_id": str(run.id),
+                "status": "reserved",
+                "scan_mode": "light_prompt" if request.light_scan else "on_demand",
+            },
+        )
+        run.usage_record_id = usage.id
+        run.quota_reserved = True
 
         symbol_limit_key = "light_prompt_symbols" if request.light_scan else "symbols_per_strategy"
         maximum_symbols = min(
@@ -137,6 +285,22 @@ class OnDemandScanService:
         evaluated_at = datetime.now(UTC)
         symbols = await self.context.rank_symbols(definition, symbols, evaluated_at)
         results: list[OnDemandScanMarketResult] = []
+        market_statuses: list[OnDemandMarketStatus] = [
+            OnDemandMarketStatus(
+                exchange=definition.universe.exchange,
+                symbol=item.symbol,
+                timeframe=definition.base_timeframe,
+                category=(
+                    "market_unavailable"
+                    if "market_unavailable" in item.reason_code
+                    else "policy_exclusion"
+                ),
+                error_code=item.reason_code,
+                safe_message=item.reason,
+            )
+            for item in screening.excluded
+        ]
+        candle_manifest: dict[str, dict] = {}
         scanned_symbols: set[str] = set()
         warnings: list[str] = []
         if screening.excluded_by_policy_count:
@@ -146,9 +310,22 @@ class OnDemandScanService:
             )
         screening_by_symbol = {item.symbol: item for item in screening.included}
 
-        async def evaluate(symbol: str) -> tuple[str, list[OnDemandScanMarketResult], str | None]:
+        async def evaluate(
+            symbol: str,
+        ) -> tuple[
+            str,
+            list[OnDemandScanMarketResult],
+            list[OnDemandMarketStatus],
+            dict | None,
+            str | None,
+        ]:
             try:
-                evaluated_results = await self._evaluate_symbol(
+                (
+                    evaluated_results,
+                    evaluated_statuses,
+                    symbol_manifest,
+                    symbol_manifest_hash,
+                ) = await self._evaluate_symbol(
                     definition,
                     symbol,
                     evaluated_at,
@@ -175,21 +352,88 @@ class OnDemandScanService:
                         "legacy_local_bypass": screening.legacy_local_bypass,
                     },
                 )
-                return symbol, evaluated_results, None
-            except Exception as exc:
-                return symbol, [], f"{symbol}: {type(exc).__name__}: {exc}"
+                return (
+                    symbol,
+                    evaluated_results,
+                    evaluated_statuses,
+                    {
+                        **symbol_manifest,
+                        "manifest_hash": symbol_manifest_hash,
+                    },
+                    None,
+                )
+            except OnDemandMarketDataError as exc:
+                return (
+                    symbol,
+                    [],
+                    [
+                        OnDemandMarketStatus(
+                            exchange=definition.universe.exchange,
+                            symbol=symbol,
+                            timeframe=definition.base_timeframe,
+                            category=exc.category,
+                            error_code=exc.code,
+                            safe_message=str(exc),
+                        )
+                    ],
+                    None,
+                    f"{symbol}: {str(exc)}",
+                )
+            except (TimeoutError, ConnectionError, OSError):
+                return (
+                    symbol,
+                    [],
+                    [
+                        OnDemandMarketStatus(
+                            exchange=definition.universe.exchange,
+                            symbol=symbol,
+                            timeframe=definition.base_timeframe,
+                            category="provider_failure",
+                            error_code="market_provider_unavailable",
+                            safe_message="Market data could not be retrieved.",
+                        )
+                    ],
+                    None,
+                    f"{symbol}: market data could not be retrieved.",
+                )
+            except Exception:
+                return (
+                    symbol,
+                    [],
+                    [
+                        OnDemandMarketStatus(
+                            exchange=definition.universe.exchange,
+                            symbol=symbol,
+                            timeframe=definition.base_timeframe,
+                            category="provider_failure",
+                            error_code="market_evaluation_failed",
+                            safe_message="This market could not be evaluated.",
+                        )
+                    ],
+                    None,
+                    f"{symbol}: market evaluation failed.",
+                )
 
         if request.light_scan and version is None:
             semaphore = asyncio.Semaphore(self.settings.on_demand_scan_concurrency)
 
             async def bounded_evaluate(
                 symbol: str,
-            ) -> tuple[str, list[OnDemandScanMarketResult], str | None]:
+            ) -> tuple[
+                str,
+                list[OnDemandScanMarketResult],
+                list[OnDemandMarketStatus],
+                dict | None,
+                str | None,
+            ]:
                 async with semaphore:
                     return await evaluate(symbol)
 
             evaluated = await asyncio.gather(*(bounded_evaluate(symbol) for symbol in symbols))
-            for symbol, evaluated_results, warning in evaluated:
+            for symbol, evaluated_results, evaluated_statuses, manifest, warning in evaluated:
+                market_statuses.extend(evaluated_statuses)
+                if manifest is not None:
+                    candle_manifest[symbol] = manifest
                 if warning:
                     warnings.append(warning)
                     continue
@@ -197,7 +441,16 @@ class OnDemandScanService:
                 results.extend(evaluated_results)
         else:
             for symbol in symbols:
-                _, evaluated_results, warning = await evaluate(symbol)
+                (
+                    _,
+                    evaluated_results,
+                    evaluated_statuses,
+                    manifest,
+                    warning,
+                ) = await evaluate(symbol)
+                market_statuses.extend(evaluated_statuses)
+                if manifest is not None:
+                    candle_manifest[symbol] = manifest
                 if warning:
                     warnings.append(warning)
                     continue
@@ -210,24 +463,15 @@ class OnDemandScanService:
         elif warnings and not results:
             status = "failed"
 
-        usage = await UsageService(self.session).record(
-            user_id,
-            metric,
-            period_start=period_start,
-            period_end=period_end,
-            idempotency_key=self._usage_key(user_id, request),
-            subject_type="strategy_version" if version else "inline_strategy",
-            subject_id=str(version.id) if version else definition.canonical_hash(),
-            metadata={
-                "symbols_requested": len(symbols),
-                "symbols_scanned": len(scanned_symbols),
-                "status": status,
-                "scan_mode": "light_prompt" if request.light_scan else "on_demand",
-                "sharia_universe_snapshot_id": str(screening.snapshot_id)
-                if screening.snapshot_id
-                else None,
-            },
-        )
+        usage.metadata_json = {
+            **dict(usage.metadata_json or {}),
+            "symbols_requested": len(symbols),
+            "symbols_scanned": len(scanned_symbols),
+            "status": status,
+            "sharia_universe_snapshot_id": (
+                str(screening.snapshot_id) if screening.snapshot_id else None
+            ),
+        }
         self.session.add(
             AuditEvent(
                 actor_user_id=user_id,
@@ -251,7 +495,15 @@ class OnDemandScanService:
         )
         await self.session.flush()
         sorted_results = sorted(results, key=lambda result: result.completion_score, reverse=True)
+        candle_snapshot_hash = hashlib.sha256(
+            json.dumps(candle_manifest, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        run.sharia_universe_snapshot_id = screening.snapshot_id
+        run.sharia_universe_snapshot_hash = screening.snapshot_hash
+        run.candle_snapshot_manifest = candle_manifest
+        run.candle_snapshot_hash = candle_snapshot_hash
         return OnDemandScanResponse(
+            run_id=run.id,
             status=status,
             plan_code=context.plan.code,
             quota_limit=quota_limit,
@@ -260,6 +512,7 @@ class OnDemandScanService:
             symbols_requested=len(symbols),
             symbols_scanned=len(scanned_symbols),
             results=sorted_results,
+            market_statuses=market_statuses,
             warnings=warnings,
             evaluated_at=evaluated_at,
             usage_record_id=usage.id,
@@ -272,7 +525,107 @@ class OnDemandScanService:
             sharia_methodology_version=screening.methodology_version,
             sharia_universe_snapshot_id=screening.snapshot_id,
             sharia_universe_snapshot_hash=screening.snapshot_hash,
+            candle_snapshot_hash=candle_snapshot_hash,
         )
+
+    async def _existing_run_response(
+        self,
+        run: OnDemandScanRun,
+        request_hash: str,
+    ) -> OnDemandScanResponse:
+        if run.request_hash != request_hash:
+            raise OnDemandScanError(
+                "idempotency_conflict",
+                "This request key is already bound to a different Scanner request.",
+            )
+        for _ in range(200):
+            if run.response_json is not None:
+                return OnDemandScanResponse.model_validate(run.response_json)
+            if run.status == "failed":
+                raise OnDemandScanError(
+                    run.error_code or "scanner_run_failed",
+                    run.safe_message or "This Scanner run failed.",
+                )
+            await asyncio.sleep(0.1)
+            await self.session.refresh(run)
+        raise OnDemandScanError(
+            "scanner_run_in_progress",
+            "This Scanner run is still in progress.",
+        )
+
+    async def _fail_run(
+        self,
+        run: OnDemandScanRun,
+        error_code: str,
+        safe_message: str,
+    ) -> None:
+        if run.usage_record_id is not None:
+            await self.session.execute(
+                delete(UsageRecord).where(UsageRecord.id == run.usage_record_id)
+            )
+        run.usage_record_id = None
+        run.quota_reserved = False
+        run.status = "failed"
+        run.error_code = error_code
+        run.safe_message = safe_message[:500]
+        run.completed_at = datetime.now(UTC)
+        await self.session.commit()
+
+    async def _complete_run(
+        self,
+        run: OnDemandScanRun,
+        response: OnDemandScanResponse,
+    ) -> OnDemandScanResponse:
+        if response.status == "failed" and run.usage_record_id is not None:
+            await self.session.execute(
+                delete(UsageRecord).where(UsageRecord.id == run.usage_record_id)
+            )
+            run.usage_record_id = None
+            run.quota_reserved = False
+            response = response.model_copy(
+                update={
+                    "quota_used": max(0, response.quota_used - 1),
+                    "quota_remaining": min(
+                        response.quota_limit,
+                        response.quota_remaining + 1,
+                    ),
+                    "usage_record_id": None,
+                }
+            )
+        completed_at = datetime.now(UTC)
+        run.status = response.status
+        run.evaluated_at = response.evaluated_at
+        run.completed_at = completed_at
+        run.response_json = response.model_dump(mode="json")
+        run.error_code = None
+        run.safe_message = None
+        payloads: dict[tuple[str, str | None], dict] = {
+            (item.symbol, item.direction): item.model_dump(mode="json")
+            for item in response.results
+        }
+        for sequence, item in enumerate(response.market_statuses, start=1):
+            payload = payloads.get((item.symbol, item.direction), {})
+            self.session.add(
+                OnDemandScanMarketRecord(
+                    run_id=run.id,
+                    sequence=sequence,
+                    exchange=item.exchange,
+                    symbol=item.symbol,
+                    timeframe=item.timeframe,
+                    direction=item.direction,
+                    category=item.category,
+                    completion_score=(
+                        Decimal(str(payload["completion_score"]))
+                        if payload.get("completion_score") is not None
+                        else None
+                    ),
+                    error_code=item.error_code,
+                    result_payload=payload,
+                    created_at=completed_at,
+                )
+            )
+        await self.session.commit()
+        return response
 
     async def _load_definition(
         self,
@@ -410,8 +763,20 @@ class OnDemandScanService:
         account_balance: float | None,
         screening_evidence: dict | None,
         screening_context: dict,
-    ) -> list[OnDemandScanMarketResult]:
+    ) -> tuple[
+        list[OnDemandScanMarketResult],
+        list[OnDemandMarketStatus],
+        dict[str, dict],
+        str,
+    ]:
         candle_sets = await self._fetch_candle_sets(definition, symbol)
+        quality = assess_candle_data_quality(definition, candle_sets, evaluated_at)
+        if not quality.usable:
+            raise OnDemandMarketDataError(
+                quality.code or "candle_data_unavailable",
+                quality.safe_message or "Candle data is unavailable.",
+                category="stale_incomplete_data",
+            )
         metadata_loader = getattr(self.provider, "fetch_universe_metadata", None)
         metadata = {}
         if callable(metadata_loader):
@@ -449,12 +814,9 @@ class OnDemandScanService:
                 .limit(1)
             )
             previous_score = float(previous) if isinstance(previous, Decimal) else previous
-        directions: list[StrategyDirection | None] = (
-            [StrategyDirection.LONG, StrategyDirection.SHORT]
-            if definition.direction == StrategyDirection.BOTH
-            else [None]
-        )
+        directions = strategy_evaluation_directions(definition)
         results: list[OnDemandScanMarketResult] = []
+        statuses: list[OnDemandMarketStatus] = []
         for direction in directions:
             evaluation = self.engine.evaluate(
                 definition,
@@ -475,10 +837,26 @@ class OnDemandScanService:
                 account_balance=account_balance,
                 condition_context=condition_context,
             )
+            category = _outcome_category(evaluation.outcome)
+            statuses.append(
+                OnDemandMarketStatus(
+                    exchange=evaluation.exchange,
+                    symbol=evaluation.symbol,
+                    timeframe=evaluation.timeframe,
+                    direction=evaluation.direction,
+                    category=category,
+                    error_code=(
+                        "technical_non_match"
+                        if category == "technical_non_match"
+                        else None
+                    ),
+                )
+            )
             if evaluation.outcome != ScanOutcome.CONFIRMED and not include_non_confirmed:
                 continue
             results.append(
                 OnDemandScanMarketResult(
+                    category=category,
                     exchange=evaluation.exchange,
                     symbol=evaluation.symbol,
                     timeframe=evaluation.timeframe,
@@ -517,7 +895,7 @@ class OnDemandScanService:
                     },
                 )
             )
-        return results
+        return results, statuses, quality.manifest, quality.manifest_hash
 
     async def _fetch_candle_sets(
         self,
@@ -580,20 +958,6 @@ class OnDemandScanService:
             proximity_score=round(condition.proximity_score, 4),
         )
 
-    @staticmethod
-    def _usage_key(user_id: UUID, request: OnDemandScanRequest) -> str:
-        if request.idempotency_key:
-            return stable_event_hash(
-                {
-                    "user_id": str(user_id),
-                    "idempotency_key": request.idempotency_key,
-                    "metric": "light_prompt_scans" if request.light_scan else "on_demand_scans",
-                }
-            )
-        prefix = "light-scan" if request.light_scan else "on-demand"
-        return f"{prefix}:{uuid4()}"
-
-
 def _unique_symbols(symbols: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -608,6 +972,18 @@ def _unique_symbols(symbols: list[str]) -> list[str]:
 
 def _canonical_symbol(symbol: str) -> str:
     return symbol.upper().replace("-", "/").strip().split(":", 1)[0]
+
+
+def _outcome_category(
+    outcome: ScanOutcome,
+) -> Literal["confirmed", "forming", "technical_non_match", "provider_failure"]:
+    if outcome == ScanOutcome.CONFIRMED:
+        return "confirmed"
+    if outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}:
+        return "forming"
+    if outcome == ScanOutcome.ERROR:
+        return "provider_failure"
+    return "technical_non_match"
 
 
 def _history_requirements(definition: StrategyDefinition) -> dict[str, dict[str, int | str]]:

@@ -14,6 +14,7 @@ from ai_market_monitor.db.models import (
     MarketDataHealth,
     ScanJob,
     Strategy,
+    StrategyVersion,
     Subscription,
     SupportRequest,
     TelegramConnection,
@@ -31,7 +32,9 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.services.admin import AdminCommercialService
 from ai_market_monitor.services.billing import BillingService, BillingWebhookResult
+from ai_market_monitor.services.interfaces import RecentMarketPreviewer
 from ai_market_monitor.services.reliability import HealthSummary, ReliabilityService
+from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.support import SupportEscalationService
 from ai_market_monitor.services.trials import TrialLifecycleService
 
@@ -260,22 +263,51 @@ class AdminDashboardService:
         return strategy
 
     async def resume_strategy(
-        self, *, strategy_id: UUID, admin_user_id: UUID, reason: str
+        self,
+        *,
+        strategy_id: UUID,
+        admin_user_id: UUID,
+        reason: str,
+        previewer: RecentMarketPreviewer,
     ) -> Strategy:
         strategy = await self.session.get(Strategy, strategy_id)
         if strategy is None:
             raise AdminDashboardError("strategy_missing", "Strategy not found.")
-        strategy.status = StrategyStatus.ACTIVE
-        strategy.paused_at = None
-        self._audit(
-            admin_user_id,
-            "admin.strategy_resumed",
-            "strategy",
-            strategy.id,
-            {"reason": reason},
+        if strategy.active_version_id is None:
+            raise AdminDashboardError(
+                "active_version_missing",
+                "The monitor has no approved version to resume.",
+            )
+        version = await self.session.get(StrategyVersion, strategy.active_version_id)
+        if version is None:
+            raise AdminDashboardError(
+                "active_version_missing",
+                "The approved monitor version is unavailable.",
+            )
+        service = StrategyService(
+            self.session,
+            self.settings.disclaimer_version,
+            self.settings,
         )
+        try:
+            await service.run_preview(
+                version,
+                user_id=strategy.user_id,
+                previewer=previewer,
+            )
+            resumed = await service.activate(
+                version,
+                user_id=strategy.user_id,
+                strategy_name=strategy.name,
+                resume=True,
+                actor_user_id=admin_user_id,
+                actor_type="admin",
+                reason=reason,
+            )
+        except StrategyGateError as exc:
+            raise AdminDashboardError(exc.code, str(exc)) from exc
         await self.session.flush()
-        return strategy
+        return resumed
 
     async def extend_trial(self, *, user_id: UUID, admin_user_id: UUID, days: int, reason: str):
         return await AdminCommercialService(self.session).grant_trial_extension(

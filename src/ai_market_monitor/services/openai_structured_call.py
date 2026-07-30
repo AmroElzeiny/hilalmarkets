@@ -23,10 +23,47 @@ from ai_market_monitor.services.ai_setup_evaluator_control import consume_evalua
 class StructuredCallError(ValueError):
     """A bounded call that could not produce a valid structured answer."""
 
-    def __init__(self, code: str, message: str, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        stage: str = "provider",
+        details: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+        self.stage = stage
+        self.details = details
+
+
+def estimate_structured_call_cost(
+    settings: Settings,
+    *,
+    instructions: str,
+    payload: dict[str, Any],
+    model: str,
+    max_output_tokens: int,
+) -> float:
+    """Pessimistic reservation used before a provider attempt, including retries."""
+
+    pricing = settings.openai_model_pricing_usd_per_million.get(model)
+    if not pricing:
+        raise StructuredCallError(
+            "SETUP_AGENT_MODEL_PRICING_UNAVAILABLE",
+            "The selected model has no configured cost contract.",
+            stage="provider",
+        )
+    estimated_input_tokens = max(
+        1,
+        (len(instructions) + len(json.dumps(payload, ensure_ascii=False))) // 4,
+    )
+    return (
+        estimated_input_tokens * float(pricing.get("input", 0))
+        + max_output_tokens * float(pricing.get("output", 0))
+    ) / 1_000_000
 
 
 def is_dns_failure(exc: BaseException) -> bool:
@@ -79,6 +116,9 @@ async def structured_call[ModelT: BaseModel](
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
+    timeout_seconds: int | float | None = None,
+    estimated_cost_limit: float | None = None,
+    stage: str = "provider",
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[ModelT, dict[str, Any]]:
     """Make exactly one structured call and return ``(parsed, usage)``.
@@ -91,6 +131,31 @@ async def structured_call[ModelT: BaseModel](
         raise StructuredCallError(
             "OPENAI_NOT_CONFIGURED",
             "This setup needs interpretation, but the AI provider is unavailable.",
+            stage=stage,
+        )
+    pricing = settings.openai_model_pricing_usd_per_million.get(model)
+    if estimated_cost_limit is not None and not pricing:
+        raise StructuredCallError(
+            "SETUP_AGENT_MODEL_PRICING_UNAVAILABLE",
+            "The selected model has no configured cost contract.",
+            stage=stage,
+        )
+    estimated_cost = (
+        estimate_structured_call_cost(
+            settings,
+            instructions=instructions,
+            payload=payload,
+            model=model,
+            max_output_tokens=max_output_tokens,
+        )
+        if pricing
+        else 0
+    )
+    if estimated_cost_limit is not None and estimated_cost > estimated_cost_limit:
+        raise StructuredCallError(
+            "SETUP_AGENT_COST_LIMIT",
+            "This turn would exceed the configured AI cost limit.",
+            stage=stage,
         )
     request = {
         "model": model,
@@ -118,7 +183,11 @@ async def structured_call[ModelT: BaseModel](
         if response_payload is None:
             async with httpx.AsyncClient(
                 base_url=str(settings.openai_base_url).rstrip("/"),
-                timeout=httpx.Timeout(settings.openai_timeout_seconds),
+                timeout=httpx.Timeout(
+                    timeout_seconds
+                    if timeout_seconds is not None
+                    else settings.openai_timeout_seconds
+                ),
                 transport=transport,
             ) as client:
                 response = await client.post("/responses", headers=headers, json=request)
@@ -131,18 +200,21 @@ async def structured_call[ModelT: BaseModel](
             "TARGET_CONNECT_TIMEOUT",
             "The interpreter could not be reached in time.",
             retryable=True,
+            stage=stage,
         ) from exc
     except httpx.ReadTimeout as exc:
         raise StructuredCallError(
             "TARGET_READ_TIMEOUT",
             "The interpreter timed out.",
             retryable=True,
+            stage=stage,
         ) from exc
     except httpx.RemoteProtocolError as exc:
         raise StructuredCallError(
             "TARGET_PARTIAL_STREAM",
             "The interpreter disconnected before completing its response.",
             retryable=True,
+            stage=stage,
         ) from exc
     except httpx.ConnectError as exc:
         raise StructuredCallError(
@@ -153,12 +225,14 @@ async def structured_call[ModelT: BaseModel](
             ),
             "The interpreter could not be reached.",
             retryable=True,
+            stage=stage,
         ) from exc
     except httpx.TimeoutException as exc:
         raise StructuredCallError(
             "TARGET_TOTAL_TIMEOUT",
             "The interpreter exceeded its bounded turn time.",
             retryable=True,
+            stage=stage,
         ) from exc
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
@@ -174,6 +248,7 @@ async def structured_call[ModelT: BaseModel](
             ),
             "The interpreter could not complete this turn.",
             retryable=status == 429 or status >= 500,
+            stage=stage,
         ) from exc
     except ValidationError as exc:
         error_types = {str(item.get("type") or "") for item in exc.errors()}
@@ -184,11 +259,21 @@ async def structured_call[ModelT: BaseModel](
                 else "TARGET_SCHEMA_VALIDATION"
             ),
             "The interpreter returned an answer that did not match its schema.",
+            stage=stage,
+            details=tuple(
+                (
+                    ".".join(map(str, item.get("loc") or ("root",)))
+                    + ":"
+                    + str(item.get("type") or "validation_error")
+                )[:300]
+                for item in exc.errors()[:12]
+            ),
         ) from exc
     except (KeyError, json.JSONDecodeError) as exc:
         raise StructuredCallError(
             "TARGET_INVALID_JSON",
             "The interpreter returned invalid JSON.",
+            stage=stage,
         ) from exc
     except ValueError as exc:
         raise StructuredCallError(
@@ -198,5 +283,6 @@ async def structured_call[ModelT: BaseModel](
                 else "TARGET_INVALID_JSON"
             ),
             "The interpreter did not return a usable structured answer.",
+            stage=stage,
         ) from exc
     return parsed, usage

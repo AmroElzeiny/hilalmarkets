@@ -730,15 +730,6 @@ class StrategyCockpitService:
         strategy = await self.session.get(Strategy, experiment.strategy_id)
         if strategy is None:
             raise ValueError("Strategy not found")
-        previous = await self.latest_version(strategy)
-        if previous and previous.id != version.id:
-            previous.status = StrategyVersionStatus.SUPERSEDED
-        version.status = StrategyVersionStatus.ACTIVE
-        version.activated_at = datetime.now(UTC)
-        strategy.active_version_id = version.id
-        strategy.status = StrategyStatus.ACTIVE
-        strategy.activated_at = version.activated_at
-        strategy.paused_at = None
         experiment.promoted_version_id = version.id
         experiment.status = "completed"
         experiment.ended_at = datetime.now(UTC)

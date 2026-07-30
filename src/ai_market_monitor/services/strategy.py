@@ -6,17 +6,21 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.db.models import (
     AuditEvent,
     CapabilityExtension,
     DisclaimerAcceptance,
+    ShariaUniverseSnapshot,
     Strategy,
     StrategyCondition,
     StrategyUniverse,
     StrategyVersion,
+    TelegramConnection,
+    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
+    ConnectionStatus,
     StrategyStatus,
     StrategyVersionStatus,
 )
@@ -35,6 +39,7 @@ from ai_market_monitor.schemas.strategy import (
 )
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import RecentMarketPreviewer
+from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
 from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
     ShariaScreeningService,
@@ -53,9 +58,15 @@ class StrategyGateError(ValueError):
 
 
 class StrategyService:
-    def __init__(self, session: AsyncSession, disclaimer_version: str):
+    def __init__(
+        self,
+        session: AsyncSession,
+        disclaimer_version: str,
+        settings: Settings | None = None,
+    ):
         self.session = session
         self.disclaimer_version = disclaimer_version
+        self.settings = settings or get_settings()
 
     async def create_from_interpretation(
         self,
@@ -268,7 +279,7 @@ class StrategyService:
         definition = StrategyDefinition.model_validate(version.schema_json)
         await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
         preview_definition = definition
-        settings = get_settings()
+        settings = self.settings
         if settings.sharia_screening_enforced:
             provider = getattr(previewer, "provider", None)
             if provider is None:
@@ -319,71 +330,24 @@ class StrategyService:
         return result
 
     async def activate(
-        self, version: StrategyVersion, *, user_id: UUID, strategy_name: str
+        self,
+        version: StrategyVersion,
+        *,
+        user_id: UUID,
+        strategy_name: str,
+        resume: bool = False,
+        actor_user_id: UUID | None = None,
+        actor_type: str = "user",
+        reason: str | None = None,
     ) -> Strategy:
         strategy = await self.session.get(Strategy, version.strategy_id)
         if strategy is None:
             raise StrategyGateError("strategy_missing", "Strategy no longer exists")
-        self._assert_owner(strategy, user_id)
-        self._assert_approval_intact(version)
-        if version.preview_status != "succeeded":
-            raise StrategyGateError(
-                "preview_required",
-                "A successful recent-market preview is required before activation",
-            )
-        disclaimer = await self.session.scalar(
-            select(DisclaimerAcceptance.id).where(
-                DisclaimerAcceptance.user_id == user_id,
-                DisclaimerAcceptance.disclaimer_version == self.disclaimer_version,
-            )
+        definition = await self._activation_definition(
+            strategy,
+            version,
+            user_id=user_id,
         )
-        if disclaimer is None:
-            raise StrategyGateError(
-                "disclaimer_required", "Accept the current risk disclaimer before activation"
-            )
-        definition = StrategyDefinition.model_validate(version.schema_json)
-        await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
-        try:
-            await EntitlementService(self.session).enforce_strategy_activation(
-                user_id,
-                definition,
-                strategy_id=strategy.id,
-            )
-        except EntitlementError as exc:
-            raise StrategyGateError(
-                exc.code,
-                str(exc),
-            ) from exc
-        universe = await self.session.scalar(
-            select(StrategyUniverse).where(StrategyUniverse.strategy_version_id == version.id)
-        )
-        if universe is None:
-            raise StrategyGateError("universe_required", "Strategy universe is missing")
-        settings = get_settings()
-        if settings.sharia_screening_enforced:
-            policy = definition.universe.sharia_policy
-            if policy is None or policy.methodology_id is None:
-                raise StrategyGateError(
-                    "sharia_policy_required",
-                    "Choose an approved methodology and Halal Market before activation.",
-                )
-            try:
-                await ShariaScreeningService(self.session, settings).methodology(
-                    policy.methodology_id,
-                    require_active=True,
-                )
-            except ShariaScreeningError as exc:
-                raise StrategyGateError(exc.code, str(exc)) from exc
-            if (
-                not universe.sharia_policy_ready
-                or not universe.universe_snapshot_hash
-                or universe.methodology_id != policy.methodology_id
-            ):
-                raise StrategyGateError(
-                    "screened_preview_required",
-                    "Run a successful preview against the current Halal Market before "
-                    "activation.",
-                )
 
         now = datetime.now(UTC)
         active_version = (
@@ -397,26 +361,157 @@ class StrategyService:
         strategy.status = StrategyStatus.ACTIVE
         strategy.active_version_id = version.id
         strategy.activated_at = now
+        strategy.paused_at = None
         version.status = StrategyVersionStatus.ACTIVE
         version.activated_at = now
-        await self._promote_pending_dynamic_artifacts(
-            definition,
-            user_id=user_id,
-            strategy_version_id=version.id,
-            promoted_at=now,
-        )
+        if not resume:
+            await self._promote_pending_dynamic_artifacts(
+                definition,
+                user_id=user_id,
+                strategy_version_id=version.id,
+                promoted_at=now,
+            )
         await self._audit(
-            user_id,
-            "strategy.activated",
+            actor_user_id or user_id,
+            "strategy.resumed" if resume else "strategy.activated",
             "strategy",
             strategy.id,
-            {"version_id": str(version.id)},
+            {
+                "version_id": str(version.id),
+                "schema_hash": version.schema_hash,
+                "owner_user_id": str(user_id),
+                "reason": reason,
+            },
+            actor_type=actor_type,
         )
-        await TrialLifecycleService(
-            self.session,
-            get_settings(),
-        ).start_monitoring_cycle(user_id, activated_at=now)
+        if not resume:
+            await TrialLifecycleService(
+                self.session,
+                self.settings,
+            ).start_monitoring_cycle(user_id, activated_at=now)
         return strategy
+
+    async def _activation_definition(
+        self,
+        strategy: Strategy,
+        version: StrategyVersion,
+        *,
+        user_id: UUID,
+    ) -> StrategyDefinition:
+        self._assert_owner(strategy, user_id)
+        self._assert_approval_intact(version)
+        if version.preview_status != "succeeded" or version.previewed_at is None:
+            raise StrategyGateError(
+                "preview_required",
+                "A successful current-market preview is required before activation.",
+            )
+        disclaimer = await self.session.scalar(
+            select(DisclaimerAcceptance.id).where(
+                DisclaimerAcceptance.user_id == user_id,
+                DisclaimerAcceptance.disclaimer_version == self.disclaimer_version,
+            )
+        )
+        if disclaimer is None:
+            raise StrategyGateError(
+                "disclaimer_required",
+                "Accept the current risk disclaimer before activation.",
+            )
+        await self._assert_notification_channel(user_id)
+        definition = StrategyDefinition.model_validate(version.schema_json)
+        await self._assert_provider_enabled(user_id, definition)
+        await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
+        try:
+            await EntitlementService(self.session).enforce_strategy_activation(
+                user_id,
+                definition,
+                strategy_id=strategy.id,
+            )
+        except EntitlementError as exc:
+            raise StrategyGateError(exc.code, str(exc)) from exc
+        universe = await self.session.scalar(
+            select(StrategyUniverse).where(StrategyUniverse.strategy_version_id == version.id)
+        )
+        if universe is None:
+            raise StrategyGateError("universe_required", "Strategy universe is missing.")
+        settings = self.settings
+        if not settings.sharia_screening_enforced:
+            return definition
+        policy = definition.universe.sharia_policy
+        if policy is None or policy.methodology_id is None:
+            raise StrategyGateError(
+                "sharia_policy_required",
+                "Choose an approved methodology and Halal Market before activation.",
+            )
+        try:
+            await ShariaScreeningService(self.session, settings).methodology(
+                policy.methodology_id,
+                require_active=True,
+            )
+        except ShariaScreeningError as exc:
+            raise StrategyGateError(exc.code, str(exc)) from exc
+        if (
+            not universe.sharia_policy_ready
+            or not universe.universe_snapshot_hash
+            or universe.methodology_id != policy.methodology_id
+        ):
+            raise StrategyGateError(
+                "screened_preview_required",
+                "Run a successful preview against the current Halal Market before activation.",
+            )
+        now = datetime.now(UTC)
+        snapshot = await self.session.scalar(
+            select(ShariaUniverseSnapshot).where(
+                ShariaUniverseSnapshot.strategy_version_id == version.id,
+                ShariaUniverseSnapshot.snapshot_hash == universe.universe_snapshot_hash,
+                ShariaUniverseSnapshot.invalidated_at.is_(None),
+                or_(
+                    ShariaUniverseSnapshot.expires_at.is_(None),
+                    ShariaUniverseSnapshot.expires_at > now,
+                ),
+            )
+        )
+        if snapshot is None:
+            raise StrategyGateError(
+                "sharia_snapshot_stale",
+                "The screening snapshot is stale or on hold. Run the preview again.",
+            )
+        return definition
+
+    async def _assert_notification_channel(self, user_id: UUID) -> None:
+        telegram = await self.session.scalar(
+            select(TelegramConnection.id).where(
+                TelegramConnection.user_id == user_id,
+                TelegramConnection.status == ConnectionStatus.ACTIVE,
+                TelegramConnection.alerts_enabled.is_(True),
+            )
+        )
+        whatsapp = await self.session.scalar(
+            select(WhatsAppConnection.id).where(
+                WhatsAppConnection.user_id == user_id,
+                WhatsAppConnection.status == ConnectionStatus.ACTIVE,
+                WhatsAppConnection.alerts_enabled.is_(True),
+            )
+        )
+        if telegram is None and whatsapp is None:
+            raise StrategyGateError(
+                "notification_channel_required",
+                "Connect an available notification channel before activation.",
+            )
+
+    async def _assert_provider_enabled(
+        self,
+        user_id: UUID,
+        definition: StrategyDefinition,
+    ) -> None:
+        preferences = await NotificationPreferenceService(
+            self.session,
+            self.settings,
+        ).current(user_id)
+        if definition.universe.exchange.casefold() not in (preferences.providers or set()):
+            raise StrategyGateError(
+                "provider_disabled",
+                "Enable this strategy's market data provider before activation.",
+            )
 
     async def _promote_pending_dynamic_artifacts(
         self,
@@ -771,12 +866,19 @@ class StrategyService:
             )
 
     async def _audit(
-        self, user_id: UUID, action: str, target_type: str, target_id: UUID, metadata: dict
+        self,
+        user_id: UUID,
+        action: str,
+        target_type: str,
+        target_id: UUID,
+        metadata: dict,
+        *,
+        actor_type: str = "user",
     ) -> None:
         self.session.add(
             AuditEvent(
                 actor_user_id=user_id,
-                actor_type="user",
+                actor_type=actor_type,
                 action=action,
                 target_type=target_type,
                 target_id=str(target_id),

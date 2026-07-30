@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     Alert,
+    AuditEvent,
     ConditionRuntimeState,
     NearMissSnapshot,
     ScanJob,
@@ -38,14 +39,16 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.dedup import AlertFatigueGuard, stable_event_hash
 from ai_market_monitor.engine.dynamic_mechanics import required_history_candles
-from ai_market_monitor.engine.evaluator import StrategyRuleEngine
+from ai_market_monitor.engine.evaluator import (
+    StrategyRuleEngine,
+    strategy_evaluation_directions,
+)
 from ai_market_monitor.engine.models import EvaluationResult, ensure_aware
 from ai_market_monitor.provider_context import ProviderContextService
 from ai_market_monitor.schemas.strategy import (
     ConditionGroup,
     ConditionRule,
     StrategyDefinition,
-    StrategyDirection,
 )
 from ai_market_monitor.services.entitlements import (
     EntitlementError,
@@ -55,6 +58,7 @@ from ai_market_monitor.services.entitlements import (
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.lifecycle import transition_setup
 from ai_market_monitor.services.market_preview import (
+    assess_candle_data_quality,
     market_snapshot_from_candles,
     timeframe_duration,
 )
@@ -1071,12 +1075,25 @@ class ScanOrchestrator:
             or version.approved_at is None
             or version.approved_schema_hash != version.schema_hash
         ):
+            if (
+                strategy is not None
+                and strategy.status == StrategyStatus.ACTIVE
+                and strategy.active_version_id == version.id
+            ):
+                await self._degrade_strategy(
+                    strategy,
+                    job,
+                    "strategy_not_runnable",
+                    "The active monitor failed its immutable version or approval gate.",
+                )
+                return self._summary(job, failures=0)
             await self._cancel_job(job, "strategy_not_active", "Strategy is not active.")
             return self._summary(job, failures=0)
 
         definition = StrategyDefinition.model_validate(version.schema_json)
         if not ensure_current_approved_schema_hash(version, definition):
-            await self._cancel_job(
+            await self._degrade_strategy(
+                strategy,
                 job,
                 "strategy_hash_mismatch",
                 "Strategy schema hash no longer matches the approved version.",
@@ -1092,11 +1109,12 @@ class ScanOrchestrator:
                 user_id=strategy.user_id,
             )
         except StrategyGateError as exc:
-            await self._cancel_job(job, exc.code, str(exc))
+            await self._degrade_strategy(strategy, job, exc.code, str(exc))
             return self._summary(job, failures=0)
         preferences = await NotificationPreferenceService(self.session).current(strategy.user_id)
         if definition.universe.exchange.lower() not in (preferences.providers or set()):
-            await self._cancel_job(
+            await self._degrade_strategy(
+                strategy,
                 job,
                 "provider_disabled",
                 "This strategy's market data provider is disabled in user settings.",
@@ -1109,7 +1127,7 @@ class ScanOrchestrator:
                 strategy_id=strategy.id,
             )
         except EntitlementError as exc:
-            await self._cancel_job(job, exc.code, str(exc))
+            await self._degrade_strategy(strategy, job, exc.code, str(exc))
             return self._summary(job, failures=0)
         maximum_symbols = int(entitlement.limit("symbols_per_strategy") or 0)
         try:
@@ -1124,10 +1142,11 @@ class ScanOrchestrator:
                 maximum_symbols=maximum_symbols,
             )
         except ShariaUniverseError as exc:
-            await self._cancel_job(job, exc.code, str(exc))
+            await self._degrade_strategy(strategy, job, exc.code, str(exc))
             return self._summary(job, failures=0)
         if screening.monitor_paused_for_compliance:
-            await self._cancel_job(
+            await self._degrade_strategy(
+                strategy,
                 job,
                 "monitor_paused_for_compliance",
                 "The Watch Plan was paused because a previously included asset left its "
@@ -1399,31 +1418,21 @@ class ScanOrchestrator:
             evaluation_time,
             provider_metadata,
         )
-        base_candidates = [
-            candle
-            for candle in candle_sets.get(definition.base_timeframe, [])
-            if ensure_aware(candle.timestamp) <= ensure_aware(evaluation_time)
-            and (definition.trigger_mode.value != "candle_close" or candle.is_closed)
-        ]
-        if base_candidates:
-            latest = base_candidates[-1]
-            observed_through = ensure_aware(latest.timestamp)
-            if latest.is_closed:
-                observed_through += timeframe_duration(definition.base_timeframe)
-            maximum_age = max(
-                300,
-                int(timeframe_duration(definition.base_timeframe).total_seconds()) * 2,
+        quality = assess_candle_data_quality(
+            definition,
+            candle_sets,
+            evaluation_time,
+        )
+        if not quality.usable:
+            market = replace(
+                market,
+                data_quality_ok=False,
+                metadata={
+                    **market.metadata,
+                    "reliability_warnings": [quality.code or "candle_data_unavailable"],
+                    "candle_snapshot_hash": quality.manifest_hash,
+                },
             )
-            data_age = int((ensure_aware(evaluation_time) - observed_through).total_seconds())
-            if data_age > maximum_age:
-                market = replace(
-                    market,
-                    data_quality_ok=False,
-                    metadata={
-                        **market.metadata,
-                        "reliability_warnings": [f"stale_market_data:{data_age}s>{maximum_age}s"],
-                    },
-                )
         previous_score = await self.session.scalar(
             select(NearMissSnapshot.completion_score)
             .where(
@@ -1505,7 +1514,8 @@ class ScanOrchestrator:
                 )
             )
         ).all()
-        latest_close = base_candidates[-1].close if base_candidates else None
+        base_candles = candle_sets.get(definition.base_timeframe, [])
+        latest_close = float(base_candles[-1].close) if base_candles else None
         condition_context = {
             "last_strategy_triggered_at": last_strategy_triggered_at,
             "last_symbol_triggered_at": last_symbol_triggered_at,
@@ -1538,11 +1548,7 @@ class ScanOrchestrator:
             evaluation_time,
             base_context=condition_context,
         )
-        directions: list[StrategyDirection | None] = (
-            [StrategyDirection.LONG, StrategyDirection.SHORT]
-            if definition.direction == StrategyDirection.BOTH
-            else [None]
-        )
+        directions = strategy_evaluation_directions(definition)
         evaluations = [
             self.engine.evaluate(
                 definition,
@@ -1607,6 +1613,34 @@ class ScanOrchestrator:
         job.error_detail = detail[:1000]
         job.next_retry_at = None
         await self.session.flush()
+
+    async def _degrade_strategy(
+        self,
+        strategy: Strategy,
+        job: ScanJob,
+        code: str,
+        detail: str,
+    ) -> None:
+        """Pause a monitor when this gate would reject every future scheduled job."""
+
+        now = datetime.now(UTC)
+        strategy.status = StrategyStatus.PAUSED
+        strategy.paused_at = now
+        self.session.add(
+            AuditEvent(
+                actor_user_id=strategy.user_id,
+                actor_type="system",
+                action="strategy.runtime_degraded",
+                target_type="strategy",
+                target_id=str(strategy.id),
+                metadata_redacted={
+                    "code": code,
+                    "strategy_version_id": str(job.strategy_version_id),
+                },
+                created_at=now,
+            )
+        )
+        await self._cancel_job(job, code, detail)
 
     async def _fail_claimed_job(self, job: ScanJob, exc: Exception) -> None:
         job.status = ScanJobStatus.FAILED

@@ -227,6 +227,7 @@ def _parameter_schema(
         item: dict[str, Any] = {
             "type": _json_type(parameter.type),
             "description": parameter.description,
+            "x-semantic-unit": _parameter_semantic_unit(parameter.name),
         }
         if parameter.default is not None:
             item["default"] = parameter.default
@@ -262,6 +263,25 @@ def _parameter_schema(
         "required": required,
         "additionalProperties": False,
     }
+
+
+def _parameter_semantic_unit(name: str) -> str:
+    """Registry-owned unit used when grounding trader-controlled values."""
+
+    lowered = name.casefold()
+    if lowered in {"period", "lookback", "window", "candles", "length"}:
+        return "count"
+    if "percent" in lowered or lowered.endswith("_pct"):
+        return "percent"
+    if lowered in {"price", "price_level", "level"}:
+        return "price"
+    if "multiplier" in lowered or lowered.endswith("_multiple"):
+        return "multiple"
+    if "timeframe" in lowered:
+        return "timeframe"
+    if "symbol" in lowered:
+        return "symbol"
+    return "plain"
 
 
 def _resource_cost(warmup_candles: int, provider_required: str | None) -> str:

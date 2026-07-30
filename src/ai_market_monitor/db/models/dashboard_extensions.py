@@ -260,3 +260,81 @@ class AISetupChatMessage(UUIDPrimaryKeyMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SetupChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "setup_chat_turns"
+    __table_args__ = (
+        UniqueConstraint(
+            "chat_session_id",
+            "client_message_id",
+            name="uq_setup_chat_turn_session_client_message",
+        ),
+        Index("ix_setup_chat_turn_session_status", "chat_session_id", "status"),
+    )
+
+    chat_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ai_setup_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    client_message_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_setup_chat_messages.id", ondelete="SET NULL")
+    )
+    assistant_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_setup_chat_messages.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(32), default="RECEIVED", nullable=False)
+    planner_model: Mapped[str | None] = mapped_column(String(120))
+    plan_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    execution_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    reply_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    mutation_committed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    executable_version_before: Mapped[int | None] = mapped_column(Integer)
+    executable_version_after: Mapped[int | None] = mapped_column(Integer)
+    workflow_revision_before: Mapped[int | None] = mapped_column(Integer)
+    workflow_revision_after: Mapped[int | None] = mapped_column(Integer)
+    failure_code: Mapped[str | None] = mapped_column(String(80))
+    failure_stage: Mapped[str | None] = mapped_column(String(80))
+    failure_retryable: Mapped[bool | None] = mapped_column(Boolean)
+    failure_details_json: Mapped[list[str] | None] = mapped_column(JSON)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SetupChatDraftSnapshot(UUIDPrimaryKeyMixin, Base):
+    """Immutable executable draft state owned by one user and chat session."""
+
+    __tablename__ = "setup_chat_draft_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "chat_session_id",
+            "executable_version",
+            "executable_hash",
+            name="uq_setup_chat_snapshot_identity",
+        ),
+        Index(
+            "ix_setup_chat_snapshot_owner_version",
+            "user_id",
+            "chat_session_id",
+            "executable_version",
+        ),
+    )
+
+    chat_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ai_setup_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_turn_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_setup_chat_messages.id", ondelete="SET NULL")
+    )
+    executable_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    executable_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    draft_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

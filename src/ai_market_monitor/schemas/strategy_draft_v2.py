@@ -30,7 +30,22 @@ class DraftMode(StrEnum):
     MONITOR = "monitor"
 
 
+class MovementDirection(StrEnum):
+    UP = "up"
+    DOWN = "down"
+    NEUTRAL = "neutral"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class StrategyBias(StrEnum):
+    LONG = "long"
+    SHORT = "short"
+    NEUTRAL = "neutral"
+
+
 class DraftDirection(StrEnum):
+    """Legacy overloaded direction accepted only by migration readers."""
+
     LONG = "long"
     SHORT = "short"
     NEUTRAL = "neutral"
@@ -105,7 +120,7 @@ class FormulaContract:
     #:
     #: A *signed* threshold is not listed here on purpose. `-2%` with a long bias is
     #: a legitimate dip rule, and the trader's own sign is never overruled.
-    forbidden_directions: frozenset[DraftDirection] = frozenset()
+    forbidden_directions: frozenset[MovementDirection] = frozenset()
 
 
 _PERCENTAGE_CONTRACT = FormulaContract(
@@ -125,12 +140,12 @@ FORMULA_CONTRACTS: dict[FormulaKind, FormulaContract] = {
     FormulaKind.HIGH_TO_LOW_PERCENTAGE: FormulaContract(
         operators=_LEVEL_OPERATORS,
         units=frozenset({"percent"}),
-        forbidden_directions=frozenset({DraftDirection.LONG}),
+        forbidden_directions=frozenset({MovementDirection.UP}),
     ),
     FormulaKind.LOW_TO_HIGH_PERCENTAGE: FormulaContract(
         operators=_LEVEL_OPERATORS,
         units=frozenset({"percent"}),
-        forbidden_directions=frozenset({DraftDirection.SHORT}),
+        forbidden_directions=frozenset({MovementDirection.DOWN}),
     ),
     FormulaKind.PREVIOUS_CANDLE_REFERENCE: FormulaContract(
         operators=_LEVEL_OPERATORS | _CROSS_OPERATORS,
@@ -166,6 +181,7 @@ class OperandV2(BaseModel):
     field: str | None = Field(default=None, max_length=120)
     name: str | None = Field(default=None, max_length=120)
     value: float | str | bool | None = None
+    unit: ConditionUnit | None = None
     parameters: dict[
         str,
         int | float | str | bool | list[int | float | str | bool],
@@ -180,6 +196,9 @@ class OperandV2(BaseModel):
         return self
 
 
+CapabilityParameterValue = int | float | str | bool | list[int | float | str | bool]
+
+
 class ConditionNodeV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -191,7 +210,8 @@ class ConditionNodeV2(BaseModel):
         max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
     )
     required: bool = True
-    direction: DraftDirection = DraftDirection.NEUTRAL
+    movement_direction: MovementDirection = MovementDirection.NEUTRAL
+    strategy_bias: StrategyBias = StrategyBias.NEUTRAL
     formula: FormulaKind | None = None
     operands: list[OperandV2] = Field(default_factory=list, max_length=12)
     operator: Comparator | None = None
@@ -202,13 +222,38 @@ class ConditionNodeV2(BaseModel):
     confirmation_timeframes: list[Timeframe] = Field(default_factory=list, max_length=10)
     reference_timeframe: Timeframe | None = None
     reference_definition: str | None = Field(default=None, max_length=500)
+    lookback: int | None = Field(default=None, ge=1, le=100000)
     capability_key: str | None = Field(
         default=None,
         min_length=1,
         max_length=120,
         pattern=r"^[a-z][a-z0-9_]*$",
     )
+    capability_version: str | None = Field(default=None, max_length=40)
+    capability_parameters: dict[str, CapabilityParameterValue] = Field(
+        default_factory=dict
+    )
+    condition_symbols: list[str] = Field(default_factory=list, max_length=1000)
     children: list[ConditionNodeV2] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_direction(cls, data: object) -> object:
+        if not isinstance(data, dict) or "direction" not in data:
+            return data
+        migrated = dict(data)
+        old = str(migrated.pop("direction") or "neutral").casefold()
+        migrated.setdefault(
+            "movement_direction",
+            "up" if old in {"long", "bullish", "up"} else "down" if old in {
+                "short",
+                "bearish",
+                "down",
+            } else "neutral",
+        )
+        # Old direction encoded price movement, not a user-authored trade instruction.
+        migrated.setdefault("strategy_bias", "neutral")
+        return migrated
 
     @model_validator(mode="after")
     def validate_shape(self) -> ConditionNodeV2:
@@ -240,6 +285,17 @@ class ConditionNodeV2(BaseModel):
 
     def walk(self) -> list[ConditionNodeV2]:
         return [self, *(item for child in self.children for item in child.walk())]
+
+    @property
+    def direction(self) -> DraftDirection:
+        """Deprecated read alias for old serializers and diagnostics."""
+
+        return {
+            MovementDirection.UP: DraftDirection.LONG,
+            MovementDirection.DOWN: DraftDirection.SHORT,
+            MovementDirection.NEUTRAL: DraftDirection.NEUTRAL,
+            MovementDirection.NOT_APPLICABLE: DraftDirection.NEUTRAL,
+        }[self.movement_direction]
 
 
 ConditionNodeV2.model_rebuild()
@@ -282,17 +338,75 @@ class MarketScopeV2(BaseModel):
         return value.strip().upper()
 
 
+UnresolvedTargetType = Literal[
+    "draft_field",
+    "condition_field",
+    "condition_creation",
+    "universe",
+    "market_scope",
+    "boolean_structure",
+    "capability_parameter",
+    "reference_definition",
+    "unsupported_resolution",
+]
+
+
 class UnresolvedFieldV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    key: str = Field(min_length=1, max_length=120)
+    unresolved_id: str = Field(min_length=1, max_length=120)
     source_turn_id: str | None = Field(default=None, max_length=80)
     source_fragment: str = Field(
         min_length=1,
         max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
     )
+    target_type: UnresolvedTargetType
+    target_field: str | None = Field(default=None, max_length=120)
+    target_condition_id: str | None = Field(default=None, max_length=120)
+    expected_answer_schema: dict[str, object] = Field(default_factory=dict)
+    allowed_options: list[str] = Field(default_factory=list, max_length=12)
     question: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
     blocking: bool = True
+    created_workflow_revision: int = Field(default=1, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_unresolved(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        key = str(migrated.pop("key", "") or migrated.get("unresolved_id") or "")
+        migrated.setdefault("unresolved_id", key)
+        target_type = migrated.get("target_type")
+        if target_type is None:
+            target_type = "condition_creation" if key == "conditions" else (
+                "universe" if key in {"universe", "symbols"} else "draft_field"
+            )
+            migrated["target_type"] = target_type
+        if target_type == "draft_field":
+            migrated.setdefault("target_field", key)
+        migrated.setdefault("expected_answer_schema", {"type": "string"})
+        migrated.setdefault("reason", "This value is required to compile the setup exactly.")
+        migrated.setdefault("created_workflow_revision", 1)
+        return migrated
+
+    @model_validator(mode="after")
+    def validate_target(self) -> UnresolvedFieldV2:
+        if (
+            self.target_type in {"draft_field", "condition_field", "capability_parameter"}
+            and not self.target_field
+        ):
+            raise ValueError(f"{self.target_type} requires target_field")
+        if self.target_type == "condition_field" and not self.target_condition_id:
+            raise ValueError("condition_field requires target_condition_id")
+        return self
+
+    @property
+    def key(self) -> str:
+        """Deprecated read alias while old UI payloads are migrated."""
+
+        return self.unresolved_id
 
 
 class UnsupportedRequirementV2(BaseModel):
@@ -318,7 +432,36 @@ class ProviderRequirementV2(BaseModel):
         min_length=1,
         max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
     )
-    available: bool = False
+    capability_version: str | None = Field(default=None, max_length=40)
+
+    @model_validator(mode="before")
+    @classmethod
+    def remove_runtime_availability(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        migrated.pop("available", None)
+        return migrated
+
+
+class ProviderRuntimeStatusV2(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1, max_length=80)
+    capability: str = Field(min_length=1, max_length=120)
+    status: Literal["available", "unavailable", "unknown"] = "unknown"
+    checked_at: datetime | None = None
+    safe_error: str | None = Field(default=None, max_length=500)
+
+
+class DraftRuntimeStateV2(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_status: list[ProviderRuntimeStatusV2] = Field(default_factory=list, max_length=100)
+    screening_available: bool | None = None
+    circuit_breaker_state: Literal["CLOSED", "OPEN", "HALF_OPEN"] = "CLOSED"
+    last_execution_result: dict[str, object] | None = None
+    runtime_health: Literal["healthy", "degraded", "unavailable", "unknown"] = "unknown"
 
 
 class ApprovalBindingV2(BaseModel):
@@ -326,19 +469,31 @@ class ApprovalBindingV2(BaseModel):
 
     approved: bool = False
     user_id: UUID | None = None
-    draft_version: int | None = Field(default=None, ge=1)
-    semantic_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    executable_version: int | None = Field(default=None, ge=1)
+    executable_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     conversation_snapshot_hash: str | None = Field(
         default=None, pattern=r"^[a-f0-9]{64}$"
     )
     approved_at: datetime | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_binding(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        if "draft_version" in migrated:
+            migrated.setdefault("executable_version", migrated.pop("draft_version"))
+        if "semantic_hash" in migrated:
+            migrated.setdefault("executable_hash", migrated.pop("semantic_hash"))
+        return migrated
+
     @model_validator(mode="after")
     def complete_binding(self) -> ApprovalBindingV2:
         bound = (
             self.user_id,
-            self.draft_version,
-            self.semantic_hash,
+            self.executable_version,
+            self.executable_hash,
             self.conversation_snapshot_hash,
             self.approved_at,
         )
@@ -347,6 +502,14 @@ class ApprovalBindingV2(BaseModel):
         if not self.approved and any(value is not None for value in bound):
             raise ValueError("unapproved drafts cannot retain approval bindings")
         return self
+
+    @property
+    def draft_version(self) -> int | None:
+        return self.executable_version
+
+    @property
+    def semantic_hash(self) -> str | None:
+        return self.executable_hash
 
 
 class SourceProvenanceV2(BaseModel):
@@ -364,9 +527,10 @@ class SourceProvenanceV2(BaseModel):
 class StrategyDraftV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["2.0"] = "2.0"
+    schema_version: Literal["2.1"] = "2.1"
     draft_id: UUID = Field(default_factory=uuid4)
-    version: int = Field(default=1, ge=1)
+    executable_version: int = Field(default=1, ge=1)
+    workflow_revision: int = Field(default=1, ge=1)
     mode: DraftMode = DraftMode.MONITOR
     name: str = Field(default="Untitled Monitor", min_length=1, max_length=160)
     universe: StrategyUniverseV2 = Field(default_factory=StrategyUniverseV2)
@@ -376,46 +540,155 @@ class StrategyDraftV2(BaseModel):
     unsupported_requirements: list[UnsupportedRequirementV2] = Field(
         default_factory=list, max_length=100
     )
-    provider_requirements: list[ProviderRequirementV2] = Field(
+    static_provider_requirements: list[ProviderRequirementV2] = Field(
         default_factory=list, max_length=100
     )
+    runtime_state: DraftRuntimeStateV2 = Field(default_factory=DraftRuntimeStateV2)
     approval: ApprovalBindingV2 = Field(default_factory=ApprovalBindingV2)
     source_provenance: list[SourceProvenanceV2] = Field(default_factory=list, max_length=1000)
-    semantic_hash: str = Field(default="", pattern=r"^$|^[a-f0-9]{64}$")
+    executable_hash: str = Field(default="", pattern=r"^$|^[a-f0-9]{64}$")
+    workflow_state_hash: str = Field(default="", pattern=r"^$|^[a-f0-9]{64}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_identity(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        legacy_identity = (
+            migrated.get("schema_version") != "2.1"
+            or "version" in migrated
+            or "semantic_hash" in migrated
+        )
+        migrated["schema_version"] = "2.1"
+        if "version" in migrated:
+            migrated.setdefault("executable_version", migrated.pop("version"))
+        migrated.setdefault("workflow_revision", migrated.get("executable_version", 1))
+        if "semantic_hash" in migrated:
+            migrated.pop("semantic_hash")
+        if "provider_requirements" in migrated:
+            legacy_requirements = list(migrated.pop("provider_requirements") or [])
+            migrated.setdefault("static_provider_requirements", legacy_requirements)
+            statuses = [
+                {
+                    "provider": item.get("provider", ""),
+                    "capability": item.get("capability", ""),
+                    "status": "available" if item.get("available") else "unavailable",
+                }
+                for item in legacy_requirements
+                if isinstance(item, dict) and item.get("provider") and item.get("capability")
+            ]
+            migrated.setdefault("runtime_state", {"provider_status": statuses})
+        if legacy_identity:
+            # The old hash mixed authoring and runtime fields, so it cannot prove the
+            # new executable identity. Migrate deterministically and fail closed.
+            migrated["executable_hash"] = ""
+            migrated["workflow_state_hash"] = ""
+            migrated["approval"] = ApprovalBindingV2().model_dump(mode="json")
+        return migrated
 
     @model_validator(mode="after")
-    def validate_semantic_hash(self) -> StrategyDraftV2:
-        calculated = self.calculate_semantic_hash()
-        if self.semantic_hash and self.semantic_hash != calculated:
-            raise ValueError("semantic_hash does not match the canonical draft")
-        self.semantic_hash = calculated
+    def validate_identities(self) -> StrategyDraftV2:
+        executable = self.calculate_executable_hash()
+        workflow = self.calculate_workflow_state_hash()
+        if self.executable_hash and self.executable_hash != executable:
+            raise ValueError("executable_hash does not match executable state")
+        if self.workflow_state_hash and self.workflow_state_hash != workflow:
+            raise ValueError("workflow_state_hash does not match authoring state")
+        self.executable_hash = executable
+        self.workflow_state_hash = workflow
         if self.approval.approved and (
-            self.approval.draft_version != self.version
-            or self.approval.semantic_hash != self.semantic_hash
+            self.approval.executable_version != self.executable_version
+            or self.approval.executable_hash != self.executable_hash
         ):
-            raise ValueError("approval is not bound to this draft version and hash")
+            raise ValueError("approval is not bound to this executable version and hash")
         return self
 
     @property
-    def blocking(self) -> bool:
+    def authoring_blocking(self) -> bool:
         return (
             self.condition_ast is None
             or any(item.blocking for item in self.unresolved_fields)
             or any(item.blocking for item in self.unsupported_requirements)
-            or any(not item.available for item in self.provider_requirements)
+        )
+
+    @property
+    def blocking(self) -> bool:
+        runtime_by_contract = {
+            (item.provider, item.capability): item.status
+            for item in self.runtime_state.provider_status
+        }
+        return (
+            self.authoring_blocking
+            or any(
+                runtime_by_contract.get(
+                    (requirement.provider, requirement.capability),
+                    "unknown",
+                )
+                != "available"
+                for requirement in self.static_provider_requirements
+            )
         )
 
     @property
     def approval_eligible(self) -> bool:
         return not self.blocking
 
-    def calculate_semantic_hash(self) -> str:
-        payload = self.model_dump(
-            mode="json",
-            exclude={"semantic_hash", "approval", "source_provenance", "version"},
-        )
+    def calculate_executable_hash(self) -> str:
+        payload = {
+            "mode": self.mode.value,
+            "universe": self.universe.model_dump(mode="json"),
+            "market_scope": self.market_scope.model_dump(mode="json"),
+            "condition_ast": (
+                _executable_condition(self.condition_ast) if self.condition_ast else None
+            ),
+            "static_provider_requirements": [
+                {
+                    "provider": item.provider,
+                    "capability": item.capability,
+                    "capability_version": item.capability_version,
+                }
+                for item in self.static_provider_requirements
+            ],
+        }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
+
+    def calculate_workflow_state_hash(self) -> str:
+        payload = {
+            "name": self.name,
+            "unresolved_fields": [
+                item.model_dump(mode="json") for item in self.unresolved_fields
+            ],
+            "unsupported_requirements": [
+                item.model_dump(mode="json") for item in self.unsupported_requirements
+            ],
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    @property
+    def version(self) -> int:
+        return self.executable_version
+
+    @property
+    def semantic_hash(self) -> str:
+        return self.executable_hash
+
+    @property
+    def provider_requirements(self) -> list[ProviderRequirementV2]:
+        return self.static_provider_requirements
+
+
+def _executable_condition(node: ConditionNodeV2) -> dict[str, object]:
+    """Canonical condition semantics without authoring/provenance metadata."""
+
+    payload = node.model_dump(
+        mode="json",
+        exclude={"node_id", "source_turn_id", "source_fragment", "children"},
+    )
+    payload["children"] = [_executable_condition(child) for child in node.children]
+    return payload
 
 
 class DraftFieldPatch(BaseModel):

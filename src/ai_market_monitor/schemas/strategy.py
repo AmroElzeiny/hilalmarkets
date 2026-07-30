@@ -35,6 +35,7 @@ class Comparator(StrEnum):
 class StrategyDirection(StrEnum):
     LONG = "long"
     SHORT = "short"
+    NEUTRAL = "neutral"
     BOTH = "both"
 
 
@@ -112,12 +113,14 @@ class ConditionRule(BaseModel):
     explanation_template: str | None = Field(default=None, max_length=500)
     forming_tolerance_percent: float | None = Field(default=None, ge=0, le=100)
     notes: str | None = Field(default=None, max_length=500)
+    source_turn_id: str | None = Field(default=None, max_length=80)
     source_fragment: str | None = Field(default=None, max_length=500)
     confidence: float | None = Field(default=None, ge=0, le=1)
     ai_interpreted: bool = False
     provider_required: bool = False
     availability: str = Field(default="available", max_length=40)
     approximation_note: str | None = Field(default=None, max_length=500)
+    ast_path: list[int] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_comparator(self) -> "ConditionRule":
@@ -644,6 +647,8 @@ class StrategyDefinition(BaseModel):
                     if not (
                         (key == "capability_key" and item is None)
                         or (key == "sharia_policy" and item is None)
+                        or (key == "source_turn_id" and item is None)
+                        or (key == "ast_path" and item == [])
                     )
                 }
             if isinstance(value, list):

@@ -1,11 +1,18 @@
+import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.core.plans import timeframe_to_minutes
+from ai_market_monitor.db.base import Base
 from ai_market_monitor.db.models import (
     Alert,
+    OnDemandScanRun,
     ScanResult,
     SetupInstance,
     Subscription,
@@ -19,7 +26,13 @@ from ai_market_monitor.db.models.enums import (
     SubscriptionStatus,
 )
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
-from ai_market_monitor.schemas.strategy import Comparator, ConditionRule, Operand, OperandKind
+from ai_market_monitor.schemas.strategy import (
+    Comparator,
+    ConditionRule,
+    Operand,
+    OperandKind,
+    StrategyDefinition,
+)
 from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from tests.factories import candle_sets, load_strategy
@@ -30,7 +43,10 @@ class OnDemandProvider:
         return ["SOL/USDT", "LINK/USDT"]
 
     async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
-        return candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+        return _fresh(
+            candle_sets(volume_multiplier=1.6)[timeframe][-limit:],
+            timeframe=timeframe,
+        )
 
 
 class ConfirmedOnDemandProvider(OnDemandProvider):
@@ -54,12 +70,46 @@ class ConfirmedOnDemandProvider(OnDemandProvider):
                 for index in range(max(0, 60 - len(rows)))
             ],
         ]
-        return extended[-limit:]
+        return _fresh(extended[-limit:], timeframe=timeframe)
 
 
 class WideConfirmedOnDemandProvider(ConfirmedOnDemandProvider):
     async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
         return [f"COIN{index}/USDT" for index in range(12)]
+
+
+class StaleOnDemandProvider(OnDemandProvider):
+    async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
+        return candle_sets(volume_multiplier=1.6)[timeframe][-limit:]
+
+
+class SlowOnDemandProvider(OnDemandProvider):
+    async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
+        await asyncio.sleep(0.05)
+        return await super().fetch_ohlcv(exchange, symbol, timeframe, limit)
+
+
+class TrackingTimeframeProvider(OnDemandProvider):
+    def __init__(self):
+        self.fetched_timeframes: set[str] = set()
+
+    async def fetch_ohlcv(self, exchange: str, symbol: str, timeframe: str, limit: int):
+        self.fetched_timeframes.add(timeframe)
+        source = candle_sets(volume_multiplier=1.6).get(timeframe)
+        if source is None:
+            source = candle_sets(volume_multiplier=1.6)["15m"]
+        return _fresh(source[-limit:], timeframe=timeframe)
+
+
+def _fresh(rows, *, timeframe: str):
+    if len(rows) < 2:
+        return rows
+    interval = timedelta(minutes=timeframe_to_minutes(timeframe))
+    latest = datetime.now(UTC) - interval
+    return [
+        replace(row, timestamp=latest - (len(rows) - index - 1) * interval)
+        for index, row in enumerate(rows)
+    ]
 
 
 def scan_strategy():
@@ -138,6 +188,11 @@ async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_
         assert await session.scalar(select(func.count(Alert.id))) == 0
         assert await session.scalar(select(func.count(ScanResult.id))) == 0
         assert await session.scalar(select(func.count(SetupInstance.id))) == 0
+        run = await session.get(OnDemandScanRun, response.run_id)
+        assert run is not None
+        assert run.draft_id is not None
+        assert run.draft_version == 1
+        assert run.draft_hash == strategy.canonical_hash()
 
         usage = await session.scalar(select(UsageRecord))
         assert usage is not None
@@ -147,6 +202,174 @@ async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_
         with pytest.raises(OnDemandScanError) as exc:
             await OnDemandScanService(session, OnDemandProvider()).run(user.id, request)
         assert exc.value.code == "on_demand_quota_exceeded"
+
+
+async def test_on_demand_retry_reuses_run_and_deliberate_rerun_consumes_quota(
+    test_context,
+):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Idempotent Scanner")
+        session.add(user)
+        await session.flush()
+        await grant_monitor_plan(session, user)
+        strategy = scan_strategy()
+        source_draft_id = uuid4()
+        source_draft_hash = "a" * 64
+        first_request = OnDemandScanRequest(
+            strategy=strategy,
+            source_draft_id=source_draft_id,
+            source_draft_version=7,
+            source_draft_hash=source_draft_hash,
+            approved_schema_hash=strategy.canonical_hash(),
+            symbols=["SOL/USDT"],
+            max_symbols=1,
+            idempotency_key="scanner-attempt-0001",
+        )
+
+        first = await OnDemandScanService(session, OnDemandProvider()).run(
+            user.id, first_request
+        )
+        retry = await OnDemandScanService(session, OnDemandProvider()).run(
+            user.id, first_request
+        )
+
+        assert retry.model_dump(mode="json") == first.model_dump(mode="json")
+        assert await session.scalar(select(func.count(OnDemandScanRun.id))) == 1
+        assert await session.scalar(select(func.count(UsageRecord.id))) == 1
+        persisted = await session.get(OnDemandScanRun, first.run_id)
+        assert persisted is not None
+        assert persisted.draft_id == source_draft_id
+        assert persisted.draft_version == 7
+        assert persisted.draft_hash == source_draft_hash
+        assert persisted.definition_hash == strategy.canonical_hash()
+
+        second_request = first_request.model_copy(
+            update={"idempotency_key": "scanner-attempt-0002"}
+        )
+        rerun = await OnDemandScanService(session, OnDemandProvider()).run(
+            user.id, second_request
+        )
+
+        assert rerun.run_id != first.run_id
+        assert rerun.quota_used == 2
+        assert await session.scalar(select(func.count(OnDemandScanRun.id))) == 2
+        assert await session.scalar(select(func.count(UsageRecord.id))) == 2
+
+        completed = await session.get(OnDemandScanRun, first.run_id)
+        assert completed is not None
+        completed.status = "running"
+        with pytest.raises(ValueError, match="immutable"):
+            await session.flush()
+        await session.rollback()
+
+
+async def test_concurrent_same_request_key_reserves_one_run_and_one_quota(
+    test_context,
+    tmp_path,
+):
+    provider = SlowOnDemandProvider()
+    database_path = (tmp_path / "scanner-concurrency.db").as_posix()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
+    session_factory = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with session_factory() as session:
+        user = User(display_name="Concurrent Scanner")
+        session.add(user)
+        await session.flush()
+        await grant_monitor_plan(session, user)
+        await session.commit()
+        strategy = scan_strategy()
+    request = OnDemandScanRequest(
+        strategy=strategy,
+        approved_schema_hash=strategy.canonical_hash(),
+        symbols=["SOL/USDT"],
+        max_symbols=1,
+        idempotency_key="scanner-concurrent-0001",
+    )
+
+    async def execute():
+        async with session_factory() as session:
+            return await OnDemandScanService(
+                session,
+                provider,
+                settings=test_context["settings"],
+            ).run(user.id, request)
+
+    try:
+        first, retry = await asyncio.gather(execute(), execute())
+
+        assert first.model_dump(mode="json") == retry.model_dump(mode="json")
+        async with session_factory() as session:
+            assert await session.scalar(select(func.count(OnDemandScanRun.id))) == 1
+            assert await session.scalar(select(func.count(UsageRecord.id))) == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_on_demand_stale_data_is_typed_and_releases_quota(test_context):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Stale Scanner")
+        session.add(user)
+        await session.flush()
+        await grant_monitor_plan(session, user)
+        strategy = scan_strategy()
+        request = OnDemandScanRequest(
+            strategy=strategy,
+            approved_schema_hash=strategy.canonical_hash(),
+            symbols=["SOL/USDT"],
+            max_symbols=1,
+            idempotency_key="scanner-stale-0001",
+        )
+
+        response = await OnDemandScanService(session, StaleOnDemandProvider()).run(
+            user.id, request
+        )
+
+        assert response.status == "failed"
+        assert response.results == []
+        assert response.market_statuses[0].category == "stale_incomplete_data"
+        assert response.market_statuses[0].error_code == "candle_data_stale"
+        assert response.quota_used == 0
+        assert response.quota_remaining == response.quota_limit
+        assert await session.scalar(select(func.count(UsageRecord.id))) == 0
+
+
+async def test_on_demand_fetches_every_non_base_trigger_timeframe(test_context):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Multi-timeframe Scanner")
+        session.add(user)
+        await session.flush()
+        await grant_monitor_plan(session, user)
+        strategy = scan_strategy().model_copy(deep=True)
+        extra = strategy.conditions.children[0].model_copy(
+            update={"key": "one_hour_trigger", "timeframe": "1h"}
+        )
+        strategy.conditions.children.append(extra)
+        strategy.supporting_timeframes = []
+        strategy = StrategyDefinition.model_validate(strategy.model_dump(mode="json"))
+        provider = TrackingTimeframeProvider()
+
+        await OnDemandScanService(session, provider).run(
+            user.id,
+            OnDemandScanRequest(
+                strategy=strategy,
+                approved_schema_hash=strategy.canonical_hash(),
+                symbols=["SOL/USDT"],
+                max_symbols=1,
+                idempotency_key="scanner-multitimeframe-0001",
+            ),
+        )
+
+        assert "1h" in strategy.supporting_timeframes
+        assert provider.fetched_timeframes == {
+            strategy.base_timeframe,
+            *strategy.supporting_timeframes,
+        }
 
 
 async def test_on_demand_scan_api_enforces_user_and_quota(test_context):

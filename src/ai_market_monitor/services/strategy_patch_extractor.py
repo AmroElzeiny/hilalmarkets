@@ -24,13 +24,14 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
     ConditionNodeV2,
     CorrectionV2,
-    DraftDirection,
     DraftFieldPatch,
     DraftMode,
     FormulaKind,
+    MovementDirection,
     OperandV2,
     ReversionV2,
     SetupIntent,
+    StrategyBias,
     StrategyDraftV2,
     StrategyPatch,
     StrategyPatchExtraction,
@@ -406,21 +407,34 @@ def deterministic_strategy_patch(
         for item in condition.walk()
         if item.node_type == ConditionNodeType.CONDITION
     ):
+        first_condition = next(
+            item
+            for item in condition.walk()
+            if item.node_type == ConditionNodeType.CONDITION
+        )
         unresolved.append(
             UnresolvedFieldV2(
-                key="timeframe",
+                unresolved_id="timeframe",
                 source_turn_id=source_turn_id,
                 source_fragment=_source_excerpt(cleaned),
+                target_type="condition_field",
+                target_field="trigger_timeframe",
+                target_condition_id=first_condition.node_id,
+                expected_answer_schema={"type": "string", "format": "timeframe"},
                 question="Which timeframe should evaluate this condition?",
+                reason="The condition needs one trigger timeframe before it can run.",
             )
         )
     if condition is None and (include or exclude or set_fields != DraftFieldPatch()):
         unresolved.append(
             UnresolvedFieldV2(
-                key="conditions",
+                unresolved_id="conditions",
                 source_turn_id=source_turn_id,
                 source_fragment=_source_excerpt(cleaned),
+                target_type="condition_creation",
+                expected_answer_schema={"type": "string"},
                 question="What measurable market condition should these assets match?",
+                reason="A market scope needs at least one measurable condition.",
             )
         )
     if (
@@ -541,11 +555,11 @@ def _deterministic_condition(
     roles = _resolve_timeframe_roles(text, report=report, draft=draft)
     confirmation_timeframes = list(roles.confirmation)
     default_timeframe = roles.trigger or _current_trigger_timeframe(draft) or "15m"
-    direction = {
-        StrategyDirection.LONG: DraftDirection.LONG,
-        StrategyDirection.SHORT: DraftDirection.SHORT,
-        StrategyDirection.BOTH: DraftDirection.NEUTRAL,
-        None: DraftDirection.NEUTRAL,
+    movement_direction = {
+        StrategyDirection.LONG: MovementDirection.UP,
+        StrategyDirection.SHORT: MovementDirection.DOWN,
+        StrategyDirection.BOTH: MovementDirection.NEUTRAL,
+        None: MovementDirection.NEUTRAL,
     }[report.direction]
     if report.is_sweep:
         return _sweep_condition(
@@ -561,7 +575,7 @@ def _deterministic_condition(
         trigger_timeframe=roles.trigger,
         context_timeframes=list(roles.context),
         confirmation_timeframes=confirmation_timeframes,
-        default_direction=direction,
+        default_direction=movement_direction,
     )
     if reference_condition is not None:
         return reference_condition
@@ -589,15 +603,16 @@ def _deterministic_condition(
             "high_to_low": FormulaKind.HIGH_TO_LOW_PERCENTAGE,
         }[formula.formula]
         if formula.direction == "up":
-            direction = DraftDirection.LONG
+            movement_direction = MovementDirection.UP
         elif formula.direction == "down":
-            direction = DraftDirection.SHORT
+            movement_direction = MovementDirection.DOWN
         return ConditionNodeV2(
             node_id=f"condition_{_stable_id(source_turn_id, text)}",
             node_type=ConditionNodeType.CONDITION,
             source_turn_id=source_turn_id,
             source_fragment=_source_excerpt(text),
-            direction=direction,
+            movement_direction=movement_direction,
+            strategy_bias=_explicit_strategy_bias(text),
             formula=formula_kind,
             operands=[
                 OperandV2(
@@ -631,19 +646,20 @@ def _sweep_condition(
     confirmation_timeframes: list[str],
 ) -> ConditionNodeV2:
     lowered = text.casefold()
-    direction = (
-        DraftDirection.LONG
+    movement_direction = (
+        MovementDirection.DOWN
         if re.search(r"\bsweeps?\s+below\b", lowered)
-        else DraftDirection.SHORT
+        else MovementDirection.UP
         if re.search(r"\bsweeps?\s+above\b", lowered)
-        else DraftDirection.NEUTRAL
+        else MovementDirection.NEUTRAL
     )
     return ConditionNodeV2(
         node_id=f"condition_{_stable_id(source_turn_id, text)}",
         node_type=ConditionNodeType.CONDITION,
         source_turn_id=source_turn_id,
         source_fragment=_source_excerpt(text),
-        direction=direction,
+        movement_direction=movement_direction,
+        strategy_bias=_explicit_strategy_bias(text),
         formula=FormulaKind.SWEEP_AND_RECLAIM,
         operands=[
             OperandV2(
@@ -685,7 +701,8 @@ def _low_to_high_percentage_condition(
         node_type=ConditionNodeType.CONDITION,
         source_turn_id=source_turn_id,
         source_fragment=_source_excerpt(text),
-        direction=DraftDirection.LONG,
+        movement_direction=MovementDirection.UP,
+        strategy_bias=_explicit_strategy_bias(text),
         formula=FormulaKind.LOW_TO_HIGH_PERCENTAGE,
         operands=[
             OperandV2(
@@ -718,7 +735,7 @@ def _deterministic_reference_condition(
     trigger_timeframe: str | None,
     context_timeframes: list[str],
     confirmation_timeframes: list[str],
-    default_direction: DraftDirection,
+    default_direction: MovementDirection,
 ) -> ConditionNodeV2 | None:
     field = _PRICE_FIELD_GROUP
     operator = _OPERATOR_GROUP
@@ -741,7 +758,8 @@ def _deterministic_reference_condition(
             text=text,
             formula=FormulaKind.LOOKBACK_REFERENCE_LEVEL,
             comparator=comparator,
-            direction=_direction_for_comparator(comparator, default_direction),
+            movement_direction=_direction_for_comparator(comparator, default_direction),
+            strategy_bias=_explicit_strategy_bias(text),
             trigger_timeframe=trigger_timeframe,
             context_timeframes=context_timeframes,
             confirmation_timeframes=confirmation_timeframes,
@@ -772,7 +790,8 @@ def _deterministic_reference_condition(
             text=text,
             formula=FormulaKind.PREVIOUS_CANDLE_REFERENCE,
             comparator=comparator,
-            direction=_direction_for_comparator(comparator, default_direction),
+            movement_direction=_direction_for_comparator(comparator, default_direction),
+            strategy_bias=_explicit_strategy_bias(text),
             trigger_timeframe=trigger_timeframe,
             context_timeframes=context_timeframes,
             confirmation_timeframes=confirmation_timeframes,
@@ -807,7 +826,8 @@ def _deterministic_reference_condition(
         node_type=ConditionNodeType.CONDITION,
         source_turn_id=source_turn_id,
         source_fragment=_source_excerpt(text),
-        direction=_direction_for_comparator(comparator, default_direction),
+        movement_direction=_direction_for_comparator(comparator, default_direction),
+        strategy_bias=_explicit_strategy_bias(text),
         formula=formula,
         operands=[
             OperandV2(
@@ -833,7 +853,8 @@ def _reference_node(
     text: str,
     formula: FormulaKind,
     comparator: Comparator,
-    direction: DraftDirection,
+    movement_direction: MovementDirection,
+    strategy_bias: StrategyBias,
     trigger_timeframe: str | None,
     context_timeframes: list[str],
     confirmation_timeframes: list[str],
@@ -850,7 +871,8 @@ def _reference_node(
         node_type=ConditionNodeType.CONDITION,
         source_turn_id=source_turn_id,
         source_fragment=_source_excerpt(text),
-        direction=direction,
+        movement_direction=movement_direction,
+        strategy_bias=strategy_bias,
         formula=formula,
         operands=[
             OperandV2(role="current_value", kind="price", field=left_field),
@@ -873,21 +895,29 @@ def _reference_node(
 
 def _direction_for_comparator(
     comparator: Comparator,
-    default: DraftDirection,
-) -> DraftDirection:
+    default: MovementDirection,
+) -> MovementDirection:
     if comparator in {
         Comparator.GREATER_THAN,
         Comparator.GREATER_THAN_OR_EQUAL,
         Comparator.CROSSES_ABOVE,
     }:
-        return DraftDirection.LONG
+        return MovementDirection.UP
     if comparator in {
         Comparator.LESS_THAN,
         Comparator.LESS_THAN_OR_EQUAL,
         Comparator.CROSSES_BELOW,
     }:
-        return DraftDirection.SHORT
+        return MovementDirection.DOWN
     return default
+
+
+def _explicit_strategy_bias(text: str) -> StrategyBias:
+    if re.search(r"\blong\b", text, re.IGNORECASE):
+        return StrategyBias.LONG
+    if re.search(r"\bshort\b", text, re.IGNORECASE):
+        return StrategyBias.SHORT
+    return StrategyBias.NEUTRAL
 
 
 #: Every spelling that puts a timeframe in the confirming role. `confirmation` alone
