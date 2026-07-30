@@ -18,6 +18,14 @@ _CLARIFICATION_FRICTION_RE = re.compile(
     r"i don't understand)\b",
     re.IGNORECASE,
 )
+#: Words that make a fragment a market statement rather than conversation. Shared by
+#: the condition counter and the mixed-turn test so the two cannot disagree.
+_TECHNICAL_FRAGMENT_RE = re.compile(
+    r"\b(?:above|below|cross|sweep|break|retest|volume|rsi|macd|ema|sma|vwap|"
+    r"candle|high|low|support|resistance|session|close|change|pattern|gap)\b",
+    re.IGNORECASE,
+)
+
 _ROUTING_TECHNICAL_TERMS = frozenset(
     {
         "above",
@@ -70,8 +78,17 @@ def select_setup_model(
     history: Iterable[dict[str, str]] = (),
     active_clarification: dict[str, Any] | None = None,
     capability_context: dict[str, Any] | None = None,
+    draft_condition_count: int = 0,
+    unresolved_field_count: int = 0,
+    previous_turn_failed: bool = False,
 ) -> AISetupModelRoute:
-    """Select a configured model tier without granting it any additional authority."""
+    """Select a configured model tier without granting it any additional authority.
+
+    ``draft_condition_count``, ``unresolved_field_count`` and ``previous_turn_failed``
+    describe the *conversation*, not the sentence. Reading only the current message
+    routed a hard turn to the cheap tier: "make that stricter" is four words, and
+    answering it needs the draft, the open question and the turn that just failed.
+    """
 
     conversation = list(history)
     combined = "\n".join(value for value in (accumulated_setup, current_message) if value)
@@ -120,6 +137,22 @@ def select_setup_model(
     if _looks_like_technical_typo(combined):
         reasons.append("possible_typographical_error")
 
+    # Signals that live in the conversation rather than in this sentence. A short
+    # message can be the hardest turn in the session.
+    if draft_condition_count >= settings.ai_setup_complex_condition_threshold:
+        reasons.append("complex_existing_draft")
+    if _refers_to_earlier_turn(current_message):
+        reasons.append("reference_to_previous_turn")
+    if unresolved_field_count > 0 and _short_answer(current_message):
+        # `yes` against an open question needs the question to make any sense.
+        reasons.append("answering_open_question")
+    if previous_turn_failed:
+        reasons.append("previous_interpretation_failed")
+    if _sounds_like_objection(current_message):
+        reasons.append("user_objection")
+    if _mixed_segment_count(current_message) >= 2:
+        reasons.append("mixed_conversation_and_instruction")
+
     unique_reasons = tuple(dict.fromkeys(reasons))
     complex_route = bool(unique_reasons)
     model = (
@@ -149,6 +182,75 @@ def select_setup_model(
     )
 
 
+#: Wording that points at something said earlier rather than naming it again. These
+#: turns cannot be understood from the sentence alone.
+_BACK_REFERENCE_RE = re.compile(
+    r"\b(?:that one|the other one|the (?:first|second|third|last|previous) one|"
+    r"the one (?:we|you|i) (?:just|already)|make (?:that|it|this)\b|"
+    r"keep (?:that|it|the first|the second)\b|remove (?:that|it|the one)\b|"
+    r"same as (?:before|above)|like (?:before|earlier)|as (?:we|you) said|"
+    r"revert|undo|go back)\b",
+    re.IGNORECASE,
+)
+
+#: A short reply that only means something against an open question.
+_SHORT_ANSWER_RE = re.compile(
+    r"^\s*(?:yes|no|yeah|yep|nope|sure|ok|okay|correct|right|wrong|both|neither|"
+    r"the (?:first|second|third)|option\s*[a-c1-3]|[a-c1-3])\b[\s.!,]*$",
+    re.IGNORECASE,
+)
+
+#: The user telling us we got it wrong. These turns need the better model most.
+_OBJECTION_RE = re.compile(
+    r"\b(?:that(?:'s| is) (?:not|wrong|incorrect)|not what i (?:said|meant|asked)|"
+    r"you (?:changed|removed|added|ignored|misunderstood)|why did you|"
+    r"i never (?:said|asked)|stop (?:asking|changing)|this is wrong|"
+    r"you keep\b|i already (?:said|told))\b",
+    re.IGNORECASE,
+)
+
+#: Conversational openers and closers that sit around an instruction. Their presence
+#: alongside technical wording is what makes a turn mixed.
+_SOCIAL_RE = re.compile(
+    r"\b(?:hi|hey|hello|thanks|thank you|please|good (?:morning|evening)|"
+    r"sorry|cheers|got it|understood|makes sense|nice|great|cool)\b",
+    re.IGNORECASE,
+)
+
+
+def _refers_to_earlier_turn(value: str) -> bool:
+    return bool(_BACK_REFERENCE_RE.search(value or ""))
+
+
+def _short_answer(value: str) -> bool:
+    return bool(_SHORT_ANSWER_RE.match(value or ""))
+
+
+def _sounds_like_objection(value: str) -> bool:
+    return bool(_OBJECTION_RE.search(value or ""))
+
+
+def _mixed_segment_count(value: str) -> int:
+    """How many different things one message is doing at once.
+
+    Only a routing hint. The model decides the real segmentation, and the server
+    checks it; this just stops a mixed turn from being priced as a simple one.
+    """
+    text = value or ""
+    kinds = 0
+    if _SOCIAL_RE.search(text):
+        kinds += 1
+    if "?" in text or "؟" in text:
+        kinds += 1
+    # `_condition_count` reports at least one for any non-empty string, so it cannot
+    # answer "is there technical content here". The vocabulary test can.
+    if _TECHNICAL_FRAGMENT_RE.search(text):
+        kinds += 1
+    if _BACK_REFERENCE_RE.search(text) or _CORRECTION_RE.search(text.strip()):
+        kinds += 1
+    return kinds
+
+
 def _condition_count(value: str) -> int:
     fragments = [
         fragment.strip()
@@ -156,14 +258,7 @@ def _condition_count(value: str) -> int:
         if fragment.strip()
     ]
     technical = [
-        fragment
-        for fragment in fragments
-        if re.search(
-            r"\b(?:above|below|cross|sweep|break|retest|volume|rsi|macd|ema|sma|vwap|"
-            r"candle|high|low|support|resistance|session|close|change|pattern|gap)\b",
-            fragment,
-            re.IGNORECASE,
-        )
+        fragment for fragment in fragments if _TECHNICAL_FRAGMENT_RE.search(fragment)
     ]
     return max(1, len(technical)) if value.strip() else 0
 

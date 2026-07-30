@@ -143,8 +143,10 @@ def apply_strategy_patch(
                 raise DraftPatchError(f"condition {node_id!r} does not exist")
             changed.append(f"condition_ast.remove:{node_id}")
     if patch.add_conditions:
+        before = condition_ast
         condition_ast = _append_conditions(condition_ast, patch.add_conditions)
-        changed.extend(f"condition_ast.add:{item.node_id}" for item in patch.add_conditions)
+        if condition_ast is not before:
+            changed.extend(f"condition_ast.add:{item.node_id}" for item in patch.add_conditions)
 
     unresolved: dict[str, UnresolvedFieldV2] = {
         unresolved_item.key: unresolved_item for unresolved_item in draft.unresolved_fields
@@ -338,12 +340,47 @@ def conversation_snapshot_hash(messages: Iterable[tuple[str, str]]) -> str:
     ).hexdigest()
 
 
+def _semantic_fingerprint(node: ConditionNodeV2) -> str:
+    """What a condition *means*, ignoring its id and which turn wrote it.
+
+    Two rules that differ only in timeframe are two real rules. Two that agree on
+    every measured field are the same rule said twice.
+    """
+    return json.dumps(
+        node.model_dump(
+            mode="json",
+            exclude={"node_id", "source_turn_id", "source_fragment"},
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _append_conditions(
     root: ConditionNodeV2 | None,
     additions: list[ConditionNodeV2],
-) -> ConditionNodeV2:
+) -> ConditionNodeV2 | None:
+    # A rule the draft already holds, identical in every measured field, is the same
+    # rule stated twice. Appending it produced two nodes that always fire together —
+    # visible to the trader as a duplicate they never asked for.
+    if root is not None:
+        existing = {
+            _semantic_fingerprint(node)
+            for node in root.walk()
+            if node.node_type == ConditionNodeType.CONDITION
+        }
+        additions = [
+            node
+            for node in additions
+            if node.node_type != ConditionNodeType.CONDITION
+            or _semantic_fingerprint(node) not in existing
+        ]
+        if not additions:
+            return root
     if root is None and len(additions) == 1:
         return additions[0]
+    if root is None and not additions:
+        return None
     if root is None:
         return ConditionNodeV2(
             node_id="root_and",

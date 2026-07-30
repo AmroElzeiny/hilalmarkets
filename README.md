@@ -5,11 +5,22 @@ traders. Users describe a Watch Plan, approve its structured interpretation, pre
 recent market data, and receive evidence-backed in-app or Telegram alerts during private beta.
 Version one never places trades.
 
-The guided Watch Plan builder starts with AI Setup Chat. The server-side interviewer keeps a durable
-conversation, asks for measurable definitions, compiles only into the validated strategy DSL, shows
-confidence/lint/assumption evidence, and creates an immutable approved strategy version only after
-explicit user approval. `OPENAI_API_KEY` is server-side only; `OPENAI_MODEL` is optional and defaults
-to `gpt-5.4-nano` with low reasoning.
+The Watch Plan builder is AI Setup Chat. Every ordinary free-text message goes to one bounded
+**Setup Agent** first: it reads the whole turn, splits it into segments — a greeting, an
+instruction, a correction and a question can arrive together — and calls exactly one
+state-changing server tool, `apply_setup_turn`. That tool is the only executable authority. It
+checks each actionable span against the user's exact words, refuses any capability key the server
+did not offer, applies the patch to `StrategyDraftV2`, runs semantic validation and compiles an
+inactive preview. The final reply is written from the tool's execution result, so it can never
+describe a change that did not land. An immutable approved strategy version is created only by the
+separate authenticated approval action. `OPENAI_API_KEY` is server-side only.
+
+One free-text turn costs at most one planning call, one deterministic execution and one reply call.
+There are no tool loops, no interviewer and no fallback orchestrator. Explicit UI actions —
+choosing Scanner or Monitor, answering a server-offered option, Review and approve — stay
+deterministic and cost nothing. See
+[docs/SETUP_CHAT_AGENT_REBUILD_REPORT.md](docs/SETUP_CHAT_AGENT_REBUILD_REPORT.md) and
+[docs/AI_SETUP_CHAT_LAUNCH_V2.md](docs/AI_SETUP_CHAT_LAUNCH_V2.md).
 
 The integrated `hm_chatbot_eval` package exercises this authenticated flow through the real
 session/message APIs and Strategy Canvas, with production-derived JSON Schemas, a canonical field
@@ -21,14 +32,14 @@ For routine release confidence, `--mode budget --target both` covers every evalu
 through the authenticated backend, repeats only UI/Canvas boundary topics in Playwright, judges
 the results, and enforces a measured all-in `$2.50` cap across evaluator and chatbot model calls.
 
-Bounded Agent Control selects among a small server-offered tool set for messy, multi-intent chat
-turns. The controlled-beta deployment profile serves the live coordinator to all authenticated
-beta users (`AI_AGENT_SHADOW_MODE=false`, `AI_AGENT_ROLLOUT_PERCENT=100`). Registry, compiler,
-provider, scanner, ownership, entitlement, hash, approval, and activation authority remain in
-application services; the model never receives approval or activation tools. Setting
-`AI_AGENT_CONTROL_ENABLED=false` returns users to the durable guided flow without a database
-rollback. See
+Bounded Agent Control is **not** the Setup Chat path. It was a general multi-tool coordinator; the
+Setup Agent above replaced it for authenticated strategy building, and `AI_AGENT_CONTROL_ENABLED`
+defaults to false and does not affect Setup Chat. Its document is retained for history only:
 [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
+
+Registry, compiler, provider, scanner, ownership, entitlement, hash, approval and activation
+authority all remain in application services. The model receives no approval, activation, network,
+SQL, filesystem or trade tool of any kind.
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
 persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology

@@ -451,6 +451,19 @@ class ReversionV2(BaseModel):
 class StrategyPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _absent_nulls_use_defaults(cls, data: object) -> object:
+        """A strict schema requires every key, so `null` here means "nothing to set".
+
+        The provider cannot omit a property under a strict schema. Sending `null` for
+        `set_fields` is how it says it has no field changes, and rejecting that failed
+        otherwise-correct patches.
+        """
+        from ai_market_monitor.schemas.strict_mode import drop_absent_nulls
+
+        return drop_absent_nulls(cls, data)
+
     source_turn_id: str = Field(min_length=1, max_length=80)
     set_fields: DraftFieldPatch = Field(default_factory=DraftFieldPatch)
     add_conditions: list[ConditionNodeV2] = Field(default_factory=list, max_length=100)

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from time import monotonic
 from typing import Any, Literal
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,11 +27,21 @@ from ai_market_monitor.engine.strategy_draft_v2 import (
     apply_strategy_patch,
     validate_draft_semantics,
 )
+from ai_market_monitor.schemas.setup_agent import (
+    DIALOGUE_WINDOW_MAX,
+    SetupConversationContext,
+    SetupTurnExecutionResult,
+)
 from ai_market_monitor.schemas.strategy import ShariaPolicyDefinition, StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     DraftMode,
-    SetupIntent,
     StrategyDraftV2,
+    UnresolvedFieldV2,
+)
+from ai_market_monitor.services.setup_chat_agent import (
+    SetupAgentError,
+    SetupAgentTurnInput,
+    SetupChatAgent,
 )
 from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
@@ -47,6 +59,37 @@ from ai_market_monitor.services.system_brain import CapabilityCoverageService
 #: instead. Asking is capped; *exposing* what is still missing is not.
 MAX_CLARIFICATIONS_PER_DRAFT = 3
 
+#: Which transport stage an agent failure maps to for the HTTP error envelope. The
+#: four stages stay distinct: a planning failure, a refused plan, a compile refusal
+#: and a failed reply need different handling, and collapsing them once lost the
+#: draft or reported real market logic as conversation.
+LaunchStage = Literal[
+    "intent",
+    "extract",
+    "patch",
+    "interpret",
+    "compile",
+    "serialize",
+    "provider",
+]
+
+_LAUNCH_STAGE_BY_AGENT_STAGE: dict[str, LaunchStage] = {
+    "planning": "extract",
+    "tool_validation": "patch",
+    "compile": "compile",
+    "response_composition": "serialize",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _DraftRenderState:
+    """What persisting the draft found, for callers that then write a message."""
+
+    blocking: bool
+    violations: tuple[str, ...]
+    unresolved: tuple[UnresolvedFieldV2, ...]
+    definition: StrategyDefinition | None
+
 
 class SetupLaunchError(ValueError):
     def __init__(
@@ -54,15 +97,7 @@ class SetupLaunchError(ValueError):
         code: str,
         message: str,
         *,
-        stage: Literal[
-            "intent",
-            "extract",
-            "patch",
-            "interpret",
-            "compile",
-            "serialize",
-            "provider",
-        ],
+        stage: LaunchStage,
         retryable: bool = False,
         status_code: int = 409,
     ) -> None:
@@ -82,9 +117,13 @@ class SetupChatLaunchService:
         owner: Any,
         *,
         extractor: StrategyPatchExtractor | None = None,
+        agent: SetupChatAgent | None = None,
     ) -> None:
         self.settings = settings
         self.owner = owner
+        #: Free text goes to the agent. The extractor now serves only explicit
+        #: server-offered field answers, which need no model call at all.
+        self.agent = agent or SetupChatAgent(settings)
         self.extractor = extractor or LaunchStrategyPatchExtractor(settings)
 
     async def handle(
@@ -149,16 +188,16 @@ class SetupChatLaunchService:
         if option_key == "monitor_name":
             cleaned = option_value or cleaned
 
-        decision = decide_setup_intent(cleaned)
-        if option_key and option_value and option_key not in {"monitor_name"}:
-            # A server-offered answer resolves a typed field. It cannot grant approval
-            # or invoke a legacy capability path.
-            decision = decision.__class__(
-                intent=SetupIntent.STRATEGY_PATCH,
-                confidence=1.0,
-                reason=f"server-offered field {option_key}",
-                requires_structured_extraction=True,
-            )
+        # The old deterministic gate is kept only as a hint recorded on the turn. It no
+        # longer decides whether a message reaches the agent, and it no longer picks a
+        # reply: a sentence its regular expressions did not recognise used to be
+        # answered with "describe the market behavior you want", even when the user had
+        # just written three lines of exact market logic.
+        lexical_hint = decide_setup_intent(cleaned)
+        offered_option = bool(option_key and option_value and option_key not in {"monitor_name"})
+        if offered_option:
+            # An explicit UI answer resolves one typed field. It stays deterministic and
+            # costs no model call; it can still never grant approval.
             cleaned = f"{option_key}: {option_value}"
 
         user_message = await self.owner._append_message(
@@ -168,20 +207,24 @@ class SetupChatLaunchService:
             message_type="option" if option_key else "text",
             content=cleaned,
             payload={
-                "intent": decision.intent.value,
-                "intent_confidence": decision.confidence,
-                "intent_reason": decision.reason,
-                "launch_pipeline": "strategy_draft_v2",
+                "lexical_hint": lexical_hint.intent.value,
+                "lexical_hint_confidence": lexical_hint.confidence,
+                "lexical_hint_reason": lexical_hint.reason,
+                "launch_pipeline": "setup_agent_v3",
                 "option_key": option_key,
                 "option_value": option_value,
             },
             client_message_id=client_message_id,
         )
 
-        if decision.intent != SetupIntent.STRATEGY_PATCH:
-            await self._respond_without_mutation(session, chat, decision.intent)
-            _set_runtime(chat, started, model_calls=0, cache_hits=0)
-            return chat
+        if not offered_option:
+            return await self._run_agent_turn(
+                session,
+                chat,
+                message=cleaned,
+                source_turn_id=str(user_message.id),
+                started=started,
+            )
 
         draft = load_strategy_draft_v2(chat)
         context = dict(chat.context_json or {})
@@ -220,13 +263,27 @@ class SetupChatLaunchService:
                 usage=getattr(self.extractor, "last_usage", None),
             )
         except StrategyPatchNonMutation as exc:
+            # A typed field answer that changed nothing. The answer text the extractor
+            # produced is used instead of being discarded, which is what left a user
+            # staring at a generic sentence after answering a question correctly.
             await CapabilityCoverageService(self.settings).record_usage(
                 session,
                 chat=chat,
                 operation="strategy_patch_v2",
                 usage=getattr(self.extractor, "last_usage", None),
             )
-            await self._respond_without_mutation(session, chat, exc.intent)
+            await self.owner._assistant(
+                session,
+                chat,
+                exc.answer or _no_change_summary(draft),
+                message_type="option_no_change",
+                payload={
+                    "strategy_mutated": False,
+                    "draft_id": str(draft.draft_id),
+                    "draft_version": draft.version,
+                    "semantic_hash": draft.semantic_hash,
+                },
+            )
             _set_runtime(
                 chat,
                 started,
@@ -259,7 +316,7 @@ class SetupChatLaunchService:
         context["strategy_state_authority"] = "v2"
         context["launch_pipeline_version"] = "2.0"
         context["last_semantic_diff"] = list(result.changed_fields)
-        context["last_intent"] = decision.intent.value
+        context["last_intent"] = f"offered_option:{option_key}"
         context["last_patch_source_turn_id"] = str(user_message.id)
         context["last_v2_patch_input_hash"] = input_fingerprint
         context["last_v2_patch_result_hash"] = result.draft.semantic_hash
@@ -272,6 +329,134 @@ class SetupChatLaunchService:
         model_calls = int(getattr(self.extractor, "model_call_count", 0))
         _set_runtime(chat, started, model_calls=model_calls, cache_hits=0)
         return chat
+
+    async def _run_agent_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        message: str,
+        source_turn_id: str,
+        started: float,
+    ) -> AISetupChatSession:
+        """One free-text turn: plan, execute once, then answer from what happened."""
+
+        draft = load_strategy_draft_v2(chat)
+        context = dict(chat.context_json or {})
+        conversation = _load_conversation_context(context)
+        history = list(context.get("strategy_draft_v2_history") or [])
+        turn = SetupAgentTurnInput(
+            message=message,
+            source_turn_id=source_turn_id,
+            draft=draft,
+            dialogue=tuple(await self._recent_dialogue(session, chat)),
+            conversation=conversation,
+            history=tuple(history),
+            setup_mode=draft.mode,
+            previous_turn_failed=bool(context.get("last_turn_failed")),
+        )
+        try:
+            outcome = await self.agent.run_turn(turn)
+        except SetupAgentError as exc:
+            # The draft is untouched and stays exactly as it was. The turn is reported
+            # as the failure it is, never as small talk, and the same idempotency key
+            # can be retried.
+            context["last_turn_failed"] = True
+            context["last_turn_failure"] = {
+                "code": exc.code,
+                "stage": exc.stage,
+                "retryable": exc.retryable,
+                "details": list(exc.details[:6]),
+            }
+            chat.context_json = context
+            raise SetupLaunchError(
+                exc.code,
+                str(exc),
+                stage=_LAUNCH_STAGE_BY_AGENT_STAGE.get(exc.stage, "interpret"),
+                retryable=exc.retryable,
+                status_code=503 if exc.retryable else 422,
+            ) from exc
+
+        await CapabilityCoverageService(self.settings).record_usage(
+            session,
+            chat=chat,
+            operation="setup_agent_turn",
+            usage=outcome.usage or None,
+        )
+
+        if outcome.execution is not None and outcome.history_snapshot is not None:
+            history.append(outcome.history_snapshot)
+            context["strategy_draft_v2_history"] = history[-100:]
+            if chat.status == "approved":
+                _archive_approval(chat, context, message)
+
+        context["strategy_draft_v2"] = outcome.draft.model_dump(mode="json")
+        context["strategy_state_authority"] = "v2"
+        context["launch_pipeline_version"] = "3.0"
+        context["setup_conversation_context"] = outcome.conversation.model_dump(mode="json")
+        context["last_turn_trace"] = outcome.trace.to_dict()
+        context["last_turn_failed"] = False
+        context.pop("last_turn_failure", None)
+        if outcome.execution is not None:
+            context["last_semantic_diff"] = list(outcome.execution.semantic_diff)
+            context["last_execution_result"] = outcome.execution.model_dump(mode="json")
+        context["last_patch_source_turn_id"] = source_turn_id
+        chat.context_json = context
+        if (
+            not chat.original_idea
+            and outcome.execution is not None
+            and outcome.execution.strategy_mutated
+        ):
+            chat.original_idea = message
+            chat.title = _title(message)
+
+        state = await self._persist_draft_state(session, chat, outcome.draft)
+        await self.owner._assistant(
+            session,
+            chat,
+            outcome.reply.message,
+            message_type=_agent_message_type(outcome.execution),
+            payload={
+                "draft_v2": outcome.draft.model_dump(mode="json"),
+                "execution_result": (
+                    outcome.execution.model_dump(mode="json")
+                    if outcome.execution is not None
+                    else None
+                ),
+                "segments": list(outcome.trace.segments),
+                "semantic_violations": list(state.violations),
+                "clarifications": (
+                    [outcome.reply.clarification.model_dump(mode="json")]
+                    if outcome.reply.clarification is not None
+                    else []
+                ),
+                "can_approve": chat.status == "ready_for_approval",
+                "turn_trace": outcome.trace.to_dict(),
+                "model_call_count": outcome.trace.model_calls,
+            },
+        )
+        _set_runtime(chat, started, model_calls=outcome.trace.model_calls, cache_hits=0)
+        return chat
+
+    async def _recent_dialogue(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+    ) -> list[dict[str, str]]:
+        """The last few turns, oldest first. Bounded, never the whole log."""
+
+        rows = await session.scalars(
+            select(AISetupChatMessage)
+            .where(AISetupChatMessage.session_id == chat.id)
+            .order_by(AISetupChatMessage.sequence.desc())
+            .limit(DIALOGUE_WINDOW_MAX)
+        )
+        recent = list(rows)[::-1]
+        return [
+            {"role": item.role, "content": (item.content or "")[:1500]}
+            for item in recent
+            if item.role in {"user", "assistant"} and (item.content or "").strip()
+        ]
 
     async def _select_mode(
         self,
@@ -346,51 +531,18 @@ class SetupChatLaunchService:
         _set_runtime(chat, started, model_calls=0, cache_hits=0)
         return chat
 
-    async def _respond_without_mutation(
-        self,
-        session: AsyncSession,
-        chat: AISetupChatSession,
-        intent: SetupIntent,
-    ) -> None:
-        draft = load_strategy_draft_v2(chat)
-        content = {
-            SetupIntent.CONVERSATION: (
-                "I'm ready. Describe the market behavior you want to scan or monitor."
-            ),
-            SetupIntent.PRODUCT_QUESTION: (
-                "I build inactive Scanner or Monitor previews from your rules. "
-                "Nothing activates until you review and approve it."
-            ),
-            SetupIntent.APPROVAL_ACTION: (
-                "Approval is completed only with the Review and approve control. "
-                "That binds your authenticated action to this exact draft version."
-            ),
-            SetupIntent.EXPLANATION_REQUEST: _draft_explanation(draft),
-            SetupIntent.UNSUPPORTED_REQUEST: (
-                "HilalMarkets can monitor and explain spot-market conditions, but it "
-                "cannot place trades or guarantee outcomes."
-            ),
-        }[intent]
-        await self.owner._assistant(
-            session,
-            chat,
-            content,
-            message_type=intent.value.casefold(),
-            payload={
-                "intent": intent.value,
-                "strategy_mutated": False,
-                "draft_id": str(draft.draft_id),
-                "draft_version": draft.version,
-                "semantic_hash": draft.semantic_hash,
-            },
-        )
-
-    async def _render_current_draft(
+    async def _persist_draft_state(
         self,
         session: AsyncSession,
         chat: AISetupChatSession,
         draft: StrategyDraftV2,
-    ) -> None:
+    ) -> _DraftRenderState:
+        """Write every derived field the dashboard reads, and emit no message.
+
+        Separated from message generation on purpose. A reply is now composed from
+        what execution actually did, so the two jobs cannot share a code path that
+        picks a sentence based on a compiler outcome.
+        """
         violations = validate_draft_semantics(draft)
         blocking = draft.blocking or bool(violations)
         definition: StrategyDefinition | None = None
@@ -456,6 +608,28 @@ class SetupChatLaunchService:
         # Every remaining field is exposed. Only the number of *questions* is capped:
         # hiding the rest left the user unable to see what the draft still needed.
         unresolved = [item for item in draft.unresolved_fields if item.blocking]
+        return _DraftRenderState(
+            blocking=blocking,
+            violations=tuple(violations),
+            unresolved=tuple(unresolved),
+            definition=definition,
+        )
+
+    async def _render_current_draft(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        draft: StrategyDraftV2,
+    ) -> None:
+        """Templated feedback for an explicit server-offered UI answer.
+
+        Free-text turns never reach this. They are answered by the agent from the
+        execution result, which is why the generic readiness sentence is gone.
+        """
+        state = await self._persist_draft_state(session, chat, draft)
+        blocking = state.blocking
+        violations = list(state.violations)
+        unresolved = list(state.unresolved)
         if blocking:
             context = dict(chat.context_json or {})
             asked = list(context.get("v2_clarification_keys_asked") or [])
@@ -605,6 +779,39 @@ def _archive_approval(
     chat.approved_strategy_version_id = None
 
 
+def _load_conversation_context(context: dict[str, Any]) -> SetupConversationContext:
+    payload = context.get("setup_conversation_context")
+    if isinstance(payload, dict):
+        try:
+            return SetupConversationContext.model_validate(payload)
+        except ValidationError:
+            # Language context is a convenience, never executable state. A stale shape
+            # must not fail a turn; it starts empty instead.
+            return SetupConversationContext()
+    return SetupConversationContext()
+
+
+def _agent_message_type(execution: SetupTurnExecutionResult | None) -> str:
+    if execution is None:
+        return "assistant_reply"
+    return {
+        "applied": "draft_updated",
+        "no_change": "no_change",
+        "blocked": "draft_blocked",
+        "rejected": "instruction_rejected",
+        "conversation_only": "assistant_reply",
+    }.get(execution.status, "assistant_reply")
+
+
+def _no_change_summary(draft: StrategyDraftV2) -> str:
+    """Factual words for an answer that resolved nothing, built from real state."""
+
+    pending = next((item for item in draft.unresolved_fields if item.blocking), None)
+    if pending is not None:
+        return f"That did not change the draft. Still needed: {pending.question}"
+    return f"That did not change the draft. It stays at version {draft.version}."
+
+
 def _translation_sheet(draft: StrategyDraftV2) -> dict[str, Any]:
     conditions = []
     if draft.condition_ast is not None:
@@ -681,19 +888,6 @@ def _rule_confidence(draft: StrategyDraftV2) -> list[dict[str, Any]]:
         for item in draft.condition_ast.walk()
         if item.node_type.value == "condition"
     ]
-
-
-def _draft_explanation(draft: StrategyDraftV2) -> str:
-    count = (
-        sum(item.node_type.value == "condition" for item in draft.condition_ast.walk())
-        if draft.condition_ast
-        else 0
-    )
-    return (
-        f"The current inactive {draft.mode.value} draft has {count} measurable "
-        f"condition{'s' if count != 1 else ''}, version {draft.version}. "
-        "Its AI Sheet shows each exact formula, timeframe, threshold, and source wording."
-    )
 
 
 def _title(text: str) -> str:

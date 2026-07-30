@@ -94,6 +94,7 @@ from ai_market_monitor.services.hybrid_capability_resolution import (
 from ai_market_monitor.services.interfaces import MarketDataProvider, StrategyInterpreter
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
+from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import (
     SetupChatLaunchService,
     SetupLaunchError,
@@ -704,6 +705,7 @@ class AISetupChatService:
         interviewer: SetupChatInterviewer | None = None,
         agent_client: AgentResponsesClient | None = None,
         launch_extractor: StrategyPatchExtractor | None = None,
+        launch_agent: SetupChatAgent | None = None,
     ) -> None:
         self.settings = settings
         self.market_provider = market_provider
@@ -711,6 +713,9 @@ class AISetupChatService:
         self.interviewer = interviewer or OpenAISetupChatInterviewer(settings)
         self.agent_client = agent_client
         self.launch_extractor = launch_extractor
+        #: Free text is answered by this agent. Injected in tests so a whole turn can
+        #: be exercised without a paid call.
+        self.launch_agent = launch_agent
         # One turn can need the same interpretation twice: once for the inactive draft
         # emitted while questions are open, once for the final compile. The service is
         # constructed per request, so memoising here bills the model call once.
@@ -1131,6 +1136,7 @@ class AISetupChatService:
                     self.settings,
                     self,
                     extractor=self.launch_extractor,
+                    agent=self.launch_agent,
                 ).handle(
                     session,
                     chat,
