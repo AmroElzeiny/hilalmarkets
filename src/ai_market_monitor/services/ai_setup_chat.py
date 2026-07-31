@@ -905,7 +905,7 @@ class AISetupChatService:
                     status_code=409,
                 )
             try:
-                definition = await SetupChatLaunchService(
+                definition, screening_evidence = await SetupChatLaunchService(
                     self.settings,
                     self,
                     agent=self.launch_agent,
@@ -938,6 +938,9 @@ class AISetupChatService:
                             executable_version=draft_v2.executable_version,
                             executable_hash=draft_v2.executable_hash,
                             conversation_snapshot_hash=snapshot_hash,
+                            # Which markets, under which policy, verified how. Bound so a
+                            # later question about what was approved has one answer.
+                            screening_evidence=screening_evidence,
                             approved_at=datetime.now(UTC),
                         ),
                         "executable_hash": draft_v2.executable_hash,

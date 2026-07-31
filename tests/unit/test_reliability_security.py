@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+﻿from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
@@ -171,7 +171,7 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -198,7 +198,7 @@ def test_deployed_public_chat_requires_real_smtp_configuration():
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -232,7 +232,7 @@ def test_agent_kill_switch_keeps_certified_capabilities_bootable() -> None:
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -240,6 +240,11 @@ def test_agent_kill_switch_keeps_certified_capabilities_bootable() -> None:
         telegram_enabled=False,
         billing_enabled=False,
         public_chat_enabled=False,
+        # A deployment with no public surface also has no public forms. Leaving the
+        # default on made this test fail for a reason that has nothing to do with the
+        # kill switch it is about: public forms need real SMTP, and none is configured
+        # here. The startup guard is right; the settings were incomplete.
+        public_forms_enabled=False,
         ai_agent_control_enabled=False,
         capability_extension_enabled=True,
         ai_setup_evaluator_enabled=False,
@@ -259,7 +264,7 @@ def test_deployed_runtime_requires_fail_closed_api_rate_limits():
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -280,7 +285,7 @@ def test_deployed_sharia_governance_requires_safe_operational_dependencies():
     settings = Settings(
         app_env="staging",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -312,7 +317,7 @@ def test_deployed_runtime_rejects_fixture_market_data_and_unwired_provider_flags
         _env_file=None,
         app_env="staging",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         ai_interpreter_provider="rules",
@@ -338,7 +343,7 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
         _env_file=None,
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -360,7 +365,7 @@ def test_enabled_production_creem_requires_the_complete_product_catalog():
         _env_file=None,
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -388,7 +393,7 @@ def test_enabled_production_whatsapp_requires_complete_cloud_api_configuration()
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -417,7 +422,7 @@ def test_whatsapp_opportunity_delivery_requires_an_explicit_template():
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,
@@ -449,7 +454,7 @@ def test_deployed_whatsapp_requires_complete_non_placeholder_template_registry()
     settings = Settings(
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
-        database_url="postgresql+asyncpg://user:password@database/monitor",
+        database_url="postgresql+asyncpg://user:s3cure-deployment-secret@database/monitor",
         public_base_url="https://monitor.example.com",
         allow_mock_providers=False,
         scanning_enabled=False,

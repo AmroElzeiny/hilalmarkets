@@ -20,6 +20,7 @@ from jsonschema import Draft202012Validator
 
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
 from ai_market_monitor.engine.capability_index import get_capability_index
+from ai_market_monitor.engine.parameter_roles import role_grounding_errors
 from ai_market_monitor.engine.semantic_grounding import (
     grounds_boolean,
     grounds_number,
@@ -257,6 +258,26 @@ def _parameter_errors(
             errors.append(
                 f"{node.node_id}:parameter_not_grounded:{name}:{semantic_unit}"
             )
+
+    # Value grounding asks "did the trader write this number?". When one capability takes
+    # two trader-controlled numbers of the same unit — an RSI period and a confirmation
+    # count are both candle counts — that question has the same answer whichever way round
+    # they are assigned, so `period=3, confirmation=14` passed while monitoring the
+    # opposite of what was asked for. Role grounding asks the second half: *why is this
+    # number this parameter?* See `engine/parameter_roles.py`.
+    errors.extend(
+        role_grounding_errors(
+            node_id=node.node_id,
+            supplied={
+                name: value
+                for name, value in supplied.items()
+                if name not in _PLATFORM_PARAMETERS
+            },
+            defaults=registry_defaults,
+            parameter_schema=properties,
+            authorizing_text=authorizing_text,
+        )
+    )
     return errors
 
 

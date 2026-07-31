@@ -89,24 +89,198 @@ def resolved_state(state: StrategyDraftState) -> dict[str, object]:
 
 
 def load_conversations(run_id: str, scenario: str | None) -> dict[str, list[str]]:
-    """Recorded user turns per scenario, in order."""
+    """Recorded user turns per scenario, in order.
+
+    Two recording shapes exist, and this reads both.
+
+    The **older** one stored each user turn under ``turns``. The probe folded them one at
+    a time, which is what the chat service does.
+
+    The **current** one stores ``canonical_state`` — the settled canonical text the setup
+    chat actually compiles — plus ``source_scenario_id``. The raw turns are gone, but what
+    remains is closer to production, not further from it: it is the exact string the
+    compiler is given. It is replayed as a single final turn.
+
+    Reading only the older shape is why this probe silently matched nothing against every
+    run recorded since the canonical-state change: it exited with "No matching
+    conversations" and a non-zero code, which reads like a broken run rather than an
+    unreadable file.
+    """
     path = RUNS_DIR / run_id / "cases.jsonl"
     if not path.exists():
-        raise SystemExit(f"No cases.jsonl for run {run_id!r} (looked in {path})")
+        available = sorted(item.parent.name for item in RUNS_DIR.glob("*/cases.jsonl"))
+        raise SystemExit(
+            f"No cases.jsonl for run {run_id!r} (looked in {path}).\n"
+            f"Runs that have one: {', '.join(available) or 'none'}"
+        )
     conversations: dict[str, list[str]] = {}
+    skipped_without_text = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         case = json.loads(line)
-        scenario_id = (case.get("scenario") or {}).get("id") or ""
+        scenario_id = (
+            (case.get("scenario") or {}).get("id")
+            or case.get("source_scenario_id")
+            or case.get("topic_id")
+            or ""
+        )
         if scenario and scenario not in scenario_id:
             continue
         turns = [
-            turn.get("text") or "" for turn in case.get("turns") or [] if turn.get("role") == "user"
+            turn.get("text") or ""
+            for turn in case.get("turns") or []
+            if isinstance(turn, dict) and turn.get("role") == "user"
         ]
         if turns:
             conversations.setdefault(scenario_id, turns)
+        else:
+            skipped_without_text += 1
+    if skipped_without_text:
+        print(
+            f"note: {skipped_without_text} recorded case(s) carry a draft, not raw turns; "
+            "use --drafts to replay those through the V2 compiler",
+            file=sys.stderr,
+        )
     return conversations
+
+
+def load_drafts(run_id: str, scenario: str | None) -> dict[str, dict]:
+    """Recorded canonical drafts per scenario.
+
+    The current recording shape stores ``canonical_state``: the serialised draft the
+    setup chat had built when the case ended. Compiling that is the closest deterministic
+    check available to what production does, and it needs no model call.
+    """
+    path = RUNS_DIR / run_id / "cases.jsonl"
+    if not path.exists():
+        available = sorted(item.parent.name for item in RUNS_DIR.glob("*/cases.jsonl"))
+        raise SystemExit(
+            f"No cases.jsonl for run {run_id!r} (looked in {path}).\n"
+            f"Runs that have one: {', '.join(available) or 'none'}"
+        )
+    drafts: dict[str, dict] = {}
+    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+        if not line.strip():
+            continue
+        case = json.loads(line)
+        scenario_id = (
+            case.get("source_scenario_id")
+            or (case.get("scenario") or {}).get("id")
+            or case.get("topic_id")
+            or f"case-{index}"
+        )
+        if scenario and scenario not in scenario_id:
+            continue
+        canonical = case.get("canonical_state")
+        if isinstance(canonical, dict) and canonical:
+            drafts.setdefault(scenario_id, canonical)
+    return drafts
+
+
+#: Fields only the pre-V2 `StrategyDraftState` had. Their presence identifies a recording
+#: this probe cannot read, which is a different thing from a draft that fails to compile.
+_PRE_V2_MARKERS = frozenset({"patches", "approval_state", "unresolved_definitions"})
+
+
+def _is_pre_v2_draft_state(payload: dict) -> bool:
+    return not payload.get("schema_version") and bool(_PRE_V2_MARKERS & set(payload))
+
+
+def replay_drafts(run_id: str, scenario: str | None, show_conditions: bool) -> int:
+    """Compile every recorded draft and report what still blocks approval.
+
+    Returns the number of drafts that raised. A raise here is what an HTTP 500 looks like
+    from inside the compiler, which is the thing this probe exists to catch.
+    """
+
+    from ai_market_monitor.engine.strategy_compiler_v2 import (  # noqa: PLC0415
+        StrategyV2CompileError,
+        compile_strategy_draft_v2,
+    )
+    from ai_market_monitor.engine.strategy_draft_v2 import (  # noqa: PLC0415
+        validate_draft_semantics,
+    )
+    from ai_market_monitor.schemas.strategy_draft_v2 import (  # noqa: PLC0415
+        StrategyDraftV2,
+    )
+
+    drafts = load_drafts(run_id, scenario)
+    if not drafts:
+        raise SystemExit("No matching recorded drafts.")
+
+    crashes = 0
+    compiled = 0
+    unreadable = 0
+    tally: collections.Counter[str] = collections.Counter()
+    for scenario_id, payload in drafts.items():
+        if _is_pre_v2_draft_state(payload):
+            # A recording from before the V2 draft existed. The probe cannot read it, and
+            # saying so is the honest answer. Counting it as a compiler crash would report
+            # this script's own limitation as a product failure.
+            unreadable += 1
+            continue
+        print("=" * 92)
+        print(scenario_id)
+        try:
+            # `StrategyDraftV2` migrates its own older schema versions, and deliberately
+            # fails closed on a legacy identity by clearing the hashes and any approval.
+            draft = StrategyDraftV2.model_validate(payload)
+        except Exception as exc:  # noqa: BLE001 - reproducing the production failure
+            crashes += 1
+            print(f"  RAISED loading the recorded draft: {type(exc).__name__}")
+            traceback.print_exc()
+            continue
+        violations = validate_draft_semantics(draft)
+        unsupported = [item for item in draft.unsupported_requirements if item.blocking]
+        unresolved = [item for item in draft.unresolved_fields if item.blocking]
+        compile_status = "not_attempted"
+        conditions = 0
+        if draft.condition_ast is not None and not violations and not draft.authoring_blocking:
+            try:
+                definition = compile_strategy_draft_v2(draft)
+            except StrategyV2CompileError as exc:
+                compile_status = f"failed:{exc.code}"
+                tally[exc.code] += 1
+            except Exception as exc:  # noqa: BLE001 - a raise is the HTTP 500
+                crashes += 1
+                compile_status = "RAISED"
+                print(f"  RAISED compiling: {type(exc).__name__}")
+                traceback.print_exc()
+            else:
+                compile_status = "compiled"
+                compiled += 1
+                conditions = len(leaves(definition.conditions))
+                if show_conditions:
+                    for row in describe(definition):
+                        print(f"        RULE  {row}")
+        print(
+            f"  compile={compile_status:<24} conditions={conditions:>2} "
+            f"violations={len(violations):>2} unsupported={len(unsupported):>2} "
+            f"unresolved={len(unresolved):>2}"
+        )
+        for item in violations:
+            tally[item.split(":", 1)[0]] += 1
+            print(f"        VIOLATION {item}")
+        for item in unsupported:
+            tally[f"unsupported:{item.key}"] += 1
+            print(f"        UNSUPPORTED {item.key}: {item.missing_contract[:70]!r}")
+
+    print("=" * 92)
+    readable = len(drafts) - unreadable
+    print(
+        f"recorded drafts: {len(drafts)}   readable: {readable}   "
+        f"compiled: {compiled}   crashes: {crashes}"
+    )
+    if unreadable:
+        print(
+            f"  {unreadable} recorded before the V2 draft existed and cannot be replayed "
+            "(not a compiler failure)"
+        )
+    print(f"blocking findings: {sum(tally.values())}")
+    for code, count in tally.most_common():
+        print(f"  {count:>3}  {code}")
+    return crashes
 
 
 def leaves(node: ConditionRule | ConditionGroup) -> list[ConditionRule]:
@@ -131,6 +305,14 @@ async def main() -> int:
         "--show-conditions", action="store_true", help="print each compiled condition"
     )
     parser.add_argument(
+        "--drafts",
+        action="store_true",
+        help=(
+            "compile each recorded canonical draft through the V2 compiler. Chosen "
+            "automatically when a run stores drafts rather than raw user turns."
+        ),
+    )
+    parser.add_argument(
         "--json",
         dest="json_path",
         default=None,
@@ -148,8 +330,10 @@ async def main() -> int:
     summary: dict[str, dict[str, object]] = {}
 
     conversations = load_conversations(args.run, args.scenario)
-    if not conversations:
-        raise SystemExit("No matching conversations.")
+    if args.drafts or not conversations:
+        # Every run recorded since the canonical-state change stores a draft rather than
+        # raw turns, so this is the ordinary path now, not a fallback.
+        return 1 if replay_drafts(args.run, args.scenario, args.show_conditions) else 0
 
     interpreter = RuleBasedStrategyInterpreter()
     crashes = 0

@@ -41,6 +41,14 @@ class CapabilityParameter:
     required: bool = False
     description: str = ""
     options: tuple[str, ...] = ()
+    #: What a trader might call this parameter, in their own words. Used to prove that a
+    #: number belongs to *this* role and not to another one measured in the same unit —
+    #: an RSI period and a confirmation count are both candle counts, so the value alone
+    #: cannot tell them apart. Leave empty and the name itself is the only phrase.
+    source_aliases: tuple[str, ...] = ()
+    #: Force role evidence even when nothing else shares this unit. For a parameter whose
+    #: meaning changes the rule completely if mistaken.
+    requires_role_phrase: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -228,6 +236,14 @@ def _parameter_schema(
             "type": _json_type(parameter.type),
             "description": parameter.description,
             "x-semantic-unit": _parameter_semantic_unit(parameter.name),
+            # The words that can name this role. The registry owns them so every reader
+            # shares one vocabulary instead of hand-writing a subset that drifts.
+            "x-source-aliases": list(
+                dict.fromkeys(
+                    (*parameter.source_aliases, *_role_aliases(parameter.name))
+                )
+            ),
+            "x-requires-role-phrase": parameter.requires_role_phrase,
         }
         if parameter.default is not None:
             item["default"] = parameter.default
@@ -263,6 +279,43 @@ def _parameter_schema(
         "required": required,
         "additionalProperties": False,
     }
+
+
+#: Everyday words for the roles the platform's own parameter names use. Keyed by the
+#: registry's parameter name, so a capability author gets the vocabulary for free and a
+#: capability with an unusual name can still add its own via ``source_aliases``.
+#:
+#: These are role *names*, not conditions or thresholds — nothing here decides what a
+#: rule does. They only answer "which parameter is this number".
+_ROLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "period": ("period", "length", "setting", "over", "fatra", "mudda"),
+    "lookback": ("lookback", "look back", "previous", "back", "ago", "candles back"),
+    "window": ("window", "range", "span", "over the last", "within"),
+    "candles": ("candles", "bars", "candlesticks", "sham3a", "shumu3"),
+    "confirmation_candles": (
+        "confirmation",
+        "confirm",
+        "consecutive",
+        "in a row",
+        "closes",
+        "ta2keed",
+    ),
+    "threshold": ("threshold", "level", "value", "at", "mustawa"),
+    "multiplier": ("multiplier", "times", "x", "multiple"),
+    "deviation": ("deviation", "standard deviation", "std", "sigma"),
+}
+
+
+def _role_aliases(name: str) -> tuple[str, ...]:
+    """Words that can name this parameter's role, from the shared vocabulary above."""
+
+    lowered = name.casefold()
+    aliases = list(_ROLE_ALIASES.get(lowered, ()))
+    # A compound name carries its parts' vocabulary: `signal_period` is still a period.
+    for part in lowered.split("_"):
+        aliases.extend(_ROLE_ALIASES.get(part, ()))
+    aliases.append(lowered.replace("_", " "))
+    return tuple(dict.fromkeys(item for item in aliases if item))
 
 
 def _parameter_semantic_unit(name: str) -> str:

@@ -35,6 +35,60 @@ def _looks_like_placeholder(value) -> bool:
     return any(token in normalized for token in placeholder_tokens)
 
 
+#: Passwords that are published somewhere: a compose default, a tutorial, a common
+#: convention. None of them is a "placeholder" by the token test above, so all of them
+#: would have booted a production deployment unnoticed.
+_PUBLISHED_PASSWORDS = frozenset(
+    {
+        "postgres",
+        "password",
+        "passwd",
+        "secret",
+        "admin",
+        "root",
+        "test",
+        "dev",
+        "local",
+        "market_monitor",
+        "monitor",
+    }
+)
+
+
+def _weak_database_password(database_url: str) -> str | None:
+    """Name the reason a deployed database password is unsafe, or ``None``.
+
+    The startup guard already refused a password containing ``REPLACE_``. It did not
+    refuse one that is simply well known — and the project's own compose file shipped
+    ``market_monitor:market_monitor``, which a deployment would inherit silently because
+    the hardcoded ``environment:`` block overrode whatever the operator put in ``.env``.
+
+    Three separate things are refused here, because each of them means anyone who has
+    read this public repository knows the password.
+    """
+
+    parts = urlsplit(database_url)
+    password = parts.password
+    if password is None:
+        return None
+    lowered = password.strip().casefold()
+    if not lowered:
+        return "DATABASE_URL must not use an empty password in staging and production"
+    if lowered in _PUBLISHED_PASSWORDS:
+        return (
+            "DATABASE_URL must not use a well-known default password in staging and "
+            "production"
+        )
+    if parts.username and lowered == parts.username.strip().casefold():
+        return (
+            "DATABASE_URL must not use a password identical to the database user in "
+            "staging and production"
+        )
+    if len(password) < 12:
+        return "DATABASE_URL password must be at least 12 characters in staging and production"
+    return None
+
+
 def validate_runtime_configuration(settings: Settings) -> None:
     errors: list[str] = []
     if settings.is_deployed:
@@ -56,6 +110,9 @@ def validate_runtime_configuration(settings: Settings) -> None:
             errors.append("DATABASE_URL must not contain placeholder credentials")
         if settings.database_url.startswith("sqlite"):
             errors.append("DATABASE_URL must use PostgreSQL in staging and production")
+        weak_password = _weak_database_password(settings.database_url)
+        if weak_password is not None:
+            errors.append(weak_password)
         if not settings.api_rate_limiting_enabled:
             errors.append("API_RATE_LIMITING_ENABLED must be true in staging and production")
         if not settings.api_rate_limit_fail_closed:

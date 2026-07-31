@@ -16,6 +16,7 @@ from ai_market_monitor.db.models.enums import (
     ShariaAssetStatus,
     ShariaUniverseMode,
 )
+from ai_market_monitor.schemas.screening_execution import ReviewedScreeningEvidence
 from ai_market_monitor.schemas.strategy import Comparator, Timeframe
 
 STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH = 500
@@ -543,6 +544,14 @@ class ApprovalBindingV2(BaseModel):
     conversation_snapshot_hash: str | None = Field(
         default=None, pattern=r"^[a-f0-9]{64}$"
     )
+    #: The screening facts the user could see when they reviewed this setup: which
+    #: markets, under which policy and methodology, and what the market-data check
+    #: promised. Bound so approval can be refused when any of them moved.
+    #:
+    #: Kept out of the executable hash on purpose. It is dynamic compliance evidence, not
+    #: authored strategy; a re-screen that returns the same answer must not look like the
+    #: user edited their rules.
+    screening_evidence: ReviewedScreeningEvidence | None = None
     approved_at: datetime | None = None
 
     @model_validator(mode="before")
@@ -570,6 +579,10 @@ class ApprovalBindingV2(BaseModel):
             raise ValueError("approved drafts require a complete approval binding")
         if not self.approved and any(value is not None for value in bound):
             raise ValueError("unapproved drafts cannot retain approval bindings")
+        # Screening evidence is a fact *about an approval*. A draft that is not approved
+        # holding one would let a later approval reuse a review nobody performed.
+        if not self.approved and self.screening_evidence is not None:
+            raise ValueError("unapproved drafts cannot retain screening evidence")
         return self
 
     @property

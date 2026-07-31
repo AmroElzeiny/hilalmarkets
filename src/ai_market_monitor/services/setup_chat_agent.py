@@ -35,6 +35,12 @@ from ai_market_monitor.engine.capability_shortlist import (
     build_capability_shortlist,
     configured_runtime_provider_requirements,
 )
+from ai_market_monitor.engine.claim_evidence import (
+    EvidenceLedger,
+    build_evidence_ledger,
+    deterministic_claim_text,
+    validate_claims,
+)
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
     RuntimePreflight,
@@ -47,10 +53,13 @@ from ai_market_monitor.engine.setup_turn_execution import (
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
+from ai_market_monitor.schemas.screening_execution import PreflightManifest
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
+    SETUP_REPLY_MAX_LENGTH,
     CapabilityRoutingCandidate,
     CapabilityRoutingContext,
+    FactualClaim,
     SegmentKind,
     SetupAgentPlanEnvelope,
     SetupAgentReply,
@@ -122,6 +131,9 @@ class SetupAgentTurnInput:
     screening: ScreeningGate | None = None
     providers: ProviderGate | None = None
     runtime_preflight: RuntimePreflight | None = None
+    #: Reads back what the preflight above actually checked, so the promise shown to the
+    #: user and the promise bound into approval are the same recorded fact.
+    preflight_manifest: Callable[[], PreflightManifest | None] | None = None
     stage_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
 
     @property
@@ -463,6 +475,7 @@ class SetupChatAgent:
                     screening=turn.screening,
                     providers=turn.providers,
                     runtime_preflight=turn.runtime_preflight,
+                    preflight_manifest=turn.preflight_manifest,
                 )
             )
         except SetupTurnRejected as exc:
@@ -627,25 +640,47 @@ class SetupChatAgent:
         model: str,
         planner_usage: dict[str, Any],
     ) -> tuple[SetupAgentReply, dict[str, Any]]:
+        knowledge = product_knowledge()
+        ledger = build_evidence_ledger(
+            reconciled_operations=[
+                item.model_dump(mode="json") for item in result.reconciled_operations
+            ],
+            execution=result.model_dump(mode="json"),
+            draft_read_model=result.draft_read_model,
+            screening_evidence=result.screening_evidence,
+            preflight_evidence=result.preflight_manifest,
+            product_knowledge=knowledge,
+        )
         payload = {
             "final_execution_result": result.model_dump(mode="json"),
+            # Kept for context, but a reply may not cite one: these are intermediate
+            # steps, and a step undone later in the same turn did not happen.
             "operation_specific_diffs": [
                 item.model_dump(mode="json") for item in result.operation_results
+            ],
+            # What actually survived the turn. Only these carry an evidence id.
+            "net_effect_of_each_operation": [
+                item.model_dump(mode="json") for item in result.reconciled_operations
             ],
             "final_compiled_status": result.compile_status,
             "screening_status": result.screening_status,
             "provider_status": result.provider_status,
             "final_chat_status": result.final_chat_status,
             "draft_read_model": result.draft_read_model,
+            "screening_evidence": result.screening_evidence,
+            "market_data_check": result.preflight_manifest,
             "response_points": [
                 item.model_dump(mode="json") for item in plan.response_points
             ],
             "questions_to_answer": list(plan.questions_to_answer),
-            "grounded_product_knowledge": product_knowledge(),
+            "grounded_product_knowledge": knowledge,
             "authorized_clarification_list": [
                 item.model_dump(mode="json")
                 for item in result.allowed_clarifications
             ],
+            # Every id a factual claim may cite this turn. Nothing outside this list is
+            # citable, so nothing outside it can be asserted.
+            "citable_evidence_ids": ledger.ids(),
             "user_message": turn.message,
         }
         reserved = estimate_structured_call_cost(
@@ -696,6 +731,13 @@ class SetupChatAgent:
             raise
         self.model_call_count += 1
         await self._provider_succeeded(model)
+        # Structural check first, and it decides. Every factual claim has to cite
+        # evidence that exists and fits its type; anything that does not is replaced by
+        # deterministic text built from the evidence. Reading ids rather than sentences
+        # is what makes this behave the same for an Arabic reply as for an English one.
+        reply = _rebuild_reply_from_validated_claims(reply, ledger)
+        # The older English phrase gate is kept as an extra filter. It can only reject,
+        # never accept, so it adds coverage for English without becoming the authority.
         if not _composer_reply_is_grounded(reply, result, payload):
             raise StructuredCallError(
                 "COMPOSER_FACT_NOT_GROUNDED",
@@ -1143,6 +1185,35 @@ certain rather than guessing.
 Cover every response_point and answer every entry in questions_to_answer. Acknowledge
 the conversational parts of the turn briefly and naturally when there were any.
 
+Split what you write into two fields.
+
+conversational_text is anything that asserts nothing about the platform: greeting the
+user, acknowledging what they said, offering to help next. It needs no evidence.
+
+factual_claims is every statement of fact, one entry each, with the evidence it rests
+on. Each entry has a claim_type, the sentence itself in the user's language, and
+evidence_ids taken only from citable_evidence_ids. Nothing else is citable.
+
+Match the evidence family to the claim:
+
+- mutation           `operation:...` — only ids in net_effect_of_each_operation whose
+                     net_effect is `effective`. A step that was undone or replaced later
+                     in the same turn did not happen, so it has no id and cannot be
+                     claimed.
+- readiness          all four of `status:compile`, `status:screening`, `status:provider`
+                     and `status:approval_eligible`. Readiness is every gate, not one.
+- approval           `approval:status`
+- condition_explanation  `condition:...`
+- universe           `screening:...` or `universe:...`
+- provider           `provider:...` or `preflight:...`
+- open_item          `unresolved:...` or `unsupported:...`
+- product_fact       `product:...`
+
+message_without_question must read as one natural message, and it must say the same
+things as conversational_text plus your factual_claims together. A claim whose evidence
+does not check out is dropped and the server states the fact plainly instead, so a claim
+you cannot support costs the user your wording, not the truth.
+
 Write for a beginner in the user's own language. Short sentences, everyday words, no
 field names, no error-template phrasing, no bullet lists unless they genuinely help.
 Be concise unless the user asked for detail.
@@ -1208,12 +1279,70 @@ def _counts_toward_circuit(exc: StructuredCallError) -> bool:
     return exc.code in _CIRCUIT_FAILURE_CODES
 
 
+def _rebuild_reply_from_validated_claims(
+    reply: SetupAgentReply,
+    ledger: EvidenceLedger,
+) -> SetupAgentReply:
+    """Keep the wording, drop the claims whose evidence does not check out.
+
+    A refused claim is *replaced*, not deleted silently. Removing a sentence would leave
+    the user reading a reply with a fact quietly missing; replacing it with text built
+    from the evidence keeps them informed and keeps the reply honest.
+
+    A composer that sent no structured claims at all — an older model, a fallback — keeps
+    its message unchanged and is still checked by the lexical filter afterwards. This
+    validation can only ever remove unsupported statements, never add one.
+    """
+
+    if not reply.factual_claims:
+        return reply
+
+    validated = validate_claims(list(reply.factual_claims), ledger)
+    accepted = [item.text for item in validated if item.accepted]
+    refused = [item for item in validated if not item.accepted]
+    if not refused:
+        return reply
+
+    replacements = deterministic_claim_text(ledger)
+    parts = [
+        _trimmed(reply.conversational_text),
+        *accepted,
+        *replacements,
+    ]
+    message = " ".join(part for part in parts if part).strip()
+    if not message:
+        # Nothing survived and there is nothing to say from evidence either. Keep the
+        # conversational half rather than returning an empty reply, which would fail
+        # validation and turn a wording problem into a failed turn.
+        message = _trimmed(reply.conversational_text) or reply.message_without_question
+    return reply.model_copy(
+        update={
+            "message_without_question": message[:SETUP_REPLY_MAX_LENGTH],
+            "factual_claims": [
+                FactualClaim(
+                    claim_type=item.claim_type,  # type: ignore[arg-type]
+                    text=item.text,
+                    evidence_ids=list(item.evidence_ids),
+                )
+                for item in validated
+                if item.accepted
+            ],
+        }
+    )
+
+
 def _composer_reply_is_grounded(
     reply: SetupAgentReply,
     result: SetupTurnExecutionResult,
     payload: dict[str, Any],
 ) -> bool:
-    """Reject obvious new facts; deterministic execution stays the authority."""
+    """Reject obvious new facts; deterministic execution stays the authority.
+
+    English-only by construction, and therefore never the primary check — see
+    :func:`_rebuild_reply_from_validated_claims`, which runs first and is language
+    independent. This stays as an extra filter because it costs nothing and catches
+    English wording that happens to cite valid evidence for the wrong sentence.
+    """
 
     message = reply.message_without_question
     lowered = message.casefold()

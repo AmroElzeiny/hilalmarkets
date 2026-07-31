@@ -77,7 +77,11 @@ def main() -> int:
     production = _production_example()
     expected_values = {
         "ALLOW_MOCK_PROVIDERS": "false",
-        "SHARIA_TEST_MARKET_ENABLED": "false",
+        # `SHARIA_TEST_MARKET_ENABLED` was deliberately removed from `Settings`, and
+        # `test_test_sharia_market_switch_is_not_a_runtime_setting` asserts it stays
+        # removed. Demanding it here made this gate fail forever and asked an operator to
+        # add a setting the application would ignore. Two guards disagreed; the test is
+        # the one that matches the code.
         "SHARIA_PILOT_SYMBOLS": "btc,eth,sol",
         "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED": "false",
         "TRACEDGE_MARKET_DATA_MODE": "ccxt",

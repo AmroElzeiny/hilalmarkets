@@ -25,16 +25,23 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from functools import partial
+from typing import Any, Literal, cast, get_args, get_origin
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
+from pydantic_core import PydanticUndefined
 
+from ai_market_monitor.db.models.enums import ShariaUniverseMode
 from ai_market_monitor.engine.action_grounding import SemanticAction, action_is_grounded
 from ai_market_monitor.engine.capability_contract import (
     capability_condition_errors,
     grounded_operator_and_timeframe,
 )
 from ai_market_monitor.engine.draft_diff import DraftChange, diff_drafts
+from ai_market_monitor.engine.operation_reconciliation import (
+    TurnReconciliation,
+    reconcile_turn,
+)
 from ai_market_monitor.engine.semantic_grounding import (
     grounds_boolean_shape,
     grounds_direction,
@@ -57,11 +64,16 @@ from ai_market_monitor.engine.strategy_draft_v2 import (
     finalize_strategy_turn,
     validate_draft_semantics,
 )
+from ai_market_monitor.schemas.screening_execution import (
+    PreflightManifest,
+    ScreeningExecutionResult,
+)
 from ai_market_monitor.schemas.setup_agent import (
     ACTIONABLE_SEGMENT_KINDS,
     AppliedInstruction,
     IgnoredSegment,
     OperationExecutionResult,
+    ReconciledOperationRecord,
     SegmentKind,
     SetupAgentTurnPlan,
     SetupConversationContext,
@@ -126,10 +138,14 @@ class SetupTurnRejected(ValueError):
         self.details = details
 
 
-#: Applies the Sharia policy and resolves the screened universe. Returns the secured
-#: definition, or ``None`` plus a plain reason when screening blocks the draft.
+#: Applies the Sharia policy and resolves the screened universe.
+#:
+#: Returns a :class:`ScreeningExecutionResult` whose ``secured_definition`` holds exactly
+#: the permitted symbols, or ``None`` plus a plain reason when screening blocks the
+#: draft. It used to return the *original* definition, so preflight, the preview and
+#: approval all ran against a universe screening had never approved.
 ScreeningGate = Callable[
-    [StrategyDefinition], Awaitable[tuple[StrategyDefinition | None, str | None]]
+    [StrategyDefinition], Awaitable[tuple[ScreeningExecutionResult | None, str | None]]
 ]
 
 #: Marks each provider requirement available or not.
@@ -139,6 +155,25 @@ ProviderGate = Callable[
 RuntimePreflight = Callable[
     [StrategyDefinition], Awaitable[list[ProviderRuntimeStatusV2]]
 ]
+
+
+def _preflight_evidence(request: SetupTurnRequest) -> dict[str, Any]:
+    """What the market-data check really covered, including its own content hash.
+
+    The hash is a property rather than a stored field, so it has to be added here: an
+    approval that binds to "the preflight the user reviewed" needs a value it can compare,
+    and re-deriving it later from a re-serialised payload would defeat the point.
+    """
+
+    if request.preflight_manifest is None:
+        return {}
+    manifest = request.preflight_manifest()
+    if manifest is None:
+        return {}
+    payload = manifest.model_dump(mode="json")
+    payload["manifest_hash"] = manifest.manifest_hash
+    payload["description"] = manifest.describe()
+    return payload
 
 
 def _provider_status(
@@ -171,6 +206,10 @@ class SetupTurnRequest:
     screening: ScreeningGate | None = None
     providers: ProviderGate | None = None
     runtime_preflight: RuntimePreflight | None = None
+    #: Reads back exactly what the preflight checked, so the promise can be stored and
+    #: displayed instead of assumed. Returns ``None`` when no preflight ran this turn —
+    #: an absent manifest is reported as absent, never as a passed check.
+    preflight_manifest: Callable[[], PreflightManifest | None] | None = None
     #: True only for an allowlisted server-rendered UI control. It bypasses language
     #: grounding, never operation validation, lifecycle gates, or canonical mutation.
     server_owned_option: bool = False
@@ -186,8 +225,10 @@ class SetupTurnOutcome:
     definition: StrategyDefinition | None
     history_snapshot: dict[str, Any] | None = None
     #: True when the turn materially changed the draft, so the caller knows whether to
-    #: archive a previous approval. Derived from the canonical diff, never guessed.
+    #: archive a previous approval. Derived from the net executable change.
     material_change: bool = False
+    #: The resolved execution universe, for the approval record and the preview.
+    screening: ScreeningExecutionResult | None = None
 
 
 async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
@@ -290,16 +331,20 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             safe_errors.append(_safe_compile_message(exc))
 
     screening_status: ScreeningStatus = "not_required"
+    screening_result: ScreeningExecutionResult | None = None
     if definition is not None and request.screening is not None:
         screening_status = "not_attempted"
-        secured, reason = await request.screening(definition)
-        if secured is None:
+        screening_result, reason = await request.screening(definition)
+        if screening_result is None:
             screening_status = "blocked"
             definition = None
             safe_errors.append(reason or "Choose and validate a Halal Market first.")
         else:
             screening_status = "passed"
-            definition = secured
+            # The screened universe becomes *the* definition from here on: preflight,
+            # the preview, approval eligibility, the read model and the reply all see
+            # exactly the symbols the resolver permitted.
+            definition = screening_result.secured_definition
 
     provider_status: ProviderStatus = "not_required"
     resolved_provider_statuses: list[ProviderRuntimeStatusV2] = []
@@ -383,7 +428,11 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         final_chat_status=final_chat_status,
     )
 
-    applied_instructions = _applied_instructions(plan, segments, operation_results)
+    # Judge every operation against the turn's *final* state before any of it becomes
+    # user-facing evidence. A step undone later in the same turn is not something a
+    # reply may claim happened, and its condition ids must not become references.
+    reconciliation = reconcile_turn(before, draft, operation_results)
+    applied_instructions = _applied_instructions(plan, segments, reconciliation)
     allowed = _allowed_clarifications(draft, request.conversation, answered)
     result = SetupTurnExecutionResult(
         status=_status(
@@ -403,9 +452,25 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         current_workflow_revision=draft.workflow_revision,
         previous_executable_hash=before.executable_hash,
         current_executable_hash=draft.executable_hash,
-        semantic_diff=[change.kind for change in changes],
+        # The net difference between the draft as the turn started and the draft that
+        # survived it. The per-operation diffs are kept in `operation_results` for audit;
+        # they are a sequence of intermediate states and must not be read as what changed.
+        semantic_diff=[change.kind for change in reconciliation.net_changes],
         applied_instructions=applied_instructions,
         operation_results=operation_results,
+        reconciled_operations=[
+            ReconciledOperationRecord(
+                operation_id=item.operation_id,
+                authorizing_segment_id=item.authorizing_segment_id,
+                operation_kind=item.operation_kind,
+                net_effect=item.net_effect,
+                final_condition_ids=list(item.final_condition_ids),
+                summary="; ".join(change.describe() for change in item.net_changes)[:400],
+                changes=[change.to_dict() for change in item.net_changes],
+                safe_error=item.safe_error,
+            )
+            for item in reconciliation.operations
+        ],
         ignored_non_actionable_segments=_ignored_segments(plan),
         answered_questions=answered,
         unresolved_fields=[
@@ -434,15 +499,22 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             approval_eligible=approval_eligible,
         ),
         allowed_clarifications=allowed,
-        draft_read_model=draft_read_model(draft, changes),
+        draft_read_model=draft_read_model(draft, list(reconciliation.net_changes)),
+        screening_evidence=(
+            screening_result.evidence() if screening_result is not None else {}
+        ),
+        preflight_manifest=_preflight_evidence(request),
     )
     return SetupTurnOutcome(
         result=result,
         draft=draft,
-        conversation=_next_conversation(request, plan, result, answered),
+        conversation=_next_conversation(request, plan, result, answered, reconciliation),
         definition=definition,
         history_snapshot=history_snapshot,
-        material_change=material and strategy_mutated,
+        # Approval invalidation follows the *net* executable change, never a temporary
+        # intermediate state inside the turn.
+        material_change=material and reconciliation.executable_changed,
+        screening=screening_result,
     )
 
 
@@ -549,7 +621,10 @@ def _verify_operation_grounding(
     existing = _existing_conditions(request.draft)
     unresolved = {item.key: item for item in request.draft.unresolved_fields}
     unsupported = {item.key: item for item in request.draft.unsupported_requirements}
-    handlers = {
+    # The unresolved handler judges an open question against the turn's *other*
+    # operations, so it needs the plan; every other handler is scoped to one segment.
+    ground_unresolved = partial(_ground_unresolved_operation, plan=plan)
+    handlers: dict[str, Callable[..., list[str]]] = {
         "set_fields": _ground_set_fields,
         "set_sharia_policy": _ground_sharia_policy,
         "add_condition": _ground_condition_operation,
@@ -560,8 +635,8 @@ def _verify_operation_grounding(
         "add_exclusion": _ground_symbol_operation,
         "remove_inclusion": _ground_symbol_operation,
         "remove_exclusion": _ground_symbol_operation,
-        "add_unresolved": _ground_unresolved_operation,
-        "update_unresolved": _ground_unresolved_operation,
+        "add_unresolved": ground_unresolved,
+        "update_unresolved": ground_unresolved,
         "resolve_unresolved_key": _ground_resolve_unresolved,
         "add_unsupported": _ground_unsupported_operation,
         "remove_unsupported_key": _ground_remove_unsupported,
@@ -872,6 +947,31 @@ def _ground_remove_condition(
     return []
 
 
+#: Which JSON answer types can fill each kind of open target. Read from the target's own
+#: declared type where one exists, so the question a user is asked can actually be
+#: answered with something the field accepts.
+_ANSWER_TYPES_BY_TARGET: dict[str, frozenset[str]] = {
+    "universe": frozenset({"string", "array"}),
+    "market_scope": frozenset({"string"}),
+    "boolean_structure": frozenset({"string", "object", "array"}),
+    "condition_creation": frozenset({"string", "object", "array"}),
+    "reference_definition": frozenset({"string"}),
+    "unsupported_resolution": frozenset({"string", "boolean"}),
+}
+
+#: Operation kinds that, when authorised by the same segment, mean that segment already
+#: determined the thing the question asks about.
+_DETERMINING_KINDS: dict[str, frozenset[str]] = {
+    "condition_creation": frozenset({"add_condition", "replace_groups"}),
+    "universe": frozenset(
+        {"set_sharia_policy", "add_inclusion", "add_exclusion", "remove_inclusion"}
+    ),
+    "market_scope": frozenset({"set_fields", "set_sharia_policy"}),
+    "draft_field": frozenset({"set_fields"}),
+    "boolean_structure": frozenset({"replace_groups"}),
+}
+
+
 def _ground_unresolved_operation(
     operation: Any,
     segment: TurnSegment,
@@ -879,44 +979,332 @@ def _ground_unresolved_operation(
     existing: dict[str, ConditionNodeV2],
     unresolved: dict[str, Any],
     unsupported: dict[str, Any],
+    *,
+    plan: SetupAgentTurnPlan | None = None,
 ) -> list[str]:
+    """An open question is valid when the *target* is missing, not when the user hedged.
+
+    This used to require an uncertainty word — `maybe`, `which`, `not sure` — before it
+    would let a question be opened. Real incomplete intent rarely carries one:
+
+        alert me on a strong move
+        watch for a large volume spike
+        notify me when BTC breaks support
+        make the first rule stricter
+
+    Each of those states a strategy intent and leaves a required value undetermined, and
+    each was refused, so the turn either failed or a number had to be invented for it.
+    Worse, the same word list decided the question in every language the product serves,
+    so an Arabic turn that hedged perfectly clearly did not match and was refused too.
+
+    The test is now typed and structural, and follows the five criteria in order:
+
+    1. the segment expresses a strategy intent — it is an actionable segment;
+    2. the target is one the executable actually needs;
+    3. the target is absent or underdetermined, both in this turn's own operations and
+       in the draft as it stands;
+    4. the answer schema can hold what the target accepts;
+    5. no equivalent target is already open.
+
+    Ambiguity wording survives only as an optional signal, used in one place: it lets a
+    user *reopen* a slot that already holds a value. It never permits a question by
+    itself and never blocks one.
+    """
     del unsupported
     item = operation.unresolved
     if item is None or not _quoted_in(item.source_fragment, segment.exact_source_text):
         return [f"{operation.operation_id}:{operation.kind}:source_not_grounded"]
     if operation.kind == "update_unresolved" and operation.target_key not in unresolved:
         return [f"{operation.operation_id}:update_unresolved:target_missing"]
+
+    # (1) intent. A question can only come out of a segment that asked for something.
+    if segment.kind not in ACTIONABLE_SEGMENT_KINDS:
+        return [f"{operation.operation_id}:{operation.kind}:segment_states_no_intent"]
+
+    # (5) the same target may not already be open under a different key.
+    duplicate = next(
+        (
+            key
+            for key, open_item in unresolved.items()
+            if key != operation.target_key
+            and getattr(open_item, "target_type", None) == item.target_type
+            and getattr(open_item, "target_field", None) == item.target_field
+            and getattr(open_item, "target_condition_id", None) == item.target_condition_id
+        ),
+        None,
+    )
+    if duplicate is not None:
+        return [f"{operation.operation_id}:{operation.kind}:duplicate_target:{duplicate}"]
+
+    # (3a) the same segment must not have determined this target in this very turn.
+    if _turn_determines_target(plan, segment.segment_id, item):
+        return [f"{operation.operation_id}:{operation.kind}:determined_by_this_turn"]
+
+    # (3b) and the draft must not already hold it — unless the turn reopens it.
+    if _draft_determines_target(item, request.draft, existing) and not _source_is_ambiguous(
+        item.source_fragment
+    ):
+        return [f"{operation.operation_id}:{operation.kind}:target_already_determined"]
+
     if item.target_type in {
         "condition_field",
         "capability_parameter",
         "reference_definition",
-    }:
-        target = existing.get(item.target_condition_id or "")
-        if target is None:
-            return [f"{operation.operation_id}:{operation.kind}:condition_target_missing"]
-        field_name = item.target_field or (
-            "reference_definition"
-            if item.target_type == "reference_definition"
-            else ""
-        )
-        current = getattr(target, field_name, None)
-        if current not in (None, "", [], {}) and not _source_is_ambiguous(
-            item.source_fragment
-        ):
-            return [f"{operation.operation_id}:{operation.kind}:target_not_ambiguous"]
-    elif item.target_type == "condition_creation":
-        if existing and not _source_is_ambiguous(item.source_fragment):
-            return [f"{operation.operation_id}:{operation.kind}:condition_already_exists"]
-    elif item.target_type == "universe":
-        if (
-            request.draft.sharia_policy.universe_mode
-            and not _source_is_ambiguous(item.source_fragment)
-        ):
-            return [f"{operation.operation_id}:{operation.kind}:universe_not_ambiguous"]
+    } and (item.target_condition_id or "") not in existing:
+        return [f"{operation.operation_id}:{operation.kind}:condition_target_missing"]
+
+    # (4) the answer has to be something the target can hold.
+    schema_error = _answer_schema_mismatch(item)
+    if schema_error is not None:
+        return [f"{operation.operation_id}:{operation.kind}:{schema_error}"]
     return []
 
 
+def _turn_determines_target(
+    plan: SetupAgentTurnPlan | None,
+    segment_id: str,
+    item: Any,
+) -> bool:
+    """Did this turn's own operations already fill the slot the question asks about?
+
+    Asking "which timeframe?" in the same breath as setting that timeframe leaves an open
+    question nobody can clear, because it is already answered.
+    """
+
+    if plan is None:
+        return False
+    same_segment = [
+        operation
+        for operation in plan.operations
+        if operation.authorizing_segment_id == segment_id
+    ]
+    if not same_segment:
+        return False
+
+    target_type = str(item.target_type)
+    if target_type in {"condition_field", "capability_parameter", "reference_definition"}:
+        field_name = _unresolved_field_name(item)
+        for operation in same_segment:
+            if operation.kind not in {"add_condition", "update_condition", "replace_groups"}:
+                continue
+            node = operation.condition
+            if node is None:
+                continue
+            written = (
+                node
+                if operation.kind != "update_condition"
+                or operation.target_condition_id == item.target_condition_id
+                else None
+            )
+            if written is None:
+                continue
+            if not _target_is_undetermined(written, field_name, target_type):
+                return True
+        return False
+
+    if target_type == "draft_field":
+        field_name = _unresolved_field_name(item)
+        return any(
+            operation.kind == "set_fields"
+            and operation.fields is not None
+            and getattr(operation.fields, field_name, None) not in (None, "", [], {})
+            for operation in same_segment
+        )
+
+    determining = _DETERMINING_KINDS.get(target_type, frozenset())
+    return any(operation.kind in determining for operation in same_segment)
+
+
+def _draft_determines_target(
+    item: Any,
+    draft: StrategyDraftV2,
+    existing: dict[str, ConditionNodeV2],
+) -> bool:
+    """Does the draft, as it stands, already hold a value for this target?"""
+
+    target_type = str(item.target_type)
+    if target_type in {"condition_field", "capability_parameter", "reference_definition"}:
+        node = existing.get(item.target_condition_id or "")
+        if node is None:
+            return False
+        return not _target_is_undetermined(node, _unresolved_field_name(item), target_type)
+    if target_type == "draft_field":
+        field_name = _unresolved_field_name(item)
+        return _authored(draft, field_name) and not _is_model_default(
+            StrategyDraftV2, field_name, getattr(draft, field_name, None)
+        )
+    if target_type == "universe":
+        return _universe_is_determined(draft)
+    if target_type == "market_scope":
+        return _authored(draft, "market_scope")
+    # ``condition_creation``, ``boolean_structure`` and ``unsupported_resolution`` are
+    # not single slots on the draft — a draft full of rules can still be missing the one
+    # this segment describes. Only this turn's own operations can determine those, which
+    # ``_turn_determines_target`` already checked.
+    return False
+
+
+def _unresolved_field_name(item: Any) -> str:
+    if item.target_type == "reference_definition":
+        return item.target_field or "reference_definition"
+    return item.target_field or ""
+
+
+def _is_model_default(model: type[BaseModel], field_name: str, value: Any) -> bool:
+    """Is this value simply what the model starts with?
+
+    A model default is not a decision anybody made. Treating one as a filled-in value is
+    how a legitimate question gets refused: a rule whose direction is still the neutral
+    default would count as "already has a direction", so ``which direction?`` could never
+    be asked.
+    """
+
+    field = model.model_fields.get(field_name)
+    if field is None:
+        return False
+    if field.default_factory is not None:
+        try:
+            return bool(value == field.default_factory())  # type: ignore[call-arg]
+        except TypeError:  # pragma: no cover - factories needing validated data
+            return False
+    if field.default is PydanticUndefined:
+        return False
+    return bool(value == field.default)
+
+
+def _target_is_undetermined(
+    node: ConditionNodeV2,
+    field_name: str,
+    target_type: str,
+) -> bool:
+    """Is the named slot actually empty — or still holding what the model started with?"""
+
+    if not field_name:
+        return True
+    if target_type == "capability_parameter":
+        if field_name not in node.capability_parameters:
+            return True
+        return node.capability_parameters.get(field_name) in (None, "", [], {})
+    if field_name not in ConditionNodeV2.model_fields:
+        return True
+    value = getattr(node, field_name, None)
+    return value in (None, "", [], {}) or _is_model_default(ConditionNodeV2, field_name, value)
+
+
+def _answer_schema_mismatch(item: Any) -> str | None:
+    """Refuse a question whose answer could not be stored in the slot it names.
+
+    The type comes from the target's own declaration — the condition model's field, the
+    draft model's field — never from a list of expected questions.
+    """
+
+    declared = str(item.expected_answer_schema.get("type") or "")
+    if not declared:
+        return "answer_schema_missing_type"
+    target_type = str(item.target_type)
+    field_name = _unresolved_field_name(item)
+
+    accepted: frozenset[str] | None = _ANSWER_TYPES_BY_TARGET.get(target_type)
+    if target_type == "condition_field":
+        accepted = _json_types_for_model_field(ConditionNodeV2, field_name)
+    elif target_type == "draft_field":
+        accepted = _json_types_for_model_field(StrategyDraftV2, field_name)
+    elif target_type == "capability_parameter":
+        # Parameter types belong to the capability registry and are checked there when
+        # the answer is applied; any scalar can name one here.
+        accepted = frozenset({"string", "number", "integer", "boolean", "array"})
+
+    if accepted is None or declared in accepted:
+        return None
+    return f"answer_schema_cannot_fill_target:{field_name or target_type}:{declared}"
+
+
+#: Python annotations to the JSON answer types that can carry them.
+_JSON_TYPES_BY_PYTHON: dict[type, frozenset[str]] = {
+    bool: frozenset({"boolean"}),
+    int: frozenset({"integer", "number"}),
+    float: frozenset({"number", "integer"}),
+    str: frozenset({"string"}),
+    list: frozenset({"array"}),
+    dict: frozenset({"object"}),
+}
+
+
+def _json_types_for_model_field(model: type[Any], field_name: str) -> frozenset[str] | None:
+    """Which answer types could fill this pydantic field. ``None`` means unknown."""
+
+    field = model.model_fields.get(field_name)
+    if field is None:
+        return None
+    annotation = field.annotation
+    collected: set[str] = set()
+    for candidate in (annotation, *get_args(annotation)):
+        origin = get_origin(candidate) or candidate
+        if origin is Literal:
+            collected.update({"string"})
+            continue
+        if isinstance(origin, type):
+            for python_type, json_types in _JSON_TYPES_BY_PYTHON.items():
+                if origin is python_type or (
+                    isinstance(origin, type) and issubclass(origin, python_type)
+                ):
+                    collected.update(json_types)
+    # An enum or a nested model is answered by naming it.
+    return frozenset(collected) or frozenset({"string", "object"})
+
+
+#: Which recorded provenance entries mean the user themselves chose a universe. A draft
+#: that has never been touched still carries a default Sharia policy; that default is the
+#: platform's starting point, not an answer the user gave.
+_UNIVERSE_AUTHORED_PREFIXES = (
+    "sharia_policy",
+    "universe.include",
+    "universe.exclude",
+    "universe.remove_inclusions",
+)
+
+
+def _authored(draft: StrategyDraftV2, *prefixes: str) -> bool:
+    """Did any past turn actually write one of these fields?
+
+    ``source_provenance`` records the field names each turn applied, so this answers
+    "did a person choose this?" rather than "does this field hold something?".
+    """
+
+    return any(
+        applied.startswith(prefix)
+        for record in draft.source_provenance
+        for applied in record.applied_fields
+        for prefix in prefixes
+    )
+
+
+def _universe_is_determined(draft: StrategyDraftV2) -> bool:
+    """A universe is determined when the user chose one *and* it names something.
+
+    The old test was ``if draft.sharia_policy.universe_mode``. That field always holds a
+    value — it defaults to the whole eligible market — so the test was always true and
+    every universe question was refused unless the user happened to hedge in English.
+    """
+
+    if not _authored(draft, *_UNIVERSE_AUTHORED_PREFIXES):
+        return False
+    policy = draft.sharia_policy
+    if policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS:
+        return bool(policy.explicit_symbols or draft.universe.included_symbols)
+    if policy.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST:
+        return policy.approved_watchlist_id is not None
+    # A deliberately chosen "everything eligible" names a universe on its own.
+    return True
+
+
 def _source_is_ambiguous(text: str) -> bool:
+    """An optional signal that a turn is hedging. Never the authority for a question.
+
+    Kept for one narrow job: letting a user reopen a slot that already holds a value.
+    Because it is only ever a *widening* signal, a language it does not cover loses
+    nothing — the typed checks above still open the question on their own.
+    """
     lowered = text.casefold()
     return bool(
         re.search(
@@ -1984,35 +2372,36 @@ def validated_clarification(
 def _applied_instructions(
     plan: SetupAgentTurnPlan,
     segments: dict[str, TurnSegment],
-    operation_results: list[OperationExecutionResult],
+    reconciliation: TurnReconciliation,
 ) -> list[AppliedInstruction]:
-    """One record per operation, described from the canonical diff.
+    """One record per **net-effective** operation, described from the turn-level diff.
 
-    The model's ``intent_summary`` is deliberately unused here: it says what the model
-    meant to do, and a reply built on it could describe a change the compiler refused.
+    Two things are deliberately not used here. The model's ``intent_summary`` says what
+    it meant to do, not what happened. And an operation's own before/after step is an
+    intermediate state: add-then-remove reported an addition that the same turn deleted,
+    and put its condition id into the references the next turn resolves.
     """
-    by_id = {item.operation_id: item for item in operation_results if item.applied}
+    by_id = {item.operation_id: item for item in reconciliation.operations}
     applied: list[AppliedInstruction] = []
     for operation in plan.operations:
         segment = segments.get(operation.authorizing_segment_id)
         if segment is None:
             continue
         result = by_id.get(operation.operation_id)
-        if result is None:
+        if result is None or not result.is_effective:
             continue
-        descriptions = [
-            str(item.get("description") or item.get("kind") or "updated")
-            for item in result.changes
-        ]
         applied.append(
             AppliedInstruction(
                 operation_id=operation.operation_id,
                 segment_id=operation.authorizing_segment_id,
                 source_text=segment.exact_source_text,
-                summary="; ".join(descriptions)[:400],
-                condition_ids=result.affected_condition_ids[:24],
+                summary="; ".join(
+                    change.describe() for change in result.net_changes
+                )[:400]
+                or "updated the setup",
+                condition_ids=list(result.final_condition_ids)[:24],
                 operation=operation.kind,
-                changes=result.changes,
+                changes=[change.to_dict() for change in result.net_changes],
             )
         )
     return applied
@@ -2269,17 +2658,21 @@ def _next_conversation(
     plan: SetupAgentTurnPlan,
     result: SetupTurnExecutionResult,
     answered: list[str],
+    reconciliation: TurnReconciliation,
 ) -> SetupConversationContext:
-    """Carry forward what the next turn needs to resolve ordinary references."""
+    """Carry forward what the next turn needs to resolve ordinary references.
+
+    Only *net-effective* condition ids become references. A rule added and then removed
+    in the same turn used to land here, so "that one" could resolve to a rule the draft
+    no longer holds.
+    """
 
     context = request.conversation
     if answered and context.active_question_id in answered:
         context = context.cleared_question()
-    changed = [
-        node_id
-        for instruction in result.applied_instructions
-        for node_id in instruction.condition_ids
-    ]
+    # `final_condition_ids` already holds only ids the reconciler found in the final
+    # draft, so a cancelled or overwritten operation contributes nothing.
+    changed = list(reconciliation.final_condition_ids)
     references = [
         segment.exact_source_text
         for segment in plan.segments

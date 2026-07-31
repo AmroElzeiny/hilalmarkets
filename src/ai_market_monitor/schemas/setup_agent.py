@@ -622,6 +622,29 @@ class OperationExecutionResult(BaseModel):
     safe_error: str | None = Field(default=None, max_length=500)
 
 
+class ReconciledOperationRecord(BaseModel):
+    """One operation judged against the turn's *final* state, not its own step.
+
+    A step can be undone later in the same turn. Reporting each step's own diff let an
+    add-then-remove announce a rule that no longer exists, and put its id into the
+    references the next turn resolves.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1, max_length=80)
+    authorizing_segment_id: str = Field(min_length=1, max_length=80)
+    operation_kind: str = Field(min_length=1, max_length=60)
+    net_effect: Literal[
+        "effective", "overwritten", "cancelled", "no_net_effect", "rejected"
+    ]
+    #: Only ids present or materially changed in the final draft.
+    final_condition_ids: list[str] = Field(default_factory=list, max_length=100)
+    summary: str = Field(default="", max_length=400)
+    changes: list[dict[str, object]] = Field(default_factory=list, max_length=40)
+    safe_error: str | None = Field(default=None, max_length=500)
+
+
 class SetupTurnExecutionResult(BaseModel):
     """What the server did. The only source of truth for any claim in the reply.
 
@@ -650,7 +673,15 @@ class SetupTurnExecutionResult(BaseModel):
     current_executable_hash: str = Field(pattern=r"^$|^[a-f0-9]{64}$")
     semantic_diff: list[str] = Field(default_factory=list, max_length=200)
     applied_instructions: list[AppliedInstruction] = Field(default_factory=list, max_length=24)
+    #: Per-operation before/after steps. Kept for audit; they are intermediate states
+    #: and must not be the source of a user-facing claim.
     operation_results: list[OperationExecutionResult] = Field(
+        default_factory=list,
+        max_length=24,
+    )
+    #: The same operations judged against the turn's final state. This is what a reply
+    #: and the next turn's references are allowed to use.
+    reconciled_operations: list[ReconciledOperationRecord] = Field(
         default_factory=list,
         max_length=24,
     )
@@ -693,6 +724,12 @@ class SetupTurnExecutionResult(BaseModel):
     )
     #: Deterministic read model for answering questions about the current draft.
     draft_read_model: dict[str, object] = Field(default_factory=dict)
+    #: The universe the Sharia resolver actually permitted, and the identity of that
+    #: resolution. Cited by approval and by any reply that mentions the market scope.
+    screening_evidence: dict[str, object] = Field(default_factory=dict)
+    #: Exactly which market/timeframe pairs were checked, and under which promise.
+    #: Without it, "runtime verified" was an unqualified claim one sample could satisfy.
+    preflight_manifest: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -828,6 +865,38 @@ class SetupConversationContext(BaseModel):
         )
 
 
+class FactualClaim(_StrictModel):
+    """One statement of fact in the reply, and the server evidence it rests on.
+
+    A reply mixes two different things. "Got it, that makes sense" asserts nothing and
+    needs no evidence. "I set the RSI level to 30 and this is ready to approve" asserts
+    two facts about the platform, and either could be wrong.
+
+    Separating them lets the server check the second kind by *looking up ids* instead of
+    reading sentences. Reading sentences meant English phrase patterns, which saw nothing
+    at all in an Arabic reply — the exact turns most likely to need checking.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_type: Literal[
+        "mutation",
+        "readiness",
+        "approval",
+        "condition_explanation",
+        "universe",
+        "provider",
+        "product_fact",
+        "open_item",
+    ]
+    #: The sentence itself, in the user's language.
+    text: str = Field(min_length=1, max_length=600)
+    #: Ids from this turn's evidence ledger. At least one, and it has to be the right
+    #: family for the claim type: readiness rests on gate statuses, a mutation on an
+    #: operation that actually survived the turn.
+    evidence_ids: list[str] = Field(default_factory=list, max_length=12)
+
+
 class SetupAgentReply(_StrictModel):
     """The final assistant message, composed from the execution result."""
 
@@ -837,6 +906,13 @@ class SetupAgentReply(_StrictModel):
         min_length=1,
         max_length=SETUP_REPLY_MAX_LENGTH,
     )
+    #: Wording that asserts nothing about the platform: greeting, acknowledgement, an
+    #: offer to help. Free, because there is nothing here that could be false.
+    conversational_text: str = Field(default="", max_length=SETUP_REPLY_MAX_LENGTH)
+    #: Every statement of fact, each carrying its evidence. A claim whose evidence does
+    #: not check out is dropped and replaced with text built from the evidence itself,
+    #: so the user still learns what happened.
+    factual_claims: list[FactualClaim] = Field(default_factory=list, max_length=12)
     #: The `question_id` of one server-authorised clarification, or null.
     #:
     #: The composer used to return a free-form question, so it could invent an

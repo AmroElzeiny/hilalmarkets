@@ -301,6 +301,19 @@ class Settings(BaseSettings):
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)
     setup_agent_circuit_breaker_cooldown_seconds: int = Field(default=60, ge=5, le=900)
     setup_provider_preflight_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    #: How many resolved symbols one turn may check against the data provider before the
+    #: preflight stops promising per-symbol coverage and says so.
+    #:
+    #: A universe of "everything eligible" can be thousands of symbols; checking each one
+    #: inside a chat turn is not possible. Below this many, the check is exhaustive and
+    #: the turn promises every symbol has data (`verified_all`). Above it, the turn
+    #: verifies the *policy* — the timeframes and capabilities the rules need — and says
+    #: plainly that each symbol is confirmed when monitoring starts, failing closed for
+    #: any symbol without data (`policy_verified_runtime_fail_closed`).
+    setup_preflight_symbol_cap: int = Field(default=25, ge=1, le=200)
+    #: How many provider checks run at once. Bounded so one wide universe cannot use up
+    #: the provider's rate limit for every other user.
+    setup_preflight_max_concurrency: int = Field(default=4, ge=1, le=16)
     setup_screening_resolution_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     setup_methodology_version_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     setup_approved_watchlist_ttl_seconds: int = Field(default=300, ge=30, le=3600)

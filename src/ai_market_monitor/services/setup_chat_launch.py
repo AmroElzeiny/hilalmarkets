@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from time import monotonic
-from typing import Any, Literal
+from typing import Any, Literal, cast, get_args
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -49,6 +49,12 @@ from ai_market_monitor.engine.strategy_compiler_v2 import (
 )
 from ai_market_monitor.engine.strategy_draft_migration import migrate_legacy_draft
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
+from ai_market_monitor.schemas.screening_execution import (
+    PreflightContract,
+    PreflightManifest,
+    ReviewedScreeningEvidence,
+    ScreeningExecutionResult,
+)
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
     SegmentKind,
@@ -85,6 +91,10 @@ from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseResolver,
 )
 from ai_market_monitor.services.system_brain import CapabilityCoverageService
+from ai_market_monitor.services.watchlist_snapshot import (
+    watchlist_content_hash,
+    watchlist_identity_changed,
+)
 
 #: Which transport stage an agent failure maps to for the HTTP error envelope. The
 #: four stages stay distinct: a planning failure, a refused plan, a compile refusal
@@ -148,6 +158,9 @@ class SetupChatLaunchService:
         self.settings = settings
         self.owner = owner
         self.agent = agent or SetupChatAgent(settings)
+        #: What the last preflight actually checked, so the promise can be shown and
+        #: hashed into approval rather than assumed.
+        self._last_preflight_manifest: PreflightManifest | None = None
         self._preflight_redis: Redis | None = (
             None
             if settings.app_env == "test"
@@ -353,6 +366,7 @@ class SetupChatLaunchService:
                 screening=self._screening_gate(session, chat),
                 providers=self._provider_gate(),
                 runtime_preflight=self._runtime_preflight(),
+                preflight_manifest=self._read_preflight_manifest,
                 server_owned_option=True,
             )
         )
@@ -569,8 +583,12 @@ class SetupChatLaunchService:
                     updates.update(
                         {
                             "approved_watchlist_id": watchlists[0].id,
-                            "approved_watchlist_version": (
-                                watchlists[0].updated_at.isoformat()
+                            # Identity of the markets in the list, not of the row that
+                            # names it. See `services/watchlist_snapshot.py`.
+                            "approved_watchlist_version": await watchlist_content_hash(
+                                session,
+                                watchlists[0],
+                                quote_currencies=[draft.market_scope.quote_asset],
                             ),
                         }
                     )
@@ -663,8 +681,12 @@ class SetupChatLaunchService:
                         update={
                             "universe_mode": ShariaUniverseMode.APPROVED_WATCHLIST,
                             "approved_watchlist_id": watchlist.id,
-                            "approved_watchlist_version": (
-                                watchlist.updated_at.isoformat()
+                            # Identity of the markets in the list, not of the row that
+                            # names it. See `services/watchlist_snapshot.py`.
+                            "approved_watchlist_version": await watchlist_content_hash(
+                                session,
+                                watchlist,
+                                quote_currencies=[draft.market_scope.quote_asset],
                             ),
                             "explicit_symbols": [],
                         }
@@ -884,9 +906,29 @@ class SetupChatLaunchService:
         expected_executable_version: int,
         expected_executable_hash: str,
         expected_schema_hash: str,
-    ) -> StrategyDefinition:
-        """Recompile and refresh every dynamic gate for the exact reviewed draft."""
+    ) -> tuple[StrategyDefinition, ReviewedScreeningEvidence | None]:
+        """Re-verify, in order, everything the user was shown before they approved.
 
+        The seven steps below run every time, and each one refuses rather than repairs:
+
+        1. the draft still has the exact version and executable identity that was reviewed
+        2. it still compiles, and the compiled preview still hashes to what was shown
+        3. the screening methodology is still active and still at the reviewed version
+        4. the Favorites list, if one is used, still has exactly the reviewed membership
+           — by content, not by a timestamp
+        5. the universe re-resolves, and the markets it permits are **the same set** the
+           user reviewed
+        6. every data capability the rules need is still available
+        7. the market-data check is fresh and keeps the same promise it made at review
+
+        Step 5 is the one that was missing. The universe was re-resolved and the answer
+        thrown away, so a setup reviewed over eight markets could be approved over a
+        different set with nothing shown and nothing recorded.
+
+        Returns the screened definition and the evidence to bind into the approval.
+        """
+
+        # 1. Identity of the reviewed draft.
         if (
             draft.executable_version != expected_executable_version
             or draft.executable_hash != expected_executable_hash
@@ -917,7 +959,9 @@ class SetupChatLaunchService:
                 status_code=409,
             ) from exc
         policy = draft.sharia_policy
+        screening: ScreeningExecutionResult | None = None
         if self.settings.sharia_screening_enforced:
+            # 3. The methodology is still active and still the reviewed version.
             if policy.methodology_id is None or not policy.methodology_version:
                 raise SetupLaunchError(
                     "SHARIA_POLICY_STALE",
@@ -937,6 +981,12 @@ class SetupChatLaunchService:
                     stage="compile",
                     status_code=409,
                 )
+            # 4. The Favorites list still holds exactly the reviewed markets.
+            #
+            # The old test compared `watchlist.updated_at.isoformat()`. Membership lives
+            # in a separate table, so adding or removing a market did not always move
+            # that timestamp, and an unrelated rename always did. A content hash of the
+            # actual membership answers the real question.
             if (
                 policy.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
                 and policy.approved_watchlist_id is not None
@@ -945,26 +995,31 @@ class SetupChatLaunchService:
                     ApprovedWatchlist,
                     policy.approved_watchlist_id,
                 )
-                if (
-                    watchlist is None
-                    or watchlist.user_id != chat.user_id
-                    or watchlist.updated_at.isoformat()
-                    != policy.approved_watchlist_version
-                ):
+                if watchlist is None or watchlist.user_id != chat.user_id:
                     raise SetupLaunchError(
                         "APPROVED_WATCHLIST_STALE",
                         "The selected Favorites list changed. Review it again.",
                         stage="compile",
                         status_code=409,
                     )
-            try:
-                resolution = await ShariaUniverseResolver(
+                if await watchlist_identity_changed(
                     session,
-                    self.owner.market_provider,
-                    self.settings,
-                ).resolve(
+                    watchlist.id,
+                    policy.approved_watchlist_version,
+                    quote_currencies=list(definition.universe.quote_currencies),
+                ):
+                    raise SetupLaunchError(
+                        "APPROVED_WATCHLIST_STALE",
+                        "The markets in that Favorites list changed. Review it again.",
+                        stage="compile",
+                        status_code=409,
+                    )
+            # 5. The universe re-resolves, and it is the same set that was reviewed.
+            try:
+                screening = await self._apply_screening_policy(
+                    session,
+                    chat,
                     definition,
-                    user_id=chat.user_id,
                     persist_snapshot=True,
                 )
             except ShariaUniverseError as exc:
@@ -974,14 +1029,20 @@ class SetupChatLaunchService:
                     stage="compile",
                     status_code=409,
                 ) from exc
-            if not resolution.included_symbols:
+            except (KeyError, ValueError) as exc:
                 raise SetupLaunchError(
                     "SHARIA_SCREENING_EMPTY",
-                    "No selected asset is currently eligible under this policy.",
+                    str(exc)
+                    or "No selected asset is currently eligible under this policy.",
                     stage="compile",
                     status_code=409,
-                )
+                ) from exc
+            # From here on the approval is about the *screened* universe. Compiling the
+            # raw draft and approving that was how a reviewed universe and an approved
+            # universe could differ without anyone noticing.
+            definition = screening.secured_definition
 
+        # 6. Every data capability the rules need is still available.
         provider_requirements = await self._provider_gate()(
             draft.static_provider_requirements
         )
@@ -992,7 +1053,9 @@ class SetupChatLaunchService:
                 stage="provider",
                 status_code=409,
             )
+        # 7. The market-data check is fresh, and it keeps its reviewed promise.
         statuses = await self._runtime_preflight()(definition)
+        manifest = self._read_preflight_manifest()
         now = datetime.now(UTC)
         ttl_seconds = self.settings.setup_provider_preflight_ttl_seconds
         if any(
@@ -1007,6 +1070,7 @@ class SetupChatLaunchService:
                 stage="provider",
                 status_code=409,
             )
+        # 2 (second half). The compiled preview still hashes to what the user read.
         if definition.canonical_hash() != expected_schema_hash:
             raise SetupLaunchError(
                 "SETUP_CHANGED",
@@ -1014,7 +1078,32 @@ class SetupChatLaunchService:
                 stage="compile",
                 status_code=409,
             )
-        return definition
+        current = ReviewedScreeningEvidence.from_execution(
+            screening=screening,
+            manifest=manifest,
+            reviewed_at=now,
+        )
+        reviewed = _load_reviewed_screening_evidence(chat)
+        if reviewed is not None:
+            changed = reviewed.differences_from(current)
+            if changed:
+                raise SetupLaunchError(
+                    "SCREENING_EVIDENCE_STALE",
+                    reviewed.describe_change(current)
+                    + " Look at the updated setup before you approve it.",
+                    stage="compile",
+                    status_code=409,
+                )
+        elif screening is not None:
+            # Screening ran, but nothing recorded what the user reviewed. Approving would
+            # be approving an unread universe, so refuse and make them look at it.
+            raise SetupLaunchError(
+                "SCREENING_EVIDENCE_MISSING",
+                "This setup has to be shown to you again before it can be approved.",
+                stage="compile",
+                status_code=409,
+            )
+        return definition, current
 
     def _turn_stage_callback(
         self,
@@ -1119,6 +1208,14 @@ class SetupChatLaunchService:
                     "conversation_after": conversation.model_dump(mode="json"),
                     "definition": definition_payload,
                     "material_change": bool(payload.get("material_change")),
+                    # The exact words a retry will be answered with, written in the same
+                    # transaction as the state they describe.
+                    #
+                    # Recovery used to *generate* this sentence when the retry arrived.
+                    # Two retries arriving together each generated their own, and the
+                    # answer a user got depended on when they pressed the button rather
+                    # than on what the server did. Storing it here makes recovery a read.
+                    RECOVERY_REPLY_KEY: deterministic_summary(result),
                 }
                 turn.mutation_committed = (
                     draft.executable_version != turn.executable_version_before
@@ -1433,7 +1530,13 @@ class SetupChatLaunchService:
             stored = record.execution_result_json.get("execution_result")
             if isinstance(stored, dict):
                 result = SetupTurnExecutionResult.model_validate(stored)
-                message = deterministic_summary(result)
+                # Read the reply the committing transaction already wrote. Regenerating
+                # it here would let two retries of the same message produce two different
+                # answers for one unchanged result.
+                #
+                # A turn committed before this field existed has none, so it is derived
+                # once and written back, and every retry after that reads it.
+                message = _recovery_reply(record, result)
                 assistant = await self.owner._assistant(
                     session,
                     chat,
@@ -1532,6 +1635,7 @@ class SetupChatLaunchService:
             screening=self._screening_gate(session, chat),
             providers=self._provider_gate(),
             runtime_preflight=self._runtime_preflight(),
+            preflight_manifest=self._read_preflight_manifest,
             stage_callback=(
                 self._turn_stage_callback(
                     session,
@@ -1723,13 +1827,21 @@ class SetupChatLaunchService:
 
         async def gate(
             definition: StrategyDefinition,
-        ) -> tuple[StrategyDefinition | None, str | None]:
+        ) -> tuple[ScreeningExecutionResult | None, str | None]:
             try:
                 return await self._apply_screening_policy(session, chat, definition), None
             except (KeyError, ValueError, ShariaUniverseError) as exc:
                 return None, str(exc) or "Choose and validate a Halal Market first."
 
         return gate
+
+    def _read_preflight_manifest(self) -> PreflightManifest | None:
+        """What the last preflight in this turn actually checked.
+
+        ``None`` when no preflight ran, so an absent check is reported as absent instead
+        of being read as a passed one.
+        """
+        return self._last_preflight_manifest
 
     def _provider_gate(self) -> ProviderGate:
         """Mark each provider requirement available or not, from configuration.
@@ -1773,6 +1885,24 @@ class SetupChatLaunchService:
         Compilation and provider availability are separate facts. A transient provider
         failure leaves the draft compile-ready but runtime-unverified; a confirmed
         unsupported market blocks it.
+
+        The universe reaching this function is always the **screened** one — the symbols
+        the Sharia resolver permitted — because :meth:`_apply_screening_policy` now hands
+        back a definition whose ``include_symbols`` are exactly those. It runs under one
+        of two promises, chosen by size and recorded in the manifest so the reply, the
+        stored preview and the approval record all state the same thing:
+
+        ``verified_all``
+            Every permitted symbol × every required timeframe was checked. Used whenever
+            the universe is at or below ``setup_preflight_symbol_cap``, which covers
+            explicit asset lists and ordinary Favorites lists.
+
+        ``policy_verified_runtime_fail_closed``
+            The universe is larger than the cap, or its membership can change without a
+            user edit ("everything eligible", a shared Favorites list). The rules'
+            timeframes and capabilities are verified against a bounded sample; each
+            symbol is then checked when monitoring starts, and one without usable data is
+            skipped, never guessed at.
         """
 
         async def preflight(
@@ -1783,6 +1913,9 @@ class SetupChatLaunchService:
             if cached is not None:
                 return cached
 
+            # A manifest describes one preflight. Carrying the previous turn's forward
+            # would let an old promise be shown next to a new universe.
+            self._last_preflight_manifest = None
             checked_at = datetime.now(UTC)
             provider_name = type(self.owner.market_provider).__name__
             try:
@@ -1811,11 +1944,33 @@ class SetupChatLaunchService:
                     )
                     for item in missing
                 ]
-                targets = (
-                    [item for item in requested if item in normalized_listed]
-                    if requested
-                    else list(sorted(normalized_listed))[:1]
-                )
+                # Which markets this preflight actually promises to have checked.
+                #
+                # The fallback used to be `sorted(listed)[:1]` — one arbitrary symbol,
+                # after which the whole universe was reported runtime-ready. A Favorites
+                # list of forty markets was "verified" by checking whichever symbol
+                # sorted first, which might not even be in the list.
+                #
+                # The contract is now explicit and bounded, and it is recorded so the UI,
+                # the execution result and the approval record all state the same promise.
+                cap = self.settings.setup_preflight_symbol_cap
+                if requested:
+                    resolved = [item for item in requested if item in normalized_listed]
+                    contract: PreflightContract = (
+                        "verified_all"
+                        if len(resolved) <= cap
+                        else "policy_verified_runtime_fail_closed"
+                    )
+                    targets = resolved[:cap]
+                    unverified = resolved[cap:]
+                else:
+                    # No explicit universe reached this preflight, so the draft runs over
+                    # whatever the exchange lists. Nothing can be promised per symbol; a
+                    # bounded sample proves the timeframes and capabilities work.
+                    contract = "policy_verified_runtime_fail_closed"
+                    sample = sorted(normalized_listed)
+                    targets = sample[:cap]
+                    unverified = sample[cap:]
                 if not targets and not statuses:
                     statuses = [
                         ProviderRuntimeStatusV2(
@@ -1826,8 +1981,16 @@ class SetupChatLaunchService:
                             safe_error="No market is available for this exchange scope.",
                         )
                     ]
+                    self._last_preflight_manifest = PreflightManifest(
+                        contract="policy_verified_runtime_fail_closed",
+                        unverified_symbols=unverified,
+                        symbol_cap=cap,
+                        checked_at=checked_at,
+                    )
                 else:
-                    semaphore = asyncio.Semaphore(8)
+                    semaphore = asyncio.Semaphore(
+                        self.settings.setup_preflight_max_concurrency
+                    )
                     timeframes = list(
                         dict.fromkeys(
                             [
@@ -1926,6 +2089,26 @@ class SetupChatLaunchService:
                             )
                         )
                     )
+                    # The manifest states exactly which pairs were checked and under
+                    # which promise, so nobody downstream has to infer it.
+                    manifest = PreflightManifest(
+                        contract=contract,
+                        verified_pairs=[
+                            f"{symbol}@{timeframe}"
+                            for symbol in targets
+                            for timeframe in timeframes
+                        ],
+                        unverified_symbols=unverified,
+                        required_timeframes=timeframes,
+                        symbol_cap=cap,
+                        checked_at=checked_at,
+                    )
+                    # The manifest travels on its own, never as a status row. A row in
+                    # this list is an availability verdict that `_provider_status` reads
+                    # and that approval re-checks for freshness; a record that always
+                    # says "available" would be a row nothing can ever block on, and it
+                    # would make the count of checked pairs wrong.
+                    self._last_preflight_manifest = manifest
             except (TimeoutError, ConnectionError, OSError):
                 statuses = [
                     ProviderRuntimeStatusV2(
@@ -2060,6 +2243,7 @@ class SetupChatLaunchService:
         )
         compile_error: str | None = None
         screening_error: str | None = None
+        reviewed_evidence: ReviewedScreeningEvidence | None = None
         if execution is not None:
             blocking = not execution.approval_eligible
             compile_error = (
@@ -2072,6 +2256,10 @@ class SetupChatLaunchService:
                 if execution.screening_status == "blocked" and execution.safe_errors
                 else None
             )
+            # The turn already ran both gates and recorded what they found. Reading those
+            # records — rather than screening again here — is what keeps the reply, the
+            # stored preview and the approval binding describing one universe.
+            reviewed_evidence = _reviewed_evidence_from_execution(execution)
         else:
             blocking = draft.blocking or bool(violations)
             if not blocking and definition is None:
@@ -2082,15 +2270,28 @@ class SetupChatLaunchService:
                     blocking = True
             if definition is not None and self.settings.sharia_screening_enforced:
                 try:
-                    definition = await self._apply_screening_policy(session, chat, definition)
+                    screened = await self._apply_screening_policy(session, chat, definition)
                 except (KeyError, ValueError, ShariaUniverseError) as exc:
                     screening_error = str(exc) or "Choose and validate a Halal Market."
                     definition = None
                     blocking = True
+                else:
+                    # What gets persisted and previewed is the screened universe, not the
+                    # one the user's rules were written against.
+                    definition = screened.secured_definition
+                    reviewed_evidence = ReviewedScreeningEvidence.from_execution(
+                        screening=screened,
+                        manifest=self._read_preflight_manifest(),
+                        reviewed_at=datetime.now(UTC),
+                    )
 
         chat.draft_schema_json = (
             definition.model_dump(mode="json") if definition is not None else None
         )
+        # Record exactly which screening facts the user is about to see. Approval compares
+        # against this, so "the universe may have changed since you looked" stops being an
+        # assumption and becomes a check. Cleared whenever there is no preview to review.
+        _store_reviewed_screening_evidence(chat, reviewed_evidence if definition else None)
         chat.unsupported_conditions = [
             {
                 "code": item.key,
@@ -2154,25 +2355,74 @@ class SetupChatLaunchService:
         session: AsyncSession,
         chat: AISetupChatSession,
         definition: StrategyDefinition,
-    ) -> StrategyDefinition:
+        *,
+        persist_snapshot: bool = False,
+    ) -> ScreeningExecutionResult:
+        """Resolve the universe and return the definition that actually governs it.
+
+        This used to resolve the universe, check that *something* survived, and then
+        return the original unscreened definition. The permitted symbols were discarded,
+        so runtime preflight, the preview and approval all worked on a different universe
+        from the one screening had approved.
+
+        ``persist_snapshot`` is on only at approval, where the resolution becomes a stored
+        compliance record. During a chat turn the universe is resolved for review, and
+        writing a snapshot per keystroke would fill the audit trail with drafts.
+        """
         policy = definition.universe.sharia_policy
         if policy is None or policy.methodology_id is None:
             raise ValueError("Choose a screening methodology before compiling.")
-        secured = definition
         resolution = await ShariaUniverseResolver(
             session,
             self.owner.market_provider,
             self.settings,
         ).resolve(
-            secured,
+            definition,
             user_id=chat.user_id,
-            persist_snapshot=False,
+            persist_snapshot=persist_snapshot,
         )
         if not resolution.included_symbols:
             raise ValueError(
                 "No asset currently meets both the screening policy and market scope."
             )
-        return secured
+        # The permitted symbols become the executable universe. Everything downstream
+        # now sees exactly what the resolver allowed.
+        secured = definition.model_copy(
+            update={
+                "universe": definition.universe.model_copy(
+                    update={"include_symbols": list(resolution.included_symbols)}
+                )
+            }
+        )
+        watchlist_hash: str | None = None
+        if policy.approved_watchlist_id is not None:
+            watchlist = await session.get(ApprovedWatchlist, policy.approved_watchlist_id)
+            if watchlist is not None:
+                watchlist_hash = await watchlist_content_hash(
+                    session,
+                    watchlist,
+                    quote_currencies=list(definition.universe.quote_currencies),
+                )
+        included_symbols = list(resolution.included_symbols)
+        excluded_symbols = [item.symbol for item in resolution.excluded]
+        return ScreeningExecutionResult(
+            secured_definition=secured,
+            resolution_snapshot_id=resolution.snapshot_id,
+            resolution_snapshot_hash=resolution.snapshot_hash,
+            policy_hash=resolution.policy_hash,
+            resolved_at=resolution.resolved_at,
+            # Everything the resolver looked at is what it kept plus what it turned away.
+            considered_symbols=sorted({*included_symbols, *excluded_symbols}),
+            included_symbols=included_symbols,
+            excluded_symbols=excluded_symbols,
+            methodology_id=resolution.methodology_id,
+            methodology_version=resolution.methodology_version,
+            watchlist_snapshot_hash=watchlist_hash,
+            # Only an explicit list is fixed. A Favorites list can be edited and an
+            # eligible-market universe changes as assessments change, so a review of
+            # either binds to the policy plus this snapshot, not to a frozen membership.
+            dynamic_membership=policy.universe_mode != ShariaUniverseMode.EXPLICIT_ASSETS,
+        )
 
 
 def load_strategy_draft_v2(chat: AISetupChatSession) -> StrategyDraftV2:
@@ -2496,6 +2746,112 @@ def _draft_is_approved(draft: StrategyDraftV2) -> bool:
         and draft.approval.executable_version == draft.executable_version
         and draft.approval.executable_hash == draft.executable_hash
     )
+
+
+#: Where the reviewed screening facts live on the chat session.
+REVIEWED_SCREENING_EVIDENCE_KEY = "reviewed_screening_evidence"
+
+#: Where the stored recovery reply lives inside a turn's committed execution payload.
+RECOVERY_REPLY_KEY = "recovery_reply"
+
+
+def _recovery_reply(record: SetupChatTurn, result: SetupTurnExecutionResult) -> str:
+    """The exact answer a retry gets: read, not regenerated.
+
+    Written when the turn committed. A turn that committed before this field existed has
+    none, so it is derived once here and written back to the same record, which makes
+    every later retry of that message a read as well.
+    """
+
+    payload = dict(record.execution_result_json or {})
+    stored = payload.get(RECOVERY_REPLY_KEY)
+    if isinstance(stored, str) and stored.strip():
+        return stored
+    message = deterministic_summary(result)
+    payload[RECOVERY_REPLY_KEY] = message
+    record.execution_result_json = payload
+    return message
+
+
+def _reviewed_evidence_from_execution(
+    execution: SetupTurnExecutionResult,
+) -> ReviewedScreeningEvidence | None:
+    """Rebuild what the turn's own gates recorded, without screening again.
+
+    The turn already resolved the universe and ran the market-data check, and stored both
+    results. Re-running them here would mean the user reads one answer and the database
+    keeps another.
+    """
+
+    screening = execution.screening_evidence or {}
+    manifest = execution.preflight_manifest or {}
+    if not screening and not manifest:
+        return None
+    return ReviewedScreeningEvidence(
+        screening_snapshot_id=_optional_text(screening.get("resolution_snapshot_id")),
+        screening_snapshot_hash=_optional_text(screening.get("resolution_snapshot_hash")),
+        screening_policy_hash=_optional_text(screening.get("policy_hash")),
+        methodology_id=_optional_text(screening.get("methodology_id")),
+        methodology_version=_optional_text(screening.get("methodology_version")),
+        resolved_symbol_set_hash=_optional_text(screening.get("resolved_symbol_set_hash")),
+        watchlist_snapshot_hash=_optional_text(screening.get("watchlist_snapshot_hash")),
+        provider_preflight_manifest_hash=_optional_text(manifest.get("manifest_hash")),
+        preflight_contract=_optional_contract(manifest.get("contract")),
+        included_symbol_count=_optional_count(screening.get("included_count")),
+        dynamic_membership=bool(screening.get("dynamic_membership")),
+        reviewed_at=datetime.now(UTC),
+    )
+
+
+def _optional_text(value: object) -> str | None:
+    return str(value) if isinstance(value, str) and value.strip() else None
+
+
+def _optional_count(value: object) -> int:
+    """A count read back from a stored payload. Anything unusable reads as zero.
+
+    This is display detail on an evidence record. Raising here would turn a cosmetic
+    field into a failed approval, which is the "a diagnostic must never become the
+    failure" rule.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _optional_contract(value: object) -> PreflightContract | None:
+    allowed = get_args(PreflightContract)
+    return cast(PreflightContract, value) if value in allowed else None
+
+
+def _store_reviewed_screening_evidence(
+    chat: AISetupChatSession,
+    evidence: ReviewedScreeningEvidence | None,
+) -> None:
+    """Keep, or clear, the screening facts the user last reviewed."""
+
+    context = dict(chat.context_json or {})
+    if evidence is None:
+        context.pop(REVIEWED_SCREENING_EVIDENCE_KEY, None)
+    else:
+        context[REVIEWED_SCREENING_EVIDENCE_KEY] = evidence.model_dump(mode="json")
+    chat.context_json = context
+
+
+def _load_reviewed_screening_evidence(
+    chat: AISetupChatSession,
+) -> ReviewedScreeningEvidence | None:
+    """What the user last reviewed, or ``None`` when nothing was recorded.
+
+    A payload that no longer parses reads as *nothing reviewed*, which refuses approval.
+    Treating an unreadable record as "unchanged" would approve on evidence nobody can see.
+    """
+
+    payload = (chat.context_json or {}).get(REVIEWED_SCREENING_EVIDENCE_KEY)
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return ReviewedScreeningEvidence.model_validate(payload)
+    except ValidationError:
+        return None
 
 
 def _load_conversation_context(context: dict[str, Any]) -> SetupConversationContext:

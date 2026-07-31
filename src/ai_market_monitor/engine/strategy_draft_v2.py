@@ -199,12 +199,17 @@ def apply_strategy_patch(
         if key in unsupported:
             unsupported.pop(key)
             changed.append(f"unsupported.resolved:{key}")
-    if patch.update_conditions or patch.remove_conditions or patch.replace_groups is not None:
-        unsupported = {
-            key: value
-            for key, value in unsupported.items()
-            if value.source_turn_id != patch.source_turn_id
-        }
+    # An unsupported requirement is a blocker the platform could not express. It used to
+    # be swept away whenever the *same turn* also touched a condition:
+    #
+    #     if patch.update_conditions or ...:
+    #         drop every unsupported item whose source_turn_id == this turn
+    #
+    # Nothing there proved the requirement was now represented. Editing an unrelated
+    # rule in the same turn cleared it, and whether a blocker survived depended on the
+    # order the operations happened to run in. It can now only be removed by an
+    # authorized `remove_unsupported_key`, by a reconciliation that binds it to a typed
+    # target, or by snapshot restoration.
 
     provenance = list(draft.source_provenance)
     if changed or patch.unresolved_references or patch.unsupported_requirements:

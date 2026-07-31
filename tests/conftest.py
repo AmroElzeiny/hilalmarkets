@@ -1,5 +1,6 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -15,6 +16,30 @@ from ai_market_monitor.db.base import Base
 from ai_market_monitor.main import create_app
 from ai_market_monitor.schemas.onboarding import MarketPreviewResponse
 from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_from_local_env_file() -> Iterator[None]:
+    """No test result may depend on a developer's untracked ``.env``.
+
+    ``Settings`` reads ``.env`` by default. A test that builds a production-like settings
+    object and then checks the startup guard was therefore reading whatever the developer
+    happened to have on disk: a local ``APP_BASE_URL=http://localhost:8000`` made two
+    production-configuration tests fail on one machine and pass on another, and the
+    reverse is worse — a real misconfiguration could be hidden by a local override.
+
+    Autouse and repo-wide on purpose. Fixing the two tests that happened to fail would
+    leave every other test, and every test written later, exposed to the same thing. A
+    test that genuinely wants a file still passes ``_env_file=`` itself, which wins over
+    this default.
+    """
+
+    original = Settings.model_config.get("env_file")
+    Settings.model_config["env_file"] = None
+    try:
+        yield
+    finally:
+        Settings.model_config["env_file"] = original
 
 
 class SuccessfulPreviewer:

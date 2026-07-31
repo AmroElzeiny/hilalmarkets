@@ -1,11 +1,21 @@
+# Deployment compose for HilalMarkets.
+#
+# Every service used to hardcode `DATABASE_URL` with the password `market_monitor` in its
+# `environment:` block. That block wins over `env_file: .env`, so an operator who set a
+# real password in `.env` was still deployed with the one published in this repository,
+# and nothing said so.
+#
+# Secrets now come from the environment with `:?`, which stops `docker compose up` with a
+# named error when one is missing rather than falling back to something insecure. Set them
+# in `.env` next to this file — see `.env.production.example`.
 services:
   api:
     build: .
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://market_monitor:market_monitor@db:5432/market_monitor
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env, see .env.production.example}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       VITE_ANALYTICS_ENABLED: "true"
       VITE_GTM_ID: "GTM-KBBHH2FV"
       VITE_GA4_MEASUREMENT_ID: ""
@@ -31,8 +41,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://market_monitor:market_monitor@db:5432/market_monitor
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env, see .env.production.example}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       VITE_ANALYTICS_ENABLED: "true"
       VITE_GTM_ID: "GTM-KBBHH2FV"
       VITE_GA4_MEASUREMENT_ID: ""
@@ -58,8 +68,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://market_monitor:market_monitor@db:5432/market_monitor
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env, see .env.production.example}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       VITE_ANALYTICS_ENABLED: "true"
       VITE_GTM_ID: "GTM-KBBHH2FV"
       VITE_GA4_MEASUREMENT_ID: ""
@@ -79,13 +89,15 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: market_monitor
-      POSTGRES_USER: market_monitor
-      POSTGRES_PASSWORD: market_monitor
+      POSTGRES_DB: ${POSTGRES_DB:-market_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-market_monitor}
+      # No default. A database whose password is printed in a public repository is not
+      # protected by anything, so there is no safe value to fall back to.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to a strong secret}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U market_monitor"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-market_monitor}"]
       interval: 5s
       timeout: 5s
       retries: 10
