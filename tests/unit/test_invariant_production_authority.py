@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -47,12 +47,11 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     StrategyPatch,
 )
-from ai_market_monitor.services.setup_chat_agent import (
-    _rebuild_reply_from_validated_claims,
-)
+from ai_market_monitor.services.setup_chat_agent import compose_final_reply
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
 from ai_market_monitor.services.watchlist_snapshot import (
     SNAPSHOT_PREFIX,
+    WatchlistMember,
     WatchlistSnapshot,
     is_content_identity,
 )
@@ -96,15 +95,35 @@ def _condition_ids(draft: StrategyDraftV2) -> list[str]:
     ]
 
 
-def _definition(symbols: list[str]) -> StrategyDefinition:
-    draft = _draft()
-    from ai_market_monitor.engine.strategy_compiler_v2 import compile_strategy_draft_v2
+def _definition(
+    symbols: list[str],
+    *,
+    mode: ShariaUniverseMode = ShariaUniverseMode.EXPLICIT_ASSETS,
+) -> StrategyDefinition:
+    """A compiled definition with a chosen universe mode and authored symbols."""
 
+    from ai_market_monitor.engine.strategy_compiler_v2 import compile_strategy_draft_v2
+    from ai_market_monitor.schemas.strategy import ShariaPolicyDefinition
+
+    draft = _draft()
     definition = compile_strategy_draft_v2(draft)
+    policy = definition.universe.sharia_policy or ShariaPolicyDefinition()
     return definition.model_copy(
         update={
             "universe": definition.universe.model_copy(
-                update={"include_symbols": symbols}
+                update={
+                    "include_symbols": symbols,
+                    "sharia_policy": policy.model_copy(
+                        update={
+                            "universe_mode": mode,
+                            "approved_watchlist_id": (
+                                uuid4()
+                                if mode is ShariaUniverseMode.APPROVED_WATCHLIST
+                                else None
+                            ),
+                        }
+                    ),
+                }
             )
         }
     )
@@ -125,28 +144,45 @@ def _definition(symbols: list[str]) -> StrategyDefinition:
         ["ADA/USDT", "BTC/USDT", "ETH/USDT", "SOL/USDT"],
     ],
 )
-def test_screening_result_cannot_carry_a_universe_it_did_not_permit(
+def test_the_data_check_runs_against_exactly_the_permitted_markets(
     permitted: list[str],
 ) -> None:
-    """The secured definition must hold exactly the permitted markets — no more, no less."""
+    """The preflight copy carries the resolution; the authored policy is untouched.
 
+    Both halves matter. If the data check ran against the authored list it would check
+    markets screening refused. If the resolution were written *into* the authored list, a
+    dynamic universe would be frozen to this moment — see the mode tests below.
+    """
+
+    authored = _definition(permitted)
     result = ScreeningExecutionResult(
-        secured_definition=_definition(permitted),
+        authored_definition=authored,
         resolved_at=datetime.now(UTC),
         included_symbols=permitted,
     )
-    assert list(result.secured_definition.universe.include_symbols) == permitted
+    assert list(result.preflight_definition.universe.include_symbols) == permitted
+    assert (
+        list(result.authored_definition.universe.include_symbols)
+        == list(authored.universe.include_symbols)
+    )
 
-    for wrong in (
-        [*permitted, "DOGE/USDT"],  # one extra market slipped through
-        permitted[:-1] if len(permitted) > 1 else [],  # one silently dropped
-    ):
-        with pytest.raises(ValueError, match="exactly the symbols screening permitted"):
-            ScreeningExecutionResult(
-                secured_definition=_definition(wrong),
-                resolved_at=datetime.now(UTC),
-                included_symbols=permitted,
-            )
+
+def test_a_fixed_universe_cannot_gain_a_market_the_user_never_chose() -> None:
+    """Runtime may drop an asset. It may never add one to a fixed list."""
+
+    authored = _definition(["BTC/USDT", "ETH/USDT"])
+    # Shrinking is allowed: an asset can lose eligibility.
+    ScreeningExecutionResult(
+        authored_definition=authored,
+        resolved_at=datetime.now(UTC),
+        included_symbols=["BTC/USDT"],
+    )
+    with pytest.raises(ValueError, match="did not choose"):
+        ScreeningExecutionResult(
+            authored_definition=authored,
+            resolved_at=datetime.now(UTC),
+            included_symbols=["BTC/USDT", "ETH/USDT", "DOGE/USDT"],
+        )
 
 
 def test_resolved_symbol_set_hash_ignores_order_but_not_membership() -> None:
@@ -224,9 +260,11 @@ def _evidence(**overrides: object) -> ReviewedScreeningEvidence:
         "methodology_id": str(uuid4()),
         "methodology_version": "1.0.0",
         "resolved_symbol_set_hash": symbol_set_hash(["BTC/USDT"]),
+        "secured_preview_hash": "e" * 64,
         "watchlist_snapshot_hash": f"{SNAPSHOT_PREFIX}{'c' * 64}",
         "provider_preflight_manifest_hash": "d" * 64,
         "preflight_contract": "verified_all",
+        "membership_kind": "fixed_watchlist",
         "reviewed_at": datetime.now(UTC),
     }
     base.update(overrides)
@@ -288,13 +326,43 @@ def test_approved_binding_carries_the_reviewed_evidence() -> None:
 # ---------------------------------------------------------------------------
 
 
+#: One stable governed id per test asset, so a member's identity does not change between
+#: two snapshots in the same test for reasons the test did not intend.
+_ASSET_IDS = {
+    "BTC": "11111111-1111-1111-1111-111111111111",
+    "ETH": "22222222-2222-2222-2222-222222222222",
+    "SOL": "33333333-3333-3333-3333-333333333333",
+}
+
+
+def _member(asset: str, *, resolved: bool = True) -> WatchlistMember:
+    return WatchlistMember(
+        canonical_asset=asset,
+        canonical_asset_id=_ASSET_IDS[asset] if resolved else None,
+        markets=(
+            [
+                {
+                    "exchange_market_id": f"market-{asset}",
+                    "exchange": "binance",
+                    "market_symbol": f"{asset}/USDT",
+                    "market_type": "spot",
+                    "quote_asset": "USDT",
+                }
+            ]
+            if resolved
+            else []
+        ),
+    )
+
+
 def _snapshot(assets: list[str], *, name: str = "My list") -> WatchlistSnapshot:
-    watchlist_id = uuid4()
     return WatchlistSnapshot(
-        watchlist_id=watchlist_id,
+        watchlist_id=UUID("44444444-4444-4444-4444-444444444444"),
         name=name,
-        ordered_asset_ids=assets,
-        market_symbols=[f"{item}/USDT" for item in assets],
+        exchange="binance",
+        market_type="spot",
+        quote_currencies=["USDT"],
+        members=[_member(item) for item in assets],
         created_at=datetime.now(UTC),
     )
 
@@ -304,8 +372,7 @@ def test_watchlist_identity_follows_membership_not_the_row() -> None:
     # Same members in a different order, a different name, a later moment: same list.
     same = first.model_copy(
         update={
-            "ordered_asset_ids": ["ETH", "BTC"],
-            "market_symbols": ["ETH/USDT", "BTC/USDT"],
+            "members": [_member("ETH"), _member("BTC")],
             "name": "Renamed",
             "created_at": datetime.now(UTC),
         }
@@ -313,13 +380,18 @@ def test_watchlist_identity_follows_membership_not_the_row() -> None:
     assert same.content_hash == first.content_hash
 
     for changed in (["BTC"], ["BTC", "ETH", "SOL"], ["BTC", "SOL"]):
-        moved = first.model_copy(
-            update={
-                "ordered_asset_ids": changed,
-                "market_symbols": [f"{item}/USDT" for item in changed],
-            }
-        )
+        moved = first.model_copy(update={"members": [_member(item) for item in changed]})
         assert moved.content_hash != first.content_hash, changed
+
+
+def test_a_member_with_no_governed_identity_changes_the_hash_and_is_named() -> None:
+    """A string-only membership is not the same thing as a verified one."""
+
+    resolved = _snapshot(["BTC"])
+    unresolved = resolved.model_copy(update={"members": [_member("BTC", resolved=False)]})
+    assert unresolved.content_hash != resolved.content_hash
+    assert unresolved.unresolved_members == ["BTC"]
+    assert resolved.unresolved_members == []
 
 
 @pytest.mark.parametrize(
@@ -672,8 +744,24 @@ def _ledger(**overrides: object) -> EvidenceLedger:
     execution.update(overrides)
     return build_evidence_ledger(
         reconciled_operations=[
-            {"operation_id": "op-1", "net_effect": "effective", "summary": "Added a rule."},
-            {"operation_id": "op-2", "net_effect": "cancelled", "summary": "Undone."},
+            {
+                "operation_id": "op-1",
+                "net_effect": "effective",
+                "operation_kind": "add_condition",
+                "summary": "Added a rule.",
+                # The proposition is checked against these, so the fixture carries the
+                # same shape the production reconciler emits.
+                "changes": [
+                    {"kind": "condition_added", "target": "c1", "condition_ids": ["c1"]}
+                ],
+            },
+            {
+                "operation_id": "op-2",
+                "net_effect": "cancelled",
+                "operation_kind": "add_condition",
+                "summary": "Undone.",
+                "changes": [],
+            },
         ],
         execution=execution,
         draft_read_model={
@@ -684,6 +772,17 @@ def _ledger(**overrides: object) -> EvidenceLedger:
         screening_evidence={"resolved_symbol_set_hash": "a" * 64},
         preflight_evidence={"manifest_hash": "b" * 64, "contract": "verified_all"},
         product_knowledge={"pricing": "free tier available"},
+    )
+
+
+def _compose(reply, ledger, *, owes_a_fact: bool):
+    """The production assembly, with a deterministic fallback the test can recognise."""
+
+    return compose_final_reply(
+        reply,
+        ledger,
+        owes_a_fact=owes_a_fact,
+        fallback_message="Nothing to report.",
     )
 
 
@@ -844,42 +943,65 @@ def test_a_refused_claim_is_replaced_not_silently_dropped(text: str) -> None:
     """The user still learns what happened, from evidence rather than from wording."""
 
     reply = SetupAgentReply(
-        message_without_question=f"Okay. {text}",
         conversational_text="Okay.",
         factual_claims=[
             FactualClaim(claim_type="mutation", text=text, evidence_ids=["operation:op-2"])
         ],
     )
-    rebuilt = _rebuild_reply_from_validated_claims(reply, _ledger())
+    rebuilt = _compose(reply, _ledger(), owes_a_fact=True)
     assert text not in rebuilt.message_without_question
     assert rebuilt.factual_claims == []
     assert rebuilt.message_without_question.strip()
     # The deterministic replacement carries the real fact.
     assert "Added a rule." in rebuilt.message_without_question
+    assert rebuilt.refused_claims, "a refusal must be recorded for the operator trace"
 
 
 def test_a_supported_claim_survives_untouched() -> None:
     reply = SetupAgentReply(
-        message_without_question="Okay. I added the rule for you.",
         conversational_text="Okay.",
         factual_claims=[
             FactualClaim(
                 claim_type="mutation",
+                subject_id="operation:op-1",
+                predicate="condition_added",
+                asserted_value="c1",
                 text="I added the rule for you.",
                 evidence_ids=["operation:op-1"],
             )
         ],
     )
-    rebuilt = _rebuild_reply_from_validated_claims(reply, _ledger())
-    assert rebuilt.message_without_question == reply.message_without_question
+    rebuilt = _compose(reply, _ledger(), owes_a_fact=True)
+    assert rebuilt.message_without_question == "Okay. I added the rule for you."
     assert len(rebuilt.factual_claims) == 1
 
 
-def test_a_reply_with_no_structured_claims_is_left_alone() -> None:
-    """An older composer keeps working; this validation only ever removes."""
+def test_a_turn_that_owes_no_fact_may_return_no_claims() -> None:
+    """"Hello" asserts nothing, so an empty claim list is correct, not suspicious."""
 
-    reply = SetupAgentReply(message_without_question="Okay, understood.")
-    assert _rebuild_reply_from_validated_claims(reply, _ledger()) is reply
+    reply = SetupAgentReply(conversational_text="Okay, understood.")
+    composed = _compose(reply, _ledger(), owes_a_fact=False)
+    assert composed.message_without_question == "Okay, understood."
+    assert composed.factual_claims == []
+
+
+def test_a_turn_that_owes_a_fact_never_returns_only_pleasantries() -> None:
+    """No claims plus a real change means the server states the change itself."""
+
+    reply = SetupAgentReply(conversational_text="Okay, understood.")
+    composed = _compose(reply, _ledger(), owes_a_fact=True)
+    assert "Added a rule." in composed.message_without_question
+
+
+def test_the_composer_schema_has_no_free_message_field() -> None:
+    """The one structural guarantee: there is nowhere else to put a fact."""
+
+    assert "message_without_question" not in SetupAgentReply.model_fields
+    assert set(SetupAgentReply.model_fields) == {
+        "conversational_text",
+        "factual_claims",
+        "selected_clarification_id",
+    }
 
 
 def test_deterministic_text_reports_only_operations_that_survived() -> None:
@@ -952,6 +1074,22 @@ def _agent_settings():
         sharia_screening_enforced=False,
         setup_agent_max_estimated_cost_usd_per_turn=5,
     )
+
+
+def _effective_condition_id(payload: dict[str, object]) -> str:
+    """The rule id the surviving operation really created, read from the payload.
+
+    Read rather than hardcoded: the proposition has to match what the server recorded, and
+    the whole point is that a value the server did not record is refused.
+    """
+
+    for item in payload.get("net_effect_of_each_operation") or []:  # type: ignore[union-attr]
+        if not isinstance(item, dict) or item.get("net_effect") != "effective":
+            continue
+        for change in item.get("changes") or []:
+            if isinstance(change, dict) and change.get("kind") == "condition_added":
+                return str(change.get("target") or "")
+    return ""
 
 
 def _responses_body(text: str) -> dict[str, object]:
@@ -1054,11 +1192,14 @@ async def test_the_real_composer_path_keeps_only_evidence_backed_wording(
             json=_responses_body(
                 _json.dumps(
                     {
-                        "message_without_question": f"Okay. {claim_text}",
                         "conversational_text": "Okay.",
                         "factual_claims": [
                             {
+                                "claim_id": "c1",
                                 "claim_type": "mutation",
+                                "subject_id": ids[0] if ids else "",
+                                "predicate": "condition_added",
+                                "asserted_value": _effective_condition_id(payload),
                                 "text": claim_text,
                                 "evidence_ids": ids,
                             }

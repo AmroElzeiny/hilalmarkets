@@ -38,12 +38,31 @@ ChangeKind = Literal[
     "group_replaced",
     "mode_changed",
     "market_scope_changed",
+    "sharia_policy_changed",
     "approval_invalidated",
     "unsupported_added",
     "unsupported_resolved",
     "unresolved_added",
     "unresolved_resolved",
 ]
+
+#: Sharia-policy fields whose change is a change to what the setup watches. The policy is
+#: part of executable identity, yet no diff was produced for it at all — so a turn that
+#: switched the screening methodology or the Favorites list reported nothing, and the
+#: operation that did it reconciled as "no net effect".
+_POLICY_FIELDS: tuple[str, ...] = (
+    "universe_mode",
+    "methodology_id",
+    "methodology_version",
+    "approved_watchlist_id",
+    "approved_watchlist_version",
+    "explicit_symbols",
+    "allowed_statuses",
+    "qualification_policy",
+    "disputed_asset_policy",
+    "compliance_change_behavior",
+    "advanced_override_acknowledged",
+)
 
 #: Fields whose change is worth naming on its own. A trader who asked to raise a
 #: threshold wants to be told the threshold moved, not that "a condition changed".
@@ -66,7 +85,14 @@ class DraftChange:
     #: to rules the turn never mentioned.
     condition_ids: tuple[str, ...] = ()
     #: The field or symbol involved, when the kind alone is not specific enough.
+    #: **Display text.** `unresolved_added` puts the whole question here.
     detail: str | None = None
+    #: The stable identity of the thing that changed: a market symbol, a field path, an
+    #: unresolved key, an unsupported key. Separate from `detail` on purpose — matching
+    #: an operation to its change needs an identity, and `detail` is a sentence for a
+    #: human. Reconciliation used to match on kind alone, so two `add_inclusion`
+    #: operations in one turn each claimed both symbols.
+    target: str | None = None
     before: str | None = None
     after: str | None = None
 
@@ -75,6 +101,7 @@ class DraftChange:
             "kind": self.kind,
             "condition_ids": list(self.condition_ids),
             "detail": self.detail,
+            "target": self.target,
             "before": self.before,
             "after": self.after,
         }
@@ -99,6 +126,8 @@ class DraftChange:
             return f"switched to {self.after}"
         if self.kind == "market_scope_changed":
             return f"set {self.detail} to {self.after}"
+        if self.kind == "sharia_policy_changed":
+            return f"changed the screening setting {self.detail}"
         if self.kind == "approval_invalidated":
             return "cleared the earlier approval because the rules changed"
         if self.kind == "unsupported_added":
@@ -156,6 +185,18 @@ def _rendered(value: Any) -> str | None:
     return str(value)
 
 
+def _rendered_policy(value: Any) -> str | None:
+    """A policy value as text, without leaking a raw identifier into a reply.
+
+    Lists are rendered by their members so a changed allowed-status set reads as one.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return ", ".join(sorted(_rendered(item) or "" for item in value)) or None
+    return _rendered(value)
+
+
 def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftChange]:
     """Every difference between two canonical drafts, in a stable order."""
 
@@ -170,6 +211,7 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
                     kind="condition_added",
                     condition_ids=(node_id,),
                     detail=_label(node),
+                    target=node_id,
                 )
             )
     for node_id, node in old.items():
@@ -179,6 +221,7 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
                     kind="condition_removed",
                     condition_ids=(node_id,),
                     detail=_label(node),
+                    target=node_id,
                 )
             )
     for node_id, node in new.items():
@@ -197,6 +240,7 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
                     kind=kind,
                     condition_ids=(node_id,),
                     detail=field.replace("_", " "),
+                    target=node_id,
                     before=_rendered(was),
                     after=_rendered(now),
                 )
@@ -207,6 +251,7 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
                     kind="condition_updated",
                     condition_ids=(node_id,),
                     detail=_label(node),
+                    target=node_id,
                 )
             )
 
@@ -221,21 +266,30 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
 
     for symbol in after.universe.included_symbols:
         if symbol not in before.universe.included_symbols:
-            changes.append(DraftChange(kind="symbol_included", detail=symbol))
+            changes.append(
+                DraftChange(kind="symbol_included", detail=symbol, target=symbol)
+            )
     for symbol in after.universe.excluded_symbols:
         if symbol not in before.universe.excluded_symbols:
-            changes.append(DraftChange(kind="symbol_excluded", detail=symbol))
+            changes.append(
+                DraftChange(kind="symbol_excluded", detail=symbol, target=symbol)
+            )
     for symbol in before.universe.included_symbols:
         if symbol not in after.universe.included_symbols:
-            changes.append(DraftChange(kind="symbol_include_removed", detail=symbol))
+            changes.append(
+                DraftChange(kind="symbol_include_removed", detail=symbol, target=symbol)
+            )
     for symbol in before.universe.excluded_symbols:
         if symbol not in after.universe.excluded_symbols:
-            changes.append(DraftChange(kind="symbol_exclude_removed", detail=symbol))
+            changes.append(
+                DraftChange(kind="symbol_exclude_removed", detail=symbol, target=symbol)
+            )
 
     if before.mode != after.mode:
         changes.append(
             DraftChange(
                 kind="mode_changed",
+                target="mode",
                 before=before.mode.value,
                 after=after.mode.value,
             )
@@ -248,8 +302,23 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
                 DraftChange(
                     kind="market_scope_changed",
                     detail=field.replace("_", " "),
+                    target=f"market_scope.{field}",
                     before=str(was),
                     after=str(now),
+                )
+            )
+
+    for field in _POLICY_FIELDS:
+        was = getattr(before.sharia_policy, field, None)
+        now = getattr(after.sharia_policy, field, None)
+        if was != now:
+            changes.append(
+                DraftChange(
+                    kind="sharia_policy_changed",
+                    detail=field.replace("_", " "),
+                    target=f"sharia_policy.{field}",
+                    before=_rendered_policy(was),
+                    after=_rendered_policy(now),
                 )
             )
 
@@ -258,18 +327,30 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
     for key, item in new_unsupported.items():
         if key not in old_unsupported:
             changes.append(
-                DraftChange(kind="unsupported_added", detail=item.missing_contract)
+                DraftChange(
+                    kind="unsupported_added",
+                    detail=item.missing_contract,
+                    target=key,
+                )
             )
     for key in old_unsupported - set(new_unsupported):
-        changes.append(DraftChange(kind="unsupported_resolved", detail=key))
+        changes.append(
+            DraftChange(kind="unsupported_resolved", detail=key, target=key)
+        )
 
     old_unresolved = {item.key for item in before.unresolved_fields}
     new_unresolved = {item.key: item for item in after.unresolved_fields}
     for key, unresolved in new_unresolved.items():
         if key not in old_unresolved:
-            changes.append(DraftChange(kind="unresolved_added", detail=unresolved.question))
+            changes.append(
+                DraftChange(
+                    kind="unresolved_added",
+                    detail=unresolved.question,
+                    target=key,
+                )
+            )
     for key in old_unresolved - set(new_unresolved):
-        changes.append(DraftChange(kind="unresolved_resolved", detail=key))
+        changes.append(DraftChange(kind="unresolved_resolved", detail=key, target=key))
 
     if before.approval.approved and not after.approval.approved:
         changes.append(DraftChange(kind="approval_invalidated"))

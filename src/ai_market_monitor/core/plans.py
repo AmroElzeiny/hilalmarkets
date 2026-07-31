@@ -54,9 +54,21 @@ FULL_ACCESS_WITHOUT_WHATSAPP: dict[str, bool] = {
 }
 
 
+#: Which plan a user is on while billing is switched off. Free, and the only one.
+PRIVATE_BETA_PLAN_CODE = "demo"
+
+
 def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
-    """Return public plans; checkout availability is represented separately."""
-    del billing_enabled
+    """Which plans a visitor may be shown.
+
+    With billing off, only the free Private Beta plan. Showing the paid plans returned a
+    price and a "Try Monitor for 7 days" button for something nobody can buy: the
+    checkout route is disabled, so every one of those buttons was a dead end. A price the
+    user cannot act on is worse than no price — it reads as a charge they are about to
+    incur.
+    """
+    if not billing_enabled:
+        return (PRIVATE_BETA_PLAN_CODE,)
     return PUBLIC_PLAN_CODES
 
 
@@ -438,6 +450,36 @@ PUBLIC_PLAN_COMPARISON: tuple[tuple[str, str, str, str], ...] = (
     ("WhatsApp", "Not included", "Not included", "Coming soon"),
     ("Monitor trial", "Not included", "7 days, no charge", "Not included"),
 )
+
+
+#: Which plan each column of `PUBLIC_PLAN_COMPARISON` describes, after the feature name.
+PLAN_COMPARISON_COLUMNS: tuple[str, ...] = ("demo", "trader", "pro")
+
+
+def visible_plan_comparison_headers(*, billing_enabled: bool) -> tuple[str, ...]:
+    """Column names for the comparison table, for the plans on offer."""
+    return tuple(
+        PLAN_DEFINITIONS[code].name
+        for code in visible_public_plan_codes(billing_enabled=billing_enabled)
+    )
+
+
+def visible_plan_comparison(*, billing_enabled: bool) -> tuple[tuple[str, ...], ...]:
+    """Comparison rows trimmed to the plans on offer.
+
+    With billing off the table used to compare three plans while only one of them could
+    be had — a page that answers "what do I get for $22" for a product with no way to pay
+    $22.
+    """
+    visible = visible_public_plan_codes(billing_enabled=billing_enabled)
+    columns = [0] + [
+        1 + PLAN_COMPARISON_COLUMNS.index(code)
+        for code in visible
+        if code in PLAN_COMPARISON_COLUMNS
+    ]
+    return tuple(
+        tuple(row[index] for index in columns) for row in PUBLIC_PLAN_COMPARISON
+    )
 
 
 def get_plan_definition(code: str) -> PlanDefinition:

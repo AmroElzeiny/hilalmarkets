@@ -184,6 +184,41 @@ class ApprovedWatchlistAsset(UUIDPrimaryKeyMixin, Base):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ApprovedWatchlistSnapshot(UUIDPrimaryKeyMixin, Base):
+    """An immutable record of exactly which markets a Favorites list held.
+
+    Without this, "the list the user approved" existed only as a hash, and the hash could
+    only be checked by recomputing it from the live `approved_watchlist_assets` rows. Once
+    a row was deleted there was no way to say what the approval had actually covered — so
+    a support question, an audit, or a compliance review had no answer.
+
+    Written once and never updated. `content_hash` is the identity; the same membership
+    always produces the same row, so re-selecting an unchanged list reuses it.
+    """
+
+    __tablename__ = "approved_watchlist_snapshots"
+    __table_args__ = (
+        UniqueConstraint("content_hash", name="uq_approved_watchlist_snapshot_hash"),
+        Index("ix_approved_watchlist_snapshot_list", "watchlist_id", "captured_at"),
+    )
+
+    watchlist_id: Mapped[UUID] = mapped_column(
+        ForeignKey("approved_watchlists.id", ondelete="CASCADE"), nullable=False
+    )
+    content_hash: Mapped[str] = mapped_column(String(80), nullable=False)
+    exchange: Mapped[str] = mapped_column(String(40), nullable=False)
+    market_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    quote_currencies: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    #: One entry per member, each carrying its governed identities. See
+    #: `services/watchlist_snapshot.py` for the shape.
+    members: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    member_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: Members that could not be bound to a verified canonical asset. Non-zero means the
+    #: snapshot is unusable for approval, and it is recorded rather than hidden.
+    unresolved_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ShariaUniverseSnapshot(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "sharia_universe_snapshots"
     __table_args__ = (

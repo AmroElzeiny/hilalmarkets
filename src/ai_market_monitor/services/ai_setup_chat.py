@@ -67,6 +67,7 @@ from ai_market_monitor.schemas.ai_setup_chat import (
 )
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
+from ai_market_monitor.schemas.screening_execution import ReviewedScreeningEvidence
 from ai_market_monitor.schemas.strategy import (
     Comparator,
     ConditionGroup,
@@ -97,6 +98,7 @@ from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import (
+    REVIEWED_PREFLIGHT_MANIFEST_KEY,
     SetupChatLaunchService,
     SetupLaunchError,
     load_strategy_draft_v2,
@@ -877,6 +879,10 @@ class AISetupChatService:
         context = dict(chat.context_json or {})
         v2_payload = context.get("strategy_draft_v2")
         strategy_state: StrategyDraftState | None = None
+        # None on the legacy V1 path, which has no screening evidence to bind. The
+        # approval record then says so plainly instead of carrying an empty object that
+        # reads like a check that passed.
+        screening_evidence: ReviewedScreeningEvidence | None = None
         snapshot_hash: str
         if context.get("strategy_state_authority") == "v2" and isinstance(v2_payload, dict):
             from ai_market_monitor.engine.strategy_draft_v2 import (
@@ -1027,6 +1033,28 @@ class AISetupChatService:
             user_id=chat.user_id,
             expected_schema_hash=version.schema_hash,
         )
+        # What the user reviewed, stored on the version that runs.
+        #
+        # The market-data contract is the part the worker needs: it says whether every
+        # market was checked before approval or only a sample, and therefore which
+        # markets must be checked again on every cycle. Written even when screening did
+        # not run, so an empty record means "nothing was promised" rather than "the
+        # record is missing" — the runtime reads both the same fail-closed way.
+        version.approval_evidence = {
+            "screening_evidence": (
+                screening_evidence.model_dump(mode="json")
+                if screening_evidence is not None
+                else {}
+            ),
+            "preflight_manifest": (
+                (chat.context_json or {}).get(REVIEWED_PREFLIGHT_MANIFEST_KEY) or {}
+            ),
+            "membership_sentence": (
+                screening_evidence.membership_sentence
+                if screening_evidence is not None
+                else ""
+            ),
+        }
         if strategy_state is not None:
             strategy_state = strategy_state.mark_compiled()
         artifact_hashes = {

@@ -13,8 +13,9 @@ from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PUBLIC_PLAN_COMPARISON,
     PUBLIC_PLAN_PRESENTATIONS,
+    visible_plan_comparison,
+    visible_plan_comparison_headers,
     visible_public_plan_codes,
 )
 from ai_market_monitor.core.site_content import (
@@ -282,9 +283,19 @@ def _public_context(
         ),
         "plans": {code: PLAN_DEFINITIONS[code] for code in plan_codes},
         "plan_presentations": PUBLIC_PLAN_PRESENTATIONS,
-        "plan_comparison": PUBLIC_PLAN_COMPARISON,
+        # Trimmed to the plans on offer. With billing off that is the free Private Beta
+        # plan alone, so the page never prices something nobody can buy.
+        "plan_comparison": visible_plan_comparison(
+            billing_enabled=settings.billing_enabled
+        ),
+        "plan_comparison_headers": visible_plan_comparison_headers(
+            billing_enabled=settings.billing_enabled
+        ),
         "public_pricing_plans": public_pricing_plans,
-        "public_plan_comparison": [list(row) for row in PUBLIC_PLAN_COMPARISON],
+        "public_plan_comparison": [
+            list(row)
+            for row in visible_plan_comparison(billing_enabled=settings.billing_enabled)
+        ],
         "billing_enabled": settings.billing_enabled,
         "billing_provider": primary_billing_provider,
         "billing_capabilities": billing_provider_capabilities(primary_billing_provider),

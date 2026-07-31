@@ -188,7 +188,7 @@ PUBLIC_PAGES = (
         "/features",
         "Features",
         (
-            "Explore Sharia-screened discovery, guided Watchlists, evidence, "
+            "Explore Sharia-screened discovery, guided Watch Plans, evidence, "
             "and compliance monitoring."
         ),
         "hilal/public/features.html",

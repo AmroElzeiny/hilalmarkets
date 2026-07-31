@@ -42,6 +42,11 @@ from ai_market_monitor.engine.operation_reconciliation import (
     TurnReconciliation,
     reconcile_turn,
 )
+from ai_market_monitor.engine.operation_target import (
+    merged_unresolved_key,
+    targets_by_operation_id,
+    unsupported_key_for,
+)
 from ai_market_monitor.engine.semantic_grounding import (
     grounds_boolean_shape,
     grounds_direction,
@@ -332,19 +337,31 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
 
     screening_status: ScreeningStatus = "not_required"
     screening_result: ScreeningExecutionResult | None = None
+    #: What the market-data check runs against. Identical to `definition` until screening
+    #: resolves a universe, after which it carries the permitted markets and `definition`
+    #: keeps the authored policy.
+    preflight_definition: StrategyDefinition | None = definition
     if definition is not None and request.screening is not None:
         screening_status = "not_attempted"
         screening_result, reason = await request.screening(definition)
         if screening_result is None:
             screening_status = "blocked"
             definition = None
+            preflight_definition = None
             safe_errors.append(reason or "Choose and validate a Halal Market first.")
         else:
             screening_status = "passed"
-            # The screened universe becomes *the* definition from here on: preflight,
-            # the preview, approval eligibility, the read model and the reply all see
-            # exactly the symbols the resolver permitted.
-            definition = screening_result.secured_definition
+            # Two objects, deliberately not one.
+            #
+            # `definition` stays **authored** — it is what gets persisted, hashed and
+            # approved, and what the runtime re-resolves its universe from every cycle.
+            # Overwriting it with the resolved symbols pinned an `eligible_market`
+            # monitor to whatever happened to be eligible the day it was approved.
+            #
+            # `preflight_definition` carries the resolved symbols and exists only for
+            # the data check. It is never persisted and never compiled.
+            definition = screening_result.authored_definition
+            preflight_definition = screening_result.preflight_definition
 
     provider_status: ProviderStatus = "not_required"
     resolved_provider_statuses: list[ProviderRuntimeStatusV2] = []
@@ -364,6 +381,7 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         provider_status = _provider_status(resolved_provider_statuses)
         if provider_status == "unavailable":
             definition = None
+            preflight_definition = None
             safe_errors.append(
                 "One rule needs a data feed this account cannot use yet, so the draft "
                 "cannot run."
@@ -373,12 +391,13 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
                 "The rule compiles, but its market-data runtime could not be verified "
                 "yet. Retry before approval."
             )
-    if definition is not None and request.runtime_preflight is not None:
-        preflight_statuses = await request.runtime_preflight(definition)
+    if preflight_definition is not None and request.runtime_preflight is not None:
+        preflight_statuses = await request.runtime_preflight(preflight_definition)
         resolved_provider_statuses.extend(preflight_statuses)
         provider_status = _provider_status(resolved_provider_statuses)
         if provider_status == "unavailable":
             definition = None
+            preflight_definition = None
             safe_errors.append(
                 "The selected exchange, symbols, or timeframes are unavailable from "
                 "the configured market-data provider."
@@ -431,7 +450,15 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     # Judge every operation against the turn's *final* state before any of it becomes
     # user-facing evidence. A step undone later in the same turn is not something a
     # reply may claim happened, and its condition ids must not become references.
-    reconciliation = reconcile_turn(before, draft, operation_results)
+    #
+    # The targets are passed with it: without them two operations of one kind — "add BTC
+    # and ETH" — each collect both changes, and the evidence for one names the other.
+    reconciliation = reconcile_turn(
+        before,
+        draft,
+        operation_results,
+        targets_by_operation_id(list(plan.operations), before),
+    )
     applied_instructions = _applied_instructions(plan, segments, reconciliation)
     allowed = _allowed_clarifications(draft, request.conversation, answered)
     result = SetupTurnExecutionResult(
@@ -467,6 +494,8 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
                 final_condition_ids=list(item.final_condition_ids),
                 summary="; ".join(change.describe() for change in item.net_changes)[:400],
                 changes=[change.to_dict() for change in item.net_changes],
+                targets=item.serialised_targets(),
+                superseded_by=item.superseded_by,
                 safe_error=item.safe_error,
             )
             for item in reconciliation.operations
@@ -1946,7 +1975,9 @@ def _build_patch(
         elif operation.kind == "add_unsupported" and operation.missing_contract:
             unsupported.append(
                 UnsupportedRequirementV2(
-                    key=f"unsupported_{operation.authorizing_segment_id}",
+                    # Same expression the reconciler matches on. Two copies of this
+                    # format string would silently stop agreeing.
+                    key=unsupported_key_for(operation),
                     source_turn_id=request.source_turn_id,
                     source_fragment=segment.exact_source_text,
                     missing_contract=operation.missing_contract,
@@ -2016,30 +2047,17 @@ def _build_patch(
 
 
 def _merge_unresolved_target(item: Any, draft: StrategyDraftV2) -> Any:
-    """Reuse one unresolved identity for one typed target."""
+    """Reuse one unresolved identity for one typed target.
 
-    identity = (
-        item.target_type,
-        item.target_field,
-        item.target_condition_id,
-    )
-    existing = next(
-        (
-            candidate
-            for candidate in draft.unresolved_fields
-            if (
-                candidate.target_type,
-                candidate.target_field,
-                candidate.target_condition_id,
-            )
-            == identity
-        ),
-        None,
-    )
-    return (
-        item.model_copy(update={"unresolved_id": existing.unresolved_id})
-        if existing is not None
-        else item
+    The lookup itself lives in `operation_target.merged_unresolved_key`, because
+    reconciliation has to predict the same answer to attribute this operation's change to
+    it. Two independent implementations of "which key will this land under" is exactly
+    the kind of duplicate reader that drifts.
+    """
+
+    merged = merged_unresolved_key(item, draft)
+    return item if merged == item.unresolved_id else item.model_copy(
+        update={"unresolved_id": merged}
     )
 
 

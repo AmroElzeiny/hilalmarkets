@@ -208,25 +208,26 @@
   </div>
   <div class="table-wrap dashboard-comparison-desktop">
     <table>
-      <caption class="sr-only">Explore, Monitor, and Pro plan comparison</caption>
-      <thead><tr><th scope="col">Feature</th><th scope="col">Explore</th><th scope="col">Monitor</th><th scope="col">Pro</th></tr></thead>
+      <caption class="sr-only">{{ plan_comparison_headers|join(', ') }} plan comparison</caption>
+      <thead><tr><th scope="col">Feature</th>{% for header in plan_comparison_headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr></thead>
       <tbody>
-        {% for feature, explore, monitor, pro in plan_comparison %}
+        {% for row in plan_comparison %}
           <tr>
-            <th scope="row">{{ feature }}</th>
-            <td>{{ explore }}</td>
-            <td>{{ monitor }}</td>
-            <td>{{ 'Included' if feature == 'WhatsApp' and whatsapp_operational else pro }}</td>
+            <th scope="row">{{ row[0] }}</th>
+            {% for header in plan_comparison_headers %}
+              <td>{{ 'Included' if row[0] == 'WhatsApp' and header == 'Pro' and whatsapp_operational else row[loop.index] }}</td>
+            {% endfor %}
           </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   <div class="dashboard-comparison-mobile">
-    {% for plan_name, value_index in [('Explore', 1), ('Monitor', 2), ('Pro', 3)] %}
+    {% for plan_name in plan_comparison_headers %}
       <article>
         <h3>{{ plan_name }}</h3>
         <dl>
+          {% set value_index = loop.index %}
           {% for row in plan_comparison %}
             <div><dt>{{ row[0] }}</dt><dd>{{ 'Included' if row[0] == 'WhatsApp' and plan_name == 'Pro' and whatsapp_operational else row[value_index] }}</dd></div>
           {% endfor %}

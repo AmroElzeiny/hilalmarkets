@@ -13,6 +13,17 @@ turn that is a sequence of intermediate states, and a step can be undone by a la
 So the sequential diffs stay for audit, and the user-facing evidence is rebuilt by
 comparing the draft *before the turn* with the draft *after everything*. An operation is
 reported as effective only when its intent survives into that final state.
+
+Comparing against the final state fixed *when* a change counted but not *whose* it was.
+Every operation of a kind was handed every change of that kind, so in
+
+    add BTC and ETH
+
+both ``add_inclusion`` operations claimed both symbols. Each operation now carries its
+target — the symbol, the condition id, the key, the field path — and only changes about
+that target become its evidence. When an operation is superseded or cancelled, the
+operation that did it is recorded by id, so "what happened to my first instruction?" has
+an answer.
 """
 
 from __future__ import annotations
@@ -21,6 +32,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ai_market_monitor.engine.draft_diff import DraftChange, diff_drafts
+from ai_market_monitor.engine.operation_target import (
+    OperationTarget,
+    serialise_targets,
+)
 from ai_market_monitor.schemas.setup_agent import OperationExecutionResult
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
@@ -49,13 +64,26 @@ class ReconciledOperation:
     #: Only ids present or materially changed in the final draft. An id that no longer
     #: exists cannot be a reference the next turn resolves.
     final_condition_ids: tuple[str, ...] = ()
-    #: The net changes attributed to this operation, from the turn-level diff.
+    #: The net changes attributed to this operation, from the turn-level diff. Only
+    #: changes about **this operation's own target**.
     net_changes: tuple[DraftChange, ...] = ()
+    #: What this operation aimed at, so its evidence can be checked rather than assumed.
+    targets: tuple[OperationTarget, ...] = ()
+    #: The later operation that replaced or undid this one, when there was one. Without
+    #: it, "overwritten" is a verdict with no explanation.
+    superseded_by: str | None = None
     safe_error: str | None = None
 
     @property
     def is_effective(self) -> bool:
         return self.net_effect == "effective"
+
+    @property
+    def target_identities(self) -> tuple[str, ...]:
+        return tuple(item.identity for item in self.targets)
+
+    def serialised_targets(self) -> list[dict[str, str]]:
+        return serialise_targets(self.targets)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,18 +159,69 @@ _OWNED_CHANGES: dict[str, frozenset[str]] = {
     "restore_snapshot": frozenset(),
 }
 
+#: Operation kinds whose real target is the condition id the patch layer wrote.
+_CONDITION_KINDS = frozenset({"add_condition", "update_condition", "remove_condition"})
+
+
+def _owned_and_targeted(
+    net_changes: tuple[DraftChange, ...],
+    owned: frozenset[str],
+    targets: tuple[OperationTarget, ...],
+) -> tuple[DraftChange, ...]:
+    """The changes that are this operation's kind **and** about its own target.
+
+    With no targets — an operation shape that carries no identity — the kind filter is
+    all there is, and that is stated rather than silently assumed to be precise.
+    """
+
+    candidates = tuple(change for change in net_changes if change.kind in owned)
+    if not targets:
+        return candidates
+    return tuple(
+        change
+        for change in candidates
+        if any(target.matches(change) for target in targets)
+    )
+
+
+def _superseding_operation(
+    results: list[OperationExecutionResult],
+    index: int,
+    targets: tuple[OperationTarget, ...],
+    targets_by_id: dict[str, tuple[OperationTarget, ...]],
+) -> str | None:
+    """The first later operation that acted on the same target, if any."""
+
+    if not targets:
+        return None
+    wanted = {(item.kind, item.identity) for item in targets}
+    for later in results[index + 1 :]:
+        if later.rejected or not later.applied:
+            continue
+        for item in targets_by_id.get(later.operation_id, ()):
+            if (item.kind, item.identity) in wanted:
+                return later.operation_id
+    return None
+
 
 def reconcile_turn(
     before: StrategyDraftV2,
     after: StrategyDraftV2,
     operation_results: list[OperationExecutionResult],
+    targets_by_id: dict[str, tuple[OperationTarget, ...]] | None = None,
 ) -> TurnReconciliation:
-    """Judge every operation against the turn's final state.
+    """Judge every operation against the turn's final state, target by target.
 
     ``before`` is the authoritative draft as the turn started; ``after`` is the finalised
     draft. Everything a user is told comes from the difference between those two.
+
+    ``targets_by_id`` comes from :func:`operation_target.targets_by_operation_id`. It is
+    optional so a caller with only execution results still works, but without it two
+    operations of one kind share their evidence again — so the production path always
+    passes it.
     """
 
+    targets_by_id = targets_by_id or {}
     net_changes = tuple(diff_drafts(before, after))
     after_ids = _condition_ids(after)
     after_nodes = _conditions(after)
@@ -166,7 +245,8 @@ def reconcile_turn(
     }
 
     reconciled: list[ReconciledOperation] = []
-    for result in operation_results:
+    for index, result in enumerate(operation_results):
+        targets = targets_by_id.get(result.operation_id, ())
         if result.rejected or not result.applied:
             reconciled.append(
                 ReconciledOperation(
@@ -174,6 +254,7 @@ def reconcile_turn(
                     authorizing_segment_id=result.authorizing_segment_id,
                     operation_kind=result.operation_kind,
                     net_effect="rejected",
+                    targets=targets,
                     safe_error=result.safe_error,
                 )
             )
@@ -224,7 +305,7 @@ def reconcile_turn(
             effect = "effective" if net_changes else "no_net_effect"
             final_ids = tuple(sorted(after_ids))[:24]
         else:
-            matched = tuple(change for change in net_changes if change.kind in owned)
+            matched = _owned_and_targeted(net_changes, owned, targets)
             if matched:
                 effect = "effective"
                 final_ids = tuple(
@@ -233,9 +314,35 @@ def reconcile_turn(
                     for node_id in change.condition_ids
                     if node_id in after_ids
                 )
+            elif targets and any(
+                change.kind in owned for change in net_changes
+            ):
+                # A change of this kind happened, but about somebody else's target. That
+                # is precisely the case that used to be reported as this operation's own.
+                effect = "no_net_effect"
             else:
                 effect = "no_net_effect"
 
+        # For condition operations the authoritative identity is what the patch layer
+        # actually wrote, not what the plan proposed: the node id can be rewritten while
+        # the operation is applied, and attributing on the proposed id would then match
+        # nothing at all.
+        attribution_targets = (
+            tuple(OperationTarget("condition", item) for item in claimed)
+            if claimed and kind in _CONDITION_KINDS
+            else targets
+        )
+        superseded = (
+            _superseding_operation(
+                operation_results,
+                index,
+                attribution_targets or targets,
+                {**targets_by_id, result.operation_id: attribution_targets or targets},
+            )
+            if effect in {"overwritten", "cancelled"}
+            else None
+        )
+        attributed = _owned_and_targeted(net_changes, owned, attribution_targets)
         reconciled.append(
             ReconciledOperation(
                 operation_id=result.operation_id,
@@ -243,15 +350,12 @@ def reconcile_turn(
                 operation_kind=kind,
                 net_effect=effect,
                 final_condition_ids=tuple(dict.fromkeys(final_ids)),
-                net_changes=tuple(
-                    change
-                    for change in net_changes
-                    if change.kind in owned
-                    and (
-                        not change.condition_ids
-                        or any(item in final_ids for item in change.condition_ids)
-                    )
-                ),
+                # Already narrowed to this operation's own target, so no second filter is
+                # needed. The old one dropped a removal's evidence, because a removal has
+                # no surviving condition id to filter against.
+                net_changes=attributed,
+                targets=attribution_targets or targets,
+                superseded_by=superseded,
             )
         )
 

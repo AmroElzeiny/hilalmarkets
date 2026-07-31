@@ -30,10 +30,10 @@
     <div class="comparison-table-wrap">
       <table class="comparison-table">
         <caption class="sr-only">Explore, Monitor, and Pro plan comparison</caption>
-        <thead><tr><th scope="col">Capability</th><th scope="col">Explore</th><th scope="col">Monitor</th><th scope="col">Pro</th></tr></thead>
+        <thead><tr><th scope="col">Capability</th>{% for header in plan_comparison_headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr></thead>
         <tbody>
-          {% for feature, explore, monitor, pro in plan_comparison %}
-            <tr><th scope="row">{{ feature }}</th><td>{{ explore }}</td><td>{{ monitor }}</td><td>{{ 'Included' if feature == 'WhatsApp' and whatsapp_operational else pro }}</td></tr>
+          {% for row in plan_comparison %}
+            <tr><th scope="row">{{ row[0] }}</th>{% for header in plan_comparison_headers %}<td>{{ 'Included' if row[0] == 'WhatsApp' and header == 'Pro' and whatsapp_operational else row[loop.index] }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>

@@ -39,6 +39,7 @@ from ai_market_monitor.engine.claim_evidence import (
     EvidenceLedger,
     build_evidence_ledger,
     deterministic_claim_text,
+    requires_factual_answer,
     validate_claims,
 )
 from ai_market_monitor.engine.setup_turn_execution import (
@@ -59,6 +60,7 @@ from ai_market_monitor.schemas.setup_agent import (
     SETUP_REPLY_MAX_LENGTH,
     CapabilityRoutingCandidate,
     CapabilityRoutingContext,
+    ComposedReply,
     FactualClaim,
     SegmentKind,
     SetupAgentPlanEnvelope,
@@ -198,7 +200,7 @@ class SetupAgentTrace:
 class SetupAgentTurnResult:
     """Everything the caller needs to persist one completed turn."""
 
-    reply: SetupAgentReply
+    reply: ComposedReply
     execution: SetupTurnExecutionResult | None
     draft: StrategyDraftV2
     conversation: SetupConversationContext
@@ -443,9 +445,12 @@ class SetupChatAgent:
         if plan is None or not plan.requires_tool:
             # Pure conversation. No tool, no new version, no status change, and still a
             # real answer. A greeting cannot touch approval because it never gets here.
-            reply = SetupAgentReply(
-                message_without_question=_trimmed(envelope.direct_reply)
-                or _deterministic_conversation_reply(turn.draft),
+            # A pure-conversation turn asserts nothing about the platform: no operations
+            # ran, no gates were evaluated, and there is no evidence ledger to check
+            # against. The planner's own wording is the reply.
+            reply = deterministic_reply(
+                _trimmed(envelope.direct_reply)
+                or _deterministic_conversation_reply(turn.draft)
             )
             return SetupAgentTurnResult(
                 reply=reply,
@@ -513,8 +518,8 @@ class SetupChatAgent:
             )
 
         composed_started = monotonic()
-        reply = SetupAgentReply(
-            message_without_question=deterministic_summary(outcome.result),
+        reply = deterministic_reply(
+            deterministic_summary(outcome.result),
             selected_clarification_id=(
                 outcome.result.allowed_clarifications[0].question_id
                 if outcome.result.allowed_clarifications
@@ -639,7 +644,7 @@ class SetupChatAgent:
         *,
         model: str,
         planner_usage: dict[str, Any],
-    ) -> tuple[SetupAgentReply, dict[str, Any]]:
+    ) -> tuple[ComposedReply, dict[str, Any]]:
         knowledge = product_knowledge()
         ledger = build_evidence_ledger(
             reconciled_operations=[
@@ -731,14 +736,28 @@ class SetupChatAgent:
             raise
         self.model_call_count += 1
         await self._provider_succeeded(model)
-        # Structural check first, and it decides. Every factual claim has to cite
-        # evidence that exists and fits its type; anything that does not is replaced by
-        # deterministic text built from the evidence. Reading ids rather than sentences
-        # is what makes this behave the same for an Arabic reply as for an English one.
-        reply = _rebuild_reply_from_validated_claims(reply, ledger)
+        # Structural check first, and it decides. Every factual claim has to state a
+        # proposition that matches the evidence; anything that does not is replaced by
+        # deterministic text built from the evidence. Reading ids and values rather than
+        # sentences is what makes this behave the same for an Arabic reply as an English
+        # one. The message itself is assembled here — the model never returns one.
+        composed = compose_final_reply(
+            reply,
+            ledger,
+            owes_a_fact=requires_factual_answer(
+                reconciled_operations=[
+                    item.model_dump(mode="json") for item in result.reconciled_operations
+                ],
+                response_points=[
+                    item.model_dump(mode="json") for item in plan.response_points
+                ],
+                questions_to_answer=list(plan.questions_to_answer),
+            ),
+            fallback_message=deterministic_summary(result),
+        )
         # The older English phrase gate is kept as an extra filter. It can only reject,
         # never accept, so it adds coverage for English without becoming the authority.
-        if not _composer_reply_is_grounded(reply, result, payload):
+        if not _composer_reply_is_grounded(composed, result, payload):
             raise StructuredCallError(
                 "COMPOSER_FACT_NOT_GROUNDED",
                 "The contextual reply introduced a fact outside the execution evidence.",
@@ -757,7 +776,7 @@ class SetupChatAgent:
             model,
         )
         merged["_setup_combined_actual_cost_usd"] = combined_actual
-        return reply, merged
+        return composed, merged
 
     def _planner_payload(
         self,
@@ -1190,9 +1209,39 @@ Split what you write into two fields.
 conversational_text is anything that asserts nothing about the platform: greeting the
 user, acknowledging what they said, offering to help next. It needs no evidence.
 
-factual_claims is every statement of fact, one entry each, with the evidence it rests
-on. Each entry has a claim_type, the sentence itself in the user's language, and
-evidence_ids taken only from citable_evidence_ids. Nothing else is citable.
+factual_claims is every statement of fact, one entry each. Each entry carries both the
+sentence and the proposition behind it:
+
+- claim_id        a short label, unique inside this reply
+- claim_type      which family of fact it is (below)
+- subject_type    what the fact is about
+- subject_id      one id from citable_evidence_ids — the thing the fact is about
+- predicate       what is being said about it, from the list below
+- asserted_value  the exact value being stated
+- text            the sentence itself, in the user's language
+- evidence_ids    every id this rests on, including subject_id
+
+The server compares subject_id, predicate and asserted_value with its own record. A
+sentence whose proposition does not match is dropped, whatever it says.
+
+Predicates by subject:
+
+- operation:...   symbol_included, symbol_excluded, symbol_include_removed,
+                  symbol_exclude_removed, condition_added, condition_removed,
+                  condition_updated, threshold_changed, timeframe_changed,
+                  operator_changed, direction_changed, formula_changed,
+                  sharia_policy_changed, market_scope_changed, mode_changed,
+                  applied, operation_kind
+- condition:...   threshold_equals, timeframe_equals, operator_equals,
+                  direction_equals, formula_equals, unit_equals, exists
+- status:...      equals
+- approval:...    equals
+- universe:...    contains, count_equals, equals
+- screening:...   contains, count_equals, equals
+- preflight:...   contains, count_equals, equals
+- unresolved:..., unsupported:...  exists, question_equals,
+                  missing_contract_equals
+- product:...     states
 
 Match the evidence family to the claim:
 
@@ -1209,20 +1258,22 @@ Match the evidence family to the claim:
 - open_item          `unresolved:...` or `unsupported:...`
 - product_fact       `product:...`
 
-message_without_question must read as one natural message, and it must say the same
-things as conversational_text plus your factual_claims together. A claim whose evidence
-does not check out is dropped and the server states the fact plainly instead, so a claim
-you cannot support costs the user your wording, not the truth.
+There is no message field. The server joins conversational_text and the claims that pass
+validation, in that order, and that is what the user reads. So put every fact in a claim:
+a fact left out of factual_claims is a fact the user never sees. A claim you cannot
+support costs the user your wording, not the truth — the server states the fact plainly
+from its own record instead.
 
 Write for a beginner in the user's own language. Short sentences, everyday words, no
 field names, no error-template phrasing, no bullet lists unless they genuinely help.
-Be concise unless the user asked for detail.
+Be concise unless the user asked for detail. Each claim's text should read as a whole
+sentence, because the sentences are joined together.
 
-Write no clarification question inside message_without_question. To ask one, set
-selected_clarification_id to the question_id of exactly one entry in
-allowed_clarifications. The server appends that contract's canonical question after
-validating the id. Ask nothing when allowed_clarifications is empty, and never ask the
-user to describe their setup when they already have.
+Write no clarification question in any field. To ask one, set selected_clarification_id
+to the question_id of exactly one entry in allowed_clarifications. The server appends
+that contract's canonical question after validating the id. Ask nothing when
+allowed_clarifications is empty, and never ask the user to describe their setup when they
+already have.
 
 Never assign or imply a Sharia, halal or haram status. Never give trading advice,
 predictions or guarantees. Never say the strategy is running or approved: approval is a
@@ -1279,60 +1330,77 @@ def _counts_toward_circuit(exc: StructuredCallError) -> bool:
     return exc.code in _CIRCUIT_FAILURE_CODES
 
 
-def _rebuild_reply_from_validated_claims(
+def compose_final_reply(
     reply: SetupAgentReply,
     ledger: EvidenceLedger,
-) -> SetupAgentReply:
-    """Keep the wording, drop the claims whose evidence does not check out.
+    *,
+    owes_a_fact: bool,
+    fallback_message: str,
+) -> ComposedReply:
+    """Build the message the user reads, from validated claims only.
+
+    The model no longer returns a message. It returns wording that asserts nothing, plus
+    claims that each state a proposition. This function is the only place those become a
+    message, so a fact cannot reach a user without having been checked — previously the
+    model could put every fact in a free message field and return no claims at all, and
+    nothing was validated.
 
     A refused claim is *replaced*, not deleted silently. Removing a sentence would leave
     the user reading a reply with a fact quietly missing; replacing it with text built
     from the evidence keeps them informed and keeps the reply honest.
-
-    A composer that sent no structured claims at all — an older model, a fallback — keeps
-    its message unchanged and is still checked by the lexical filter afterwards. This
-    validation can only ever remove unsupported statements, never add one.
     """
 
-    if not reply.factual_claims:
-        return reply
-
     validated = validate_claims(list(reply.factual_claims), ledger)
-    accepted = [item.text for item in validated if item.accepted]
+    accepted = [item for item in validated if item.accepted]
     refused = [item for item in validated if not item.accepted]
-    if not refused:
-        return reply
+    conversational = _trimmed(reply.conversational_text)
 
-    replacements = deterministic_claim_text(ledger)
-    parts = [
-        _trimmed(reply.conversational_text),
-        *accepted,
-        *replacements,
-    ]
+    parts = [conversational, *(item.text for item in accepted)]
+    if refused or (owes_a_fact and not accepted):
+        # Either a claim was thrown out, or the turn owed the user a fact and the model
+        # supplied none that survived. Both are answered from the evidence itself.
+        parts.extend(deterministic_claim_text(ledger))
     message = " ".join(part for part in parts if part).strip()
     if not message:
-        # Nothing survived and there is nothing to say from evidence either. Keep the
-        # conversational half rather than returning an empty reply, which would fail
-        # validation and turn a wording problem into a failed turn.
-        message = _trimmed(reply.conversational_text) or reply.message_without_question
-    return reply.model_copy(
-        update={
-            "message_without_question": message[:SETUP_REPLY_MAX_LENGTH],
-            "factual_claims": [
-                FactualClaim(
-                    claim_type=item.claim_type,  # type: ignore[arg-type]
-                    text=item.text,
-                    evidence_ids=list(item.evidence_ids),
-                )
-                for item in validated
-                if item.accepted
-            ],
-        }
+        message = conversational or fallback_message
+    return ComposedReply(
+        message_without_question=message[:SETUP_REPLY_MAX_LENGTH],
+        conversational_text=conversational[:SETUP_REPLY_MAX_LENGTH],
+        factual_claims=[
+            FactualClaim(
+                claim_id=item.claim_id,
+                claim_type=item.claim_type,  # type: ignore[arg-type]
+                subject_id=item.subject_id,
+                predicate=item.predicate,
+                asserted_value=item.asserted_value,
+                text=item.text,
+                evidence_ids=list(item.evidence_ids),
+            )
+            for item in accepted
+        ],
+        refused_claims=[
+            f"{item.claim_id or item.claim_type}: {item.reason}"[:200]
+            for item in refused
+        ][:12],
+        selected_clarification_id=reply.selected_clarification_id,
+    )
+
+
+def deterministic_reply(
+    message: str,
+    *,
+    selected_clarification_id: str | None = None,
+) -> ComposedReply:
+    """A server-authored reply: no model wording, nothing to validate."""
+
+    return ComposedReply(
+        message_without_question=message[:SETUP_REPLY_MAX_LENGTH],
+        selected_clarification_id=selected_clarification_id,
     )
 
 
 def _composer_reply_is_grounded(
-    reply: SetupAgentReply,
+    reply: ComposedReply,
     result: SetupTurnExecutionResult,
     payload: dict[str, Any],
 ) -> bool:

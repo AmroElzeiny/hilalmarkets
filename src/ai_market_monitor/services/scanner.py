@@ -44,6 +44,10 @@ from ai_market_monitor.engine.evaluator import (
     strategy_evaluation_directions,
 )
 from ai_market_monitor.engine.models import EvaluationResult, ensure_aware
+from ai_market_monitor.engine.runtime_preflight import (
+    RuntimeDataContract,
+    skip_reason,
+)
 from ai_market_monitor.provider_context import ProviderContextService
 from ai_market_monitor.schemas.strategy import (
     ConditionGroup,
@@ -1423,13 +1427,31 @@ class ScanOrchestrator:
             candle_sets,
             evaluation_time,
         )
-        if not quality.usable:
+        # The market-data promise this version was approved under, kept per symbol.
+        #
+        # A `policy_verified_runtime_fail_closed` approval means only a sample was
+        # checked before approval, so every market has to be checked here. Nothing
+        # enforced that: the worker evaluated whatever the universe re-resolved to,
+        # including markets that entered it after approval and had never been checked.
+        contract = RuntimeDataContract.from_approval_evidence(version.approval_evidence)
+        refusal = skip_reason(
+            contract,
+            symbol=symbol,
+            timeframes=sorted(timeframes),
+            data_is_usable=quality.usable,
+            data_reason=quality.code,
+        )
+        if refusal is not None:
+            # `data_quality_ok=False` makes `MarketFilterEngine.evaluate` fail, which
+            # returns `ScanOutcome.SKIPPED` with no conditions evaluated at all. The
+            # reason travels with it, so a skipped market is visible rather than silent.
             market = replace(
                 market,
                 data_quality_ok=False,
                 metadata={
                     **market.metadata,
-                    "reliability_warnings": [quality.code or "candle_data_unavailable"],
+                    "reliability_warnings": [refusal],
+                    "preflight_contract": contract.contract,
                     "candle_snapshot_hash": quality.manifest_hash,
                 },
             )

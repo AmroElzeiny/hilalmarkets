@@ -102,6 +102,16 @@ class StrategyVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     approved_schema_hash: Mapped[str | None] = mapped_column(String(64))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: What the user was shown when they approved this version: the screening evidence
+    #: and the market-data check that went with it.
+    #:
+    #: The runtime needs the market-data *contract* from here. Without it the worker had
+    #: no way to know whether every market had been checked before approval or only a
+    #: sample, so it could not tell which markets still needed checking each cycle. Empty
+    #: means "nothing was promised", which the runtime reads as "check everything".
+    approval_evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
     preview_status: Mapped[str] = mapped_column(String(32), default="not_run", nullable=False)
     previewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     preview_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

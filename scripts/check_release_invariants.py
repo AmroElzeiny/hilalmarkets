@@ -90,9 +90,15 @@ def main() -> int:
         "BILLING_PROVIDER": "static",
         "WHATSAPP_ENABLED": "false",
         "WHATSAPP_OPPORTUNITY_ALERTS_ENABLED": "false",
-        "AI_AGENT_CONTROL_ENABLED": "true",
+        # The old general agent coordinator stays out of production. Authenticated Setup
+        # Chat is served by the Setup Agent, which has its own bounds
+        # (`SETUP_AGENT_*`), and the coordinator has no authority over it. This gate used
+        # to demand the coordinator be on at 100%, which contradicted both the shipped
+        # `.env.production.example` and the config comments, and asked an operator to
+        # switch on a path nothing routes to.
+        "AI_AGENT_CONTROL_ENABLED": "false",
         "AI_AGENT_SHADOW_MODE": "false",
-        "AI_AGENT_ROLLOUT_PERCENT": "100",
+        "AI_AGENT_ROLLOUT_PERCENT": "0",
         "CAPABILITY_EXTENSION_ENABLED": "true",
         "PUBLIC_CHAT_ENABLED": "true",
         "PUBLIC_CHAT_AI_ENABLED": "true",

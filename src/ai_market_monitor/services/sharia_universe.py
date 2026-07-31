@@ -11,6 +11,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.universe_membership import (
+    membership_source_symbols,
+)
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
@@ -46,6 +49,11 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
     canonical_asset,
     canonical_symbol,
+)
+from ai_market_monitor.services.watchlist_snapshot import (
+    WatchlistScope,
+    scope_from_definition,
+    watchlist_identity_changed,
 )
 
 logger = structlog.get_logger(__name__)
@@ -155,6 +163,7 @@ class ShariaUniverseResolver:
             policy,
             considered,
             user_id=user_id,
+            scope=scope_from_definition(definition),
         )
         assessments = await self.screening.effective_assessments(
             methodology.id,
@@ -576,7 +585,30 @@ class ShariaUniverseResolver:
         return len(rows)
 
     async def _technical_symbols(self, definition: StrategyDefinition) -> list[str]:
-        symbols = definition.universe.include_symbols or await self.provider.list_symbols(
+        """The markets this policy could possibly cover, before screening.
+
+        Only ``explicit_assets`` takes this list from ``include_symbols``. The other two
+        modes take membership from somewhere else — the whole exchange, or a Favorites
+        list — so reading ``include_symbols`` for them reads a value the user never
+        authored for that purpose.
+
+        That is what pinned dynamic monitors. A previous fix wrote each resolution's
+        permitted symbols back into ``include_symbols``; this function then read them as
+        the authored universe, and an "everything eligible" monitor stopped following the
+        eligible market the moment it was approved. Asking the membership contract which
+        field owns the answer removes the ambiguity instead of relying on the field
+        happening to be empty.
+        """
+        policy = definition.universe.sharia_policy
+        authored = membership_source_symbols(
+            policy.universe_mode if policy is not None else None,
+            authored_include_symbols=list(definition.universe.include_symbols),
+        )
+        if policy is None:
+            # Legacy, unscreened, local-only. There is no membership contract to consult,
+            # so the historical behaviour is kept exactly.
+            authored = list(definition.universe.include_symbols)
+        symbols = authored or await self.provider.list_symbols(
             definition.universe.exchange,
             definition.universe.quote_currencies,
         )
@@ -597,6 +629,7 @@ class ShariaUniverseResolver:
         considered: list[str],
         *,
         user_id: UUID | None,
+        scope: WatchlistScope | None = None,
     ) -> tuple[list[str], list[ShariaUniverseExclusion]]:
         if policy.universe_mode == ShariaUniverseMode.ELIGIBLE_MARKET:
             return considered, []
@@ -615,6 +648,26 @@ class ShariaUniverseResolver:
         watchlist = await self.session.get(ApprovedWatchlist, policy.approved_watchlist_id)
         if watchlist is None or watchlist.user_id != user_id:
             raise ShariaUniverseError("watchlist_not_found", "Approved watchlist not found.")
+        # A Favorites universe is *fixed to the list the user approved*. Reading the live
+        # rows here is how a market added to Favorites after approval entered a running
+        # monitor with no review and no record. The bound identity is checked every cycle,
+        # and a changed list stops the monitor rather than quietly widening it.
+        if (
+            policy.approved_watchlist_version
+            and scope is not None
+            and await watchlist_identity_changed(
+                self.session,
+                watchlist.id,
+                policy.approved_watchlist_version,
+                scope=scope,
+                require_resolved=self.settings.is_deployed,
+            )
+        ):
+            raise ShariaUniverseError(
+                "approved_watchlist_changed",
+                "The markets in that Favorites list changed. Review and approve the "
+                "Watch Plan again before it can run.",
+            )
         assets = set(
             (
                 await self.session.scalars(

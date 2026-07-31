@@ -642,6 +642,12 @@ class ReconciledOperationRecord(BaseModel):
     final_condition_ids: list[str] = Field(default_factory=list, max_length=100)
     summary: str = Field(default="", max_length=400)
     changes: list[dict[str, object]] = Field(default_factory=list, max_length=40)
+    #: Exactly what this operation aimed at — a symbol, a condition id, a key, a field
+    #: path. Persisted so the attribution can be audited instead of trusted.
+    targets: list[dict[str, str]] = Field(default_factory=list, max_length=24)
+    #: The later operation that replaced or undid this one. Recorded because
+    #: "overwritten" with no explanation is not evidence a user can act on.
+    superseded_by: str | None = Field(default=None, max_length=80)
     safe_error: str | None = Field(default=None, max_length=500)
 
 
@@ -865,20 +871,41 @@ class SetupConversationContext(BaseModel):
         )
 
 
+#: What kind of thing a claim is about. Paired with a predicate and a value, this turns
+#: "the sentence sounds right" into "the proposition matches the evidence".
+ClaimSubjectType = Literal[
+    "operation",
+    "status",
+    "condition",
+    "universe",
+    "provider",
+    "approval",
+    "open_item",
+    "product",
+]
+
+
 class FactualClaim(_StrictModel):
-    """One statement of fact in the reply, and the server evidence it rests on.
+    """One statement of fact, as a proposition the server can check.
 
     A reply mixes two different things. "Got it, that makes sense" asserts nothing and
     needs no evidence. "I set the RSI level to 30 and this is ready to approve" asserts
     two facts about the platform, and either could be wrong.
 
-    Separating them lets the server check the second kind by *looking up ids* instead of
-    reading sentences. Reading sentences meant English phrase patterns, which saw nothing
-    at all in an Arabic reply — the exact turns most likely to need checking.
+    Carrying evidence ids proved the claim *rested on something real*. It did not prove
+    the sentence described that thing: a mutation claim could cite a genuinely effective
+    operation and then describe a different one, and citing valid evidence for the wrong
+    sentence passed every check.
+
+    So a claim now states its proposition in fields — subject, predicate, value — and the
+    server compares that proposition with the authoritative evidence. The wording is free
+    and may be in any language; the proposition is what is checked.
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    #: Stable within one reply, so a refusal can name the claim it refused.
+    claim_id: str = Field(default="", max_length=80)
     claim_type: Literal[
         "mutation",
         "readiness",
@@ -889,6 +916,13 @@ class FactualClaim(_StrictModel):
         "product_fact",
         "open_item",
     ]
+    subject_type: ClaimSubjectType | None = None
+    #: The evidence id the proposition is *about*, e.g. `operation:add_btc`.
+    subject_id: str = Field(default="", max_length=160)
+    #: What is being asserted about the subject, e.g. `symbol_included`.
+    predicate: str = Field(default="", max_length=60)
+    #: The asserted value, as text. Compared with the authoritative value, normalised.
+    asserted_value: str = Field(default="", max_length=200)
     #: The sentence itself, in the user's language.
     text: str = Field(min_length=1, max_length=600)
     #: Ids from this turn's evidence ledger. At least one, and it has to be the right
@@ -896,22 +930,35 @@ class FactualClaim(_StrictModel):
     #: operation that actually survived the turn.
     evidence_ids: list[str] = Field(default_factory=list, max_length=12)
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_natural_language_alias(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        if "natural_language_text" in migrated:
+            migrated.setdefault("text", migrated.pop("natural_language_text"))
+        return migrated
+
 
 class SetupAgentReply(_StrictModel):
-    """The final assistant message, composed from the execution result."""
+    """What the composer model is allowed to return.
+
+    ``message_without_question`` used to be here, and it was the whole message. That made
+    the structured claims optional in practice: a model could put every fact in the free
+    message field, return ``factual_claims: []``, and nothing was checked. The field is
+    gone. The server builds the message from the two things below, so there is exactly one
+    place a fact can live and it is validated.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    message_without_question: str = Field(
-        min_length=1,
-        max_length=SETUP_REPLY_MAX_LENGTH,
-    )
     #: Wording that asserts nothing about the platform: greeting, acknowledgement, an
     #: offer to help. Free, because there is nothing here that could be false.
     conversational_text: str = Field(default="", max_length=SETUP_REPLY_MAX_LENGTH)
-    #: Every statement of fact, each carrying its evidence. A claim whose evidence does
-    #: not check out is dropped and replaced with text built from the evidence itself,
-    #: so the user still learns what happened.
+    #: Every statement of fact, each carrying its proposition and its evidence. A claim
+    #: that does not check out is dropped and replaced with text built from the evidence
+    #: itself, so the user still learns what happened.
     factual_claims: list[FactualClaim] = Field(default_factory=list, max_length=12)
     #: The `question_id` of one server-authorised clarification, or null.
     #:
@@ -923,17 +970,50 @@ class SetupAgentReply(_StrictModel):
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_reply(cls, data: object) -> object:
+        """Accept older payloads without letting their free text become authoritative.
+
+        A stored reply from before this change carries `message`/`message_without_question`.
+        It is read as *conversational* text and still passes through claim validation,
+        rather than being trusted as the final message.
+        """
         if not isinstance(data, dict):
             return data
         migrated = dict(data)
-        if "message" in migrated:
-            migrated.setdefault("message_without_question", migrated.pop("message"))
+        legacy = migrated.pop("message", None) or migrated.pop(
+            "message_without_question", None
+        )
+        if isinstance(legacy, str) and legacy.strip() and not migrated.get(
+            "conversational_text"
+        ):
+            migrated["conversational_text"] = legacy
         if "clarification_question_id" in migrated:
             migrated.setdefault(
                 "selected_clarification_id",
                 migrated.pop("clarification_question_id"),
             )
         return migrated
+
+
+class ComposedReply(_StrictModel):
+    """The final assistant message, built by the server.
+
+    Every factual sentence in ``message_without_question`` came from a claim that passed
+    validation, or from deterministic text built out of the evidence. Nothing the model
+    wrote reaches a user without going through one of those two paths.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_without_question: str = Field(
+        min_length=1,
+        max_length=SETUP_REPLY_MAX_LENGTH,
+    )
+    conversational_text: str = Field(default="", max_length=SETUP_REPLY_MAX_LENGTH)
+    #: Only the claims that were accepted.
+    factual_claims: list[FactualClaim] = Field(default_factory=list, max_length=12)
+    #: Why each refused claim was refused, for the operator trace.
+    refused_claims: list[str] = Field(default_factory=list, max_length=12)
+    selected_clarification_id: str | None = Field(default=None, max_length=120)
 
     @property
     def message(self) -> str:

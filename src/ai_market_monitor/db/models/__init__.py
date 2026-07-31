@@ -116,6 +116,7 @@ from ai_market_monitor.db.models.public_forms import (
 from ai_market_monitor.db.models.sharia import (
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
+    ApprovedWatchlistSnapshot,
     AssetShariaAssessment,
     AssetShariaStatusHistory,
     ComplianceChange,
@@ -209,6 +210,7 @@ __all__ = [
     "AlertInboxItem",
     "ApprovedWatchlist",
     "ApprovedWatchlistAsset",
+    "ApprovedWatchlistSnapshot",
     "AdminOverride",
     "AttributionTouch",
     "AssetShariaAssessment",

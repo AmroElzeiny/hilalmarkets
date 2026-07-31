@@ -23,9 +23,10 @@ from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_CODES,
-    PUBLIC_PLAN_COMPARISON,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    visible_plan_comparison,
+    visible_plan_comparison_headers,
     visible_public_plan_codes,
 )
 from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION
@@ -2943,7 +2944,12 @@ async def billing_page(
                 )
             },
             plan_presentations=PUBLIC_PLAN_PRESENTATIONS,
-            plan_comparison=PUBLIC_PLAN_COMPARISON,
+            plan_comparison=visible_plan_comparison(
+                billing_enabled=settings.billing_enabled
+            ),
+            plan_comparison_headers=visible_plan_comparison_headers(
+                billing_enabled=settings.billing_enabled
+            ),
             trial_claimable=(
                 trial is None
                 and completed_provider_trial is None
