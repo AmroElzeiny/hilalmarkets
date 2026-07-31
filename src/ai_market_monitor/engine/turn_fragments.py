@@ -1128,12 +1128,7 @@ def extract_symbols(text: str) -> tuple[str, ...]:
 
 def extract_timeframes(text: str) -> tuple[str, ...]:
     """Return every supported timeframe named in ``text``, canonicalised (``60m`` -> ``1h``)."""
-    found: list[str] = []
-    for match in _TIMEFRAME_RE.finditer(text):
-        canonical = _canonical_timeframe(match.group(1), match.group(2))
-        if canonical is not None:
-            found.append(canonical)
-    return _unique(found)
+    return _unique(canonical for _start, _end, canonical in _timeframe_spans(text))
 
 
 #: Words that mark the timeframe a rule actually fires on.

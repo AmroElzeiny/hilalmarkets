@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from ai_market_monitor.engine.draft_diff import diff_drafts, is_material
@@ -32,6 +33,7 @@ from ai_market_monitor.engine.strategy_draft_v2 import apply_strategy_patch
 from ai_market_monitor.schemas.setup_agent import (
     ACTIONABLE_SEGMENT_KINDS,
     SegmentKind,
+    SetupAgentPlanEnvelope,
     SetupAgentTurnPlan,
     SetupConversationContext,
     StrategyInstructionPlan,
@@ -55,7 +57,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     UnresolvedFieldV2,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
-from tests.support.setup_agent_plans import operations_from_patch, segment
+from tests.support.setup_agent_plans import operations_from_patch, responses_body, segment
 
 TURN = "turn-closure-1"
 RULE = "Monitor BTC/USDT on the 15m when the candle rises open-to-close by at least 5%"
@@ -894,6 +896,12 @@ def test_9_the_registry_validator_checks_operator_direction_and_grounding() -> N
         allowed_keys=frozenset(),
     )
     assert any("capability_not_offered" in item for item in unoffered.errors)
+    nearest = validate_capability_node(
+        node,
+        authorizing_text="MACD crossover on the 15m",
+        allowed_keys=frozenset({spec.key}),
+    )
+    assert any("capability_semantics_not_exact" in item for item in nearest.errors)
     wrong_type = validate_capability_node(
         node.model_copy(update={"capability_parameters": {"period": "fourteen"}}),
         authorizing_text="RSI below 30 on the 15m",
@@ -918,8 +926,8 @@ def test_9_the_registry_validator_checks_operator_direction_and_grounding() -> N
 # Enforced by `_replayed_turn` and `_record_turn` in `setup_chat_launch`.
 
 
-async def test_14_one_turn_uses_at_most_one_model_call() -> None:
-    """An exact primitive uses no model call and still executes deterministically."""
+async def test_14_simple_mutation_uses_exactly_one_planner_call() -> None:
+    """Free text reaches the planner first; a simple mutation needs no composer."""
     from pydantic import SecretStr
 
     from ai_market_monitor.core.config import Settings
@@ -929,6 +937,24 @@ async def test_14_one_turn_uses_at_most_one_model_call() -> None:
     )
 
     message = "exclude LTC/USDT"
+    draft = _draft_with()
+    plan = _plan(
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        operations=operations_from_patch(_patch(message, draft), segment_id="s1"),
+        strategy_instructions=[
+            StrategyInstructionPlan(segment_id="s1", intent_summary="exclude LTC")
+        ],
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=responses_body(
+                SetupAgentPlanEnvelope(plan=plan).model_dump_json()
+            ),
+        )
+
     agent = SetupChatAgent(
         Settings(
             _env_file=None,
@@ -936,12 +962,13 @@ async def test_14_one_turn_uses_at_most_one_model_call() -> None:
             app_secret_key="closure-secret-with-at-least-thirty-two-chars",
             openai_api_key=SecretStr("test-key"),
             sharia_screening_enforced=False,
-        )
+        ),
+        transport=httpx.MockTransport(handler),
     )
     result = await agent.run_turn(
-        SetupAgentTurnInput(message=message, source_turn_id=TURN, draft=_draft_with())
+        SetupAgentTurnInput(message=message, source_turn_id=TURN, draft=draft)
     )
-    assert result.trace.model_calls == 0
+    assert result.trace.model_calls == 1
     assert result.execution is not None
     assert result.execution.strategy_mutated is True
 

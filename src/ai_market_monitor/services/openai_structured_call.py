@@ -129,8 +129,9 @@ async def structured_call[ModelT: BaseModel](
 
     if settings.openai_api_key is None:
         raise StructuredCallError(
-            "OPENAI_NOT_CONFIGURED",
-            "This setup needs interpretation, but the AI provider is unavailable.",
+            "TARGET_PROVIDER_NOT_CONFIGURED",
+            "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
+            retryable=True,
             stage=stage,
         )
     pricing = settings.openai_model_pricing_usd_per_million.get(model)
@@ -174,8 +175,20 @@ async def structured_call[ModelT: BaseModel](
         "instructions": instructions,
         "input": json.dumps(payload, ensure_ascii=False, sort_keys=True),
     }
+    api_key = (
+        settings.openai_api_key.get_secret_value().strip()
+        if settings.openai_api_key is not None
+        else ""
+    )
+    if not api_key:
+        raise StructuredCallError(
+            "TARGET_PROVIDER_NOT_CONFIGURED",
+            "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
+            retryable=True,
+            stage=stage,
+        )
     headers = {
-        "Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     try:
@@ -240,6 +253,8 @@ async def structured_call[ModelT: BaseModel](
             (
                 "TARGET_HTTP_429"
                 if status == 429
+                else "TARGET_PROVIDER_AUTH_FAILURE"
+                if status in {401, 403}
                 else "TARGET_HTTP_409"
                 if status == 409
                 else "TARGET_HTTP_5XX"
@@ -247,7 +262,7 @@ async def structured_call[ModelT: BaseModel](
                 else "TARGET_PROVIDER_ERROR"
             ),
             "The interpreter could not complete this turn.",
-            retryable=status == 429 or status >= 500,
+            retryable=status in {401, 403, 429} or status >= 500,
             stage=stage,
         ) from exc
     except ValidationError as exc:

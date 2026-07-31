@@ -27,6 +27,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     FormulaKind,
     OperandV2,
     ReversionV2,
+    ShariaPolicyV2,
     StrategyDraftV2,
     StrategyPatch,
     UnresolvedFieldV2,
@@ -219,7 +220,7 @@ def test_core_reference_primitives_compile_without_capability_search(
     assert rule.capability_key is None
 
 
-def test_trigger_context_confirmation_and_reference_roles_remain_distinct():
+def test_trigger_context_confirmation_and_reference_roles_compile_distinctly():
     patch = deterministic_strategy_patch(
         StrategyDraftV2(),
         (
@@ -238,13 +239,14 @@ def test_trigger_context_confirmation_and_reference_roles_remain_distinct():
     assert draft.condition_ast.reference_timeframe == "15m"
 
     errors = validate_draft_semantics(draft)
-    assert any(item.startswith("context_timeframe_not_executable:") for item in errors)
-    assert any(
-        item.startswith("confirmation_timeframe_not_executable:") for item in errors
-    )
-    with pytest.raises(StrategyV2CompileError) as captured:
-        compile_strategy_draft_v2(draft)
-    assert captured.value.code == "semantic_validation_failed"
+    assert errors == []
+    compiled = compile_strategy_draft_v2(draft)
+    rule = compiled.conditions.children[0]
+    assert rule.timeframe == "15m"
+    assert rule.context_timeframes == ["4h"]
+    assert rule.confirmation_timeframes == ["1h"]
+    assert rule.reference_timeframe == "15m"
+    assert set(compiled.supporting_timeframes) == {"1h", "4h"}
 
 
 def test_neutral_strategy_compiles_as_one_neutral_evaluation():
@@ -257,11 +259,49 @@ def test_neutral_strategy_compiles_as_one_neutral_evaluation():
     assert compiled.direction.value == "neutral"
 
 
+def test_static_sharia_policy_changes_executable_identity_and_invalidates_approval():
+    draft = StrategyDraftV2(condition_ast=_condition())
+    approved = StrategyDraftV2.model_validate(
+        draft.model_copy(
+            update={
+                "approval": ApprovalBindingV2(
+                    approved=True,
+                    user_id=uuid4(),
+                    executable_version=draft.executable_version,
+                    executable_hash=draft.executable_hash,
+                    conversation_snapshot_hash="a" * 64,
+                    approved_at=datetime.now(UTC),
+                )
+            }
+        ).model_dump(mode="json")
+    )
+    changed_policy = ShariaPolicyV2(
+        universe_mode="explicit_assets",
+        explicit_symbols=["BTC/USDT", "ETH/USDT"],
+        allowed_statuses=approved.sharia_policy.allowed_statuses,
+        compliance_change_behavior=approved.sharia_policy.compliance_change_behavior,
+    )
+
+    result = apply_strategy_patch(
+        approved,
+        StrategyPatch(
+            source_turn_id="turn-sharia-policy",
+            set_sharia_policy=changed_policy,
+        ),
+    )
+
+    assert result.draft.executable_version == approved.executable_version + 1
+    assert result.draft.executable_hash != approved.executable_hash
+    assert result.draft.sharia_policy.explicit_symbols == ["BTC/USDT", "ETH/USDT"]
+    assert result.draft.approval.approved is False
+
+
 def test_compiler_preserves_source_turn_and_explicit_lookback_and_detects_drift():
     condition = _condition().model_copy(
         update={
             "source_turn_id": "turn-provenance-1234",
             "lookback": 20,
+            "condition_symbols": ["BTC/USDT"],
         }
     )
     draft = StrategyDraftV2(condition_ast=condition)
@@ -271,12 +311,16 @@ def test_compiler_preserves_source_turn_and_explicit_lookback_and_detects_drift(
 
     assert rule.source_turn_id == "turn-provenance-1234"
     assert rule.source_fragment == condition.source_fragment
+    assert rule.source_operands
+    assert rule.condition_symbols == ["BTC/USDT"]
     assert rule.resolved_parameters["lookback"] == 20
     assert validate_compiled_equivalence(draft, compiled) == []
 
     drifted_rule = rule.model_copy(
         update={
             "source_turn_id": "turn-wrong",
+            "source_operands": [],
+            "condition_symbols": [],
             "resolved_parameters": {
                 **rule.resolved_parameters,
                 "lookback": 19,
@@ -293,6 +337,8 @@ def test_compiler_preserves_source_turn_and_explicit_lookback_and_detects_drift(
 
     errors = validate_compiled_equivalence(draft, drifted)
     assert "source_turn_id:move" in errors
+    assert "operands:move" in errors
+    assert "condition_symbols:move" in errors
     assert "lookback:move" in errors
 
 
@@ -334,7 +380,7 @@ def test_latest_correction_wins_and_invalidates_approval():
     assert result.draft.condition_ast.threshold == 2
 
 
-def test_patch_clears_only_unresolved_semantic_slots_it_answers():
+def test_patch_never_clears_unresolved_targets_without_explicit_resolution():
     draft = StrategyDraftV2(
         unresolved_fields=[
             UnresolvedFieldV2(
@@ -391,7 +437,10 @@ def test_patch_clears_only_unresolved_semantic_slots_it_answers():
     )
 
     assert [item.key for item in result.draft.unresolved_fields] == [
-        "delivery_channel"
+        "reference_price_definition",
+        "one_hour_context_definition",
+        "watchlist_scope",
+        "delivery_channel",
     ]
 
 

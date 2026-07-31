@@ -221,14 +221,9 @@ def test_the_trigger_timeframe_can_never_hold_a_second_role(role: str) -> None:
 
 
 @pytest.mark.parametrize("role", ["context_timeframes", "confirmation_timeframes"])
-def test_a_distinct_supporting_timeframe_blocks_until_it_is_executable(role: str) -> None:
+def test_a_distinct_supporting_timeframe_is_executable(role: str) -> None:
     errors = _violations(trigger_timeframe="15m", **{role: ["4h"]})
-    expected = (
-        "context_timeframe_not_executable"
-        if role == "context_timeframes"
-        else "confirmation_timeframe_not_executable"
-    )
-    assert any(item.startswith(expected) for item in errors), errors
+    assert errors == []
 
 
 def test_the_same_timeframe_cannot_be_both_context_and_confirmation() -> None:
@@ -300,17 +295,7 @@ def test_a_supporting_timeframe_never_replaces_the_trigger(
     assert condition.trigger_timeframe == trigger, message
     assert tuple(condition.context_timeframes) == context, message
     assert tuple(condition.confirmation_timeframes) == confirmation, message
-    errors = validate_draft_semantics(draft)
-    if context:
-        assert any(
-            item.startswith("context_timeframe_not_executable") for item in errors
-        ), message
-    elif confirmation:
-        assert any(
-            item.startswith("confirmation_timeframe_not_executable") for item in errors
-        ), message
-    else:
-        assert errors == [], message
+    assert validate_draft_semantics(draft) == [], message
 
 
 # --------------------------------------------------------------------------------

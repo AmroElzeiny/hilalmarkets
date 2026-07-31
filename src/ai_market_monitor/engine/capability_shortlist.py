@@ -30,11 +30,25 @@ SHORTLIST_LIMIT = 12
 #: Candidates per fragment asked of the resolver before merging and trimming.
 _PER_FRAGMENT_LIMIT = 6
 
-# Provider contracts backed by the production market-data adapter. Capabilities that
-# require anything else are not offered to the planner as executable choices.
-SETUP_RUNTIME_PROVIDER_REQUIREMENTS = frozenset(
-    {"", "ohlcv", "market_data", "candles", "ccxt"}
+# Provider contracts backed by every launch market-data adapter. Adapter-specific
+# contracts are added only when that adapter is actually configured.
+SETUP_BASE_PROVIDER_REQUIREMENTS = frozenset(
+    {"", "ohlcv", "market_data", "candles"}
 )
+SETUP_RUNTIME_PROVIDER_REQUIREMENTS = frozenset(
+    {*SETUP_BASE_PROVIDER_REQUIREMENTS, "ccxt"}
+)
+
+
+def configured_runtime_provider_requirements(
+    market_data_provider: str,
+) -> frozenset[str]:
+    """Return only contracts implemented by the configured launch adapter."""
+
+    provider = market_data_provider.strip().casefold()
+    if provider == "ccxt":
+        return SETUP_RUNTIME_PROVIDER_REQUIREMENTS
+    return SETUP_BASE_PROVIDER_REQUIREMENTS
 
 
 @dataclass(frozen=True, slots=True)

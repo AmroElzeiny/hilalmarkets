@@ -15,6 +15,16 @@
       "title": "Comparator",
       "type": "string"
     },
+    "ComplianceChangeBehavior": {
+      "enum": [
+        "pause_asset",
+        "remove_asset",
+        "pause_monitor_if_any_asset_changes",
+        "notify_only"
+      ],
+      "title": "ComplianceChangeBehavior",
+      "type": "string"
+    },
     "ConditionNodeType": {
       "enum": [
         "condition",
@@ -40,12 +50,45 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Capability Key"
         },
         "capability_parameters": {
-          "additionalProperties": false,
-          "properties": {},
-          "required": [],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
           "title": "Capability Parameters",
           "type": "object"
         },
@@ -59,6 +102,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Capability Version"
         },
         "children": {
@@ -103,7 +147,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "lookback": {
           "anyOf": [
@@ -116,10 +161,12 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Lookback"
         },
         "movement_direction": {
-          "$ref": "#/$defs/MovementDirection"
+          "$ref": "#/$defs/MovementDirection",
+          "default": "neutral"
         },
         "node_id": {
           "title": "Node Id",
@@ -144,7 +191,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "reference_definition": {
           "anyOf": [
@@ -156,6 +204,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Reference Definition"
         },
         "reference_timeframe": {
@@ -168,9 +217,11 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Reference Timeframe"
         },
         "required": {
+          "default": true,
           "title": "Required",
           "type": "boolean"
         },
@@ -184,6 +235,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Source Fragment"
         },
         "source_turn_id": {
@@ -196,10 +248,12 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Source Turn Id"
         },
         "strategy_bias": {
-          "$ref": "#/$defs/StrategyBias"
+          "$ref": "#/$defs/StrategyBias",
+          "default": "neutral"
         },
         "threshold": {
           "anyOf": [
@@ -210,6 +264,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Threshold"
         },
         "trigger_timeframe": {
@@ -222,9 +277,11 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Trigger Timeframe"
         },
         "unit": {
+          "default": "none",
           "enum": [
             "percent",
             "price",
@@ -239,29 +296,7 @@
         }
       },
       "required": [
-        "node_id",
-        "node_type",
-        "source_turn_id",
-        "source_fragment",
-        "required",
-        "movement_direction",
-        "strategy_bias",
-        "formula",
-        "operands",
-        "operator",
-        "threshold",
-        "unit",
-        "trigger_timeframe",
-        "context_timeframes",
-        "confirmation_timeframes",
-        "reference_timeframe",
-        "reference_definition",
-        "lookback",
-        "capability_key",
-        "capability_version",
-        "capability_parameters",
-        "condition_symbols",
-        "children"
+        "node_type"
       ],
       "title": "ConditionNodeV2",
       "type": "object"
@@ -323,6 +358,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Exchange"
         },
         "market_type": {
@@ -335,6 +371,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Market Type"
         },
         "mode": {
@@ -345,7 +382,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "name": {
           "anyOf": [
@@ -358,6 +396,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Name"
         },
         "quote_asset": {
@@ -371,16 +410,10 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Quote Asset"
         }
       },
-      "required": [
-        "mode",
-        "name",
-        "exchange",
-        "quote_asset",
-        "market_type"
-      ],
       "title": "DraftFieldPatch",
       "type": "object"
     },
@@ -432,6 +465,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Field"
         },
         "kind": {
@@ -455,12 +489,45 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Name"
         },
         "parameters": {
-          "additionalProperties": false,
-          "properties": {},
-          "required": [],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
           "title": "Parameters",
           "type": "object"
         },
@@ -488,6 +555,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Unit"
         },
         "value": {
@@ -505,17 +573,13 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Value"
         }
       },
       "required": [
         "role",
-        "kind",
-        "field",
-        "name",
-        "value",
-        "unit",
-        "parameters"
+        "kind"
       ],
       "title": "OperandV2",
       "type": "object"
@@ -534,6 +598,131 @@
       ],
       "title": "ReversionV2",
       "type": "object"
+    },
+    "ShariaAssetStatus": {
+      "enum": [
+        "eligible",
+        "eligible_with_qualifications",
+        "disputed",
+        "under_review",
+        "excluded",
+        "insufficient_information"
+      ],
+      "title": "ShariaAssetStatus",
+      "type": "string"
+    },
+    "ShariaPolicyV2": {
+      "additionalProperties": false,
+      "description": "Static, user-selected Sharia policy that is part of executable identity.\n\nCurrent assessment results and universe resolutions deliberately do not live here.\nThey are dynamic compliance/runtime evidence and are frozen separately.",
+      "properties": {
+        "allowed_statuses": {
+          "items": {
+            "$ref": "#/$defs/ShariaAssetStatus"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Allowed Statuses",
+          "type": "array"
+        },
+        "approved_watchlist_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Watchlist Id"
+        },
+        "approved_watchlist_version": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Watchlist Version"
+        },
+        "compliance_change_behavior": {
+          "$ref": "#/$defs/ComplianceChangeBehavior",
+          "default": "pause_asset"
+        },
+        "disputed_asset_policy": {
+          "default": "exclude",
+          "enum": [
+            "exclude",
+            "include_with_warning"
+          ],
+          "title": "Disputed Asset Policy",
+          "type": "string"
+        },
+        "explicit_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Explicit Symbols",
+          "type": "array"
+        },
+        "methodology_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Id"
+        },
+        "methodology_version": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Version"
+        },
+        "qualification_policy": {
+          "default": "include_with_warning",
+          "enum": [
+            "include_with_warning",
+            "exclude",
+            "require_acknowledgement"
+          ],
+          "title": "Qualification Policy",
+          "type": "string"
+        },
+        "universe_mode": {
+          "$ref": "#/$defs/ShariaUniverseMode",
+          "default": "eligible_market"
+        }
+      },
+      "title": "ShariaPolicyV2",
+      "type": "object"
+    },
+    "ShariaUniverseMode": {
+      "enum": [
+        "eligible_market",
+        "approved_watchlist",
+        "explicit_assets"
+      ],
+      "title": "ShariaUniverseMode",
+      "type": "string"
     },
     "StrategyBias": {
       "enum": [
@@ -556,18 +745,18 @@
           "type": "array"
         },
         "blocking": {
+          "default": true,
           "title": "Blocking",
           "type": "boolean"
         },
         "created_workflow_revision": {
+          "default": 1,
           "minimum": 1,
           "title": "Created Workflow Revision",
           "type": "integer"
         },
         "expected_answer_schema": {
-          "additionalProperties": false,
-          "properties": {},
-          "required": [],
+          "additionalProperties": true,
           "title": "Expected Answer Schema",
           "type": "object"
         },
@@ -599,6 +788,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Source Turn Id"
         },
         "target_condition_id": {
@@ -611,6 +801,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Target Condition Id"
         },
         "target_field": {
@@ -623,6 +814,7 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Target Field"
         },
         "target_type": {
@@ -649,17 +841,10 @@
       },
       "required": [
         "unresolved_id",
-        "source_turn_id",
         "source_fragment",
         "target_type",
-        "target_field",
-        "target_condition_id",
-        "expected_answer_schema",
-        "allowed_options",
         "question",
-        "reason",
-        "blocking",
-        "created_workflow_revision"
+        "reason"
       ],
       "title": "UnresolvedFieldV2",
       "type": "object"
@@ -668,6 +853,7 @@
       "additionalProperties": false,
       "properties": {
         "blocking": {
+          "default": true,
           "title": "Blocking",
           "type": "boolean"
         },
@@ -699,15 +885,14 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Source Turn Id"
         }
       },
       "required": [
         "key",
-        "source_turn_id",
         "source_fragment",
-        "missing_contract",
-        "blocking"
+        "missing_contract"
       ],
       "title": "UnsupportedRequirementV2",
       "type": "object"
@@ -747,7 +932,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     },
     "remove_conditions": {
       "items": {
@@ -797,7 +983,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     },
     "reversion": {
       "anyOf": [
@@ -807,10 +994,22 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     },
     "set_fields": {
       "$ref": "#/$defs/DraftFieldPatch"
+    },
+    "set_sharia_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ShariaPolicyV2"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "source_turn_id": {
       "maxLength": 80,
@@ -844,22 +1043,7 @@
     }
   },
   "required": [
-    "source_turn_id",
-    "set_fields",
-    "add_conditions",
-    "update_conditions",
-    "remove_conditions",
-    "replace_groups",
-    "add_inclusions",
-    "add_exclusions",
-    "remove_inclusions",
-    "remove_exclusions",
-    "correction",
-    "reversion",
-    "unresolved_references",
-    "unsupported_requirements",
-    "remove_unresolved_keys",
-    "remove_unsupported_keys"
+    "source_turn_id"
   ],
   "title": "StrategyPatch",
   "type": "object"

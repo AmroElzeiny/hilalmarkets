@@ -25,10 +25,11 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import ValidationError
 
+from ai_market_monitor.engine.action_grounding import SemanticAction, action_is_grounded
 from ai_market_monitor.engine.capability_contract import (
     capability_condition_errors,
     grounded_operator_and_timeframe,
@@ -43,6 +44,7 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_operator,
     grounds_strategy_bias,
     grounds_symbol,
+    grounds_text_value,
     grounds_timeframe,
 )
 from ai_market_monitor.engine.strategy_compiler_v2 import (
@@ -52,6 +54,7 @@ from ai_market_monitor.engine.strategy_compiler_v2 import (
 from ai_market_monitor.engine.strategy_draft_v2 import (
     DraftPatchError,
     apply_strategy_patch,
+    finalize_strategy_turn,
     validate_draft_semantics,
 )
 from ai_market_monitor.schemas.setup_agent import (
@@ -168,6 +171,9 @@ class SetupTurnRequest:
     screening: ScreeningGate | None = None
     providers: ProviderGate | None = None
     runtime_preflight: RuntimePreflight | None = None
+    #: True only for an allowlisted server-rendered UI control. It bypasses language
+    #: grounding, never operation validation, lifecycle gates, or canonical mutation.
+    server_owned_option: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,7 +196,7 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     plan = _locate_spans(request.plan, request.message)
     segments = {item.segment_id: item for item in plan.segments}
     _verify_actionable_spans(plan, request.message)
-    _verify_capability_keys(plan, request.allowed_capability_keys)
+    _verify_capability_keys(plan, request.allowed_capability_keys, request.draft)
     plan = _verify_condition_references(plan, request.draft)
     _verify_authorization(plan, segments, request)
 
@@ -216,7 +222,12 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             )
             continue
         try:
-            outcome = apply_strategy_patch(operation_before, patch, history=request.history)
+            outcome = apply_strategy_patch(
+                operation_before,
+                patch,
+                history=request.history,
+                finalize_versions=False,
+            )
         except (DraftPatchError, ValidationError) as exc:
             raise SetupTurnRejected(
                 "PATCH_REJECTED",
@@ -236,9 +247,17 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             )
         )
 
-    _verify_resolved_targets(plan, before, draft)
+    finalized = finalize_strategy_turn(before, draft)
+    draft = finalized.draft
+    _verify_resolved_targets(
+        plan,
+        before,
+        draft,
+        server_owned_option=request.server_owned_option,
+    )
     strategy_mutated = draft.executable_hash != before.executable_hash
-    workflow_mutated = draft.workflow_revision != before.workflow_revision
+    workflow_mutated = draft.workflow_state_hash != before.workflow_state_hash
+    changes = diff_drafts(before, draft)
     material = strategy_mutated
     history_snapshot = before.model_dump(mode="json") if strategy_mutated else None
 
@@ -432,24 +451,43 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
 # --------------------------------------------------------------------------------
 
 
-def _verify_capability_keys(plan: SetupAgentTurnPlan, allowed: frozenset[str]) -> None:
+def _verify_capability_keys(
+    plan: SetupAgentTurnPlan,
+    allowed: frozenset[str],
+    draft: StrategyDraftV2,
+) -> None:
     """A plan may only name a key the server put in front of it this turn.
 
     Checked at plan level, not only on nodes that reach the draft: a key named in
     `strategy_instructions` is a claim about what the platform supports, and an invented
     one has to be refused even when it produced no node.
     """
-    named = {
-        item.capability_key
-        for item in plan.strategy_instructions
-        if item.capability_key is not None
-    }
+    existing = _existing_conditions(draft)
+    named: set[str] = set()
+    for item in plan.strategy_instructions:
+        key = item.capability_key
+        if key is None:
+            continue
+        inherited = existing.get(item.target_condition_id or "")
+        if inherited is None or inherited.capability_key != key:
+            named.add(key)
     for operation in plan.operations:
         if operation.condition is None:
             continue
-        named.update(
-            node.capability_key for node in operation.condition.walk() if node.capability_key
-        )
+        for node in operation.condition.walk():
+            if not node.capability_key:
+                continue
+            inherited = existing.get(
+                operation.target_condition_id or node.node_id
+            )
+            if (
+                operation.kind == "update_condition"
+                and inherited is not None
+                and inherited.capability_key == node.capability_key
+                and inherited.capability_version == node.capability_version
+            ):
+                continue
+            named.add(node.capability_key)
     unknown = sorted(key for key in named if key not in allowed)
     if unknown:
         raise SetupTurnRejected(
@@ -513,6 +551,7 @@ def _verify_operation_grounding(
     unsupported = {item.key: item for item in request.draft.unsupported_requirements}
     handlers = {
         "set_fields": _ground_set_fields,
+        "set_sharia_policy": _ground_sharia_policy,
         "add_condition": _ground_condition_operation,
         "update_condition": _ground_condition_operation,
         "remove_condition": _ground_remove_condition,
@@ -531,6 +570,8 @@ def _verify_operation_grounding(
     errors: list[str] = []
     for operation in plan.operations:
         segment = segments[operation.authorizing_segment_id]
+        if request.server_owned_option:
+            continue
         handler = handlers[operation.kind]
         errors.extend(
             handler(
@@ -577,6 +618,162 @@ def _ground_set_fields(
     return errors
 
 
+def _ground_sharia_policy(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    existing: dict[str, ConditionNodeV2],
+    unresolved: dict[str, Any],
+    unsupported: dict[str, Any],
+) -> list[str]:
+    del existing, unresolved, unsupported
+    policy = operation.sharia_policy
+    if policy is None:
+        return [f"{operation.operation_id}:set_sharia_policy:missing"]
+    old = request.draft.sharia_policy
+    text = segment.exact_source_text
+    lowered = text.casefold()
+    errors: list[str] = []
+    if policy.universe_mode != old.universe_mode:
+        mode_words = {
+            "eligible_market": (
+                "all eligible",
+                "eligible market",
+                "كل المؤهلة",
+                "kol el eligible",
+            ),
+            "approved_watchlist": (
+                "favorites",
+                "favourites",
+                "watchlist",
+                "مفض",
+                "mofadala",
+            ),
+            "explicit_assets": (
+                "specific",
+                "explicit",
+                "محدد",
+                "بعين",
+                "mo7adad",
+            ),
+        }[policy.universe_mode.value]
+        if not any(word in lowered for word in mode_words):
+            errors.append(f"{operation.operation_id}:sharia_policy:universe_mode")
+    for field_name in ("methodology_id", "methodology_version"):
+        previous = getattr(old, field_name)
+        current = getattr(policy, field_name)
+        if current == previous:
+            continue
+        if current is None:
+            grounded = action_is_grounded(text, "clear")
+        else:
+            grounded = str(current).casefold() in lowered
+        if not grounded:
+            errors.append(f"{operation.operation_id}:sharia_policy:{field_name}")
+
+    status_aliases = {
+        "eligible": ("eligible", "مؤهل", "mo2ahal"),
+        "eligible_with_qualifications": (
+            "eligible with qualifications",
+            "qualified eligible",
+            "مؤهل بشروط",
+            "mo2ahal b shoroot",
+        ),
+        "disputed": ("disputed", "مختلف عليه", "mokhtalaf 3aleh"),
+        "under_review": ("under review", "قيد المراجعة", "ta7t el morag3a"),
+        "excluded": ("excluded", "مستبعد", "mostab3ad"),
+        "insufficient_information": (
+            "insufficient information",
+            "معلومات غير كافية",
+            "malomat mesh kefaya",
+        ),
+    }
+    old_statuses = {item.value for item in old.allowed_statuses}
+    new_statuses = {item.value for item in policy.allowed_statuses}
+    for status in new_statuses - old_statuses:
+        if not any(alias in lowered for alias in status_aliases[status]):
+            errors.append(
+                f"{operation.operation_id}:sharia_policy:allowed_statuses:{status}"
+            )
+    if old_statuses - new_statuses and not (
+        action_is_grounded(text, "change") or action_is_grounded(text, "clear")
+    ):
+        errors.append(
+            f"{operation.operation_id}:sharia_policy:allowed_statuses:removal"
+        )
+
+    choice_aliases: dict[str, dict[str, tuple[str, ...]]] = {
+        "qualification_policy": {
+            "include_with_warning": (
+                "include with warning",
+                "تحذير",
+                "warning",
+            ),
+            "exclude": ("exclude", "استبعد", "estab3ed"),
+            "require_acknowledgement": (
+                "require acknowledgement",
+                "require acknowledgment",
+                "تأكيد",
+                "ta2keed",
+            ),
+        },
+        "disputed_asset_policy": {
+            "exclude": ("exclude", "استبعد", "estab3ed"),
+            "include_with_warning": (
+                "include with warning",
+                "تحذير",
+                "warning",
+            ),
+        },
+        "compliance_change_behavior": {
+            "pause_asset": ("pause asset", "وقف الأصل", "wa2af el asset"),
+            "remove_asset": ("remove asset", "شيل الأصل", "sheel el asset"),
+            "pause_monitor_if_any_asset_changes": (
+                "pause monitor",
+                "وقف المراقب",
+                "wa2af el monitor",
+            ),
+            "notify_only": ("notify only", "تنبيه فقط", "notification bas"),
+        },
+    }
+    for field_name, aliases_by_value in choice_aliases.items():
+        previous = getattr(old, field_name)
+        current = getattr(policy, field_name)
+        if current == previous:
+            continue
+        rendered = current.value if hasattr(current, "value") else str(current)
+        if not any(
+            alias in lowered for alias in aliases_by_value[str(rendered)]
+        ):
+            errors.append(f"{operation.operation_id}:sharia_policy:{field_name}")
+
+    for field_name in ("approved_watchlist_id", "approved_watchlist_version"):
+        previous = getattr(old, field_name)
+        current = getattr(policy, field_name)
+        if current == previous:
+            continue
+        if current is None:
+            grounded = action_is_grounded(text, "clear")
+        else:
+            grounded = str(current).casefold() in lowered
+        if not grounded:
+            errors.append(f"{operation.operation_id}:sharia_policy:{field_name}")
+
+    for symbol in set(policy.explicit_symbols) - set(old.explicit_symbols):
+        if not grounds_symbol(text, symbol):
+            errors.append(f"{operation.operation_id}:sharia_policy:symbol:{symbol}")
+    removed_symbols = set(old.explicit_symbols) - set(policy.explicit_symbols)
+    if removed_symbols and not action_is_grounded(text, "clear"):
+        errors.append(f"{operation.operation_id}:sharia_policy:symbols:removal")
+    elif removed_symbols and policy.explicit_symbols:
+        for symbol in removed_symbols:
+            if not grounds_symbol(text, symbol):
+                errors.append(
+                    f"{operation.operation_id}:sharia_policy:symbol:{symbol}:removal"
+                )
+    return errors
+
+
 def _ground_symbol_operation(
     operation: Any,
     segment: TurnSegment,
@@ -590,16 +787,16 @@ def _ground_symbol_operation(
     symbol = operation.symbol or ""
     if not grounds_symbol(text, symbol):
         return [f"{operation.operation_id}:{operation.kind}:{symbol}:not_grounded"]
-    lowered = text.casefold()
-    intent_patterns = {
-        "add_inclusion": r"\binclude\b|\badd\b|\bonly\b|\bwatch\b|\bmonitor\b|\bscan\b",
-        "add_exclusion": (
-            r"\bexclud(?:e|es|ed|ing)\b|\bavoid\b|\bblock\b|\bexcept\b|\bnot\b"
-        ),
-        "remove_inclusion": r"\bremove\b|\bstop including\b|\bdrop\b|\bno longer include\b",
-        "remove_exclusion": r"\ballow\b|\bstop excluding\b|\bunblock\b|\binclude again\b",
-    }
-    action_grounded = bool(re.search(intent_patterns[operation.kind], lowered))
+    action_name = cast(
+        SemanticAction,
+        {
+        "add_inclusion": "include",
+        "add_exclusion": "exclude",
+        "remove_inclusion": "remove_inclusion",
+        "remove_exclusion": "remove_exclusion",
+        }[operation.kind],
+    )
+    action_grounded = action_is_grounded(text, action_name)
     if operation.kind == "add_inclusion" and not action_grounded:
         # A condition scoped to BTC/USDT necessarily includes BTC/USDT. This is
         # allowed only when that same actionable segment also creates the rule.
@@ -670,10 +867,7 @@ def _ground_remove_condition(
     }
     if target not in allowed_references:
         return [f"{operation.operation_id}:remove_condition:target_not_resolved_by_server"]
-    if not re.search(
-        r"\bremove\b|\bdelete\b|\bdrop\b|\bundo\b|\bwithout\b",
-        segment.exact_source_text.casefold(),
-    ):
+    if not action_is_grounded(segment.exact_source_text, "remove_condition"):
         return [f"{operation.operation_id}:remove_condition:action_not_grounded"]
     return []
 
@@ -686,13 +880,52 @@ def _ground_unresolved_operation(
     unresolved: dict[str, Any],
     unsupported: dict[str, Any],
 ) -> list[str]:
-    del request, existing, unsupported
+    del unsupported
     item = operation.unresolved
     if item is None or not _quoted_in(item.source_fragment, segment.exact_source_text):
         return [f"{operation.operation_id}:{operation.kind}:source_not_grounded"]
     if operation.kind == "update_unresolved" and operation.target_key not in unresolved:
         return [f"{operation.operation_id}:update_unresolved:target_missing"]
+    if item.target_type in {
+        "condition_field",
+        "capability_parameter",
+        "reference_definition",
+    }:
+        target = existing.get(item.target_condition_id or "")
+        if target is None:
+            return [f"{operation.operation_id}:{operation.kind}:condition_target_missing"]
+        field_name = item.target_field or (
+            "reference_definition"
+            if item.target_type == "reference_definition"
+            else ""
+        )
+        current = getattr(target, field_name, None)
+        if current not in (None, "", [], {}) and not _source_is_ambiguous(
+            item.source_fragment
+        ):
+            return [f"{operation.operation_id}:{operation.kind}:target_not_ambiguous"]
+    elif item.target_type == "condition_creation":
+        if existing and not _source_is_ambiguous(item.source_fragment):
+            return [f"{operation.operation_id}:{operation.kind}:condition_already_exists"]
+    elif item.target_type == "universe":
+        if (
+            request.draft.sharia_policy.universe_mode
+            and not _source_is_ambiguous(item.source_fragment)
+        ):
+            return [f"{operation.operation_id}:{operation.kind}:universe_not_ambiguous"]
     return []
+
+
+def _source_is_ambiguous(text: str) -> bool:
+    lowered = text.casefold()
+    return bool(
+        re.search(
+            r"\b(?:maybe|either|or|unsure|not sure|which|what|unclear)\b"
+            r"|(?:يمكن|ولا|او|أو|مش عارف|غير واضح)"
+            r"|\b(?:momken|wala|msh 3aref|mesh 3aref)\b",
+            lowered,
+        )
+    )
 
 
 def _ground_resolve_unresolved(
@@ -744,10 +977,7 @@ def _ground_remove_unsupported(
     target = operation.target_key or ""
     if target not in unsupported:
         return [f"{operation.operation_id}:remove_unsupported_key:target_missing"]
-    if not re.search(
-        r"\bdrop\b|\bremove\b|\breplace\b|\bforget\b|\bdo not use\b",
-        segment.exact_source_text.casefold(),
-    ):
+    if not action_is_grounded(segment.exact_source_text, "remove_unsupported"):
         return [f"{operation.operation_id}:remove_unsupported_key:action_not_grounded"]
     return []
 
@@ -761,10 +991,7 @@ def _ground_restore_snapshot(
     unsupported: dict[str, Any],
 ) -> list[str]:
     del existing, unresolved, unsupported
-    if not re.search(
-        r"\bundo\b|\brestore\b|\bgo back\b|\breturn to\b|\brevert\b",
-        segment.exact_source_text.casefold(),
-    ):
+    if not action_is_grounded(segment.exact_source_text, "restore"):
         return [f"{operation.operation_id}:restore_snapshot:action_not_grounded"]
     owned = next(
         (
@@ -829,10 +1056,7 @@ def _condition_grounding(
         errors.append(f"{node.node_id}:movement_direction")
     if not grounds_strategy_bias(fragment, node.strategy_bias):
         errors.append(f"{node.node_id}:strategy_bias")
-    if not node.required and not re.search(
-        r"\boptional\b|\bnot required\b|\bprefer\b",
-        fragment.casefold(),
-    ):
+    if not node.required and not action_is_grounded(fragment, "optional"):
         errors.append(f"{node.node_id}:required")
     if node.lookback is not None and not grounds_lookback(
         fragment,
@@ -919,13 +1143,19 @@ def _update_grounding(
         now = getattr(replacement, name)
         if name == "node_type":
             errors.append(f"{replacement.node_id}:node_type_requires_group_replacement")
-        elif name == "threshold" and now is not None:
-            if not grounds_number(text, now, unit=_threshold_unit(replacement)):
+        elif name == "threshold":
+            if now is None:
+                if not action_is_grounded(text, "clear"):
+                    errors.append(f"{replacement.node_id}:threshold:clear")
+            elif not grounds_number(text, now, unit=_threshold_unit(replacement)):
                 errors.append(f"{replacement.node_id}:threshold")
         elif name == "unit" and not _grounds_unit(text, now):
             errors.append(f"{replacement.node_id}:unit")
-        elif name == "trigger_timeframe" and now:
-            if not grounds_timeframe(text, now):
+        elif name == "trigger_timeframe":
+            if now is None:
+                if not action_is_grounded(text, "clear"):
+                    errors.append(f"{replacement.node_id}:trigger_timeframe:clear")
+            elif not grounds_timeframe(text, now):
                 errors.append(f"{replacement.node_id}:trigger_timeframe")
         elif name == "operator" and now is not None:
             if not grounds_operator(text, now):
@@ -933,19 +1163,35 @@ def _update_grounding(
         elif name == "formula" and now is not None:
             if not grounds_formula(text, now):
                 errors.append(f"{replacement.node_id}:formula")
-        elif name == "movement_direction" and not grounds_direction(text, now):
-            errors.append(f"{replacement.node_id}:movement_direction")
-        elif name == "strategy_bias" and not grounds_strategy_bias(text, now):
-            errors.append(f"{replacement.node_id}:strategy_bias")
+        elif name == "movement_direction":
+            if not grounds_direction(text, now) or (
+                now.value in {"neutral", "not_applicable"}
+                and not action_is_grounded(text, "clear")
+            ):
+                errors.append(f"{replacement.node_id}:movement_direction")
+        elif name == "strategy_bias":
+            if not grounds_strategy_bias(text, now) or (
+                now.value == "neutral" and not action_is_grounded(text, "clear")
+            ):
+                errors.append(f"{replacement.node_id}:strategy_bias")
         elif name in {"context_timeframes", "confirmation_timeframes"}:
-            for timeframe in now:
+            old_values = set(getattr(existing, name))
+            for timeframe in set(now) - old_values:
                 if not grounds_timeframe(text, timeframe):
                     errors.append(f"{replacement.node_id}:{name}:{timeframe}")
-        elif name == "reference_timeframe" and now:
-            if not grounds_timeframe(text, now):
+            if old_values - set(now) and not action_is_grounded(text, "clear"):
+                errors.append(f"{replacement.node_id}:{name}:removal")
+        elif name == "reference_timeframe":
+            if now is None:
+                if not action_is_grounded(text, "clear"):
+                    errors.append(f"{replacement.node_id}:reference_timeframe:clear")
+            elif not grounds_timeframe(text, now):
                 errors.append(f"{replacement.node_id}:reference_timeframe")
-        elif name == "lookback" and now is not None:
-            if not grounds_lookback(
+        elif name == "lookback":
+            if now is None:
+                if not action_is_grounded(text, "clear"):
+                    errors.append(f"{replacement.node_id}:lookback:clear")
+            elif not grounds_lookback(
                 text,
                 now,
                 timeframe=replacement.reference_timeframe
@@ -954,24 +1200,62 @@ def _update_grounding(
                 errors.append(f"{replacement.node_id}:lookback")
         elif name == "operands":
             errors.extend(_operand_grounding(replacement, text))
-        elif name in {"reference_definition"}:
-            errors.extend(_reference_grounding(replacement, text))
+            if (
+                len(replacement.operands) < len(existing.operands)
+                and not action_is_grounded(text, "clear")
+            ):
+                errors.append(f"{replacement.node_id}:operands:removal")
+        elif name == "reference_definition":
+            if now is None:
+                if not action_is_grounded(text, "clear"):
+                    errors.append(f"{replacement.node_id}:reference_definition:clear")
+            else:
+                errors.extend(_reference_grounding(replacement, text))
         elif name == "condition_symbols":
-            for symbol in replacement.condition_symbols:
+            old_symbols = set(existing.condition_symbols)
+            for symbol in set(replacement.condition_symbols) - old_symbols:
                 if not grounds_symbol(text, symbol):
                     errors.append(f"{replacement.node_id}:condition_symbol:{symbol}")
+            if old_symbols - set(replacement.condition_symbols) and not action_is_grounded(
+                text, "clear"
+            ):
+                errors.append(f"{replacement.node_id}:condition_symbols:removal")
         elif name == "children":
             if not grounds_boolean_shape(text, _boolean_shape(replacement)):
                 errors.append(f"{replacement.node_id}:boolean_shape")
         elif (
             name == "required"
             and not (
-                re.search(r"\boptional\b|\bnot required\b|\bprefer\b", text.casefold())
+                action_is_grounded(text, "optional")
                 if now is False
-                else re.search(r"\brequired\b|\bmust\b|\bneed\b", text.casefold())
+                else action_is_grounded(text, "required")
             )
         ):
             errors.append(f"{replacement.node_id}:required")
+        elif name == "capability_key":
+            if now is None:
+                if not action_is_grounded(text, "clear"):
+                    errors.append(f"{replacement.node_id}:capability_key:clear")
+            elif not (
+                grounds_text_value(text, now)
+                or grounds_text_value(text, now.split("_", 1)[0])
+            ):
+                errors.append(f"{replacement.node_id}:capability_key")
+        elif name == "capability_version":
+            # The registry owns the exact version for a selected mechanic. A changed
+            # mechanic is separately grounded and shortlist-gated; requiring a user to
+            # recite an internal semantic version would invent a trader-controlled
+            # value where none exists.
+            if now is None and not action_is_grounded(text, "clear"):
+                errors.append(f"{replacement.node_id}:capability_version:clear")
+        elif name == "capability_parameters":
+            removed = set(existing.capability_parameters) - set(
+                replacement.capability_parameters
+            )
+            if removed and not action_is_grounded(text, "clear"):
+                errors.append(f"{replacement.node_id}:capability_parameters:removal")
+        else:
+            errors.append(f"{replacement.node_id}:{name}:no_grounding_rule")
     return errors
 
 
@@ -993,6 +1277,14 @@ def _operand_grounding(node: ConditionNodeV2, text: str) -> list[str]:
     errors: list[str] = []
     errors.extend(_primitive_operand_contract_errors(node))
     for index, operand in enumerate(node.operands):
+        if operand.field and not grounds_text_value(text, operand.field):
+            errors.append(f"{node.node_id}:operand:{index}:field")
+        if (
+            operand.name
+            and operand.kind not in {"market_metric", "reference"}
+            and not grounds_text_value(text, operand.name)
+        ):
+            errors.append(f"{node.node_id}:operand:{index}:name")
         if operand.kind == "constant" and isinstance(operand.value, int | float):
             unit = operand.unit or node.unit
             if not grounds_number(text, float(operand.value), unit=_grounding_number_unit(unit)):
@@ -1169,10 +1461,12 @@ def _capability_gate(
     if not nodes:
         return [], []
     previous = _existing_conditions(before)
-    changed_node_ids = frozenset(
+    shortlist_required_node_ids = frozenset(
         node.node_id
         for node in nodes
-        if previous.get(node.node_id) != node
+        if previous.get(node.node_id) is None
+        or previous[node.node_id].capability_key != node.capability_key
+        or previous[node.node_id].capability_version != node.capability_version
     )
     authorizing: dict[str, str] = {
         node.node_id: node.source_fragment or ""
@@ -1189,11 +1483,12 @@ def _capability_gate(
         authorizing_text_by_node=authorizing,
         allowed_keys=request.allowed_capability_keys,
         source_turn_id=request.source_turn_id,
-        changed_node_ids=changed_node_ids,
+        changed_node_ids=shortlist_required_node_ids,
+        previous_nodes_by_id=previous,
     )
     for node in nodes:
         text = authorizing.get(node.node_id)
-        if text:
+        if text and previous.get(node.node_id) is None:
             errors.extend(grounded_operator_and_timeframe(node, authorizing_text=text))
     return errors, list(draft.static_provider_requirements)
 
@@ -1213,6 +1508,7 @@ def _build_patch(
     if not plan.operations and not plan.unsupported_segments:
         return None
     fields: dict[str, Any] = {}
+    sharia_policy: Any | None = None
     add_conditions: list[ConditionNodeV2] = []
     updates: list[ConditionUpdateV2] = []
     removals: list[str] = []
@@ -1236,6 +1532,8 @@ def _build_patch(
                     for key, value in operation.fields.model_dump(exclude_none=True).items()
                 }
             )
+        elif operation.kind == "set_sharia_policy" and operation.sharia_policy is not None:
+            sharia_policy = operation.sharia_policy
         elif operation.kind == "add_condition" and operation.condition is not None:
             add_conditions.append(operation.condition)
         elif operation.kind == "update_condition" and operation.condition is not None:
@@ -1269,14 +1567,18 @@ def _build_patch(
         elif operation.kind == "resolve_unresolved_key" and operation.target_key:
             resolved_keys.append(operation.target_key)
         elif operation.kind == "add_unresolved" and operation.unresolved is not None:
-            unresolved_items.append(operation.unresolved)
+            unresolved_items.append(
+                _merge_unresolved_target(operation.unresolved, request.draft)
+            )
         elif (
             operation.kind == "update_unresolved"
             and operation.unresolved is not None
             and operation.target_key
         ):
             resolved_keys.append(operation.target_key)
-            unresolved_items.append(operation.unresolved)
+            unresolved_items.append(
+                _merge_unresolved_target(operation.unresolved, request.draft)
+            )
         elif operation.kind == "remove_unsupported_key" and operation.target_key:
             removed_unsupported.append(operation.target_key)
         elif operation.kind == "restore_snapshot" and operation.target_executable_version:
@@ -1287,6 +1589,7 @@ def _build_patch(
     if not any(
         (
             fields,
+            sharia_policy is not None,
             add_conditions,
             updates,
             removals,
@@ -1307,6 +1610,7 @@ def _build_patch(
     return StrategyPatch(
         source_turn_id=request.source_turn_id,
         set_fields=DraftFieldPatch(**fields),
+        set_sharia_policy=sharia_policy,
         add_conditions=add_conditions,
         update_conditions=updates,
         remove_conditions=removals,
@@ -1320,6 +1624,34 @@ def _build_patch(
         remove_unresolved_keys=resolved_keys,
         remove_unsupported_keys=removed_unsupported,
         reversion=reversion,
+    )
+
+
+def _merge_unresolved_target(item: Any, draft: StrategyDraftV2) -> Any:
+    """Reuse one unresolved identity for one typed target."""
+
+    identity = (
+        item.target_type,
+        item.target_field,
+        item.target_condition_id,
+    )
+    existing = next(
+        (
+            candidate
+            for candidate in draft.unresolved_fields
+            if (
+                candidate.target_type,
+                candidate.target_field,
+                candidate.target_condition_id,
+            )
+            == identity
+        ),
+        None,
+    )
+    return (
+        item.model_copy(update={"unresolved_id": existing.unresolved_id})
+        if existing is not None
+        else item
     )
 
 
@@ -1462,6 +1794,8 @@ def _verify_resolved_targets(
     plan: SetupAgentTurnPlan,
     before: StrategyDraftV2,
     after: StrategyDraftV2,
+    *,
+    server_owned_option: bool = False,
 ) -> None:
     """A resolve operation may remove a blocker only after its typed target changed."""
 
@@ -1472,6 +1806,13 @@ def _verify_resolved_targets(
             continue
         item = pending.get(operation.target_key)
         if item is None:
+            continue
+        if (
+            server_owned_option
+            and operation.authorizing_segment_id == "server_option"
+            and item.key
+            not in {pending_item.key for pending_item in after.unresolved_fields}
+        ):
             continue
         contract = ClarificationContract(
             question_id=item.key,
@@ -1514,6 +1855,7 @@ def _target_resolved(
         return (
             after.universe.included_symbols != before.universe.included_symbols
             or after.universe.excluded_symbols != before.universe.excluded_symbols
+            or after.sharia_policy != before.sharia_policy
         )
     if contract.target_type in {"draft_field", "market_scope"}:
         field_name = contract.target_field or ""
@@ -1524,11 +1866,7 @@ def _target_resolved(
             if hasattr(holder_after, field_name):
                 return getattr(holder_after, field_name) != getattr(holder_before, field_name)
         return False
-    if contract.target_type in {
-        "condition_field",
-        "capability_parameter",
-        "reference_definition",
-    }:
+    if contract.target_type in {"condition_field", "reference_definition"}:
         node_id = contract.target_condition_id or ""
         old = _existing_conditions(before).get(node_id)
         new = _existing_conditions(after).get(node_id)
@@ -1537,8 +1875,23 @@ def _target_resolved(
             return old is not None
         if old is None:
             return True
-        return getattr(new, contract.target_field or "", None) != getattr(
-            old, contract.target_field or "", None
+        field_name = (
+            "reference_definition"
+            if contract.target_type == "reference_definition"
+            else contract.target_field or ""
+        )
+        return getattr(new, field_name, None) != getattr(
+            old, field_name, None
+        )
+    if contract.target_type == "capability_parameter":
+        node_id = contract.target_condition_id or ""
+        old = _existing_conditions(before).get(node_id)
+        new = _existing_conditions(after).get(node_id)
+        if new is None:
+            return old is not None
+        key = contract.target_field or ""
+        return new.capability_parameters.get(key) != (
+            old.capability_parameters.get(key) if old is not None else None
         )
     if contract.target_type == "condition_creation":
         return len(_existing_conditions(after)) > len(_existing_conditions(before))
@@ -1552,8 +1905,7 @@ def _target_resolved(
             if before.condition_ast is not None
             else ""
         )
-    # A field the draft records as unresolved is resolved when it leaves that list.
-    return contract.question_id not in {item.key for item in after.unresolved_fields}
+    return False
 
 
 def _allowed_clarifications(

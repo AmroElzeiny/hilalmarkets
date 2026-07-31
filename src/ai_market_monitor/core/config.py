@@ -292,7 +292,6 @@ class Settings(BaseSettings):
     # --- Setup Agent bounds. These are the ones that control Setup Chat traffic. ---
     #: Retained for environment compatibility only. Authenticated Setup Chat never
     #: retries a model call inside one free-text turn.
-    setup_agent_planner_retries: int = Field(default=0, ge=0, le=2)
     setup_agent_planner_max_output_tokens: int = Field(default=6000, ge=512, le=16000)
     setup_agent_composer_max_output_tokens: int = Field(default=1600, ge=256, le=4000)
     setup_agent_planner_timeout_seconds: int = Field(default=10, ge=5, le=12)
@@ -301,6 +300,10 @@ class Settings(BaseSettings):
     #: Consecutive provider failures before the agent stops trying for a while.
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)
     setup_agent_circuit_breaker_cooldown_seconds: int = Field(default=60, ge=5, le=900)
+    setup_provider_preflight_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    setup_screening_resolution_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    setup_methodology_version_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    setup_approved_watchlist_ttl_seconds: int = Field(default=300, ge=30, le=3600)
 
     #: Bounded Agent Control is the *old* general coordinator. It has no authority over
     #: authenticated Setup Chat, and the `ai_agent_*` bounds below do not govern that

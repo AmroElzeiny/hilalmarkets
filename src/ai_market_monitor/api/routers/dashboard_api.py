@@ -93,6 +93,7 @@ from ai_market_monitor.schemas.strategy import (
     InterpretationPreview,
     StrategyDefinition,
 )
+from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.ai_setup_chat import (
     AISetupChatService,
@@ -1006,22 +1007,57 @@ async def _setup_chat_response(
     error: SetupChatErrorEnvelope | None = None,
 ) -> SetupChatSessionResponse:
     messages = await service.messages(session, chat.id)
+    replay = getattr(chat, "_setup_replayed_turn", None)
+    replay_payload: dict[str, Any] = replay if isinstance(replay, dict) else {}
+    if error is None and isinstance(replay_payload.get("reply"), dict):
+        replay_error = replay_payload["reply"].get("error")
+        if isinstance(replay_error, dict):
+            error = SetupChatErrorEnvelope.model_validate(replay_error)
+    replay_execution_candidate = replay_payload.get("execution")
+    replay_execution: dict[str, Any] = (
+        replay_execution_candidate
+        if isinstance(replay_execution_candidate, dict)
+        else {}
+    )
+    if replay_payload:
+        replay_message_ids = {
+            value
+            for value in (
+                replay_payload.get("source_message_id"),
+                replay_payload.get("assistant_message_id"),
+            )
+            if value
+        }
+        messages = [item for item in messages if str(item.id) in replay_message_ids]
     definition = (
-        StrategyDefinition.model_validate(chat.draft_schema_json)
+        StrategyDefinition.model_validate(replay_execution.get("definition"))
+        if isinstance(replay_execution.get("definition"), dict)
+        else StrategyDefinition.model_validate(chat.draft_schema_json)
         if chat.draft_schema_json
         else None
     )
     blocking_lint = any(item.get("severity") == "critical" for item in (chat.lint_warnings or []))
     chat_context = chat.context_json or {}
     draft_v2 = (
-        load_strategy_draft_v2(chat)
+        StrategyDraftV2.model_validate(replay_execution.get("draft_after"))
+        if isinstance(replay_execution.get("draft_after"), dict)
+        else load_strategy_draft_v2(chat)
         if chat_context.get("strategy_state_authority") == "v2"
         else None
     )
-    setup_mode: Literal["scanner", "monitor"] = (
-        "scanner" if chat_context.get("setup_mode") == "scanner" else "monitor"
+    replay_result = replay_execution.get("execution_result")
+    response_status = (
+        str(replay_result.get("final_chat_status"))
+        if isinstance(replay_result, dict) and replay_result.get("final_chat_status")
+        else chat.status
     )
-    can_approve = chat.status == "ready_for_approval" and not blocking_lint
+    setup_mode: Literal["scanner", "monitor"] = (
+        "scanner"
+        if (draft_v2 is not None and draft_v2.mode.value == "scanner")
+        or chat_context.get("setup_mode") == "scanner"
+        else "monitor"
+    )
+    can_approve = response_status == "ready_for_approval" and not blocking_lint
     approved_version = (
         await session.get(StrategyVersion, chat.approved_strategy_version_id)
         if chat.approved_strategy_version_id
@@ -1030,7 +1066,7 @@ async def _setup_chat_response(
     evaluation_contract = (
         build_setup_chat_evaluation_contract(
             definition,
-            session_status=chat.status,
+            session_status=response_status,
             approval_eligible=can_approve,
             blocking_findings=blocking_lint,
             assumptions=chat.assumptions or [],
@@ -1052,7 +1088,7 @@ async def _setup_chat_response(
         else None
     )
     lifecycle_state = setup_lifecycle_state(
-        session_status=chat.status,
+        session_status=response_status,
         has_draft=definition is not None,
         approval_eligible=can_approve,
         blocking_findings=blocking_lint,
@@ -1063,7 +1099,7 @@ async def _setup_chat_response(
     )
     return SetupChatSessionResponse(
         id=chat.id,
-        status=chat.status,
+        status=response_status,
         lifecycle_state=lifecycle_state,
         turn_complete=is_turn_complete(lifecycle_state),
         title=chat.title,
@@ -1093,13 +1129,21 @@ async def _setup_chat_response(
         unsupported_conditions=chat.unsupported_conditions or [],
         setup_mode=setup_mode,
         can_approve=can_approve,
-        can_scan=(chat.status == "ready_to_scan" and not blocking_lint),
+        can_scan=(response_status == "ready_to_scan" and not blocking_lint),
         scanner_result=chat_context.get("scanner_result"),
         approved_strategy_id=chat.approved_strategy_id,
         approved_strategy_version_id=chat.approved_strategy_version_id,
         evaluation_contract=evaluation_contract,
         error=error,
         next_url=next_url,
+        replayed_client_message_id=(
+            str(replay_payload.get("client_message_id"))
+            if replay_payload.get("client_message_id")
+            else None
+        ),
+        turn_execution_result=(
+            replay_result if isinstance(replay_result, dict) else None
+        ),
         updated_at=chat.updated_at,
     )
 
@@ -3913,7 +3957,7 @@ async def backtest_chart(
                     "kind": "condition",
                 }
             )
-    setup_result = next(
+    setup_result: dict[str, Any] = next(
         (item for item in reversed(result.setup_results) if str(item.get("symbol")) == symbol),
         {},
     )

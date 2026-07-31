@@ -11,6 +11,11 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ai_market_monitor.db.models.enums import (
+    ComplianceChangeBehavior,
+    ShariaAssetStatus,
+    ShariaUniverseMode,
+)
 from ai_market_monitor.schemas.strategy import Comparator, Timeframe
 
 STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH = 500
@@ -338,6 +343,52 @@ class MarketScopeV2(BaseModel):
         return value.strip().upper()
 
 
+class ShariaPolicyV2(BaseModel):
+    """Static, user-selected Sharia policy that is part of executable identity.
+
+    Current assessment results and universe resolutions deliberately do not live here.
+    They are dynamic compliance/runtime evidence and are frozen separately.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    universe_mode: ShariaUniverseMode = ShariaUniverseMode.ELIGIBLE_MARKET
+    methodology_id: UUID | None = None
+    methodology_version: str | None = Field(default=None, max_length=32)
+    allowed_statuses: list[ShariaAssetStatus] = Field(
+        default_factory=lambda: [
+            ShariaAssetStatus.ELIGIBLE,
+            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS,
+        ],
+        min_length=1,
+        max_length=6,
+    )
+    qualification_policy: Literal[
+        "include_with_warning", "exclude", "require_acknowledgement"
+    ] = "include_with_warning"
+    disputed_asset_policy: Literal["exclude", "include_with_warning"] = "exclude"
+    compliance_change_behavior: ComplianceChangeBehavior = (
+        ComplianceChangeBehavior.PAUSE_ASSET
+    )
+    approved_watchlist_id: UUID | None = None
+    approved_watchlist_version: str | None = Field(default=None, max_length=80)
+    explicit_symbols: list[str] = Field(default_factory=list, max_length=100000)
+
+    @field_validator("explicit_symbols")
+    @classmethod
+    def normalize_explicit_symbols(cls, values: list[str]) -> list[str]:
+        return list(
+            dict.fromkeys(_canonical_symbol(item) for item in values if item.strip())
+        )
+
+    @model_validator(mode="after")
+    def validate_static_policy(self) -> ShariaPolicyV2:
+        self.allowed_statuses = list(dict.fromkeys(self.allowed_statuses))
+        if self.methodology_id is None and self.methodology_version is not None:
+            raise ValueError("methodology_version requires methodology_id")
+        return self
+
+
 UnresolvedTargetType = Literal[
     "draft_field",
     "condition_field",
@@ -398,8 +449,26 @@ class UnresolvedFieldV2(BaseModel):
             and not self.target_field
         ):
             raise ValueError(f"{self.target_type} requires target_field")
-        if self.target_type == "condition_field" and not self.target_condition_id:
-            raise ValueError("condition_field requires target_condition_id")
+        if self.target_type in {
+            "condition_field",
+            "capability_parameter",
+            "reference_definition",
+        } and not self.target_condition_id:
+            raise ValueError(f"{self.target_type} requires target_condition_id")
+        if self.target_type == "condition_creation" and self.target_condition_id:
+            raise ValueError("condition_creation cannot name a condition_id")
+        schema_type = self.expected_answer_schema.get("type")
+        if schema_type not in {
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "array",
+            "object",
+        }:
+            raise ValueError("expected_answer_schema requires a supported JSON type")
+        if self.allowed_options and schema_type not in {"string", "array"}:
+            raise ValueError("allowed_options require a string or array answer")
         return self
 
     @property
@@ -527,7 +596,7 @@ class SourceProvenanceV2(BaseModel):
 class StrategyDraftV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["2.1"] = "2.1"
+    schema_version: Literal["2.2"] = "2.2"
     draft_id: UUID = Field(default_factory=uuid4)
     executable_version: int = Field(default=1, ge=1)
     workflow_revision: int = Field(default=1, ge=1)
@@ -535,6 +604,7 @@ class StrategyDraftV2(BaseModel):
     name: str = Field(default="Untitled Monitor", min_length=1, max_length=160)
     universe: StrategyUniverseV2 = Field(default_factory=StrategyUniverseV2)
     market_scope: MarketScopeV2 = Field(default_factory=MarketScopeV2)
+    sharia_policy: ShariaPolicyV2 = Field(default_factory=ShariaPolicyV2)
     condition_ast: ConditionNodeV2 | None = None
     unresolved_fields: list[UnresolvedFieldV2] = Field(default_factory=list, max_length=100)
     unsupported_requirements: list[UnsupportedRequirementV2] = Field(
@@ -556,11 +626,12 @@ class StrategyDraftV2(BaseModel):
             return data
         migrated = dict(data)
         legacy_identity = (
-            migrated.get("schema_version") != "2.1"
+            migrated.get("schema_version") != "2.2"
             or "version" in migrated
             or "semantic_hash" in migrated
         )
-        migrated["schema_version"] = "2.1"
+        migrated["schema_version"] = "2.2"
+        migrated.setdefault("sharia_policy", ShariaPolicyV2().model_dump(mode="json"))
         if "version" in migrated:
             migrated.setdefault("executable_version", migrated.pop("version"))
         migrated.setdefault("workflow_revision", migrated.get("executable_version", 1))
@@ -639,6 +710,7 @@ class StrategyDraftV2(BaseModel):
             "mode": self.mode.value,
             "universe": self.universe.model_dump(mode="json"),
             "market_scope": self.market_scope.model_dump(mode="json"),
+            "sharia_policy": self.sharia_policy.model_dump(mode="json"),
             "condition_ast": (
                 _executable_condition(self.condition_ast) if self.condition_ast else None
             ),
@@ -739,6 +811,7 @@ class StrategyPatch(BaseModel):
 
     source_turn_id: str = Field(min_length=1, max_length=80)
     set_fields: DraftFieldPatch = Field(default_factory=DraftFieldPatch)
+    set_sharia_policy: ShariaPolicyV2 | None = None
     add_conditions: list[ConditionNodeV2] = Field(default_factory=list, max_length=100)
     update_conditions: list[ConditionUpdateV2] = Field(default_factory=list, max_length=100)
     remove_conditions: list[str] = Field(default_factory=list, max_length=100)
@@ -779,6 +852,7 @@ class StrategyPatch(BaseModel):
                 self.remove_unresolved_keys,
                 self.remove_unsupported_keys,
                 self.set_fields != DraftFieldPatch(),
+                self.set_sharia_policy is not None,
             )
         ):
             raise ValueError("reversion cannot be combined with other mutations")

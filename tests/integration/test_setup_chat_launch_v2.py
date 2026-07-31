@@ -1,7 +1,9 @@
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import httpx
+import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
@@ -13,6 +15,7 @@ from ai_market_monitor.db.models import (
     SetupChatTurn,
     User,
 )
+from ai_market_monitor.engine.strategy_compiler_v2 import compile_strategy_draft_v2
 from ai_market_monitor.engine.strategy_draft_v2 import apply_strategy_patch
 from ai_market_monitor.schemas.setup_agent import (
     SegmentKind,
@@ -22,22 +25,35 @@ from ai_market_monitor.schemas.setup_agent import (
     TurnSegment,
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
-from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    ConditionUpdateV2,
+    ProviderRuntimeStatusV2,
+    StrategyDraftV2,
+    StrategyPatch,
+)
 from ai_market_monitor.services.ai_setup_chat import AISetupChatService, SetupChatError
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
-from ai_market_monitor.services.setup_chat_launch import load_strategy_draft_v2
+from ai_market_monitor.services.setup_chat_launch import (
+    SetupChatLaunchService,
+    SetupLaunchError,
+    load_strategy_draft_v2,
+)
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
 from tests.integration.test_ai_setup_chat_api import _signup
 from tests.support.setup_agent_plans import operations_from_patch
 
 
 class MarketProvider:
+    def __init__(self):
+        self.fetches: list[tuple[str, str]] = []
+
     async def list_symbols(self, exchange, quote_currencies):
         return ["BTC/USDT", "ETH/USDT"]
 
     async def fetch_ohlcv(self, exchange, symbol, timeframe, limit):
+        self.fetches.append((symbol, timeframe))
         minutes = {"1m": 1, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}.get(
             timeframe,
             15,
@@ -45,22 +61,15 @@ class MarketProvider:
         end = datetime.now(UTC) - timedelta(minutes=minutes)
         return [
             Candle(
-                timestamp=end - timedelta(minutes=minutes),
+                timestamp=end - timedelta(minutes=minutes * offset),
                 open=100,
                 high=101,
                 low=99,
                 close=100,
                 volume=1000,
-            ),
-            Candle(
-                timestamp=end,
-                open=100,
-                high=102,
-                low=99,
-                close=101,
-                volume=1200,
-            ),
-        ][-limit:]
+            )
+            for offset in range(limit - 1, -1, -1)
+        ]
 
 
 class StandInPlanner:
@@ -210,7 +219,7 @@ async def test_launch_pipeline_conversation_does_not_mutate_and_strategy_compile
         )
         draft = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 1, "the exact primitive needs no additional model call"
+        assert planner.plan_calls == 2, "every ordinary free-text turn is planned first"
         assert chat.status == "ready_for_approval"
         assert chat.draft_schema_json is not None
         assert draft.universe.included_symbols == ["BTC/USDT"]
@@ -263,7 +272,10 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
         await service.handle_message(session, chat, **kwargs)
         second = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 0
+        assert planner.plan_calls == 1
+        replay = chat._setup_replayed_turn
+        assert replay["reply"] == turn.reply_json
+        assert replay["execution"] == turn.execution_result_json
         assert second.version == first.version
         assert second.semantic_hash == first.semantic_hash
         assert await session.scalar(
@@ -272,7 +284,359 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
                 AISetupChatMessage.role == "assistant",
             )
         ) == assistant_count
-        assert snapshot_count == 1
+        assert snapshot_count == 2, "both the before and public final version are restorable"
+
+
+async def test_allowlisted_ui_option_uses_canonical_turn_without_ai(test_context):
+    user = await _user(test_context)
+    planner = StandInPlanner()
+    service = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], planner),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        before = load_strategy_draft_v2(chat)
+
+        await service.handle_message(
+            session,
+            chat,
+            message="",
+            option_key="setup_mode",
+            option_value="scanner",
+            option_label="Scanner",
+            client_message_id="launch-v2-ui-scanner",
+        )
+
+        after = load_strategy_draft_v2(chat)
+        turn = await session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == "launch-v2-ui-scanner",
+            )
+        )
+        assert planner.plan_calls == 0
+        assert after.mode.value == "scanner"
+        assert after.executable_version == before.executable_version + 1
+        assert turn is not None and turn.status == "COMPLETED"
+        execution = turn.reply_json["execution_result"]
+        assert execution["operation_results"][0]["operation_kind"] == "set_fields"
+        assert execution["operation_results"][0]["operation_id"].startswith("ui_setup_mode_")
+
+
+async def test_runtime_preflight_verifies_every_explicit_symbol_and_timeframe(test_context):
+    provider = MarketProvider()
+    owner = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        provider,
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    draft = StrategyDraftV2()
+    patch = deterministic_strategy_patch(
+        draft,
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%",
+        source_turn_id="turn-preflight-base",
+    )
+    assert patch is not None
+    draft = apply_strategy_patch(draft, patch).draft
+    condition = draft.condition_ast
+    assert condition is not None
+    draft = apply_strategy_patch(
+        draft,
+        StrategyPatch(
+            source_turn_id="turn-preflight-roles",
+            add_inclusions=["ETH/USDT"],
+            update_conditions=[
+                ConditionUpdateV2(
+                    node_id=condition.node_id,
+                    replacement=condition.model_copy(
+                        update={
+                            "context_timeframes": ["4h"],
+                            "confirmation_timeframes": ["1h"],
+                        }
+                    ),
+                )
+            ],
+        ),
+    ).draft
+    definition = compile_strategy_draft_v2(draft)
+    launch = SetupChatLaunchService(
+        _launch_settings(test_context["settings"]),
+        owner,
+        agent=owner.launch_agent,
+    )
+
+    statuses = await launch._runtime_preflight()(definition)
+
+    expected = {
+        (symbol, timeframe)
+        for symbol in ("BTC/USDT", "ETH/USDT")
+        for timeframe in ("15m", "1h", "4h")
+    }
+    assert set(provider.fetches) == expected
+    assert len(statuses) == len(expected)
+    assert all(item.status == "available" for item in statuses)
+
+
+async def test_runtime_preflight_rejects_stale_candles(test_context):
+    class StaleProvider(MarketProvider):
+        async def fetch_ohlcv(self, exchange, symbol, timeframe, limit):
+            candles = await super().fetch_ohlcv(exchange, symbol, timeframe, limit)
+            return [
+                Candle(
+                    timestamp=item.timestamp - timedelta(days=14),
+                    open=item.open,
+                    high=item.high,
+                    low=item.low,
+                    close=item.close,
+                    volume=item.volume,
+                    is_closed=item.is_closed,
+                )
+                for item in candles
+            ]
+
+    provider = StaleProvider()
+    owner = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        provider,
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    patch = deterministic_strategy_patch(
+        StrategyDraftV2(),
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%",
+        source_turn_id="turn-stale-preflight",
+    )
+    assert patch is not None
+    definition = compile_strategy_draft_v2(
+        apply_strategy_patch(StrategyDraftV2(), patch).draft
+    )
+    launch = SetupChatLaunchService(
+        _launch_settings(test_context["settings"]),
+        owner,
+        agent=owner.launch_agent,
+    )
+
+    statuses = await launch._runtime_preflight()(definition)
+
+    assert statuses
+    assert all(item.status == "unavailable" for item in statuses)
+    assert all("stale" in (item.safe_error or "").casefold() for item in statuses)
+
+
+async def test_runtime_preflight_checks_available_pairs_even_when_one_market_is_missing(
+    test_context,
+):
+    class PartialProvider(MarketProvider):
+        async def list_symbols(self, exchange, quote_currencies):
+            return ["BTC/USDT"]
+
+    provider = PartialProvider()
+    owner = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        provider,
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    patch = deterministic_strategy_patch(
+        StrategyDraftV2(),
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%",
+        source_turn_id="turn-partial-preflight",
+    )
+    assert patch is not None
+    draft = apply_strategy_patch(StrategyDraftV2(), patch).draft
+    draft = apply_strategy_patch(
+        draft,
+        StrategyPatch(
+            source_turn_id="turn-partial-preflight-include",
+            add_inclusions=["ETH/USDT"],
+        ),
+    ).draft
+    definition = compile_strategy_draft_v2(draft)
+    launch = SetupChatLaunchService(
+        _launch_settings(test_context["settings"]),
+        owner,
+        agent=owner.launch_agent,
+    )
+
+    statuses = await launch._runtime_preflight()(definition)
+
+    assert provider.fetches == [("BTC/USDT", "15m")]
+    assert any(
+        item.capability == "market:ETH/USDT" and item.status == "unavailable"
+        for item in statuses
+    )
+    assert any(
+        item.capability == "market:BTC/USDT:15m" and item.status == "available"
+        for item in statuses
+    )
+
+
+async def test_approval_revalidation_rejects_stale_provider_evidence(test_context):
+    user = await _user(test_context)
+    settings = _launch_settings(test_context["settings"])
+    owner = AISetupChatService(
+        settings,
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await owner.create_session(session, user.id)
+        patch = deterministic_strategy_patch(
+            StrategyDraftV2(),
+            "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%",
+            source_turn_id="turn-stale-approval",
+        )
+        assert patch is not None
+        draft = apply_strategy_patch(StrategyDraftV2(), patch).draft
+        definition = compile_strategy_draft_v2(draft)
+        launch = SetupChatLaunchService(settings, owner, agent=owner.launch_agent)
+
+        async def stale_preflight(
+            _definition: StrategyDefinition,
+        ) -> list[ProviderRuntimeStatusV2]:
+            return [
+                ProviderRuntimeStatusV2(
+                    provider="MarketProvider",
+                    capability="market:BTC/USDT:15m",
+                    status="available",
+                    checked_at=datetime.now(UTC)
+                    - timedelta(
+                        seconds=settings.setup_provider_preflight_ttl_seconds + 1
+                    ),
+                )
+            ]
+
+        launch._runtime_preflight = lambda: stale_preflight  # type: ignore[method-assign]
+        with pytest.raises(SetupLaunchError) as error:
+            await launch.revalidate_for_approval(
+                session,
+                chat,
+                draft,
+                expected_executable_version=draft.executable_version,
+                expected_executable_hash=draft.executable_hash,
+                expected_schema_hash=definition.canonical_hash(),
+            )
+
+        assert error.value.code == "PROVIDER_PREFLIGHT_STALE"
+
+
+async def test_legacy_session_sharia_policy_migrates_to_one_v2_authority(test_context):
+    user = await _user(test_context)
+    settings = _launch_settings(test_context["settings"])
+    owner = AISetupChatService(
+        settings,
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    methodology_id = uuid4()
+    async with test_context["session_factory"]() as session:
+        chat = await owner.create_session(session, user.id)
+        chat.context_json = {
+            "setup_mode": "monitor",
+            "screened_universe_mode": "explicit_assets",
+            "screened_explicit_symbols": ["BTC/USDT"],
+            "sharia_methodology_id": str(methodology_id),
+            "sharia_methodology_version": "2026.07",
+            "allowed_sharia_statuses": ["eligible"],
+            "qualification_policy": "exclude",
+            "disputed_asset_policy": "exclude",
+            "compliance_change_behavior": "pause_asset",
+        }
+
+        draft = load_strategy_draft_v2(chat)
+        context = dict(chat.context_json or {})
+
+        assert draft.schema_version == "2.2"
+        assert draft.executable_version == 2
+        assert draft.sharia_policy.methodology_id == methodology_id
+        assert draft.sharia_policy.methodology_version == "2026.07"
+        assert draft.sharia_policy.explicit_symbols == ["BTC/USDT"]
+        assert draft.approval.approved is False
+        assert context["sharia_policy_authority"] == "strategy_draft_v2"
+        assert "screened_universe_mode" not in context
+        assert "sharia_methodology_id" not in context
+
+
+async def test_invalid_legacy_sharia_values_migrate_fail_closed(test_context):
+    user = await _user(test_context)
+    owner = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await owner.create_session(session, user.id)
+        chat.context_json = {
+            "screened_universe_mode": "guess_everything",
+            "allowed_sharia_statuses": ["eligible", "probably_fine"],
+            "compliance_change_behavior": "keep_running_silently",
+        }
+
+        draft = load_strategy_draft_v2(chat)
+
+        assert {item.unresolved_id for item in draft.unresolved_fields} == {
+            "sharia.universe_mode",
+            "sharia.allowed_statuses",
+            "sharia.compliance_change_behavior",
+        }
+        assert draft.authoring_blocking is True
+        assert draft.approval.approved is False
+
+
+async def test_stale_planned_turn_cannot_overwrite_a_newer_draft(test_context):
+    user = await _user(test_context)
+    settings = _launch_settings(test_context["settings"])
+    owner = AISetupChatService(
+        settings,
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    launch = SetupChatLaunchService(settings, owner, agent=owner.launch_agent)
+    async with test_context["session_factory"]() as session:
+        chat = await owner.create_session(session, user.id)
+        before = load_strategy_draft_v2(chat)
+        turn = await launch._get_or_create_turn(
+            session,
+            chat,
+            "concurrent-stale-turn",
+        )
+        patch = deterministic_strategy_patch(
+            before,
+            "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 4%",
+            source_turn_id="newer-turn",
+        )
+        assert patch is not None
+        newer = apply_strategy_patch(before, patch).draft
+        context = dict(chat.context_json or {})
+        context["strategy_draft_v2"] = newer.model_dump(mode="json")
+        chat.context_json = context
+        await session.commit()
+
+        callback = launch._turn_stage_callback(
+            session,
+            chat,
+            turn,
+            message="exclude ETH/USDT",
+            source_turn_id=str(uuid4()),
+            expected_executable_hash=before.executable_hash,
+            expected_workflow_state_hash=before.workflow_state_hash,
+        )
+        with pytest.raises(SetupLaunchError) as error:
+            await callback(
+                "EXECUTING",
+                {"planner_model": "test-model", "plan": {}},
+            )
+
+        assert error.value.code == "SETUP_TURN_CONFLICT"
+        assert load_strategy_draft_v2(chat).executable_hash == newer.executable_hash
 
 
 async def test_committed_execution_recovers_without_reapplying_or_replanning(test_context):
@@ -314,7 +678,7 @@ async def test_committed_execution_recovers_without_reapplying_or_replanning(tes
         await service.handle_message(session, chat, **request)
         recovered = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 0
+        assert planner.plan_calls == 1
         assert planner.reply_calls == 0
         assert recovered.executable_version == committed.executable_version
         assert recovered.executable_hash == committed.executable_hash
@@ -331,8 +695,8 @@ async def test_repeated_identical_text_is_understood_again_but_changes_nothing(
     context-aware agent that is wrong — `yes` twice answers two different questions —
     so the text cache is gone. A genuine retry is still free: it is caught earlier by
     ``client_message_id``. Repeating the words costs one planning call and, because the
-    patch is already reflected, leaves the draft untouched. Exact primitives are
-    re-read deterministically and need no planning call.
+    plan is already reflected, leaves the draft untouched. Both ordinary free-text
+    messages still reach the AI planner first.
     """
     user = await _user(test_context)
     planner = StandInPlanner()
@@ -363,7 +727,7 @@ async def test_repeated_identical_text_is_understood_again_but_changes_nothing(
         )
         second = load_strategy_draft_v2(chat)
 
-        assert planner.plan_calls == 0
+        assert planner.plan_calls == 2
         assert second.version == first.version, "an identical patch is not a new version"
         assert second.semantic_hash == first.semantic_hash
 
@@ -568,7 +932,7 @@ async def test_launch_v2_http_contract_compiles_and_approves_exact_draft(test_co
     )
     assert created.status_code == 201
     chat_id = created.json()["id"]
-    assert created.json()["draft_v2"]["schema_version"] == "2.1"
+    assert created.json()["draft_v2"]["schema_version"] == "2.2"
 
     response = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",

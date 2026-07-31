@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -43,6 +44,120 @@ class RunningApp:
     auto_started: bool
     database_url: str | None
     command: str
+
+
+def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
+    """Run a local structured-model stand-in for authenticated browser tests.
+
+    The application still performs a real HTTP planner call. Only the remote model is
+    replaced, so the browser path cannot accidentally depend on deterministic
+    free-text mutation inside production code.
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            from ai_market_monitor.schemas.setup_agent import (
+                SegmentKind,
+                SetupAgentPlanEnvelope,
+                SetupAgentReply,
+                SetupAgentTurnPlan,
+                StrategyInstructionPlan,
+                TurnSegment,
+            )
+            from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
+            from ai_market_monitor.services.strategy_patch_extractor import (
+                deterministic_strategy_patch,
+            )
+            from tests.support.setup_agent_plans import operations_from_patch
+
+            length = int(self.headers.get("Content-Length") or 0)
+            request = json.loads(self.rfile.read(length) or b"{}")
+            schema_name = request["text"]["format"]["name"]
+            payload = json.loads(request["input"])
+            if schema_name == "hilalmarkets_setup_turn_plan":
+                message = str(payload["current_user_turn"])
+                turn_id = str(payload["source_turn_id"])
+                patch = deterministic_strategy_patch(
+                    StrategyDraftV2(),
+                    message,
+                    source_turn_id=turn_id,
+                )
+                if patch is None:
+                    output = SetupAgentPlanEnvelope(
+                        plan=SetupAgentTurnPlan(
+                            source_turn_id=turn_id,
+                            segments=[
+                                TurnSegment(
+                                    segment_id="browser_stub_conversation",
+                                    exact_source_text=message,
+                                    start_offset=0,
+                                    end_offset=len(message),
+                                    kind=SegmentKind.SOCIAL_REPLY,
+                                    reply_required=True,
+                                    confidence=1,
+                                )
+                            ],
+                            overall_confidence=1,
+                        ),
+                        direct_reply="Happy to help.",
+                    ).model_dump_json()
+                else:
+                    segment_id = "browser_stub_instruction"
+                    output = SetupAgentPlanEnvelope(
+                        plan=SetupAgentTurnPlan(
+                            source_turn_id=turn_id,
+                            segments=[
+                                TurnSegment(
+                                    segment_id=segment_id,
+                                    exact_source_text=message,
+                                    start_offset=0,
+                                    end_offset=len(message),
+                                    kind=SegmentKind.STRATEGY_INSTRUCTION,
+                                    action_required=True,
+                                    confidence=1,
+                                )
+                            ],
+                            operations=operations_from_patch(
+                                patch,
+                                segment_id=segment_id,
+                            ),
+                            strategy_instructions=[
+                                StrategyInstructionPlan(
+                                    segment_id=segment_id,
+                                    intent_summary="Browser fixture strategy instruction",
+                                )
+                            ],
+                            overall_confidence=1,
+                        )
+                    ).model_dump_json()
+            else:
+                output = SetupAgentReply(
+                    message_without_question="I applied the verified draft update.",
+                ).model_dump_json()
+            response = json.dumps(
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": output}],
+                        }
+                    ],
+                    "usage": {"input_tokens": 20, "output_tokens": 8},
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
 
 
 def _terminate_server_process(process: subprocess.Popen[str]) -> None:
@@ -154,7 +269,11 @@ def repo_root() -> Path:
 
 
 @pytest.fixture(scope="session")
-def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
+def browser_app(
+    pytestconfig: pytest.Config,
+    repo_root: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> RunningApp:
     configured_url = (
         pytestconfig.getoption("--browser-base-url")
         or os.environ.get("BROWSER_E2E_BASE_URL")
@@ -244,6 +363,18 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
             "Could not migrate browser E2E database.\n"
             f"STDOUT:\n{migration.stdout}\nSTDERR:\n{migration.stderr}"
         )
+    model_stub, model_thread = _start_setup_model_stub()
+    env["OPENAI_API_KEY"] = "browser-e2e-structured-model-key"
+    env["OPENAI_BASE_URL"] = f"http://127.0.0.1:{model_stub.server_port}/v1"
+    # App credentials intentionally prefer the project-local dotenv over ambient
+    # process variables. Give the isolated server its own dotenv so the browser
+    # suite exercises a real structured-model HTTP call without touching the
+    # developer's repository credentials or weakening production precedence.
+    server_workdir = tmp_path_factory.mktemp("browser-app")
+    (server_workdir / ".env").write_text(
+        "OPENAI_API_KEY=browser-e2e-structured-model-key\n",
+        encoding="utf-8",
+    )
 
     command = [
         sys.executable,
@@ -259,7 +390,7 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
     server_log = server_log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         command,
-        cwd=repo_root,
+        cwd=server_workdir,
         env=env,
         stdout=server_log,
         stderr=subprocess.STDOUT,
@@ -278,6 +409,9 @@ def browser_app(pytestconfig: pytest.Config, repo_root: Path) -> RunningApp:
     finally:
         _terminate_server_process(process)
         server_log.close()
+        model_stub.shutdown()
+        model_stub.server_close()
+        model_thread.join(timeout=5)
 
 
 @pytest.fixture

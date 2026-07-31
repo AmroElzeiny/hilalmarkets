@@ -18,6 +18,7 @@ from ai_market_monitor.schemas.strategy import (
     Operand,
     OperandKind,
     RiskPolicy,
+    ShariaPolicyDefinition,
     StrategyDefinition,
     StrategyDirection,
     UniverseDefinition,
@@ -106,8 +107,27 @@ def compile_strategy_draft_v2(draft: StrategyDraftV2) -> StrategyDefinition:
             exchange=draft.market_scope.exchange,
             market_type=MarketType(draft.market_scope.market_type),
             quote_currencies=[draft.market_scope.quote_asset],
-            include_symbols=draft.universe.included_symbols,
+            include_symbols=(
+                draft.sharia_policy.explicit_symbols
+                if draft.sharia_policy.universe_mode.value == "explicit_assets"
+                else draft.universe.included_symbols
+            ),
             exclude_symbols=draft.universe.excluded_symbols,
+            sharia_policy=ShariaPolicyDefinition(
+                universe_mode=draft.sharia_policy.universe_mode,
+                methodology_id=draft.sharia_policy.methodology_id,
+                methodology_version=draft.sharia_policy.methodology_version,
+                allowed_statuses=draft.sharia_policy.allowed_statuses,
+                qualification_policy=draft.sharia_policy.qualification_policy,
+                disputed_asset_policy=draft.sharia_policy.disputed_asset_policy,
+                compliance_change_behavior=(
+                    draft.sharia_policy.compliance_change_behavior
+                ),
+                approved_watchlist_id=draft.sharia_policy.approved_watchlist_id,
+                approved_watchlist_version=(
+                    draft.sharia_policy.approved_watchlist_version
+                ),
+            ),
         ),
         conditions=(
             conditions
@@ -192,9 +212,14 @@ def _compile_node(
         label=_condition_label(node),
         condition_type=_condition_type(node),
         timeframe=node.trigger_timeframe,
+        context_timeframes=node.context_timeframes,
+        confirmation_timeframes=node.confirmation_timeframes,
+        reference_timeframe=node.reference_timeframe,
         left=left,
         comparator=node.operator,
         right=right,
+        source_operands=[_compile_operand(item) for item in node.operands],
+        condition_symbols=node.condition_symbols,
         required=node.required,
         resolved_parameters=_formula_parameters(node),
         required_data=["ohlcv"],
@@ -284,9 +309,14 @@ def _compile_exact_capability(
         label=capability.label,
         condition_type=ConditionType(capability.condition_type),
         timeframe=node.trigger_timeframe,
+        context_timeframes=node.context_timeframes,
+        confirmation_timeframes=node.confirmation_timeframes,
+        reference_timeframe=node.reference_timeframe,
         left=left,
         comparator=node.operator,
         right=right,
+        source_operands=[_compile_operand(item) for item in node.operands],
+        condition_symbols=node.condition_symbols,
         required=node.required,
         required_data=list(capability.required_data),
         source_turn_id=node.source_turn_id,
@@ -339,6 +369,8 @@ def _formula_parameters(
             "strategy_bias": node.strategy_bias.value,
             "unit": node.unit,
             "trigger_timeframe": node.trigger_timeframe or "",
+            "context_timeframes": list(node.context_timeframes),
+            "confirmation_timeframes": list(node.confirmation_timeframes),
         }
     )
     if node.reference_timeframe:
@@ -406,10 +438,28 @@ def validate_compiled_equivalence(
         errors.append("market_type")
     if definition.universe.quote_currencies != [draft.market_scope.quote_asset]:
         errors.append("quote_asset")
-    if definition.universe.include_symbols != draft.universe.included_symbols:
+    expected_included = (
+        draft.sharia_policy.explicit_symbols
+        if draft.sharia_policy.universe_mode.value == "explicit_assets"
+        else draft.universe.included_symbols
+    )
+    if definition.universe.include_symbols != expected_included:
         errors.append("included_symbols")
     if definition.universe.exclude_symbols != draft.universe.excluded_symbols:
         errors.append("excluded_symbols")
+    expected_policy = ShariaPolicyDefinition(
+        universe_mode=draft.sharia_policy.universe_mode,
+        methodology_id=draft.sharia_policy.methodology_id,
+        methodology_version=draft.sharia_policy.methodology_version,
+        allowed_statuses=draft.sharia_policy.allowed_statuses,
+        qualification_policy=draft.sharia_policy.qualification_policy,
+        disputed_asset_policy=draft.sharia_policy.disputed_asset_policy,
+        compliance_change_behavior=draft.sharia_policy.compliance_change_behavior,
+        approved_watchlist_id=draft.sharia_policy.approved_watchlist_id,
+        approved_watchlist_version=draft.sharia_policy.approved_watchlist_version,
+    )
+    if definition.universe.sharia_policy != expected_policy:
+        errors.append("sharia_policy")
 
     trigger_timeframes = [
         item.trigger_timeframe
@@ -490,6 +540,12 @@ def _node_equivalence_errors(
         return [*errors, f"node_type:{draft_node.node_id}"]
     if compiled_node.timeframe != draft_node.trigger_timeframe:
         errors.append(f"trigger_timeframe:{draft_node.node_id}")
+    if compiled_node.context_timeframes != draft_node.context_timeframes:
+        errors.append(f"context_timeframes:{draft_node.node_id}")
+    if compiled_node.confirmation_timeframes != draft_node.confirmation_timeframes:
+        errors.append(f"confirmation_timeframes:{draft_node.node_id}")
+    if compiled_node.reference_timeframe != draft_node.reference_timeframe:
+        errors.append(f"reference_timeframe_field:{draft_node.node_id}")
     if compiled_node.comparator != draft_node.operator:
         errors.append(f"operator:{draft_node.node_id}")
     if compiled_node.required != draft_node.required:
@@ -500,6 +556,12 @@ def _node_equivalence_errors(
         errors.append(f"source_turn_id:{draft_node.node_id}")
     if compiled_node.ast_path != list(ast_path):
         errors.append(f"ast_path:{draft_node.node_id}")
+    if compiled_node.source_operands != [
+        _compile_operand(item) for item in draft_node.operands
+    ]:
+        errors.append(f"operands:{draft_node.node_id}")
+    if compiled_node.condition_symbols != draft_node.condition_symbols:
+        errors.append(f"condition_symbols:{draft_node.node_id}")
     actual_threshold = (
         compiled_node.right.value
         if compiled_node.right is not None
@@ -542,6 +604,21 @@ def _node_equivalence_errors(
     if draft_node.formula == FormulaKind.CAPABILITY:
         if compiled_node.capability_key != draft_node.capability_key:
             errors.append(f"capability_key:{draft_node.node_id}")
+        if compiled_node.capability_version != draft_node.capability_version:
+            errors.append(f"capability_version:{draft_node.node_id}")
+        expected_parameters = {
+            **draft_node.capability_parameters,
+            **{
+                key: value
+                for operand in draft_node.operands
+                for key, value in operand.parameters.items()
+            },
+        }
+        if any(
+            compiled_node.resolved_parameters.get(key) != value
+            for key, value in expected_parameters.items()
+        ):
+            errors.append(f"capability_parameters:{draft_node.node_id}")
     elif compiled_node.capability_key is not None:
         errors.append(f"unrequested_capability:{draft_node.node_id}")
     return errors

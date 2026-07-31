@@ -9,16 +9,9 @@ a fixed sentence:
 A user who had just written three lines of exact market logic got told to describe a
 setup. That is the defect this module exists to remove.
 
-Here exact core primitives are parsed deterministically first. Everything else reaches
-the model as the semantic layer, and the server remains the only executable authority.
-A mutating free-text turn costs at most:
-
-* zero calls for an exact deterministic primitive, otherwise one planning call
-* one deterministic execution through :func:`apply_setup_turn`
-* one deterministic response built from the execution evidence
-
-No tool loops, no second opinion, no fallback orchestrator, and no second provider call
-to word a successful mutation.
+Every arbitrary free-text turn reaches the planner first. Deterministic readers run
+only after planning to verify the proposed operations. A mixed turn may use one bounded
+composer call after canonical execution; simple mutations use an evidence-only summary.
 """
 
 from __future__ import annotations
@@ -38,11 +31,10 @@ from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.engine.capability_shortlist import (
-    SETUP_RUNTIME_PROVIDER_REQUIREMENTS,
     CapabilityShortlist,
     build_capability_shortlist,
+    configured_runtime_provider_requirements,
 )
-from ai_market_monitor.engine.setup_intent import decide_setup_intent
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
     RuntimePreflight,
@@ -55,7 +47,6 @@ from ai_market_monitor.engine.setup_turn_execution import (
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
-from ai_market_monitor.engine.turn_fragments import classify_turn
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
     CapabilityRoutingCandidate,
@@ -66,30 +57,19 @@ from ai_market_monitor.schemas.setup_agent import (
     SetupAgentTurnPlan,
     SetupConversationContext,
     SetupTurnExecutionResult,
-    StrategyInstructionPlan,
-    TurnSegment,
 )
-from ai_market_monitor.schemas.setup_authorization import (
-    AuthorizedPatchOperation,
-    ClarificationContract,
-)
+from ai_market_monitor.schemas.setup_authorization import ClarificationContract
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
-    DraftFieldPatch,
     DraftMode,
-    SetupIntent,
     StrategyDraftV2,
-    StrategyPatch,
 )
 from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.openai_structured_call import (
     StructuredCallError,
     estimate_structured_call_cost,
     structured_call,
-)
-from ai_market_monitor.services.strategy_patch_extractor import (
-    deterministic_strategy_patch,
 )
 
 
@@ -249,18 +229,19 @@ class SetupChatAgent:
             if settings.app_env == "test"
             else Redis.from_url(settings.redis_url, decode_responses=True)
         )
+        self._local_circuit: dict[str, tuple[int, float]] = {}
 
-    @property
-    def _circuit_key(self) -> str:
+    def _circuit_key(self, model: str) -> str:
         provider = (
             f"{str(self.settings.openai_base_url).rstrip('/')}:"
-            f"{self.settings.openai_model}"
+            f"{model}"
         )
         digest = hashlib.sha256(provider.encode("utf-8")).hexdigest()[:24]
         return f"hm:setup-agent:circuit:{digest}"
 
-    async def _before_provider_call(self) -> None:
+    async def _before_provider_call(self, model: str) -> None:
         if self._circuit_redis is None:
+            self._before_local_provider_call(model)
             return
         cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
         script = """
@@ -285,19 +266,18 @@ class SetupChatAgent:
                 self._circuit_redis.eval(
                     script,
                     1,
-                    self._circuit_key,
+                    self._circuit_key(model),
                     str(time.time()),
                     str(cooldown),
                     str(max(cooldown * 3, 300)),
                 ),
             )
-        except RedisError as exc:
-            raise StructuredCallError(
-                "SETUP_AGENT_CIRCUIT_STATE_UNAVAILABLE",
-                "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
-                retryable=True,
-                stage="provider",
-            ) from exc
+        except RedisError:
+            # Redis coordinates workers but is not semantic authority. A cache outage
+            # falls back to a conservative process-local breaker and still permits a
+            # healthy provider call.
+            self._before_local_provider_call(model)
+            return
         if not bool(allowed):
             raise StructuredCallError(
                 "SETUP_AGENT_CIRCUIT_OPEN",
@@ -306,19 +286,40 @@ class SetupChatAgent:
                 stage="provider",
             )
 
-    async def _provider_succeeded(self) -> None:
+    def _before_local_provider_call(self, model: str) -> None:
+        local_key = self._circuit_key(model)
+        failures, opened_at = self._local_circuit.get(local_key, (0, 0.0))
+        cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
+        if (
+            failures >= self.settings.setup_agent_circuit_breaker_failures
+            and time.time() - opened_at < cooldown
+        ):
+            raise StructuredCallError(
+                "SETUP_AGENT_CIRCUIT_OPEN",
+                "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
+                retryable=True,
+                stage="provider",
+            )
+
+    async def _provider_succeeded(self, model: str) -> None:
+        self._local_circuit.pop(self._circuit_key(model), None)
         if self._circuit_redis is None:
             return
         try:
-            await self._circuit_redis.delete(self._circuit_key)
+            await self._circuit_redis.delete(self._circuit_key(model))
         except RedisError:
             # The provider result is already complete and authoritative. Losing the
             # success marker may leave the circuit conservative for a later turn, but
             # must never discard this result or cause a second paid model call.
             return
 
-    async def _provider_failed(self, exc: StructuredCallError) -> None:
-        if not exc.retryable or self._circuit_redis is None:
+    async def _provider_failed(self, exc: StructuredCallError, model: str) -> None:
+        if not exc.retryable:
+            return
+        local_key = self._circuit_key(model)
+        failures, _opened_at = self._local_circuit.get(local_key, (0, 0.0))
+        self._local_circuit[local_key] = (failures + 1, time.time())
+        if self._circuit_redis is None:
             return
         threshold = self.settings.setup_agent_circuit_breaker_failures
         cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
@@ -344,7 +345,7 @@ class SetupChatAgent:
                 self._circuit_redis.eval(
                     script,
                     1,
-                    self._circuit_key,
+                    self._circuit_key(model),
                     str(threshold),
                     str(time.time()),
                     str(max(cooldown * 3, 300)),
@@ -358,60 +359,40 @@ class SetupChatAgent:
     async def run_turn(self, turn: SetupAgentTurnInput) -> SetupAgentTurnResult:
         self.model_call_count = 0
         self.last_usage = {}
-        # The lexical helper reads a normalised copy; the model and every span check see
-        # the raw message, line breaks and lists intact.
         shortlist = build_capability_shortlist(
             turn.normalized_message,
-            available_provider_requirements=SETUP_RUNTIME_PROVIDER_REQUIREMENTS,
+            available_provider_requirements=configured_runtime_provider_requirements(
+                self.settings.market_data_provider
+            ),
         )
-        # The old authoritative gate survives only as a hint the model may disagree
-        # with. It can no longer stop a message from being understood.
-        hint = decide_setup_intent(turn.normalized_message)
         started = monotonic()
-        envelope = (
-            _deterministic_plan_envelope(turn)
-            if hint.intent is SetupIntent.STRATEGY_PATCH
-            else None
+        route = select_setup_model(
+            self.settings,
+            current_message=turn.normalized_message,
+            history=list(turn.dialogue),
+            active_clarification=(
+                {"question": turn.conversation.question_text}
+                if turn.conversation.active_question_id
+                else None
+            ),
+            capability_context=_routing_context(shortlist),
+            draft_condition_count=_condition_count(turn.draft),
+            unresolved_field_count=len(turn.draft.unresolved_fields),
+            previous_turn_failed=turn.previous_turn_failed,
         )
-        if envelope is not None:
-            planner_model = "deterministic_primitives"
-            planner_reasons: tuple[str, ...] = ("exact_core_primitive",)
-            plan_usage: dict[str, Any] = {
-                "_setup_planner_attempts": 0,
-                "_setup_reserved_cost_usd": 0.0,
-            }
-        else:
-            route = select_setup_model(
-                self.settings,
-                current_message=turn.normalized_message,
-                history=list(turn.dialogue),
-                active_clarification=(
-                    {"question": turn.conversation.question_text}
-                    if turn.conversation.active_question_id
-                    else None
-                ),
-                # The router needs the shape of the shortlist, not just its keys. Passing
-                # keys alone left `low_capability_confidence` and `custom_terminology`
-                # permanently unreachable, so an ambiguous turn was priced as a simple
-                # one.
-                capability_context=_routing_context(shortlist),
-                draft_condition_count=_condition_count(turn.draft),
-                unresolved_field_count=len(turn.draft.unresolved_fields),
-                previous_turn_failed=turn.previous_turn_failed,
-            )
-            try:
-                envelope, plan_usage = await self._plan_once(turn, shortlist, hint, route)
-            except StructuredCallError as exc:
-                raise SetupAgentError(
-                    exc.code,
-                    str(exc),
-                    stage="planning",
-                    retryable=exc.retryable,
-                    details=exc.details,
-                ) from exc
-            planner_model = route.model
-            planner_reasons = route.reasons
-            plan_usage = {**plan_usage, **route.usage_metadata()}
+        try:
+            envelope, plan_usage = await self._plan_once(turn, shortlist, route)
+        except StructuredCallError as exc:
+            raise SetupAgentError(
+                exc.code,
+                str(exc),
+                stage="planning",
+                retryable=exc.retryable,
+                details=exc.details,
+            ) from exc
+        planner_model = route.model
+        planner_reasons = route.reasons
+        plan_usage = {**plan_usage, **route.usage_metadata()}
         planner_latency = (monotonic() - started) * 1000
         # `_plan_once` already counted its model call. Counting again here would make
         # the per-turn cost and latency telemetry inaccurate.
@@ -434,7 +415,7 @@ class SetupChatAgent:
                 for item in (envelope.plan.segments if envelope.plan else ())
             ),
             shortlist_keys=tuple(sorted(shortlist.allowed_keys)),
-            lexical_hint=hint.intent.value,
+            lexical_hint="",
             model_calls=self.model_call_count,
         )
 
@@ -528,6 +509,27 @@ class SetupChatAgent:
             ),
         )
         response_model = "deterministic_summary"
+        if _requires_contextual_composer(plan, outcome.result):
+            try:
+                reply, composer_usage = await self._compose_once(
+                    turn,
+                    plan,
+                    outcome.result,
+                    model=route.model,
+                    planner_usage=plan_usage,
+                )
+            except StructuredCallError as exc:
+                # Execution is already canonical and checkpointed. Composition failure
+                # can only affect wording, so return the exact deterministic fallback
+                # once and never replay mutation or make another model call.
+                self.last_usage = {
+                    **self.last_usage,
+                    "_setup_composer_failure": exc.code,
+                }
+                response_model = "deterministic_fallback"
+            else:
+                self.last_usage = _merged_usage(self.last_usage, composer_usage)
+                response_model = route.model
         trace = _with(
             trace,
             response_model=response_model,
@@ -568,11 +570,10 @@ class SetupChatAgent:
         self,
         turn: SetupAgentTurnInput,
         shortlist: CapabilityShortlist,
-        hint: Any,
         route: Any,
     ) -> tuple[SetupAgentPlanEnvelope, dict[str, Any]]:
         """Make at most one bounded structured model call for a free-text turn."""
-        planner_payload = self._planner_payload(turn, shortlist, hint.intent.value)
+        planner_payload = self._planner_payload(turn, shortlist)
         reserved_cost = estimate_structured_call_cost(
             self.settings,
             instructions=_PLANNER_INSTRUCTIONS,
@@ -587,7 +588,7 @@ class SetupChatAgent:
                 stage="planning",
             )
         try:
-            await self._before_provider_call()
+            await self._before_provider_call(route.model)
             envelope, usage = await structured_call(
                 self.settings,
                 schema_model=SetupAgentPlanEnvelope,
@@ -604,21 +605,122 @@ class SetupChatAgent:
             )
         except StructuredCallError as exc:
             self.model_call_count = 1
-            await self._provider_failed(exc)
+            if _counts_toward_circuit(exc):
+                await self._provider_failed(exc, route.model)
+            else:
+                await self._provider_succeeded(route.model)
             raise
         self.model_call_count = 1
-        await self._provider_succeeded()
+        await self._provider_succeeded(route.model)
         return envelope, {
             **usage,
             "_setup_reserved_cost_usd": reserved_cost,
             "_setup_planner_attempts": 1,
         }
 
+    async def _compose_once(
+        self,
+        turn: SetupAgentTurnInput,
+        plan: SetupAgentTurnPlan,
+        result: SetupTurnExecutionResult,
+        *,
+        model: str,
+        planner_usage: dict[str, Any],
+    ) -> tuple[SetupAgentReply, dict[str, Any]]:
+        payload = {
+            "final_execution_result": result.model_dump(mode="json"),
+            "operation_specific_diffs": [
+                item.model_dump(mode="json") for item in result.operation_results
+            ],
+            "final_compiled_status": result.compile_status,
+            "screening_status": result.screening_status,
+            "provider_status": result.provider_status,
+            "final_chat_status": result.final_chat_status,
+            "draft_read_model": result.draft_read_model,
+            "response_points": [
+                item.model_dump(mode="json") for item in plan.response_points
+            ],
+            "questions_to_answer": list(plan.questions_to_answer),
+            "grounded_product_knowledge": product_knowledge(),
+            "authorized_clarification_list": [
+                item.model_dump(mode="json")
+                for item in result.allowed_clarifications
+            ],
+            "user_message": turn.message,
+        }
+        reserved = estimate_structured_call_cost(
+            self.settings,
+            instructions=_COMPOSER_INSTRUCTIONS,
+            payload=payload,
+            model=model,
+            max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
+        )
+        planner_reserved = float(
+            planner_usage.get("_setup_reserved_cost_usd") or 0.0
+        )
+        if (
+            planner_reserved + reserved
+            > self.settings.setup_agent_max_estimated_cost_usd_per_turn
+        ):
+            raise StructuredCallError(
+                "SETUP_AGENT_COST_LIMIT",
+                "Contextual wording would exceed the configured per-turn AI budget.",
+                stage="response_composition",
+            )
+        try:
+            await self._before_provider_call(model)
+            reply, usage = await structured_call(
+                self.settings,
+                schema_model=SetupAgentReply,
+                schema_name="hilalmarkets_setup_turn_reply",
+                instructions=_COMPOSER_INSTRUCTIONS,
+                payload=payload,
+                model=model,
+                reasoning_effort="low",
+                max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
+                timeout_seconds=self.settings.setup_agent_composer_timeout_seconds,
+                estimated_cost_limit=max(
+                    0.000001,
+                    self.settings.setup_agent_max_estimated_cost_usd_per_turn
+                    - planner_reserved,
+                ),
+                stage="response_composition",
+                transport=self.transport,
+            )
+        except StructuredCallError as exc:
+            self.model_call_count += 1
+            if _counts_toward_circuit(exc):
+                await self._provider_failed(exc, model)
+            else:
+                await self._provider_succeeded(model)
+            raise
+        self.model_call_count += 1
+        await self._provider_succeeded(model)
+        if not _composer_reply_is_grounded(reply, result, payload):
+            raise StructuredCallError(
+                "COMPOSER_FACT_NOT_GROUNDED",
+                "The contextual reply introduced a fact outside the execution evidence.",
+                stage="response_composition",
+            )
+        merged = _merged_usage(
+            usage,
+            {
+                "_setup_composer_attempts": 1,
+                "_setup_composer_reserved_cost_usd": reserved,
+            },
+        )
+        combined_actual = _estimated_usage_cost(
+            _merged_usage(planner_usage, usage),
+            self.settings,
+            model,
+        )
+        merged["_setup_combined_actual_cost_usd"] = combined_actual
+        return reply, merged
+
     def _planner_payload(
         self,
         turn: SetupAgentTurnInput,
         shortlist: CapabilityShortlist,
-        lexical_hint: str,
     ) -> dict[str, Any]:
         draft = turn.draft
         return {
@@ -634,11 +736,12 @@ class SetupChatAgent:
                 "included_symbols": draft.universe.included_symbols[:50],
                 "excluded_symbols": draft.universe.excluded_symbols[:50],
                 "market_scope": draft.market_scope.model_dump(mode="json"),
+                "sharia_policy": draft.sharia_policy.model_dump(mode="json"),
                 "conditions": _condition_labels(draft),
                 "boolean_shape": _boolean_shape(draft),
             },
             "unresolved_fields": [
-                {"key": item.key, "question": item.question}
+                item.model_dump(mode="json")
                 for item in draft.unresolved_fields
             ],
             "unsupported_requirements": [
@@ -662,139 +765,31 @@ class SetupChatAgent:
             "product_boundaries": _PRODUCT_BOUNDARIES,
             "product_knowledge": product_knowledge(),
             "operation_kinds": _OPERATION_GUIDE,
-            "lexical_hint_non_authoritative": lexical_hint,
         }
 
 
-def _deterministic_plan_envelope(
-    turn: SetupAgentTurnInput,
-) -> SetupAgentPlanEnvelope | None:
-    """Authorize an exact primitive without asking a model to restate its values.
+def _requires_contextual_composer(
+    plan: SetupAgentTurnPlan,
+    result: SetupTurnExecutionResult,
+) -> bool:
+    """Use a second bounded call only when factual summary cannot answer the turn."""
 
-    This is deliberately narrow. Long, mixed, corrective and reversion turns still go
-    to the planner because a whole-message segment would be too coarse to authorize
-    them safely.
-    """
-
-    if (
-        not turn.message.strip()
-        or len(turn.message) > 500
-        or turn.conversation.active_question_id is not None
-        or turn.message.rstrip().endswith(("?", "؟"))
-        or re.search(
-            r"\b(?:thanks?|thank\s+you|appreciate|sorry|hello|hey)\b",
-            turn.message,
-            re.IGNORECASE,
-        )
-    ):
-        return None
-    report = classify_turn(turn.normalized_message)
-    if not report.fragments or any(
-        not fragment.contributes_strategy_state for fragment in report.fragments
-    ):
-        return None
-    patch = deterministic_strategy_patch(
-        turn.draft,
-        turn.message,
-        source_turn_id=turn.source_turn_id,
+    reply_bearing_kinds = {
+        SegmentKind.SOCIAL_REPLY,
+        SegmentKind.CONVERSATIONAL_CONTEXT,
+        SegmentKind.USER_QUESTION,
+        SegmentKind.PRODUCT_QUESTION,
+        SegmentKind.EXPLANATION_REQUEST,
+        SegmentKind.UNSUPPORTED_REQUEST,
+    }
+    return bool(
+        plan.questions_to_answer
+        or len(plan.response_points) > 1
+        or any(item.kind in reply_bearing_kinds for item in plan.segments)
+        or any(item.kind == "explain_refusal" for item in plan.response_points)
+        or plan.unsupported_segments
+        or result.safe_errors
     )
-    if patch is None or patch.correction is not None or patch.reversion is not None:
-        return None
-    operations = _authorized_operations_from_patch(patch, segment_id="deterministic")
-    if not operations or len(operations) > 24:
-        return None
-    segment = TurnSegment(
-        segment_id="deterministic",
-        exact_source_text=turn.message,
-        start_offset=0,
-        end_offset=len(turn.message),
-        kind=SegmentKind.STRATEGY_INSTRUCTION,
-        action_required=True,
-        confidence=1.0,
-    )
-    return SetupAgentPlanEnvelope(
-        plan=SetupAgentTurnPlan(
-            source_turn_id=turn.source_turn_id,
-            segments=[segment],
-            operations=operations,
-            strategy_instructions=[
-                StrategyInstructionPlan(
-                    segment_id=segment.segment_id,
-                    intent_summary="Exact deterministic strategy instruction",
-                )
-            ],
-            overall_confidence=1.0,
-        )
-    )
-
-
-def _authorized_operations_from_patch(
-    patch: StrategyPatch,
-    *,
-    segment_id: str,
-) -> list[AuthorizedPatchOperation]:
-    """Translate a trusted deterministic patch into segment-bound operations."""
-
-    operations: list[AuthorizedPatchOperation] = []
-
-    def add(kind: str, **payload: Any) -> None:
-        raw = {
-            "authorizing_segment_id": segment_id,
-            "kind": kind,
-            **payload,
-        }
-        encoded = json.dumps(
-            {
-                key: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
-                for key, value in raw.items()
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        ).encode()
-        operations.append(
-            AuthorizedPatchOperation.model_validate(
-                {
-                    "operation_id": (
-                        f"det_{len(operations) + 1:02d}_"
-                        f"{hashlib.sha256(encoded).hexdigest()[:16]}"
-                    ),
-                    **raw,
-                }
-            )
-        )
-
-    if patch.set_fields != DraftFieldPatch():
-        add("set_fields", fields=patch.set_fields)
-    for condition in patch.add_conditions:
-        add("add_condition", condition=condition)
-    for update in patch.update_conditions:
-        add(
-            "update_condition",
-            condition=update.replacement,
-            target_condition_id=update.node_id,
-        )
-    for node_id in patch.remove_conditions:
-        add("remove_condition", target_condition_id=node_id)
-    if patch.replace_groups is not None:
-        add("replace_groups", condition=patch.replace_groups)
-    for symbol in patch.add_inclusions:
-        add("add_inclusion", symbol=symbol)
-    for symbol in patch.add_exclusions:
-        add("add_exclusion", symbol=symbol)
-    for symbol in patch.remove_inclusions:
-        add("remove_inclusion", symbol=symbol)
-    for symbol in patch.remove_exclusions:
-        add("remove_exclusion", symbol=symbol)
-    for unresolved in patch.unresolved_references:
-        add("add_unresolved", unresolved=unresolved)
-    for item in patch.unsupported_requirements:
-        add("add_unsupported", missing_contract=item.missing_contract)
-    for key in patch.remove_unresolved_keys:
-        add("resolve_unresolved_key", target_key=key)
-    for key in patch.remove_unsupported_keys:
-        add("remove_unsupported_key", target_key=key)
-    return operations
 
 
 def deterministic_summary(result: SetupTurnExecutionResult) -> str:
@@ -1008,6 +1003,10 @@ _OPERATION_GUIDE = {
     ),
     "kinds": {
         "set_fields": "change the mode, name, exchange or quote asset",
+        "set_sharia_policy": (
+            "change the canonical static Sharia policy, including methodology, universe "
+            "mode, statuses, watchlist identity, explicit symbols or drift behavior"
+        ),
         "add_condition": "create one new rule",
         "update_condition": "change one existing rule, named by target_condition_id",
         "remove_condition": "delete one existing rule",
@@ -1187,6 +1186,83 @@ def _estimated_usage_cost(
         input_tokens * float(pricing.get("input", 0))
         + output_tokens * float(pricing.get("output", 0))
     ) / 1_000_000
+
+
+_CIRCUIT_FAILURE_CODES = frozenset(
+    {
+        "TARGET_CONNECT_TIMEOUT",
+        "TARGET_READ_TIMEOUT",
+        "TARGET_TOTAL_TIMEOUT",
+        "TARGET_PARTIAL_STREAM",
+        "TARGET_DNS_RESOLUTION_FAILURE",
+        "TARGET_CONNECTION_REFUSED",
+        "TARGET_HTTP_429",
+        "TARGET_HTTP_5XX",
+    }
+)
+
+
+def _counts_toward_circuit(exc: StructuredCallError) -> bool:
+    """Only routed provider availability failures affect the breaker."""
+
+    return exc.code in _CIRCUIT_FAILURE_CODES
+
+
+def _composer_reply_is_grounded(
+    reply: SetupAgentReply,
+    result: SetupTurnExecutionResult,
+    payload: dict[str, Any],
+) -> bool:
+    """Reject obvious new facts; deterministic execution stays the authority."""
+
+    message = reply.message_without_question
+    lowered = message.casefold()
+    if re.search(r"\b(?:halal|haram)\b|(?:حلال|حرام)", lowered):
+        return False
+    if re.search(r"\b(?:running|activated|active now|live now)\b", lowered):
+        return False
+    positive_ready = bool(
+        re.search(r"\b(?:is|it's|it is|now|fully|setup is)\s+ready\b", lowered)
+    )
+    if positive_ready and not result.approval_eligible:
+        return False
+    positive_approved = bool(
+        re.search(r"\b(?:is|it's|it is|now|has been)\s+approved\b", lowered)
+    )
+    if positive_approved and result.approval_status != "approved":
+        return False
+    if (
+        re.search(r"\b(?:verified|provider available|runtime available)\b", lowered)
+        and result.provider_status not in {"available", "not_required"}
+    ):
+        return False
+    if re.search(r"\b(?:compiled|compile-ready)\b", lowered) and (
+        result.compile_status != "compiled"
+    ):
+        return False
+    if re.search(r"\b(?:screening passed|screened and ready)\b", lowered) and (
+        result.screening_status not in {"passed", "not_required"}
+    ):
+        return False
+    if not any(item.applied for item in result.operation_results) and re.search(
+        r"\b(?:i|we)\s+(?:added|changed|updated|removed|set|applied)\b",
+        lowered,
+    ):
+        return False
+
+    # Numbers, explicit market pairs and timeframe tokens are the highest-risk facts
+    # for a trading rule. Every such token must exist in the execution/read-model or
+    # grounded product knowledge supplied to this exact composer call.
+    evidence = json.dumps(payload, ensure_ascii=False, sort_keys=True).casefold()
+    risky_tokens = {
+        *re.findall(r"(?<!\w)[+-]?\d+(?:\.\d+)?%?", lowered),
+        *re.findall(r"\b[a-z0-9]{2,12}/[a-z0-9]{2,12}\b", lowered),
+        *re.findall(
+            r"\b(?:\d+\s*(?:m|h|d|w)|hourly|daily|weekly)\b",
+            lowered,
+        ),
+    }
+    return all(token in evidence for token in risky_tokens)
 
 
 def _trimmed(value: str | None) -> str:

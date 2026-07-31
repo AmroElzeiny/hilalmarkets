@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -21,45 +22,56 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
     AISetupChatSession,
+    ApprovedWatchlist,
     SetupChatDraftSnapshot,
     SetupChatTurn,
+    ShariaMethodology,
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
     ShariaAssetStatus,
+    ShariaMethodologyStatus,
     ShariaUniverseMode,
 )
 from ai_market_monitor.engine.capability_shortlist import (
-    SETUP_RUNTIME_PROVIDER_REQUIREMENTS,
+    configured_runtime_provider_requirements,
 )
-from ai_market_monitor.engine.setup_intent import decide_setup_intent
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
     RuntimePreflight,
     ScreeningGate,
+    SetupTurnRequest,
+    apply_setup_turn,
 )
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
     compile_strategy_draft_v2,
 )
 from ai_market_monitor.engine.strategy_draft_migration import migrate_legacy_draft
-from ai_market_monitor.engine.strategy_draft_v2 import (
-    DraftPatchError,
-    apply_strategy_patch,
-    validate_draft_semantics,
-)
+from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
+    SegmentKind,
+    SetupAgentTurnPlan,
     SetupConversationContext,
     SetupTurnExecutionResult,
+    TurnSegment,
 )
-from ai_market_monitor.schemas.strategy import ShariaPolicyDefinition, StrategyDefinition
+from ai_market_monitor.schemas.setup_authorization import AuthorizedPatchOperation
+from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    ApprovalBindingV2,
+    DraftFieldPatch,
     DraftMode,
     ProviderRequirementV2,
     ProviderRuntimeStatusV2,
+    ShariaPolicyV2,
     StrategyDraftV2,
     UnresolvedFieldV2,
+)
+from ai_market_monitor.services.market_preview import (
+    assess_candle_data_quality,
+    timeframe_duration,
 )
 from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
@@ -67,21 +79,12 @@ from ai_market_monitor.services.setup_chat_agent import (
     SetupChatAgent,
     deterministic_summary,
 )
+from ai_market_monitor.services.sharia_screening import ShariaScreeningService
 from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
     ShariaUniverseResolver,
 )
-from ai_market_monitor.services.strategy_patch_extractor import (
-    LaunchStrategyPatchExtractor,
-    StrategyPatchExtractionError,
-    StrategyPatchExtractor,
-    StrategyPatchNonMutation,
-)
 from ai_market_monitor.services.system_brain import CapabilityCoverageService
-
-#: How many questions one draft may ask before it must show the remaining fields
-#: instead. Asking is capped; *exposing* what is still missing is not.
-MAX_CLARIFICATIONS_PER_DRAFT = 3
 
 #: Which transport stage an agent failure maps to for the HTTP error envelope. The
 #: four stages stay distinct: a planning failure, a refused plan, a compile refusal
@@ -140,15 +143,11 @@ class SetupChatLaunchService:
         settings: Settings,
         owner: Any,
         *,
-        extractor: StrategyPatchExtractor | None = None,
         agent: SetupChatAgent | None = None,
     ) -> None:
         self.settings = settings
         self.owner = owner
-        #: Free text goes to the agent. The extractor now serves only explicit
-        #: server-offered field answers, which need no model call at all.
         self.agent = agent or SetupChatAgent(settings)
-        self.extractor = extractor or LaunchStrategyPatchExtractor(settings)
         self._preflight_redis: Redis | None = (
             None
             if settings.app_env == "test"
@@ -184,60 +183,18 @@ class SetupChatLaunchService:
         # sentence, and made the stored provenance disagree with what the user wrote.
         raw = message or option_label or option_value or ""
         cleaned = " ".join(raw.split())
-        if option_key == "setup_mode":
-            selected_chat = await self._select_mode(
+        if option_key:
+            selected_chat = await self._run_server_option_turn(
                 session,
                 chat,
-                value=option_value or cleaned,
-                label=option_label,
+                option_key=option_key,
+                option_value=option_value or cleaned,
+                option_label=option_label,
                 client_message_id=client_message_id,
                 started=started,
+                turn_record=turn_record,
             )
-            await self._complete_db_turn(session, selected_chat, turn_record)
             return selected_chat
-        if option_key in {
-            "screened_universe_mode",
-            "screened_watchlist",
-            "screened_explicit_assets",
-        }:
-            await self.owner._append_message(
-                session,
-                chat,
-                role="user",
-                message_type="option",
-                content=option_label or option_value or cleaned,
-                payload={
-                    "option_key": option_key,
-                    "option_value": option_value,
-                    "launch_pipeline": "strategy_draft_v2",
-                },
-                client_message_id=client_message_id,
-            )
-            await self.owner._apply_screened_universe_answer(
-                session,
-                chat,
-                key=option_key,
-                value=option_value or cleaned,
-            )
-            await self._complete_db_turn(session, chat, turn_record)
-            _set_runtime(chat, started, model_calls=0, cache_hits=0)
-            return chat
-        if option_key == "monitor_name":
-            cleaned = option_value or cleaned
-
-        # The old deterministic gate is kept only as a hint recorded on the turn. It no
-        # longer decides whether a message reaches the agent, and it no longer picks a
-        # reply: a sentence its regular expressions did not recognise used to be
-        # answered with "describe the market behavior you want", even when the user had
-        # just written three lines of exact market logic.
-        lexical_hint = decide_setup_intent(cleaned)
-        offered_option = bool(option_key and option_value and option_key not in {"monitor_name"})
-        if offered_option:
-            # An explicit UI answer resolves one typed field. It stays deterministic and
-            # costs no model call; it can still never grant approval.
-            cleaned = f"{option_key}: {option_value}"
-            raw = cleaned
-
         user_message = (
             await session.get(AISetupChatMessage, turn_record.source_message_id)
             if turn_record is not None and turn_record.source_message_id is not None
@@ -248,13 +205,11 @@ class SetupChatLaunchService:
                 session,
                 chat,
                 role="user",
-                message_type="option" if option_key else "text",
+                message_type="text",
                 # Stored as typed, so provenance quotes what the user can see they wrote.
-                content=raw if not offered_option else cleaned,
+                content=raw,
                 payload={
-                    "lexical_hint": lexical_hint.intent.value,
-                    "lexical_hint_confidence": lexical_hint.confidence,
-                    "lexical_hint_reason": lexical_hint.reason,
+                    "semantic_layer": "ai_first",
                     "launch_pipeline": "setup_agent_v3",
                     "option_key": option_key,
                     "option_value": option_value,
@@ -267,141 +222,799 @@ class SetupChatLaunchService:
             await session.flush()
             await session.commit()
 
-        if not offered_option:
-            return await self._run_agent_turn(
-                session,
-                chat,
-                message=raw,
-                source_turn_id=str(user_message.id),
-                started=started,
-                client_message_id=client_message_id,
-                turn_record=turn_record,
-            )
+        return await self._run_agent_turn(
+            session,
+            chat,
+            message=raw,
+            source_turn_id=str(user_message.id),
+            started=started,
+            client_message_id=client_message_id,
+            turn_record=turn_record,
+        )
 
-        draft = load_strategy_draft_v2(chat)
-        context = dict(chat.context_json or {})
-        input_fingerprint = hashlib.sha256(cleaned.casefold().encode()).hexdigest()
-        if (
-            context.get("last_v2_patch_input_hash") == input_fingerprint
-            and context.get("last_v2_patch_result_hash") == draft.executable_hash
-        ):
-            await self.owner._assistant(
-                session,
-                chat,
-                "That exact update is already reflected in the current AI Sheet.",
-                message_type="patch_already_applied",
-                payload={
-                    "strategy_mutated": False,
-                    "draft_id": str(draft.draft_id),
-                    "draft_version": draft.version,
-                    "semantic_hash": draft.semantic_hash,
-                    "cache_hit": True,
-                },
-            )
-            _set_runtime(chat, started, model_calls=0, cache_hits=1)
-            return chat
-        try:
-            patch = await self.extractor.extract(
-                current_draft=draft,
-                message=cleaned,
-                source_turn_id=str(user_message.id),
-            )
-            history = await self._snapshot_history(session, chat)
-            context = dict(chat.context_json or {})
-            result = apply_strategy_patch(draft, patch, history=history)
-            await CapabilityCoverageService(self.settings).record_usage(
-                session,
-                chat=chat,
-                operation="strategy_patch_v2",
-                usage=getattr(self.extractor, "last_usage", None),
-            )
-        except StrategyPatchNonMutation as exc:
-            # A typed field answer that changed nothing. The answer text the extractor
-            # produced is used instead of being discarded, which is what left a user
-            # staring at a generic sentence after answering a question correctly.
-            await CapabilityCoverageService(self.settings).record_usage(
-                session,
-                chat=chat,
-                operation="strategy_patch_v2",
-                usage=getattr(self.extractor, "last_usage", None),
-            )
-            await self.owner._assistant(
-                session,
-                chat,
-                exc.answer or _no_change_summary(draft),
-                message_type="option_no_change",
-                payload={
-                    "strategy_mutated": False,
-                    "draft_id": str(draft.draft_id),
-                    "draft_version": draft.version,
-                    "semantic_hash": draft.semantic_hash,
-                },
-            )
-            _set_runtime(
-                chat,
-                started,
-                model_calls=int(getattr(self.extractor, "model_call_count", 0)),
-                cache_hits=0,
-            )
-            await self._complete_db_turn(session, chat, turn_record)
-            return chat
-        except StrategyPatchExtractionError as exc:
+    async def _run_server_option_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        option_key: str,
+        option_value: str,
+        option_label: str | None,
+        client_message_id: str | None,
+        started: float,
+        turn_record: SetupChatTurn | None,
+    ) -> AISetupChatSession:
+        """Map one allowlisted server UI control into the canonical turn tool."""
+
+        allowed = {
+            "setup_mode",
+            "monitor_name",
+            "screened_universe_mode",
+            "screened_watchlist",
+            "screened_explicit_assets",
+            "sharia_methodology",
+        }
+        if option_key not in allowed:
             await self._fail_db_turn(
                 session,
                 turn_record,
-                code=exc.code,
-                stage="extract",
-                retryable=exc.retryable,
-            )
-            raise SetupLaunchError(
-                exc.code,
-                str(exc),
-                stage="extract",
-                retryable=exc.retryable,
-                status_code=503 if exc.retryable else 422,
-            ) from exc
-        except DraftPatchError as exc:
-            await self._fail_db_turn(
-                session,
-                turn_record,
-                code="STRATEGY_PATCH_REJECTED",
-                stage="patch",
+                code="UNKNOWN_SETUP_OPTION",
+                stage="intent",
                 retryable=False,
             )
             raise SetupLaunchError(
-                "STRATEGY_PATCH_REJECTED",
-                str(exc),
-                stage="patch",
+                "UNKNOWN_SETUP_OPTION",
+                "That setup option is no longer available. Refresh and choose again.",
+                stage="intent",
                 status_code=422,
-            ) from exc
-
-        if result.material_change:
-            await self._store_snapshot(
+            )
+        rendered = option_label or option_value
+        user_message = (
+            await session.get(AISetupChatMessage, turn_record.source_message_id)
+            if turn_record is not None and turn_record.source_message_id is not None
+            else None
+        )
+        if user_message is None:
+            user_message = await self.owner._append_message(
                 session,
                 chat,
-                draft.model_dump(mode="json"),
-                source_turn_id=str(user_message.id),
+                role="user",
+                message_type="option",
+                content=rendered,
+                payload={
+                    "option_key": option_key,
+                    "option_value": option_value,
+                    "authorizing_source": "server_owned_allowlist",
+                    "launch_pipeline": "setup_agent_v3",
+                },
+                client_message_id=client_message_id,
             )
-            if chat.status == "approved":
-                _archive_approval(chat, context, cleaned)
-        context["strategy_draft_v2"] = result.draft.model_dump(mode="json")
-        context["strategy_state_authority"] = "v2"
-        context["launch_pipeline_version"] = "3.1"
-        context["last_semantic_diff"] = list(result.changed_fields)
-        context["last_intent"] = f"offered_option:{option_key}"
-        context["last_patch_source_turn_id"] = str(user_message.id)
-        context["last_v2_patch_input_hash"] = input_fingerprint
-        context["last_v2_patch_result_hash"] = result.draft.executable_hash
-        chat.context_json = context
-        if not chat.original_idea:
-            chat.original_idea = cleaned
-            chat.title = _title(cleaned)
+        if turn_record is not None:
+            turn_record.source_message_id = user_message.id
+            turn_record.status = TurnStatus.EXECUTING.value
+            await session.flush()
+            await session.commit()
 
-        await self._render_current_draft(session, chat, result.draft)
-        model_calls = int(getattr(self.extractor, "model_call_count", 0))
-        _set_runtime(chat, started, model_calls=model_calls, cache_hits=0)
-        await self._complete_db_turn(session, chat, turn_record)
+        before = load_strategy_draft_v2(chat)
+        operations = await self._server_option_operations(
+            session,
+            chat,
+            draft=before,
+            option_key=option_key,
+            option_value=option_value,
+            source_turn_id=str(user_message.id),
+        )
+        segment = TurnSegment(
+            segment_id="server_option",
+            exact_source_text=rendered,
+            start_offset=0,
+            end_offset=len(rendered),
+            kind=SegmentKind.CLARIFICATION_ANSWER,
+            reply_required=False,
+            action_required=True,
+            confidence=1.0,
+        )
+        plan = SetupAgentTurnPlan(
+            source_turn_id=str(user_message.id),
+            segments=[segment],
+            operations=operations,
+            overall_confidence=1.0,
+        )
+        callback = (
+            self._turn_stage_callback(
+                session,
+                chat,
+                turn_record,
+                message=rendered,
+                source_turn_id=str(user_message.id),
+                expected_executable_hash=before.executable_hash,
+                expected_workflow_state_hash=before.workflow_state_hash,
+            )
+            if turn_record is not None
+            else None
+        )
+        if callback is not None:
+            await callback(
+                TurnStatus.EXECUTING.value,
+                {
+                    "planner_model": "server_owned_option",
+                    "plan": plan.model_dump(mode="json"),
+                },
+            )
+        outcome = await apply_setup_turn(
+            SetupTurnRequest(
+                plan=plan,
+                message=rendered,
+                draft=before,
+                source_turn_id=str(user_message.id),
+                allowed_capability_keys=frozenset(),
+                history=await self._snapshot_history(session, chat),
+                conversation=_load_conversation_context(dict(chat.context_json or {})),
+                screening=self._screening_gate(session, chat),
+                providers=self._provider_gate(),
+                runtime_preflight=self._runtime_preflight(),
+                server_owned_option=True,
+            )
+        )
+        if callback is not None:
+            await callback(
+                TurnStatus.COMPOSING.value,
+                {
+                    "planner_model": "server_owned_option",
+                    "plan": plan.model_dump(mode="json"),
+                    "execution_result": outcome.result.model_dump(mode="json"),
+                    "draft_after": outcome.draft.model_dump(mode="json"),
+                    "conversation_after": outcome.conversation.model_dump(mode="json"),
+                    "definition": (
+                        outcome.definition.model_dump(mode="json")
+                        if outcome.definition is not None
+                        else None
+                    ),
+                    "history_snapshot": outcome.history_snapshot,
+                    "material_change": outcome.material_change,
+                },
+            )
+        else:
+            context = dict(chat.context_json or {})
+            context["strategy_draft_v2"] = outcome.draft.model_dump(mode="json")
+            context["strategy_state_authority"] = "v2"
+            chat.context_json = context
+            await self._persist_draft_state(
+                session,
+                chat,
+                outcome.draft,
+                definition=outcome.definition,
+                execution=outcome.result,
+            )
+
+        content, message_type, payload = await self._server_option_reply(
+            session,
+            chat,
+            option_key=option_key,
+            draft=outcome.draft,
+            execution=outcome.result,
+        )
+        assistant = await self.owner._assistant(
+            session,
+            chat,
+            content,
+            message_type=message_type,
+            payload={
+                **payload,
+                "draft_v2": outcome.draft.model_dump(mode="json"),
+                "execution_result": outcome.result.model_dump(mode="json"),
+                "model_call_count": 0,
+            },
+        )
+        await self._complete_db_turn(
+            session,
+            chat,
+            turn_record,
+            reply={
+                "message": content,
+                "execution_result": outcome.result.model_dump(mode="json"),
+            },
+            assistant_message_id=assistant.id,
+        )
+        _set_runtime(chat, started, model_calls=0, cache_hits=0)
         return chat
+
+    async def _server_option_operations(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        draft: StrategyDraftV2,
+        option_key: str,
+        option_value: str,
+        source_turn_id: str,
+    ) -> list[AuthorizedPatchOperation]:
+        payloads: list[dict[str, Any]] = []
+        value = option_value.strip()
+        if option_key == "setup_mode":
+            normalized = value.casefold()
+            if normalized not in {"scanner", "monitor"}:
+                raise SetupLaunchError(
+                    "INVALID_SETUP_MODE",
+                    "Choose Scanner or Monitor.",
+                    stage="intent",
+                    status_code=422,
+                )
+            mode = DraftMode(normalized)
+            payloads.append(
+                {
+                    "kind": "set_fields",
+                    "fields": DraftFieldPatch(
+                        mode=mode,
+                        name=(
+                            "Untitled Scanner"
+                            if mode == DraftMode.SCANNER
+                            else "Untitled Monitor"
+                        ),
+                    ),
+                }
+            )
+            if self.settings.sharia_screening_enforced:
+                methodology = await ShariaScreeningService(
+                    session, self.settings
+                ).default_methodology()
+                if methodology is not None:
+                    payloads.append(
+                        {
+                            "kind": "set_sharia_policy",
+                            "sharia_policy": draft.sharia_policy.model_copy(
+                                update={
+                                    "methodology_id": methodology.id,
+                                    "methodology_version": methodology.version,
+                                    "allowed_statuses": sorted(
+                                        (
+                                            ShariaAssetStatus.ELIGIBLE,
+                                            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS,
+                                        ),
+                                        key=lambda item: item.value,
+                                    ),
+                                    "compliance_change_behavior": (
+                                        ComplianceChangeBehavior.PAUSE_ASSET
+                                    ),
+                                }
+                            ),
+                        }
+                    )
+                if not any(
+                    item.unresolved_id == "sharia.universe_mode"
+                    for item in draft.unresolved_fields
+                ):
+                    payloads.append(
+                        {
+                            "kind": "add_unresolved",
+                            "unresolved": UnresolvedFieldV2(
+                                unresolved_id="sharia.universe_mode",
+                                source_turn_id=source_turn_id,
+                                source_fragment=value,
+                                target_type="universe",
+                                target_field="sharia_policy.universe_mode",
+                                expected_answer_schema={
+                                    "type": "string",
+                                    "enum": [
+                                        ShariaUniverseMode.ELIGIBLE_MARKET.value,
+                                        ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                                        ShariaUniverseMode.EXPLICIT_ASSETS.value,
+                                    ],
+                                },
+                                allowed_options=[
+                                    ShariaUniverseMode.ELIGIBLE_MARKET.value,
+                                    ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                                    ShariaUniverseMode.EXPLICIT_ASSETS.value,
+                                ],
+                                question="Which screened assets should HilalMarkets watch?",
+                                reason=(
+                                    "A screened universe must be selected explicitly "
+                                    "before this setup can be approved."
+                                ),
+                                created_workflow_revision=draft.workflow_revision,
+                            ),
+                        }
+                    )
+        elif option_key == "monitor_name":
+            if not value:
+                raise SetupLaunchError(
+                    "INVALID_MONITOR_NAME",
+                    "Enter a name for this Watchlist.",
+                    stage="intent",
+                    status_code=422,
+                )
+            payloads.append(
+                {"kind": "set_fields", "fields": DraftFieldPatch(name=value)}
+            )
+        elif option_key == "screened_universe_mode":
+            aliases = {
+                "all_eligible_spot_assets": "eligible_market",
+                "my_favorites": "approved_watchlist",
+                "my_favourites": "approved_watchlist",
+                "favorites": "approved_watchlist",
+                "favourites": "approved_watchlist",
+                "specific_eligible_assets": "explicit_assets",
+            }
+            normalized = aliases.get(
+                value.casefold().replace(" ", "_"),
+                value.casefold().replace(" ", "_"),
+            )
+            try:
+                universe_mode = ShariaUniverseMode(normalized)
+            except ValueError as exc:
+                raise SetupLaunchError(
+                    "INVALID_SCREENED_UNIVERSE_MODE",
+                    "Choose one of the displayed screened-market scopes.",
+                    stage="intent",
+                    status_code=422,
+                ) from exc
+            updates: dict[str, Any] = {
+                "universe_mode": universe_mode,
+                "approved_watchlist_id": None,
+                "approved_watchlist_version": None,
+                "explicit_symbols": [],
+            }
+            if universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST:
+                watchlists = list(
+                    await session.scalars(
+                        select(ApprovedWatchlist)
+                        .where(ApprovedWatchlist.user_id == chat.user_id)
+                        .order_by(
+                            ApprovedWatchlist.is_default.desc(),
+                            ApprovedWatchlist.name.asc(),
+                        )
+                    )
+                )
+                if len(watchlists) == 1:
+                    updates.update(
+                        {
+                            "approved_watchlist_id": watchlists[0].id,
+                            "approved_watchlist_version": (
+                                watchlists[0].updated_at.isoformat()
+                            ),
+                        }
+                    )
+            payloads.append(
+                {
+                    "kind": "set_sharia_policy",
+                    "sharia_policy": draft.sharia_policy.model_copy(update=updates),
+                }
+            )
+            for target_key in (
+                "sharia.universe_mode",
+                "sharia.approved_watchlist",
+                "sharia.explicit_symbols",
+            ):
+                if any(item.unresolved_id == target_key for item in draft.unresolved_fields):
+                    payloads.append(
+                        {"kind": "resolve_unresolved_key", "target_key": target_key}
+                    )
+            if (
+                universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
+                and updates["approved_watchlist_id"] is None
+            ):
+                payloads.append(
+                    {
+                        "kind": "add_unresolved",
+                        "unresolved": UnresolvedFieldV2(
+                            unresolved_id="sharia.approved_watchlist",
+                            source_turn_id=source_turn_id,
+                            source_fragment=value,
+                            target_type="universe",
+                            target_field="sharia_policy.approved_watchlist_id",
+                            expected_answer_schema={"type": "string", "format": "uuid"},
+                            question="Which Favorites list should HilalMarkets use?",
+                            reason=(
+                                "The approved watchlist and its immutable version are "
+                                "part of the executable Sharia policy."
+                            ),
+                            created_workflow_revision=draft.workflow_revision,
+                        ),
+                    }
+                )
+            elif universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS:
+                payloads.append(
+                    {
+                        "kind": "add_unresolved",
+                        "unresolved": UnresolvedFieldV2(
+                            unresolved_id="sharia.explicit_symbols",
+                            source_turn_id=source_turn_id,
+                            source_fragment=value,
+                            target_type="universe",
+                            target_field="sharia_policy.explicit_symbols",
+                            expected_answer_schema={
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 1,
+                            },
+                            question=(
+                                "Which eligible spot assets should HilalMarkets watch?"
+                            ),
+                            reason=(
+                                "Every explicitly bounded asset must be screened and "
+                                "runtime-verified before approval."
+                            ),
+                            created_workflow_revision=draft.workflow_revision,
+                        ),
+                    }
+                )
+        elif option_key == "screened_watchlist":
+            try:
+                watchlist_id = UUID(value)
+            except ValueError as exc:
+                raise SetupLaunchError(
+                    "WATCHLIST_NOT_FOUND",
+                    "That Favorites list is unavailable.",
+                    stage="intent",
+                    status_code=404,
+                ) from exc
+            watchlist = await session.get(ApprovedWatchlist, watchlist_id)
+            if watchlist is None or watchlist.user_id != chat.user_id:
+                raise SetupLaunchError(
+                    "WATCHLIST_NOT_FOUND",
+                    "That Favorites list is unavailable.",
+                    stage="intent",
+                    status_code=404,
+                )
+            payloads.append(
+                {
+                    "kind": "set_sharia_policy",
+                    "sharia_policy": draft.sharia_policy.model_copy(
+                        update={
+                            "universe_mode": ShariaUniverseMode.APPROVED_WATCHLIST,
+                            "approved_watchlist_id": watchlist.id,
+                            "approved_watchlist_version": (
+                                watchlist.updated_at.isoformat()
+                            ),
+                            "explicit_symbols": [],
+                        }
+                    ),
+                }
+            )
+            if any(
+                item.unresolved_id == "sharia.approved_watchlist"
+                for item in draft.unresolved_fields
+            ):
+                payloads.append(
+                    {
+                        "kind": "resolve_unresolved_key",
+                        "target_key": "sharia.approved_watchlist",
+                    }
+                )
+        elif option_key == "screened_explicit_assets":
+            symbols = _option_symbols(value, draft.market_scope.quote_asset)
+            if not symbols:
+                raise SetupLaunchError(
+                    "SCREENED_ASSETS_REQUIRED",
+                    "Type at least one displayed spot asset symbol.",
+                    stage="intent",
+                    status_code=422,
+                )
+            payloads.append(
+                {
+                    "kind": "set_sharia_policy",
+                    "sharia_policy": draft.sharia_policy.model_copy(
+                        update={
+                            "universe_mode": ShariaUniverseMode.EXPLICIT_ASSETS,
+                            "approved_watchlist_id": None,
+                            "approved_watchlist_version": None,
+                            "explicit_symbols": symbols,
+                        }
+                    ),
+                }
+            )
+            if any(
+                item.unresolved_id == "sharia.explicit_symbols"
+                for item in draft.unresolved_fields
+            ):
+                payloads.append(
+                    {
+                        "kind": "resolve_unresolved_key",
+                        "target_key": "sharia.explicit_symbols",
+                    }
+                )
+        elif option_key == "sharia_methodology":
+            try:
+                methodology_id = UUID(value)
+            except ValueError as exc:
+                raise SetupLaunchError(
+                    "METHODOLOGY_NOT_AVAILABLE",
+                    "That methodology is unavailable.",
+                    stage="intent",
+                    status_code=404,
+                ) from exc
+            methodology = await session.get(ShariaMethodology, methodology_id)
+            if (
+                methodology is None
+                or methodology.status != ShariaMethodologyStatus.ACTIVE
+            ):
+                raise SetupLaunchError(
+                    "METHODOLOGY_NOT_AVAILABLE",
+                    "That methodology is not currently active.",
+                    stage="intent",
+                    status_code=409,
+                )
+            payloads.append(
+                {
+                    "kind": "set_sharia_policy",
+                    "sharia_policy": draft.sharia_policy.model_copy(
+                        update={
+                            "methodology_id": methodology.id,
+                            "methodology_version": methodology.version,
+                        }
+                    ),
+                }
+            )
+
+        operations: list[AuthorizedPatchOperation] = []
+        for index, payload in enumerate(payloads, start=1):
+            digest = hashlib.sha256(
+                json.dumps(
+                    {
+                        "source_turn_id": source_turn_id,
+                        "option_key": option_key,
+                        "index": index,
+                        "payload": {
+                            key: (
+                                item.model_dump(mode="json")
+                                if hasattr(item, "model_dump")
+                                else item
+                            )
+                            for key, item in payload.items()
+                        },
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode()
+            ).hexdigest()[:20]
+            operations.append(
+                AuthorizedPatchOperation.model_validate(
+                    {
+                        "operation_id": f"ui_{option_key}_{digest}"[:80],
+                        "authorizing_segment_id": "server_option",
+                        **payload,
+                    }
+                )
+            )
+        return operations
+
+    async def _server_option_reply(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        option_key: str,
+        draft: StrategyDraftV2,
+        execution: SetupTurnExecutionResult,
+    ) -> tuple[str, str, dict[str, Any]]:
+        if option_key == "setup_mode" and self.settings.sharia_screening_enforced:
+            if draft.sharia_policy.methodology_id is None:
+                return (
+                    "Screened monitoring is unavailable because no approved methodology is active.",
+                    "screening_unavailable",
+                    {"can_approve": False, "can_scan": False},
+                )
+            options = [
+                {
+                    "key": "screened_universe_mode",
+                    "label": "All eligible spot assets",
+                    "value": ShariaUniverseMode.ELIGIBLE_MARKET.value,
+                },
+                {
+                    "key": "screened_universe_mode",
+                    "label": "My Favorites",
+                    "value": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                },
+                {
+                    "key": "screened_universe_mode",
+                    "label": "Specific eligible assets",
+                    "value": ShariaUniverseMode.EXPLICIT_ASSETS.value,
+                },
+            ]
+            return (
+                "Which screened assets should HilalMarkets watch?",
+                "screened_universe_required",
+                {"clarifications": [{"key": "screened_universe_mode", "options": options}]},
+            )
+        if (
+            option_key == "screened_universe_mode"
+            and draft.sharia_policy.universe_mode
+            == ShariaUniverseMode.APPROVED_WATCHLIST
+            and draft.sharia_policy.approved_watchlist_id is None
+        ):
+            rows = list(
+                await session.scalars(
+                    select(ApprovedWatchlist)
+                    .where(ApprovedWatchlist.user_id == chat.user_id)
+                    .order_by(
+                        ApprovedWatchlist.is_default.desc(),
+                        ApprovedWatchlist.name.asc(),
+                    )
+                )
+            )
+            if not rows:
+                return (
+                    "You do not have a Favorites list yet. Choose another screened scope.",
+                    "screened_watchlist_missing",
+                    {"can_approve": False, "can_scan": False},
+                )
+            return (
+                "Which Favorites list should HilalMarkets use?",
+                "screened_watchlist_required",
+                {
+                    "clarifications": [
+                        {
+                            "key": "screened_watchlist",
+                            "options": [
+                                {
+                                    "key": "screened_watchlist",
+                                    "label": row.name,
+                                    "value": str(row.id),
+                                }
+                                for row in rows[:8]
+                            ],
+                        }
+                    ]
+                },
+            )
+        if (
+            option_key == "screened_universe_mode"
+            and draft.sharia_policy.universe_mode
+            == ShariaUniverseMode.EXPLICIT_ASSETS
+            and not draft.sharia_policy.explicit_symbols
+        ):
+            return (
+                "Which eligible spot assets should HilalMarkets watch?",
+                "screened_assets_required",
+                {"awaiting_answer": True, "can_approve": False},
+            )
+        return (
+            deterministic_summary(execution),
+            _agent_message_type(execution),
+            {"can_approve": execution.approval_eligible},
+        )
+
+    async def revalidate_for_approval(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        draft: StrategyDraftV2,
+        *,
+        expected_executable_version: int,
+        expected_executable_hash: str,
+        expected_schema_hash: str,
+    ) -> StrategyDefinition:
+        """Recompile and refresh every dynamic gate for the exact reviewed draft."""
+
+        if (
+            draft.executable_version != expected_executable_version
+            or draft.executable_hash != expected_executable_hash
+        ):
+            raise SetupLaunchError(
+                "SETUP_CHANGED",
+                "The draft changed. Review the latest version before approval.",
+                stage="compile",
+                status_code=409,
+            )
+        # Approval can only bind a draft that is already independently restorable.
+        # This also closes the one-time legacy-policy migration case, where the
+        # canonical JSON payload is upgraded before any ordinary mutation exists to
+        # create a snapshot.
+        await self._store_snapshot(
+            session,
+            chat,
+            draft.model_dump(mode="json"),
+            source_turn_id=None,
+        )
+        try:
+            definition = compile_strategy_draft_v2(draft)
+        except StrategyV2CompileError as exc:
+            raise SetupLaunchError(
+                "SETUP_NOT_READY",
+                "The exact draft no longer compiles.",
+                stage="compile",
+                status_code=409,
+            ) from exc
+        policy = draft.sharia_policy
+        if self.settings.sharia_screening_enforced:
+            if policy.methodology_id is None or not policy.methodology_version:
+                raise SetupLaunchError(
+                    "SHARIA_POLICY_STALE",
+                    "Choose an active methodology before approval.",
+                    stage="compile",
+                    status_code=409,
+                )
+            methodology = await session.get(ShariaMethodology, policy.methodology_id)
+            if (
+                methodology is None
+                or methodology.status != ShariaMethodologyStatus.ACTIVE
+                or methodology.version != policy.methodology_version
+            ):
+                raise SetupLaunchError(
+                    "SHARIA_POLICY_STALE",
+                    "The selected methodology changed. Review the updated policy.",
+                    stage="compile",
+                    status_code=409,
+                )
+            if (
+                policy.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
+                and policy.approved_watchlist_id is not None
+            ):
+                watchlist = await session.get(
+                    ApprovedWatchlist,
+                    policy.approved_watchlist_id,
+                )
+                if (
+                    watchlist is None
+                    or watchlist.user_id != chat.user_id
+                    or watchlist.updated_at.isoformat()
+                    != policy.approved_watchlist_version
+                ):
+                    raise SetupLaunchError(
+                        "APPROVED_WATCHLIST_STALE",
+                        "The selected Favorites list changed. Review it again.",
+                        stage="compile",
+                        status_code=409,
+                    )
+            try:
+                resolution = await ShariaUniverseResolver(
+                    session,
+                    self.owner.market_provider,
+                    self.settings,
+                ).resolve(
+                    definition,
+                    user_id=chat.user_id,
+                    persist_snapshot=True,
+                )
+            except ShariaUniverseError as exc:
+                raise SetupLaunchError(
+                    "SHARIA_SCREENING_STALE",
+                    "The screened universe could not be refreshed for approval.",
+                    stage="compile",
+                    status_code=409,
+                ) from exc
+            if not resolution.included_symbols:
+                raise SetupLaunchError(
+                    "SHARIA_SCREENING_EMPTY",
+                    "No selected asset is currently eligible under this policy.",
+                    stage="compile",
+                    status_code=409,
+                )
+
+        provider_requirements = await self._provider_gate()(
+            draft.static_provider_requirements
+        )
+        if any(item.status != "available" for item in provider_requirements):
+            raise SetupLaunchError(
+                "PROVIDER_UNAVAILABLE",
+                "A required data capability is unavailable.",
+                stage="provider",
+                status_code=409,
+            )
+        statuses = await self._runtime_preflight()(definition)
+        now = datetime.now(UTC)
+        ttl_seconds = self.settings.setup_provider_preflight_ttl_seconds
+        if any(
+            item.status != "available"
+            or item.checked_at is None
+            or (now - item.checked_at).total_seconds() > ttl_seconds
+            for item in statuses
+        ):
+            raise SetupLaunchError(
+                "PROVIDER_PREFLIGHT_STALE",
+                "Every selected market and timeframe must be verified again.",
+                stage="provider",
+                status_code=409,
+            )
+        if definition.canonical_hash() != expected_schema_hash:
+            raise SetupLaunchError(
+                "SETUP_CHANGED",
+                "The compiled preview changed. Review it again before approval.",
+                stage="compile",
+                status_code=409,
+            )
+        return definition
 
     def _turn_stage_callback(
         self,
@@ -411,14 +1024,38 @@ class SetupChatLaunchService:
         *,
         message: str,
         source_turn_id: str,
+        expected_executable_hash: str,
+        expected_workflow_state_hash: str,
     ) -> Any:
         async def persist(stage: str, payload: dict[str, Any]) -> None:
+            execution = payload.get("execution_result")
+            if stage == TurnStatus.EXECUTING.value and not isinstance(execution, dict):
+                # The model call has finished, so it is safe to hold this row lock only
+                # across deterministic execution and its gates. This prevents two
+                # different client-message IDs from both applying to the same stale
+                # before-turn draft and losing one user's update.
+                await session.refresh(chat, with_for_update=True)
+                authoritative = load_strategy_draft_v2(chat)
+                if (
+                    authoritative.executable_hash != expected_executable_hash
+                    or authoritative.workflow_state_hash
+                    != expected_workflow_state_hash
+                ):
+                    raise SetupLaunchError(
+                        "SETUP_TURN_CONFLICT",
+                        (
+                            "The draft changed while this message was being understood. "
+                            "Retry it against the latest draft."
+                        ),
+                        stage="patch",
+                        retryable=True,
+                        status_code=409,
+                    )
             turn.status = stage
             turn.planner_model = str(payload.get("planner_model") or "") or None
             plan = payload.get("plan")
             if isinstance(plan, dict):
                 turn.plan_json = plan
-            execution = payload.get("execution_result")
             if isinstance(execution, dict):
                 result = SetupTurnExecutionResult.model_validate(execution)
                 draft = StrategyDraftV2.model_validate(payload.get("draft_after"))
@@ -467,6 +1104,15 @@ class SetupChatLaunchService:
                     definition=definition,
                     execution=result,
                 )
+                if bool(payload.get("material_change")):
+                    # The final public executable version is restorable immediately,
+                    # not only after a later edit stores it as that turn's "before".
+                    await self._store_snapshot(
+                        session,
+                        chat,
+                        draft.model_dump(mode="json"),
+                        source_turn_id=source_turn_id,
+                    )
                 turn.execution_result_json = {
                     "execution_result": execution,
                     "draft_after": draft.model_dump(mode="json"),
@@ -481,7 +1127,8 @@ class SetupChatLaunchService:
                 turn.executable_version_after = draft.executable_version
                 turn.workflow_revision_after = draft.workflow_revision
             await session.flush()
-            await session.commit()
+            if stage != TurnStatus.EXECUTING.value or isinstance(execution, dict):
+                await session.commit()
 
         return persist
 
@@ -492,19 +1139,33 @@ class SetupChatLaunchService:
         turn: SetupChatTurn | None,
         *,
         reply: dict[str, Any] | None = None,
+        assistant_message_id: UUID | None = None,
     ) -> None:
         if turn is None:
             return
         draft = load_strategy_draft_v2(chat)
-        assistant = await session.scalar(
-            select(AISetupChatMessage)
-            .where(
-                AISetupChatMessage.session_id == chat.id,
-                AISetupChatMessage.role == "assistant",
+        assistant = (
+            await session.get(AISetupChatMessage, assistant_message_id)
+            if assistant_message_id is not None
+            else await session.scalar(
+                select(AISetupChatMessage)
+                .where(
+                    AISetupChatMessage.session_id == chat.id,
+                    AISetupChatMessage.role == "assistant",
+                )
+                .order_by(AISetupChatMessage.sequence.desc())
+                .limit(1)
             )
-            .order_by(AISetupChatMessage.sequence.desc())
-            .limit(1)
         )
+        if assistant is not None and (
+            assistant.session_id != chat.id or assistant.role != "assistant"
+        ):
+            raise SetupLaunchError(
+                "TURN_REPLY_MISMATCH",
+                "The stored assistant reply did not belong to this turn.",
+                stage="serialize",
+                status_code=409,
+            )
         turn.assistant_message_id = assistant.id if assistant is not None else None
         turn.reply_json = reply or (
             {
@@ -632,6 +1293,14 @@ class SetupChatLaunchService:
             context["strategy_snapshot_history_migrated_at"] = datetime.now(UTC).isoformat()
             chat.context_json = context
             await session.flush()
+        current = load_strategy_draft_v2(chat)
+        if current.condition_ast is not None:
+            await self._store_snapshot(
+                session,
+                chat,
+                current.model_dump(mode="json"),
+                source_turn_id=None,
+            )
         rows = list(
             await session.scalars(
                 select(SetupChatDraftSnapshot)
@@ -719,6 +1388,21 @@ class SetupChatLaunchService:
             return None
         status = str(record.status or "")
         if status == TurnStatus.COMPLETED.value:
+            chat.__dict__["_setup_replayed_turn"] = {
+                "client_message_id": record.client_message_id,
+                "source_message_id": (
+                    str(record.source_message_id)
+                    if record.source_message_id
+                    else None
+                ),
+                "assistant_message_id": (
+                    str(record.assistant_message_id)
+                    if record.assistant_message_id
+                    else None
+                ),
+                "reply": dict(record.reply_json or {}),
+                "execution": dict(record.execution_result_json or {}),
+            }
             return chat
         if (
             status
@@ -728,11 +1412,29 @@ class SetupChatLaunchService:
             }
             and isinstance(record.execution_result_json, dict)
         ):
+            if record.assistant_message_id is not None and isinstance(
+                record.reply_json, dict
+            ):
+                record.status = TurnStatus.COMPLETED.value
+                record.completed_at = record.completed_at or datetime.now(UTC)
+                await session.flush()
+                chat.__dict__["_setup_replayed_turn"] = {
+                    "client_message_id": record.client_message_id,
+                    "source_message_id": (
+                        str(record.source_message_id)
+                        if record.source_message_id
+                        else None
+                    ),
+                    "assistant_message_id": str(record.assistant_message_id),
+                    "reply": dict(record.reply_json),
+                    "execution": dict(record.execution_result_json),
+                }
+                return chat
             stored = record.execution_result_json.get("execution_result")
             if isinstance(stored, dict):
                 result = SetupTurnExecutionResult.model_validate(stored)
                 message = deterministic_summary(result)
-                await self.owner._assistant(
+                assistant = await self.owner._assistant(
                     session,
                     chat,
                     message,
@@ -748,7 +1450,23 @@ class SetupChatLaunchService:
                     chat,
                     record,
                     reply={"message": message, "execution_result": stored},
+                    assistant_message_id=assistant.id,
                 )
+                chat.__dict__["_setup_replayed_turn"] = {
+                    "client_message_id": record.client_message_id,
+                    "source_message_id": (
+                        str(record.source_message_id)
+                        if record.source_message_id
+                        else None
+                    ),
+                    "assistant_message_id": (
+                        str(record.assistant_message_id)
+                        if record.assistant_message_id
+                        else None
+                    ),
+                    "reply": dict(record.reply_json or {}),
+                    "execution": dict(record.execution_result_json),
+                }
                 return chat
         if status in {
             TurnStatus.PLANNING.value,
@@ -821,6 +1539,8 @@ class SetupChatLaunchService:
                     turn_record,
                     message=message,
                     source_turn_id=source_turn_id,
+                    expected_executable_hash=draft.executable_hash,
+                    expected_workflow_state_hash=draft.workflow_state_hash,
                 )
                 if turn_record is not None
                 else None
@@ -874,7 +1594,7 @@ class SetupChatLaunchService:
             context["last_turn_failed"] = False
             context.pop("last_turn_failure", None)
             chat.context_json = context
-            await self.owner._assistant(
+            assistant = await self.owner._assistant(
                 session,
                 chat,
                 outcome.message,
@@ -897,6 +1617,7 @@ class SetupChatLaunchService:
                 chat,
                 turn_record,
                 reply={"message": outcome.message, "execution_result": None},
+                assistant_message_id=assistant.id,
             )
             return chat
 
@@ -949,7 +1670,7 @@ class SetupChatLaunchService:
             definition=outcome.definition,
             execution=outcome.execution,
         )
-        await self.owner._assistant(
+        assistant = await self.owner._assistant(
             session,
             chat,
             outcome.message,
@@ -985,6 +1706,7 @@ class SetupChatLaunchService:
                     else None
                 ),
             },
+            assistant_message_id=assistant.id,
         )
         _set_runtime(chat, started, model_calls=outcome.trace.model_calls, cache_hits=0)
         return chat
@@ -1041,7 +1763,9 @@ class SetupChatLaunchService:
         evaluated, and the alert would simply never fire with no explanation.
         """
         name = provider.strip().casefold()
-        return name in SETUP_RUNTIME_PROVIDER_REQUIREMENTS
+        return name in configured_runtime_provider_requirements(
+            self.settings.market_data_provider
+        )
 
     def _runtime_preflight(self) -> RuntimePreflight:
         """Verify the configured adapter for this exact exchange/symbol/timeframe set.
@@ -1077,71 +1801,131 @@ class SetupChatLaunchService:
                     for item in definition.universe.include_symbols
                 ]
                 missing = [item for item in requested if item not in normalized_listed]
-                if missing:
+                statuses = [
+                    ProviderRuntimeStatusV2(
+                        provider=provider_name,
+                        capability=f"market:{item}"[:120],
+                        status="unavailable",
+                        checked_at=checked_at,
+                        safe_error="A selected market is unavailable.",
+                    )
+                    for item in missing
+                ]
+                targets = (
+                    [item for item in requested if item in normalized_listed]
+                    if requested
+                    else list(sorted(normalized_listed))[:1]
+                )
+                if not targets and not statuses:
                     statuses = [
                         ProviderRuntimeStatusV2(
                             provider=provider_name,
                             capability="exchange_symbol_timeframe_preflight",
                             status="unavailable",
                             checked_at=checked_at,
-                            safe_error="One or more selected markets are unavailable.",
+                            safe_error="No market is available for this exchange scope.",
                         )
                     ]
                 else:
-                    sample = requested[0] if requested else next(
-                        iter(normalized_listed),
-                        "",
-                    )
-                    if not sample:
-                        statuses = [
-                            ProviderRuntimeStatusV2(
-                                provider=provider_name,
-                                capability="exchange_symbol_timeframe_preflight",
-                                status="unavailable",
-                                checked_at=checked_at,
-                                safe_error="No market is available for this exchange scope.",
-                            )
-                        ]
-                    else:
-                        for timeframe in dict.fromkeys(
+                    semaphore = asyncio.Semaphore(8)
+                    timeframes = list(
+                        dict.fromkeys(
                             [
                                 definition.base_timeframe,
                                 *definition.supporting_timeframes,
                             ]
-                        ):
-                            candles = await asyncio.wait_for(
-                                self.owner.market_provider.fetch_ohlcv(
-                                    definition.universe.exchange,
-                                    sample,
-                                    timeframe,
-                                    2,
-                                ),
-                                timeout=5,
-                            )
-                            if len(candles) < 2:
-                                statuses = [
-                                    ProviderRuntimeStatusV2(
-                                        provider=provider_name,
-                                        capability=(
-                                            "exchange_symbol_timeframe_preflight"
-                                        ),
-                                        status="unavailable",
-                                        checked_at=checked_at,
-                                        safe_error=(
-                                            f"Market data is unavailable for {timeframe}."
-                                        ),
-                                    )
-                                ]
-                                break
-                        else:
-                            statuses = [
-                                ProviderRuntimeStatusV2(
-                                    provider=provider_name,
-                                    capability="exchange_symbol_timeframe_preflight",
-                                    status="available",
-                                    checked_at=checked_at,
+                        )
+                    )
+
+                    async def verify_pair(
+                        symbol: str,
+                        timeframe: str,
+                    ) -> ProviderRuntimeStatusV2:
+                        capability = f"market:{symbol}:{timeframe}"[:120]
+                        try:
+                            async with semaphore:
+                                candles = await asyncio.wait_for(
+                                    self.owner.market_provider.fetch_ohlcv(
+                                        definition.universe.exchange,
+                                        symbol,
+                                        timeframe,
+                                        definition.universe.min_historical_candles,
+                                    ),
+                                    timeout=5,
                                 )
-                            ]
+                        except (TimeoutError, ConnectionError, OSError):
+                            return ProviderRuntimeStatusV2(
+                                provider=provider_name,
+                                capability=capability,
+                                status="unknown",
+                                checked_at=checked_at,
+                                safe_error=(
+                                    "Market-data runtime could not be verified."
+                                ),
+                            )
+                        except Exception:
+                            return ProviderRuntimeStatusV2(
+                                provider=provider_name,
+                                capability=capability,
+                                status="unknown",
+                                checked_at=checked_at,
+                                safe_error=(
+                                    "Market-data runtime verification failed safely."
+                                ),
+                            )
+                        pair_definition = definition.model_copy(
+                            update={
+                                "base_timeframe": timeframe,
+                                "supporting_timeframes": [],
+                            }
+                        )
+                        quality_checked_at = checked_at
+                        if (
+                            self.settings.app_env == "test"
+                            and self.settings.allow_mock_providers
+                            and provider_name == "FixtureMarketDataProvider"
+                            and candles
+                        ):
+                            # The deterministic fixture has a frozen clock by design.
+                            # Validate its ordering/history/completeness at that frozen
+                            # instant; production and every non-fixture adapter always
+                            # use the real current time for freshness.
+                            quality_checked_at = (
+                                candles[-1].timestamp
+                                + timeframe_duration(timeframe)
+                            )
+                        quality = assess_candle_data_quality(
+                            pair_definition,
+                            {timeframe: candles},
+                            quality_checked_at,
+                        )
+                        return ProviderRuntimeStatusV2(
+                            provider=provider_name,
+                            capability=capability,
+                            status="available" if quality.usable else "unavailable",
+                            checked_at=checked_at,
+                            safe_error=(
+                                None
+                                if quality.usable
+                                else quality.safe_message
+                                or (
+                                    "Market data is stale or incomplete for a "
+                                    "required timeframe."
+                                )
+                            ),
+                        )
+
+                    statuses.extend(
+                        list(
+                            await asyncio.gather(
+                                *(
+                                    verify_pair(symbol, timeframe)
+                                    for symbol in targets
+                                    for timeframe in timeframes
+                                )
+                            )
+                        )
+                    )
             except (TimeoutError, ConnectionError, OSError):
                 statuses = [
                     ProviderRuntimeStatusV2(
@@ -1173,6 +1957,8 @@ class SetupChatLaunchService:
             "exchange": definition.universe.exchange,
             "quotes": definition.universe.quote_currencies,
             "symbols": sorted(definition.universe.include_symbols),
+            "trigger_mode": definition.trigger_mode.value,
+            "minimum_history": definition.universe.min_historical_candles,
             "timeframes": [
                 definition.base_timeframe,
                 *definition.supporting_timeframes,
@@ -1210,7 +1996,11 @@ class SetupChatLaunchService:
     ) -> None:
         if self._preflight_redis is None:
             return
-        ttl = 300 if all(item.status == "available" for item in statuses) else 30
+        ttl = (
+            self.settings.setup_provider_preflight_ttl_seconds
+            if all(item.status == "available" for item in statuses)
+            else min(30, self.settings.setup_provider_preflight_ttl_seconds)
+        )
         try:
             await self._preflight_redis.set(
                 key,
@@ -1248,81 +2038,6 @@ class SetupChatLaunchService:
             for item in recent
             if item.role in {"user", "assistant"} and (item.content or "").strip()
         ]
-
-    async def _select_mode(
-        self,
-        session: AsyncSession,
-        chat: AISetupChatSession,
-        *,
-        value: str,
-        label: str | None,
-        client_message_id: str | None,
-        started: float,
-    ) -> AISetupChatSession:
-        mode_text = value.casefold().strip()
-        if mode_text not in {"scanner", "monitor"}:
-            raise SetupLaunchError(
-                "INVALID_SETUP_MODE",
-                "Choose Scanner or Monitor.",
-                stage="intent",
-                status_code=422,
-            )
-        await self.owner._append_message(
-            session,
-            chat,
-            role="user",
-            message_type="option",
-            content=label or mode_text.title(),
-            payload={
-                "option_key": "setup_mode",
-                "option_value": mode_text,
-                "launch_pipeline": "strategy_draft_v2",
-            },
-            client_message_id=client_message_id,
-        )
-        context = dict(chat.context_json or {})
-        current = load_strategy_draft_v2(chat)
-        selected = DraftMode(mode_text)
-        if current.mode != selected:
-            current = StrategyDraftV2.model_validate(
-                current.model_copy(
-                    update={
-                        "mode": selected,
-                        "name": (
-                            "Untitled Scanner"
-                            if selected == DraftMode.SCANNER
-                            else "Untitled Monitor"
-                        ),
-                        "executable_version": current.executable_version + 1,
-                        "workflow_revision": current.workflow_revision + 1,
-                        "approval": {"approved": False},
-                        "executable_hash": "",
-                        "workflow_state_hash": "",
-                    }
-                ).model_dump(mode="json")
-            )
-        context["setup_mode"] = mode_text
-        context["strategy_draft_v2"] = current.model_dump(mode="json")
-        context["strategy_state_authority"] = "v2"
-        chat.context_json = context
-        chat.status = "interviewing"
-        chat.draft_schema_json = None
-        if self.settings.sharia_screening_enforced:
-            await self.owner._ask_screened_universe(session, chat)
-        else:
-            await self.owner._assistant(
-                session,
-                chat,
-                (
-                    "Scanner is ready. Describe the exact conditions assets should match now."
-                    if selected == DraftMode.SCANNER
-                    else "Monitor is ready. Describe the exact conditions to follow continuously."
-                ),
-                message_type="mode_selected",
-                payload={"setup_mode": mode_text, "launch_pipeline": "strategy_draft_v2"},
-            )
-        _set_runtime(chat, started, model_calls=0, cache_hits=0)
-        return chat
 
     async def _persist_draft_state(
         self,
@@ -1434,117 +2149,16 @@ class SetupChatLaunchService:
             definition=definition,
         )
 
-    async def _render_current_draft(
-        self,
-        session: AsyncSession,
-        chat: AISetupChatSession,
-        draft: StrategyDraftV2,
-    ) -> None:
-        """Templated feedback for an explicit server-offered UI answer.
-
-        Free-text turns never reach this. They are answered by the agent from the
-        execution result, which is why the generic readiness sentence is gone.
-        """
-        state = await self._persist_draft_state(session, chat, draft)
-        blocking = state.blocking
-        violations = list(state.violations)
-        unresolved = list(state.unresolved)
-        if blocking:
-            context = dict(chat.context_json or {})
-            asked = list(context.get("v2_clarification_keys_asked") or [])
-            next_item = next(
-                (item for item in unresolved if item.key not in asked),
-                None,
-            )
-            if next_item is not None and len(asked) < MAX_CLARIFICATIONS_PER_DRAFT:
-                content = next_item.question
-                asked.append(next_item.key)
-                context["v2_clarification_keys_asked"] = asked[-MAX_CLARIFICATIONS_PER_DRAFT:]
-                chat.context_json = context
-                message_type = "clarification"
-            else:
-                content = (
-                    "The remaining exact fields are listed in What needs attention. "
-                    "Update one of those fields to continue."
-                    if unresolved
-                    else (
-                        "This draft is blocked because an exact requested mechanic is "
-                        "not available. Review the item in What needs attention."
-                    )
-                )
-                message_type = "draft_blocked"
-        else:
-            content = (
-                "The inactive Scanner preview is ready to run."
-                if draft.mode == DraftMode.SCANNER
-                else (
-                    "The inactive Watchlist preview is ready. Review the AI Sheet, "
-                    "then use Review and approve when it matches your intent."
-                )
-            )
-            message_type = "draft_ready"
-        await self.owner._assistant(
-            session,
-            chat,
-            content,
-            message_type=message_type,
-            payload={
-                "draft_v2": draft.model_dump(mode="json"),
-                "semantic_violations": violations,
-                "clarifications": [
-                    {
-                        "key": item.key,
-                        "question": item.question,
-                        "reason": "This exact field is required before compilation.",
-                        "options": [],
-                    }
-                    for item in unresolved
-                ],
-                "can_approve": chat.status == "ready_for_approval",
-                "model_call_count": int(getattr(self.extractor, "model_call_count", 0)),
-            },
-        )
-
     async def _apply_screening_policy(
         self,
         session: AsyncSession,
         chat: AISetupChatSession,
         definition: StrategyDefinition,
     ) -> StrategyDefinition:
-        context = chat.context_json or {}
-        mode = ShariaUniverseMode(str(context["screened_universe_mode"]))
-        methodology_id = context.get("sharia_methodology_id")
-        if not methodology_id:
+        policy = definition.universe.sharia_policy
+        if policy is None or policy.methodology_id is None:
             raise ValueError("Choose a screening methodology before compiling.")
-        policy = ShariaPolicyDefinition(
-            universe_mode=mode,
-            methodology_id=methodology_id,
-            allowed_statuses=[
-                ShariaAssetStatus(value)
-                for value in context.get("allowed_sharia_statuses")
-                or [
-                    ShariaAssetStatus.ELIGIBLE.value,
-                    ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
-                ]
-            ],
-            qualification_policy="include_with_warning",
-            disputed_asset_policy="exclude",
-            compliance_change_behavior=ComplianceChangeBehavior(
-                context.get("compliance_change_behavior")
-                or ComplianceChangeBehavior.PAUSE_ASSET.value
-            ),
-            approved_watchlist_id=context.get("approved_watchlist_id"),
-        )
-        universe_update: dict[str, Any] = {"sharia_policy": policy}
-        if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
-            universe_update["include_symbols"] = list(
-                context.get("screened_explicit_symbols") or []
-            )
-        secured = definition.model_copy(
-            update={
-                "universe": definition.universe.model_copy(update=universe_update)
-            }
-        )
+        secured = definition
         resolution = await ShariaUniverseResolver(
             session,
             self.owner.market_provider,
@@ -1562,19 +2176,279 @@ class SetupChatLaunchService:
 
 
 def load_strategy_draft_v2(chat: AISetupChatSession) -> StrategyDraftV2:
-    context = chat.context_json or {}
+    context = dict(chat.context_json or {})
     payload = context.get("strategy_draft_v2")
     if isinstance(payload, dict):
-        return StrategyDraftV2.model_validate(payload)
-    return migrate_legacy_draft(
-        chat.draft_schema_json,
-        setup_mode=str(context.get("setup_mode") or "monitor"),
-        unsupported=chat.unsupported_conditions or [],
+        migrated_payload = dict(payload)
+        if "sharia_policy" not in migrated_payload:
+            policy = _legacy_sharia_policy(context)
+            migrated_payload["sharia_policy"] = policy.model_dump(mode="json")
+            migrated_payload["executable_version"] = (
+                int(migrated_payload.get("executable_version") or 1) + 1
+            )
+            migrated_payload["approval"] = ApprovalBindingV2().model_dump(mode="json")
+            migrated_payload["executable_hash"] = ""
+            migrated_payload["workflow_state_hash"] = ""
+            migrated_payload["unresolved_fields"] = [
+                *list(migrated_payload.get("unresolved_fields") or []),
+                *[
+                    item.model_dump(mode="json")
+                    for item in _migration_policy_unresolved(
+                        policy,
+                        workflow_revision=int(
+                            migrated_payload.get("workflow_revision") or 1
+                        ),
+                        legacy_context=context,
+                    )
+                ],
+            ]
+        draft = StrategyDraftV2.model_validate(migrated_payload)
+    else:
+        draft = migrate_legacy_draft(
+            chat.draft_schema_json,
+            setup_mode=str(context.get("setup_mode") or "monitor"),
+            unsupported=chat.unsupported_conditions or [],
+        )
+        if any(context.get(key) is not None for key in _LEGACY_SHARIA_POLICY_KEYS):
+            policy = _legacy_sharia_policy(context)
+            draft = StrategyDraftV2.model_validate(
+                draft.model_copy(
+                    update={
+                        "sharia_policy": policy,
+                        "unresolved_fields": [
+                            *draft.unresolved_fields,
+                            *_migration_policy_unresolved(
+                                policy,
+                                workflow_revision=draft.workflow_revision,
+                                legacy_context=context,
+                            ),
+                        ],
+                        "executable_version": draft.executable_version + 1,
+                        "approval": ApprovalBindingV2(),
+                        "executable_hash": "",
+                        "workflow_state_hash": "",
+                    }
+                ).model_dump(mode="json")
+            )
+    changed = context.get("strategy_draft_v2") != draft.model_dump(mode="json")
+    context["strategy_draft_v2"] = draft.model_dump(mode="json")
+    for key in _LEGACY_SHARIA_POLICY_KEYS:
+        changed = context.pop(key, None) is not None or changed
+    if changed:
+        context["sharia_policy_authority"] = "strategy_draft_v2"
+        chat.context_json = context
+    return draft
+
+
+_LEGACY_SHARIA_POLICY_KEYS = {
+    "screened_universe_mode",
+    "sharia_methodology_id",
+    "sharia_methodology_code",
+    "sharia_methodology_name",
+    "sharia_methodology_version",
+    "allowed_sharia_statuses",
+    "qualification_policy",
+    "disputed_asset_policy",
+    "compliance_change_behavior",
+    "approved_watchlist_id",
+    "approved_watchlist_name",
+    "approved_watchlist_version",
+    "screened_explicit_symbols",
+}
+
+
+def _legacy_sharia_policy(context: dict[str, Any]) -> ShariaPolicyV2:
+    """Move the legacy session policy into the one canonical executable owner."""
+
+    mode_value = str(
+        context.get("screened_universe_mode")
+        or ShariaUniverseMode.ELIGIBLE_MARKET.value
     )
+    try:
+        universe_mode = ShariaUniverseMode(mode_value)
+    except ValueError:
+        universe_mode = ShariaUniverseMode.ELIGIBLE_MARKET
+    allowed: list[ShariaAssetStatus] = []
+    for value in context.get("allowed_sharia_statuses") or [
+        ShariaAssetStatus.ELIGIBLE.value,
+        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
+    ]:
+        try:
+            allowed.append(ShariaAssetStatus(value))
+        except ValueError:
+            continue
+    if not allowed:
+        allowed = [ShariaAssetStatus.ELIGIBLE]
+    try:
+        compliance_behavior = ComplianceChangeBehavior(
+            context.get("compliance_change_behavior")
+            or ComplianceChangeBehavior.PAUSE_ASSET.value
+        )
+    except ValueError:
+        compliance_behavior = ComplianceChangeBehavior.PAUSE_ASSET
+    return ShariaPolicyV2(
+        universe_mode=universe_mode,
+        methodology_id=context.get("sharia_methodology_id"),
+        methodology_version=context.get("sharia_methodology_version"),
+        allowed_statuses=allowed,
+        qualification_policy=context.get("qualification_policy")
+        or "include_with_warning",
+        disputed_asset_policy=context.get("disputed_asset_policy") or "exclude",
+        compliance_change_behavior=compliance_behavior,
+        approved_watchlist_id=context.get("approved_watchlist_id"),
+        approved_watchlist_version=context.get("approved_watchlist_version"),
+        explicit_symbols=list(context.get("screened_explicit_symbols") or []),
+    )
+
+
+def _migration_policy_unresolved(
+    policy: ShariaPolicyV2,
+    *,
+    workflow_revision: int,
+    legacy_context: dict[str, Any] | None = None,
+) -> list[UnresolvedFieldV2]:
+    """Represent incomplete legacy policy as typed, visible, fail-closed work."""
+
+    unresolved: list[UnresolvedFieldV2] = []
+    if policy.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST and (
+        policy.approved_watchlist_id is None or not policy.approved_watchlist_version
+    ):
+        unresolved.append(
+            UnresolvedFieldV2(
+                unresolved_id="sharia.approved_watchlist",
+                source_turn_id=None,
+                source_fragment="Migrated legacy Setup Chat Sharia policy.",
+                target_type="universe",
+                target_field="sharia_policy.approved_watchlist_id",
+                expected_answer_schema={"type": "string", "format": "uuid"},
+                question="Which current Favorites list should HilalMarkets use?",
+                reason=(
+                    "The legacy setup did not preserve a complete immutable watchlist "
+                    "identity."
+                ),
+                created_workflow_revision=workflow_revision,
+            )
+        )
+    if (
+        policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS
+        and not policy.explicit_symbols
+    ):
+        unresolved.append(
+            UnresolvedFieldV2(
+                unresolved_id="sharia.explicit_symbols",
+                source_turn_id=None,
+                source_fragment="Migrated legacy Setup Chat Sharia policy.",
+                target_type="universe",
+                target_field="sharia_policy.explicit_symbols",
+                expected_answer_schema={
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+                question="Which eligible spot assets should HilalMarkets watch?",
+                reason="The legacy setup did not preserve an explicit screened asset list.",
+                created_workflow_revision=workflow_revision,
+            )
+        )
+    if legacy_context is not None:
+        raw_mode = legacy_context.get("screened_universe_mode")
+        if raw_mode is not None and str(raw_mode) not in {
+            item.value for item in ShariaUniverseMode
+        }:
+            unresolved.append(
+                UnresolvedFieldV2(
+                    unresolved_id="sharia.universe_mode",
+                    source_turn_id=None,
+                    source_fragment="Migrated legacy Setup Chat Sharia policy.",
+                    target_type="universe",
+                    target_field="sharia_policy.universe_mode",
+                    expected_answer_schema={
+                        "type": "string",
+                        "enum": [item.value for item in ShariaUniverseMode],
+                    },
+                    allowed_options=[item.value for item in ShariaUniverseMode],
+                    question="Which screened universe should HilalMarkets use?",
+                    reason=(
+                        "The legacy setup stored an unrecognized universe mode, so "
+                        "the policy cannot be approved until it is selected again."
+                    ),
+                    created_workflow_revision=workflow_revision,
+                )
+            )
+        raw_statuses = legacy_context.get("allowed_sharia_statuses")
+        known_statuses = {item.value for item in ShariaAssetStatus}
+        if isinstance(raw_statuses, list) and any(
+            str(item) not in known_statuses for item in raw_statuses
+        ):
+            unresolved.append(
+                UnresolvedFieldV2(
+                    unresolved_id="sharia.allowed_statuses",
+                    source_turn_id=None,
+                    source_fragment="Migrated legacy Setup Chat Sharia policy.",
+                    target_type="universe",
+                    target_field="sharia_policy.allowed_statuses",
+                    expected_answer_schema={
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": sorted(known_statuses),
+                        },
+                        "minItems": 1,
+                    },
+                    question="Which governed Sharia statuses may this setup include?",
+                    reason=(
+                        "The legacy setup contained an unrecognized allowed status."
+                    ),
+                    created_workflow_revision=workflow_revision,
+                )
+            )
+        raw_behavior = legacy_context.get("compliance_change_behavior")
+        if raw_behavior is not None and str(raw_behavior) not in {
+            item.value for item in ComplianceChangeBehavior
+        }:
+            unresolved.append(
+                UnresolvedFieldV2(
+                    unresolved_id="sharia.compliance_change_behavior",
+                    source_turn_id=None,
+                    source_fragment="Migrated legacy Setup Chat Sharia policy.",
+                    target_type="universe",
+                    target_field="sharia_policy.compliance_change_behavior",
+                    expected_answer_schema={
+                        "type": "string",
+                        "enum": [item.value for item in ComplianceChangeBehavior],
+                    },
+                    allowed_options=[
+                        item.value for item in ComplianceChangeBehavior
+                    ],
+                    question=(
+                        "What should happen if an included asset's compliance "
+                        "status changes?"
+                    ),
+                    reason=(
+                        "The legacy setup stored an unrecognized compliance-change "
+                        "behavior."
+                    ),
+                    created_workflow_revision=workflow_revision,
+                )
+            )
+    return unresolved
 
 
 def _normalized_market_symbol(value: str) -> str:
     return value.upper().replace("-", "/").split(":", 1)[0].strip()
+
+
+def _option_symbols(value: str, quote_asset: str) -> list[str]:
+    tokens = re.findall(r"\b[A-Za-z0-9]{2,12}(?:[/_-][A-Za-z0-9]{2,12})?\b", value)
+    ignored = {"AND", "OR", "THE", "ASSET", "ASSETS", "COIN", "COINS"}
+    normalized: list[str] = []
+    for token in tokens:
+        compact = token.upper().replace("-", "/").replace("_", "/")
+        if compact in ignored:
+            continue
+        symbol = compact if "/" in compact else f"{compact}/{quote_asset.upper()}"
+        normalized.append(symbol)
+    return list(dict.fromkeys(normalized))
 
 
 def _archive_approval(
@@ -1682,7 +2556,7 @@ def _translation_sheet(draft: StrategyDraftV2) -> dict[str, Any]:
                     }
                 )
     return {
-        "schema_version": "2.1",
+        "schema_version": "2.2",
         "executable_version": draft.executable_version,
         "workflow_revision": draft.workflow_revision,
         "monitor_name": draft.name,

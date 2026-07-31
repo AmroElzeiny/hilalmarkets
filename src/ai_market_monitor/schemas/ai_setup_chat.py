@@ -233,6 +233,8 @@ class SetupChatSessionResponse(BaseModel):
     evaluation_contract: SetupChatEvaluationContract | None = None
     error: SetupChatErrorEnvelope | None = None
     next_url: str | None = None
+    replayed_client_message_id: str | None = None
+    turn_execution_result: dict[str, Any] | None = None
     updated_at: datetime
 
 

@@ -111,7 +111,6 @@ from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseResolver,
 )
 from ai_market_monitor.services.strategy import StrategyService
-from ai_market_monitor.services.strategy_patch_extractor import StrategyPatchExtractor
 from ai_market_monitor.services.system_brain import CapabilityCoverageService
 from ai_market_monitor.services.verified_strategy import VerifiedStrategyService
 
@@ -706,7 +705,6 @@ class AISetupChatService:
         *,
         interviewer: SetupChatInterviewer | None = None,
         agent_client: AgentResponsesClient | None = None,
-        launch_extractor: StrategyPatchExtractor | None = None,
         launch_agent: SetupChatAgent | None = None,
     ) -> None:
         self.settings = settings
@@ -714,7 +712,6 @@ class AISetupChatService:
         self.strategy_interpreter = strategy_interpreter
         self.interviewer = interviewer or OpenAISetupChatInterviewer(settings)
         self.agent_client = agent_client
-        self.launch_extractor = launch_extractor
         #: Free text is answered by this agent. Injected in tests so a whole turn can
         #: be exercised without a paid call.
         self.launch_agent = launch_agent
@@ -892,7 +889,7 @@ class AISetupChatService:
             )
 
             draft_v2 = StrategyDraftV2.model_validate(v2_payload)
-            if not draft_v2.approval_eligible or validate_draft_semantics(draft_v2):
+            if draft_v2.authoring_blocking or validate_draft_semantics(draft_v2):
                 raise SetupChatError(
                     "setup_not_ready",
                     "Resolve every blocking V2 draft item before approval.",
@@ -907,6 +904,27 @@ class AISetupChatService:
                     "The V2 draft changed. Review the latest version before approval.",
                     status_code=409,
                 )
+            try:
+                definition = await SetupChatLaunchService(
+                    self.settings,
+                    self,
+                    agent=self.launch_agent,
+                ).revalidate_for_approval(
+                    session,
+                    chat,
+                    draft_v2,
+                    expected_executable_version=draft_v2.executable_version,
+                    expected_executable_hash=draft_v2.executable_hash,
+                    expected_schema_hash=expected_schema_hash,
+                )
+            except SetupLaunchError as exc:
+                raise SetupChatError(
+                    exc.code.casefold(),
+                    str(exc),
+                    status_code=exc.status_code,
+                ) from exc
+            canonical_hash = definition.canonical_hash()
+            chat.draft_schema_json = definition.model_dump(mode="json")
             approval_messages = await self.messages(session, chat.id)
             snapshot_hash = conversation_snapshot_hash(
                 (item.role, item.content) for item in approval_messages
@@ -1130,7 +1148,6 @@ class AISetupChatService:
                 return await SetupChatLaunchService(
                     self.settings,
                     self,
-                    extractor=self.launch_extractor,
                     agent=self.launch_agent,
                 ).handle(
                     session,
@@ -3937,14 +3954,15 @@ class AISetupChatService:
             except ValidationError:
                 current_hash = None
         user_safe_validation = not envelope.error_code.startswith(("TARGET_", "STRATEGY_"))
-        await self._assistant(
+        assistant_content = (
+            envelope.message
+            if user_safe_validation
+            else _TURN_FAILURE_MESSAGE.format(request_id=envelope.request_id)
+        )
+        assistant = await self._assistant(
             session,
             chat,
-            (
-                envelope.message
-                if user_safe_validation
-                else _TURN_FAILURE_MESSAGE.format(request_id=envelope.request_id)
-            ),
+            assistant_content,
             message_type="turn_error",
             payload={
                 "error": envelope.model_dump(mode="json"),
@@ -3968,14 +3986,23 @@ class AISetupChatService:
                 and turn.status != "COMPLETED"
                 and turn.execution_result_json is None
             ):
+                draft = load_strategy_draft_v2(chat)
                 turn.status = (
-                    "RETRYABLE_FAILURE"
-                    if envelope.retryable
-                    else "PERMANENT_FAILURE"
+                    "RETRYABLE_FAILURE" if envelope.retryable else "COMPLETED"
                 )
                 turn.failure_code = envelope.error_code
                 turn.failure_stage = envelope.stage
                 turn.failure_retryable = envelope.retryable
+                turn.assistant_message_id = assistant.id
+                turn.reply_json = {
+                    "message": assistant_content,
+                    "execution_result": None,
+                    "error": envelope.model_dump(mode="json"),
+                }
+                turn.executable_version_after = draft.executable_version
+                turn.workflow_revision_after = draft.workflow_revision
+                if not envelope.retryable:
+                    turn.completed_at = datetime.now(UTC)
 
     async def _assistant(
         self,
@@ -3985,8 +4012,8 @@ class AISetupChatService:
         *,
         message_type: str,
         payload: dict[str, Any] | None = None,
-    ) -> None:
-        await self._append_message(
+    ) -> AISetupChatMessage:
+        return await self._append_message(
             session,
             chat,
             role="assistant",

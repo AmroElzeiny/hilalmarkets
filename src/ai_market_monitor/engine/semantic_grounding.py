@@ -160,6 +160,47 @@ def grounds_timeframe(text: str, timeframe: str) -> bool:
     return timeframe in extract_timeframes(text)
 
 
+def grounds_text_value(text: str, value: str) -> bool:
+    """Ground a trader-controlled string or enum without substring accidents."""
+
+    normalized_text = re.sub(r"[_-]+", " ", text.casefold())
+    normalized_value = re.sub(r"[_-]+", " ", value.casefold()).strip()
+    aliases = {
+        "close": ("close", "closing price", "سعر الاغلاق", "سعر الإغلاق", "2fl"),
+        "open": ("open", "opening price", "سعر الفتح", "سعر الافتتاح"),
+        "high": ("high", "highest price", "اعلى", "أعلى"),
+        "low": ("low", "lowest price", "اقل", "أقل"),
+        "bullish": ("bullish", "صاعد", "tale3", "tal3"),
+        "bearish": ("bearish", "هابط", "نازل", "nazel"),
+        "neutral": ("neutral", "محايد"),
+    }
+    candidates = aliases.get(normalized_value, (normalized_value,))
+    return any(
+        bool(re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", normalized_text))
+        for candidate in candidates
+    )
+
+
+def grounds_boolean(text: str, value: bool) -> bool:
+    """Ground an explicit boolean choice in English, Arabic, or common Arabizi."""
+
+    lowered = re.sub(r"[_-]+", " ", text.casefold())
+    patterns = (
+        (
+            r"\b(?:yes|true|enable|enabled|use|required|must|on)\b"
+            r"|(?:نعم|ايوه|أيوه|مطلوب|فعّل|فعل)"
+            r"|\b(?:aywa|ah|fa3al|shaghal)\b"
+        )
+        if value
+        else (
+            r"\b(?:no|false|disable|disabled|do not|don't|optional|off)\b"
+            r"|(?:لا|مش|اختياري|عطّل|الغ)"
+            r"|\b(?:la2|la|msh|ekhtiyary|optional)\b"
+        )
+    )
+    return bool(re.search(patterns, lowered, re.IGNORECASE))
+
+
 def grounds_operator(text: str, operator: Comparator) -> bool:
     """True when ``text`` states this comparison, in words or symbols.
 

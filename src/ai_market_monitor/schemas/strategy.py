@@ -103,9 +103,14 @@ class ConditionRule(BaseModel):
     label: str = Field(min_length=1, max_length=240)
     condition_type: ConditionType
     timeframe: Timeframe
+    context_timeframes: list[Timeframe] = Field(default_factory=list, max_length=10)
+    confirmation_timeframes: list[Timeframe] = Field(default_factory=list, max_length=10)
+    reference_timeframe: Timeframe | None = None
     left: Operand
     comparator: Comparator
     right: Operand | None = None
+    source_operands: list[Operand] = Field(default_factory=list, max_length=12)
+    condition_symbols: list[str] = Field(default_factory=list, max_length=1000)
     required: bool = True
     weight: float = Field(default=1.0, gt=0, le=100)
     cap_score_on_fail: float | None = Field(default=None, ge=0, le=100)
@@ -189,6 +194,7 @@ class ShariaPolicyDefinition(BaseModel):
 
     universe_mode: ShariaUniverseMode = ShariaUniverseMode.ELIGIBLE_MARKET
     methodology_id: UUID | None = None
+    methodology_version: str | None = Field(default=None, max_length=32)
     allowed_statuses: list[ShariaAssetStatus] = Field(
         default_factory=lambda: [
             ShariaAssetStatus.ELIGIBLE,
@@ -203,6 +209,7 @@ class ShariaPolicyDefinition(BaseModel):
     disputed_asset_policy: Literal["exclude", "include_with_warning"] = "exclude"
     compliance_change_behavior: ComplianceChangeBehavior = ComplianceChangeBehavior.PAUSE_ASSET
     approved_watchlist_id: UUID | None = None
+    approved_watchlist_version: str | None = Field(default=None, max_length=80)
     universe_snapshot_version: int | None = Field(default=None, ge=1)
     universe_last_resolved_at: datetime | None = None
     advanced_override_acknowledged: bool = False
@@ -616,6 +623,10 @@ class StrategyDefinition(BaseModel):
             keys.append(node.key)
             if isinstance(node, ConditionRule):
                 timeframes.add(node.timeframe)
+                timeframes.update(node.context_timeframes)
+                timeframes.update(node.confirmation_timeframes)
+                if node.reference_timeframe:
+                    timeframes.add(node.reference_timeframe)
             else:
                 for child in node.children:
                     walk(child)

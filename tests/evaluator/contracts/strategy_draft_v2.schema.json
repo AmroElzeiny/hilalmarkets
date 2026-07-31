@@ -92,6 +92,16 @@
       "title": "Comparator",
       "type": "string"
     },
+    "ComplianceChangeBehavior": {
+      "enum": [
+        "pause_asset",
+        "remove_asset",
+        "pause_monitor_if_any_asset_changes",
+        "notify_only"
+      ],
+      "title": "ComplianceChangeBehavior",
+      "type": "string"
+    },
     "ConditionNodeType": {
       "enum": [
         "condition",
@@ -738,6 +748,131 @@
       "title": "ProviderRuntimeStatusV2",
       "type": "object"
     },
+    "ShariaAssetStatus": {
+      "enum": [
+        "eligible",
+        "eligible_with_qualifications",
+        "disputed",
+        "under_review",
+        "excluded",
+        "insufficient_information"
+      ],
+      "title": "ShariaAssetStatus",
+      "type": "string"
+    },
+    "ShariaPolicyV2": {
+      "additionalProperties": false,
+      "description": "Static, user-selected Sharia policy that is part of executable identity.\n\nCurrent assessment results and universe resolutions deliberately do not live here.\nThey are dynamic compliance/runtime evidence and are frozen separately.",
+      "properties": {
+        "allowed_statuses": {
+          "items": {
+            "$ref": "#/$defs/ShariaAssetStatus"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Allowed Statuses",
+          "type": "array"
+        },
+        "approved_watchlist_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Watchlist Id"
+        },
+        "approved_watchlist_version": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Watchlist Version"
+        },
+        "compliance_change_behavior": {
+          "$ref": "#/$defs/ComplianceChangeBehavior",
+          "default": "pause_asset"
+        },
+        "disputed_asset_policy": {
+          "default": "exclude",
+          "enum": [
+            "exclude",
+            "include_with_warning"
+          ],
+          "title": "Disputed Asset Policy",
+          "type": "string"
+        },
+        "explicit_symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Explicit Symbols",
+          "type": "array"
+        },
+        "methodology_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Id"
+        },
+        "methodology_version": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Version"
+        },
+        "qualification_policy": {
+          "default": "include_with_warning",
+          "enum": [
+            "include_with_warning",
+            "exclude",
+            "require_acknowledgement"
+          ],
+          "title": "Qualification Policy",
+          "type": "string"
+        },
+        "universe_mode": {
+          "$ref": "#/$defs/ShariaUniverseMode",
+          "default": "eligible_market"
+        }
+      },
+      "title": "ShariaPolicyV2",
+      "type": "object"
+    },
+    "ShariaUniverseMode": {
+      "enum": [
+        "eligible_market",
+        "approved_watchlist",
+        "explicit_assets"
+      ],
+      "title": "ShariaUniverseMode",
+      "type": "string"
+    },
     "SourceProvenanceV2": {
       "additionalProperties": false,
       "properties": {
@@ -1022,10 +1157,13 @@
       "$ref": "#/$defs/DraftRuntimeStateV2"
     },
     "schema_version": {
-      "const": "2.1",
-      "default": "2.1",
+      "const": "2.2",
+      "default": "2.2",
       "title": "Schema Version",
       "type": "string"
+    },
+    "sharia_policy": {
+      "$ref": "#/$defs/ShariaPolicyV2"
     },
     "source_provenance": {
       "items": {

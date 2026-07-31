@@ -58,10 +58,15 @@ from ai_market_monitor.schemas.setup_authorization import (
     AuthorizedPatchOperation,
     ClarificationContract,
 )
+from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
+    FormulaKind,
+    MovementDirection,
+    StrategyBias,
     StrategyDraftV2,
     StrategyPatch,
+    StrategyUniverseV2,
 )
 from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
@@ -415,8 +420,9 @@ async def test_an_instruction_and_a_question_are_both_handled() -> None:
     assert result.execution.strategy_mutated is True
     assert result.plan is not None
     assert question in result.plan.questions_to_answer
-    assert script.composer_payloads == []
-    assert result.trace.model_calls == 1
+    assert len(script.composer_payloads) == 1
+    assert result.trace.model_calls == 2
+    assert result.reply.message_without_question == script.reply
     kinds = {item.kind for item in result.execution.ignored_non_actionable_segments}
     assert SegmentKind.USER_QUESTION in kinds
 
@@ -702,6 +708,7 @@ async def test_several_independent_conditions_each_keep_their_own_semantics() ->
     assert timeframes == {"15m", "1h"}, "each rule keeps its own timeframe"
     assert result.execution is not None
     assert result.execution.semantic_violations == []
+    assert result.draft.executable_version == base.executable_version + 1
 
 
 async def test_nested_boolean_structure_is_preserved_through_the_tool() -> None:
@@ -914,6 +921,86 @@ async def test_a_capability_key_must_come_from_the_server_shortlist() -> None:
     assert error.value.code == "CAPABILITY_NOT_OFFERED"
 
 
+async def test_inherited_capability_and_parameters_need_no_rediscovery() -> None:
+    existing = _conditions(
+        _draft_with(
+            "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
+        )
+    )[0].model_copy(
+        update={
+            "formula": FormulaKind.CAPABILITY,
+            "operands": [],
+            "operator": Comparator.LESS_THAN,
+            "threshold": 30,
+            "unit": "index",
+            "movement_direction": MovementDirection.DOWN,
+            "strategy_bias": StrategyBias.SHORT,
+            "capability_key": "rsi_threshold",
+            "capability_version": "1.0",
+            "capability_parameters": {},
+            "source_fragment": "RSI below 30 on the 15m",
+        }
+    )
+    draft = StrategyDraftV2(
+        universe=StrategyUniverseV2(included_symbols=["BTC/USDT"]),
+        condition_ast=existing,
+    )
+    message = "make that stricter at 25"
+    replacement = existing.model_copy(
+        update={
+            "threshold": 25,
+            "source_turn_id": TURN_ID,
+            "source_fragment": message,
+        }
+    )
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN_ID,
+        segments=[
+            _segment(
+                message,
+                message,
+                SegmentKind.STRATEGY_INSTRUCTION,
+                segment_id="s1",
+                action=True,
+                target=existing.node_id,
+            )
+        ],
+        operations=[
+            AuthorizedPatchOperation(
+                operation_id="inherit-rsi-threshold",
+                authorizing_segment_id="s1",
+                kind="update_condition",
+                target_condition_id=existing.node_id,
+                condition=replacement,
+            )
+        ],
+        strategy_instructions=[
+            StrategyInstructionPlan(
+                segment_id="s1",
+                intent_summary="make the existing condition stricter",
+                target_condition_id=existing.node_id,
+                capability_key="rsi_threshold",
+            )
+        ],
+        overall_confidence=0.95,
+    )
+
+    outcome = await apply_setup_turn(
+        SetupTurnRequest(
+            plan=plan,
+            message=message,
+            draft=draft,
+            source_turn_id=TURN_ID,
+            allowed_capability_keys=frozenset(),
+        )
+    )
+
+    changed = _conditions(outcome.draft)[0]
+    assert changed.threshold == 25
+    assert changed.capability_key == "rsi_threshold"
+    assert outcome.draft.executable_version == draft.executable_version + 1
+
+
 async def test_snapshot_restore_requires_exact_owned_snapshot_identity() -> None:
     original = _draft_with(
         "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
@@ -1012,7 +1099,7 @@ async def test_the_planner_is_always_given_the_shortlist_and_the_boundaries() ->
     assert "rule" in payload["capability_shortlist"]
     assert payload["core_primitives"]["formulas"], "core primitives must be supplied"
     assert payload["product_boundaries"]["cannot"], "boundaries must be supplied"
-    assert payload["lexical_hint_non_authoritative"], "the hint travels as a hint"
+    assert "lexical_hint_non_authoritative" not in payload
 
 
 # --------------------------------------------------------------------------------
@@ -1201,8 +1288,28 @@ async def test_a_provider_failure_while_planning_preserves_the_draft(
     assert error.value.retryable is True
 
 
+async def test_missing_ai_provider_credentials_are_retryable_and_do_not_mutate() -> None:
+    settings = _settings().model_copy(update={"openai_api_key": None})
+    agent = SetupChatAgent(settings)
+    draft = StrategyDraftV2()
+
+    with pytest.raises(SetupAgentError) as error:
+        await agent.run_turn(
+            SetupAgentTurnInput(
+                message="hello",
+                source_turn_id=TURN_ID,
+                draft=draft,
+            )
+        )
+
+    assert error.value.code == "TARGET_PROVIDER_NOT_CONFIGURED"
+    assert error.value.stage == "planning"
+    assert error.value.retryable is True
+    assert draft.executable_version == 1
+
+
 async def test_success_is_composed_deterministically_without_a_second_ai_call() -> None:
-    """An exact primitive is parsed and reported without a provider call."""
+    """An exact primitive is AI-planned once and reported without a composer call."""
     message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
     script = Script(
         plan=SetupAgentPlanEnvelope(
@@ -1233,8 +1340,8 @@ async def test_success_is_composed_deterministically_without_a_second_ai_call() 
     assert result.execution is not None
     assert result.execution.strategy_mutated is True, "the applied work survives"
     assert result.trace.response_model == "deterministic_summary"
-    assert result.trace.model_calls == 0
-    assert script.planner_payloads == []
+    assert result.trace.model_calls == 1
+    assert len(script.planner_payloads) == 1
     assert script.composer_payloads == []
     assert "open to close percentage" in result.reply.message_without_question
     assert (
@@ -1297,10 +1404,57 @@ async def test_redis_success_bookkeeping_failure_never_repeats_the_model_call() 
         )
     )
 
-    assert result.trace.model_calls == 1
+    assert result.trace.model_calls == 2
     assert len(script.planner_payloads) == 1
+    assert len(script.composer_payloads) == 1
     assert result.execution is not None
     assert result.execution.strategy_mutated is True
+
+
+async def test_redis_outage_does_not_make_healthy_ai_semantics_unavailable() -> None:
+    message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
+    script = Script(
+        plan=SetupAgentPlanEnvelope(
+            plan=SetupAgentTurnPlan(
+                source_turn_id=TURN_ID,
+                segments=[
+                    _segment(
+                        message,
+                        message,
+                        SegmentKind.STRATEGY_INSTRUCTION,
+                        segment_id="s1",
+                        action=True,
+                    )
+                ],
+                operations=operations_from_patch(_patch_for(message), segment_id="s1"),
+                strategy_instructions=[
+                    StrategyInstructionPlan(segment_id="s1", intent_summary="15m rise")
+                ],
+                overall_confidence=0.95,
+            )
+        )
+    )
+
+    class RedisUnavailable:
+        async def eval(self, *args, **kwargs):
+            raise RedisError("shared state unavailable")
+
+        async def delete(self, *args, **kwargs):
+            raise RedisError("shared state unavailable")
+
+    agent = SetupChatAgent(_settings(), transport=script.transport())
+    agent._circuit_redis = RedisUnavailable()  # type: ignore[assignment]
+    result = await agent.run_turn(
+        SetupAgentTurnInput(
+            message=message,
+            source_turn_id=TURN_ID,
+            draft=StrategyDraftV2(),
+        )
+    )
+
+    assert result.execution is not None
+    assert result.execution.strategy_mutated
+    assert result.trace.model_calls == 1
 
 
 # --------------------------------------------------------------------------------

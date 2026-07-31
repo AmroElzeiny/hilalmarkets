@@ -19,9 +19,13 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
+from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.semantic_grounding import (
+    grounds_boolean,
     grounds_number,
     grounds_operator,
+    grounds_symbol,
+    grounds_text_value,
     grounds_timeframe,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
@@ -67,6 +71,7 @@ def validate_capability_node(
     allowed_keys: frozenset[str],
     source_turn_id: str | None = None,
     require_current_shortlist: bool = True,
+    previous_node: ConditionNodeV2 | None = None,
 ) -> CapabilityContractResult:
     """Check one capability node against its registry contract.
 
@@ -89,6 +94,8 @@ def validate_capability_node(
         return CapabilityContractResult(errors=(f"{node.node_id}:capability_unknown:{key}",))
 
     errors: list[str] = []
+    if require_current_shortlist and key not in _exact_capability_keys(authorizing_text):
+        errors.append(f"{node.node_id}:capability_semantics_not_exact:{key}")
     if node.capability_version != spec.capability_version:
         errors.append(
             f"{node.node_id}:capability_version_mismatch:"
@@ -116,6 +123,7 @@ def validate_capability_node(
             node,
             spec,
             authorizing_text=authorizing_text,
+            previous_node=previous_node,
         )
     )
 
@@ -135,6 +143,17 @@ def validate_capability_node(
     return CapabilityContractResult(errors=tuple(errors), provider_requirements=providers)
 
 
+def _exact_capability_keys(authorizing_text: str) -> frozenset[str]:
+    """Capabilities the deterministic resolver matched exactly, never nearest."""
+
+    report = get_capability_index().resolver.resolve_prompt(authorizing_text)
+    return frozenset(
+        resolution.candidates[0].capability_key
+        for resolution in report.fragments
+        if resolution.status == "matched" and resolution.candidates
+    )
+
+
 def _parameters(node: ConditionNodeV2) -> dict[str, Any]:
     merged: dict[str, Any] = dict(node.capability_parameters)
     for operand in node.operands:
@@ -147,6 +166,7 @@ def _parameter_errors(
     spec: CapabilitySpec,
     *,
     authorizing_text: str,
+    previous_node: ConditionNodeV2 | None = None,
 ) -> list[str]:
     """Required present, nothing invented, every value inside its declared bounds."""
 
@@ -185,6 +205,26 @@ def _parameter_errors(
     for name in set(schema.get("properties") or {}) | set(declared):
         if name not in validation_payload and node_level.get(name) is not None:
             validation_payload[name] = node_level[name]
+    previous_payload: dict[str, Any] = {}
+    if (
+        previous_node is not None
+        and previous_node.capability_key == node.capability_key
+        and previous_node.capability_version == node.capability_version
+    ):
+        previous_payload = _parameters(previous_node)
+        previous_node_level: dict[str, Any] = {
+            "threshold": previous_node.threshold,
+            "level": previous_node.threshold,
+            "value": previous_node.threshold,
+            "timeframe": previous_node.trigger_timeframe,
+            "direction": _DIRECTION_WORDS[previous_node.movement_direction],
+            "comparator": (
+                previous_node.operator.value if previous_node.operator else None
+            ),
+        }
+        for name in set(schema.get("properties") or {}) | set(declared):
+            if name not in previous_payload and previous_node_level.get(name) is not None:
+                previous_payload[name] = previous_node_level[name]
     for failure in Draft202012Validator(schema).iter_errors(validation_payload):
         location = ".".join(str(item) for item in failure.absolute_path) or "parameters"
         validator = str(failure.validator or "schema")
@@ -199,25 +239,98 @@ def _parameter_errors(
         )
         # A number the trader controls has to come from the trader. Periods and levels
         # the platform fills in are exempt via `_PLATFORM_PARAMETERS`.
-        if (
-            isinstance(value, int | float)
-            and not isinstance(value, bool)
-            and name not in _PLATFORM_PARAMETERS
+        trader_controlled = (
+            name not in _PLATFORM_PARAMETERS
+            and previous_payload.get(name, object()) != value
             and (
                 name in supplied
                 or name not in registry_defaults
                 or registry_defaults[name] != value
             )
-            and not grounds_number(
-                authorizing_text,
-                float(value),
-                unit=_grounding_unit(semantic_unit),
-            )
+        )
+        if trader_controlled and not _parameter_value_grounded(
+            authorizing_text,
+            value,
+            rules if isinstance(rules, dict) else {},
+            semantic_unit=semantic_unit,
         ):
             errors.append(
                 f"{node.node_id}:parameter_not_grounded:{name}:{semantic_unit}"
             )
     return errors
+
+
+def _parameter_value_grounded(
+    text: str,
+    value: Any,
+    schema: dict[str, Any],
+    *,
+    semantic_unit: str,
+) -> bool:
+    """Ground every JSON value type; schema validity is not user authorization."""
+
+    if isinstance(value, bool):
+        return grounds_boolean(text, value)
+    if isinstance(value, int | float):
+        return grounds_number(
+            text,
+            float(value),
+            unit=_grounding_unit(semantic_unit),
+        )
+    if isinstance(value, str):
+        if semantic_unit == "timeframe":
+            return grounds_timeframe(text, value)
+        if semantic_unit == "symbol":
+            return grounds_symbol(text, value)
+        if grounds_text_value(text, value):
+            return True
+        semantic_aliases = schema.get("x-semantic-aliases")
+        aliases: list[str] = []
+        if isinstance(semantic_aliases, dict):
+            raw_aliases = semantic_aliases.get(value)
+            if isinstance(raw_aliases, list):
+                aliases = [str(item) for item in raw_aliases]
+        elif isinstance(semantic_aliases, list):
+            aliases = [str(item) for item in semantic_aliases]
+        return any(grounds_text_value(text, alias) for alias in aliases)
+    if isinstance(value, list):
+        item_schema = schema.get("items")
+        rules = item_schema if isinstance(item_schema, dict) else {}
+        return all(
+            _parameter_value_grounded(
+                text,
+                item,
+                rules,
+                semantic_unit=(
+                    str(rules.get("x-semantic-unit"))
+                    if rules.get("x-semantic-unit")
+                    else semantic_unit
+                ),
+            )
+            for item in value
+        )
+    if isinstance(value, dict):
+        properties = schema.get("properties")
+        property_rules = properties if isinstance(properties, dict) else {}
+        return all(
+            _parameter_value_grounded(
+                text,
+                item,
+                _property_schema(property_rules, name),
+                semantic_unit=(
+                    str(_property_schema(property_rules, name).get("x-semantic-unit"))
+                    if _property_schema(property_rules, name).get("x-semantic-unit")
+                    else _semantic_unit(name)
+                ),
+            )
+            for name, item in value.items()
+        )
+    return False
+
+
+def _property_schema(properties: dict[str, Any], name: str) -> dict[str, Any]:
+    value = properties.get(name)
+    return value if isinstance(value, dict) else {}
 
 
 def _semantic_unit(name: str) -> str:
@@ -253,6 +366,7 @@ def capability_condition_errors(
     allowed_keys: frozenset[str],
     source_turn_id: str | None = None,
     changed_node_ids: frozenset[str] = frozenset(),
+    previous_nodes_by_id: dict[str, ConditionNodeV2] | None = None,
 ) -> tuple[list[str], list[ProviderRequirementV2]]:
     """Validate every capability node in one place, before compilation."""
 
@@ -265,6 +379,7 @@ def capability_condition_errors(
             allowed_keys=allowed_keys,
             source_turn_id=source_turn_id,
             require_current_shortlist=node.node_id in changed_node_ids,
+            previous_node=(previous_nodes_by_id or {}).get(node.node_id),
         )
         errors.extend(result.errors)
         providers.extend(result.provider_requirements)

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -771,6 +772,115 @@ class StrategyRuleEngine:
         evaluation_time: datetime,
         condition_context: dict[str, Any] | None = None,
     ) -> ConditionEvaluation:
+        """Evaluate trigger, then exact context and confirmation role contracts.
+
+        Context and confirmation reuse the same measurable rule on their own candle
+        sets. They are independent prerequisites; neither can fire a condition by
+        itself. A reference timeframe is consumed only by operand/reference
+        calculation and is never treated as another pass/fail vote.
+        """
+
+        single = condition.model_copy(
+            update={"context_timeframes": [], "confirmation_timeframes": []}
+        )
+        trigger = self._condition_single(
+            single,
+            strategy,
+            candle_sets,
+            evaluation_time,
+            condition_context,
+        )
+        if not trigger.passed or not (
+            condition.context_timeframes or condition.confirmation_timeframes
+        ):
+            return trigger
+
+        role_results: list[tuple[str, str, ConditionEvaluation]] = []
+        for role, timeframes in (
+            ("context", condition.context_timeframes),
+            ("confirmation", condition.confirmation_timeframes),
+        ):
+            for timeframe in timeframes:
+                role_rule = single.model_copy(update={"timeframe": timeframe})
+                role_results.append(
+                    (
+                        role,
+                        timeframe,
+                        self._condition_single(
+                            role_rule,
+                            strategy,
+                            candle_sets,
+                            evaluation_time,
+                            condition_context,
+                        ),
+                    )
+                )
+        failed = [item for item in role_results if not item[2].passed]
+        state = (
+            trigger.state
+            if not failed
+            else next(
+                (
+                    candidate
+                    for candidate in (
+                        EvaluationState.ERROR,
+                        EvaluationState.UNAVAILABLE,
+                        EvaluationState.PENDING,
+                        EvaluationState.FAILED,
+                    )
+                    if candidate in {item[2].state for item in failed}
+                ),
+                EvaluationState.FAILED,
+            )
+        )
+        evidence = [
+            {
+                "role": role,
+                "timeframe": timeframe,
+                "state": result.state.value,
+                "actual_value": result.actual_value,
+                "required_value": result.required_value,
+                "market_data_timestamp": (
+                    result.market_data_timestamp.isoformat()
+                    if result.market_data_timestamp
+                    else None
+                ),
+            }
+            for role, timeframe, result in role_results
+        ]
+        semantic = {
+            **(trigger.semantic_contract or {}),
+            "context_timeframes": list(condition.context_timeframes),
+            "confirmation_timeframes": list(condition.confirmation_timeframes),
+            "reference_timeframe": condition.reference_timeframe,
+            "timeframe_role_contract": "same_rule_independent_prerequisite",
+            "timeframe_role_evaluations": evidence,
+        }
+        explanation = trigger.explanation
+        if failed:
+            missing = ", ".join(
+                f"{role} {timeframe}" for role, timeframe, _result in failed
+            )
+            explanation = f"{trigger.name} trigger passed; {missing} did not confirm."
+        return replace(
+            trigger,
+            state=state,
+            explanation=explanation,
+            proximity_score=min(
+                [trigger.proximity_score, *(item[2].proximity_score for item in role_results)]
+            ),
+            error_code=failed[0][2].error_code if failed else trigger.error_code,
+            semantic_contract=semantic,
+        )
+
+    def _condition_single(
+        self,
+        condition: ConditionRule,
+        strategy: StrategyDefinition,
+        candle_sets: dict[str, list[Candle]],
+        evaluation_time: datetime,
+        condition_context: dict[str, Any] | None = None,
+    ) -> ConditionEvaluation:
         condition_context = {
             **(condition_context or {}),
             "current_condition_key": condition.key,
@@ -1501,9 +1611,18 @@ class StrategyRuleEngine:
             "unit": parameters.get("unit"),
             "timeframe_role": "trigger",
             "trigger_timeframe": condition.timeframe,
-            "reference_timeframe": parameters.get("reference_timeframe"),
+            "context_timeframes": list(condition.context_timeframes),
+            "confirmation_timeframes": list(condition.confirmation_timeframes),
+            "reference_timeframe": (
+                condition.reference_timeframe
+                or parameters.get("reference_timeframe")
+            ),
             "reference_definition": parameters.get("reference_definition"),
             "lookback": parameters.get("lookback"),
+            "source_operands": [
+                item.model_dump(mode="json") for item in condition.source_operands
+            ],
+            "condition_symbols": list(condition.condition_symbols),
             "ast_path": list(condition.ast_path),
             "source_turn_id": condition.source_turn_id,
             "source_fragment": condition.source_fragment,

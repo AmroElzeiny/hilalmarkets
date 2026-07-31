@@ -108,9 +108,13 @@ def test_evaluator_proof_retains_compiled_semantic_contract_and_provenance():
         "unit": "price",
         "timeframe_role": "trigger",
         "trigger_timeframe": "15m",
+        "context_timeframes": [],
+        "confirmation_timeframes": [],
         "reference_timeframe": "15m",
         "reference_definition": "fixed price level 0",
         "lookback": 20,
+        "source_operands": [],
+        "condition_symbols": [],
         "ast_path": [1, 0],
         "source_turn_id": "turn-proof-1234",
         "source_fragment": "close is above zero",
@@ -393,6 +397,47 @@ def test_neutral_direction_is_one_runtime_evaluation_not_long_and_short():
     strategy.direction = StrategyDirection.NEUTRAL
 
     assert strategy_evaluation_directions(strategy) == (None,)
+
+
+def test_context_and_confirmation_timeframes_are_independent_runtime_prerequisites():
+    strategy = load_strategy()
+    strategy.risk.enabled = False
+    rule = ConditionRule(
+        key="multi_timeframe_rule",
+        label="Close above zero on every role",
+        condition_type=strategy.conditions.children[0].condition_type,
+        timeframe="15m",
+        context_timeframes=["4h"],
+        confirmation_timeframes=["1h"],
+        left=Operand(kind=OperandKind.PRICE, field="close"),
+        comparator=Comparator.GREATER_THAN,
+        right=Operand(kind=OperandKind.CONSTANT, value=0),
+        resolved_parameters={"formula": "fixed_reference_level"},
+    )
+    strategy.conditions = ConditionGroup(
+        key="multi_timeframe_root",
+        operator=LogicalOperator.AND,
+        children=[rule],
+    )
+    strategy.supporting_timeframes = ["1h", "4h"]
+    sets = candle_sets()
+    sets["1h"] = list(sets["4h"])
+
+    result = StrategyRuleEngine().evaluate(
+        strategy,
+        market(),
+        sets,
+        evaluation_time=sets["15m"][-1].timestamp,
+        strategy_version="multi-timeframe",
+    )
+
+    condition = result.conditions[0]
+    assert condition.passed
+    role_evidence = condition.semantic_contract["timeframe_role_evaluations"]
+    assert {(item["role"], item["timeframe"]) for item in role_evidence} == {
+        ("context", "4h"),
+        ("confirmation", "1h"),
+    }
 
 
 def test_risk_failure_is_preserved_in_proof_and_blocks_confirmation():

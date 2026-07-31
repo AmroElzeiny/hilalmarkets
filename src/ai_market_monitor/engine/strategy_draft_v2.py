@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -54,11 +53,22 @@ def apply_strategy_patch(
     patch: StrategyPatch,
     *,
     history: list[dict[str, Any]] | None = None,
+    finalize_versions: bool = True,
 ) -> DraftPatchResult:
-    """Apply exactly one validated patch and return a new canonical version."""
+    """Apply one validated patch.
+
+    ``finalize_versions=False`` is reserved for the atomic Setup Chat turn executor.
+    It lets that executor validate sequential operations against a working draft while
+    consuming public version numbers only once, after the complete turn succeeds.
+    """
 
     if patch.reversion is not None:
-        return _revert_to_snapshot(draft, patch, history or [])
+        return _revert_to_snapshot(
+            draft,
+            patch,
+            history or [],
+            finalize_versions=finalize_versions,
+        )
 
     original_executable_hash = draft.executable_hash
     original_workflow_hash = draft.workflow_state_hash
@@ -81,6 +91,13 @@ def apply_strategy_patch(
     market_scope = (
         draft.market_scope.model_copy(update=scope_update) if scope_update else draft.market_scope
     )
+    sharia_policy = draft.sharia_policy
+    if (
+        patch.set_sharia_policy is not None
+        and patch.set_sharia_policy != draft.sharia_policy
+    ):
+        sharia_policy = patch.set_sharia_policy
+        changed.append("sharia_policy")
 
     included = list(draft.universe.included_symbols)
     excluded = list(draft.universe.excluded_symbols)
@@ -163,17 +180,9 @@ def apply_strategy_patch(
     for unresolved_item in patch.unresolved_references:
         unresolved[unresolved_item.key] = unresolved_item
         changed.append(f"unresolved.added:{unresolved_item.key}")
-    if patch.correction is not None:
-        unresolved.pop(patch.correction.target, None)
-    resolved_keys = _resolved_keys(patch)
-    resolved_keys.update(
-        key
-        for key, item in unresolved.items()
-        if _patch_resolves_unresolved(item, patch)
-    )
-    # An explicitly named key is the reliable way to close an open item. The inference
-    # above stays for patches that resolve a field as a side effect of changing it.
-    resolved_keys.update(patch.remove_unresolved_keys)
+    # Typed, explicitly named targets are the only clarification authority. Legacy
+    # correction prose is still readable but cannot clear V2 state.
+    resolved_keys = set(patch.remove_unresolved_keys)
     for key in resolved_keys:
         if key in unresolved:
             unresolved.pop(key)
@@ -186,8 +195,6 @@ def apply_strategy_patch(
     for unsupported_item in patch.unsupported_requirements:
         unsupported[unsupported_item.key] = unsupported_item
         changed.append(f"unsupported.added:{unsupported_item.key}")
-    if patch.correction is not None:
-        unsupported.pop(patch.correction.target, None)
     for key in patch.remove_unsupported_keys:
         if key in unsupported:
             unsupported.pop(key)
@@ -216,6 +223,7 @@ def apply_strategy_patch(
             **draft_update,
             "universe": universe,
             "market_scope": market_scope,
+            "sharia_policy": sharia_policy,
             "condition_ast": condition_ast,
             "static_provider_requirements": derive_provider_requirements(condition_ast),
             "unresolved_fields": list(unresolved.values()),
@@ -244,12 +252,12 @@ def apply_strategy_patch(
             update={
                 "executable_version": (
                     draft.executable_version + 1
-                    if executable_change
+                    if executable_change and finalize_versions
                     else draft.executable_version
                 ),
                 "workflow_revision": (
                     draft.workflow_revision + 1
-                    if workflow_change
+                    if workflow_change and finalize_versions
                     else draft.workflow_revision
                 ),
                 "approval": (
@@ -268,8 +276,69 @@ def apply_strategy_patch(
     )
 
 
+def finalize_strategy_turn(
+    before: StrategyDraftV2,
+    working: StrategyDraftV2,
+) -> DraftPatchResult:
+    """Publish one canonical revision after all turn-local operations validate."""
+
+    executable_change = working.executable_hash != before.executable_hash
+    workflow_change = working.workflow_state_hash != before.workflow_state_hash
+    if not executable_change and not workflow_change:
+        return DraftPatchResult(
+            draft=before,
+            executable_change=False,
+            workflow_change=False,
+            changed_fields=(),
+        )
+    finalized = StrategyDraftV2.model_validate(
+        working.model_copy(
+            update={
+                "executable_version": (
+                    before.executable_version + 1
+                    if executable_change
+                    else before.executable_version
+                ),
+                "workflow_revision": (
+                    before.workflow_revision + 1
+                    if workflow_change
+                    else before.workflow_revision
+                ),
+                "approval": (
+                    ApprovalBindingV2() if executable_change else before.approval
+                ),
+                "executable_hash": "",
+                "workflow_state_hash": "",
+            }
+        ).model_dump(mode="json")
+    )
+    return DraftPatchResult(
+        draft=finalized,
+        executable_change=executable_change,
+        workflow_change=workflow_change,
+        changed_fields=tuple(
+            name
+            for name, changed_now in (
+                ("executable_state", executable_change),
+                ("workflow_state", workflow_change),
+            )
+            if changed_now
+        ),
+    )
+
+
 def validate_draft_semantics(draft: StrategyDraftV2) -> list[str]:
     errors: list[str] = []
+    policy = draft.sharia_policy
+    if (policy.methodology_id is None) != (policy.methodology_version is None):
+        errors.append("sharia_methodology_identity_incomplete")
+    if policy.universe_mode.value == "approved_watchlist" and (
+        policy.approved_watchlist_id is None
+        or not policy.approved_watchlist_version
+    ):
+        errors.append("approved_watchlist_identity_missing")
+    if policy.universe_mode.value == "explicit_assets" and not policy.explicit_symbols:
+        errors.append("explicit_sharia_symbols_missing")
     overlap = set(draft.universe.included_symbols) & set(draft.universe.excluded_symbols)
     if overlap:
         errors.append(f"include_exclude_overlap:{','.join(sorted(overlap))}")
@@ -434,10 +503,6 @@ def _timeframe_role_errors(node: ConditionNodeV2) -> list[str]:
     # measured on the candle that fires it — so it is checked for existence only.
     if node.node_type == ConditionNodeType.CONDITION and not node.trigger_timeframe:
         errors.append(f"missing_trigger_timeframe:{node.node_id}")
-    if node.context_timeframes:
-        errors.append(f"context_timeframe_not_executable:{node.node_id}")
-    if node.confirmation_timeframes:
-        errors.append(f"confirmation_timeframe_not_executable:{node.node_id}")
     return errors
 
 
@@ -547,92 +612,6 @@ def _remove_node(
     return node.model_copy(update={"children": children}), True
 
 
-def _resolved_keys(
-    patch: StrategyPatch,
-) -> set[str]:
-    keys: set[str] = set()
-    if patch.add_inclusions or patch.add_exclusions:
-        keys.add("universe")
-    if patch.set_fields.exchange or patch.set_fields.quote_asset:
-        keys.add("market_scope")
-    patch_nodes = _patch_condition_nodes(patch)
-    if patch_nodes:
-        keys.add("conditions")
-    if any(
-        node.trigger_timeframe
-        for node in patch_nodes
-        if node.node_type == ConditionNodeType.CONDITION
-    ):
-        keys.add("timeframe")
-    return keys
-
-
-def _patch_condition_nodes(patch: StrategyPatch) -> list[ConditionNodeV2]:
-    roots = [
-        *patch.add_conditions,
-        *(item.replacement for item in patch.update_conditions),
-        *([patch.replace_groups] if patch.replace_groups is not None else []),
-    ]
-    return [node for root in roots for node in root.walk()]
-
-
-def _patch_resolves_unresolved(
-    unresolved: UnresolvedFieldV2,
-    patch: StrategyPatch,
-) -> bool:
-    """Clear an old question only when the patch contains its exact semantic slot."""
-
-    key = unresolved.key.casefold()
-    nodes = [
-        node
-        for node in _patch_condition_nodes(patch)
-        if node.node_type == ConditionNodeType.CONDITION
-    ]
-    if any(term in key for term in ("universe", "watchlist_scope", "asset_scope")):
-        return bool(patch.add_inclusions or patch.add_exclusions)
-    if any(term in key for term in ("market_scope", "exchange", "quote_asset")):
-        return any(
-            (
-                patch.set_fields.exchange,
-                patch.set_fields.quote_asset,
-                patch.set_fields.market_type,
-            )
-        )
-    if any(term in key for term in ("reference", "measured_move", "move_definition")):
-        return any(
-            node.reference_definition
-            or node.reference_timeframe
-            or node.formula
-            in {
-                FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE,
-                FormulaKind.PREVIOUS_CANDLE_REFERENCE,
-                FormulaKind.FIXED_REFERENCE_LEVEL,
-                FormulaKind.LOOKBACK_REFERENCE_LEVEL,
-            }
-            for node in nodes
-        )
-    if "context" in key:
-        return any(
-            node.context_timeframes
-            or (
-                node.trigger_timeframe is not None
-                and re.search(r"\bcontext\b", node.source_fragment or "", re.IGNORECASE)
-            )
-            for node in nodes
-        )
-    if any(term in key for term in ("trigger", "condition")):
-        return bool(nodes) and any(node.trigger_timeframe for node in nodes)
-    if "timeframe" in key:
-        return any(
-            node.trigger_timeframe
-            or node.context_timeframes
-            or node.confirmation_timeframes
-            or node.reference_timeframe
-            for node in nodes
-        )
-    return False
-
-
 def _patch_fragments(patch: StrategyPatch) -> list[str]:
     fragments = [
         item.source_fragment or ""
@@ -650,6 +629,8 @@ def _revert_to_snapshot(
     draft: StrategyDraftV2,
     patch: StrategyPatch,
     history: list[dict[str, Any]],
+    *,
+    finalize_versions: bool,
 ) -> DraftPatchResult:
     assert patch.reversion is not None
     for item in history:
@@ -663,8 +644,16 @@ def _revert_to_snapshot(
         restored = StrategyDraftV2.model_validate(
             candidate.model_copy(
                 update={
-                    "executable_version": draft.executable_version + 1,
-                    "workflow_revision": draft.workflow_revision + 1,
+                    "workflow_revision": (
+                        draft.workflow_revision + 1
+                        if finalize_versions
+                        else draft.workflow_revision
+                    ),
+                    "executable_version": (
+                        draft.executable_version + 1
+                        if finalize_versions
+                        else draft.executable_version
+                    ),
                     "approval": ApprovalBindingV2(),
                     "runtime_state": draft.runtime_state,
                     "executable_hash": "",

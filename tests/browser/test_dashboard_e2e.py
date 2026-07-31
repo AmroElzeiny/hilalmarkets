@@ -975,7 +975,7 @@ def test_ai_setup_chat_v2_deterministic_preview_and_exact_approval(
     response = response_info.value
     assert response.status == 200
     backend = response.json()
-    assert backend["draft_v2"]["schema_version"] == "2.1"
+    assert backend["draft_v2"]["schema_version"] == "2.2"
     assert backend["draft_v2"]["executable_version"] >= 2
     assert re.fullmatch(r"[a-f0-9]{64}", backend["draft_v2"]["executable_hash"])
     assert backend["draft_v2"]["condition_ast"]["threshold"] == 3
@@ -1336,7 +1336,7 @@ def test_legacy_scan_route_redirects_into_chat_scanner(page: Page, base_url: str
     page.wait_for_url(re.compile(r".*/dashboard/strategies/new\?mode=scanner"), timeout=10_000)
     expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
     expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
-        "Scanner is ready", timeout=10_000
+        "switched to scanner", timeout=10_000
     )
     composer = page.locator(".ai-chat-composer")
     assistant_bubble = page.locator(".ai-chat-message.assistant .ai-chat-bubble").first

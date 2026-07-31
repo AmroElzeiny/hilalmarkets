@@ -25,6 +25,7 @@ from pydantic import Field, model_validator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeV2,
     DraftFieldPatch,
+    ShariaPolicyV2,
     UnresolvedFieldV2,
 )
 from ai_market_monitor.schemas.strict_mode import StrictModel
@@ -33,6 +34,7 @@ from ai_market_monitor.schemas.strict_mode import StrictModel
 #: canonical draft, so the applied diff can be reported per operation.
 OperationKind = Literal[
     "set_fields",
+    "set_sharia_policy",
     "add_condition",
     "update_condition",
     "remove_condition",
@@ -65,6 +67,8 @@ class AuthorizedPatchOperation(StrictModel):
 
     #: `set_fields`
     fields: DraftFieldPatch | None = None
+    #: `set_sharia_policy`
+    sharia_policy: ShariaPolicyV2 | None = None
     #: `add_condition`, `update_condition`, `replace_groups`
     condition: ConditionNodeV2 | None = None
     #: `update_condition`, `remove_condition` — the existing node this acts on.
@@ -118,6 +122,7 @@ class AuthorizedPatchOperation(StrictModel):
     def validate_payload(self) -> AuthorizedPatchOperation:
         required: dict[str, tuple[str, ...]] = {
             "set_fields": ("fields",),
+            "set_sharia_policy": ("sharia_policy",),
             "add_condition": ("condition",),
             "update_condition": ("condition", "target_condition_id"),
             "remove_condition": ("target_condition_id",),
@@ -141,6 +146,7 @@ class AuthorizedPatchOperation(StrictModel):
                 raise ValueError(f"{self.kind} requires {name}")
         payload_fields = {
             "fields",
+            "sharia_policy",
             "condition",
             "target_condition_id",
             "symbol",
@@ -205,7 +211,11 @@ class ClarificationContract(StrictModel):
     def validate_target(self) -> ClarificationContract:
         if self.mutating and self.target_type == "conversational":
             raise ValueError("a conversational question cannot be mutating")
-        if self.target_type == "condition_field" and not self.target_condition_id:
+        if self.target_type in {
+            "condition_field",
+            "capability_parameter",
+            "reference_definition",
+        } and not self.target_condition_id:
             raise ValueError("a condition question must name its condition")
         if self.target_type in {
             "draft_field",

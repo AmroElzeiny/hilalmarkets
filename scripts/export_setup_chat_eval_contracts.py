@@ -7,6 +7,7 @@ from typing import Any
 
 from ai_market_monitor.schemas.setup_chat_evaluation import SetupChatEvaluationContract
 from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2, StrategyPatch
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_DIR = ROOT / "tests" / "evaluator" / "contracts"
@@ -50,6 +51,8 @@ FIELD_MAP: dict[str, str | dict[str, str]] = {
 def artifacts() -> dict[Path, dict[str, Any]]:
     return {
         CONTRACT_DIR / "strategy_definition.schema.json": (StrategyDefinition.model_json_schema()),
+        CONTRACT_DIR / "strategy_draft_v2.schema.json": StrategyDraftV2.model_json_schema(),
+        CONTRACT_DIR / "strategy_patch.schema.json": StrategyPatch.model_json_schema(),
         CONTRACT_DIR / "setup_chat_evaluation_contract.schema.json": (
             SetupChatEvaluationContract.model_json_schema()
         ),
