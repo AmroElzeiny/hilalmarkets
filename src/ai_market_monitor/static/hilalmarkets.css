@@ -249,6 +249,29 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .public-plan-title h3{margin:0}
 .public-plan-title .badge{margin-left:auto}
 .price-card .feature-list li.is-highlighted{margin-inline:-8px;padding:9px 8px;border:1px solid rgba(85,113,42,.24);border-radius:12px;background:#f1fadf;color:#2b2e35;font-weight:750}
+/* Launch offer. One apple-green focal point per card: the accent goes on the label
+   above the new price and nowhere else. The old price is struck through in the muted
+   neutral, so the change reads as information rather than a sales flash. */
+.price .price-original{align-self:baseline;color:var(--muted);font-family:"Manrope";font-size:1.5rem;font-weight:600;text-decoration-line:line-through;text-decoration-thickness:2px}
+.price-card.is-featured .price .price-original{color:#bed0ca}
+.price.is-coming-soon strong{font-size:1.9rem;color:var(--muted)}
+.price.is-coming-soon span{color:var(--muted)}
+.price-card.is-coming-soon{border-style:dashed;box-shadow:none}
+.price-card.is-coming-soon.is-featured{background:#fff;color:var(--ink);transform:none}
+.badge-soon{margin-left:auto;padding:5px 11px;border:1px solid var(--line);border-radius:999px;background:var(--ivory-2);color:var(--muted);font-size:.72rem;font-weight:700}
+.btn.is-disabled,.btn[disabled]{border-color:var(--line);background:var(--ivory-2);color:var(--muted);cursor:not-allowed;box-shadow:none}
+.annual-soon{display:block;margin-top:-12px;color:var(--muted);font-size:.78rem}
+.offer-countdown{margin:-8px 0 18px;padding:12px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;border:1px solid var(--line);border-radius:16px;background:var(--ivory-2)}
+.offer-countdown[hidden]{display:none}
+.offer-countdown-label{color:#55712a;font-size:.78rem;font-weight:600}
+.offer-countdown-parts{display:flex;gap:14px}
+.offer-countdown-part{display:flex;align-items:baseline;gap:4px}
+.offer-countdown-part strong{font-family:"Manrope";font-size:1.25rem;font-weight:600;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.offer-countdown-part small{color:var(--muted);font-size:.72rem}
+.price-card.is-featured .offer-countdown{border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.08)}
+.price-card.is-featured .offer-countdown-label{color:var(--gold-2)}
+.price-card.is-featured .offer-countdown-part strong{color:#fff}
+.price-card.is-featured .offer-countdown-part small{color:#bed0ca}
 .public-plan-details{margin-top:14px}
 .public-plan-details summary{min-height:44px;display:inline-flex;align-items:center;cursor:pointer;font-weight:750;text-decoration:underline;text-underline-offset:5px}
 .checkout-heading{align-items:flex-end}

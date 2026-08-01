@@ -492,11 +492,25 @@ class CapabilityCoverageService:
             usage.get("_traceedge_reasoning_effort")
             or self.settings.openai_reasoning_effort
         )
+        service_tier = str(
+            usage.get("_setup_service_tier")
+            or usage.get("_setup_requested_service_tier")
+            or "default"
+        )
         cost = estimate_usage_cost(
             self.settings,
             model=model,
             usage=usage,
+            service_tier=service_tier,
         )
+        used_reserved_cost = False
+        if input_tokens == 0 and output_tokens == 0:
+            reserved_cost = Decimal(
+                str(usage.get("_setup_reserved_cost_usd") or 0)
+            )
+            if reserved_cost > cost:
+                cost = reserved_cost
+                used_reserved_cost = True
         recorded_usage = dict(usage)
         correlation_id = current_ai_usage_correlation_id()
         if correlation_id:
@@ -513,7 +527,15 @@ class CapabilityCoverageService:
                 output_tokens=output_tokens,
                 reasoning_tokens=reasoning,
                 estimated_cost_usd=cost,
-                pricing_source="configured_from_openai_pricing",
+                pricing_source=(
+                    "reserved_from_openai_fast_pricing"
+                    if used_reserved_cost and service_tier in {"fast", "priority"}
+                    else "reserved_from_openai_pricing"
+                    if used_reserved_cost
+                    else "configured_from_openai_fast_pricing"
+                    if service_tier in {"fast", "priority"}
+                    else "configured_from_openai_pricing"
+                ),
                 raw_usage=recorded_usage,
                 created_at=datetime.now(UTC),
             )
@@ -1472,7 +1494,11 @@ def estimate_usage_cost(
     details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
     cached = int(details.get("cached_tokens") or 0)
     uncached = max(0, input_tokens - cached)
-    pricing = settings.openai_model_pricing_usd_per_million.get(model, {})
+    pricing = (
+        settings.openai_fast_model_pricing_usd_per_million.get(model, {})
+        if service_tier in {"fast", "priority"}
+        else settings.openai_model_pricing_usd_per_million.get(model, {})
+    )
     cost = (
         Decimal(uncached) * Decimal(str(pricing.get("input", 0)))
         + Decimal(cached) * Decimal(str(pricing.get("cached_input", 0)))

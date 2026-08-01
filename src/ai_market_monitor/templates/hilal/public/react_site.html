@@ -43,7 +43,7 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260719-react-shell">
   <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260719-react-shell">
-  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260728-pricing">
+  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260801-launch-offer">
   {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260720-brand4">{% endif %}
   <script>
     window.HilalMarketsConsentConfig = {{ {
@@ -71,7 +71,9 @@
         "whatsappOperational": whatsapp_operational,
         "annualBillingSupported": annual_billing_supported,
         "plans": public_pricing_plans,
-        "comparisonRows": public_plan_comparison
+        "comparisonRows": public_plan_comparison,
+        "promotionEndsAt": promotion_ends_at,
+        "promotionActive": promotion_active
       }
     } | tojson }};
   </script>
@@ -85,6 +87,6 @@
   <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
   <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-x-pixel"></script>
   {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260720-brand4"></script>{% endif %}
-  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260728-pricing"></script>
+  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260801-launch-offer"></script>
 </body>
 </html>

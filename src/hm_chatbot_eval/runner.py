@@ -45,6 +45,15 @@ from .test_ai import TestAI
 from .topics import TOPIC_BY_ID, TOPICS
 from .util import ensure_dir, stable_hash, utc_now
 
+_EXPECTED_EVALUATOR_FAULT_ERRORS: dict[str, frozenset[str]] = {
+    "empty_once": frozenset({"TARGET_EMPTY_RESPONSE"}),
+    "invalid_json_once": frozenset({"TARGET_INVALID_JSON"}),
+    "partial_json_once": frozenset({"TARGET_INVALID_JSON"}),
+    "timeout_once": frozenset({"TARGET_TOTAL_TIMEOUT"}),
+    "429_once": frozenset({"TARGET_HTTP_429"}),
+    "stream_disconnect_once": frozenset({"TARGET_PARTIAL_STREAM"}),
+}
+
 
 def _role_for_kind(kind: str) -> Role:
     """The browser harness has its own failure vocabulary; keep the roles distinct."""
@@ -83,6 +92,7 @@ class EvaluationRunner:
         self.test_ai = TestAI(settings, self.ai_client)
         self.budget = budget_usd
         self.spent = 0.0
+        self.readiness_target_cost = 0.0
         #: Observed cost of each completed case, used to project the next one.
         self._case_costs: list[float] = []
         self.schema = settings.load_schema()
@@ -121,7 +131,7 @@ class EvaluationRunner:
                     )
                     readiness_checks = [
                         "authenticated_session",
-                        "long_message",
+                        "ai_first_non_mutating_turn",
                         (
                             "fault_control"
                             if requires_fault_control
@@ -134,6 +144,65 @@ class EvaluationRunner:
                         scenario_id=f"readiness-{self.run_id}",
                         fault=probe_fault,
                     )
+                    readiness_cost = self._target_cost(
+                        reply.model,
+                        dict(reply.usage or {}),
+                    )
+                    self._charge(readiness_cost)
+                    self.readiness_target_cost += readiness_cost
+                    if probe_fault and self._expected_evaluator_fault_response(
+                        reply,
+                        expected_fault=probe_fault,
+                    ):
+                        records.append(
+                            {
+                                "target": probe_name,
+                                "attempt": attempt,
+                                "status": "PASS",
+                                "checks": [*readiness_checks, "fault_control_observed"],
+                                "elapsed_ms": (
+                                    asyncio.get_running_loop().time() - started
+                                )
+                                * 1000,
+                                "target_cost_usd": readiness_cost,
+                            }
+                        )
+                        passed = True
+                        break
+                    if probe_fault:
+                        # A successful ordinary reply is not a successful fault
+                        # probe.  The target must prove that the exact one-shot
+                        # injected fault reached its LLM boundary, otherwise a
+                        # deterministic branch or ignored header would let a broken
+                        # resilience test look ready.
+                        last_failure = FailureRecord(
+                            failure_class=FailureClass.EVALUATOR_FAULT_CONTROL_UNAVAILABLE,
+                            role=_role_for_kind(kind),
+                            stage="readiness",
+                            retryable=False,
+                            attempt=attempt,
+                            elapsed_ms=(
+                                asyncio.get_running_loop().time() - started
+                            )
+                            * 1000,
+                            http_status=reply.status_code,
+                            error_type="EvaluatorFaultNotObserved",
+                            error_message=(
+                                "The target did not return the exact evidence-bound "
+                                f"response for injected fault {probe_fault!r}."
+                            ),
+                        )
+                        records.append(
+                            {
+                                "target": probe_name,
+                                "attempt": attempt,
+                                "status": "FAIL",
+                                "checks": readiness_checks,
+                                "failure": last_failure.to_dict(),
+                                "target_cost_usd": readiness_cost,
+                            }
+                        )
+                        break
                     probe_failure = self._reply_failure(
                         reply,
                         kind=kind,
@@ -149,6 +218,7 @@ class EvaluationRunner:
                                 "status": "FAIL",
                                 "checks": readiness_checks,
                                 "failure": probe_failure.to_dict(),
+                                "target_cost_usd": readiness_cost,
                             }
                         )
                         if not probe_failure.retryable:
@@ -172,6 +242,7 @@ class EvaluationRunner:
                                 asyncio.get_running_loop().time() - started
                             )
                             * 1000,
+                            "target_cost_usd": readiness_cost,
                         }
                     )
                     passed = True
@@ -247,18 +318,43 @@ class EvaluationRunner:
         return True, records, None
 
     @staticmethod
-    def _readiness_message() -> str:
-        """A deterministic >1,000-character turn that spends no evaluator tokens."""
+    def _expected_evaluator_fault_response(
+        reply: TargetReply,
+        *,
+        expected_fault: str,
+    ) -> bool:
+        """Recognize only the integrated target's explicit expected fault response.
 
-        setup = (
-            "BTCUSDT only on Binance spot. Use 1h context and a 15m trigger. "
-            "Require a bullish close-to-close percentage move of at least 1%. "
+        ``empty_once`` is deliberately not a valid assistant reply.  A normal
+        reply would mean the header was ignored; an unmarked empty reply remains a
+        target outage.  The test-only response marker is emitted only after the
+        target accepted evaluator control in its test environment.
+        """
+
+        raw: dict[str, Any] = reply.raw if isinstance(reply.raw, dict) else {}
+        error_candidate = raw.get("error")
+        error: dict[str, Any] = (
+            error_candidate if isinstance(error_candidate, dict) else {}
         )
-        conversation = (
-            "Keep the explanation concise and preserve the exact reviewed fields; "
-            "this sentence is presentation guidance, not another market condition. "
+        expected_codes = _EXPECTED_EVALUATOR_FAULT_ERRORS.get(expected_fault, frozenset())
+        return (
+            reply.status_code is not None
+            and reply.status_code >= 400
+            and raw.get("_evaluator_fault_applied") == expected_fault
+            and str(error.get("error_code") or "") in expected_codes
         )
-        return setup + conversation * 9
+
+    @staticmethod
+    def _readiness_message() -> str:
+        """A cheap, non-mutating AI-first turn for authenticated readiness.
+
+        Long-input behavior belongs to its own measured evaluator topics. Running a
+        repeated 1,000-character strategy mutation before every case routed readiness
+        through the expensive complex planner, could spend real target tokens, and
+        occasionally exhausted the provider before a quality case began.
+        """
+
+        return "Can you hear me? Reply briefly."
 
     def _reply_failure(
         self,
@@ -525,6 +621,14 @@ class EvaluationRunner:
                     encoding="utf-8",
                 )
                 artifacts.append(str(raw_path))
+                if fault and self._expected_evaluator_fault_response(
+                    reply,
+                    expected_fault=fault,
+                ):
+                    # The test-only target proved the injected one-shot fault reached
+                    # the real LLM boundary.  Preserve that failed turn as evidence,
+                    # then let the simulated trader perform the recovery turn.
+                    continue
                 reply_failure = self._reply_failure(
                     reply,
                     kind=kind,
@@ -869,6 +973,7 @@ class EvaluationRunner:
             encoding="utf-8",
         )
         run_metadata["readiness_status"] = readiness_payload["status"]
+        run_metadata["readiness_target_cost_usd"] = self.readiness_target_cost
         execution_status: str | None = None
         execution_error: str | None = None
         if not readiness_ok:
@@ -882,9 +987,16 @@ class EvaluationRunner:
             )
             execution_error = (
                 f"Authenticated target access failed during readiness "
-                f"({failure_class}) before paid evaluation. "
+                f"({failure_class}) before quality evaluation. "
                 "Completed 0 cases before stopping."
             )
+            if failure_class is FailureClass.EVALUATOR_FAULT_CONTROL_UNAVAILABLE:
+                execution_error += (
+                    " Fault-injection topics must use an isolated APP_ENV=test "
+                    "target with AI_SETUP_EVALUATOR_ENABLED=true and "
+                    "AI_SETUP_EVALUATOR_FAULTS_ENABLED=true; do not enable those "
+                    "controls on the development or production app."
+                )
             summary = write_reports(
                 self.run_dir,
                 [],

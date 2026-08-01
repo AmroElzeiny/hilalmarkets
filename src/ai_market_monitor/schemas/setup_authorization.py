@@ -99,9 +99,66 @@ class AuthorizedPatchOperation(StrictModel):
         that predate operation-level attribution.
         """
 
-        if not isinstance(data, dict) or data.get("operation_id"):
+        if not isinstance(data, dict):
             return data
         migrated = dict(data)
+        # Some planners attach the unsupported requirement's `blocking` flag to
+        # the operation. Blocking is deliberately server-owned and always true for
+        # launch-path unsupported mechanics, so discard this redundant model field
+        # rather than accepting a model-authored false value or rejecting an
+        # otherwise fail-closed unsupported record.
+        if migrated.get("kind") == "add_unsupported":
+            migrated.pop("blocking", None)
+        kind = migrated.get("kind")
+        unresolved = migrated.get("unresolved")
+        if (
+            kind == "update_unresolved"
+            and not migrated.get("target_key")
+            and isinstance(unresolved, dict)
+            and unresolved.get("unresolved_id")
+        ):
+            # The payload already names the exact unresolved contract. Reuse that
+            # identity instead of rejecting the whole turn because the planner did
+            # not repeat it in target_key.
+            migrated["target_key"] = unresolved["unresolved_id"]
+
+        allowed_payloads: dict[object, frozenset[str]] = {
+            "set_fields": frozenset({"fields"}),
+            "set_sharia_policy": frozenset({"sharia_policy"}),
+            "add_condition": frozenset({"condition"}),
+            "update_condition": frozenset({"condition", "target_condition_id"}),
+            "remove_condition": frozenset({"target_condition_id"}),
+            "replace_groups": frozenset({"condition"}),
+            "add_inclusion": frozenset({"symbol"}),
+            "add_exclusion": frozenset({"symbol"}),
+            "remove_inclusion": frozenset({"symbol"}),
+            "remove_exclusion": frozenset({"symbol"}),
+            "add_unresolved": frozenset({"unresolved"}),
+            "update_unresolved": frozenset({"unresolved", "target_key"}),
+            "add_unsupported": frozenset({"missing_contract"}),
+            "resolve_unresolved_key": frozenset({"target_key"}),
+            "remove_unsupported_key": frozenset({"target_key"}),
+            "restore_snapshot": frozenset(
+                {"target_snapshot_id", "target_executable_version"}
+            ),
+        }
+        payload_fields = {
+            "fields",
+            "sharia_policy",
+            "condition",
+            "target_condition_id",
+            "symbol",
+            "missing_contract",
+            "target_key",
+            "unresolved",
+            "target_snapshot_id",
+            "target_executable_version",
+        }
+        if kind in allowed_payloads:
+            for field_name in payload_fields - allowed_payloads[kind]:
+                migrated.pop(field_name, None)
+        if migrated.get("operation_id"):
+            return migrated
         encoded = json.dumps(
             {
                 key: (

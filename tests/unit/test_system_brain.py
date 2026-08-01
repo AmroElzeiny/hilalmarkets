@@ -194,6 +194,37 @@ async def test_ai_usage_records_the_current_request_correlation(test_context):
         assert usage.raw_usage["_traceedge_correlation_id"] == "request-correlation-1"
 
 
+async def test_timeout_without_provider_usage_records_reserved_cost(test_context):
+    settings = test_context["settings"]
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Reserved Cost Usage")
+        session.add(user)
+        await session.flush()
+        chat = AISetupChatSession(user_id=user.id, title="Reserved cost chat")
+        session.add(chat)
+        await session.flush()
+
+        await CapabilityCoverageService(settings).record_usage(
+            session,
+            chat=chat,
+            operation="setup_agent_turn",
+            usage={
+                "_traceedge_model": "gpt-5.4-mini",
+                "_traceedge_reasoning_effort": "low",
+                "_setup_requested_service_tier": "fast",
+                "_setup_reserved_cost_usd": 0.045,
+            },
+        )
+        await session.commit()
+
+        usage = await session.scalar(select(AIUsageEvent))
+        assert usage is not None
+        assert usage.input_tokens == 0
+        assert usage.output_tokens == 0
+        assert usage.estimated_cost_usd == Decimal("0.04500000")
+        assert usage.pricing_source == "reserved_from_openai_fast_pricing"
+
+
 async def test_system_brain_session_is_database_backed(test_context):
     _configure(test_context)
     async with test_context["session_factory"]() as session:

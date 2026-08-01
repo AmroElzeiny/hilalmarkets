@@ -13,7 +13,11 @@ from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
+    plan_offer,
+    plan_offer_payload,
+    promotion_is_active,
     visible_plan_comparison,
     visible_plan_comparison_headers,
     visible_public_plan_codes,
@@ -33,6 +37,9 @@ from ai_market_monitor.core.site_content import (
     SOCIAL_PREVIEW_TITLE,
     HelpArticle,
     PurchaseFaq,
+)
+from ai_market_monitor.services.ai_setup_evaluator_control import (
+    evaluator_fault_control_available,
 )
 from ai_market_monitor.services.billing import (
     BillingError,
@@ -220,8 +227,6 @@ def _public_context(
         {
             "code": code,
             "name": PLAN_DEFINITIONS[code].name,
-            "monthlyPrice": float(PLAN_DEFINITIONS[code].monthly_price),
-            "annualPrice": float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
             "description": PUBLIC_PLAN_PRESENTATIONS[code].description,
             "button": PUBLIC_PLAN_PRESENTATIONS[code].cta_label,
             "badge": PUBLIC_PLAN_PRESENTATIONS[code].badge,
@@ -231,6 +236,10 @@ def _public_context(
                 PUBLIC_PLAN_PRESENTATIONS[code].additional_features
             ),
             "highlightedFeature": PUBLIC_PLAN_PRESENTATIONS[code].highlighted_feature,
+            # `monthlyPrice`, `originalMonthlyPrice` and the two availability flags all
+            # come from `plan_offer_payload`, so the landing page cannot show a price the
+            # dashboard disagrees with.
+            **plan_offer_payload(code),
         }
         for code in plan_codes
     ]
@@ -283,8 +292,13 @@ def _public_context(
         ),
         "plans": {code: PLAN_DEFINITIONS[code] for code in plan_codes},
         "plan_presentations": PUBLIC_PLAN_PRESENTATIONS,
-        # Trimmed to the plans on offer. With billing off that is the free Private Beta
-        # plan alone, so the page never prices something nobody can buy.
+        # What each plan costs today and whether it can be bought. Read by the Jinja
+        # pricing cards; the React landing page reads the same values out of
+        # `public_pricing_plans` below.
+        "plan_offers": {code: plan_offer(code) for code in plan_codes},
+        "plan_offer_values": {code: plan_offer_payload(code) for code in plan_codes},
+        "promotion_ends_at": PROMOTION_ENDS_AT.isoformat(),
+        "promotion_active": promotion_is_active(),
         "plan_comparison": visible_plan_comparison(
             billing_enabled=settings.billing_enabled
         ),
@@ -669,11 +683,15 @@ async def dashboard_entry(
 
 
 @router.get("/health")
-async def health(settings: Settings = Depends(get_settings)) -> dict[str, str]:
+async def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     return {
         "status": "ok",
         "service": "hilalmarkets",
         "environment": settings.app_env,
+        # This exposes no credential or control surface. It lets the evaluator
+        # reject a misconfigured target before any paid run, instead of inferring
+        # availability solely from APP_ENV=test.
+        "evaluator_fault_control_available": evaluator_fault_control_available(settings),
     }
 
 

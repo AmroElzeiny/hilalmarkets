@@ -38,8 +38,9 @@ type CommerceRuntimeConfig = {
   plans?: Array<{
     code: PublicPlanCode
     name: string
-    monthlyPrice: number
-    annualPrice: number
+    /** Null while the interval is not open for sale: there is no price to quote yet. */
+    monthlyPrice: number | null
+    annualPrice: number | null
     description: string
     button: string
     badge?: string | null
@@ -47,8 +48,17 @@ type CommerceRuntimeConfig = {
     visibleFeatures: string[]
     additionalFeatures: string[]
     highlightedFeature?: string | null
+    /** False while an interval is not open for sale yet. */
+    monthlyAvailable?: boolean
+    annualAvailable?: boolean
+    /** The price before the launch discount, or null when there is no discount. */
+    originalMonthlyPrice?: number | null
+    comingSoonLabel?: string
   }>
   comparisonRows?: string[][]
+  /** When the launch price stops, as an ISO instant. */
+  promotionEndsAt?: string
+  promotionActive?: boolean
 }
 
 export type LegalRuntimeConfig = {

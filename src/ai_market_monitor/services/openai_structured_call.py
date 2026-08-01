@@ -31,25 +31,33 @@ class StructuredCallError(ValueError):
         retryable: bool = False,
         stage: str = "provider",
         details: tuple[str, ...] = (),
+        usage: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.retryable = retryable
         self.stage = stage
         self.details = details
+        self.usage = dict(usage or {})
 
 
 def estimate_structured_call_cost(
     settings: Settings,
     *,
+    schema_model: type[BaseModel],
     instructions: str,
     payload: dict[str, Any],
     model: str,
     max_output_tokens: int,
+    service_tier: str = "default",
 ) -> float:
     """Pessimistic reservation used before a provider attempt, including retries."""
 
-    pricing = settings.openai_model_pricing_usd_per_million.get(model)
+    pricing = (
+        settings.openai_fast_model_pricing_usd_per_million.get(model)
+        if service_tier in {"fast", "priority"}
+        else settings.openai_model_pricing_usd_per_million.get(model)
+    )
     if not pricing:
         raise StructuredCallError(
             "SETUP_AGENT_MODEL_PRICING_UNAVAILABLE",
@@ -58,7 +66,12 @@ def estimate_structured_call_cost(
         )
     estimated_input_tokens = max(
         1,
-        (len(instructions) + len(json.dumps(payload, ensure_ascii=False))) // 4,
+        (
+            len(instructions)
+            + len(json.dumps(payload, ensure_ascii=False))
+            + len(json.dumps(strict_json_schema(schema_model), ensure_ascii=False))
+        )
+        // 4,
     )
     return (
         estimated_input_tokens * float(pricing.get("input", 0))
@@ -92,17 +105,25 @@ def response_output_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct
+    fragments: list[str] = []
     for item in payload.get("output") or []:
+        if not isinstance(item, dict):
+            continue
         if item.get("type") != "message":
             continue
         for part in item.get("content") or []:
+            if not isinstance(part, dict):
+                continue
             text = part.get("text")
             if (
                 part.get("type") in {"output_text", "text"}
                 and isinstance(text, str)
-                and text.strip()
+                and text
             ):
-                return text
+                fragments.append(text)
+    combined = "".join(fragments)
+    if combined.strip():
+        return combined
     raise ValueError("the response carried no structured output")
 
 
@@ -116,6 +137,7 @@ async def structured_call[ModelT: BaseModel](
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
+    service_tier: str | None = None,
     timeout_seconds: int | float | None = None,
     estimated_cost_limit: float | None = None,
     stage: str = "provider",
@@ -134,7 +156,11 @@ async def structured_call[ModelT: BaseModel](
             retryable=True,
             stage=stage,
         )
-    pricing = settings.openai_model_pricing_usd_per_million.get(model)
+    pricing = (
+        settings.openai_fast_model_pricing_usd_per_million.get(model)
+        if service_tier in {"fast", "priority"}
+        else settings.openai_model_pricing_usd_per_million.get(model)
+    )
     if estimated_cost_limit is not None and not pricing:
         raise StructuredCallError(
             "SETUP_AGENT_MODEL_PRICING_UNAVAILABLE",
@@ -144,10 +170,12 @@ async def structured_call[ModelT: BaseModel](
     estimated_cost = (
         estimate_structured_call_cost(
             settings,
+            schema_model=schema_model,
             instructions=instructions,
             payload=payload,
             model=model,
             max_output_tokens=max_output_tokens,
+            service_tier=service_tier or "default",
         )
         if pricing
         else 0
@@ -175,6 +203,8 @@ async def structured_call[ModelT: BaseModel](
         "instructions": instructions,
         "input": json.dumps(payload, ensure_ascii=False, sort_keys=True),
     }
+    if service_tier is not None:
+        request["service_tier"] = service_tier
     api_key = (
         settings.openai_api_key.get_secret_value().strip()
         if settings.openai_api_key is not None
@@ -191,6 +221,7 @@ async def structured_call[ModelT: BaseModel](
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    usage: dict[str, Any] = {}
     try:
         response_payload = consume_evaluator_llm_fault()
         if response_payload is None:
@@ -207,6 +238,9 @@ async def structured_call[ModelT: BaseModel](
             response.raise_for_status()
             response_payload = response.json()
         usage = dict(response_payload.get("usage") or {})
+        returned_service_tier = response_payload.get("service_tier")
+        if isinstance(returned_service_tier, str) and returned_service_tier:
+            usage["_setup_service_tier"] = returned_service_tier
         parsed = schema_model.model_validate_json(response_output_text(response_payload))
     except httpx.ConnectTimeout as exc:
         raise StructuredCallError(
@@ -249,6 +283,21 @@ async def structured_call[ModelT: BaseModel](
         ) from exc
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
+        details: list[str] = []
+        request_id = exc.response.headers.get("x-request-id", "").strip()
+        if request_id:
+            details.append(f"provider_request_id:{request_id[:120]}")
+        try:
+            error_payload = exc.response.json().get("error")
+        except (ValueError, AttributeError):
+            error_payload = None
+        if isinstance(error_payload, dict):
+            error_type = str(error_payload.get("type") or "").strip()
+            error_code = str(error_payload.get("code") or "").strip()
+            if error_type:
+                details.append(f"provider_error_type:{error_type[:120]}")
+            if error_code:
+                details.append(f"provider_error_code:{error_code[:120]}")
         raise StructuredCallError(
             (
                 "TARGET_HTTP_429"
@@ -264,6 +313,7 @@ async def structured_call[ModelT: BaseModel](
             "The interpreter could not complete this turn.",
             retryable=status in {401, 403, 429} or status >= 500,
             stage=stage,
+            details=tuple(details),
         ) from exc
     except ValidationError as exc:
         error_types = {str(item.get("type") or "") for item in exc.errors()}
@@ -280,15 +330,19 @@ async def structured_call[ModelT: BaseModel](
                     ".".join(map(str, item.get("loc") or ("root",)))
                     + ":"
                     + str(item.get("type") or "validation_error")
+                    + ":"
+                    + str(item.get("msg") or "")
                 )[:300]
                 for item in exc.errors()[:12]
             ),
+            usage=usage,
         ) from exc
     except (KeyError, json.JSONDecodeError) as exc:
         raise StructuredCallError(
             "TARGET_INVALID_JSON",
             "The interpreter returned invalid JSON.",
             stage=stage,
+            usage=usage,
         ) from exc
     except ValueError as exc:
         raise StructuredCallError(
@@ -299,5 +353,6 @@ async def structured_call[ModelT: BaseModel](
             ),
             "The interpreter did not return a usable structured answer.",
             stage=stage,
+            usage=usage,
         ) from exc
     return parsed, usage

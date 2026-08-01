@@ -30,6 +30,7 @@ SetupLifecycleState = Literal[
 #: is transport/UI state, not approval authority.
 TURN_COMPLETE_STATES: frozenset[SetupLifecycleState] = frozenset(
     {
+        "collecting",
         "needs_clarification",
         "ready_for_confirmation",
         "awaiting_approval",
@@ -98,6 +99,12 @@ def is_terminal(state: SetupLifecycleState) -> bool:
 
 
 def is_turn_complete(state: SetupLifecycleState) -> bool:
-    """True when a client may stop waiting for assistant output for this turn."""
+    """True when a client may stop waiting for assistant output for this turn.
+
+    Setup-chat message requests are synchronous and return only after their
+    database-backed turn has reached a persisted reply (or deterministic fallback).
+    ``collecting`` describes the strategy lifecycle after a completed conversational
+    turn; it does not mean that assistant output is still being produced.
+    """
 
     return state in TURN_COMPLETE_STATES

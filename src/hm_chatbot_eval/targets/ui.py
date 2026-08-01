@@ -29,11 +29,24 @@ class UITarget(ChatTarget):
         self.page: Page | None = None
         self.last_api_json: Any = None
         self.last_status: int | None = None
+        self.last_evaluator_fault_applied: str | None = None
         self.variant: dict[str, Any] = {}
 
     async def _capture_response(self, response) -> None:
         if fnmatch.fnmatch(response.url, self.settings.target_ui_chat_api_pattern):
             self.last_status = response.status
+            # Playwright exposes a plain, lower-cased header dictionary while the
+            # backend adapter receives HTTPX's case-insensitive headers.  Reading
+            # the mixed-case wire spelling here made a successfully injected UI
+            # fault look unavailable, then the browser waited for a normal terminal
+            # turn after its deliberate 4xx/5xx response.
+            headers = {
+                str(key).casefold(): str(value)
+                for key, value in response.headers.items()
+            }
+            self.last_evaluator_fault_applied = headers.get(
+                "x-hm-eval-fault-applied"
+            ) or None
             try:
                 self.last_api_json = await response.json()
             except Exception:
@@ -173,6 +186,7 @@ class UITarget(ChatTarget):
         assert self.page is not None
         self.last_api_json = None
         self.last_status = None
+        self.last_evaluator_fault_applied = None
         routed = await self._install_evaluator_headers(fault)
         started = time.perf_counter()
         try:
@@ -191,6 +205,63 @@ class UITarget(ChatTarget):
                 await self.page.locator(self.settings.target_ui_send_selector).first.click()
             response = await response_info.value
             await self._capture_response(response)
+            if fault and self.last_evaluator_fault_applied == fault:
+                raw = self.last_api_json
+                if isinstance(raw, dict):
+                    raw = {**raw, "_evaluator_fault_applied": fault}
+                else:
+                    raw = {"response": raw, "_evaluator_fault_applied": fault}
+                safe_raw = redact(raw, self.settings.redacted_keys)
+                return TargetReply(
+                    text="",
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    status_code=self.last_status,
+                    raw=safe_raw,
+                    raw_hash=stable_hash(safe_raw),
+                    conversation_id=str(get_path(raw, "id", "") or ""),
+                    error=(
+                        f"HTTP {self.last_status}"
+                        if self.last_status is not None and self.last_status >= 400
+                        else None
+                    ),
+                )
+            # The browser view receives the same structured error envelope as the
+            # backend target. The application persists and renders its safe assistant
+            # error reply even though the transport status is non-2xx. Capturing that
+            # rendered text lets deterministic grounding rejections remain measured
+            # product behavior while retryable provider errors keep their typed
+            # infrastructure classification.
+            if self.last_status is not None and self.last_status >= 400:
+                assistant = _latest_assistant_message(self.last_api_json)
+                assistant_id = str((assistant or {}).get("id") or "")
+                text = str((assistant or {}).get("content") or "")
+                if assistant_id:
+                    current = self.page.locator(f'[data-message-id="{assistant_id}"]')
+                    await current.wait_for(
+                        state="visible",
+                        timeout=self.settings.target_ui_timeout_ms,
+                    )
+                    text = await current.inner_text()
+                structured = get_path(
+                    self.last_api_json,
+                    self.settings.target_ui_response_object_path,
+                )
+                if not isinstance(structured, dict):
+                    structured = None
+                model, usage = _assistant_runtime_metadata(assistant)
+                safe_raw = redact(self.last_api_json, self.settings.redacted_keys)
+                return TargetReply(
+                    text=text,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    status_code=self.last_status,
+                    structured=structured,
+                    raw=safe_raw,
+                    raw_hash=stable_hash(safe_raw),
+                    conversation_id=str(get_path(safe_raw, "id", "") or ""),
+                    model=model,
+                    usage=usage,
+                    error=f"HTTP {self.last_status}",
+                )
             request_payload = response.request.post_data_json
             client_message_id = (
                 str(request_payload.get("client_message_id") or "")

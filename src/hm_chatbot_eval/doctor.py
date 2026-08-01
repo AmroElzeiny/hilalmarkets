@@ -18,7 +18,8 @@ def _fault_control_check(health: httpx.Response) -> tuple[str, bool, str]:
     """
     label = "Backend accepts evaluator fault control"
     try:
-        environment = str((health.json() or {}).get("environment") or "")
+        payload = health.json() or {}
+        environment = str(payload.get("environment") or "")
     except ValueError:
         return (label, False, "/health did not return JSON, so APP_ENV is unknown")
     if not environment:
@@ -31,7 +32,69 @@ def _fault_control_check(health: httpx.Response) -> tuple[str, bool, str]:
             "target started with APP_ENV=test, AI_SETUP_EVALUATOR_ENABLED=true and "
             "AI_SETUP_EVALUATOR_FAULTS_ENABLED=true, or plan only topics without faults",
         )
-    return (label, True, "target runs APP_ENV=test")
+    availability = payload.get("evaluator_fault_control_available")
+    if availability is not True:
+        if availability is False:
+            return (
+                label,
+                False,
+                "the target runs APP_ENV=test but evaluator fault control is disabled; "
+                "set both AI_SETUP_EVALUATOR_ENABLED=true and "
+                "AI_SETUP_EVALUATOR_FAULTS_ENABLED=true only on an isolated test target",
+            )
+        return (
+            label,
+            False,
+            "/health does not report evaluator_fault_control_available; update the "
+            "target before running fault-injection topics",
+        )
+    return (label, True, "target is an isolated test evaluator with fault control enabled")
+
+
+def _fault_control_doctor_check(health: httpx.Response) -> tuple[str, bool, str]:
+    """Validate fault-control isolation without requiring faults for normal runs."""
+
+    label = "Evaluator fault-control isolation"
+    try:
+        payload = health.json() or {}
+        environment = str(payload.get("environment") or "")
+    except ValueError:
+        return (label, False, "/health did not return JSON, so isolation is unknown")
+    if not environment:
+        return (label, False, "/health did not report an environment")
+
+    available = payload.get("evaluator_fault_control_available")
+    if environment != "test":
+        if available is False:
+            return (
+                label,
+                True,
+                f"disabled on APP_ENV={environment} as required; use the isolated "
+                "test wrapper only for fault-injection topics",
+            )
+        return (
+            label,
+            False,
+            f"fault control must be disabled on APP_ENV={environment}",
+        )
+
+    _, enabled, detail = _fault_control_check(health)
+    return (label, enabled, detail)
+
+
+def fault_control_availability(settings: Settings) -> tuple[bool, str]:
+    """Read the target's zero-cost fault-control readiness capability."""
+
+    if not settings.target_backend_health_url:
+        return False, "TARGET_BACKEND_HEALTH_URL is not configured"
+    try:
+        response = httpx.get(settings.target_backend_health_url, timeout=5)
+    except Exception as exc:
+        return False, f"the target did not answer /health ({type(exc).__name__})"
+    if not response.is_success:
+        return False, f"/health returned HTTP {response.status_code}"
+    _, available, detail = _fault_control_check(response)
+    return available, detail
 
 
 def checks(settings: Settings) -> list[tuple[str, bool, str]]:
@@ -146,12 +209,12 @@ def checks(settings: Settings) -> list[tuple[str, bool, str]]:
         try:
             r = httpx.get(settings.target_backend_health_url, timeout=5)
             results.append(("Backend health", r.is_success, f"HTTP {r.status_code}"))
-            results.append(_fault_control_check(r))
+            results.append(_fault_control_doctor_check(r))
         except Exception as exc:
             results.append(("Backend health", False, f"{type(exc).__name__}: {exc}"))
             results.append(
                 (
-                    "Backend accepts evaluator fault control",
+                    "Evaluator fault-control isolation",
                     False,
                     "the target did not answer /health, so its APP_ENV is unknown",
                 )

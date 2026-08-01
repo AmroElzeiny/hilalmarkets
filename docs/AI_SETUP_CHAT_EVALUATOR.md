@@ -207,13 +207,55 @@ Inspect configuration:
 python -m hm_chatbot_eval doctor
 ```
 
+## Target boundary for fault scenarios
+
+The resilience topics use test-only LLM fault injection. They must never run against the normal
+development or production application, including a local Docker API at port 8000. The API reports
+whether an isolated target can accept fault control, and the CLI stops fault topics before any paid
+evaluation if it cannot.
+
+Run a local fault smoke through the repository wrapper, which starts an isolated SQLite-backed
+`APP_ENV=test` server on port 8124 and enables the evaluator controls only in that child process:
+
+```powershell
+.\scripts\run_isolated_setup_chat_smoke.ps1 `
+  -Topic partial_invalid_recovery `
+  -EnableFaults `
+  -Target backend `
+  -BudgetUsd 0.25
+```
+
+Use `timeout_recovery`, `rate_limit_recovery`, or `stream_interruption` for the other injected
+fault classes. For an ordinary no-fault check against port 8000, select an explicit no-fault topic,
+for example `operator_mapping`.
+
+The command above is deliberately a one-case fault smoke; its report is evidence for that recovery
+path only, not a full-corpus readiness report. Preview the full isolated scope without model calls:
+
+```powershell
+python -m hm_chatbot_eval plan --mode full --tests-per-topic 20 --target both
+```
+
+Then, after choosing an explicit spend ceiling, run the full corpus in a fresh isolated target. It
+includes fault scenarios, uses online judging by default, and writes a new timestamped report
+directory rather than replacing a prior smoke report:
+
+```powershell
+.\scripts\run_isolated_setup_chat_smoke.ps1 `
+  -Mode full `
+  -AllTopics `
+  -EnableFaults `
+  -Target both `
+  -BudgetUsd <approved-dollar-ceiling>
+```
+
 Preview the cost-controlled plan without calling OpenAI or the application:
 
 ```powershell
 python -m hm_chatbot_eval plan --mode budget --target both
 ```
 
-Run the recommended routine quality gate:
+Run the recommended routine quality gate against a separately provisioned test target:
 
 ```powershell
 python -m hm_chatbot_eval run --mode budget --target both --judge-mode online

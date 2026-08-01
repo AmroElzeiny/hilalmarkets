@@ -20,6 +20,7 @@ dependencies = [
   "httpx==0.28.1",
   "itsdangerous==2.2.0",
   "jinja2==3.1.6",
+  "jsonschema==4.26.0",
   "markupsafe==3.0.2",
   "orjson==3.11.9",
   "psycopg[binary]==3.3.4",
@@ -36,7 +37,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "aiosqlite==0.22.1",
-  "jsonschema==4.26.0",
   "mypy==2.1.0",
   "rich==14.0.0",
   "pytest==8.4.2",
@@ -48,7 +48,6 @@ dev = [
   "typer==0.16.0",
 ]
 evaluator = [
-  "jsonschema==4.26.0",
   "playwright==1.60.0",
   "rich==14.0.0",
   "typer==0.16.0",

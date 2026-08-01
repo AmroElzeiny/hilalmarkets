@@ -1464,7 +1464,9 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "Latest Setups" not in dashboard.text
     assert "Strategy Cockpit" not in dashboard.text
     assert "Coverage score" not in dashboard.text
-    assert "Create your first Watchlist" in dashboard.text
+    # "Watchlist" is the Favorites list; the thing being created here is a Watch Plan.
+    # `scripts/check_release_invariants.py` enforces that vocabulary.
+    assert "Create your first Watch Plan" in dashboard.text
     assert "data-open-sidebar" in dashboard.text
     assert "data-close-sidebar" in dashboard.text
     assert "sidebar-create-quick" in dashboard.text

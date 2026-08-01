@@ -12,7 +12,11 @@
     "match": "contains",
     "path": "timeframes"
   },
-  "direction": "direction",
+  "direction": {
+    "fallback_path": "direction",
+    "match": "movement_direction",
+    "path": "strategy.conditions"
+  },
   "excluded_symbol": {
     "match": "contains",
     "path": "exclusions"

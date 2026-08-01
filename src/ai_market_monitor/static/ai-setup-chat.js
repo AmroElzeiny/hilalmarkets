@@ -51,18 +51,19 @@
       headers: {"Content-Type": "application/json", ...(options.headers || {})},
       ...options,
     });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { payload = {}; }
     if (!response.ok) {
-      let payload = {};
-      try { payload = await response.json(); } catch (_) { payload = {}; }
       const detail = payload.detail;
       const message = typeof detail === "object"
         ? detail.message || detail.code
-        : detail;
+        : detail || payload.error?.message;
       const error = new Error(message || "The request could not be completed.");
       error.status = response.status;
+      error.payload = payload?.id ? payload : null;
       throw error;
     }
-    return response.json();
+    return payload;
   }
 
   async function recordInterpretationFeedback(feedbackType) {
@@ -616,6 +617,11 @@
       optimisticMessages.delete(requestPayload.client_message_id);
       render();
     } catch (error) {
+      if (error.payload?.id) {
+        chat = error.payload;
+        optimisticMessages.delete(requestPayload.client_message_id);
+        render();
+      }
       const failed = optimisticMessages.get(requestPayload.client_message_id);
       if (failed) optimisticMessages.set(requestPayload.client_message_id, {
         ...failed, pending: false, failed: true,

@@ -11,8 +11,12 @@ from rich.table import Table
 
 from .batch import BatchManager
 from .compare import compare_runs
-from .config import Settings, discard_stale_process_openai_key
-from .doctor import checks
+from .config import (
+    Settings,
+    discard_stale_isolated_target_overrides,
+    discard_stale_process_openai_key,
+)
+from .doctor import checks, fault_control_availability
 from .profiles import (
     cases_per_topic,
     max_turns_for_topic,
@@ -21,7 +25,7 @@ from .profiles import (
     topics_for_mode,
     variants_for_topic,
 )
-from .runner import EvaluationRunner
+from .runner import BudgetExceeded, EvaluationRunner
 from .topics import TOPICS
 
 app = typer.Typer(no_args_is_help=True, help="AI-vs-AI evaluator for HilalMarkets AI Setup Chat.")
@@ -30,7 +34,35 @@ console = Console()
 
 def _settings() -> Settings:
     discard_stale_process_openai_key()
+    discard_stale_isolated_target_overrides()
     return Settings()
+
+
+def _selected_topics_require_fault_control(mode: str, requested_topics: str) -> bool:
+    requested = {item.strip() for item in requested_topics.split(",") if item.strip()}
+    configured = [topic for topic in TOPICS if not requested or topic.id in requested]
+    return any(topic.fault is not None for topic in topics_for_mode(mode, configured))
+
+
+def _require_fault_control_target(settings: Settings, *, mode: str, topics: str) -> None:
+    """Stop a fault run before it can target a development/production app."""
+
+    if (
+        settings.target_backend_adapter != "hilalmarkets"
+        or not _selected_topics_require_fault_control(mode, topics)
+    ):
+        return
+    available, detail = fault_control_availability(settings)
+    if available:
+        return
+    raise typer.BadParameter(
+        "Selected topics use test-only fault injection, but the configured target cannot "
+        f"accept it: {detail}. Use "
+        ".\\scripts\\run_isolated_setup_chat_smoke.ps1 -Topic <fault-topic> "
+        "-EnableFaults, or select only no-fault topics for port 8000. Do not enable "
+        "evaluator fault controls on the development or production app.",
+        param_hint="--topics",
+    )
 
 
 @app.command("doctor")
@@ -123,6 +155,7 @@ def run(
     run_id: Annotated[str, typer.Option()] = "",
 ) -> None:
     settings = _settings()
+    _require_fault_control_target(settings, mode=mode, topics=topics)
     actual_run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     budget = budget_usd or settings.eval_budget_usd
     if mode == "budget":
@@ -178,10 +211,31 @@ def replay(
     async def execute():
         runner = EvaluationRunner(settings, new_run_id, budget_usd or settings.eval_budget_usd)
         try:
-            case = await runner.run_case(found, target, settings.target_variants[0], judge_mode)
             from .report import write_reports
 
-            summary = write_reports(runner.run_dir, [case])
+            try:
+                case = await runner.run_case(
+                    found,
+                    target,
+                    settings.target_variants[0],
+                    judge_mode,
+                )
+            except BudgetExceeded as exc:
+                summary = write_reports(
+                    runner.run_dir,
+                    [],
+                    budget_usd=runner.budget,
+                    measured_spend_usd=runner.spent,
+                    execution_status="STOPPED_BUDGET",
+                    execution_error=f"{exc} Completed 0 cases before stopping.",
+                )
+                return summary, runner.run_dir
+            summary = write_reports(
+                runner.run_dir,
+                [case],
+                budget_usd=runner.budget,
+                measured_spend_usd=runner.spent,
+            )
             return summary, runner.run_dir
         finally:
             await runner.close()

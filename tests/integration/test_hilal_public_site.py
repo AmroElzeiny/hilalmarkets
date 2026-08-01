@@ -220,13 +220,17 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     assert pricing.status_code == 200
     assert PLAN_DEFINITIONS["demo"].name in pricing.text
     assert "$0" in pricing.text
+    # The launch offer: the Monitor plan runs at $8 with its usual $12 crossed out.
+    assert "$8" in pricing.text
     assert "$12" in pricing.text
-    assert "$22" in pricing.text
+    # The Pro plan is not on sale yet, so it says "Soon" and carries no price at all.
+    assert "$22" not in pricing.text
+    assert "Pro is coming soon" in pricing.text
     assert "$29" not in pricing.text
     assert "Try Monitor for 7 days" in pricing.text
     assert "No charge for seven days. Cancel before the first payment." in pricing.text
     assert "Choose Core" not in pricing.text
-    assert "Choose Pro" in pricing.text
+    assert "Choose Pro" not in pricing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
         assert PLAN_DEFINITIONS[internal_code].name not in pricing.text
 

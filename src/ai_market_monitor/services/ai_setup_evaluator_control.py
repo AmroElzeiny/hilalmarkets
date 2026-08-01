@@ -34,6 +34,16 @@ class AISetupEvaluatorControlError(ValueError):
     pass
 
 
+def evaluator_fault_control_available(settings: Settings) -> bool:
+    """Whether this process may accept a test-only fault-injection request."""
+
+    return bool(
+        settings.app_env == "test"
+        and settings.ai_setup_evaluator_enabled
+        and settings.ai_setup_evaluator_faults_enabled
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AISetupEvaluatorTurn:
     fault: str | None
@@ -117,6 +127,21 @@ def evaluator_prompt_appendix() -> str:
     if target is None:
         return ""
     return _PROMPT_APPENDICES[target.prompt_version]
+
+
+def evaluator_fault_was_consumed() -> str | None:
+    """Return the injected fault only after it reached the LLM boundary.
+
+    Admission to :func:`evaluator_turn` proves only that a test-only request was
+    authorized.  The evaluator response marker must additionally prove that the
+    one-shot fault was actually consumed by the routed model client; otherwise a
+    deterministic/no-model branch could look like a working fault probe.
+    """
+
+    active = _turn.get()
+    if active is None or active.fault is None or not _fault_consumed.get():
+        return None
+    return active.fault
 
 
 def consume_evaluator_llm_fault() -> dict[str, Any] | None:

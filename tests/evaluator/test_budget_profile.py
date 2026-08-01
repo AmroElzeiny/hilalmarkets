@@ -95,6 +95,8 @@ class _UsageTarget(ChatTarget):
         scenario_id: str,
         fault: str | None = None,
     ) -> TargetReply:
+        if message == "Can you hear me? Reply briefly.":
+            return TargetReply(text="Yes.", latency_ms=1, usage={})
         return TargetReply(
             text="Measured response",
             latency_ms=1,

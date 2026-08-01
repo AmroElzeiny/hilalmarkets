@@ -21,6 +21,7 @@ the final chat status, and the only thing the reply may state as fact.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -86,9 +87,10 @@ from ai_market_monitor.schemas.setup_agent import (
     TurnSegment,
 )
 from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
     ClarificationContract,
 )
-from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.schemas.strategy import Comparator, StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
     ConditionNodeV2,
@@ -236,14 +238,84 @@ class SetupTurnOutcome:
     screening: ScreeningExecutionResult | None = None
 
 
+_SIGNED_MAGNITUDE_COMPARATOR: dict[Comparator, Comparator] = {
+    Comparator.LESS_THAN: Comparator.GREATER_THAN,
+    Comparator.LESS_THAN_OR_EQUAL: Comparator.GREATER_THAN_OR_EQUAL,
+    Comparator.GREATER_THAN: Comparator.LESS_THAN,
+    Comparator.GREATER_THAN_OR_EQUAL: Comparator.LESS_THAN_OR_EQUAL,
+    Comparator.EQUAL: Comparator.EQUAL,
+}
+
+
+def _canonicalize_grounded_directional_magnitudes(
+    plan: SetupAgentTurnPlan,
+) -> SetupAgentTurnPlan:
+    """Repair only a source-proven signed-magnitude representation after planning.
+
+    The runtime measures an ``up`` or ``down`` percentage formula as a positive
+    directional magnitude. A planner can nevertheless encode “bearish move at least
+    2.5%” as signed arithmetic (``lte -2.5``). That is not what the trader wrote and
+    the grounding gate correctly rejects it forever. After the AI has identified the
+    rule, this narrow normalizer changes that representation only when both the
+    positive magnitude and the sign-inverted comparator are explicitly grounded in
+    the condition's own source fragment. Explicit signed rules are left untouched.
+    """
+
+    def canonicalize(node: ConditionNodeV2) -> ConditionNodeV2:
+        if node.node_type != ConditionNodeType.CONDITION:
+            children = [canonicalize(child) for child in node.children]
+            return (
+                node
+                if children == node.children
+                else node.model_copy(update={"children": children})
+            )
+        if (
+            node.threshold is None
+            or node.threshold >= 0
+            or node.unit != "percent"
+            or node.operator not in _SIGNED_MAGNITUDE_COMPARATOR
+            or node.movement_direction.value not in {"up", "down"}
+            or not node.source_fragment
+        ):
+            return node
+        comparator = _SIGNED_MAGNITUDE_COMPARATOR[node.operator]
+        magnitude = abs(node.threshold)
+        if not (
+            grounds_operator(node.source_fragment, comparator)
+            and grounds_number(node.source_fragment, magnitude, unit="percent")
+        ):
+            return node
+        return node.model_copy(
+            update={
+                "operator": comparator,
+                "threshold": magnitude,
+            }
+        )
+
+    operations: list[AuthorizedPatchOperation] = []
+    changed = False
+    for operation in plan.operations:
+        condition = operation.condition
+        if condition is None:
+            operations.append(operation)
+            continue
+        normalized = canonicalize(condition)
+        changed = changed or normalized != condition
+        operations.append(operation.model_copy(update={"condition": normalized}))
+    return plan.model_copy(update={"operations": operations}) if changed else plan
+
+
 async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     """Validate one turn plan, apply what survives, run every gate, then report."""
 
     plan = _locate_spans(request.plan, request.message)
+    plan = _canonicalize_grounded_directional_magnitudes(plan)
     segments = {item.segment_id: item for item in plan.segments}
     _verify_actionable_spans(plan, request.message)
     _verify_capability_keys(plan, request.allowed_capability_keys, request.draft)
     plan = _verify_condition_references(plan, request.draft)
+    plan = _normalize_future_unresolved_targets(plan, request.draft)
+    plan = _append_live_clarification_resolution(plan, request)
     _verify_authorization(plan, segments, request)
 
     before = request.draft
@@ -983,7 +1055,12 @@ _ANSWER_TYPES_BY_TARGET: dict[str, frozenset[str]] = {
     "universe": frozenset({"string", "array"}),
     "market_scope": frozenset({"string"}),
     "boolean_structure": frozenset({"string", "object", "array"}),
-    "condition_creation": frozenset({"string", "object", "array"}),
+    # Before a condition exists, the clarification can be the one missing scalar
+    # (for example the number that defines "strong") or a full structured rule.
+    # The subsequent turn still has to create and ground the whole condition.
+    "condition_creation": frozenset(
+        {"string", "number", "integer", "boolean", "object", "array"}
+    ),
     "reference_definition": frozenset({"string"}),
     "unsupported_resolution": frozenset({"string", "boolean"}),
 }
@@ -1481,8 +1558,12 @@ def _condition_grounding(
         timeframe=node.reference_timeframe or node.trigger_timeframe,
     ):
         errors.append(f"{node.node_id}:lookback")
+    # Like a timeframe, a condition scope is commonly stated once before the rule:
+    # `BTCUSDT only; trigger when the 15m candle rises ...`. Requiring the pair to be
+    # repeated inside the rule clause rejects a value that is still grounded in this
+    # exact authorising segment. It remains segment-scoped, never message-wide.
     for symbol in node.condition_symbols:
-        if not grounds_symbol(fragment, symbol):
+        if not grounds_symbol(text, symbol):
             errors.append(f"{node.node_id}:condition_symbol:{symbol}")
     errors.extend(_operand_grounding(node, fragment))
     errors.extend(_reference_grounding(node, fragment))
@@ -2591,6 +2672,91 @@ def _verify_condition_references(
             ],
         }
     )
+
+
+def _normalize_future_unresolved_targets(
+    plan: SetupAgentTurnPlan,
+    draft: StrategyDraftV2,
+) -> SetupAgentTurnPlan:
+    """Turn invented future condition ids into typed condition creation.
+
+    A planner sometimes assigns an id to the rule it hopes to create and then points a
+    missing threshold at that id. The id is not authoritative and no such condition
+    exists yet. Persist the ambiguity against ``condition_creation`` instead; later
+    clarification still has to propose and ground a complete real condition.
+    Existing condition ids are preserved exactly.
+    """
+
+    existing = set(_existing_conditions(draft))
+    condition_targets = {
+        "condition_field",
+        "capability_parameter",
+        "reference_definition",
+    }
+    operations: list[AuthorizedPatchOperation] = []
+    for operation in plan.operations:
+        item = operation.unresolved
+        if (
+            operation.kind == "add_unresolved"
+            and item is not None
+            and item.target_type in condition_targets
+            and (item.target_condition_id or "") not in existing
+        ):
+            item = item.model_copy(
+                update={
+                    "target_type": "condition_creation",
+                    "target_field": None,
+                    "target_condition_id": None,
+                }
+            )
+            operation = operation.model_copy(update={"unresolved": item})
+        operations.append(operation)
+    return plan.model_copy(update={"operations": operations})
+
+
+def _append_live_clarification_resolution(
+    plan: SetupAgentTurnPlan,
+    request: SetupTurnRequest,
+) -> SetupAgentTurnPlan:
+    """Materialize one explicitly answered live question as operation evidence.
+
+    The planner may create the complete rule and mark the active typed clarification
+    answered while omitting a redundant ``resolve_unresolved_key`` operation. The
+    server adds that workflow operation with the same authorizing segment. The later
+    ``_verify_resolved_targets`` check still refuses removal unless the declared
+    target actually changed in the canonical draft.
+    """
+
+    active = request.conversation.active_question
+    if active is None:
+        return plan
+    pending = {item.key for item in request.draft.unresolved_fields}
+    if active.question_id not in pending or any(
+        operation.kind == "resolve_unresolved_key"
+        and operation.target_key == active.question_id
+        for operation in plan.operations
+    ):
+        return plan
+    answer = next(
+        (
+            item
+            for item in plan.clarification_answers
+            if item.question_id == active.question_id and item.resolves_question
+        ),
+        None,
+    )
+    if answer is None:
+        return plan
+    digest = hashlib.sha256(
+        f"{plan.source_turn_id}:{answer.segment_id}:{active.question_id}".encode()
+    ).hexdigest()[:20]
+    operation = AuthorizedPatchOperation(
+        operation_id=f"server_resolve_{digest}",
+        authorizing_segment_id=answer.segment_id,
+        kind="resolve_unresolved_key",
+        target_key=active.question_id,
+    )
+    return plan.model_copy(update={"operations": [*plan.operations, operation]})
 
 
 def _ignored_segments(plan: SetupAgentTurnPlan) -> list[IgnoredSegment]:

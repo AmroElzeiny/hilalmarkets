@@ -47,7 +47,14 @@ def semantic_field_metrics(
             continue
         actual = get_path(structured, path)
         wanted = expected[key]
-        if match == "contains" and isinstance(actual, list):
+        if match == "movement_direction":
+            movements = _movement_directions(actual)
+            if not movements:
+                fallback_path = str(mapping.get("fallback_path") or "")
+                fallback = get_path(structured, fallback_path) if fallback_path else None
+                movements = [fallback] if isinstance(fallback, str) else []
+            ok = any(_direction_equivalent(item, wanted) for item in movements)
+        elif match == "contains" and isinstance(actual, list):
             ok = any(_equivalent(item, wanted) for item in actual)
         elif match == "contains_numeric" and isinstance(actual, list):
             ok = any(
@@ -84,6 +91,50 @@ def _equivalent(actual: Any, wanted: Any) -> bool:
             return actual_symbol == wanted_symbol
         return actual_text == wanted_text
     return actual == wanted
+
+
+def _direction_equivalent(actual: Any, wanted: Any) -> bool:
+    if not isinstance(actual, str) or not isinstance(wanted, str):
+        return actual == wanted
+    aliases = {
+        "bullish": "up",
+        "long": "up",
+        "up": "up",
+        "bearish": "down",
+        "short": "down",
+        "down": "down",
+        "neutral": "neutral",
+        "not_applicable": "not_applicable",
+    }
+    return aliases.get(actual.strip().casefold(), actual.strip().casefold()) == aliases.get(
+        wanted.strip().casefold(), wanted.strip().casefold()
+    )
+
+
+def _movement_directions(value: Any) -> list[str]:
+    """Read price-movement semantics without confusing them with strategy bias."""
+
+    found: list[str] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            direct = item.get("movement_direction")
+            if isinstance(direct, str):
+                found.append(direct)
+            resolved = item.get("resolved_parameters")
+            if isinstance(resolved, dict):
+                movement = resolved.get("movement_direction")
+                if isinstance(movement, str):
+                    found.append(movement)
+            for key, nested in item.items():
+                if key not in {"movement_direction", "resolved_parameters"}:
+                    visit(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return list(dict.fromkeys(found))
 
 
 def deterministic_metrics(
@@ -432,6 +483,13 @@ def _field_mismatch(
     path = mapping if isinstance(mapping, str) else str(mapping.get("path") or "")
     actual = get_path(structured, path)
     wanted = expected[field]
+    if isinstance(mapping, dict) and mapping.get("match") == "movement_direction":
+        movements = _movement_directions(actual)
+        if not movements:
+            fallback_path = str(mapping.get("fallback_path") or "")
+            fallback = get_path(structured, fallback_path) if fallback_path else None
+            movements = [fallback] if isinstance(fallback, str) else []
+        return float(not any(_direction_equivalent(item, wanted) for item in movements))
     if isinstance(actual, list):
         return float(not any(_equivalent(item, wanted) for item in actual))
     return float(not _equivalent(actual, wanted))

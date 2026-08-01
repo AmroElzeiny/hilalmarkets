@@ -67,6 +67,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     StrategyPatch,
     StrategyUniverseV2,
+    UnresolvedFieldV2,
 )
 from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
@@ -422,7 +423,8 @@ async def test_an_instruction_and_a_question_are_both_handled() -> None:
     assert question in result.plan.questions_to_answer
     assert len(script.composer_payloads) == 1
     assert result.trace.model_calls == 2
-    assert result.reply.message_without_question == script.reply
+    assert result.reply.message_without_question.startswith(script.reply)
+    assert "added the rule" in result.reply.message_without_question.casefold()
     kinds = {item.kind for item in result.execution.ignored_non_actionable_segments}
     assert SegmentKind.USER_QUESTION in kinds
 
@@ -606,6 +608,61 @@ async def test_a_mutating_answer_that_changes_the_target_does_close_it() -> None
     assert "universe" in result.execution.answered_questions
     assert result.draft.universe.included_symbols == ["BTC/USDT"]
     assert result.conversation.active_question_id is None
+
+
+async def test_complete_condition_answer_removes_live_creation_blocker() -> None:
+    answer = "the 15m candle rises open-to-close by at least 5%"
+    unresolved = UnresolvedFieldV2(
+        unresolved_id="create-condition",
+        source_turn_id="prior-turn",
+        source_fragment="a strong bullish move",
+        target_type="condition_creation",
+        expected_answer_schema={"type": "number"},
+        question="What percentage should strong mean?",
+        reason="A measurable threshold is required.",
+    )
+    before = apply_strategy_patch(
+        StrategyDraftV2(),
+        StrategyPatch(
+            source_turn_id="prior-turn",
+            unresolved_references=[unresolved],
+        ),
+    ).draft
+    condition = _conditions(_draft_with(answer))[0]
+    contract = ClarificationContract(
+        question_id=unresolved.key,
+        question=unresolved.question,
+        reason=unresolved.reason,
+        target_type="condition_creation",
+        expected_answer_schema='{"type":"number"}',
+        mutating=True,
+    )
+    result = await _run(
+        Script(
+            plan=_answer_plan(
+                answer,
+                question_id=unresolved.key,
+                operations=[
+                    AuthorizedPatchOperation(
+                        operation_id="add-complete-condition",
+                        authorizing_segment_id="s1",
+                        kind="add_condition",
+                        condition=condition,
+                    )
+                ],
+            ),
+            reply="Added the complete rule.",
+        ),
+        answer,
+        draft=before,
+        conversation=SetupConversationContext().with_question(contract),
+    )
+
+    assert result.execution is not None
+    assert unresolved.key in result.execution.answered_questions
+    assert result.draft.unresolved_fields == []
+    assert result.conversation.active_question_id is None
+    assert len(_conditions(result.draft)) == 1
 
 
 async def test_a_reference_to_an_earlier_condition_reaches_the_planner() -> None:
@@ -1286,6 +1343,8 @@ async def test_a_provider_failure_while_planning_preserves_the_draft(
     assert error.value.stage == "planning"
     assert error.value.code == code
     assert error.value.retryable is True
+    assert error.value.usage["_setup_reserved_cost_usd"] > 0
+    assert error.value.usage["_traceedge_model"]
 
 
 async def test_missing_ai_provider_credentials_are_retryable_and_do_not_mutate() -> None:
@@ -1790,6 +1849,45 @@ async def test_a_segment_that_carries_its_own_values_is_accepted() -> None:
     assert condition.threshold == 5.0
 
 
+async def test_condition_symbol_may_be_grounded_before_its_rule_clause() -> None:
+    message = (
+        "BTCUSDT only on Binance spot. "
+        "Require a bullish close-to-close move of at least 1% on the 15m."
+    )
+    clause = "Require a bullish close-to-close move of at least 1% on the 15m."
+    patch = _patch_for(message)
+    node = patch.add_conditions[0].model_copy(
+        update={"source_fragment": clause, "condition_symbols": ["BTCUSDT"]}
+    )
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN_ID,
+        segments=[
+            _segment(
+                message,
+                message,
+                SegmentKind.STRATEGY_INSTRUCTION,
+                segment_id="s1",
+                action=True,
+            )
+        ],
+        operations=operations_from_patch(
+            patch.model_copy(update={"add_conditions": [node]}), segment_id="s1"
+        ),
+        overall_confidence=0.9,
+    )
+
+    outcome = await apply_setup_turn(
+        SetupTurnRequest(
+            plan=plan,
+            message=message,
+            draft=StrategyDraftV2(),
+            source_turn_id=TURN_ID,
+        )
+    )
+
+    assert _conditions(outcome.draft)[0].condition_symbols == ["BTCUSDT"]
+
+
 async def test_a_hint_pointing_at_a_new_rule_is_dropped_not_fatal() -> None:
     """A real model labels the rule it is creating. That is a label, not a mutation."""
     message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
@@ -1857,6 +1955,404 @@ async def test_a_strict_schema_null_for_a_container_uses_the_default() -> None:
     assert patch.set_fields.mode is None
     assert patch.add_conditions == []
     assert patch.correction is None
+
+
+def test_unsupported_operation_forces_server_owned_blocking() -> None:
+    operation = AuthorizedPatchOperation.model_validate(
+        {
+            "operation_id": "unsupported-1",
+            "authorizing_segment_id": "s1",
+            "kind": "add_unsupported",
+            "missing_contract": "order-flow delta is not configured",
+            "blocking": False,
+        }
+    )
+
+    assert operation.kind == "add_unsupported"
+    assert not hasattr(operation, "blocking")
+
+
+def test_schema_valid_but_incomplete_condition_fails_closed_as_unsupported() -> None:
+    message = "Use a clean liquidity signal near support."
+    plan = SetupAgentTurnPlan.model_validate(
+        {
+            "source_turn_id": TURN_ID,
+            "segments": [
+                {
+                    "segment_id": "s1",
+                    "exact_source_text": message,
+                    "start_offset": 0,
+                    "end_offset": len(message),
+                    "kind": "STRATEGY_INSTRUCTION",
+                    "action_required": True,
+                    "confidence": 0.9,
+                }
+            ],
+            "operations": [
+                {
+                    "operation_id": "incomplete-condition-1",
+                    "authorizing_segment_id": "s1",
+                    "kind": "add_condition",
+                    "condition": {
+                        "node_type": "condition",
+                        "formula": "capability",
+                        "capability_key": "liquidity_sweep",
+                        "operator": None,
+                    },
+                }
+            ],
+            "overall_confidence": 0.9,
+        }
+    )
+
+    assert len(plan.operations) == 1
+    assert plan.operations[0].kind == "add_unsupported"
+    assert plan.operations[0].missing_contract == message
+
+
+def test_uniquely_wrapped_core_formula_is_normalized_without_guessing() -> None:
+    message = "Use a bullish close-to-close move of at least 5% on 5m."
+    plan = SetupAgentTurnPlan.model_validate(
+        {
+            "source_turn_id": TURN_ID,
+            "segments": [
+                {
+                    "segment_id": "s1",
+                    "exact_source_text": message,
+                    "start_offset": 0,
+                    "end_offset": len(message),
+                    "kind": "STRATEGY_INSTRUCTION",
+                    "action_required": True,
+                    "confidence": 0.9,
+                }
+            ],
+            "operations": [
+                {
+                    "operation_id": "wrapped-formula-1",
+                    "authorizing_segment_id": "s1",
+                    "kind": "add_condition",
+                    "condition": {
+                        "node_type": "condition",
+                        "formula": {"value": "close_to_close_percentage"},
+                        "operator": "gte",
+                        "threshold": 5,
+                        "movement_direction": "up",
+                        "trigger_timeframe": "5m",
+                    },
+                }
+            ],
+            "overall_confidence": 0.9,
+        }
+    )
+
+    condition = plan.operations[0].condition
+    assert condition is not None
+    assert condition.formula is FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE
+    assert condition.operands[0].parameters["formula"] == "close_to_close"
+
+
+def test_unknown_wrapped_formula_fails_closed_without_a_type_error() -> None:
+    message = "Use my private signal object."
+    plan = SetupAgentTurnPlan.model_validate(
+        {
+            "source_turn_id": TURN_ID,
+            "segments": [
+                {
+                    "segment_id": "s1",
+                    "exact_source_text": message,
+                    "start_offset": 0,
+                    "end_offset": len(message),
+                    "kind": "STRATEGY_INSTRUCTION",
+                    "action_required": True,
+                    "confidence": 0.9,
+                }
+            ],
+            "operations": [
+                {
+                    "operation_id": "unknown-formula-1",
+                    "authorizing_segment_id": "s1",
+                    "kind": "add_condition",
+                    "condition": {
+                        "node_type": "condition",
+                        "formula": {"value": "private_signal"},
+                        "operator": "is_true",
+                    },
+                }
+            ],
+            "overall_confidence": 0.4,
+        }
+    )
+
+    assert plan.operations[0].kind == "add_unsupported"
+    assert plan.operations[0].missing_contract == message
+
+
+def test_incomplete_restore_proposal_cannot_invalidate_independent_operations() -> None:
+    message = "Use Scanner and keep approval explicit."
+    plan = SetupAgentTurnPlan.model_validate(
+        {
+            "source_turn_id": TURN_ID,
+            "segments": [
+                {
+                    "segment_id": "s1",
+                    "exact_source_text": "Use Scanner",
+                    "start_offset": 0,
+                    "end_offset": 11,
+                    "kind": "STRATEGY_INSTRUCTION",
+                    "action_required": True,
+                    "confidence": 0.9,
+                },
+                {
+                    "segment_id": "s2",
+                    "exact_source_text": "keep approval explicit",
+                    "start_offset": 16,
+                    "end_offset": len(message) - 1,
+                    "kind": "APPROVAL_INTENT",
+                    "action_required": False,
+                    "confidence": 0.9,
+                },
+            ],
+            "operations": [
+                {
+                    "operation_id": "set-mode",
+                    "authorizing_segment_id": "s1",
+                    "kind": "set_fields",
+                    "fields": {"mode": "scanner"},
+                },
+                {
+                    "operation_id": "invalid-restore",
+                    "authorizing_segment_id": "s2",
+                    "kind": "restore_snapshot",
+                },
+            ],
+            "approval_intent": {
+                "segment_id": "s2",
+                "accompanied_by_material_edit": True,
+            },
+            "overall_confidence": 0.9,
+        }
+    )
+
+    assert [operation.operation_id for operation in plan.operations] == ["set-mode"]
+
+
+def test_operation_payload_canonicalization_preserves_exact_unresolved_identity() -> None:
+    unresolved = {
+        "unresolved_id": "threshold-question",
+        "source_turn_id": TURN_ID,
+        "source_fragment": "at most 0.5%",
+        "target_type": "condition_creation",
+        "expected_answer_schema": {"type": "number"},
+        "question": "What threshold?",
+        "reason": "A number is required.",
+        "blocking": True,
+    }
+    update = AuthorizedPatchOperation.model_validate(
+        {
+            "operation_id": "update-question",
+            "authorizing_segment_id": "s1",
+            "kind": "update_unresolved",
+            "unresolved": unresolved,
+        }
+    )
+    resolved = AuthorizedPatchOperation.model_validate(
+        {
+            "operation_id": "resolve-question",
+            "authorizing_segment_id": "s1",
+            "kind": "resolve_unresolved_key",
+            "target_key": "threshold-question",
+            "target_executable_version": 99,
+        }
+    )
+
+    assert update.target_key == "threshold-question"
+    assert resolved.target_key == "threshold-question"
+    assert resolved.target_executable_version is None
+
+
+def test_one_long_strategy_segment_preserves_the_exact_authorizing_text() -> None:
+    message = "Keep the exact fields and explanation concise. " * 30
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN_ID,
+        segments=[
+            TurnSegment(
+                segment_id="long-strategy",
+                exact_source_text=message,
+                start_offset=0,
+                end_offset=len(message),
+                kind=SegmentKind.STRATEGY_INSTRUCTION,
+                action_required=True,
+                confidence=0.9,
+            )
+        ],
+        overall_confidence=0.9,
+    )
+
+    assert len(plan.segments[0].exact_source_text) > 1_000
+    assert plan.segments[0].exact_source_text == message
+
+
+def test_one_long_clarification_answer_preserves_the_exact_user_text() -> None:
+    message = "Use these exact measurable clarification values. " * 30
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN_ID,
+        segments=[
+            TurnSegment(
+                segment_id="clarification-answer",
+                exact_source_text=message,
+                start_offset=0,
+                end_offset=len(message),
+                kind=SegmentKind.CLARIFICATION_ANSWER,
+                action_required=True,
+                confidence=0.9,
+            )
+        ],
+        clarification_answers=[
+            ClarificationAnswer(
+                segment_id="clarification-answer",
+                question_id="condition-creation-1",
+                answer_text=message,
+            )
+        ],
+        overall_confidence=0.9,
+    )
+
+    assert len(plan.clarification_answers[0].answer_text) > 1_000
+    assert plan.clarification_answers[0].answer_text == message
+
+
+def test_unresolved_condition_field_without_an_id_stays_blocking_creation() -> None:
+    unresolved = UnresolvedFieldV2.model_validate(
+        {
+            "unresolved_id": "missing-reference-1",
+            "source_turn_id": TURN_ID,
+            "source_fragment": "from local swing low",
+            "target_type": "reference_definition",
+            "target_field": "reference_definition",
+            "target_condition_id": None,
+            "expected_answer_schema": {"type": "string"},
+            "question": "How should the local swing low be measured?",
+            "reason": "The reference is not measurable yet.",
+            "blocking": True,
+        }
+    )
+
+    assert unresolved.target_type == "condition_creation"
+    assert unresolved.target_condition_id is None
+    assert unresolved.target_field is None
+    assert unresolved.blocking is True
+
+
+def test_condition_creation_discards_a_planner_authored_future_id() -> None:
+    unresolved = UnresolvedFieldV2.model_validate(
+        {
+            "unresolved_id": "missing-threshold-1",
+            "source_turn_id": TURN_ID,
+            "source_fragment": "a strong bearish move",
+            "target_type": "condition_creation",
+            "target_field": "threshold",
+            "target_condition_id": "planner-future-condition-id",
+            "expected_answer_schema": {"type": "number"},
+            "question": "What percentage should strong mean?",
+            "reason": "Strong is not measurable yet.",
+            "blocking": True,
+        }
+    )
+
+    assert unresolved.target_type == "condition_creation"
+    assert unresolved.target_condition_id is None
+    assert unresolved.target_field == "threshold"
+
+
+def test_numeric_unresolved_contract_discards_incompatible_string_options() -> None:
+    unresolved = UnresolvedFieldV2.model_validate(
+        {
+            "unresolved_id": "numeric-threshold",
+            "source_turn_id": TURN_ID,
+            "source_fragment": "at most 0.5%",
+            "target_type": "condition_creation",
+            "expected_answer_schema": {"type": "number"},
+            "allowed_options": ["gte", "lte"],
+            "question": "What threshold?",
+            "reason": "A number is required.",
+        }
+    )
+
+    assert unresolved.expected_answer_schema == {"type": "number"}
+    assert unresolved.allowed_options == []
+
+
+async def test_future_condition_id_is_normalized_to_one_typed_creation_question() -> None:
+    message = "Alert on a strong bullish close-to-close move."
+    plan = SetupAgentTurnPlan.model_validate(
+        {
+            "source_turn_id": TURN_ID,
+            "segments": [
+                {
+                    "segment_id": "s1",
+                    "exact_source_text": message,
+                    "start_offset": 0,
+                    "end_offset": len(message),
+                    "kind": "STRATEGY_INSTRUCTION",
+                    "action_required": True,
+                    "confidence": 0.9,
+                }
+            ],
+            "operations": [
+                {
+                    "operation_id": "incomplete-core-rule",
+                    "authorizing_segment_id": "s1",
+                    "kind": "add_condition",
+                    "condition": {
+                        "node_type": "condition",
+                        "formula": "close_to_close_percentage",
+                        "operator": None,
+                    },
+                },
+                {
+                    "operation_id": "ask-strong-threshold",
+                    "authorizing_segment_id": "s1",
+                    "kind": "add_unresolved",
+                    "unresolved": {
+                        "unresolved_id": "missing-strong-threshold",
+                        "source_turn_id": TURN_ID,
+                        "source_fragment": message,
+                        "target_type": "condition_field",
+                        "target_field": "threshold",
+                        "target_condition_id": "planner-invented-future-id",
+                        "expected_answer_schema": {"type": "number"},
+                        "question": "What percentage should strong mean?",
+                        "reason": "Strong needs a measurable threshold.",
+                        "blocking": True,
+                    },
+                },
+            ],
+            "overall_confidence": 0.8,
+        }
+    )
+
+    # The invalid core-rule proposal is not duplicated as unsupported when its
+    # exact segment already has one typed clarification authority.
+    assert [operation.kind for operation in plan.operations] == ["add_unresolved"]
+
+    before = StrategyDraftV2()
+    outcome = await apply_setup_turn(
+        SetupTurnRequest(
+            plan=plan,
+            message=message,
+            draft=before,
+            source_turn_id=TURN_ID,
+        )
+    )
+
+    assert len(outcome.draft.unresolved_fields) == 1
+    unresolved = outcome.draft.unresolved_fields[0]
+    assert unresolved.target_type == "condition_creation"
+    assert unresolved.target_condition_id is None
+    assert unresolved.target_field is None
+    assert unresolved.expected_answer_schema == {"type": "number"}
+    assert outcome.draft.executable_version == before.executable_version
+    assert outcome.draft.workflow_revision == before.workflow_revision + 1
 
 
 async def test_the_deterministic_summary_only_states_what_the_result_holds() -> None:

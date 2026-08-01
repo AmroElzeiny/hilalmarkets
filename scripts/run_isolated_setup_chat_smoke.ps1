@@ -1,8 +1,21 @@
 param(
     [int]$Port = 8124,
     [double]$BudgetUsd = 0.25,
-    [string]$RunId = "launch-v2-isolated-live-smoke",
+    # An empty run ID lets the evaluator allocate a timestamped directory, so a
+    # new run cannot overwrite evidence from an earlier smoke or full corpus run.
+    [string]$RunId = "",
     [string]$Topic = "operator_mapping",
+    [switch]$AllTopics,
+    [ValidateSet("smoke", "budget", "standard", "full")]
+    [string]$Mode = "smoke",
+    # Zero selects the conservative profile default: 1 for smoke/budget, 5 for
+    # standard, and 20 for full.
+    [ValidateRange(0, 30)]
+    [int]$TestsPerTopic = 0,
+    [ValidateSet("online", "deferred")]
+    [string]$JudgeMode = "",
+    [switch]$EnableFaults,
+    [switch]$PreflightOnly,
     [ValidateSet("backend", "ui", "both")]
     [string]$Target = "both"
 )
@@ -17,6 +30,89 @@ $serverLog = Join-Path $testResults "evaluator-live-smoke-server.log"
 $serverErrorLog = "$serverLog.err"
 $server = $null
 $exitCode = 1
+
+# This wrapper runs inside the caller's PowerShell process.  Process environment
+# mutations therefore outlive the script unless every value is restored.  Keep
+# an exact snapshot so a completed (or failed) isolated run cannot leave the
+# normal evaluator pointed at the temporary port/database after that target has
+# been stopped.
+$isolatedEnvironmentNames = @(
+    "APP_ENV",
+    "APP_SECRET_KEY",
+    "DATABASE_URL",
+    "PUBLIC_BASE_URL",
+    "ALLOW_MOCK_PROVIDERS",
+    "SCANNING_ENABLED",
+    "TRACEDGE_MARKET_DATA_MODE",
+    "TRACEDGE_FIXTURE_MARKET_DATA_ENABLED",
+    "AI_INTERPRETER_PROVIDER",
+    "AI_AGENT_CONTROL_ENABLED",
+    "CAPABILITY_EXTENSION_ENABLED",
+    "SETUP_CHAT_LAUNCH_V2_ENABLED",
+    "SETUP_CHAT_LEGACY_COMPATIBILITY_ENABLED",
+    "AI_SETUP_EVALUATOR_ENABLED",
+    "AI_SETUP_EVALUATOR_FAULTS_ENABLED",
+    "PUBLIC_CHAT_ENABLED",
+    "PUBLIC_CHAT_AI_ENABLED",
+    "PUBLIC_FORMS_ENABLED",
+    "TELEGRAM_ENABLED",
+    "WHATSAPP_ENABLED",
+    "BILLING_ENABLED",
+    "EMAIL_ADAPTER",
+    "VITE_ANALYTICS_ENABLED",
+    "LOG_LEVEL",
+    "PYTHONPATH",
+    "TARGET_BACKEND_BASE_URL",
+    "TARGET_BACKEND_HEALTH_URL",
+    "TARGET_UI_URL",
+    "TARGET_BACKEND_EMAIL",
+    "TARGET_BACKEND_PASSWORD",
+    "TARGET_UI_EMAIL",
+    "TARGET_UI_PASSWORD",
+    "EVAL_MAX_CONCURRENCY",
+    "HM_ISOLATED_EVALUATOR_ACTIVE",
+    "HM_ISOLATED_READINESS_TARGETS"
+)
+$originalProcessEnvironment = @{}
+foreach ($name in $isolatedEnvironmentNames) {
+    $originalProcessEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
+
+if ($AllTopics -and $PSBoundParameters.ContainsKey("Topic") -and -not [string]::IsNullOrWhiteSpace($Topic)) {
+    throw "Use either -AllTopics or -Topic, not both."
+}
+if ($AllTopics) {
+    $Topic = ""
+}
+if ($Mode -eq "full" -and -not $AllTopics) {
+    throw "A full corpus run requires -AllTopics; use -Mode standard with -Topic for a focused run."
+}
+if ($Mode -eq "full" -and -not $EnableFaults) {
+    throw "A full corpus includes fault scenarios and requires -EnableFaults on this isolated APP_ENV=test target."
+}
+if ($Mode -eq "full" -and -not $PSBoundParameters.ContainsKey("BudgetUsd")) {
+    throw "Set an explicit -BudgetUsd ceiling before a full corpus run. Run 'python -m hm_chatbot_eval plan --mode full --tests-per-topic 20 --target both' first."
+}
+
+$effectiveTestsPerTopic = if ($TestsPerTopic -gt 0) {
+    $TestsPerTopic
+} elseif ($Mode -eq "standard") {
+    5
+} elseif ($Mode -eq "full") {
+    20
+} else {
+    1
+}
+$effectiveJudgeMode = if ($JudgeMode) {
+    $JudgeMode
+} elseif ($Mode -eq "full") {
+    "online"
+} else {
+    "deferred"
+}
+if ($Mode -eq "full" -and ($effectiveTestsPerTopic -lt 20 -or $effectiveTestsPerTopic -gt 30)) {
+    throw "Full mode requires -TestsPerTopic from 20 to 30."
+}
 
 function Get-ConfiguredValue([string]$Name) {
     $environmentValue = [Environment]::GetEnvironmentVariable($Name)
@@ -54,8 +150,11 @@ $env:AI_AGENT_CONTROL_ENABLED = "false"
 $env:CAPABILITY_EXTENSION_ENABLED = "false"
 $env:SETUP_CHAT_LAUNCH_V2_ENABLED = "true"
 $env:SETUP_CHAT_LEGACY_COMPATIBILITY_ENABLED = "false"
-$env:AI_SETUP_EVALUATOR_ENABLED = "false"
-$env:AI_SETUP_EVALUATOR_FAULTS_ENABLED = "false"
+# Fault injection is strictly scoped to this isolated APP_ENV=test server.  The
+# switch is intentionally opt-in so ordinary smoke runs cannot exercise a fault
+# path by accident; fault topics must pass -EnableFaults.
+$env:AI_SETUP_EVALUATOR_ENABLED = if ($EnableFaults) { "true" } else { "false" }
+$env:AI_SETUP_EVALUATOR_FAULTS_ENABLED = if ($EnableFaults) { "true" } else { "false" }
 $env:PUBLIC_CHAT_ENABLED = "false"
 $env:PUBLIC_CHAT_AI_ENABLED = "false"
 $env:PUBLIC_FORMS_ENABLED = "false"
@@ -66,7 +165,9 @@ $env:EMAIL_ADAPTER = "memory"
 $env:VITE_ANALYTICS_ENABLED = "false"
 $env:LOG_LEVEL = "WARNING"
 $env:PYTHONPATH = Join-Path $root "src"
+$env:HM_ISOLATED_EVALUATOR_ACTIVE = "1"
 $env:TARGET_BACKEND_BASE_URL = $baseUrl
+$env:TARGET_BACKEND_HEALTH_URL = "$baseUrl/health"
 $env:TARGET_UI_URL = "$baseUrl/dashboard/strategies/new"
 $env:TARGET_BACKEND_EMAIL = $evaluatorEmail
 $env:TARGET_BACKEND_PASSWORD = $evaluatorPassword
@@ -185,19 +286,86 @@ try {
         throw "Isolated evaluator server did not become healthy."
     }
 
-    & $python -m hm_chatbot_eval run `
-        --mode smoke `
-        --target $Target `
-        --tests-per-topic 1 `
-        --topics $Topic `
-        --judge-mode deferred `
-        --budget-usd $BudgetUsd `
-        --selection-seed 20260729 `
-        --run-id $RunId
+    if ($PreflightOnly) {
+        # First check static configuration, then exercise the same authenticated
+        # backend/UI fault boundary that a full run uses.  The probe fault replaces
+        # the model call, so this cannot spend on the challenger, planner or judge.
+        & $python -m hm_chatbot_eval doctor
+        if ($LASTEXITCODE -ne 0) {
+            throw "Evaluator configuration preflight failed."
+        }
+        $targetKinds = if ($Target -eq "both") {
+            @("backend", "ui")
+        } else {
+            @($Target)
+        }
+        $env:HM_ISOLATED_READINESS_TARGETS = $targetKinds | ConvertTo-Json -Compress
+        $readiness = @'
+import asyncio
+import json
+import os
+import sys
+from uuid import uuid4
+
+from hm_chatbot_eval.config import Settings
+from hm_chatbot_eval.runner import EvaluationRunner
+from hm_chatbot_eval.scenarios import build_scenario
+from hm_chatbot_eval.topics import TOPIC_BY_ID
+
+
+async def main() -> int:
+    settings = Settings()
+    targets = json.loads(os.environ["HM_ISOLATED_READINESS_TARGETS"])
+    scenario = build_scenario(TOPIC_BY_ID["partial_invalid_recovery"], 1, 20260723)
+    runner = EvaluationRunner(settings, f"isolated-readiness-{uuid4().hex}", 0.01)
+    try:
+        ok, records, failure = await runner._readiness_gate(
+            [(scenario, str(kind), {"name": "current"}) for kind in targets]
+        )
+        print(json.dumps({
+            "status": "PASS" if ok else "FAIL",
+            "records": records,
+            "failure": failure.to_dict() if failure else None,
+            "model_calls": 0,
+        }, ensure_ascii=False))
+        return 0 if ok else 1
+    finally:
+        await runner.close()
+
+
+raise SystemExit(asyncio.run(main()))
+'@
+        $readiness | & $python -
+        Remove-Item Env:HM_ISOLATED_READINESS_TARGETS -ErrorAction SilentlyContinue
+    } else {
+        $runArguments = @(
+            "-m", "hm_chatbot_eval", "run",
+            "--mode", $Mode,
+            "--target", $Target,
+            "--tests-per-topic", "$effectiveTestsPerTopic",
+            "--judge-mode", $effectiveJudgeMode,
+            "--budget-usd", "$BudgetUsd",
+            "--selection-seed", "20260729"
+        )
+        if (-not $AllTopics) {
+            $runArguments += @("--topics", $Topic)
+        }
+        if ($RunId) {
+            $runArguments += @("--run-id", $RunId)
+        }
+        & $python @runArguments
+    }
     $exitCode = $LASTEXITCODE
 } finally {
     if ($null -ne $server -and -not $server.HasExited) {
         & taskkill /PID $server.Id /T /F | Out-Null
+    }
+    foreach ($name in $isolatedEnvironmentNames) {
+        [Environment]::SetEnvironmentVariable(
+            $name,
+            $originalProcessEnvironment[$name],
+            "Process"
+        )
     }
 }
 

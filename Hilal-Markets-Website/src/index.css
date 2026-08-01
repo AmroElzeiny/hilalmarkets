@@ -398,6 +398,104 @@ body:hover *::-webkit-scrollbar-thumb {
   font-size: 14px;
 }
 
+/* ---- Launch offer -------------------------------------------------------
+   One focal point per card: the apple-green accent goes on the new price and
+   nothing else. The old price is struck through in the muted neutral, so the
+   change reads as information rather than as a sales flash. */
+
+.plan-price-original {
+  align-self: baseline;
+  color: var(--color-ink-soft);
+  font-family: var(--font-display);
+  font-size: clamp(20px, 2vw, 26px);
+  font-weight: 500;
+  line-height: 1;
+  text-decoration-line: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.pricing-card.is-coming-soon {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.plan-price.is-coming-soon strong {
+  font-size: clamp(30px, 3vw, 38px);
+  color: var(--color-ink-soft);
+}
+
+.plan-price.is-coming-soon span {
+  color: var(--color-ink-soft);
+}
+
+.soon-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 7px 11px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: var(--color-canvas);
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.plan-cta.is-disabled,
+.plan-cta[disabled] {
+  border-color: var(--color-hairline);
+  background: var(--color-canvas);
+  color: var(--color-ink-soft);
+  cursor: not-allowed;
+}
+
+.plan-cta.is-disabled:hover,
+.plan-cta[disabled]:hover {
+  translate: 0 0;
+}
+
+.offer-countdown {
+  margin-top: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 16px;
+  background: var(--color-canvas);
+}
+
+.offer-countdown-label {
+  color: var(--color-apple-deep);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.offer-countdown-parts {
+  display: flex;
+  gap: 14px;
+}
+
+.offer-countdown-part {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.offer-countdown-part strong {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.offer-countdown-part small {
+  color: var(--color-ink-soft);
+  font-size: 12px;
+}
+
 .annual-saving {
   min-height: 22px;
   margin-top: -10px;

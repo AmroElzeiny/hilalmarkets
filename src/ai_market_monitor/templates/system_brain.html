@@ -6,10 +6,10 @@
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260729-setup-v2">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260729-setup-v2">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260801-launch-offer">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260801-launch-offer">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/system-brain.js?v=20260729-setup-v2" defer></script>
+  <script src="/static/system-brain.js?v=20260801-launch-offer" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -97,7 +97,7 @@
             <span class="brain-health-dot {{ row.status }}" aria-hidden="true"></span>
             <strong>{{ row.label }}</strong>
             <span class="brain-status {{ row.status }}">{{ row.status }}</span>
-            <small>{{ row.last_success.strftime('%d %b %H:%M UTC') if row.last_success else 'No successful telemetry' }} · {{ row.active_failures }} active failures</small>
+            <small>{{ row.last_success.strftime('%d %b %H:%M UTC') if row.last_success else 'No successful telemetry' }} В· {{ row.active_failures }} active failures</small>
           </div>
           {% endfor %}
         </div>
@@ -109,14 +109,14 @@
         <div class="brain-assistant-head">
           <span class="brain-metric-icon"><i data-icon="spark"></i></span>
           <div><p class="brain-kicker">Read-only diagnostic assistant</p><h2>Ask System Brain</h2><p>Searches redacted repository evidence and live governance telemetry. It cannot decide, approve, publish, or change the system.</p></div>
-          <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ '5.4 nano · low' if assistant_enabled else 'Disabled' }}</span>
+          <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ '5.4 nano В· low' if assistant_enabled else 'Disabled' }}</span>
         </div>
         <div class="brain-assistant-messages" data-brain-assistant-messages aria-live="polite">
           <div class="brain-assistant-message assistant"><p>Ask about a case, an error, a system mechanism, a file, or what deserves attention.</p></div>
         </div>
         <form class="brain-assistant-form" data-brain-assistant-form>
           <label for="brain-assistant-input">Question</label>
-          <textarea id="brain-assistant-input" maxlength="2000" required placeholder="Ask about reviews, evidence, errors, logs, or system behavior…" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
+          <textarea id="brain-assistant-input" maxlength="2000" required placeholder="Ask about reviews, evidence, errors, logs, or system behaviorвЂ¦" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
           <button type="submit" class="brain-action-button" {{ 'disabled' if not assistant_enabled else '' }}><span>Ask</span><i data-icon="arrow"></i></button>
         </form>
       </article>
@@ -346,10 +346,10 @@
       <div class="brain-section-head"><div><p class="brain-kicker">Versioned policies</p><h2>Governance</h2><p>Methodology, evidence, AI, review, and publication boundaries remain explicit.</p></div></div>
       <div class="brain-card-list">
         {% for item in methodologies %}
-        <article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} · Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">{{ item.rules_json.get('required_criteria', [])|length }} required criteria</span><span class="brain-status neutral">{{ item.rules_json.get('use_cases', [])|length }} use-specific policies</span></div></div></article>
+        <article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} В· Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">{{ item.rules_json.get('required_criteria', [])|length }} required criteria</span><span class="brain-status neutral">{{ item.rules_json.get('use_cases', [])|length }} use-specific policies</span></div></div></article>
         {% else %}<p class="brain-empty">No methodology is configured. Publication cannot proceed.</p>{% endfor %}
       </div>
-      <details class="brain-panel brain-progressive"><summary><span><i data-icon="passport"></i> Published and historical Passports</span><small>{{ published|length }} records</small></summary><div class="brain-card-list">{% for item in published %}<article><div class="brain-asset-mark">{{ item.asset.symbol[:3] }}</div><div><h3>{{ item.asset.name }} <small>{{ item.asset.symbol }}</small></h3><p>Publication version {{ item.publication.version }} · {{ item.publication.published_at.strftime('%d %b %Y') }}</p></div><a class="brain-link" href="/dashboard/sharia/assets/{{ item.asset.symbol }}">View Passport</a></article>{% endfor %}</div></details>
+      <details class="brain-panel brain-progressive"><summary><span><i data-icon="passport"></i> Published and historical Passports</span><small>{{ published|length }} records</small></summary><div class="brain-card-list">{% for item in published %}<article><div class="brain-asset-mark">{{ item.asset.symbol[:3] }}</div><div><h3>{{ item.asset.name }} <small>{{ item.asset.symbol }}</small></h3><p>Publication version {{ item.publication.version }} В· {{ item.publication.published_at.strftime('%d %b %Y') }}</p></div><a class="brain-link" href="/dashboard/sharia/assets/{{ item.asset.symbol }}">View Passport</a></article>{% endfor %}</div></details>
     </section>
 
     {% elif section == 'audit-settings' %}

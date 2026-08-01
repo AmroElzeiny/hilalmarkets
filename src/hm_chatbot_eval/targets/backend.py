@@ -97,6 +97,13 @@ class HilalMarketsBackendTarget(ChatTarget):
                 raw: Any = response.json()
             except ValueError:
                 raw = {"text": response.text}
+            fault_applied = response.headers.get("X-HM-Eval-Fault-Applied", "").strip()
+            if fault_applied:
+                raw = (
+                    {**raw, "_evaluator_fault_applied": fault_applied}
+                    if isinstance(raw, dict)
+                    else {"response": raw, "_evaluator_fault_applied": fault_applied}
+                )
             assistant = _latest_assistant_message(raw)
             text = str((assistant or {}).get("content") or "")
             structured = (

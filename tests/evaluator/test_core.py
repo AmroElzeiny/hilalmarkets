@@ -2,15 +2,21 @@ import json
 from pathlib import Path
 from unittest.mock import Mock
 
+import httpx
 import pytest
 from jsonschema import Draft202012Validator
 
 from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
 )
+from hm_chatbot_eval.cli import _selected_topics_require_fault_control
 from hm_chatbot_eval.compare import compare_runs
 from hm_chatbot_eval.config import Settings, process_openai_key_overrides_dotenv
-from hm_chatbot_eval.doctor import checks
+from hm_chatbot_eval.doctor import (
+    _fault_control_check,
+    _fault_control_doctor_check,
+    checks,
+)
 from hm_chatbot_eval.evaluate import (
     deterministic_metrics,
     semantic_field_metrics,
@@ -52,6 +58,47 @@ def test_doctor_keeps_unconfigured_drift_honestly_not_measured():
     assert "NOT_MEASURED" in drift_check[2]
 
 
+def test_fault_control_check_requires_all_test_only_controls():
+    disabled = httpx.Response(
+        200,
+        json={"environment": "test", "evaluator_fault_control_available": False},
+    )
+    _, available, detail = _fault_control_check(disabled)
+
+    assert available is False
+    assert "disabled" in detail
+
+    enabled = httpx.Response(
+        200,
+        json={"environment": "test", "evaluator_fault_control_available": True},
+    )
+    _, available, detail = _fault_control_check(enabled)
+
+    assert available is True
+    assert "isolated test evaluator" in detail
+
+
+def test_doctor_accepts_fault_controls_disabled_on_development():
+    development = httpx.Response(
+        200,
+        json={
+            "environment": "development",
+            "evaluator_fault_control_available": False,
+        },
+    )
+
+    label, safe, detail = _fault_control_doctor_check(development)
+
+    assert label == "Evaluator fault-control isolation"
+    assert safe is True
+    assert "disabled" in detail
+
+
+def test_fault_topics_are_preflighted_but_ordinary_dev_smoke_is_allowed():
+    assert _selected_topics_require_fault_control("smoke", "partial_invalid_recovery")
+    assert not _selected_topics_require_fault_control("smoke", "operator_mapping")
+
+
 def test_schema_and_semantic_checks():
     schema = {
         "type": "object",
@@ -80,7 +127,12 @@ def test_mapping_accuracy_metrics_are_derived_from_the_scenario_contract():
     structured = {
         "symbols": [expected["symbol"]],
         "exclusions": [expected["excluded_symbol"]],
-        "direction": expected["direction"],
+        "direction": "neutral",
+        "strategy": {
+            "conditions": {
+                "resolved_parameters": {"movement_direction": "up"}
+            }
+        },
         "timeframes": [expected["timeframe"], expected["context_timeframe"]],
         "operators": ["and", expected["operator"]],
         "thresholds": [expected["threshold_percent"]],
@@ -105,6 +157,7 @@ def test_mapping_accuracy_metrics_are_derived_from_the_scenario_contract():
     assert metrics["threshold_accuracy"] == 1.0
     assert metrics["timeframe_accuracy"] == 1.0
     assert metrics["universe_accuracy"] == 1.0
+    assert metrics["direction_inversion_rate"] == 0.0
 
 
 async def test_mapping_challenger_uses_contract_without_model_cost():
@@ -138,6 +191,47 @@ async def test_mapping_challenger_uses_contract_without_model_cost():
     assert done is False
     assert cost == 0.0
 
+
+async def test_ambiguity_challenger_tests_one_vague_term_then_exactly_defines_it():
+    scenario = build_scenario(
+        next(t for t in TOPICS if t.id == "ambiguous_trading_language"), 17, 20260723
+    )
+    ai = EvaluatorTestAI(Settings(_env_file=None), Mock())
+
+    opening, done, cost = await ai.next_user_turn(scenario, [], 1)
+
+    assert "strong" in opening
+    assert str(scenario.expected_contract["threshold_percent"]) not in opening
+    assert "delta" not in opening.casefold()
+    assert "stop" not in opening.casefold()
+    assert done is False
+    assert cost == 0.0
+
+    clarification, done, cost = await ai.next_user_turn(
+        scenario,
+        [
+            TurnRecord(
+                turn_id="u1",
+                role="user",
+                text=opening,
+                timestamp="2026-08-01T00:00:00Z",
+            ),
+            TurnRecord(
+                turn_id="a1",
+                role="assistant",
+                text="What measurable percentage should strong mean?",
+                timestamp="2026-08-01T00:00:01Z",
+            ),
+        ],
+        2,
+    )
+
+    assert f"{float(scenario.expected_contract['threshold_percent']):g}%" in clarification
+    assert "close-to-close" in clarification
+    assert scenario.expected_contract["timeframe"] in clarification
+    assert "delta" not in clarification.casefold()
+    assert done is False
+    assert cost == 0.0
 
 def test_redaction_and_paths():
     value = {"Authorization": "Bearer abcdefghijklmnop", "nested": {"ok": 1}}

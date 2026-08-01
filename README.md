@@ -31,6 +31,11 @@ OpenAI and Playwright corpus runs remain manual or scheduled. See
 For routine release confidence, `--mode budget --target both` covers every evaluator topic
 through the authenticated backend, repeats only UI/Canvas boundary topics in Playwright, judges
 the results, and enforces a measured all-in `$2.50` cap across evaluator and chatbot model calls.
+Those resilience topics include test-only fault injection, so they must target an isolated
+`APP_ENV=test` process rather than the normal development or production app. For a local fault
+smoke, use `./scripts/run_isolated_setup_chat_smoke.ps1 -Topic partial_invalid_recovery
+-EnableFaults -Target backend`. This is one fault-recovery case, not a full evaluation. The Docker
+app on port 8000 intentionally rejects those controls.
 
 Every change the agent proposes names the one message segment that authorised it, and each value in
 it must appear in *that segment's own words*. Message-wide grounding is not authorization: in

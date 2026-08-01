@@ -194,12 +194,25 @@ async def test_repeated_target_5xx_opens_the_run_circuit(tmp_path):
         await runner.close()
 
 
-async def test_readiness_probes_long_turn_and_fault_control_before_test_ai(tmp_path):
-    observed: list[tuple[int, str | None]] = []
+async def test_readiness_probes_non_mutating_turn_and_fault_control_before_test_ai(
+    tmp_path,
+):
+    observed: list[tuple[str, str | None]] = []
 
     class _ProbeTarget(_Target):
         async def send(self, message, *, scenario_id, fault=None):
-            observed.append((len(message), fault))
+            observed.append((message, fault))
+            if fault:
+                return TargetReply(
+                    text="",
+                    latency_ms=4,
+                    status_code=422,
+                    raw={
+                        "_evaluator_fault_applied": fault,
+                        "error": {"error_code": "TARGET_EMPTY_RESPONSE"},
+                    },
+                    error="HTTP 422",
+                )
             return await super().send(message, scenario_id=scenario_id, fault=fault)
 
     runner = _Runner(
@@ -217,10 +230,124 @@ async def test_readiness_probes_long_turn_and_fault_control_before_test_ai(tmp_p
         assert ok is True
         assert failure is None
         assert records[0]["status"] == "PASS"
-        assert observed and observed[0][0] > 1000
+        assert observed and len(observed[0][0]) < 200
+        assert observed[0][0] == "Can you hear me? Reply briefly."
         assert observed[0][1] == "empty_once"
         assert test_ai.user_calls == 0
         assert test_ai.judge_calls == 0
+    finally:
+        await runner.close()
+
+
+async def test_readiness_rejects_an_unobserved_fault_header(tmp_path):
+    runner = _Runner(
+        _settings(tmp_path),
+        "readiness-fault-not-observed",
+        2.5,
+        target_factory=lambda: _Target(status=200),
+    )
+    test_ai = _CountingTestAI()
+    runner.test_ai = test_ai
+    try:
+        ok, records, failure = await runner._readiness_gate(
+            [(_scenario(fault="invalid_json_once"), "backend", {"name": "current"})]
+        )
+        assert ok is False
+        assert failure is not None
+        assert failure.failure_class is FailureClass.EVALUATOR_FAULT_CONTROL_UNAVAILABLE
+        assert failure.error_type == "EvaluatorFaultNotObserved"
+        assert records[0]["status"] == "FAIL"
+        assert test_ai.user_calls == 0
+        assert test_ai.judge_calls == 0
+    finally:
+        await runner.close()
+
+
+async def test_readiness_accepts_only_the_explicit_integrated_fault_probe(tmp_path):
+    class _FaultProbeTarget(_Target):
+        async def send(self, message, *, scenario_id, fault=None):
+            return TargetReply(
+                text="",
+                latency_ms=4,
+                status_code=422,
+                raw={
+                    "_evaluator_fault_applied": fault,
+                    "error": {"error_code": "TARGET_EMPTY_RESPONSE"},
+                },
+                error="HTTP 422",
+            )
+
+    runner = _Runner(
+        _settings(tmp_path),
+        "readiness-fault-observed",
+        2.5,
+        target_factory=_FaultProbeTarget,
+    )
+    try:
+        ok, records, failure = await runner._readiness_gate(
+            [(_scenario(fault="invalid_json_once"), "backend", {"name": "current"})]
+        )
+        assert ok is True
+        assert failure is None
+        assert records[0]["status"] == "PASS"
+        assert "fault_control_observed" in records[0]["checks"]
+    finally:
+        await runner.close()
+
+
+async def test_expected_fault_response_is_preserved_then_recovery_turn_runs(tmp_path):
+    class _RecoveryAI:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def next_user_turn(self, *_args, **_kwargs):
+            self.calls += 1
+            return ("Retry the same instruction.", self.calls >= 2, 0.0)
+
+    class _RecoveryTarget(_Target):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def send(self, message, *, scenario_id, fault=None):
+            self.calls += 1
+            if self.calls == 1:
+                return TargetReply(
+                    text="",
+                    latency_ms=4,
+                    status_code=422,
+                    raw={
+                        "_evaluator_fault_applied": fault,
+                        "error": {"error_code": "TARGET_INVALID_JSON"},
+                    },
+                    error="HTTP 422",
+                )
+            return TargetReply(
+                text="Please clarify the threshold.",
+                latency_ms=4,
+                status_code=200,
+                raw={},
+            )
+
+    target = _RecoveryTarget()
+    runner = _Runner(
+        _settings(tmp_path),
+        "fault-recovery-turn",
+        2.5,
+        target_factory=lambda: target,
+    )
+    runner.test_ai = _RecoveryAI()
+    try:
+        result = await runner.run_case(
+            _scenario(max_turns=2, fault="invalid_json_once"),
+            "backend",
+            {"name": "current"},
+            "deferred",
+        )
+        assert result.failure is None
+        assert target.calls == 2
+        assert len(result.turns) == 4
+        assert result.turns[1].error == "HTTP 422"
     finally:
         await runner.close()
 
@@ -314,6 +441,39 @@ def test_deterministic_compiler_error_is_not_reported_as_infrastructure(tmp_path
             kind="backend",
             scenario_id="scenario-compile",
             turn_id="a1",
+        )
+    finally:
+        runner.cache.close()
+
+    assert failure is None
+
+
+def test_rendered_ui_grounding_rejection_is_not_a_response_timeout(tmp_path) -> None:
+    runner = _Runner(
+        _settings(tmp_path),
+        "ui-grounding-rejection",
+        2.5,
+        target_factory=lambda: _Target(),
+    )
+    try:
+        failure = runner._reply_failure(
+            TargetReply(
+                text="A value in that change does not appear in the words that asked for it.",
+                latency_ms=40,
+                status_code=422,
+                error="HTTP 422",
+                raw={
+                    "error": {
+                        "error_code": "VALUE_NOT_GROUNDED",
+                        "request_id": "request-grounding-1",
+                        "stage": "patch",
+                        "retryable": False,
+                    }
+                },
+            ),
+            kind="ui",
+            scenario_id="scenario-grounding",
+            turn_id="a2",
         )
     finally:
         runner.cache.close()

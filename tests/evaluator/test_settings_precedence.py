@@ -19,6 +19,7 @@ import pytest
 from ai_market_monitor.core.config import Settings as AppSettings
 from hm_chatbot_eval.config import Settings as EvalSettings
 from hm_chatbot_eval.config import (
+    discard_stale_isolated_target_overrides,
     discard_stale_process_openai_key,
     process_openai_key_overrides_dotenv,
 )
@@ -109,3 +110,33 @@ def test_stale_process_key_is_removed_before_a_cli_run(env_file: Path, monkeypat
     assert discard_stale_process_openai_key(env_file) is True
     assert "OPENAI_API_KEY" not in os.environ
     assert EvalSettings(_env_file=env_file).openai_api_key == DOTENV_KEY
+
+
+def test_historical_isolated_target_leak_is_removed(monkeypatch) -> None:
+    monkeypatch.delenv("HM_ISOLATED_EVALUATOR_ACTIVE", raising=False)
+    monkeypatch.setenv("TARGET_BACKEND_BASE_URL", "http://127.0.0.1:8124")
+    monkeypatch.setenv("TARGET_BACKEND_HEALTH_URL", "http://127.0.0.1:8124/health")
+    monkeypatch.setenv(
+        "TARGET_UI_URL", "http://127.0.0.1:8124/dashboard/strategies/new"
+    )
+
+    removed = discard_stale_isolated_target_overrides()
+
+    assert set(removed) == {
+        "TARGET_BACKEND_BASE_URL",
+        "TARGET_BACKEND_HEALTH_URL",
+        "TARGET_UI_URL",
+    }
+    assert not any(name in os.environ for name in removed)
+
+
+def test_active_isolated_target_and_arbitrary_overrides_are_preserved(monkeypatch) -> None:
+    monkeypatch.setenv("HM_ISOLATED_EVALUATOR_ACTIVE", "1")
+    monkeypatch.setenv("TARGET_BACKEND_BASE_URL", "http://127.0.0.1:8124")
+    assert discard_stale_isolated_target_overrides() == ()
+    assert os.environ["TARGET_BACKEND_BASE_URL"].endswith(":8124")
+
+    monkeypatch.setenv("HM_ISOLATED_EVALUATOR_ACTIVE", "0")
+    monkeypatch.setenv("TARGET_BACKEND_BASE_URL", "https://evaluator.example.test")
+    assert discard_stale_isolated_target_overrides() == ()
+    assert os.environ["TARGET_BACKEND_BASE_URL"] == "https://evaluator.example.test"

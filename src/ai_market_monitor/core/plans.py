@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 
 UNLIMITED_SYMBOL_CAP = 100_000
@@ -59,17 +60,121 @@ PRIVATE_BETA_PLAN_CODE = "demo"
 
 
 def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
-    """Which plans a visitor may be shown.
+    """Which plans a visitor may be shown. Always all of them.
 
-    With billing off, only the free Private Beta plan. Showing the paid plans returned a
-    price and a "Try Monitor for 7 days" button for something nobody can buy: the
-    checkout route is disabled, so every one of those buttons was a dead end. A price the
-    user cannot act on is worse than no price — it reads as a charge they are about to
-    incur.
+    Prices stay on the page whether or not checkout is switched on, because the page has
+    a second job besides selling: telling a visitor what the product will cost. Hiding
+    them left the pricing page with one free plan and nothing to compare it against.
+
+    What checkout being off *does* change is the button, not the price. Availability is
+    handled per plan and per interval by :func:`plan_offer`, so a plan that cannot be
+    bought says so on its own card instead of disappearing.
     """
-    if not billing_enabled:
-        return (PRIVATE_BETA_PLAN_CODE,)
+    del billing_enabled
     return PUBLIC_PLAN_CODES
+
+
+# --------------------------------------------------------------------------------
+# The current offer: which plans can be bought, and at what price, right now.
+#
+# One definition, read by the landing page, the public pricing page and the dashboard.
+# Three surfaces showing prices is three chances to disagree, and a visitor who sees $12
+# on one page and $8 on another has no way to know which is real.
+# --------------------------------------------------------------------------------
+
+#: When the launch price stops. After this instant the plan costs its normal price again,
+#: and the countdown disappears. Both facts come from this one value.
+PROMOTION_ENDS_AT = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
+
+#: What a card says instead of a price when the plan cannot be bought yet.
+COMING_SOON_LABEL = "Soon"
+
+
+@dataclass(frozen=True, slots=True)
+class PlanOffer:
+    """Whether a plan can be bought, per interval, and what it costs today."""
+
+    monthly_available: bool
+    annual_available: bool
+    #: The launch price, while :data:`PROMOTION_ENDS_AT` is still in the future. ``None``
+    #: means the plan is simply at its normal price.
+    promotional_monthly_price: Decimal | None = None
+
+
+PLAN_OFFERS: dict[str, PlanOffer] = {
+    # Free, so there is nothing to buy and nothing to discount.
+    "demo": PlanOffer(monthly_available=True, annual_available=False),
+    # The one plan on offer. Annual billing is not open yet.
+    "trader": PlanOffer(
+        monthly_available=True,
+        annual_available=False,
+        promotional_monthly_price=Decimal("8.00"),
+    ),
+    # Not open yet, on either interval.
+    "pro": PlanOffer(monthly_available=False, annual_available=False),
+}
+
+_DEFAULT_OFFER = PlanOffer(monthly_available=False, annual_available=False)
+
+
+def plan_offer(code: str) -> PlanOffer:
+    """The offer for one plan. An unknown plan is not for sale.
+
+    Fails closed: a plan nobody described cannot be bought by accident.
+    """
+    return PLAN_OFFERS.get(code, _DEFAULT_OFFER)
+
+
+def promotion_is_active(now: datetime | None = None) -> bool:
+    """Is the launch price still running?"""
+    return (now or datetime.now(UTC)) < PROMOTION_ENDS_AT
+
+
+def effective_monthly_price(code: str, *, now: datetime | None = None) -> Decimal:
+    """What this plan costs per month today.
+
+    Reads the promotion and the clock together, so the price on the page and the
+    countdown next to it can never say different things.
+    """
+    definition = PLAN_DEFINITIONS[code]
+    offer = plan_offer(code)
+    if offer.promotional_monthly_price is not None and promotion_is_active(now):
+        return offer.promotional_monthly_price
+    return definition.monthly_price
+
+
+def original_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
+    """The crossed-out price, or ``None`` when there is nothing to cross out."""
+    if effective_monthly_price(code, now=now) == PLAN_DEFINITIONS[code].monthly_price:
+        return None
+    return PLAN_DEFINITIONS[code].monthly_price
+
+
+def plan_offer_payload(code: str, *, now: datetime | None = None) -> dict[str, object]:
+    """The offer as plain data, for the landing page and the dashboard.
+
+    A price for an interval that is not open yet is ``None``, not the number. Leaving the
+    number in the payload would ship it in the page source for anyone to read, and the
+    point of "Soon" is that there is no price to quote yet.
+    """
+    offer = plan_offer(code)
+    original = original_monthly_price(code, now=now)
+    return {
+        "monthlyAvailable": offer.monthly_available,
+        "annualAvailable": offer.annual_available,
+        "monthlyPrice": (
+            float(effective_monthly_price(code, now=now))
+            if offer.monthly_available
+            else None
+        ),
+        "annualPrice": (
+            float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)
+            if offer.annual_available and code in PUBLIC_PLAN_PRESENTATIONS
+            else None
+        ),
+        "originalMonthlyPrice": float(original) if original is not None else None,
+        "comingSoonLabel": COMING_SOON_LABEL,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,7 +562,11 @@ PLAN_COMPARISON_COLUMNS: tuple[str, ...] = ("demo", "trader", "pro")
 
 
 def visible_plan_comparison_headers(*, billing_enabled: bool) -> tuple[str, ...]:
-    """Column names for the comparison table, for the plans on offer."""
+    """Column names for the comparison table, one per visible plan.
+
+    Derived from the same list the cards come from, so a plan can never appear as a card
+    without a column or as a column without a card.
+    """
     return tuple(
         PLAN_DEFINITIONS[code].name
         for code in visible_public_plan_codes(billing_enabled=billing_enabled)
@@ -465,12 +574,7 @@ def visible_plan_comparison_headers(*, billing_enabled: bool) -> tuple[str, ...]
 
 
 def visible_plan_comparison(*, billing_enabled: bool) -> tuple[tuple[str, ...], ...]:
-    """Comparison rows trimmed to the plans on offer.
-
-    With billing off the table used to compare three plans while only one of them could
-    be had — a page that answers "what do I get for $22" for a product with no way to pay
-    $22.
-    """
+    """Comparison rows, one column per visible plan."""
     visible = visible_public_plan_codes(billing_enabled=billing_enabled)
     columns = [0] + [
         1 + PLAN_COMPARISON_COLUMNS.index(code)

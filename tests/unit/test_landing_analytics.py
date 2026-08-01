@@ -253,10 +253,17 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
         "Explore",
         "Monitor",
         "Pro",
-        "monthlyPrice: 12",
+        # The launch offer: the Monitor plan runs at $8 with $12 crossed out. The
+        # server sends these values too; the fallback exists for a page opened with no
+        # runtime config, so it has to say the same thing.
+        "monthlyPrice: 8",
+        "originalMonthlyPrice: 12",
         "annualPrice: 120",
         "monthlyPrice: 22",
         "annualPrice: 220",
+        # Annual is not open on any plan, and Pro is not open at all.
+        "annualAvailable: false",
+        "monthlyAvailable: false",
         "Most Popular",
         "Try Monitor for 7 days",
         "No charge for seven days. Cancel before the first payment.",

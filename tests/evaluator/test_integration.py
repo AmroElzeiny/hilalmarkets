@@ -111,6 +111,36 @@ async def test_evaluator_headers_fail_closed_when_test_control_is_disabled(test_
     assert "AI_SETUP_EVALUATOR_ENABLED" in detail or "APP_ENV" in detail
 
 
+async def test_consumed_evaluator_fault_marks_the_error_response(test_context):
+    """The readiness marker proves a real model-boundary fault, not header admission."""
+
+    await _signup(test_context, "evaluator-consumed@example.com")
+    settings = test_context["settings"]
+    settings.ai_setup_evaluator_enabled = True
+    settings.ai_setup_evaluator_faults_enabled = True
+    planner = StandInPlanner()
+    service = AISetupChatService(
+        _launch_settings(settings),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(settings, planner),
+    )
+    test_context["app"].dependency_overrides[get_ai_setup_chat_service] = lambda: service
+    created = await test_context["client"].post("/api/v1/dashboard/setup-chat/sessions")
+    response = await test_context["client"].post(
+        f"/api/v1/dashboard/setup-chat/sessions/{created.json()['id']}/messages",
+        headers={"X-HM-Eval-Fault": "empty_once"},
+        json={
+            "message": "Monitor BTC/USDT when the 15m candle rises by at least 3%",
+            "client_message_id": "eval-consumed-message",
+        },
+    )
+
+    assert response.status_code >= 400
+    assert response.headers["X-HM-Eval-Fault-Applied"] == "empty_once"
+    assert planner.plan_calls == 0, "the injected fault replaced the planner provider call"
+
+
 async def test_authenticated_builder_exposes_only_targeted_evaluator_selectors(test_context):
     await _signup(test_context, "evaluator-selectors@example.com")
     response = await test_context["client"].get("/dashboard/strategies/new")

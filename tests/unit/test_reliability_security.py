@@ -1,4 +1,4 @@
-﻿from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select

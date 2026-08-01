@@ -21,10 +21,14 @@ from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
+    COMING_SOON_LABEL,
     PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    plan_offer_payload,
+    promotion_is_active,
     visible_plan_comparison,
     visible_plan_comparison_headers,
     visible_public_plan_codes,
@@ -2944,6 +2948,17 @@ async def billing_page(
                 )
             },
             plan_presentations=PUBLIC_PLAN_PRESENTATIONS,
+            # What each plan costs today and whether it can be bought, from the same
+            # `core/plans` definition the landing page reads. One offer, three surfaces.
+            plan_offer_values={
+                code: plan_offer_payload(code)
+                for code in visible_public_plan_codes(
+                    billing_enabled=settings.billing_enabled
+                )
+            },
+            promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
+            promotion_active=promotion_is_active(),
+            promotion_coming_soon_label=COMING_SOON_LABEL,
             plan_comparison=visible_plan_comparison(
                 billing_enabled=settings.billing_enabled
             ),

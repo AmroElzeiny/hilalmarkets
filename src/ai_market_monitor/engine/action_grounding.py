@@ -25,7 +25,7 @@ SemanticAction = Literal[
 
 _ACTION_PATTERNS: dict[SemanticAction, str] = {
     "include": (
-        r"\b(?:include|add|only|watch|monitor|scan)\b"
+        r"\b(?:includ(?:e|ed|es|ing)|add|only|watch|monitor|scan)\b"
         r"|(?:ضم|اضف|أضف|راقب|تابع|اسمح)"
         r"|\b(?:dof|deef|add|ra2eb|tab3)\b"
     ),

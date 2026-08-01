@@ -1708,6 +1708,16 @@ class SetupChatLaunchService:
         try:
             outcome = await self.agent.run_turn(turn)
         except SetupAgentError as exc:
+            # Planning can be paid and complete even when the server subsequently
+            # rejects an ungrounded operation. Usage belongs to the attempted turn,
+            # not only to successful mutations, and must be recorded before the
+            # classified failure is returned.
+            await CapabilityCoverageService(self.settings).record_usage(
+                session,
+                chat=chat,
+                operation="setup_agent_turn",
+                usage=exc.usage or None,
+            )
             # The draft is untouched and stays exactly as it was. The turn is reported
             # as the failure it is, never as small talk, and the same idempotency key
             # can be retried.

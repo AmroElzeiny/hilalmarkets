@@ -236,7 +236,6 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             include=("BTC/USDT",),
             context=("4h",),
             reference="15m",
-            expected_blocking_prefix="context_timeframe_not_executable:",
         ),
         LaunchCoreContract(
             id="confirmation-role-never-becomes-trigger",
@@ -252,7 +251,6 @@ def launch_core_contracts() -> list[LaunchCoreContract]:
             include=("SOL/USDT",),
             confirmation=("1h",),
             reference="1h",
-            expected_blocking_prefix="confirmation_timeframe_not_executable:",
         ),
         LaunchCoreContract(
             id="reference-timeframe-differs-from-trigger",

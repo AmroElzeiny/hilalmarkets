@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   trackBillingIntervalChanged,
   trackPlanSelected,
@@ -12,8 +12,13 @@ import { useVisibilityTracking } from './Tracking'
 type Plan = {
   code: PublicPlanCode
   name: string
-  monthlyPrice: number
-  annualPrice: number
+  /**
+   * What the plan costs today, already carrying the launch price when one is running.
+   * Null while the interval is not open for sale — there is no price to quote yet, and
+   * shipping the number anyway would put it in the page source for anyone to read.
+   */
+  monthlyPrice: number | null
+  annualPrice: number | null
   description: string
   button: string
   visibleFeatures: string[]
@@ -21,7 +26,17 @@ type Plan = {
   highlightedFeature?: string | null
   badge?: string | null
   trialNote?: string | null
+  /** False while an interval is not open yet: the card says "Soon" and shows no price. */
+  monthlyAvailable?: boolean
+  annualAvailable?: boolean
+  /** The old price to cross out, or null when nothing changed. */
+  originalMonthlyPrice?: number | null
+  comingSoonLabel?: string
 }
+
+/** Server default, used only when the page is opened without runtime config. */
+const DEFAULT_PROMOTION_ENDS_AT = '2026-09-01T00:00:00+00:00'
+const DEFAULT_COMING_SOON_LABEL = 'Soon'
 
 const PLANS: Plan[] = [
   {
@@ -29,6 +44,8 @@ const PLANS: Plan[] = [
     name: 'Explore',
     monthlyPrice: 0,
     annualPrice: 0,
+    monthlyAvailable: true,
+    annualAvailable: false,
     description:
       'For traders who want to explore assets listed as Halal under a selected methodology, inspect the evidence, and follow changes to favorite coins.',
     button: 'Start free',
@@ -50,8 +67,11 @@ const PLANS: Plan[] = [
   {
     code: 'trader',
     name: 'Monitor',
-    monthlyPrice: 12,
+    monthlyPrice: 8,
+    originalMonthlyPrice: 12,
     annualPrice: 120,
+    monthlyAvailable: true,
+    annualAvailable: false,
     description:
       'For regular traders who want AI-assisted market monitoring and clear evidence behind every alert.',
     button: 'Try Monitor for 7 days',
@@ -78,6 +98,8 @@ const PLANS: Plan[] = [
     name: 'Pro',
     monthlyPrice: 22,
     annualPrice: 220,
+    monthlyAvailable: false,
+    annualAvailable: false,
     description:
       'For active traders who need more simultaneous monitors, more quick scans, and unlimited monitor alerts.',
     button: 'Choose Pro',
@@ -121,15 +143,90 @@ const COMPARISON_ROWS = [
   ['Monitor trial', 'Not included', '7 days, no payment', 'Not included'],
 ] as const
 
-function priceLabel(plan: Plan, interval: BillingInterval) {
-  if (plan.monthlyPrice === 0) return { amount: '$0', period: 'Free forever' }
-  return interval === 'annual'
-    ? { amount: `$${plan.annualPrice}`, period: 'per year' }
-    : { amount: `$${plan.monthlyPrice}`, period: 'per month' }
+/** Can this plan be bought on this interval today? Missing means "yes", for older data. */
+function isAvailable(plan: Plan, interval: BillingInterval) {
+  const flag = interval === 'annual' ? plan.annualAvailable : plan.monthlyAvailable
+  return flag !== false
+}
+
+type Price =
+  | { kind: 'coming_soon'; label: string }
+  | { kind: 'price'; amount: string; period: string; original?: string }
+
+function priceLabel(plan: Plan, interval: BillingInterval): Price {
+  const amount = interval === 'annual' ? plan.annualPrice : plan.monthlyPrice
+  if (!isAvailable(plan, interval) || amount === null || amount === undefined) {
+    // No price at all for something nobody can buy yet. A number next to "Soon" reads
+    // as a charge the visitor is about to face.
+    return { kind: 'coming_soon', label: plan.comingSoonLabel ?? DEFAULT_COMING_SOON_LABEL }
+  }
+  if (amount === 0) return { kind: 'price', amount: '$0', period: 'Free forever' }
+  if (interval === 'annual') {
+    return { kind: 'price', amount: `$${amount}`, period: 'per year' }
+  }
+  return {
+    kind: 'price',
+    amount: `$${amount}`,
+    period: 'per month',
+    original:
+      plan.originalMonthlyPrice && plan.originalMonthlyPrice > amount
+        ? `$${plan.originalMonthlyPrice}`
+        : undefined,
+  }
 }
 
 function checkoutHref(planCode: PublicPlanCode, interval: BillingInterval) {
   return `/subscribe?plan_code=${encodeURIComponent(planCode)}&billing_interval=${interval}`
+}
+
+type Remaining = { days: number; hours: number; minutes: number } | null
+
+function remainingUntil(endsAt: string, now: number): Remaining {
+  const end = Date.parse(endsAt)
+  if (Number.isNaN(end)) return null
+  const ms = end - now
+  if (ms <= 0) return null
+  const minutes = Math.floor(ms / 60_000)
+  return {
+    days: Math.floor(minutes / 1440),
+    hours: Math.floor((minutes % 1440) / 60),
+    minutes: minutes % 60,
+  }
+}
+
+/**
+ * How long the launch price lasts, in days, hours and minutes.
+ *
+ * Deliberately quiet: it ticks once a minute rather than once a second, it does not
+ * animate, and it says what it is next to the price instead of shouting a deadline. The
+ * brand rules ask for calm, not urgency, so this states a fact and stops there.
+ */
+function OfferCountdown({ endsAt }: { endsAt: string }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const left = remainingUntil(endsAt, now)
+  if (!left) return null
+  const parts: Array<[number, string]> = [
+    [left.days, left.days === 1 ? 'day' : 'days'],
+    [left.hours, left.hours === 1 ? 'hour' : 'hours'],
+    [left.minutes, left.minutes === 1 ? 'minute' : 'minutes'],
+  ]
+  return (
+    <div className="offer-countdown" role="group" aria-label="Time left at this price">
+      <span className="offer-countdown-label">Launch price ends in</span>
+      <span className="offer-countdown-parts tnum">
+        {parts.map(([value, unit]) => (
+          <span className="offer-countdown-part" key={unit}>
+            <strong>{value}</strong>
+            <small>{unit}</small>
+          </span>
+        ))}
+      </span>
+    </div>
+  )
 }
 
 export default function Pricing() {
@@ -146,6 +243,7 @@ export default function Pricing() {
     commerce?.plans?.length === PLANS.length ? commerce.plans : PLANS
   const comparisonRows =
     commerce?.comparisonRows?.length ? commerce.comparisonRows : COMPARISON_ROWS
+  const promotionEndsAt = commerce?.promotionEndsAt ?? DEFAULT_PROMOTION_ENDS_AT
 
   function setBillingInterval(next: BillingInterval) {
     setInterval(next)
@@ -169,19 +267,27 @@ export default function Pricing() {
 
       <fieldset className="billing-toggle">
         <legend className="sr-only">Choose a billing interval</legend>
-        {(['monthly', 'annual'] as const).map((value) => (
-          <label key={value} className={interval === value ? 'is-selected' : ''}>
-            <input
-              type="radio"
-              name="billing-interval"
-              value={value}
-              checked={interval === value}
-              onChange={() => setBillingInterval(value)}
-            />
-            <span>{value === 'monthly' ? 'Monthly' : 'Annual'}</span>
-            {value === 'annual' && <small>Save up to $44</small>}
-          </label>
-        ))}
+        {(['monthly', 'annual'] as const).map((value) => {
+          // "Save up to $44" next to an interval nobody can buy is an offer that does
+          // not exist. The toggle still switches, so a visitor can see what annual will
+          // look like, and every card then says the same thing: soon.
+          const anyAvailable = plans.some((plan) => isAvailable(plan, value))
+          return (
+            <label key={value} className={interval === value ? 'is-selected' : ''}>
+              <input
+                type="radio"
+                name="billing-interval"
+                value={value}
+                checked={interval === value}
+                onChange={() => setBillingInterval(value)}
+              />
+              <span>{value === 'monthly' ? 'Monthly' : 'Annual'}</span>
+              {value === 'annual' && (
+                <small>{anyAvailable ? 'Save up to $44' : DEFAULT_COMING_SOON_LABEL}</small>
+              )}
+            </label>
+          )
+        })}
       </fieldset>
 
       <p className="sr-only" role="status" aria-live="polite">
@@ -190,9 +296,11 @@ export default function Pricing() {
       <div className="pricing-grid">
         {plans.map((plan) => {
           const price = priceLabel(plan, interval)
+          const available = isAvailable(plan, interval)
           const expanded = expandedPlans.has(plan.code)
-          const ctaLabel =
-            plan.code === 'trader' && interval === 'annual'
+          const ctaLabel = !available
+            ? `${plan.name} is coming soon`
+            : plan.code === 'trader' && interval === 'annual'
               ? 'Choose Monitor'
               : plan.button
           const presentFeature = (feature: string) =>
@@ -203,39 +311,70 @@ export default function Pricing() {
           return (
             <article
               key={plan.code}
-              className={`pricing-card ${plan.code === 'trader' ? 'is-popular' : ''}`}
+              // The apple-green accent marks the one plan to choose. A card that
+              // cannot be bought is not that plan, so it loses the accent as well as
+              // the badge.
+              className={`pricing-card ${
+                plan.code === 'trader' && available ? 'is-popular' : ''
+              } ${available ? '' : 'is-coming-soon'}`}
               aria-labelledby={`plan-${plan.code}`}
             >
               <div className="plan-title-row">
                 <h3 id={`plan-${plan.code}`}>{plan.name}</h3>
-                {plan.badge && <span className="popular-badge">{plan.badge}</span>}
+                {plan.badge && available && (
+                  <span className="popular-badge">{plan.badge}</span>
+                )}
+                {!available && <span className="soon-badge">{price.kind === 'coming_soon' ? price.label : 'Soon'}</span>}
               </div>
               <div className="pricing-card-head">
                 <p>{plan.description}</p>
               </div>
-              <div className="plan-price tnum">
-                <strong>{price.amount}</strong>
-                <span>{price.period}</span>
-              </div>
+              {price.kind === 'coming_soon' ? (
+                <div className="plan-price is-coming-soon">
+                  <strong>{price.label}</strong>
+                  <span>Not available yet</span>
+                </div>
+              ) : (
+                <div className="plan-price tnum">
+                  {price.original && (
+                    <s className="plan-price-original" aria-label={`Was ${price.original} per month`}>
+                      {price.original}
+                    </s>
+                  )}
+                  <strong>{price.amount}</strong>
+                  <span>{price.period}</span>
+                </div>
+              )}
+              {price.kind === 'price' && price.original && (
+                <OfferCountdown endsAt={promotionEndsAt} />
+              )}
               <p
                 className={`annual-saving ${
-                  interval === 'annual' && plan.annualPrice > 0 ? '' : 'is-placeholder'
+                  interval === 'annual' && available && plan.annualPrice && plan.monthlyPrice
+                    ? ''
+                    : 'is-placeholder'
                 }`}
-                aria-hidden={interval !== 'annual' || plan.annualPrice === 0}
+                aria-hidden={interval !== 'annual' || !available || !plan.annualPrice}
               >
-                {interval === 'annual' && plan.annualPrice > 0
+                {interval === 'annual' && available && plan.annualPrice && plan.monthlyPrice
                   ? `Save $${plan.monthlyPrice * 12 - plan.annualPrice} per year`
                   : '\u00a0'}
               </p>
-              <a
-                href={checkoutHref(plan.code, interval)}
-                className="plan-cta"
-                data-plan={plan.code}
-                onClick={() => selectPlan(plan)}
-              >
-                {ctaLabel}
-              </a>
-              {plan.code === 'trader' && interval === 'monthly' && (
+              {available ? (
+                <a
+                  href={checkoutHref(plan.code, interval)}
+                  className="plan-cta"
+                  data-plan={plan.code}
+                  onClick={() => selectPlan(plan)}
+                >
+                  {ctaLabel}
+                </a>
+              ) : (
+                <button type="button" className="plan-cta is-disabled" disabled data-plan={plan.code}>
+                  {ctaLabel}
+                </button>
+              )}
+              {plan.code === 'trader' && interval === 'monthly' && available && (
                 <p className="trial-payment-note">
                   {plan.trialNote ?? 'No charge for seven days. Cancel before the first payment.'}
                 </p>

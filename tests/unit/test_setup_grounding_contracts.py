@@ -11,10 +11,20 @@ from ai_market_monitor.engine.capability_contract import _parameter_value_ground
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
 )
-from ai_market_monitor.engine.setup_turn_execution import _ground_sharia_policy
-from ai_market_monitor.schemas.setup_agent import SegmentKind, TurnSegment
+from ai_market_monitor.engine.setup_turn_execution import (
+    _canonicalize_grounded_directional_magnitudes,
+    _ground_sharia_policy,
+)
+from ai_market_monitor.schemas.setup_agent import SegmentKind, SetupAgentTurnPlan, TurnSegment
 from ai_market_monitor.schemas.setup_authorization import AuthorizedPatchOperation
-from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
+from ai_market_monitor.schemas.strategy import Comparator
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    ConditionNodeType,
+    ConditionNodeV2,
+    FormulaKind,
+    MovementDirection,
+    StrategyDraftV2,
+)
 
 
 @pytest.mark.parametrize(
@@ -73,6 +83,73 @@ def test_symbol_lists_are_grounded_symbol_by_symbol():
     )
 
 
+def _directional_plan(source: str, operator: Comparator, threshold: float) -> SetupAgentTurnPlan:
+    segment = TurnSegment(
+        segment_id="segment-1",
+        exact_source_text=source,
+        start_offset=0,
+        end_offset=len(source),
+        kind=SegmentKind.STRATEGY_INSTRUCTION,
+        action_required=True,
+        confidence=1.0,
+    )
+    condition = ConditionNodeV2(
+        node_type=ConditionNodeType.CONDITION,
+        source_turn_id="turn-1",
+        source_fragment=source,
+        movement_direction=MovementDirection.DOWN,
+        formula=FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE,
+        operator=operator,
+        threshold=threshold,
+        unit="percent",
+        trigger_timeframe="4h",
+    )
+    return SetupAgentTurnPlan(
+        source_turn_id="turn-1",
+        segments=[segment],
+        operations=[
+            AuthorizedPatchOperation(
+                operation_id="condition-1",
+                authorizing_segment_id=segment.segment_id,
+                kind="add_condition",
+                condition=condition,
+            )
+        ],
+        overall_confidence=1.0,
+    )
+
+
+def test_signed_planner_representation_is_normalized_to_grounded_directional_magnitude():
+    plan = _directional_plan(
+        "bearish close-to-close percentage move at least 2.5% on 4h",
+        Comparator.LESS_THAN_OR_EQUAL,
+        -2.5,
+    )
+
+    normalized = _canonicalize_grounded_directional_magnitudes(plan)
+    condition = normalized.operations[0].condition
+
+    assert condition is not None
+    assert condition.movement_direction is MovementDirection.DOWN
+    assert condition.operator is Comparator.GREATER_THAN_OR_EQUAL
+    assert condition.threshold == 2.5
+
+
+def test_explicit_signed_threshold_is_not_rewritten_without_grounded_inverse_operator():
+    plan = _directional_plan(
+        "bearish close-to-close percentage move at most -2.5% on 4h",
+        Comparator.LESS_THAN_OR_EQUAL,
+        -2.5,
+    )
+
+    normalized = _canonicalize_grounded_directional_magnitudes(plan)
+    condition = normalized.operations[0].condition
+
+    assert condition is not None
+    assert condition.operator is Comparator.LESS_THAN_OR_EQUAL
+    assert condition.threshold == -2.5
+
+
 def test_capability_provider_shortlist_tracks_the_configured_adapter():
     assert "ccxt" in configured_runtime_provider_requirements("ccxt")
     assert "ccxt" not in configured_runtime_provider_requirements("memory")
@@ -124,6 +201,7 @@ def test_every_changed_sharia_policy_field_requires_source_grounding():
 @pytest.mark.parametrize(
     ("text", "action"),
     [
+        ("Keep SOLUSDT included", "include"),
         ("استبعد ETH/USDT", "exclude"),
         ("شيل شرط RSI", "remove_condition"),
         ("خليه مطلوب", "required"),

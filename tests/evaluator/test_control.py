@@ -12,6 +12,7 @@ from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     AISetupEvaluatorControlError,
     consume_evaluator_llm_fault,
+    evaluator_fault_was_consumed,
     evaluator_prompt_appendix,
     evaluator_turn,
 )
@@ -59,8 +60,11 @@ def test_exception_faults_are_one_shot(fault, exception_type):
 def test_payload_faults_are_one_shot(fault):
     settings = _settings()
     with evaluator_turn(settings, fault=fault, target_version=None):
+        assert evaluator_fault_was_consumed() is None
         assert consume_evaluator_llm_fault() is not None
+        assert evaluator_fault_was_consumed() == fault
         assert consume_evaluator_llm_fault() is None
+    assert evaluator_fault_was_consumed() is None
 
 
 async def test_fault_is_applied_at_the_real_responses_client_boundary():

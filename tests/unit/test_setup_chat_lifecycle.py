@@ -114,9 +114,10 @@ def test_only_approved_lifecycle_states_are_terminal() -> None:
     assert set(TERMINAL_STATES) == {"approved", "compiled", "activated"}
 
 
-def test_collecting_is_the_only_incomplete_assistant_turn() -> None:
-    assert is_turn_complete("collecting") is False
+def test_every_synchronous_response_lifecycle_is_a_complete_assistant_turn() -> None:
+    assert is_turn_complete("collecting") is True
     assert set(TURN_COMPLETE_STATES) == {
+        "collecting",
         "needs_clarification",
         "ready_for_confirmation",
         "awaiting_approval",

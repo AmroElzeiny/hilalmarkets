@@ -97,7 +97,7 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
 
     dashboard = await test_context["client"].get("/dashboard")
     assert dashboard.status_code == 200
-    assert "Create your first Watchlist" in dashboard.text
+    assert "Create your first Watch Plan" in dashboard.text
     assert "Your next useful action" in dashboard.text
     assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
@@ -483,7 +483,14 @@ async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test
     assert "Try Monitor for 7 days" in page.text
     assert "The seven-day Creem trial product is not available yet." in page.text
     assert 'id="billing-checkout-dialog"' in page.text
-    assert "$22" in page.text
+    # The Pro plan is not on sale yet, so the card says "Soon" and carries no price.
+    # A number beside "Soon" reads as a charge the user is about to face.
+    assert "Pro is coming soon" in page.text
+    assert "$22" not in page.text
+    # The Monitor launch price, with the old one crossed out beside it.
+    assert "$8" in page.text
+    assert 'class="price-original"' in page.text
+    assert "data-offer-countdown" in page.text
     review = await test_context["client"].get(
         "/dashboard/billing/checkout?plan_code=trader",
         follow_redirects=False,

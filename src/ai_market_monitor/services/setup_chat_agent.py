@@ -100,12 +100,17 @@ class SetupAgentError(ValueError):
         stage: str,
         retryable: bool = False,
         details: tuple[str, ...] = (),
+        usage: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.stage = stage
         self.retryable = retryable
         self.details = details
+        # A provider call can succeed before deterministic authorization rejects the
+        # proposed operation. Preserve that paid usage across the error boundary so
+        # the launch service and evaluator cannot report the turn as costing $0.
+        self.usage = dict(usage or {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,6 +408,10 @@ class SetupChatAgent:
                 stage="planning",
                 retryable=exc.retryable,
                 details=exc.details,
+                # Even an invalid/empty final answer may have consumed the full
+                # model budget. Bind the actual route here because parsing failed
+                # before the normal success path could merge this metadata.
+                usage={**exc.usage, **route.usage_metadata()},
             ) from exc
         planner_model = route.model
         planner_reasons = route.reasons
@@ -489,6 +498,7 @@ class SetupChatAgent:
                 str(exc),
                 stage="tool_validation",
                 details=exc.details,
+                usage=self.last_usage,
             ) from exc
 
         trace = _with(
@@ -534,6 +544,7 @@ class SetupChatAgent:
                     plan,
                     outcome.result,
                     model=route.model,
+                    service_tier=route.service_tier,
                     planner_usage=plan_usage,
                 )
             except StructuredCallError as exc:
@@ -594,10 +605,12 @@ class SetupChatAgent:
         planner_payload = self._planner_payload(turn, shortlist)
         reserved_cost = estimate_structured_call_cost(
             self.settings,
+            schema_model=SetupAgentPlanEnvelope,
             instructions=_PLANNER_INSTRUCTIONS,
             payload=planner_payload,
             model=route.model,
             max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+            service_tier=route.service_tier,
         )
         if reserved_cost > self.settings.setup_agent_max_estimated_cost_usd_per_turn:
             raise StructuredCallError(
@@ -605,8 +618,10 @@ class SetupChatAgent:
                 "The planner call would exceed the configured per-turn AI budget.",
                 stage="planning",
             )
+        provider_attempted = False
         try:
             await self._before_provider_call(route.model)
+            provider_attempted = True
             envelope, usage = await structured_call(
                 self.settings,
                 schema_model=SetupAgentPlanEnvelope,
@@ -616,6 +631,7 @@ class SetupChatAgent:
                 model=route.model,
                 reasoning_effort=route.reasoning_effort,
                 max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+                service_tier=route.service_tier,
                 timeout_seconds=self.settings.setup_agent_planner_timeout_seconds,
                 estimated_cost_limit=self.settings.setup_agent_max_estimated_cost_usd_per_turn,
                 stage="planning",
@@ -623,6 +639,15 @@ class SetupChatAgent:
             )
         except StructuredCallError as exc:
             self.model_call_count = 1
+            if provider_attempted:
+                # A timeout has no response usage, but it may still be billed. Carry
+                # the pessimistic reservation so the account and evaluator do not
+                # present a paid attempt as free.
+                exc.usage = {
+                    **exc.usage,
+                    "_setup_reserved_cost_usd": reserved_cost,
+                    "_setup_planner_attempts": 1,
+                }
             if _counts_toward_circuit(exc):
                 await self._provider_failed(exc, route.model)
             else:
@@ -643,6 +668,7 @@ class SetupChatAgent:
         result: SetupTurnExecutionResult,
         *,
         model: str,
+        service_tier: str,
         planner_usage: dict[str, Any],
     ) -> tuple[ComposedReply, dict[str, Any]]:
         knowledge = product_knowledge()
@@ -690,10 +716,12 @@ class SetupChatAgent:
         }
         reserved = estimate_structured_call_cost(
             self.settings,
+            schema_model=SetupAgentReply,
             instructions=_COMPOSER_INSTRUCTIONS,
             payload=payload,
             model=model,
             max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
+            service_tier=service_tier,
         )
         planner_reserved = float(
             planner_usage.get("_setup_reserved_cost_usd") or 0.0
@@ -718,6 +746,7 @@ class SetupChatAgent:
                 model=model,
                 reasoning_effort="low",
                 max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
+                service_tier=service_tier,
                 timeout_seconds=self.settings.setup_agent_composer_timeout_seconds,
                 estimated_cost_limit=max(
                     0.000001,
@@ -1134,6 +1163,11 @@ A number written inside a question does not authorize a rule. The exception is a
 `update_condition`: fields you leave unchanged are inherited from the rule you name, so
 `change that to at least 8%` does not have to restate the timeframe.
 
+condition_symbols is a symbol-specific restriction, not the draft watchlist. Keep it
+empty unless the same authorizing segment explicitly names that symbol for the rule.
+Never copy symbols from draft.universe into condition_symbols merely because the
+watchlist currently contains one symbol.
+
 If a value is not in the authorizing segment's words, do not supply one. Create an
 add_unresolved operation with a typed target, answer schema and smallest useful
 canonical question. Use condition_creation when the missing item is a whole rule.
@@ -1152,6 +1186,15 @@ clarification_answers entry. An answer resolves that question; it does not becom
 new condition. "yes" is not a market rule. A mutating answer must also include the
 operation that fills the unresolved target, then resolve_unresolved_key.
 
+For an active condition_creation question, a complete explicit supported rule is the
+operation that fills the target: propose add_condition and resolve_unresolved_key in
+the same plan. The user's latest exact operator wins over an assumption embedded in an
+older question. For example, if the question asked for a minimum but the answer says
+"at most 0.5%", use lte 0.5; do not reinterpret it as gte, ask the same question again,
+or resolve the blocker without adding the condition. When first asking about a vague
+word such as "strong", do not presume minimum or maximum: ask neutrally for the missing
+threshold and comparator.
+
 REFERENCES
 Use recent_dialogue and conversation_context to resolve "that one", "the second
 option", "the one we just added", "make it stricter". Point at the existing
@@ -1167,7 +1210,15 @@ DIRECTION
 movement_direction is up, down, neutral or not_applicable. strategy_bias is long,
 short or neutral. Default strategy_bias to neutral unless the trader explicitly says
 long or short. A falling market does not imply short, and a rising market does not
-imply long.
+imply long. Likewise, "bullish" authorizes movement_direction=up only; it never
+authorizes strategy_bias=long.
+
+For directional percentage rules, keep the user's comparator and positive magnitude
+exactly as stated. "Bearish move of at least 2.5%" means movement_direction=down,
+operator=gte and threshold=2.5. Never encode direction by negating the threshold or
+flipping the comparator (for example, never rewrite it as lte -2.5). When asking what
+"strong" means, ask for a comparator and positive percent magnitude without suggesting
+a signed negative convention.
 
 APPROVAL
 You may record approval_intent. You can never approve. Approval happens only through
@@ -1179,6 +1230,11 @@ direct_reply instead, with no plan, only when the turn is purely conversational 
 nothing needs applying — and then write the reply yourself, in plain words, in the
 user's language. Never tell a user to describe a setup when they have already given
 you technical content. Never claim anything changed; that is decided after you.
+
+The envelope has exactly two fields: plan and direct_reply. response_points,
+questions_to_answer and overall_confidence belong inside plan only. For a pure
+conversation return exactly plan=null and direct_reply=<your reply>; never copy plan
+fields beside direct_reply at the envelope root.
 
 Use response_points to record what the final reply must cover, including answers to
 their questions and honest explanations of anything refused.
@@ -1303,7 +1359,12 @@ def _estimated_usage_cost(
 ) -> float:
     input_tokens = int(usage.get("input_tokens") or 0)
     output_tokens = int(usage.get("output_tokens") or 0)
-    pricing = settings.openai_model_pricing_usd_per_million.get(model) or {}
+    service_tier = str(usage.get("_setup_service_tier") or "default")
+    pricing = (
+        settings.openai_fast_model_pricing_usd_per_million.get(model)
+        if service_tier in {"fast", "priority"}
+        else settings.openai_model_pricing_usd_per_million.get(model)
+    ) or {}
     return (
         input_tokens * float(pricing.get("input", 0))
         + output_tokens * float(pricing.get("output", 0))

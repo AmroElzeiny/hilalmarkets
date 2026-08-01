@@ -19,7 +19,10 @@ from ai_market_monitor.db.models.enums import (
 from ai_market_monitor.schemas.screening_execution import ReviewedScreeningEvidence
 from ai_market_monitor.schemas.strategy import Comparator, Timeframe
 
-STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH = 500
+# A Setup Chat message is bounded at 5,000 characters. One legitimate semantic
+# segment may span the entire message (for example, a long but single strategy
+# instruction), so provenance must be able to preserve that exact authorizing span.
+STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH = 5000
 
 
 class SetupIntent(StrEnum):
@@ -436,9 +439,35 @@ class UnresolvedFieldV2(BaseModel):
                 "universe" if key in {"universe", "symbols"} else "draft_field"
             )
             migrated["target_type"] = target_type
+        if (
+            target_type
+            in {"condition_field", "capability_parameter", "reference_definition"}
+            and not migrated.get("target_condition_id")
+        ):
+            # Before a condition exists there is no owned condition id to target.
+            # Preserve the blocker as typed condition creation; never invent an id
+            # or let one incomplete clarification discard the rest of the turn.
+            target_type = "condition_creation"
+            migrated["target_type"] = target_type
+            migrated["target_field"] = None
+        if target_type == "condition_creation":
+            # A condition-creation blocker necessarily refers to a rule that does not
+            # exist yet. Planner-authored future ids have no canonical authority and
+            # must not make the entire turn fail schema validation.
+            migrated["target_condition_id"] = None
         if target_type == "draft_field":
             migrated.setdefault("target_field", key)
         migrated.setdefault("expected_answer_schema", {"type": "string"})
+        expected = migrated.get("expected_answer_schema")
+        if (
+            migrated.get("allowed_options")
+            and isinstance(expected, dict)
+            and expected.get("type") not in {"string", "array"}
+        ):
+            # Display options are strings. They cannot authorize an answer to a
+            # numeric/object/boolean contract, so discard only the incompatible UI
+            # metadata and keep the typed blocker intact.
+            migrated["allowed_options"] = []
         migrated.setdefault("reason", "This value is required to compile the setup exactly.")
         migrated.setdefault("created_workflow_revision", 1)
         return migrated

@@ -1,19 +1,28 @@
 """The dynamic-universe, preflight-evidence and response-proof invariants.
 
 Each test names the invariant it proves and the production function that enforces it.
-They assert a *rule* across a family — every universe mode, every contract, every claim
-type, every operation kind — so a fix that only helps one reported example fails here.
+They assert a *rule* across a family вЂ” every universe mode, every contract, every claim
+type, every operation kind вЂ” so a fix that only helps one reported example fails here.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 
 from ai_market_monitor.core.plans import (
+    COMING_SOON_LABEL,
+    PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
+    effective_monthly_price,
+    original_monthly_price,
+    plan_offer,
+    plan_offer_payload,
+    promotion_is_active,
     visible_plan_comparison,
     visible_plan_comparison_headers,
     visible_public_plan_codes,
@@ -739,9 +748,9 @@ def test_a_condition_claim_must_state_the_value_the_draft_actually_holds(
     "text",
     [
         "I added ETH for you.",
-        "تمت إضافة ETH.",
+        "ШЄЩ…ШЄ ШҐШ¶Ш§ЩЃШ© ETH.",
         "Ana zawedt ETH.",
-        "已添加 ETH。",
+        "е·Іж·»еЉ  ETHгЂ‚",
     ],
 )
 def test_the_proposition_check_is_the_same_in_every_language(text: str) -> None:
@@ -909,20 +918,20 @@ def test_two_add_inclusion_operations_do_not_share_each_others_symbols() -> None
     before = _draft()
     after = apply_strategy_patch(
         before,
-        StrategyPatch(source_turn_id=TURN, include_symbols=["BTC/USDT", "ETH/USDT"]),
+        StrategyPatch(source_turn_id=TURN, add_inclusions=["SOL/USDT", "ADA/USDT"]),
     ).draft
     operations = [
         AuthorizedPatchOperation(
             operation_id="op-btc",
             authorizing_segment_id="s1",
             kind="add_inclusion",
-            symbol="BTC/USDT",
+            symbol="SOL/USDT",
         ),
         AuthorizedPatchOperation(
             operation_id="op-eth",
             authorizing_segment_id="s1",
             kind="add_inclusion",
-            symbol="ETH/USDT",
+            symbol="ADA/USDT",
         ),
     ]
     reconciliation = reconcile_turn(
@@ -937,8 +946,8 @@ def test_two_add_inclusion_operations_do_not_share_each_others_symbols() -> None
     by_id = {item.operation_id: item for item in reconciliation.operations}
     btc_targets = [change.target for change in by_id["op-btc"].net_changes]
     eth_targets = [change.target for change in by_id["op-eth"].net_changes]
-    assert btc_targets == ["BTC/USDT"]
-    assert eth_targets == ["ETH/USDT"]
+    assert btc_targets == ["SOL/USDT"]
+    assert eth_targets == ["ADA/USDT"]
     assert by_id["op-btc"].net_effect == "effective"
     assert by_id["op-eth"].net_effect == "effective"
 
@@ -949,7 +958,7 @@ def test_without_targets_the_old_sharing_is_what_happens() -> None:
     before = _draft()
     after = apply_strategy_patch(
         before,
-        StrategyPatch(source_turn_id=TURN, include_symbols=["BTC/USDT", "ETH/USDT"]),
+        StrategyPatch(source_turn_id=TURN, add_inclusions=["SOL/USDT", "ADA/USDT"]),
     ).draft
     reconciliation = reconcile_turn(
         before,
@@ -963,7 +972,7 @@ def test_without_targets_the_old_sharing_is_what_happens() -> None:
         item.operation_id: sorted(change.target or "" for change in item.net_changes)
         for item in reconciliation.operations
     }
-    assert shared["op-btc"] == ["BTC/USDT", "ETH/USDT"]
+    assert shared["op-btc"] == ["ADA/USDT", "SOL/USDT"]
     assert shared["op-btc"] == shared["op-eth"]
 
 
@@ -975,7 +984,7 @@ def test_a_sharia_policy_change_is_diffed_and_attributed() -> None:
         before,
         StrategyPatch(
             source_turn_id=TURN,
-            sharia_policy=before.sharia_policy.model_copy(
+            set_sharia_policy=before.sharia_policy.model_copy(
                 update={"universe_mode": ShariaUniverseMode.EXPLICIT_ASSETS}
             ),
         ),
@@ -1162,23 +1171,93 @@ def test_every_bound_fact_that_moves_is_reported_as_changed(field_name: str) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_disabled_billing_exposes_only_the_free_plan() -> None:
-    assert visible_public_plan_codes(billing_enabled=False) == ("demo",)
-    assert visible_public_plan_codes(billing_enabled=True) == PUBLIC_PLAN_CODES
+@pytest.mark.parametrize("billing_enabled", [True, False])
+def test_prices_stay_on_the_page_in_both_billing_modes(billing_enabled: bool) -> None:
+    """Checkout being off changes the button, never whether a price is shown."""
+
+    assert visible_public_plan_codes(billing_enabled=billing_enabled) == PUBLIC_PLAN_CODES
 
 
-def test_disabled_billing_trims_the_comparison_table_to_one_column() -> None:
-    """A page that answers "what do I get for $22" needs a way to pay $22."""
+@pytest.mark.parametrize("billing_enabled", [True, False])
+def test_the_comparison_table_always_has_one_column_per_visible_plan(
+    billing_enabled: bool,
+) -> None:
+    """A plan can never be a card with no column, or a column with no card."""
 
-    headers = visible_plan_comparison_headers(billing_enabled=False)
-    rows = visible_plan_comparison(billing_enabled=False)
-    assert len(headers) == 1
-    assert all(len(row) == 2 for row in rows)
+    headers = visible_plan_comparison_headers(billing_enabled=billing_enabled)
+    rows = visible_plan_comparison(billing_enabled=billing_enabled)
+    assert len(headers) == len(
+        visible_public_plan_codes(billing_enabled=billing_enabled)
+    )
+    assert all(len(row) == len(headers) + 1 for row in rows)
 
-    full_headers = visible_plan_comparison_headers(billing_enabled=True)
-    full_rows = visible_plan_comparison(billing_enabled=True)
-    assert len(full_headers) == 3
-    assert all(len(row) == 4 for row in full_rows)
+
+def test_only_the_monitor_plan_is_on_sale_and_only_monthly() -> None:
+    """Enforced by `core/plans.plan_offer`, read by every pricing surface."""
+
+    assert plan_offer("trader").monthly_available is True
+    assert plan_offer("pro").monthly_available is False
+    for code in PUBLIC_PLAN_CODES:
+        assert plan_offer(code).annual_available is False, code
+
+
+def test_an_unknown_plan_is_never_for_sale() -> None:
+    """Fail closed: a plan nobody described cannot be bought by accident."""
+
+    offer = plan_offer("not-a-plan")
+    assert offer.monthly_available is False
+    assert offer.annual_available is False
+
+
+def test_the_launch_price_and_the_countdown_come_from_one_rule() -> None:
+    """A price on the page and a timer beside it must never disagree."""
+
+    before = PROMOTION_ENDS_AT - timedelta(minutes=1)
+    after = PROMOTION_ENDS_AT
+
+    assert promotion_is_active(before) is True
+    assert effective_monthly_price("trader", now=before) == Decimal("8.00")
+    assert original_monthly_price("trader", now=before) == Decimal("12.00")
+
+    assert promotion_is_active(after) is False
+    assert effective_monthly_price("trader", now=after) == Decimal("12.00")
+    # Nothing to cross out once the offer is over.
+    assert original_monthly_price("trader", now=after) is None
+
+
+@pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
+def test_a_plan_with_no_promotion_has_nothing_crossed_out(code: str) -> None:
+    if code == "trader":
+        pytest.skip("the Monitor plan is the one on offer")
+    assert original_monthly_price(code) is None
+    assert effective_monthly_price(code) == PLAN_DEFINITIONS[code].monthly_price
+
+
+@pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
+def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
+    """The landing page and the dashboard read this same object."""
+
+    payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+    assert set(payload) == {
+        "monthlyAvailable",
+        "annualAvailable",
+        "monthlyPrice",
+        "annualPrice",
+        "originalMonthlyPrice",
+        "comingSoonLabel",
+    }
+    assert payload["comingSoonLabel"] == COMING_SOON_LABEL
+    assert payload["annualAvailable"] is False
+    # An interval that is not open carries no number at all, so the page source cannot
+    # leak a price for something nobody can buy.
+    assert payload["annualPrice"] is None
+    if code == "trader":
+        assert payload["monthlyPrice"] == 8.0
+        assert payload["originalMonthlyPrice"] == 12.0
+    else:
+        assert payload["originalMonthlyPrice"] is None
+    if not payload["monthlyAvailable"]:
+        assert payload["monthlyPrice"] is None
 
 
 def test_the_old_coordinator_stays_off_in_the_production_example() -> None:

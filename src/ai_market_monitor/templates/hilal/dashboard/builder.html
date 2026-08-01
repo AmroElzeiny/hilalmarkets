@@ -1,9 +1,9 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260729-setup-v2">
-<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260729-setup-v2">
-<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260729-setup-v2">
-<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260729-setup-v2">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260801-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260801-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260801-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260801-launch-offer">
 {% endblock %}
 {% block content %}
 <section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
@@ -42,7 +42,7 @@
       <div class="ai-chat-error" data-ai-chat-error data-testid="ai-setup-request-error" role="alert" hidden><span data-ai-chat-error-text></span><button type="button" data-ai-chat-retry>Retry</button></div>
       <form class="ai-chat-composer" data-ai-chat-form>
         <label class="sr-only" for="ai-setup-chat-input">Describe your setup</label>
-        <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Describe your setup…"></textarea>
+        <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Describe your setupвЂ¦"></textarea>
         <button type="submit" data-ai-chat-send disabled aria-label="Send message"><span data-icon="arrow" data-icon-class="icon"></span></button>
         <small>Enter to send | Shift+Enter for a new line</small>
       </form>
@@ -60,7 +60,7 @@
 {% include "hilal/dashboard/partials/builder_workspace.html" %}
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260729-setup-v2"></script>
-<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260729-setup-v2"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260729-setup-v2"></script>
+<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260801-launch-offer"></script>
+<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260801-launch-offer"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260801-launch-offer"></script>
 {% endblock %}

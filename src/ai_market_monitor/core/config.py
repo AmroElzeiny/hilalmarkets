@@ -292,11 +292,19 @@ class Settings(BaseSettings):
     # --- Setup Agent bounds. These are the ones that control Setup Chat traffic. ---
     #: Retained for environment compatibility only. Authenticated Setup Chat never
     #: retries a model call inside one free-text turn.
-    setup_agent_planner_max_output_tokens: int = Field(default=6000, ge=512, le=16000)
+    setup_agent_planner_max_output_tokens: int = Field(default=8000, ge=512, le=16000)
     setup_agent_composer_max_output_tokens: int = Field(default=1600, ge=256, le=4000)
-    setup_agent_planner_timeout_seconds: int = Field(default=10, ge=5, le=12)
+    # Twelve seconds is the product p95 objective, not a hard kill switch. Complex
+    # but valid turns can occasionally exceed it; keep the provider call bounded
+    # while recording the latency regression instead of returning a false outage.
+    setup_agent_planner_timeout_seconds: int = Field(default=60, ge=5, le=60)
     setup_agent_composer_timeout_seconds: int = Field(default=10, ge=5, le=12)
-    setup_agent_max_estimated_cost_usd_per_turn: float = Field(default=0.05, gt=0, le=5)
+    #: Setup Chat pins both routes explicitly so project-level ``auto`` routing cannot
+    #: silently change latency/cost behavior. Standard processing is the stable
+    #: launch default; Fast remains an explicit opt-in after provider canary evidence.
+    setup_agent_simple_service_tier: Literal["default"] = "default"
+    setup_agent_complex_service_tier: Literal["default", "fast"] = "default"
+    setup_agent_max_estimated_cost_usd_per_turn: float = Field(default=0.10, gt=0, le=5)
     #: Consecutive provider failures before the agent stops trying for a while.
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)
     setup_agent_circuit_breaker_cooldown_seconds: int = Field(default=60, ge=5, le=900)
@@ -492,10 +500,29 @@ class Settings(BaseSettings):
                 "cached_input": 0.075,
                 "output": 4.50,
             },
+            "gpt-5-mini": {
+                "input": 0.25,
+                "cached_input": 0.025,
+                "output": 2.00,
+            },
             "gpt-5-nano": {
                 "input": 0.05,
                 "cached_input": 0.005,
                 "output": 0.40,
+            },
+        }
+    )
+    openai_fast_model_pricing_usd_per_million: dict[str, dict[str, float]] = Field(
+        default_factory=lambda: {
+            "gpt-5.4-mini": {
+                "input": 1.50,
+                "cached_input": 0.15,
+                "output": 9.00,
+            },
+            "gpt-5-mini": {
+                "input": 0.45,
+                "cached_input": 0.045,
+                "output": 3.60,
             },
         }
     )

@@ -64,15 +64,42 @@
     document.querySelectorAll("[data-dashboard-plan-price]").forEach((price) => {
       const amount = price.querySelector("[data-dashboard-plan-amount]");
       const period = price.querySelector("[data-dashboard-plan-period]");
+      const original = price.querySelector("[data-dashboard-plan-original]");
+      const card = price.closest("[data-offer-card]");
+      const countdown = card
+        ? card.querySelector("[data-dashboard-offer-countdown]")
+        : null;
       const free = price.getAttribute("data-free") === "true";
+      const soonLabel = price.getAttribute("data-coming-soon-label") || "Soon";
+      const available =
+        price.getAttribute(
+          interval === "annual" ? "data-annual-available" : "data-monthly-available"
+        ) !== "false";
+      const originalPrice = price.getAttribute("data-original-monthly-price") || "";
+      // An interval that is not open yet shows no number. A price beside "Soon" reads
+      // as a charge the user is about to face.
+      price.classList.toggle("is-coming-soon", !available);
       if (amount) {
-        amount.textContent = `$${price.getAttribute(
-          interval === "annual" ? "data-annual-price" : "data-monthly-price"
-        ) || "0"}`;
+        amount.textContent = available
+          ? `$${price.getAttribute(
+              interval === "annual" ? "data-annual-price" : "data-monthly-price"
+            ) || "0"}`
+          : soonLabel;
       }
       if (period) {
-        period.textContent = free ? "Free forever" : interval === "annual" ? "per year" : "per month";
+        period.textContent = !available
+          ? "Not available yet"
+          : free
+            ? "Free forever"
+            : interval === "annual"
+              ? "per year"
+              : "per month";
       }
+      // The crossed-out price and the countdown belong to the monthly launch offer, so
+      // both disappear together on any other interval.
+      const promoted = available && interval === "monthly" && Boolean(originalPrice);
+      if (original) original.hidden = !promoted;
+      if (countdown) countdown.hidden = !promoted;
     });
     document.querySelectorAll("[data-dashboard-purchase-button]").forEach((button) => {
       const planCode = button.getAttribute("data-plan-code") || "";
@@ -81,8 +108,18 @@
       const cycle =
         button.getAttribute(interval === "annual" ? "data-annual-cycle" : "data-monthly-cycle") ||
         interval;
+      const card = button.closest("[data-offer-card]");
+      const priceNode = card ? card.querySelector("[data-dashboard-plan-price]") : null;
+      // A plan or an interval that is not on sale yet cannot be bought whatever the
+      // payment provider reports about it.
+      const offered =
+        !priceNode ||
+        priceNode.getAttribute(
+          interval === "annual" ? "data-annual-available" : "data-monthly-available"
+        ) !== "false";
       const availability = plan.availability || {};
       const available =
+        offered &&
         Boolean(availability.purchasable) &&
         (cycle === "trial_7_day"
           ? Boolean(availability.trial)

@@ -102,6 +102,7 @@ from ai_market_monitor.services.ai_setup_chat import (
 )
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     AISetupEvaluatorControlError,
+    evaluator_fault_was_consumed,
     evaluator_turn,
 )
 from ai_market_monitor.services.ai_usage_context import ai_usage_correlation
@@ -1213,26 +1214,48 @@ async def send_ai_setup_chat_message(
 ) -> SetupChatSessionResponse:
     turn_started = monotonic()
     usage_correlation_id = uuid4().hex
+    evaluator_fault_name = (evaluator_fault or "").strip() or None
+    evaluator_fault_consumed = False
+
+    def mark_evaluator_fault_applied() -> None:
+        """Expose a test-only fault that reached the routed LLM boundary.
+
+        Admission by ``evaluator_turn`` is not sufficient: a deterministic branch
+        might not make a model call.  The marker is set only after the one-shot
+        fault was consumed, and only inside the isolated ``APP_ENV=test`` control
+        path.  It contains the public fault name, never customer data or credentials.
+        """
+
+        if evaluator_fault_consumed and evaluator_fault_name:
+            response.headers["X-HM-Eval-Fault-Applied"] = evaluator_fault_name
+
     try:
         chat = await service.owned_session(session, principal.user_id, chat_id)
         with (
             ai_usage_correlation(usage_correlation_id),
             evaluator_turn(
                 settings,
-                fault=evaluator_fault,
+                fault=evaluator_fault_name,
                 target_version=evaluator_target_version,
             ),
         ):
-            await service.handle_message(
-                session,
-                chat,
-                message=payload.message,
-                option_key=payload.option_key,
-                option_value=payload.option_value,
-                option_label=payload.option_label,
-                client_message_id=payload.client_message_id,
-            )
-            await service.finalize_agent_shadow_comparison(session, chat)
+            try:
+                await service.handle_message(
+                    session,
+                    chat,
+                    message=payload.message,
+                    option_key=payload.option_key,
+                    option_value=payload.option_value,
+                    option_label=payload.option_label,
+                    client_message_id=payload.client_message_id,
+                )
+                await service.finalize_agent_shadow_comparison(session, chat)
+            finally:
+                # This runs before ``evaluator_turn`` resets its ContextVars, so an
+                # injected error response can still carry an evidence marker.
+                evaluator_fault_consumed = (
+                    evaluator_fault_was_consumed() == evaluator_fault_name
+                )
         await service.attach_turn_usage(
             session,
             chat,
@@ -1280,6 +1303,7 @@ async def send_ai_setup_chat_message(
         await session.commit()
         await session.refresh(chat)
         response.status_code = exc.status_code
+        mark_evaluator_fault_applied()
         return await _setup_chat_response(service, session, chat, error=envelope)
     except Exception as exc:
         # Anything unhandled used to escape as a bare HTTP 500 with no body, which the
@@ -1325,7 +1349,9 @@ async def send_ai_setup_chat_message(
             if envelope.retryable
             else status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+        mark_evaluator_fault_applied()
         return await _setup_chat_response(service, session, chat, error=envelope)
+    mark_evaluator_fault_applied()
     return await _setup_chat_response(service, session, chat)
 
 

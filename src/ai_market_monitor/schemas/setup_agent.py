@@ -25,7 +25,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ai_market_monitor.schemas.setup_authorization import (
     AuthorizedPatchOperation,
@@ -33,6 +33,8 @@ from ai_market_monitor.schemas.setup_authorization import (
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
+    ConditionNodeV2,
+    FormulaKind,
 )
 from ai_market_monitor.schemas.strict_mode import StrictModel as _StrictModel
 
@@ -145,6 +147,7 @@ def _bind_condition_tree_provenance(
                 re.IGNORECASE,
             )
         )
+    node["formula"] = _canonical_formula_identifier(node.get("formula"))
     node["operands"] = _canonicalize_core_operand_metadata(node)
     children = node.get("children")
     if isinstance(children, list):
@@ -163,15 +166,46 @@ def _bind_condition_tree_provenance(
     return node
 
 
+def _canonical_formula_identifier(value: object) -> object:
+    """Normalize only one unambiguous known formula from malformed AI wrapping."""
+
+    if isinstance(value, FormulaKind):
+        return value.value
+    if isinstance(value, str):
+        return value
+    known = {item.value for item in FormulaKind}
+    found: set[str] = set()
+
+    def visit(item: object) -> None:
+        if isinstance(item, str) and item in known:
+            found.add(item)
+        elif isinstance(item, dict):
+            for key, nested in item.items():
+                visit(key)
+                visit(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return next(iter(found)) if len(found) == 1 else value
+
+
 def _canonicalize_core_operand_metadata(
     raw_node: dict[str, object],
 ) -> list[object]:
     """Fill metadata fixed by a named core formula, never trader-controlled values."""
 
     operands = raw_node.get("operands")
-    if not isinstance(operands, list):
+    if operands is None:
+        operands = []
+    elif not isinstance(operands, list):
         return []
     formula = raw_node.get("formula")
+    if not isinstance(formula, str):
+        # Let ConditionNodeV2 reject the malformed formula. Canonical metadata must
+        # never throw before schema validation can produce the classified failure.
+        return list(operands)
     percentage_formulas: dict[object, dict[str, object]] = {
         "open_to_close_percentage": {
             "formula": "open_to_close",
@@ -342,7 +376,12 @@ class ClarificationAnswer(_StrictModel):
     #: The unresolved field or question this answers.
     question_id: str = Field(min_length=1, max_length=120)
     #: What the user chose, in their own words.
-    answer_text: str = Field(min_length=1, max_length=500)
+    # A user can answer one clarification with a complete multi-rule strategy turn.
+    # Preserve the exact valid message instead of imposing a smaller hidden limit.
+    answer_text: str = Field(
+        min_length=1,
+        max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
+    )
     resolves_question: bool = True
 
 
@@ -476,7 +515,34 @@ class SetupAgentTurnPlan(_StrictModel):
         }
         migrated = dict(data)
         operations: list[object] = []
+        unresolved_condition_segments = {
+            item.get("authorizing_segment_id")
+            for item in raw_operations
+            if isinstance(item, dict)
+            and item.get("kind") == "add_unresolved"
+            and isinstance(item.get("unresolved"), dict)
+            and item["unresolved"].get("target_type")
+            in {
+                "condition_field",
+                "condition_creation",
+                "capability_parameter",
+                "reference_definition",
+            }
+        }
         for item in raw_operations:
+            if (
+                isinstance(item, dict)
+                and item.get("kind") == "restore_snapshot"
+                and (
+                    not item.get("target_snapshot_id")
+                    or item.get("target_executable_version") is None
+                )
+            ):
+                # Restore is a privileged, server-verified operation. An incomplete
+                # model proposal has no target and therefore cannot be grounded or
+                # executed. Discard only that proposal; never invent a snapshot or
+                # let it invalidate independent operations in the same turn.
+                continue
             if not isinstance(item, dict) or not isinstance(item.get("condition"), dict):
                 operations.append(item)
                 continue
@@ -485,7 +551,7 @@ class SetupAgentTurnPlan(_StrictModel):
                 operations.append(item)
                 continue
             operation = dict(item)
-            operation["condition"] = _bind_condition_tree_provenance(
+            bound_condition = _bind_condition_tree_provenance(
                 item["condition"],
                 source_turn_id=source_turn_id,
                 source_fragment=exact_text,
@@ -495,6 +561,33 @@ class SetupAgentTurnPlan(_StrictModel):
                     else None
                 ),
             )
+            try:
+                ConditionNodeV2.model_validate(bound_condition)
+            except ValidationError:
+                # A plan can be valid JSON Schema yet propose an internally
+                # incomplete condition (for example, a condition with no operator).
+                # Preserve the exact request as a blocking unsupported mechanic. Do
+                # not guess the missing field, discard the rest of the turn, or pick
+                # a nearby capability.
+                raw_formula = item["condition"].get("formula")
+                if (
+                    raw_formula is not None
+                    and raw_formula != "capability"
+                    and item.get("authorizing_segment_id")
+                    in unresolved_condition_segments
+                ):
+                    # The same segment already carries a typed blocker for this
+                    # incomplete core rule. Keep that one authority; do not also
+                    # label the user's supported primitive as unsupported.
+                    continue
+                operation = {
+                    "operation_id": item.get("operation_id"),
+                    "authorizing_segment_id": item.get("authorizing_segment_id"),
+                    "kind": "add_unsupported",
+                    "missing_contract": exact_text[:500],
+                }
+            else:
+                operation["condition"] = bound_condition
             operations.append(operation)
         migrated["operations"] = operations
         return migrated
@@ -1036,6 +1129,48 @@ class SetupAgentPlanEnvelope(_StrictModel):
 
     plan: SetupAgentTurnPlan | None = None
     direct_reply: str | None = Field(default=None, max_length=SETUP_REPLY_MAX_LENGTH)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_harmless_misplaced_direct_reply_metadata(cls, data: object) -> object:
+        """Recover a pure reply only when misplaced fields cannot encode mutation.
+
+        Some otherwise schema-constrained provider responses put plan-only reply
+        metadata beside ``direct_reply``. Refusing a greeting for an unused
+        confidence score makes the authenticated chat unavailable without adding a
+        safety boundary. Drop only the explicitly non-executable fields below, and
+        only when ``plan`` is null and a real direct reply exists. Segments,
+        operations, clarifications, approval intent, or any unknown key still fail
+        strict validation instead of being silently discarded.
+        """
+
+        if not isinstance(data, dict):
+            return data
+        if data.get("plan") is not None or not str(data.get("direct_reply") or "").strip():
+            return data
+        harmless_metadata = {
+            "plan",
+            "direct_reply",
+            "response_points",
+            "questions_to_answer",
+            "overall_confidence",
+        }
+        empty_plan_collections = {
+            "segments",
+            "operations",
+            "strategy_instructions",
+            "clarification_answers",
+            "clarifications_to_ask",
+            "unsupported_segments",
+        }
+        allowed = harmless_metadata | empty_plan_collections | {"approval_intent"}
+        if not set(data).issubset(allowed):
+            return data
+        if any(data.get(key) not in (None, []) for key in empty_plan_collections):
+            return data
+        if data.get("approval_intent") is not None:
+            return data
+        return {"plan": None, "direct_reply": data.get("direct_reply")}
 
     @model_validator(mode="after")
     def validate_one_of(self) -> SetupAgentPlanEnvelope:

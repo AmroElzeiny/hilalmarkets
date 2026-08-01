@@ -11,6 +11,13 @@ def _settings() -> Settings:
         ai_setup_complex_model="configured-complex",
         ai_setup_simple_reasoning_effort="low",
         ai_setup_complex_reasoning_effort="medium",
+        openai_fast_model_pricing_usd_per_million={
+            "configured-complex": {
+                "input": 1.0,
+                "cached_input": 0.1,
+                "output": 5.0,
+            }
+        },
     )
 
 
@@ -22,12 +29,13 @@ def test_clear_single_condition_uses_configured_simple_tier() -> None:
 
     assert route.model == "configured-simple"
     assert route.reasoning_effort == "low"
+    assert route.service_tier == "default"
     assert route.tier == "simple"
     assert route.reasons == ("simple_clear_request",)
     assert route.correction_count == 0
 
 
-def test_complex_logic_and_multiple_timeframes_use_configured_complex_tier() -> None:
+def test_complex_logic_and_multiple_timeframes_use_stable_complex_tier() -> None:
     route = select_setup_model(
         _settings(),
         current_message=(
@@ -38,6 +46,7 @@ def test_complex_logic_and_multiple_timeframes_use_configured_complex_tier() -> 
 
     assert route.model == "configured-complex"
     assert route.reasoning_effort == "medium"
+    assert route.service_tier == "default"
     assert route.tier == "complex"
     assert "mixed_boolean_logic" in route.reasons
     assert "multiple_timeframes" in route.reasons

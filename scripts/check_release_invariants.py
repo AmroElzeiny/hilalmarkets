@@ -11,6 +11,7 @@ from ai_market_monitor.api.route_security import (
 from ai_market_monitor.core.plans import (
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
+    plan_offer,
     visible_public_plan_codes,
 )
 from ai_market_monitor.main import app
@@ -65,8 +66,15 @@ def main() -> int:
         failures.append(f"Public plan allowlist changed: {PUBLIC_PLAN_CODES!r}")
     if tuple(PURCHASABLE_PLAN_CODES) != EXPECTED_PURCHASABLE_PLANS:
         failures.append(f"Purchasable plan allowlist changed: {PURCHASABLE_PLAN_CODES!r}")
-    if visible_public_plan_codes(billing_enabled=False) != ("demo",):
-        failures.append("Disabled billing must expose only the free private-beta plan")
+    # Prices stay on the page whether or not checkout is switched on. What changes is the
+    # button: `core/plans.plan_offer` marks a plan or an interval as not yet available and
+    # the card says so, instead of the plan vanishing from the comparison.
+    if visible_public_plan_codes(billing_enabled=False) != PUBLIC_PLAN_CODES:
+        failures.append("Every public plan must stay visible with billing disabled")
+    if plan_offer("pro").monthly_available:
+        failures.append("The Pro plan is not on sale yet and must not offer checkout")
+    if any(plan_offer(code).annual_available for code in PUBLIC_PLAN_CODES):
+        failures.append("Annual billing is not open yet and must not offer checkout")
 
     routes = iter_versioned_api_routes(app)
     if not routes:

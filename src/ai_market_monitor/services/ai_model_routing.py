@@ -58,6 +58,7 @@ _ROUTING_TECHNICAL_TERMS = frozenset(
 class AISetupModelRoute:
     model: str
     reasoning_effort: str
+    service_tier: str
     tier: str
     reasons: tuple[str, ...]
     condition_count: int
@@ -67,6 +68,7 @@ class AISetupModelRoute:
         return {
             "_traceedge_model": self.model,
             "_traceedge_reasoning_effort": self.reasoning_effort,
+            "_setup_requested_service_tier": self.service_tier,
             "_traceedge_route_tier": self.tier,
             "_traceedge_route_reasons": list(self.reasons),
             "_traceedge_condition_count": self.condition_count,
@@ -185,9 +187,25 @@ def select_setup_model(
         model = evaluator_target.model
         effort = evaluator_target.reasoning_effort
         unique_reasons = (*unique_reasons, "evaluator_target_version")
+    configured_service_tier = (
+        settings.setup_agent_complex_service_tier
+        if complex_route
+        else settings.setup_agent_simple_service_tier
+    )
+    service_tier = configured_service_tier
+    if (
+        configured_service_tier == "fast"
+        and model not in settings.openai_fast_model_pricing_usd_per_million
+    ):
+        # Fast availability is model-specific. A test/canary model that has no
+        # configured Fast price remains executable on Standard without changing
+        # the semantic plan or substituting another model.
+        service_tier = "default"
+        unique_reasons = (*unique_reasons, "fast_service_tier_unavailable_for_model")
     return AISetupModelRoute(
         model=model,
         reasoning_effort=effort,
+        service_tier=service_tier,
         tier="complex" if complex_route else "simple",
         reasons=unique_reasons or ("simple_clear_request",),
         condition_count=condition_count,

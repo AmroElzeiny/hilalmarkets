@@ -76,6 +76,40 @@ def discard_stale_process_openai_key(env_file: str | Path = ".env") -> bool:
     return True
 
 
+_ISOLATED_TARGET_ENVIRONMENT = (
+    "TARGET_BACKEND_BASE_URL",
+    "TARGET_BACKEND_HEALTH_URL",
+    "TARGET_UI_URL",
+)
+
+
+def discard_stale_isolated_target_overrides() -> tuple[str, ...]:
+    """Remove target addresses leaked by the historical isolated-run wrapper.
+
+    The original PowerShell wrapper set its default isolated target (port 8124) in
+    the *caller's* process and did not restore it.  A later ordinary evaluator run
+    then ignored the project's port-8000 configuration and failed readiness against
+    the already-stopped test server.  Current wrappers set an active marker and
+    restore their environment; this cleanup exists for terminals contaminated by an
+    older invocation.
+
+    Only the wrapper's exact historical localhost port is removed.  Arbitrary
+    operator/CI target overrides keep normal environment precedence.
+    """
+
+    if os.environ.get("HM_ISOLATED_EVALUATOR_ACTIVE", "").strip() == "1":
+        return ()
+    removed: list[str] = []
+    for name in _ISOLATED_TARGET_ENVIRONMENT:
+        value = os.environ.get(name, "").strip().rstrip("/").casefold()
+        if value == "http://127.0.0.1:8124" or value.startswith(
+            "http://127.0.0.1:8124/"
+        ):
+            os.environ.pop(name, None)
+            removed.append(name)
+    return tuple(removed)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
@@ -120,7 +154,7 @@ class Settings(BaseSettings):
     judge_model: str = ""
     judge_reasoning: str = "low"
     judge_service_tier: str = "flex"
-    judge_max_output_tokens: int = 1600
+    judge_max_output_tokens: int = 4000
 
     eval_output_dir: Path = Path("chatbot_eval_runs")
     eval_cache_db: Path = Path(".chatbot_eval_cache.sqlite3")
@@ -200,7 +234,10 @@ class Settings(BaseSettings):
     target_ui_send_selector: str = "[data-testid=ai-setup-send]"
     target_ui_assistant_message_selector: str = "[data-testid=ai-setup-assistant-message]"
     target_ui_new_chat_selector: str = "[data-testid=new-ai-setup-chat]"
-    target_ui_chat_api_pattern: str = "*/api/v1/dashboard/setup-chat/sessions/*/messages"
+    # Playwright glob routes need ``**`` for the scheme, host, and nested path.
+    # A leading single ``*`` still let Python's ``fnmatch`` observe a response, but
+    # did not reliably intercept the browser request to attach a test-only fault.
+    target_ui_chat_api_pattern: str = "**/api/v1/dashboard/setup-chat/sessions/*/messages"
     target_ui_response_object_path: str = "evaluation_contract"
     target_ui_timeout_ms: int = 90000
     target_ui_screenshots: bool = True

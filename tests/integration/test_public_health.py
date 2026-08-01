@@ -22,6 +22,7 @@ async def test_public_health_returns_service_metadata(test_context):
         "status": "ok",
         "service": "hilalmarkets",
         "environment": "test",
+        "evaluator_fault_control_available": False,
     }
 
 

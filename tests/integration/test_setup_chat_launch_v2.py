@@ -11,6 +11,7 @@ from ai_market_monitor.api.routers.dashboard_api import get_ai_setup_chat_servic
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
+    AIUsageEvent,
     SetupChatDraftSnapshot,
     SetupChatTurn,
     User,
@@ -34,7 +35,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
 from ai_market_monitor.services.ai_setup_chat import AISetupChatService, SetupChatError
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
-from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
+from ai_market_monitor.services.setup_chat_agent import SetupAgentError, SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import (
     SetupChatLaunchService,
     SetupLaunchError,
@@ -154,6 +155,26 @@ class StandInPlanner:
             )
 
         return httpx.MockTransport(handler)
+
+
+class PaidRejectedAgent:
+    """Simulate a completed paid plan rejected by deterministic authorization."""
+
+    async def run_turn(self, _turn):
+        raise SetupAgentError(
+            "VALUE_NOT_GROUNDED",
+            "The proposed threshold is not grounded in the user's wording.",
+            stage="tool_validation",
+            usage={
+                "input_tokens": 1_200,
+                "output_tokens": 300,
+                "input_tokens_details": {"cached_tokens": 200},
+                "output_tokens_details": {"reasoning_tokens": 120},
+                "_traceedge_model": "gpt-5.4-mini",
+                "_traceedge_reasoning_effort": "low",
+                "_setup_service_tier": "fast",
+            },
+        )
 
 
 def _agent(base: Settings, planner: StandInPlanner) -> SetupChatAgent:
@@ -868,6 +889,39 @@ async def test_launch_pipeline_error_preserves_authoritative_draft(test_context)
         assert preserved.version == authoritative.version
         assert preserved.semantic_hash == authoritative.semantic_hash
         assert preserved.draft_id == authoritative.draft_id
+
+
+async def test_paid_planner_usage_is_recorded_when_grounding_rejects_turn(test_context):
+    user = await _user(test_context)
+    service = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=PaidRejectedAgent(),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        authoritative = load_strategy_draft_v2(chat)
+
+        with pytest.raises(SetupChatError) as failure:
+            await service.handle_message(
+                session,
+                chat,
+                message="Make it stricter",
+                client_message_id="launch-v2-paid-grounding-rejection",
+            )
+
+        assert failure.value.code == "VALUE_NOT_GROUNDED"
+        usage = await session.scalar(
+            select(AIUsageEvent).where(AIUsageEvent.chat_session_id == chat.id)
+        )
+        assert usage is not None
+        assert usage.operation == "setup_agent_turn"
+        assert usage.input_tokens == 1_200
+        assert usage.output_tokens == 300
+        assert usage.pricing_source == "configured_from_openai_fast_pricing"
+        assert usage.estimated_cost_usd > 0
+        assert load_strategy_draft_v2(chat).executable_hash == authoritative.executable_hash
 
 
 async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_context):

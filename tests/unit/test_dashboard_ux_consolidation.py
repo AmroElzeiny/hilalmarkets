@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path("src/ai_market_monitor")
@@ -112,7 +113,10 @@ def test_dashboard_shell_has_notification_center_and_cache_busted_brand_assets()
     topbar = _read("templates/hilal/partials/dashboard_topbar.html")
     sidebar = _read("templates/hilal/partials/dashboard_sidebar.html")
 
-    assert "20260729-setup-v2" in base
+    # Every asset carries a cache-busting key. Which key it is belongs to the release,
+    # and `test_dashboard_static_assets` proves they all share one; naming the string
+    # here as well taught the habit of editing the test instead of the templates.
+    assert re.search(r"\?v=[a-zA-Z0-9-]+", base)
     assert "data-notification-center" in topbar
     assert 'data-icon="bell"' in topbar
     assert "data-sidebar-collapse" in sidebar

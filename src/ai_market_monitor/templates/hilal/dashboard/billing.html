@@ -32,7 +32,9 @@
     <label>
       <input type="radio" name="dashboard_billing_interval" value="annual" {{ 'checked' if checkout_selected_interval == 'annual' else '' }}>
       <span>Annual</span>
-      <small>Save up to $44</small>
+      {# "Save up to $44" beside an interval nobody can buy is an offer that does not
+         exist. The toggle still switches so the cards can say the same thing: soon. #}
+      <small>{{ 'Save up to $44' if plan_offer_values.values() | selectattr('annualAvailable') | list else promotion_coming_soon_label }}</small>
     </label>
   </fieldset>
   <p class="sr-only" aria-live="polite" data-billing-page-interval-status>Prices are shown for monthly billing.</p>
@@ -40,25 +42,55 @@
     {% for code, plan in purchase_plans.items() %}
       {% set presentation = plan_presentations[code] %}
       {% set current = code in active_paid_plan_codes %}
-      <article class="price-card dashboard-price-card {{ 'is-featured' if code == 'trader' else '' }} {{ 'is-current' if current else '' }}" {% if current %}aria-current="true"{% endif %}>
+      {% set offer = plan_offer_values[code] %}
+      <article
+        class="price-card dashboard-price-card {{ 'is-featured' if code == 'trader' and offer.monthlyAvailable else '' }} {{ 'is-current' if current else '' }} {{ '' if offer.monthlyAvailable else 'is-coming-soon' }}"
+        data-offer-card
+        {% if current %}aria-current="true"{% endif %}
+      >
         <div class="dashboard-plan-title">
           <h3>{{ plan.name }}</h3>
-          {% if presentation.badge %}<span class="badge plan-popular-badge">{{ presentation.badge }}</span>{% endif %}
+          {% if presentation.badge and offer.monthlyAvailable %}
+            <span class="badge plan-popular-badge">{{ presentation.badge }}</span>
+          {% elif not offer.monthlyAvailable %}
+            <span class="badge badge-soon">{{ offer.comingSoonLabel }}</span>
+          {% endif %}
         </div>
         {% if current %}<span class="current-plan-label">Current access</span>{% endif %}
         <p class="plan-description">{{ presentation.description }}</p>
+        {# Availability and the launch price travel on the element itself, so the
+           interval switch below reads the same facts the server rendered. #}
         <div
-          class="price dashboard-plan-price"
+          class="price dashboard-plan-price {{ '' if offer.monthlyAvailable else 'is-coming-soon' }}"
           data-dashboard-plan-price
-          data-monthly-price="{{ plan.monthly_price | int }}"
-          data-annual-price="{{ presentation.annual_price | int }}"
-          data-free="{{ 'true' if plan.monthly_price == 0 else 'false' }}"
+          {# Empty when the interval is not open yet: no number, so nothing can leak a
+             price for something nobody can buy. #}
+          data-monthly-price="{{ (offer.monthlyPrice | int) if offer.monthlyAvailable else '' }}"
+          data-annual-price="{{ (offer.annualPrice | int) if offer.annualAvailable else '' }}"
+          data-original-monthly-price="{{ (offer.originalMonthlyPrice | int) if offer.originalMonthlyPrice else '' }}"
+          data-monthly-available="{{ 'true' if offer.monthlyAvailable else 'false' }}"
+          data-annual-available="{{ 'true' if offer.annualAvailable else 'false' }}"
+          data-coming-soon-label="{{ offer.comingSoonLabel }}"
+          data-free="{{ 'true' if offer.monthlyPrice == 0 else 'false' }}"
         >
-          <strong data-dashboard-plan-amount>${{ plan.monthly_price | int }}</strong>
-          <span data-dashboard-plan-period>{{ 'Free forever' if plan.monthly_price == 0 else 'per month' }}</span>
+          {% if offer.originalMonthlyPrice %}
+            <s
+              class="price-original"
+              data-dashboard-plan-original
+              data-offer-original-price
+              aria-label="Was ${{ offer.originalMonthlyPrice | int }} per month"
+            >${{ offer.originalMonthlyPrice | int }}</s>
+          {% endif %}
+          <strong data-dashboard-plan-amount>{{ offer.comingSoonLabel if not offer.monthlyAvailable else '$' ~ (offer.monthlyPrice | int) }}</strong>
+          <span data-dashboard-plan-period>{{ 'Not available yet' if not offer.monthlyAvailable else ('Free forever' if offer.monthlyPrice == 0 else 'per month') }}</span>
         </div>
+        {% if offer.originalMonthlyPrice %}
+          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" data-dashboard-offer-countdown role="group" aria-label="Time left at this price" hidden></div>
+        {% endif %}
 
-        {% if code == 'demo' %}
+        {% if not offer.monthlyAvailable %}
+          <button class="btn btn-secondary is-disabled" type="button" disabled aria-disabled="true">{{ plan.name }} is coming soon</button>
+        {% elif code == 'demo' %}
           <button class="btn btn-secondary" type="button" disabled aria-disabled="true">{{ 'Current plan' if current else 'Included with your plan' }}</button>
         {% elif code == 'trader' and 'pro_trial' in active_paid_plan_codes %}
           <button class="btn btn-gold" type="button" disabled aria-disabled="true">Monitor trial active</button>
@@ -250,5 +282,5 @@
 </section>
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260729-setup-v2"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260801-launch-offer"></script>
 {% endblock %}

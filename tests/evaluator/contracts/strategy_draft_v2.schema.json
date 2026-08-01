@@ -60,6 +60,17 @@
           "default": null,
           "title": "Executable Version"
         },
+        "screening_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewedScreeningEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "user_id": {
           "anyOf": [
             {
@@ -305,7 +316,7 @@
         "source_fragment": {
           "anyOf": [
             {
-              "maxLength": 500,
+              "maxLength": 5000,
               "type": "string"
             },
             {
@@ -662,7 +673,7 @@
           "type": "string"
         },
         "source_fragment": {
-          "maxLength": 500,
+          "maxLength": 5000,
           "minLength": 1,
           "title": "Source Fragment",
           "type": "string"
@@ -746,6 +757,184 @@
         "capability"
       ],
       "title": "ProviderRuntimeStatusV2",
+      "type": "object"
+    },
+    "ReviewedScreeningEvidence": {
+      "additionalProperties": false,
+      "description": "The exact screening facts the user could see when they reviewed the setup.\n\nApproval used to bind only the compiled rules and the conversation. The universe was\nresolved again at approval time and the new answer was never compared with the old\none, so a setup reviewed over eight markets could be approved over eleven \u2014 or over a\ndifferent eleven \u2014 with nothing shown to the user and nothing recorded.\n\nEvery field here is content-addressed. Storing it at review time and re-deriving it at\napproval time turns \"the universe may have changed\" from an assumption into a check.",
+      "properties": {
+        "dynamic_membership": {
+          "default": false,
+          "title": "Dynamic Membership",
+          "type": "boolean"
+        },
+        "included_symbol_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Included Symbol Count",
+          "type": "integer"
+        },
+        "membership_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "fixed_authored",
+                "fixed_watchlist",
+                "governed_dynamic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Membership Kind"
+        },
+        "methodology_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Id"
+        },
+        "methodology_version": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Methodology Version"
+        },
+        "preflight_contract": {
+          "anyOf": [
+            {
+              "enum": [
+                "verified_all",
+                "policy_verified_runtime_fail_closed",
+                "not_required"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preflight Contract"
+        },
+        "provider_preflight_manifest_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Preflight Manifest Hash"
+        },
+        "resolved_symbol_set_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Symbol Set Hash"
+        },
+        "reviewed_at": {
+          "format": "date-time",
+          "title": "Reviewed At",
+          "type": "string"
+        },
+        "screening_policy_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Screening Policy Hash"
+        },
+        "screening_snapshot_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Screening Snapshot Hash"
+        },
+        "screening_snapshot_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Screening Snapshot Id"
+        },
+        "secured_preview_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secured Preview Hash"
+        },
+        "watchlist_snapshot_hash": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Watchlist Snapshot Hash"
+        }
+      },
+      "required": [
+        "reviewed_at"
+      ],
+      "title": "ReviewedScreeningEvidence",
       "type": "object"
     },
     "ShariaAssetStatus": {
@@ -885,7 +1074,7 @@
           "type": "array"
         },
         "fragment": {
-          "maxLength": 500,
+          "maxLength": 5000,
           "minLength": 1,
           "title": "Fragment",
           "type": "string"
@@ -981,7 +1170,7 @@
           "type": "string"
         },
         "source_fragment": {
-          "maxLength": 500,
+          "maxLength": 5000,
           "minLength": 1,
           "title": "Source Fragment",
           "type": "string"
@@ -1078,7 +1267,7 @@
           "type": "string"
         },
         "source_fragment": {
-          "maxLength": 500,
+          "maxLength": 5000,
           "minLength": 1,
           "title": "Source Fragment",
           "type": "string"
