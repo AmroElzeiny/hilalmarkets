@@ -448,7 +448,7 @@
         "source_fragment": {
           "anyOf": [
             {
-              "maxLength": 500,
+              "maxLength": 5000,
               "type": "string"
             },
             {
@@ -820,6 +820,13 @@
       "additionalProperties": false,
       "description": "Canonical, evaluator-facing view of one validated strategy condition.",
       "properties": {
+        "ast_path": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Ast Path",
+          "type": "array"
+        },
         "availability": {
           "title": "Availability",
           "type": "string"
@@ -868,6 +875,20 @@
           "default": null,
           "title": "Confidence"
         },
+        "confirmation_timeframes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Confirmation Timeframes",
+          "type": "array"
+        },
+        "context_timeframes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Timeframes",
+          "type": "array"
+        },
         "key": {
           "title": "Key",
           "type": "string"
@@ -875,6 +896,18 @@
         "label": {
           "title": "Label",
           "type": "string"
+        },
+        "movement_direction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Movement Direction"
         },
         "parent_group_key": {
           "title": "Parent Group Key",
@@ -887,6 +920,18 @@
         "provider_required": {
           "title": "Provider Required",
           "type": "boolean"
+        },
+        "reference_timeframe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Timeframe"
         },
         "required": {
           "title": "Required",
@@ -903,6 +948,18 @@
           ],
           "default": null,
           "title": "Source Fragment"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
         },
         "threshold": {
           "anyOf": [
@@ -1246,6 +1303,214 @@
       "title": "PositionSizingPolicy",
       "type": "object"
     },
+    "RequirementStateV2": {
+      "additionalProperties": false,
+      "description": "Server-owned truth about one authoring requirement.\n\nPlanner output can propose operations and clarifications, but it cannot mark a\nrequirement satisfied.  This record is rebuilt from the canonical draft, grounded\nsource segments and net-effective operations after every turn.",
+      "properties": {
+        "blocking": {
+          "default": false,
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "conflicting": {
+          "default": false,
+          "title": "Conflicting",
+          "type": "boolean"
+        },
+        "exact_source_text": {
+          "anyOf": [
+            {
+              "maxLength": 5000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exact Source Text"
+        },
+        "explicit": {
+          "default": false,
+          "title": "Explicit",
+          "type": "boolean"
+        },
+        "grounded": {
+          "default": false,
+          "title": "Grounded",
+          "type": "boolean"
+        },
+        "inherited": {
+          "default": false,
+          "title": "Inherited",
+          "type": "boolean"
+        },
+        "normalized_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Normalized Value"
+        },
+        "platform_default": {
+          "default": false,
+          "title": "Platform Default",
+          "type": "boolean"
+        },
+        "provenance_kind": {
+          "enum": [
+            "user_explicit",
+            "user_confirmed",
+            "inherited_existing",
+            "platform_default",
+            "registry_owned",
+            "model_proposed"
+          ],
+          "title": "Provenance Kind",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Reason",
+          "type": "string"
+        },
+        "requirement_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "satisfied": {
+          "default": false,
+          "title": "Satisfied",
+          "type": "boolean"
+        },
+        "semantic_type": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Semantic Type",
+          "type": "string"
+        },
+        "source_segment_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Segment Id"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
+        },
+        "supported": {
+          "default": true,
+          "title": "Supported",
+          "type": "boolean"
+        },
+        "target_condition_id": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Condition Id"
+        },
+        "target_path": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Target Path",
+          "type": "string"
+        },
+        "value_role": {
+          "default": "value",
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Value Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "semantic_type",
+        "target_path",
+        "provenance_kind"
+      ],
+      "title": "RequirementStateV2",
+      "type": "object"
+    },
     "RiskPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -1361,6 +1626,145 @@
         }
       },
       "title": "RiskPolicy",
+      "type": "object"
+    },
+    "SemanticRoleAssignmentV2": {
+      "additionalProperties": false,
+      "description": "A normalized value with the semantic role stated by its source evidence.",
+      "properties": {
+        "exact_source_text": {
+          "anyOf": [
+            {
+              "maxLength": 5000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exact Source Text"
+        },
+        "explicit": {
+          "default": false,
+          "title": "Explicit",
+          "type": "boolean"
+        },
+        "inherited": {
+          "default": false,
+          "title": "Inherited",
+          "type": "boolean"
+        },
+        "normalized_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Normalized Value"
+        },
+        "role": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "semantic_type": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Semantic Type",
+          "type": "string"
+        },
+        "source_segment_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Segment Id"
+        },
+        "source_turn_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Id"
+        },
+        "target_path": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Target Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "semantic_type",
+        "role",
+        "normalized_value",
+        "target_path"
+      ],
+      "title": "SemanticRoleAssignmentV2",
       "type": "object"
     },
     "ShariaAssetStatus": {
@@ -1986,11 +2390,25 @@
       "title": "Provider Required Capabilities",
       "type": "array"
     },
+    "requirement_states": {
+      "items": {
+        "$ref": "#/$defs/RequirementStateV2"
+      },
+      "title": "Requirement States",
+      "type": "array"
+    },
     "requires_explicit_approval": {
       "const": true,
       "default": true,
       "title": "Requires Explicit Approval",
       "type": "boolean"
+    },
+    "semantic_role_assignments": {
+      "items": {
+        "$ref": "#/$defs/SemanticRoleAssignmentV2"
+      },
+      "title": "Semantic Role Assignments",
+      "type": "array"
     },
     "sharia_status_assignment_authorized": {
       "const": false,

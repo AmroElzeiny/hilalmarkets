@@ -349,6 +349,47 @@ def _parameter_value_grounded(
     return False
 
 
+def parameter_value_is_grounded(
+    text: str,
+    value: Any,
+    schema: dict[str, Any],
+    *,
+    semantic_unit: str,
+) -> bool:
+    """Public grounding authority for one registry capability parameter value."""
+
+    return _parameter_value_grounded(
+        text,
+        value,
+        schema,
+        semantic_unit=semantic_unit,
+    )
+
+
+def capability_parameter_metadata(
+    capability_key: str,
+    name: str,
+) -> tuple[dict[str, Any], str, bool, Any]:
+    """Return the registry schema, semantic unit and optional default for a parameter."""
+
+    spec = next((item for item in all_capabilities() if item.key == capability_key), None)
+    if spec is None:
+        return {}, _semantic_unit(name), False, None
+    raw_properties = spec.parameter_schema.get("properties")
+    properties = raw_properties if isinstance(raw_properties, dict) else {}
+    rules = _property_schema(properties, name)
+    semantic_unit = (
+        str(rules.get("x-semantic-unit"))
+        if rules.get("x-semantic-unit")
+        else _semantic_unit(name)
+    )
+    if name in spec.default_parameters:
+        return rules, semantic_unit, True, spec.default_parameters[name]
+    if "default" in rules:
+        return rules, semantic_unit, True, rules["default"]
+    return rules, semantic_unit, False, None
+
+
 def _property_schema(properties: dict[str, Any], name: str) -> dict[str, Any]:
     value = properties.get(name)
     return value if isinstance(value, dict) else {}

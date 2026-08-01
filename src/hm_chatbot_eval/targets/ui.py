@@ -248,6 +248,9 @@ class UITarget(ChatTarget):
                 )
                 if not isinstance(structured, dict):
                     structured = None
+                canonical_state = get_path(self.last_api_json, "draft_v2")
+                if not isinstance(canonical_state, dict):
+                    canonical_state = None
                 model, usage = _assistant_runtime_metadata(assistant)
                 safe_raw = redact(self.last_api_json, self.settings.redacted_keys)
                 return TargetReply(
@@ -255,6 +258,7 @@ class UITarget(ChatTarget):
                     latency_ms=(time.perf_counter() - started) * 1000,
                     status_code=self.last_status,
                     structured=structured,
+                    canonical_state=canonical_state,
                     raw=safe_raw,
                     raw_hash=stable_hash(safe_raw),
                     conversation_id=str(get_path(safe_raw, "id", "") or ""),
@@ -290,6 +294,9 @@ class UITarget(ChatTarget):
             )
             if not isinstance(structured, dict):
                 structured = None
+            canonical_state = get_path(self.last_api_json, "draft_v2")
+            if not isinstance(canonical_state, dict):
+                canonical_state = None
             ui_contract = await self._verify_ui_contract(structured)
             model, usage = _assistant_runtime_metadata(assistant)
             safe_raw = redact(self.last_api_json, self.settings.redacted_keys)
@@ -305,6 +312,7 @@ class UITarget(ChatTarget):
                 latency_ms=latency,
                 status_code=self.last_status,
                 structured=structured,
+                canonical_state=canonical_state,
                 raw=safe_raw,
                 raw_hash=stable_hash(safe_raw),
                 conversation_id=str(get_path(self.last_api_json, "id", "") or ""),
@@ -423,6 +431,69 @@ class UITarget(ChatTarget):
             "canvas_node_ids": sorted(actual_nodes),
             **self._turn_state(),
         }
+
+    async def approve(self, *, scenario_id: str) -> TargetReply:
+        """Click the same authenticated Review and approve control a customer uses."""
+
+        assert self.page is not None
+        button = self.page.locator("[data-ai-chat-approve]").first
+        started = time.perf_counter()
+        try:
+            if not await button.is_visible() or await button.is_disabled():
+                raise RuntimeError("Authenticated approval control is not eligible")
+            for checkbox in await self.page.locator(
+                "[data-low-confidence-rule]"
+            ).all():
+                if not await checkbox.is_checked():
+                    await checkbox.check()
+            async with self.page.expect_response(
+                lambda response: (
+                    response.request.method == "POST"
+                    and response.url.rstrip("/").endswith("/approve")
+                ),
+                timeout=self.settings.target_ui_timeout_ms,
+            ) as response_info:
+                await button.click()
+            response = await response_info.value
+            try:
+                raw: Any = await response.json()
+            except Exception:
+                raw = {"text": await response.text()}
+            self.last_api_json = raw
+            self.last_status = response.status
+            structured = get_path(raw, self.settings.target_ui_response_object_path)
+            canonical_state = get_path(raw, "draft_v2")
+            safe_raw = redact(raw, self.settings.redacted_keys)
+            artifacts: list[str] = []
+            if self.settings.target_ui_screenshots:
+                path = self.evidence_dir / f"{scenario_id}-authenticated-approval.png"
+                with suppress(Exception):
+                    await self.page.screenshot(path=str(path), full_page=True)
+                    artifacts.append(str(path))
+            return TargetReply(
+                text=(
+                    "Authenticated approval action completed."
+                    if response.status < 400
+                    else ""
+                ),
+                latency_ms=(time.perf_counter() - started) * 1000,
+                status_code=response.status,
+                structured=structured if isinstance(structured, dict) else None,
+                canonical_state=(
+                    canonical_state if isinstance(canonical_state, dict) else None
+                ),
+                raw=safe_raw,
+                raw_hash=stable_hash(safe_raw),
+                conversation_id=str(get_path(raw, "id", "") or ""),
+                error=None if response.status < 400 else f"HTTP {response.status}",
+                artifacts=artifacts,
+            )
+        except Exception as exc:
+            return TargetReply(
+                text="",
+                latency_ms=(time.perf_counter() - started) * 1000,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     async def close(self) -> None:
         if self.context:

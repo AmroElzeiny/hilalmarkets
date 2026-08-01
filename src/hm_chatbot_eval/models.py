@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 Severity = Literal["critical", "high", "medium", "low"]
+ApprovalMode = Literal["preserve_gate", "execute_authenticated_approval"]
 
 
 class ScenarioContract(dict[str, Any]):
@@ -71,6 +72,7 @@ class ScenarioSpec:
     success_criteria: list[dict[str, Any]]
     max_turns: int
     fault: str | None = None
+    approval_mode: ApprovalMode = "preserve_gate"
 
     def __post_init__(self) -> None:
         self.expected_contract = ScenarioContract.from_value(self.expected_contract)
@@ -86,6 +88,7 @@ class TurnRecord:
     status_code: int | None = None
     raw_hash: str | None = None
     structured: dict[str, Any] | None = None
+    canonical_state: dict[str, Any] | None = None
     model: str | None = None
     usage: dict[str, Any] | None = None
     error: str | None = None
@@ -138,6 +141,10 @@ class CaseResult:
     failure: dict[str, Any] | None = None
     measurement_status: Literal["MEASURED", "NOT_MEASURED"] = "MEASURED"
     measurement_issues: list[str] = field(default_factory=list)
+    clean_turn_success: bool = True
+    eventual_case_success: bool = False
+    product_failure_classes: list[str] = field(default_factory=list)
+    canonical_state: dict[str, Any] | None = None
 
     @property
     def is_infrastructure_failure(self) -> bool:
@@ -187,4 +194,8 @@ def case_result_from_dict(data: dict[str, Any]) -> CaseResult:
         failure=data.get("failure"),
         measurement_status=data.get("measurement_status", "MEASURED"),
         measurement_issues=data.get("measurement_issues", []),
+        clean_turn_success=data.get("clean_turn_success", True),
+        eventual_case_success=data.get("eventual_case_success", data.get("passed", False)),
+        product_failure_classes=data.get("product_failure_classes", []),
+        canonical_state=data.get("canonical_state"),
     )

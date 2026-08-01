@@ -269,6 +269,7 @@ def test_static_sharia_policy_changes_executable_identity_and_invalidates_approv
                     user_id=uuid4(),
                     executable_version=draft.executable_version,
                     executable_hash=draft.executable_hash,
+                    schema_hash="b" * 64,
                     conversation_snapshot_hash="a" * 64,
                     approved_at=datetime.now(UTC),
                 )
@@ -352,6 +353,7 @@ def test_latest_correction_wins_and_invalidates_approval():
                     user_id=uuid4(),
                     draft_version=initial.version,
                     semantic_hash=initial.semantic_hash,
+                    schema_hash="b" * 64,
                     conversation_snapshot_hash="a" * 64,
                     approved_at=datetime.now(UTC),
                 )
@@ -530,6 +532,7 @@ def test_approval_cannot_bind_to_wrong_version_or_hash():
                         user_id=uuid4(),
                         draft_version=draft.version + 1,
                         semantic_hash=draft.semantic_hash,
+                        schema_hash="b" * 64,
                         conversation_snapshot_hash="b" * 64,
                         approved_at=datetime.now(UTC),
                     )

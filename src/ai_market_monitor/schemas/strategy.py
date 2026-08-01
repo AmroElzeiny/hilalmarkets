@@ -119,7 +119,9 @@ class ConditionRule(BaseModel):
     forming_tolerance_percent: float | None = Field(default=None, ge=0, le=100)
     notes: str | None = Field(default=None, max_length=500)
     source_turn_id: str | None = Field(default=None, max_length=80)
-    source_fragment: str | None = Field(default=None, max_length=500)
+    # Match StrategyDraftV2's immutable evidence contract. Truncating this while
+    # compiling made the compiled rule lose the exact source retained by the draft.
+    source_fragment: str | None = Field(default=None, max_length=5000)
     confidence: float | None = Field(default=None, ge=0, le=1)
     ai_interpreted: bool = False
     provider_required: bool = False

@@ -6,6 +6,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    RequirementStateV2,
+    SemanticRoleAssignmentV2,
+)
 
 
 class EvaluationCondition(BaseModel):
@@ -21,10 +25,16 @@ class EvaluationCondition(BaseModel):
     capability_key: str | None = None
     capability_version: str | None = None
     timeframe: str
+    context_timeframes: list[str] = Field(default_factory=list)
+    confirmation_timeframes: list[str] = Field(default_factory=list)
+    reference_timeframe: str | None = None
+    movement_direction: str | None = None
     comparator: str
     threshold: float | str | bool | dict[str, Any] | None = None
     required: bool
     source_fragment: str | None = None
+    source_turn_id: str | None = None
+    ast_path: list[int] = Field(default_factory=list)
     confidence: float | None = None
     provider_required: bool
     availability: str
@@ -129,3 +139,5 @@ class SetupChatEvaluationContract(BaseModel):
     provider_required_capabilities: list[EvaluationCondition]
     approval: EvaluationApprovalState
     canvas: EvaluationCanvasPayload
+    requirement_states: list[RequirementStateV2] = Field(default_factory=list)
+    semantic_role_assignments: list[SemanticRoleAssignmentV2] = Field(default_factory=list)

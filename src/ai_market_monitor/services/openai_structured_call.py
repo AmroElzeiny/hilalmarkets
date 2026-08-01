@@ -32,6 +32,7 @@ class StructuredCallError(ValueError):
         stage: str = "provider",
         details: tuple[str, ...] = (),
         usage: dict[str, Any] | None = None,
+        candidate: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -39,6 +40,8 @@ class StructuredCallError(ValueError):
         self.stage = stage
         self.details = details
         self.usage = dict(usage or {})
+        # Sanitized structured candidate used only by the one bounded repair call.
+        self.candidate = dict(candidate) if isinstance(candidate, dict) else None
 
 
 def estimate_structured_call_cost(
@@ -222,6 +225,7 @@ async def structured_call[ModelT: BaseModel](
         "Content-Type": "application/json",
     }
     usage: dict[str, Any] = {}
+    raw_output = ""
     try:
         response_payload = consume_evaluator_llm_fault()
         if response_payload is None:
@@ -241,7 +245,8 @@ async def structured_call[ModelT: BaseModel](
         returned_service_tier = response_payload.get("service_tier")
         if isinstance(returned_service_tier, str) and returned_service_tier:
             usage["_setup_service_tier"] = returned_service_tier
-        parsed = schema_model.model_validate_json(response_output_text(response_payload))
+        raw_output = response_output_text(response_payload)
+        parsed = schema_model.model_validate_json(raw_output)
     except httpx.ConnectTimeout as exc:
         raise StructuredCallError(
             "TARGET_CONNECT_TIMEOUT",
@@ -317,6 +322,10 @@ async def structured_call[ModelT: BaseModel](
         ) from exc
     except ValidationError as exc:
         error_types = {str(item.get("type") or "") for item in exc.errors()}
+        try:
+            candidate = json.loads(raw_output)
+        except (TypeError, ValueError):
+            candidate = None
         raise StructuredCallError(
             (
                 "TARGET_INVALID_JSON"
@@ -336,6 +345,7 @@ async def structured_call[ModelT: BaseModel](
                 for item in exc.errors()[:12]
             ),
             usage=usage,
+            candidate=candidate if isinstance(candidate, dict) else None,
         ) from exc
     except (KeyError, json.JSONDecodeError) as exc:
         raise StructuredCallError(
@@ -343,6 +353,7 @@ async def structured_call[ModelT: BaseModel](
             "The interpreter returned invalid JSON.",
             stage=stage,
             usage=usage,
+            candidate=None,
         ) from exc
     except ValueError as exc:
         raise StructuredCallError(

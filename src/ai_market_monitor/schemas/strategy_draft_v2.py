@@ -410,6 +410,9 @@ class UnresolvedFieldV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     unresolved_id: str = Field(min_length=1, max_length=120)
+    #: Server-bound semantic object identity. Several missing slots authored by the
+    #: same source segment share this identity and therefore produce one question.
+    semantic_object_id: str | None = Field(default=None, max_length=120)
     source_turn_id: str | None = Field(default=None, max_length=80)
     source_fragment: str = Field(
         min_length=1,
@@ -419,6 +422,9 @@ class UnresolvedFieldV2(BaseModel):
     target_field: str | None = Field(default=None, max_length=120)
     target_condition_id: str | None = Field(default=None, max_length=120)
     expected_answer_schema: dict[str, object] = Field(default_factory=dict)
+    #: A coalesced condition requirement may need several slots.  The server owns this
+    #: list and asks one question for the semantic object instead of one per field.
+    missing_slots: list[str] = Field(default_factory=list, max_length=32)
     allowed_options: list[str] = Field(default_factory=list, max_length=12)
     question: str = Field(min_length=1, max_length=500)
     reason: str = Field(min_length=1, max_length=500)
@@ -447,6 +453,9 @@ class UnresolvedFieldV2(BaseModel):
             # Before a condition exists there is no owned condition id to target.
             # Preserve the blocker as typed condition creation; never invent an id
             # or let one incomplete clarification discard the rest of the turn.
+            missing_field = migrated.get("target_field")
+            if missing_field:
+                migrated.setdefault("missing_slots", [missing_field])
             target_type = "condition_creation"
             migrated["target_type"] = target_type
             migrated["target_field"] = None
@@ -570,6 +579,7 @@ class ApprovalBindingV2(BaseModel):
     user_id: UUID | None = None
     executable_version: int | None = Field(default=None, ge=1)
     executable_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    schema_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     conversation_snapshot_hash: str | None = Field(
         default=None, pattern=r"^[a-f0-9]{64}$"
     )
@@ -601,6 +611,7 @@ class ApprovalBindingV2(BaseModel):
             self.user_id,
             self.executable_version,
             self.executable_hash,
+            self.schema_hash,
             self.conversation_snapshot_hash,
             self.approved_at,
         )
@@ -635,6 +646,98 @@ class SourceProvenanceV2(BaseModel):
     recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+RequirementProvenanceKind = Literal[
+    "user_explicit",
+    "user_confirmed",
+    "inherited_existing",
+    "platform_default",
+    "registry_owned",
+    "model_proposed",
+]
+
+RequirementValue = (
+    str
+    | int
+    | float
+    | bool
+    | list[str | int | float | bool]
+    | dict[str, str | int | float | bool]
+    | None
+)
+
+
+class RequirementStateV2(BaseModel):
+    """Server-owned truth about one authoring requirement.
+
+    Planner output can propose operations and clarifications, but it cannot mark a
+    requirement satisfied.  This record is rebuilt from the canonical draft, grounded
+    source segments and net-effective operations after every turn.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: str = Field(min_length=1, max_length=160)
+    semantic_type: str = Field(min_length=1, max_length=80)
+    target_path: str = Field(min_length=1, max_length=240)
+    target_condition_id: str | None = Field(default=None, max_length=120)
+    normalized_value: RequirementValue = None
+    value_role: str = Field(default="value", min_length=1, max_length=80)
+    source_turn_id: str | None = Field(default=None, max_length=80)
+    source_segment_id: str | None = Field(default=None, max_length=80)
+    exact_source_text: str | None = Field(
+        default=None,
+        max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
+    )
+    provenance_kind: RequirementProvenanceKind
+    explicit: bool = False
+    inherited: bool = False
+    platform_default: bool = False
+    supported: bool = True
+    grounded: bool = False
+    conflicting: bool = False
+    satisfied: bool = False
+    blocking: bool = False
+    reason: str = Field(default="", max_length=500)
+
+
+class RequirementAssessmentV2(BaseModel):
+    """Why a requirement did or did not close during the completed turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: str = Field(min_length=1, max_length=160)
+    target_path: str = Field(min_length=1, max_length=240)
+    target_exists: bool
+    final_value: RequirementValue = None
+    expected_or_authorized_value: RequirementValue = None
+    satisfied: bool
+    changed_this_turn: bool
+    explicitly_confirmed_this_turn: bool
+    authorization_grounded: bool
+    satisfying_operation_ids: list[str] = Field(default_factory=list, max_length=24)
+    satisfying_segment_ids: list[str] = Field(default_factory=list, max_length=24)
+    unresolved_reason: str | None = Field(default=None, max_length=500)
+
+
+class SemanticRoleAssignmentV2(BaseModel):
+    """A normalized value with the semantic role stated by its source evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    semantic_type: str = Field(min_length=1, max_length=80)
+    role: str = Field(min_length=1, max_length=80)
+    normalized_value: RequirementValue
+    exact_source_text: str | None = Field(
+        default=None,
+        max_length=STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
+    )
+    source_segment_id: str | None = Field(default=None, max_length=80)
+    source_turn_id: str | None = Field(default=None, max_length=80)
+    target_path: str = Field(min_length=1, max_length=240)
+    explicit: bool = False
+    inherited: bool = False
+
+
 class StrategyDraftV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -658,6 +761,12 @@ class StrategyDraftV2(BaseModel):
     runtime_state: DraftRuntimeStateV2 = Field(default_factory=DraftRuntimeStateV2)
     approval: ApprovalBindingV2 = Field(default_factory=ApprovalBindingV2)
     source_provenance: list[SourceProvenanceV2] = Field(default_factory=list, max_length=1000)
+    requirement_states: list[RequirementStateV2] = Field(default_factory=list, max_length=2000)
+    semantic_role_assignments: list[SemanticRoleAssignmentV2] = Field(
+        default_factory=list,
+        max_length=2000,
+    )
+    approval_intent_received: bool = False
     executable_hash: str = Field(default="", pattern=r"^$|^[a-f0-9]{64}$")
     workflow_state_hash: str = Field(default="", pattern=r"^$|^[a-f0-9]{64}$")
 
@@ -674,6 +783,15 @@ class StrategyDraftV2(BaseModel):
         )
         migrated["schema_version"] = "2.2"
         migrated.setdefault("sharia_policy", ShariaPolicyV2().model_dump(mode="json"))
+        legacy_approval = migrated.get("approval")
+        if (
+            isinstance(legacy_approval, dict)
+            and legacy_approval.get("approved")
+            and not legacy_approval.get("schema_hash")
+        ):
+            # Compatibility is read-only.  An approval that predates schema binding
+            # cannot authorize a new write or runtime action.
+            migrated["approval"] = ApprovalBindingV2().model_dump(mode="json")
         if "version" in migrated:
             migrated.setdefault("executable_version", migrated.pop("version"))
         migrated.setdefault("workflow_revision", migrated.get("executable_version", 1))
@@ -777,6 +895,13 @@ class StrategyDraftV2(BaseModel):
             "unsupported_requirements": [
                 item.model_dump(mode="json") for item in self.unsupported_requirements
             ],
+            "requirement_states": [
+                item.model_dump(mode="json") for item in self.requirement_states
+            ],
+            "semantic_role_assignments": [
+                item.model_dump(mode="json") for item in self.semantic_role_assignments
+            ],
+            "approval_intent_received": self.approval_intent_received,
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()

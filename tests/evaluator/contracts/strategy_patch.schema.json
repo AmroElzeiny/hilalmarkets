@@ -760,6 +760,14 @@
           "title": "Expected Answer Schema",
           "type": "object"
         },
+        "missing_slots": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Missing Slots",
+          "type": "array"
+        },
         "question": {
           "maxLength": 500,
           "minLength": 1,
@@ -771,6 +779,19 @@
           "minLength": 1,
           "title": "Reason",
           "type": "string"
+        },
+        "semantic_object_id": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Object Id"
         },
         "source_fragment": {
           "maxLength": 5000,

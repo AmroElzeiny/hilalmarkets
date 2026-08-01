@@ -20,6 +20,7 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_operator,
     grounds_symbol,
     grounds_timeframe,
+    grounds_timeframe_role,
 )
 from ai_market_monitor.engine.setup_turn_execution import (
     MAX_CLARIFICATIONS_PER_DRAFT,
@@ -32,6 +33,8 @@ from ai_market_monitor.engine.setup_turn_execution import (
 from ai_market_monitor.engine.strategy_draft_v2 import apply_strategy_patch
 from ai_market_monitor.schemas.setup_agent import (
     ACTIONABLE_SEGMENT_KINDS,
+    ApprovalIntent,
+    ClarificationAnswer,
     SegmentKind,
     SetupAgentPlanEnvelope,
     SetupAgentTurnPlan,
@@ -93,6 +96,7 @@ def _approved(draft: StrategyDraftV2) -> StrategyDraftV2:
                     user_id=uuid4(),
                     draft_version=draft.version,
                     semantic_hash=draft.semantic_hash,
+                    schema_hash="b" * 64,
                     conversation_snapshot_hash="a" * 64,
                     approved_at=datetime.now(UTC),
                 )
@@ -248,7 +252,9 @@ def test_planner_condition_provenance_is_bound_to_its_authorizing_segment() -> N
     assert proposed.source_turn_id == TURN
     assert proposed.source_fragment == RULE
     assert proposed.node_id != "null"
-    assert proposed.required is True
+    # The server binds immutable provenance but must not silently rewrite a
+    # trader-controlled boolean proposed by the planner.
+    assert proposed.required is False
     assert len(proposed.operands) == 1
     assert proposed.operands[0].name == "percentage_change"
     assert proposed.operands[0].parameters["formula"] == "open_to_close"
@@ -799,7 +805,7 @@ async def test_15_an_unoffered_capability_key_is_always_refused(invented: str) -
     assert error.value.code == "CAPABILITY_NOT_OFFERED"
 
 
-async def test_resolving_unresolved_requires_the_declared_target_to_change() -> None:
+async def test_stale_resolution_is_removed_and_the_unsatisfied_target_stays_open() -> None:
     unresolved = UnresolvedFieldV2(
         unresolved_id="exchange",
         source_turn_id=TURN,
@@ -826,9 +832,9 @@ async def test_resolving_unresolved_requires_the_declared_target_to_change() -> 
             ),
         ),
     )
-    with pytest.raises(SetupTurnRejected) as error:
-        await _run(resolving_only, message, draft)
-    assert error.value.code == "UNRESOLVED_TARGET_UNCHANGED"
+    unchanged = await _run(resolving_only, message, draft)
+    assert [item.unresolved_id for item in unchanged.draft.unresolved_fields] == ["exchange"]
+    assert unchanged.draft.executable_version == draft.executable_version
 
     filled = _plan(
         message,
@@ -850,6 +856,361 @@ async def test_resolving_unresolved_requires_the_declared_target_to_change() -> 
     assert outcome.draft.market_scope.exchange == "bybit"
     assert outcome.draft.unresolved_fields == []
     assert outcome.draft.executable_version == draft.executable_version + 1
+
+
+async def test_one_complete_answer_closes_all_coalesced_condition_slots() -> None:
+    first = UnresolvedFieldV2(
+        unresolved_id="strong-rule-a",
+        source_turn_id="earlier-turn",
+        source_fragment="Use a strong move.",
+        target_type="condition_creation",
+        expected_answer_schema={"type": "string"},
+        missing_slots=["formula", "operator"],
+        question="What formula and comparator define strong?",
+        reason="The condition is incomplete.",
+    )
+    duplicate = first.model_copy(
+        update={
+            "unresolved_id": "strong-rule-b",
+            "missing_slots": ["threshold", "trigger_timeframe"],
+            "question": "What threshold and timeframe define strong?",
+        }
+    )
+    draft = apply_strategy_patch(
+        StrategyDraftV2(),
+        StrategyPatch(source_turn_id=TURN, unresolved_references=[first, duplicate]),
+    ).draft
+    message = "Monitor BTC/USDT when the 60m candle rises open-to-close by at least 5%."
+    plan = _plan(
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        operations=operations_from_patch(_patch(message, draft), segment_id="s1"),
+    )
+    active = ClarificationContract(
+        question_id="strong-rule-a",
+        question=first.question,
+        reason=first.reason,
+        target_type="condition_creation",
+        expected_answer_schema="a complete measurable condition",
+    )
+
+    outcome = await _run(
+        plan,
+        message,
+        draft,
+        conversation=SetupConversationContext().with_question(active),
+    )
+
+    assert outcome.draft.unresolved_fields == []
+    assert set(outcome.result.answered_questions) == {"strong-rule-a", "strong-rule-b"}
+    condition = _conditions(outcome.draft)[0]
+    assert condition.trigger_timeframe == "1h", "60m remains grounded after normalization"
+    assert not outcome.result.allowed_clarifications
+
+
+@pytest.mark.parametrize(
+    ("answer", "closed"),
+    [("Bybit", True), ("yes", False)],
+)
+async def test_noop_confirmation_closes_only_an_exact_canonical_value(
+    answer: str,
+    closed: bool,
+) -> None:
+    unresolved = UnresolvedFieldV2(
+        unresolved_id="confirm-exchange",
+        source_turn_id="earlier-turn",
+        source_fragment="Please confirm the exchange.",
+        target_type="market_scope",
+        target_field="exchange",
+        expected_answer_schema={"type": "string"},
+        question="Confirm the exchange.",
+        reason="The existing exchange needs explicit confirmation.",
+    )
+    draft = apply_strategy_patch(
+        StrategyDraftV2(),
+        StrategyPatch(
+            source_turn_id=TURN,
+            set_fields=DraftFieldPatch(exchange="bybit"),
+            unresolved_references=[unresolved],
+        ),
+    ).draft
+    contract = ClarificationContract(
+        question_id="confirm-exchange",
+        question="Confirm the exchange.",
+        reason="The existing exchange needs explicit confirmation.",
+        target_type="market_scope",
+        target_field="exchange",
+        expected_answer_schema="an exchange name",
+    )
+    plan = _plan(
+        answer,
+        SegmentKind.CLARIFICATION_ANSWER,
+        clarification_answers=[
+            ClarificationAnswer(
+                segment_id="s1",
+                question_id="confirm-exchange",
+                answer_text=answer,
+            )
+        ],
+    )
+    outcome = await _run(
+        plan,
+        answer,
+        draft,
+        conversation=SetupConversationContext().with_question(contract),
+    )
+
+    assert (not outcome.draft.unresolved_fields) is closed
+    assert outcome.draft.executable_version == draft.executable_version
+    if closed:
+        assessment = outcome.result.requirement_assessments[0]
+        assert assessment.explicitly_confirmed_this_turn is True
+        assert assessment.changed_this_turn is False
+
+
+async def test_conflicting_grounded_assignments_create_one_typed_requirement() -> None:
+    message = "Use Binance or Bybit for the exchange."
+    plan = _plan(
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        operations=(
+            AuthorizedPatchOperation(
+                operation_id="exchange-one",
+                authorizing_segment_id="s1",
+                kind="set_fields",
+                fields=DraftFieldPatch(exchange="binance"),
+            ),
+            AuthorizedPatchOperation(
+                operation_id="exchange-two",
+                authorizing_segment_id="s1",
+                kind="set_fields",
+                fields=DraftFieldPatch(exchange="bybit"),
+            ),
+        ),
+    )
+    outcome = await _run(plan, message, StrategyDraftV2())
+
+    blockers = [
+        item
+        for item in outcome.draft.requirement_states
+        if item.target_path == "market_scope.exchange" and item.blocking
+    ]
+    assert len(blockers) == 1
+    assert blockers[0].conflicting is True
+    assert len(outcome.result.allowed_clarifications) == 1
+
+
+async def test_missing_slots_from_one_semantic_segment_coalesce_into_one_question() -> None:
+    message = "Alert me on a strong and large market move."
+    incomplete = (
+        UnresolvedFieldV2(
+            unresolved_id="missing-threshold",
+            source_turn_id=TURN,
+            source_fragment="strong",
+            target_type="condition_creation",
+            expected_answer_schema={"type": "number"},
+            missing_slots=["threshold"],
+            question="What threshold defines strong?",
+            reason="The threshold is missing.",
+        ),
+        UnresolvedFieldV2(
+            unresolved_id="missing-formula",
+            source_turn_id=TURN,
+            source_fragment="large market move",
+            target_type="condition_creation",
+            expected_answer_schema={"type": "string"},
+            missing_slots=["formula", "trigger_timeframe"],
+            question="What formula and timeframe define the move?",
+            reason="The formula and timeframe are missing.",
+        ),
+    )
+    plan = _plan(
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        operations=tuple(
+            AuthorizedPatchOperation(
+                operation_id=f"open-{index}",
+                authorizing_segment_id="s1",
+                kind="add_unresolved",
+                unresolved=item,
+            )
+            for index, item in enumerate(incomplete)
+        ),
+    )
+
+    outcome = await _run(plan, message, StrategyDraftV2())
+
+    assert len(outcome.draft.unresolved_fields) == 1
+    assert set(outcome.draft.unresolved_fields[0].missing_slots) == {
+        "formula",
+        "threshold",
+        "trigger_timeframe",
+    }
+    assert len(outcome.result.allowed_clarifications) == 1
+
+
+async def test_timeframe_aliases_keep_roles_and_role_swaps_are_rejected() -> None:
+    message = (
+        "Monitor BTC/USDT when the close-to-close move rises by at least 2%; "
+        "use 60m as the trigger and daily as context."
+    )
+    patch = _patch(message)
+    node = patch.add_conditions[0]
+    assert grounds_timeframe_role(message, "1h", "trigger")
+    assert grounds_timeframe_role(message, "1d", "context")
+    grounded = node.model_copy(
+        update={"trigger_timeframe": "1h", "context_timeframes": ["1d"]}
+    )
+    valid = _plan(
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        operations=(
+            AuthorizedPatchOperation(
+                operation_id="role-valid",
+                authorizing_segment_id="s1",
+                kind="add_condition",
+                condition=grounded,
+            ),
+        ),
+    )
+    outcome = await _run(valid, message, StrategyDraftV2())
+    assert any(
+        item.role == "trigger" and item.normalized_value == "1h"
+        for item in outcome.draft.semantic_role_assignments
+    )
+    assert any(
+        item.role == "context" and item.normalized_value == ["1d"]
+        for item in outcome.draft.semantic_role_assignments
+    )
+
+    swapped = grounded.model_copy(
+        update={"trigger_timeframe": "1d", "context_timeframes": ["1h"]}
+    )
+    invalid = _plan(
+        message,
+        SegmentKind.STRATEGY_INSTRUCTION,
+        operations=(
+            AuthorizedPatchOperation(
+                operation_id="role-swapped",
+                authorizing_segment_id="s1",
+                kind="add_condition",
+                condition=swapped,
+            ),
+        ),
+    )
+    with pytest.raises(SetupTurnRejected) as error:
+        await _run(invalid, message, StrategyDraftV2())
+    assert error.value.code == "VALUE_NOT_GROUNDED"
+
+
+async def test_requirement_state_separates_defaults_and_normalized_symbols() -> None:
+    message = "Monitor BTCUSDT when the 15m candle rises open-to-close by at least 5%."
+    outcome = await _run(
+        _plan(
+            message,
+            SegmentKind.STRATEGY_INSTRUCTION,
+            operations=operations_from_patch(_patch(message), segment_id="s1"),
+        ),
+        message,
+        StrategyDraftV2(),
+    )
+    states = {item.target_path: item for item in outcome.draft.requirement_states}
+    condition = _conditions(outcome.draft)[0]
+
+    assert states[f"condition_ast.{condition.node_id}.movement_direction"].explicit
+    assert states[f"condition_ast.{condition.node_id}.strategy_bias"].platform_default
+    assert not states[f"condition_ast.{condition.node_id}.strategy_bias"].explicit
+    assert states[f"condition_ast.{condition.node_id}.required"].platform_default
+    assert states[f"condition_ast.{condition.node_id}.unit"].grounded
+    assert states[f"condition_ast.{condition.node_id}.reference_definition"].grounded
+    assert states["universe.included_symbols.BTC/USDT"].explicit
+    assert not [item for item in states.values() if item.blocking]
+
+
+async def test_authorized_clear_is_a_satisfied_requirement_with_no_role_swap() -> None:
+    initial = (
+        "Monitor BTCUSDT when the close-to-close move rises at least 5%; "
+        "use 15m as trigger and 1h as context."
+    )
+    created = await _run(
+        _plan(
+            initial,
+            SegmentKind.STRATEGY_INSTRUCTION,
+            operations=operations_from_patch(_patch(initial), segment_id="s1"),
+        ),
+        initial,
+        StrategyDraftV2(),
+    )
+    condition = _conditions(created.draft)[0]
+    message = "Clear the context timeframe."
+    replacement = condition.model_copy(
+        update={
+            "source_turn_id": TURN,
+            "source_fragment": message,
+            "context_timeframes": [],
+        }
+    )
+    outcome = await _run(
+        _plan(
+            message,
+            SegmentKind.STRATEGY_INSTRUCTION,
+            operations=(
+                AuthorizedPatchOperation(
+                    operation_id="clear-context",
+                    authorizing_segment_id="s1",
+                    kind="update_condition",
+                    target_condition_id=condition.node_id,
+                    condition=replacement,
+                ),
+            ),
+        ),
+        message,
+        created.draft,
+    )
+    state = next(
+        item
+        for item in outcome.draft.requirement_states
+        if item.target_path == f"condition_ast.{condition.node_id}.context_timeframes"
+    )
+
+    assert state.normalized_value == []
+    assert state.explicit and state.grounded and state.satisfied
+    assert not state.blocking
+    assert any(
+        item.target_path == state.target_path
+        and item.role == "context"
+        and item.normalized_value == []
+        for item in outcome.draft.semantic_role_assignments
+    )
+
+
+async def test_repeated_textual_approval_intent_is_stable_and_never_approves() -> None:
+    draft = _draft_with()
+    message = "I approve this exact draft."
+    plan = SetupAgentTurnPlan(
+        source_turn_id=TURN,
+        segments=[
+            segment(
+                message,
+                message,
+                SegmentKind.APPROVAL_INTENT,
+                segment_id="s1",
+                reply=True,
+            )
+        ],
+        approval_intent=ApprovalIntent(segment_id="s1"),
+        overall_confidence=0.99,
+    )
+
+    first = await _run(plan, message, draft)
+    repeated = await _run(plan, message, first.draft)
+
+    assert first.draft.approval_intent_received is True
+    assert first.draft.approval.approved is False
+    assert first.draft.executable_version == draft.executable_version
+    assert repeated.draft.approval.approved is False
+    assert repeated.draft.executable_hash == first.draft.executable_hash
+    assert repeated.draft.workflow_revision == first.draft.workflow_revision
 
 
 # 9. Capability parameters satisfy the registry schema and source grounding. --------

@@ -70,6 +70,43 @@ def _metric_values(items: list[CaseResult], metric: str) -> list[float]:
                 if a.structured_hash and b.structured_hash:
                     parity_values.append(float(a.structured_hash == b.structured_hash))
         return parity_values
+    if metric.startswith("backend_ui_"):
+        contract_pairs: dict[tuple[str, str, str], dict[str, CaseResult]] = defaultdict(dict)
+        for case in items:
+            contract_pairs[
+                (case.scenario.id, case.target_variant, case.scenario.approval_mode)
+            ][case.target_kind] = case
+        values: list[float] = []
+        for pair in contract_pairs.values():
+            if "ui" not in pair or "backend" not in pair:
+                continue
+            backend, ui = pair["backend"], pair["ui"]
+            if metric == "backend_ui_contract_match":
+                values.append(float(backend.structured_hash == ui.structured_hash))
+            elif metric == "backend_ui_status_match":
+                values.append(float(_case_lifecycle(backend) == _case_lifecycle(ui)))
+            elif metric == "backend_ui_error_class_match":
+                values.append(
+                    float(
+                        backend.product_failure_classes == ui.product_failure_classes
+                        and (backend.failure or {}).get("failure_class")
+                        == (ui.failure or {}).get("failure_class")
+                    )
+                )
+            elif metric == "backend_ui_turn_count_delta":
+                values.append(float(abs(len(backend.turns) - len(ui.turns))))
+            elif metric == "backend_ui_approval_state_match":
+                values.append(float(_case_approval(backend) == _case_approval(ui)))
+            elif metric == "backend_ui_requirement_state_match":
+                backend_requirements = _canonical_requirements(
+                    backend.canonical_state
+                ) or _canonical_requirements(backend.structured_output)
+                ui_requirements = _canonical_requirements(
+                    ui.canonical_state
+                ) or _canonical_requirements(ui.structured_output)
+                if backend_requirements or ui_requirements:
+                    values.append(float(backend_requirements == ui_requirements))
+        return values
     if metric == "reproducibility":
         repeat_groups: dict[tuple[str, str, str], list[CaseResult]] = defaultdict(list)
         for case in items:
@@ -94,6 +131,137 @@ def _metric_values(items: list[CaseResult], metric: str) -> list[float]:
                 float(case.test_ai_cost_usd or 0) + float(case.target_cost_usd or 0)
             )
     return metric_values
+
+
+def _case_approval(case: CaseResult) -> dict[str, Any]:
+    approval = (case.structured_output or {}).get("approval")
+    return dict(approval) if isinstance(approval, dict) else {}
+
+
+def _case_lifecycle(case: CaseResult) -> str:
+    return str(_case_approval(case).get("lifecycle_state") or "")
+
+
+def _canonical_requirements(value: dict[str, Any] | None) -> list[dict[str, Any]]:
+    values = (value or {}).get("requirement_states")
+    return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
+
+
+def _canonical_unresolved(value: dict[str, Any] | None) -> list[dict[str, Any]]:
+    values = (value or {}).get("unresolved_fields")
+    return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
+
+
+def _turn_reliability_metrics(cases: list[CaseResult]) -> dict[str, float]:
+    assistant_turns = [
+        turn for case in cases for turn in case.turns if turn.role == "assistant"
+    ]
+    repair_attempts = sum(
+        int((turn.usage or {}).get("planner_repair_attempt_count") or 0)
+        for turn in assistant_turns
+    )
+    repair_successes = sum(
+        int((turn.usage or {}).get("planner_repair_success_count") or 0)
+        for turn in assistant_turns
+    )
+    blocking_states = [
+        item
+        for case in cases
+        for item in _canonical_requirements(case.canonical_state)
+        if item.get("blocking")
+    ]
+    stale_states = [
+        item
+        for item in blocking_states
+        if item.get("satisfied")
+        or (
+            item.get("supported", True)
+            and item.get("grounded")
+            and not item.get("conflicting")
+            and item.get("normalized_value") not in (None, "", [], {})
+        )
+    ]
+
+    question_occurrences = 0
+    repeated_questions = 0
+    unnecessary_questions = 0
+    for case in cases:
+        previously_seen: set[str] = set()
+        for turn in case.turns:
+            if turn.role != "assistant" or turn.canonical_state is None:
+                continue
+            unresolved = _canonical_unresolved(turn.canonical_state)
+            blockers = {
+                str(item.get("requirement_id"))
+                for item in _canonical_requirements(turn.canonical_state)
+                if item.get("blocking") and item.get("requirement_id")
+            }
+            current_ids = {
+                str(item.get("unresolved_id"))
+                for item in unresolved
+                if item.get("blocking", True) and item.get("unresolved_id")
+            }
+            question_occurrences += len(current_ids)
+            repeated_questions += len(current_ids & previously_seen)
+            if current_ids and not blockers:
+                unnecessary_questions += len(current_ids)
+            previously_seen |= current_ids
+
+    grounding_failures = sum(
+        failure in {"VALUE_NOT_GROUNDED", "SPAN_NOT_GROUNDED"}
+        for case in cases
+        for failure in case.product_failure_classes
+    )
+    total_product_failures = sum(len(case.product_failure_classes) for case in cases)
+    return {
+        "planner_repair_attempts": float(repair_attempts),
+        "planner_repair_successes": float(repair_successes),
+        "planner_repair_success_rate": repair_successes / max(1, repair_attempts),
+        "stale_requirement_rate": len(stale_states) / max(1, len(blocking_states)),
+        "repeated_question_rate": repeated_questions / max(1, question_occurrences),
+        "unnecessary_question_rate": unnecessary_questions / max(1, question_occurrences),
+        "grounding_rejection_rate": grounding_failures / max(1, total_product_failures),
+    }
+
+
+def _milestone_metrics(cases: list[CaseResult]) -> dict[str, float]:
+    observed: dict[str, list[tuple[float, float, float]]] = {
+        "first_valid_draft": [],
+        "approval_eligibility": [],
+    }
+    for case in cases:
+        user_turns = 0
+        latency_ms = 0.0
+        cost_usd = 0.0
+        found: set[str] = set()
+        for turn in case.turns:
+            if turn.role == "user":
+                user_turns += 1
+                continue
+            latency_ms += float(turn.latency_ms or 0.0)
+            cost_usd += float((turn.usage or {}).get("estimated_cost_usd") or 0.0)
+            if turn.structured is None:
+                continue
+            if "first_valid_draft" not in found:
+                observed["first_valid_draft"].append((float(user_turns), latency_ms, cost_usd))
+                found.add("first_valid_draft")
+            approval = turn.structured.get("approval")
+            if (
+                "approval_eligibility" not in found
+                and isinstance(approval, dict)
+                and approval.get("eligible") is True
+            ):
+                observed["approval_eligibility"].append(
+                    (float(user_turns), latency_ms, cost_usd)
+                )
+                found.add("approval_eligibility")
+    metrics: dict[str, float] = {}
+    for name, values in observed.items():
+        metrics[f"{name}_coverage"] = len(values) / max(1, len(cases))
+        metrics[f"turns_to_{name}"] = mean(item[0] for item in values) if values else 0.0
+        metrics[f"latency_ms_to_{name}"] = mean(item[1] for item in values) if values else 0.0
+        metrics[f"cost_usd_to_{name}"] = mean(item[2] for item in values) if values else 0.0
+    return metrics
 
 
 def _criterion_pass(operator: str, actual: float, threshold: float) -> bool:
@@ -316,11 +484,62 @@ def aggregate(cases: list[CaseResult]) -> dict[str, Any]:
         gate = "INCOMPLETE"
     else:
         gate = "PASS"
+    reliability_metrics = _turn_reliability_metrics(quality_cases)
+    milestone_metrics = _milestone_metrics(quality_cases)
+    parity_metrics: dict[str, float | None] = {}
+    for metric in (
+        "backend_ui_contract_match",
+        "backend_ui_status_match",
+        "backend_ui_error_class_match",
+        "backend_ui_turn_count_delta",
+        "backend_ui_approval_state_match",
+        "backend_ui_requirement_state_match",
+    ):
+        values = _metric_values(cases, metric)
+        parity_metrics[metric] = mean(values) if values else None
     return {
         "cases": len(cases),
         "passed": sum(c.passed for c in quality_cases),
         "pass_rate": sum(c.passed for c in quality_cases) / max(1, len(quality_cases)),
         "strict_pass_rate": sum(c.passed for c in quality_cases) / max(1, len(quality_cases)),
+        "clean_turn_success_rate": sum(c.clean_turn_success for c in quality_cases)
+        / max(1, len(quality_cases)),
+        "eventual_case_success_rate": sum(c.eventual_case_success for c in quality_cases)
+        / max(1, len(quality_cases)),
+        "product_reliability_failure_classes": sorted(
+            {
+                failure
+                for case in quality_cases
+                for failure in case.product_failure_classes
+            }
+        ),
+        **reliability_metrics,
+        **milestone_metrics,
+        **parity_metrics,
+        "schema_failure_rate": 1.0
+        - (schema_valid_cases / max(1, len(quality_cases))),
+        "semantic_role_swap_rate": mean(
+            case.deterministic_metrics.get("semantic_role_swap_rate", 0.0)
+            for case in quality_cases
+        )
+        if quality_cases
+        else 0.0,
+        "approval_evaluator_false_positive_rate": mean(
+            case.deterministic_metrics.get(
+                "approval_evaluator_false_positive_rate", 0.0
+            )
+            for case in quality_cases
+        )
+        if quality_cases
+        else 0.0,
+        "approval_evaluator_false_negative_rate": mean(
+            case.deterministic_metrics.get(
+                "approval_evaluator_false_negative_rate", 0.0
+            )
+            for case in quality_cases
+        )
+        if quality_cases
+        else 0.0,
         "average_score": mean(_case_score(c) for c in quality_cases) if quality_cases else 0,
         "total_test_cost_usd": total_cost,
         "target_api_cost_usd": target_cost,
@@ -429,6 +648,18 @@ def write_reports(
                     "reproduce": f"hm-chatbot-eval replay {c.run_id} {c.scenario.id} --target {c.target_kind}",
                 }
             )
+    parity_summary = " · ".join(
+        f"{key.removeprefix('backend_ui_').replace('_', ' ')}: "
+        + ("NOT MEASURED" if summary[key] is None else f"{summary[key]:.3f}")
+        for key in (
+            "backend_ui_contract_match",
+            "backend_ui_status_match",
+            "backend_ui_error_class_match",
+            "backend_ui_turn_count_delta",
+            "backend_ui_approval_state_match",
+            "backend_ui_requirement_state_match",
+        )
+    )
     md = [
         "# HilalMarkets AI Setup Chat Evaluation\n",
         f"**Release gate:** {summary['release_gate']}  ",
@@ -454,6 +685,30 @@ def write_reports(
         f"**Measured API cost:** ${summary['total_test_cost_usd']:.4f} "
         f"(target ${summary['target_api_cost_usd']:.4f}; evaluator "
         f"${summary['evaluator_api_cost_usd']:.4f})\n",
+        "## Reliability and convergence\n",
+        f"**Clean turn success:** {summary['clean_turn_success_rate']:.1%} · "
+        f"**Eventual case success:** {summary['eventual_case_success_rate']:.1%} · "
+        f"**Schema failure:** {summary['schema_failure_rate']:.1%}\n",
+        f"**Planner repair:** {int(summary['planner_repair_successes'])}/"
+        f"{int(summary['planner_repair_attempts'])} successful "
+        f"({summary['planner_repair_success_rate']:.1%}) · "
+        f"**Grounding rejection:** {summary['grounding_rejection_rate']:.1%}\n",
+        f"**Stale requirements:** {summary['stale_requirement_rate']:.1%} · "
+        f"**Repeated questions:** {summary['repeated_question_rate']:.1%} · "
+        f"**Unnecessary questions:** {summary['unnecessary_question_rate']:.1%} · "
+        f"**Semantic role swaps:** {summary['semantic_role_swap_rate']:.1%}\n",
+        f"**Approval evaluator false positive / false negative:** "
+        f"{summary['approval_evaluator_false_positive_rate']:.1%} / "
+        f"{summary['approval_evaluator_false_negative_rate']:.1%}\n",
+        f"**First valid draft:** {summary['turns_to_first_valid_draft']:.2f} turns, "
+        f"{summary['latency_ms_to_first_valid_draft']:.0f} ms, "
+        f"${summary['cost_usd_to_first_valid_draft']:.4f} average "
+        f"(coverage {summary['first_valid_draft_coverage']:.1%})\n",
+        f"**Approval eligibility:** {summary['turns_to_approval_eligibility']:.2f} turns, "
+        f"{summary['latency_ms_to_approval_eligibility']:.0f} ms, "
+        f"${summary['cost_usd_to_approval_eligibility']:.4f} average "
+        f"(coverage {summary['approval_eligibility_coverage']:.1%})\n",
+        f"**Backend/UI parity:** {parity_summary}\n",
         "## Topic results\n",
         "| Topic | Severity | Cases | Pass | Score |",
         "|---|---:|---:|---:|---:|",
@@ -537,8 +792,19 @@ def write_reports(
         if "budget_remaining_usd" in summary
         else ""
     )
+    reliability_cards = (
+        f'<div class="kpi"><b>{summary["clean_turn_success_rate"]:.1%}</b>Clean turns</div>'
+        f'<div class="kpi"><b>{summary["eventual_case_success_rate"]:.1%}</b>Eventual cases</div>'
+        f'<div class="kpi"><b>{int(summary["planner_repair_successes"])}/'
+        f'{int(summary["planner_repair_attempts"])}</b>Planner repairs</div>'
+        f'<div class="kpi"><b>{summary["stale_requirement_rate"]:.1%}</b>Stale requirements</div>'
+        f'<div class="kpi"><b>{summary["repeated_question_rate"]:.1%}</b>Repeated questions</div>'
+        f'<div class="kpi"><b>{summary["semantic_role_swap_rate"]:.1%}</b>Role swaps</div>'
+        f'<div class="kpi"><b>{summary["turns_to_first_valid_draft"]:.2f}</b>Turns to draft</div>'
+        f'<div class="kpi"><b>{summary["turns_to_approval_eligibility"]:.2f}</b>Turns to approval eligibility</div>'
+    )
     page = f"""<!doctype html><html><head><meta charset="utf-8"><title>HilalMarkets Chatbot Evaluation</title><style>
 body{{font:15px system-ui;margin:0;background:#f6f4ec;color:#18231e}}main{{max-width:1200px;margin:auto;padding:32px}}header{{background:#073f34;color:white;padding:28px;border-radius:18px}}.kpis{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}}.kpi,article{{background:white;border:1px solid #ddd8c8;border-radius:14px;padding:16px}}.kpi b{{font-size:26px;display:block}}table{{width:100%;border-collapse:collapse;background:white}}th,td{{padding:10px;border-bottom:1px solid #eee;text-align:left}}th{{position:sticky;top:0;background:#eee9da}}.fail{{color:#a02d2d}}.pass{{color:#0b6b51}}article h3{{margin-top:0;display:flex;justify-content:space-between}}code{{white-space:pre-wrap}}@media(max-width:700px){{.kpis{{grid-template-columns:1fr 1fr}}}}
-</style></head><body><main><header><h1>AI Setup Chat Evaluation</h1><p>Evidence-backed AI-vs-AI quality and reliability report</p><h2 class="{"pass" if summary["release_gate"] == "PASS" else "fail"}">Release gate: {summary["release_gate"]}</h2><p>Quality: {summary["quality_status"]} | Critical release: {summary["critical_release_status"]} | Workflow: {summary["workflow_status"]} | Measurement: {summary["measurement_status"]} | Infrastructure: {summary["infrastructure_status"]}</p></header><section class="kpis"><div class="kpi"><b>{summary["quality_measured_cases"]}/{summary["cases"]}</b>Measured answers</div><div class="kpi"><b>{summary["strict_pass_rate"]:.1%}</b>Strict end-to-end pass</div><div class="kpi"><b>{summary["schema_valid_rate"]:.1%}</b>Schema valid</div><div class="kpi"><b>{summary["semantic_contract_pass_rate"]:.1%}</b>Semantic contract</div><div class="kpi"><b>${summary["target_api_cost_usd"]:.4f}</b>Target API cost</div><div class="kpi"><b>${summary["evaluator_api_cost_usd"]:.4f}</b>Evaluator API cost</div>{budget_card}</section><h2>Topic results</h2><div style="overflow:auto;max-height:650px"><table><thead><tr><th>Topic</th><th>Severity</th><th>Cases</th><th>Pass</th><th>Score</th><th>Criteria</th><th>Latency</th></tr></thead><tbody>{topic_cards}</tbody></table></div><h2>Failures and fixes with proof</h2>{failure_cards}</main></body></html>"""
+</style></head><body><main><header><h1>AI Setup Chat Evaluation</h1><p>Evidence-backed AI-vs-AI quality and reliability report</p><h2 class="{"pass" if summary["release_gate"] == "PASS" else "fail"}">Release gate: {summary["release_gate"]}</h2><p>Quality: {summary["quality_status"]} | Critical release: {summary["critical_release_status"]} | Workflow: {summary["workflow_status"]} | Measurement: {summary["measurement_status"]} | Infrastructure: {summary["infrastructure_status"]}</p></header><section class="kpis"><div class="kpi"><b>{summary["quality_measured_cases"]}/{summary["cases"]}</b>Measured answers</div><div class="kpi"><b>{summary["strict_pass_rate"]:.1%}</b>Strict end-to-end pass</div><div class="kpi"><b>{summary["schema_valid_rate"]:.1%}</b>Schema valid</div><div class="kpi"><b>{summary["semantic_contract_pass_rate"]:.1%}</b>Semantic contract</div><div class="kpi"><b>${summary["target_api_cost_usd"]:.4f}</b>Target API cost</div><div class="kpi"><b>${summary["evaluator_api_cost_usd"]:.4f}</b>Evaluator API cost</div>{budget_card}</section><h2>Reliability and convergence</h2><section class="kpis">{reliability_cards}</section><p>{html.escape(parity_summary)}</p><h2>Topic results</h2><div style="overflow:auto;max-height:650px"><table><thead><tr><th>Topic</th><th>Severity</th><th>Cases</th><th>Pass</th><th>Score</th><th>Criteria</th><th>Latency</th></tr></thead><tbody>{topic_cards}</tbody></table></div><h2>Failures and fixes with proof</h2>{failure_cards}</main></body></html>"""
     (run_dir / "report.html").write_text(page, encoding="utf-8")
     return summary

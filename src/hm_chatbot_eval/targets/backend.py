@@ -34,12 +34,14 @@ class HilalMarketsBackendTarget(ChatTarget):
         self.history: list[dict[str, str]] = []
         self.variant: dict[str, Any] = {}
         self.turn_number = 0
+        self.last_payload: dict[str, Any] = {}
 
     async def start(self, scenario_id: str, variant: dict[str, Any]) -> None:
         self.variant = variant
         self.conversation_id = ""
         self.history = []
         self.turn_number = 0
+        self.last_payload = {}
         await self._authenticate_if_configured()
         response = await self.client.post(
             self.settings.target_backend_session_path,
@@ -111,6 +113,11 @@ class HilalMarketsBackendTarget(ChatTarget):
                 if isinstance(raw, dict) and isinstance(raw.get("evaluation_contract"), dict)
                 else None
             )
+            canonical_state = (
+                raw.get("draft_v2")
+                if isinstance(raw, dict) and isinstance(raw.get("draft_v2"), dict)
+                else None
+            )
             model, usage = _assistant_runtime_metadata(assistant)
             structured_application_error = (
                 response.status_code == 409
@@ -124,11 +131,13 @@ class HilalMarketsBackendTarget(ChatTarget):
                 ]
             )
             safe_raw = redact(raw, self.settings.redacted_keys)
+            self.last_payload = raw if isinstance(raw, dict) else {}
             return TargetReply(
                 text=text,
                 latency_ms=latency,
                 status_code=response.status_code,
                 structured=structured,
+                canonical_state=canonical_state,
                 raw=safe_raw,
                 raw_hash=stable_hash(safe_raw),
                 conversation_id=self.conversation_id,
@@ -139,6 +148,70 @@ class HilalMarketsBackendTarget(ChatTarget):
                     if response.is_success or structured_application_error
                     else f"HTTP {response.status_code}"
                 ),
+            )
+        except Exception as exc:
+            return TargetReply(
+                text="",
+                latency_ms=(time.perf_counter() - started) * 1000,
+                error=f"{type(exc).__name__}: {exc}",
+                conversation_id=self.conversation_id,
+            )
+
+    async def approve(self, *, scenario_id: str) -> TargetReply:
+        draft = self.last_payload.get("draft_v2")
+        schema_hash = str(self.last_payload.get("schema_hash") or "")
+        if not isinstance(draft, dict) or not schema_hash:
+            return TargetReply(
+                text="",
+                latency_ms=0,
+                error="Reviewed approval identity is unavailable.",
+                conversation_id=self.conversation_id,
+            )
+        path = f"/api/v1/dashboard/setup-chat/sessions/{self.conversation_id}/approve"
+        started = time.perf_counter()
+        try:
+            response = await self.client.post(
+                path,
+                headers=self.settings.backend_headers,
+                json={
+                    "approved": True,
+                    "expected_schema_hash": schema_hash,
+                    "expected_executable_version": draft.get("executable_version"),
+                    "expected_executable_hash": draft.get("executable_hash"),
+                    "confirmed_low_confidence_rule_keys": [
+                        str(item.get("rule_key"))
+                        for item in (self.last_payload.get("rule_confidence") or [])
+                        if isinstance(item, dict)
+                        and item.get("requires_confirmation")
+                        and item.get("rule_key")
+                    ],
+                },
+            )
+            latency = (time.perf_counter() - started) * 1000
+            try:
+                raw: Any = response.json()
+            except ValueError:
+                raw = {"text": response.text}
+            self.last_payload = raw if isinstance(raw, dict) else {}
+            assistant = _latest_assistant_message(raw)
+            structured = raw.get("evaluation_contract") if isinstance(raw, dict) else None
+            canonical_state = raw.get("draft_v2") if isinstance(raw, dict) else None
+            model, usage = _assistant_runtime_metadata(assistant)
+            safe_raw = redact(raw, self.settings.redacted_keys)
+            return TargetReply(
+                text="Authenticated approval action completed." if response.is_success else "",
+                latency_ms=latency,
+                status_code=response.status_code,
+                structured=structured if isinstance(structured, dict) else None,
+                canonical_state=(
+                    canonical_state if isinstance(canonical_state, dict) else None
+                ),
+                raw=safe_raw,
+                raw_hash=stable_hash(safe_raw),
+                conversation_id=self.conversation_id,
+                model=model,
+                usage=usage,
+                error=None if response.is_success else f"HTTP {response.status_code}",
             )
         except Exception as exc:
             return TargetReply(

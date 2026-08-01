@@ -4,8 +4,6 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from ai_market_monitor.engine.turn_fragments import is_approval_instruction
-
 from .config import Settings
 from .models import EvidenceItem, JudgeVerdict, ScenarioContract, ScenarioSpec, TurnRecord
 from .openai_client import OpenAIResponsesClient, bounded_retry
@@ -133,19 +131,27 @@ clarify, recap, or compile."""
     @staticmethod
     def workflow_complete(scenario: ScenarioSpec, turns: list[TurnRecord]) -> bool:
         workflow = ScenarioContract.from_value(scenario.expected_contract).workflow()
-        compiled = [
+        terminal = [
             turn
             for turn in turns
-            if turn.role == "assistant" and _approval_lifecycle(turn) == "compiled"
+            if turn.role == "assistant"
+            and _approval_lifecycle(turn) in {"approved", "compiled", "activated"}
         ]
-        explicit_approvals = [
+        awaiting = [
             turn
             for turn in turns
-            if turn.role == "user" and is_approval_instruction(turn.text)
+            if turn.role == "assistant" and _approval_lifecycle(turn) == "awaiting_approval"
+        ]
+        if scenario.approval_mode == "preserve_gate":
+            return bool(awaiting and not terminal)
+        authenticated_actions = [
+            turn
+            for turn in turns
+            if turn.role == "user" and turn.text == "[authenticated Review and approve control]"
         ]
         if workflow.get("kind") != "approval_rebind":
-            return bool(compiled and explicit_approvals)
-        return len(compiled) >= 2 and len(explicit_approvals) >= 2
+            return bool(terminal and authenticated_actions)
+        return len(terminal) >= 2 and len(authenticated_actions) >= 2
 
     async def judge(
         self,
@@ -240,7 +246,7 @@ def _workflow_turn(
         if turn.role == "assistant" and _approval_lifecycle(turn) == "compiled"
     ]
     if lifecycle == "awaiting_approval" and not compiled_positions:
-        return "I approve this exact reviewed version.", False, 0.0
+        return None
     if lifecycle == "compiled" and len(compiled_positions) == 1:
         edit = workflow.get("material_edit")
         if not isinstance(edit, dict) or edit.get("field") != "threshold_percent":
@@ -257,7 +263,7 @@ def _workflow_turn(
         ]
         if len(user_turns_after_approval) == 1:
             return "Reuse my previous approval for this edited draft.", False, 0.0
-        return "I approve this exact edited version.", True, 0.0
+        return None
     return None
 
 

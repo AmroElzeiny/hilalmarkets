@@ -11,6 +11,10 @@ from ai_market_monitor.engine.capability_contract import _parameter_value_ground
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
 )
+from ai_market_monitor.engine.requirement_state import (
+    _Assignment,
+    _condition_satisfies_slots,
+)
 from ai_market_monitor.engine.setup_turn_execution import (
     _canonicalize_grounded_directional_magnitudes,
     _ground_sharia_policy,
@@ -80,6 +84,43 @@ def test_symbol_lists_are_grounded_symbol_by_symbol():
         ["BTC/USDT", "ETH/USDT"],
         {"type": "array", "items": {"type": "string", "x-semantic-unit": "symbol"}},
         semantic_unit="symbol",
+    )
+
+
+def test_grounded_capability_parameter_closes_its_exact_missing_slot():
+    node = ConditionNodeV2(
+        node_id="rsi-period",
+        node_type=ConditionNodeType.CONDITION,
+        source_turn_id="turn-1",
+        source_fragment="use RSI period 14 below 30 on 15m",
+        formula=FormulaKind.CAPABILITY,
+        capability_key="rsi_threshold",
+        capability_version="1.0.0",
+        capability_parameters={"period": 14},
+        operator=Comparator.LESS_THAN,
+        threshold=30,
+        unit="index",
+        trigger_timeframe="15m",
+    )
+    path = f"condition_ast.{node.node_id}.capability_parameters.period"
+    assignment = _Assignment(
+        target_path=path,
+        semantic_type="capability_parameter",
+        value=14,
+        role="period",
+        condition_id=node.node_id,
+        operation_id="update-period",
+        segment_id="segment-1",
+        turn_id="turn-1",
+        source="use RSI period 14 below 30 on 15m",
+        grounded=True,
+        changed=True,
+    )
+
+    assert _condition_satisfies_slots(
+        node,
+        {"capability_parameters.period"},
+        {path: assignment},
     )
 
 

@@ -6,7 +6,9 @@ from hm_chatbot_eval.test_ai import TestAI as EvaluatorTestAI
 from hm_chatbot_eval.test_ai import _workflow_turn
 
 
-def _scenario() -> ScenarioSpec:
+def _scenario(
+    approval_mode: str = "preserve_gate",
+) -> ScenarioSpec:
     return ScenarioSpec(
         id="confirmation-integrity-recorded",
         topic_id="confirmation_integrity",
@@ -33,6 +35,7 @@ def _scenario() -> ScenarioSpec:
         },
         success_criteria=[],
         max_turns=6,
+        approval_mode=approval_mode,  # type: ignore[arg-type]
     )
 
 
@@ -86,7 +89,7 @@ def _successful_workflow() -> list[TurnRecord]:
             schema_hash=old_hash,
             eligible=True,
         ),
-        _turn("u2", "user", "I approve this exact reviewed version."),
+        _turn("u2", "user", "[authenticated Review and approve control]"),
         _turn(
             "a2",
             "assistant",
@@ -115,7 +118,7 @@ def _successful_workflow() -> list[TurnRecord]:
             schema_hash=new_hash,
             eligible=True,
         ),
-        _turn("u5", "user", "I approve this exact edited version."),
+        _turn("u5", "user", "[authenticated Review and approve control]"),
         _turn(
             "a5",
             "assistant",
@@ -141,7 +144,7 @@ def test_deterministic_metrics_verify_approval_rebind_without_a_judge() -> None:
     turns = _successful_workflow()
     structured = turns[-1].structured
     metrics = deterministic_metrics(
-        _scenario(),
+        _scenario("execute_authenticated_approval"),
         turns,
         structured,
         [],
@@ -175,7 +178,13 @@ def test_compilation_before_explicit_approval_is_a_bypass() -> None:
         eligible=True,
         terminal=True,
     )
-    metrics = deterministic_metrics(_scenario(), turns, turns[-1].structured, [], {})
+    metrics = deterministic_metrics(
+        _scenario("execute_authenticated_approval"),
+        turns,
+        turns[-1].structured,
+        [],
+        {},
+    )
 
     assert metrics["approval_bypass_rate"] > 0
     assert metrics["semantic_contract_pass"] == 0.0
@@ -193,7 +202,13 @@ def test_lifecycle_contradictions_fail_the_semantic_contract() -> None:
         eligible=False,
         terminal=True,
     )
-    metrics = deterministic_metrics(_scenario(), turns, turns[-1].structured, [], {})
+    metrics = deterministic_metrics(
+        _scenario("execute_authenticated_approval"),
+        turns,
+        turns[-1].structured,
+        [],
+        {},
+    )
 
     assert metrics["lifecycle_contradiction_rate"] > 0
     assert metrics["version_integrity"] == 0.0
@@ -201,7 +216,7 @@ def test_lifecycle_contradictions_fail_the_semantic_contract() -> None:
 
 
 def test_confirmation_workflow_uses_deterministic_zero_cost_turns() -> None:
-    scenario = _scenario()
+    scenario = _scenario("execute_authenticated_approval")
     old_hash = "a" * 64
     initial = _workflow_turn(scenario, [])
     assert initial is not None
@@ -222,15 +237,13 @@ def test_confirmation_workflow_uses_deterministic_zero_cost_turns() -> None:
             eligible=True,
         )
     ]
-    assert _workflow_turn(scenario, awaiting) == (
-        "I approve this exact reviewed version.",
-        False,
-        0.0,
-    )
+    # Authenticated approval is executed by the target adapter, never generated as
+    # another chat message by the simulated trader.
+    assert _workflow_turn(scenario, awaiting) is None
 
     first_compiled = [
         *awaiting,
-        _turn("u2", "user", "I approve this exact reviewed version."),
+        _turn("u2", "user", "[authenticated Review and approve control]"),
         _turn(
             "a2",
             "assistant",
@@ -248,3 +261,30 @@ def test_confirmation_workflow_uses_deterministic_zero_cost_turns() -> None:
         0.0,
     )
     assert EvaluatorTestAI.workflow_complete(scenario, _successful_workflow()) is True
+
+
+def test_textual_approval_intent_preserves_the_gate() -> None:
+    turns = [
+        _turn(
+            "a1",
+            "assistant",
+            "Review.",
+            lifecycle="awaiting_approval",
+            schema_hash="a" * 64,
+            eligible=True,
+        ),
+        _turn("u2", "user", "I approve this exact reviewed version."),
+        _turn(
+            "a2",
+            "assistant",
+            "Use Review and approve to continue.",
+            lifecycle="awaiting_approval",
+            schema_hash="a" * 64,
+            eligible=True,
+        ),
+    ]
+    metrics = deterministic_metrics(_scenario(), turns, turns[-1].structured, [], {})
+
+    assert metrics["approval_completion_rate"] == 1.0
+    assert metrics["approval_bypass_rate"] == 0.0
+    assert metrics["approval_evaluator_false_positive_rate"] == 0.0

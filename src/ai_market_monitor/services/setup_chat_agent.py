@@ -42,6 +42,10 @@ from ai_market_monitor.engine.claim_evidence import (
     requires_factual_answer,
     validate_claims,
 )
+from ai_market_monitor.engine.requirement_state import (
+    active_requirement_states,
+    unresolved_target_path,
+)
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
     RuntimePreflight,
@@ -50,6 +54,8 @@ from ai_market_monitor.engine.setup_turn_execution import (
     SetupTurnRequest,
     apply_setup_turn,
     conversation_from_segments,
+    draft_read_model,
+    validate_setup_turn_plan,
     validated_clarification,
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
@@ -69,13 +75,17 @@ from ai_market_monitor.schemas.setup_agent import (
     SetupConversationContext,
     SetupTurnExecutionResult,
 )
-from ai_market_monitor.schemas.setup_authorization import ClarificationContract
+from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
+    ClarificationContract,
+)
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
     DraftMode,
     StrategyDraftV2,
 )
+from ai_market_monitor.services.agent_tools import strict_json_schema
 from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.openai_structured_call import (
     StructuredCallError,
@@ -228,6 +238,28 @@ class SetupAgentTurnResult:
             f"{self.reply.message_without_question.rstrip()}\n\n"
             f"{self.clarification.question}"
         )
+
+
+def _turn_request(
+    turn: SetupAgentTurnInput,
+    plan: SetupAgentTurnPlan,
+    allowed_capability_keys: frozenset[str],
+    *,
+    include_gates: bool,
+) -> SetupTurnRequest:
+    return SetupTurnRequest(
+        plan=plan,
+        message=turn.message,
+        draft=turn.draft,
+        source_turn_id=turn.source_turn_id,
+        allowed_capability_keys=allowed_capability_keys,
+        history=list(turn.history),
+        conversation=turn.conversation,
+        screening=turn.screening if include_gates else None,
+        providers=turn.providers if include_gates else None,
+        runtime_preflight=turn.runtime_preflight if include_gates else None,
+        preflight_manifest=turn.preflight_manifest if include_gates else None,
+    )
 
 
 class SetupChatAgent:
@@ -399,20 +431,39 @@ class SetupChatAgent:
             unresolved_field_count=len(turn.draft.unresolved_fields),
             previous_turn_failed=turn.previous_turn_failed,
         )
+        repaired = False
         try:
             envelope, plan_usage = await self._plan_once(turn, shortlist, route)
         except StructuredCallError as exc:
-            raise SetupAgentError(
-                exc.code,
-                str(exc),
-                stage="planning",
-                retryable=exc.retryable,
-                details=exc.details,
-                # Even an invalid/empty final answer may have consumed the full
-                # model budget. Bind the actual route here because parsing failed
-                # before the normal success path could merge this metadata.
-                usage={**exc.usage, **route.usage_metadata()},
-            ) from exc
+            if not _repair_eligible_provider_failure(exc):
+                raise SetupAgentError(
+                    exc.code,
+                    str(exc),
+                    stage="planning",
+                    retryable=exc.retryable,
+                    details=exc.details,
+                    usage={**exc.usage, **route.usage_metadata()},
+                ) from exc
+            try:
+                envelope, plan_usage = await self._repair_once(
+                    turn,
+                    shortlist,
+                    route,
+                    original_candidate=exc.candidate,
+                    validation_code=exc.code,
+                    validation_details=exc.details,
+                    prior_usage=exc.usage,
+                )
+            except StructuredCallError as repair_exc:
+                raise SetupAgentError(
+                    repair_exc.code,
+                    str(repair_exc),
+                    stage="planner_repair",
+                    retryable=repair_exc.retryable,
+                    details=repair_exc.details,
+                    usage={**repair_exc.usage, **route.usage_metadata()},
+                ) from repair_exc
+            repaired = True
         planner_model = route.model
         planner_reasons = route.reasons
         plan_usage = {**plan_usage, **route.usage_metadata()}
@@ -443,6 +494,79 @@ class SetupChatAgent:
         )
 
         plan = envelope.plan
+        if plan is not None and plan.requires_tool:
+            try:
+                dry = validate_setup_turn_plan(
+                    _turn_request(turn, plan, shortlist.allowed_keys, include_gates=False)
+                )
+            except SetupTurnRejected as exc:
+                if repaired or not _repair_eligible_validation_failure(exc):
+                    raise SetupAgentError(
+                        exc.code,
+                        str(exc),
+                        stage="tool_validation",
+                        details=exc.details,
+                        usage=self.last_usage,
+                    ) from exc
+                try:
+                    envelope, repair_usage = await self._repair_once(
+                        turn,
+                        shortlist,
+                        route,
+                        original_candidate=envelope.model_dump(mode="json"),
+                        validation_code=exc.code,
+                        validation_details=exc.details,
+                        prior_usage=plan_usage,
+                    )
+                except StructuredCallError as repair_exc:
+                    raise SetupAgentError(
+                        repair_exc.code,
+                        str(repair_exc),
+                        stage="planner_repair",
+                        retryable=repair_exc.retryable,
+                        details=repair_exc.details,
+                        usage={**repair_exc.usage, **route.usage_metadata()},
+                    ) from repair_exc
+                repaired = True
+                plan_usage = repair_usage
+                self.last_usage = {**repair_usage, **route.usage_metadata()}
+                plan = envelope.plan
+                if plan is None or not plan.requires_tool:
+                    raise SetupAgentError(
+                        "PLANNER_REPAIR_DROPPED_ACTION",
+                        "The planner repair did not preserve the requested action.",
+                        stage="planner_repair",
+                        usage=self.last_usage,
+                    ) from exc
+                try:
+                    dry = validate_setup_turn_plan(
+                        _turn_request(turn, plan, shortlist.allowed_keys, include_gates=False)
+                    )
+                except SetupTurnRejected as final_exc:
+                    raise SetupAgentError(
+                        final_exc.code,
+                        str(final_exc),
+                        stage="planner_repair",
+                        details=final_exc.details,
+                        usage=self.last_usage,
+                    ) from final_exc
+            plan = dry.plan
+            trace = _with(
+                trace,
+                plan_confidence=plan.overall_confidence,
+                segments=tuple(
+                    {
+                        "segment_id": item.segment_id,
+                        "kind": item.kind.value,
+                        "text": item.exact_source_text,
+                        "confidence": item.confidence,
+                        "action_required": item.action_required,
+                    }
+                    for item in plan.segments
+                ),
+                model_calls=self.model_call_count,
+                patch_validation="repaired" if repaired else "dry_validated",
+            )
         if turn.stage_callback is not None:
             await turn.stage_callback(
                 "EXECUTING" if plan is not None and plan.requires_tool else "COMPOSING",
@@ -477,20 +601,7 @@ class SetupChatAgent:
 
         try:
             outcome = await apply_setup_turn(
-                SetupTurnRequest(
-                    plan=plan,
-                    # The raw message: spans are located in what the user actually typed.
-                    message=turn.message,
-                    draft=turn.draft,
-                    source_turn_id=turn.source_turn_id,
-                    allowed_capability_keys=shortlist.allowed_keys,
-                    history=list(turn.history),
-                    conversation=turn.conversation,
-                    screening=turn.screening,
-                    providers=turn.providers,
-                    runtime_preflight=turn.runtime_preflight,
-                    preflight_manifest=turn.preflight_manifest,
-                )
+                _turn_request(turn, plan, shortlist.allowed_keys, include_gates=True)
             )
         except SetupTurnRejected as exc:
             raise SetupAgentError(
@@ -500,6 +611,8 @@ class SetupChatAgent:
                 details=exc.details,
                 usage=self.last_usage,
             ) from exc
+        if repaired:
+            self.last_usage["_setup_repair_successes"] = 1
 
         trace = _with(
             trace,
@@ -660,6 +773,106 @@ class SetupChatAgent:
             "_setup_reserved_cost_usd": reserved_cost,
             "_setup_planner_attempts": 1,
         }
+
+    async def _repair_once(
+        self,
+        turn: SetupAgentTurnInput,
+        shortlist: CapabilityShortlist,
+        route: Any,
+        *,
+        original_candidate: dict[str, Any] | None,
+        validation_code: str,
+        validation_details: tuple[str, ...],
+        prior_usage: dict[str, Any],
+    ) -> tuple[SetupAgentPlanEnvelope, dict[str, Any]]:
+        """Make the single bounded pre-mutation repair call allowed for this turn."""
+
+        payload = {
+            "exact_original_user_text": turn.message,
+            "authoritative_source_segments": _authoritative_source_segments(
+                turn.message,
+                original_candidate,
+            ),
+            "current_canonical_read_model": draft_read_model(turn.draft, []),
+            "current_requirement_states": [
+                item.model_dump(mode="json")
+                for item in active_requirement_states(turn.draft)
+            ],
+            "active_clarification_contract": (
+                turn.conversation.active_question.model_dump(mode="json")
+                if turn.conversation.active_question is not None
+                else None
+            ),
+            "original_plan_when_parseable": original_candidate,
+            "allowed_capabilities": shortlist.to_prompt_dict(),
+            "authorized_operation_schema": strict_json_schema(AuthorizedPatchOperation),
+            "operation_kinds": _OPERATION_GUIDE,
+            "validation": {
+                "code": validation_code,
+                "paths": _sanitized_validation_paths(validation_details),
+            },
+        }
+        reserved = estimate_structured_call_cost(
+            self.settings,
+            schema_model=SetupAgentPlanEnvelope,
+            instructions=_REPAIR_INSTRUCTIONS,
+            payload=payload,
+            model=route.model,
+            max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+            service_tier=route.service_tier,
+        )
+        prior_reserved = float(prior_usage.get("_setup_reserved_cost_usd") or 0.0)
+        if prior_reserved + reserved > self.settings.setup_agent_max_estimated_cost_usd_per_turn:
+            raise StructuredCallError(
+                "SETUP_AGENT_COST_LIMIT",
+                "The single planner repair would exceed the per-turn AI budget.",
+                stage="planner_repair",
+                usage=prior_usage,
+            )
+        provider_attempted = False
+        try:
+            await self._before_provider_call(route.model)
+            provider_attempted = True
+            envelope, usage = await structured_call(
+                self.settings,
+                schema_model=SetupAgentPlanEnvelope,
+                schema_name="hilalmarkets_setup_turn_plan_repair",
+                instructions=_REPAIR_INSTRUCTIONS,
+                payload=payload,
+                model=route.model,
+                reasoning_effort=route.reasoning_effort,
+                max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+                service_tier=route.service_tier,
+                timeout_seconds=self.settings.setup_agent_planner_timeout_seconds,
+                estimated_cost_limit=max(
+                    0.000001,
+                    self.settings.setup_agent_max_estimated_cost_usd_per_turn
+                    - prior_reserved,
+                ),
+                stage="planner_repair",
+                transport=self.transport,
+            )
+        except StructuredCallError as exc:
+            self.model_call_count += 1
+            exc.usage = _merged_usage(
+                prior_usage,
+                {
+                    **exc.usage,
+                    "_setup_reserved_cost_usd": prior_reserved + reserved,
+                    "_setup_repair_attempts": 1,
+                },
+            )
+            if provider_attempted and _counts_toward_circuit(exc):
+                await self._provider_failed(exc, route.model)
+            elif provider_attempted:
+                await self._provider_succeeded(route.model)
+            raise
+        self.model_call_count += 1
+        await self._provider_succeeded(route.model)
+        merged = _merged_usage(prior_usage, usage)
+        merged["_setup_reserved_cost_usd"] = prior_reserved + reserved
+        merged["_setup_repair_attempts"] = 1
+        return envelope, merged
 
     async def _compose_once(
         self,
@@ -830,9 +1043,19 @@ class SetupChatAgent:
                 "conditions": _condition_labels(draft),
                 "boolean_shape": _boolean_shape(draft),
             },
+            "requirement_states": [
+                item.model_dump(mode="json")
+                for item in active_requirement_states(draft)
+            ],
             "unresolved_fields": [
                 item.model_dump(mode="json")
                 for item in draft.unresolved_fields
+                if unresolved_target_path(item)
+                in {
+                    state.target_path
+                    for state in active_requirement_states(draft)
+                    if state.blocking
+                }
             ],
             "unsupported_requirements": [
                 {"key": item.key, "missing": item.missing_contract}
@@ -901,8 +1124,8 @@ def deterministic_summary(result: SetupTurnExecutionResult) -> str:
         lines.append(f"The draft is now version {result.current_version}.")
     for item in result.unsupported_requirements[:3]:
         lines.append(f"I could not express this exactly: {item.get('missing_contract', '')}")
-    for item in result.unresolved_fields[:1]:
-        lines.append(f"Still needed: {item.get('question', '')}")
+    # The selected canonical clarification is appended exactly once by ``run_turn``.
+    # Repeating it here produced both a status line and the same question.
     lines.extend(result.safe_errors[:2])
     if result.approval_eligible:
         lines.append("The inactive preview is ready. Use Review and approve when it matches.")
@@ -1183,17 +1406,29 @@ For the core primitives listed in core_primitives, use no capability_key at all.
 CLARIFICATION ANSWERS
 If conversation_context has an active_question_id and this turn answers it, record a
 clarification_answers entry. An answer resolves that question; it does not become a
-new condition. "yes" is not a market rule. A mutating answer must also include the
-operation that fills the unresolved target, then resolve_unresolved_key.
+new condition. "yes" is not a market rule. Include every grounded operation needed to
+make the final canonical value correct. You may link a resolve_unresolved_key operation,
+but the server—not that operation—decides whether the requirement is satisfied and
+closes it after all operations complete.
 
 For an active condition_creation question, a complete explicit supported rule is the
-operation that fills the target: propose add_condition and resolve_unresolved_key in
-the same plan. The user's latest exact operator wins over an assumption embedded in an
-older question. For example, if the question asked for a minimum but the answer says
-"at most 0.5%", use lte 0.5; do not reinterpret it as gte, ask the same question again,
-or resolve the blocker without adding the condition. When first asking about a vague
-word such as "strong", do not presume minimum or maximum: ask neutrally for the missing
-threshold and comparator.
+operation that fills the target: propose add_condition. One complete grounded operation
+may satisfy every missing slot in that condition requirement; do not emit duplicate
+questions or require one resolution operation per slot. The user's latest exact
+operator wins over an assumption embedded in an older question. For example, if the
+question asked for a minimum but the answer says "at most 0.5%", use lte 0.5; do not
+reinterpret it as gte, ask the same question again, or resolve the blocker without
+adding the condition. When first asking about a vague word such as "strong", do not
+presume minimum or maximum: ask neutrally for the missing threshold and comparator.
+
+SEMANTIC ROLES
+Preserve each value in the role stated by the user. Trigger, context, confirmation and
+reference timeframes are separate fields. Movement direction and strategy bias are
+separate. Threshold, lookback, period and confirmation count are separate. Include and
+exclude are opposite symbol actions. Never assign a role from timeframe size, token
+order, proximity alone or market convention. Context is metadata for the named
+condition unless the user separately states executable contextual logic; do not invent
+an EMA, candle count, ratio or extra condition from a context label.
 
 REFERENCES
 Use recent_dialogue and conversation_context to resolve "that one", "the second
@@ -1238,6 +1473,33 @@ fields beside direct_reply at the envelope root.
 
 Use response_points to record what the final reply must cover, including answers to
 their questions and honest explanations of anything refused.
+"""
+
+
+_REPAIR_INSTRUCTIONS = """\
+You repair one HilalMarkets Setup Chat planner response before any canonical mutation.
+Return the same strict SetupAgentPlanEnvelope schema.
+
+The original user text is authoritative. Source segments must quote it exactly. The
+current canonical read model and requirement states are server-owned truth. The active
+clarification contract is the only open question you may claim to resolve. Use only an
+offered capability and only the authorized operation schema.
+
+Fix only the sanitized validation code and paths. You may remove an ungrounded
+model-added value, inherit an unchanged existing field, relink an operation to the exact
+authorizing segment, remove a stale/redundant resolution operation, or correct a role
+assignment that the user's exact wording already states. Do not add a symbol,
+timeframe, semantic role, formula, movement direction, strategy bias, comparator,
+threshold, unit, lookback, capability, Sharia value, approval action, or executable
+relationship that is absent from the exact user text and canonical context. Platform
+and registry defaults may remain only where the canonical contract owns them.
+
+Never replace an unknown capability with a nearby one. Never approve or activate.
+Never assign Sharia status. Never turn contextual information into a new executable
+condition. If a genuine requested mechanic is unsupported, preserve valid supported
+requirements and record one typed unsupported requirement. If the plan cannot be
+repaired safely, return a non-mutating plan that keeps the typed blocker open; do not
+invent a value.
 """
 
 
@@ -1383,6 +1645,83 @@ _CIRCUIT_FAILURE_CODES = frozenset(
         "TARGET_HTTP_5XX",
     }
 )
+
+_REPAIRABLE_PROVIDER_CODES = frozenset(
+    {"TARGET_INVALID_JSON", "TARGET_SCHEMA_VALIDATION", "TARGET_EMPTY_RESPONSE"}
+)
+_REPAIRABLE_VALIDATION_CODES = frozenset(
+    {
+        "SPAN_NOT_GROUNDED",
+        "VALUE_NOT_GROUNDED",
+        "UNAUTHORIZED_OPERATION",
+        "PATCH_REJECTED",
+        "CONDITION_NOT_FOUND",
+        "SEMANTIC_VALIDATION_FAILED",
+    }
+)
+
+
+def _repair_eligible_provider_failure(exc: StructuredCallError) -> bool:
+    return exc.code in _REPAIRABLE_PROVIDER_CODES and not exc.retryable
+
+
+def _repair_eligible_validation_failure(exc: SetupTurnRejected) -> bool:
+    if exc.code not in _REPAIRABLE_VALIDATION_CODES:
+        return False
+    non_repairable_markers = {
+        "authentication",
+        "authorization",
+        "ownership",
+        "approval",
+        "screening",
+        "provider",
+        "capability_not_offered",
+        "capability_not_registered",
+        "unsupported_requirement",
+        "unsupported_mechanic",
+    }
+    details = " ".join(exc.details).casefold()
+    return not any(marker in details for marker in non_repairable_markers)
+
+
+def _sanitized_validation_paths(details: tuple[str, ...]) -> list[str]:
+    """Keep codes/paths, never raw exception strings or model-authored prose."""
+
+    cleaned: list[str] = []
+    for detail in details[:12]:
+        tokens = [
+            token
+            for token in re.split(r"[:\s]+", str(detail))
+            if re.fullmatch(r"[A-Za-z0-9_.\[\]-]{1,160}", token)
+        ]
+        if tokens:
+            cleaned.append(":".join(tokens[:3]))
+    return cleaned
+
+
+def _authoritative_source_segments(
+    message: str,
+    candidate: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Retain only candidate spans the server can locate in the original text."""
+
+    plan = candidate.get("plan") if isinstance(candidate, dict) else None
+    raw_segments = plan.get("segments") if isinstance(plan, dict) else None
+    authoritative: list[dict[str, Any]] = []
+    for item in raw_segments if isinstance(raw_segments, list) else []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("exact_source_text")
+        if not isinstance(text, str) or not text or text not in message:
+            continue
+        authoritative.append(
+            {
+                "segment_id": str(item.get("segment_id") or "")[:80],
+                "exact_source_text": text,
+                "kind": str(item.get("kind") or "")[:80],
+            }
+        )
+    return authoritative
 
 
 def _counts_toward_circuit(exc: StructuredCallError) -> bool:

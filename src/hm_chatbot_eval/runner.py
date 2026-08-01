@@ -26,7 +26,14 @@ from .failures import (
     rate_limit_headers,
     sanitize_excerpt,
 )
-from .models import CaseResult, JudgeVerdict, ScenarioSpec, TurnRecord
+from .models import (
+    ApprovalMode,
+    CaseResult,
+    JudgeVerdict,
+    ScenarioContract,
+    ScenarioSpec,
+    TurnRecord,
+)
 from .openai_client import MalformedAIResponse, OpenAIResponsesClient
 from .profiles import (
     cases_per_topic,
@@ -53,6 +60,67 @@ _EXPECTED_EVALUATOR_FAULT_ERRORS: dict[str, frozenset[str]] = {
     "429_once": frozenset({"TARGET_HTTP_429"}),
     "stream_disconnect_once": frozenset({"TARGET_PARTIAL_STREAM"}),
 }
+
+_TARGET_PRODUCT_FAILURE_CODES = frozenset(
+    {
+        "TARGET_EMPTY_RESPONSE",
+        "TARGET_INVALID_JSON",
+        "TARGET_SCHEMA_VALIDATION",
+        "VALUE_NOT_GROUNDED",
+        "SPAN_NOT_GROUNDED",
+        "SEMANTIC_VALIDATION_FAILED",
+        "PLANNER_REPAIR_DROPPED_ACTION",
+        "UNRESOLVED_TARGET_UNCHANGED",
+    }
+)
+
+
+def _product_failure_code(reply: TargetReply) -> str | None:
+    raw_error = reply.raw.get("error") if isinstance(reply.raw, dict) else None
+    code = str(raw_error.get("error_code") or "") if isinstance(raw_error, dict) else ""
+    if code in _TARGET_PRODUCT_FAILURE_CODES:
+        return code
+    if reply.status_code == 422:
+        return code or "TARGET_HTTP_422"
+    if reply.status_code is not None and reply.status_code < 400 and not reply.text.strip():
+        return "TARGET_EMPTY_RESPONSE"
+    return None
+
+
+def _approval_lifecycle_from_structured(structured: dict[str, Any] | None) -> str:
+    approval = structured.get("approval") if isinstance(structured, dict) else None
+    return str(approval.get("lifecycle_state") or "") if isinstance(approval, dict) else ""
+
+
+def _needs_stale_approval_probe(scenario: ScenarioSpec, turns: list[TurnRecord]) -> bool:
+    """Let approval-rebind cases test stale intent once before the real UI action.
+
+    The first ready draft is approved immediately through the authenticated control.
+    After the material edit, the scenario emits one stale-approval-intent turn and
+    verifies that the target remains at the gate; only the following step invokes the
+    real approval action. Text intent is never treated as approval by this function.
+    """
+
+    if (
+        ScenarioContract.from_value(scenario.expected_contract).workflow().get("kind")
+        != "approval_rebind"
+    ):
+        return False
+    compiled_indexes = [
+        index
+        for index, turn in enumerate(turns)
+        if turn.role == "assistant"
+        and _approval_lifecycle_from_structured(turn.structured)
+        in {"approved", "compiled", "activated"}
+    ]
+    if not compiled_indexes:
+        return False
+    user_turns_after = [
+        turn for turn in turns[compiled_indexes[-1] + 1 :] if turn.role == "user"
+    ]
+    # The only user turn after the first approval is the material edit. The next
+    # evaluator turn is therefore the deliberate stale-intent probe.
+    return len(user_turns_after) == 1
 
 
 def _role_for_kind(kind: str) -> Role:
@@ -386,7 +454,11 @@ class EvaluationRunner:
             and isinstance(raw_error, dict)
             and raw_error.get("retryable") is False
         )
-        if structured_failure is not None:
+        if raw_error_code in _TARGET_PRODUCT_FAILURE_CODES or reply.status_code == 422:
+            # The target handled the request and exposed a product defect.  It remains
+            # a measured reliability signal and may recover on a later user turn.
+            failure_class = None
+        elif structured_failure is not None:
             failure_class = structured_failure
         elif (
             reply.status_code in {401, 403, 429}
@@ -403,7 +475,7 @@ class EvaluationRunner:
                 role=role,
                 stage="turn",
             )
-        elif not reply.text.strip():
+        elif not reply.text.strip() and reply.status_code is None:
             failure_class = (
                 FailureClass.UI_RESPONSE_TIMEOUT
                 if kind == "ui"
@@ -449,6 +521,7 @@ class EvaluationRunner:
         started_at: str,
         turns: list[TurnRecord],
         structured: dict[str, Any] | None,
+        canonical_state: dict[str, Any] | None,
         target_cost: float,
         test_cost: float,
         artifacts: list[str],
@@ -476,6 +549,7 @@ class EvaluationRunner:
             failure=failure.to_dict(),
             measurement_status="NOT_MEASURED",
             measurement_issues=[str(failure.failure_class)],
+            canonical_state=canonical_state,
         )
 
     def _charge(self, amount: float) -> None:
@@ -569,10 +643,13 @@ class EvaluationRunner:
         turns: list[TurnRecord] = []
         artifacts: list[str] = []
         structured = None
+        canonical_state = None
         error = None
         test_cost = 0.0
         target_cost = 0.0
         fault_used = False
+        clean_turn_success = True
+        product_failures: list[str] = []
         try:
             await target.start(scenario.id, variant)
             for turn_number in range(1, scenario.max_turns + 1):
@@ -592,6 +669,8 @@ class EvaluationRunner:
                 artifacts.extend(reply.artifacts)
                 if reply.structured is not None:
                     structured = reply.structured
+                if reply.canonical_state is not None:
+                    canonical_state = reply.canonical_state
                 usage = reply.usage or {}
                 turn_target_cost = self._target_cost(reply.model, usage)
                 self._charge(turn_target_cost)
@@ -606,6 +685,7 @@ class EvaluationRunner:
                         status_code=reply.status_code,
                         raw_hash=reply.raw_hash,
                         structured=reply.structured,
+                        canonical_state=reply.canonical_state,
                         model=reply.model,
                         usage=reply.usage,
                         error=reply.error,
@@ -629,6 +709,14 @@ class EvaluationRunner:
                     # the real LLM boundary.  Preserve that failed turn as evidence,
                     # then let the simulated trader perform the recovery turn.
                     continue
+                product_failure = _product_failure_code(reply)
+                if product_failure is not None:
+                    clean_turn_success = False
+                    product_failures.append(product_failure)
+                    # A handled target-side 422/schema/grounding failure is product
+                    # reliability, not evaluator infrastructure.  Both routes get the
+                    # same remaining-turn recovery policy.
+                    continue
                 reply_failure = self._reply_failure(
                     reply,
                     kind=kind,
@@ -643,15 +731,90 @@ class EvaluationRunner:
                         started_at=started_at,
                         turns=turns,
                         structured=structured,
+                        canonical_state=canonical_state,
                         target_cost=target_cost,
                         test_cost=test_cost,
                         artifacts=artifacts,
                         failure=reply_failure,
                     )
+                lifecycle = _approval_lifecycle_from_structured(structured)
+                if lifecycle == "awaiting_approval":
+                    if scenario.approval_mode == "preserve_gate":
+                        break
+                    if _needs_stale_approval_probe(scenario, turns):
+                        continue
+                    turns.append(
+                        TurnRecord(
+                            turn_id=f"approval-action-{turn_number}",
+                            role="user",
+                            text="[authenticated Review and approve control]",
+                            timestamp=utc_now(),
+                        )
+                    )
+                    approval_reply = await target.approve(scenario_id=scenario.id)
+                    artifacts.extend(approval_reply.artifacts)
+                    if approval_reply.structured is not None:
+                        structured = approval_reply.structured
+                    if approval_reply.canonical_state is not None:
+                        canonical_state = approval_reply.canonical_state
+                    approval_cost = self._target_cost(
+                        approval_reply.model,
+                        approval_reply.usage or {},
+                    )
+                    self._charge(approval_cost)
+                    target_cost += approval_cost
+                    turns.append(
+                        TurnRecord(
+                            turn_id=f"approval-result-{turn_number}",
+                            role="assistant",
+                            text=approval_reply.text,
+                            timestamp=utc_now(),
+                            latency_ms=approval_reply.latency_ms,
+                            status_code=approval_reply.status_code,
+                            raw_hash=approval_reply.raw_hash,
+                            structured=approval_reply.structured,
+                            canonical_state=approval_reply.canonical_state,
+                            model=approval_reply.model,
+                            usage=approval_reply.usage,
+                            error=approval_reply.error,
+                        )
+                    )
+                    approval_failure = self._reply_failure(
+                        approval_reply,
+                        kind=kind,
+                        scenario_id=scenario.id,
+                        turn_id=f"approval-result-{turn_number}",
+                    )
+                    if approval_failure is not None:
+                        return self._failed_case(
+                            scenario=scenario,
+                            kind=kind,
+                            variant=variant,
+                            started_at=started_at,
+                            turns=turns,
+                            structured=structured,
+                            canonical_state=canonical_state,
+                            target_cost=target_cost,
+                            test_cost=test_cost,
+                            artifacts=artifacts,
+                            failure=approval_failure,
+                        )
+                    approved_lifecycle = _approval_lifecycle_from_structured(structured)
+                    if approved_lifecycle not in {"approved", "compiled", "activated"}:
+                        clean_turn_success = False
+                        product_failures.append("AUTHENTICATED_APPROVAL_NOT_BOUND")
+                    if ScenarioContract.from_value(scenario.expected_contract).workflow().get(
+                        "kind"
+                    ) != "approval_rebind":
+                        break
+                    continue
                 if done and turn_number >= 2:
                     break
                 if TestAI.workflow_complete(scenario, turns):
                     break
+            if structured is None:
+                clean_turn_success = False
+                product_failures.append("TARGET_NO_STRUCTURED_STRATEGY")
             schema_errors = validate_schema(structured, self.schema)
             deterministic = deterministic_metrics(
                 scenario, turns, structured, schema_errors, self.settings.target_field_map
@@ -687,7 +850,12 @@ class EvaluationRunner:
                     encoding="utf-8",
                 )
             semantic_pass = bool(deterministic.get("semantic_contract_pass"))
-            passed = bool(judge.passed) and semantic_pass if judge else semantic_pass and not error
+            eventual_success = semantic_pass and structured is not None
+            passed = (
+                bool(judge.passed) and eventual_success
+                if judge
+                else eventual_success and not error
+            )
             return CaseResult(
                 run_id=self.run_id,
                 scenario=scenario,
@@ -711,6 +879,10 @@ class EvaluationRunner:
                 measurement_issues=(
                     ["awaiting_paired_backend_ui_capture"] if paired_only else []
                 ),
+                clean_turn_success=clean_turn_success,
+                eventual_case_success=eventual_success,
+                product_failure_classes=list(dict.fromkeys(product_failures)),
+                canonical_state=canonical_state,
             )
         except (BudgetExceeded, CostAccountingError, EvaluationInfrastructureError):
             raise
@@ -774,6 +946,7 @@ class EvaluationRunner:
                 ).to_dict(),
                 measurement_status="NOT_MEASURED",
                 measurement_issues=["target_http_failure"],
+                canonical_state=canonical_state,
             )
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
@@ -820,6 +993,7 @@ class EvaluationRunner:
                 ).to_dict(),
                 measurement_status="NOT_MEASURED",
                 measurement_issues=[str(failure_class)],
+                canonical_state=canonical_state,
             )
         finally:
             await target.close()
@@ -886,6 +1060,7 @@ class EvaluationRunner:
         judge_mode: str,
         only_scenario: str | None = None,
         selection_seed: int | None = None,
+        approval_mode: ApprovalMode = "preserve_gate",
     ) -> tuple[list[CaseResult], dict[str, Any]]:
         configured = [TOPIC_BY_ID[x] for x in topic_ids] if topic_ids else list(TOPICS)
         selected = topics_for_mode(mode, configured)
@@ -924,6 +1099,8 @@ class EvaluationRunner:
                 raise ValueError(
                     "Scenario ID not found; use the same scenario seed and topic selection"
                 )
+        for scenario in scenarios:
+            scenario.approval_mode = approval_mode
         work = []
         for scenario in scenarios:
             topic = TOPIC_BY_ID[scenario.topic_id]

@@ -20,12 +20,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ai_market_monitor.schemas.setup_authorization import (
     AuthorizedPatchOperation,
@@ -33,8 +32,9 @@ from ai_market_monitor.schemas.setup_authorization import (
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
-    ConditionNodeV2,
     FormulaKind,
+    RequirementAssessmentV2,
+    RequirementStateV2,
 )
 from ai_market_monitor.schemas.strict_mode import StrictModel as _StrictModel
 
@@ -139,14 +139,6 @@ def _bind_condition_tree_provenance(
         else source_fragment
     )
     node["source_fragment"] = grounded_fragment
-    if node.get("node_type") == "condition":
-        node["required"] = bool(
-            not re.search(
-                r"\boptional\b|\bnot required\b|\bprefer\b",
-                grounded_fragment,
-                re.IGNORECASE,
-            )
-        )
     node["formula"] = _canonical_formula_identifier(node.get("formula"))
     node["operands"] = _canonicalize_core_operand_metadata(node)
     children = node.get("children")
@@ -515,35 +507,8 @@ class SetupAgentTurnPlan(_StrictModel):
         }
         migrated = dict(data)
         operations: list[object] = []
-        unresolved_condition_segments = {
-            item.get("authorizing_segment_id")
-            for item in raw_operations
-            if isinstance(item, dict)
-            and item.get("kind") == "add_unresolved"
-            and isinstance(item.get("unresolved"), dict)
-            and item["unresolved"].get("target_type")
-            in {
-                "condition_field",
-                "condition_creation",
-                "capability_parameter",
-                "reference_definition",
-            }
-        }
         for item in raw_operations:
-            if (
-                isinstance(item, dict)
-                and item.get("kind") == "restore_snapshot"
-                and (
-                    not item.get("target_snapshot_id")
-                    or item.get("target_executable_version") is None
-                )
-            ):
-                # Restore is a privileged, server-verified operation. An incomplete
-                # model proposal has no target and therefore cannot be grounded or
-                # executed. Discard only that proposal; never invent a snapshot or
-                # let it invalidate independent operations in the same turn.
-                continue
-            if not isinstance(item, dict) or not isinstance(item.get("condition"), dict):
+            if not isinstance(item, dict):
                 operations.append(item)
                 continue
             exact_text = segment_text.get(item.get("authorizing_segment_id"))
@@ -551,43 +516,28 @@ class SetupAgentTurnPlan(_StrictModel):
                 operations.append(item)
                 continue
             operation = dict(item)
-            bound_condition = _bind_condition_tree_provenance(
-                item["condition"],
-                source_turn_id=source_turn_id,
-                source_fragment=exact_text,
-                node_id_seed=(
-                    f"{source_turn_id}:{item.get('operation_id')}"
-                    if item.get("kind") == "add_condition"
-                    else None
-                ),
-            )
-            try:
-                ConditionNodeV2.model_validate(bound_condition)
-            except ValidationError:
-                # A plan can be valid JSON Schema yet propose an internally
-                # incomplete condition (for example, a condition with no operator).
-                # Preserve the exact request as a blocking unsupported mechanic. Do
-                # not guess the missing field, discard the rest of the turn, or pick
-                # a nearby capability.
-                raw_formula = item["condition"].get("formula")
-                if (
-                    raw_formula is not None
-                    and raw_formula != "capability"
-                    and item.get("authorizing_segment_id")
-                    in unresolved_condition_segments
-                ):
-                    # The same segment already carries a typed blocker for this
-                    # incomplete core rule. Keep that one authority; do not also
-                    # label the user's supported primitive as unsupported.
-                    continue
-                operation = {
-                    "operation_id": item.get("operation_id"),
-                    "authorizing_segment_id": item.get("authorizing_segment_id"),
-                    "kind": "add_unsupported",
-                    "missing_contract": exact_text[:500],
-                }
-            else:
-                operation["condition"] = bound_condition
+            if isinstance(item.get("condition"), dict):
+                operation["condition"] = _bind_condition_tree_provenance(
+                    item["condition"],
+                    source_turn_id=source_turn_id,
+                    source_fragment=exact_text,
+                    node_id_seed=(
+                        f"{source_turn_id}:{item.get('operation_id')}"
+                        if item.get("kind") == "add_condition"
+                        else None
+                    ),
+                )
+            if isinstance(item.get("unresolved"), dict):
+                unresolved = dict(item["unresolved"])
+                semantic_seed = (
+                    f"{source_turn_id}:{item.get('authorizing_segment_id')}:"
+                    f"{unresolved.get('target_type')}:"
+                    f"{unresolved.get('target_condition_id') or ''}"
+                )
+                unresolved["semantic_object_id"] = (
+                    f"object_{hashlib.sha256(semantic_seed.encode()).hexdigest()[:24]}"
+                )
+                operation["unresolved"] = unresolved
             operations.append(operation)
         migrated["operations"] = operations
         return migrated
@@ -787,7 +737,12 @@ class SetupTurnExecutionResult(BaseModel):
     ignored_non_actionable_segments: list[IgnoredSegment] = Field(
         default_factory=list, max_length=24
     )
-    answered_questions: list[str] = Field(default_factory=list, max_length=8)
+    answered_questions: list[str] = Field(default_factory=list, max_length=100)
+    requirement_states: list[RequirementStateV2] = Field(default_factory=list, max_length=2000)
+    requirement_assessments: list[RequirementAssessmentV2] = Field(
+        default_factory=list,
+        max_length=100,
+    )
     unresolved_fields: list[dict[str, str]] = Field(default_factory=list, max_length=100)
     unsupported_requirements: list[dict[str, str]] = Field(default_factory=list, max_length=100)
     semantic_violations: list[str] = Field(default_factory=list, max_length=100)

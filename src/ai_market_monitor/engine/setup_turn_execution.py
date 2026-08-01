@@ -48,6 +48,11 @@ from ai_market_monitor.engine.operation_target import (
     targets_by_operation_id,
     unsupported_key_for,
 )
+from ai_market_monitor.engine.requirement_state import (
+    blocking_requirement_states,
+    reconcile_requirement_state,
+    unresolved_target_path,
+)
 from ai_market_monitor.engine.semantic_grounding import (
     grounds_boolean_shape,
     grounds_direction,
@@ -58,7 +63,8 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_strategy_bias,
     grounds_symbol,
     grounds_text_value,
-    grounds_timeframe,
+    grounds_timeframe_role,
+    grounds_unit,
 )
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
@@ -238,6 +244,14 @@ class SetupTurnOutcome:
     screening: ScreeningExecutionResult | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class SetupTurnDryValidation:
+    """A fully authorized local transition; no provider call or persistence occurred."""
+
+    plan: SetupAgentTurnPlan
+    draft: StrategyDraftV2
+
+
 _SIGNED_MAGNITUDE_COMPARATOR: dict[Comparator, Comparator] = {
     Comparator.LESS_THAN: Comparator.GREATER_THAN,
     Comparator.LESS_THAN_OR_EQUAL: Comparator.GREATER_THAN_OR_EQUAL,
@@ -308,15 +322,7 @@ def _canonicalize_grounded_directional_magnitudes(
 async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     """Validate one turn plan, apply what survives, run every gate, then report."""
 
-    plan = _locate_spans(request.plan, request.message)
-    plan = _canonicalize_grounded_directional_magnitudes(plan)
-    segments = {item.segment_id: item for item in plan.segments}
-    _verify_actionable_spans(plan, request.message)
-    _verify_capability_keys(plan, request.allowed_capability_keys, request.draft)
-    plan = _verify_condition_references(plan, request.draft)
-    plan = _normalize_future_unresolved_targets(plan, request.draft)
-    plan = _append_live_clarification_resolution(plan, request)
-    _verify_authorization(plan, segments, request)
+    plan, segments = _validated_plan(request)
 
     before = request.draft
     draft = before
@@ -365,21 +371,35 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             )
         )
 
+    requirement_reconciliation = reconcile_requirement_state(
+        before=before,
+        working=draft,
+        plan=plan,
+        segments=segments,
+        operation_results=operation_results,
+        active_clarification=request.conversation.active_question,
+    )
+    draft = requirement_reconciliation.draft
     finalized = finalize_strategy_turn(before, draft)
     draft = finalized.draft
-    _verify_resolved_targets(
-        plan,
-        before,
-        draft,
-        server_owned_option=request.server_owned_option,
-    )
     strategy_mutated = draft.executable_hash != before.executable_hash
     workflow_mutated = draft.workflow_state_hash != before.workflow_state_hash
     changes = diff_drafts(before, draft)
     material = strategy_mutated
     history_snapshot = before.model_dump(mode="json") if strategy_mutated else None
 
-    answered = _resolved_questions(plan, before, draft, request.conversation)
+    answered = list(requirement_reconciliation.answered_question_ids)
+    if (
+        request.conversation.active_question is not None
+        and not request.conversation.active_question.mutating
+    ):
+        answered.extend(
+            answer.question_id
+            for answer in plan.clarification_answers
+            if answer.resolves_question
+            and answer.question_id == request.conversation.active_question.question_id
+        )
+    answered = list(dict.fromkeys(answered))
     violations = validate_draft_semantics(draft)
     safe_errors: list[str] = []
 
@@ -574,6 +594,8 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         ],
         ignored_non_actionable_segments=_ignored_segments(plan),
         answered_questions=answered,
+        requirement_states=list(draft.requirement_states),
+        requirement_assessments=list(requirement_reconciliation.assessments),
         unresolved_fields=[
             {"key": item.key, "question": item.question, "source_fragment": item.source_fragment}
             for item in draft.unresolved_fields
@@ -617,6 +639,111 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         material_change=material and reconciliation.executable_changed,
         screening=screening_result,
     )
+
+
+def validate_setup_turn_plan(request: SetupTurnRequest) -> SetupTurnDryValidation:
+    """Dry-run the exact canonical patch and requirement reconciliation.
+
+    The returned draft is disposable.  This function never invokes screening,
+    provider preflight, persistence, version finalization, approval invalidation, or a
+    response composer.  The production executor repeats the same pure patch only after
+    this validation succeeds.
+    """
+
+    plan, segments = _validated_plan(request)
+    before = request.draft
+    working = before
+    operation_results: list[OperationExecutionResult] = []
+    for operation in plan.operations:
+        operation_before = working
+        patch = _build_patch(
+            plan.model_copy(update={"operations": [operation], "unsupported_segments": []}),
+            segments,
+            request,
+        )
+        if patch is None:
+            operation_results.append(
+                _operation_result(
+                    operation,
+                    before=operation_before,
+                    after=operation_before,
+                    changes=[],
+                    applied=False,
+                )
+            )
+            continue
+        try:
+            patch_outcome = apply_strategy_patch(
+                operation_before,
+                patch,
+                history=request.history,
+                finalize_versions=False,
+            )
+        except (DraftPatchError, ValidationError) as exc:
+            raise SetupTurnRejected(
+                "PATCH_REJECTED",
+                "That proposed change is not valid for the current canonical draft.",
+                details=(f"{operation.operation_id}:{str(exc)[:450]}",),
+            ) from exc
+        working = patch_outcome.draft
+        changes = diff_drafts(operation_before, working)
+        operation_results.append(
+            _operation_result(
+                operation,
+                before=operation_before,
+                after=working,
+                changes=changes,
+                applied=bool(changes),
+            )
+        )
+    reconciled = reconcile_requirement_state(
+        before=before,
+        working=working,
+        plan=plan,
+        segments=segments,
+        operation_results=operation_results,
+        active_clarification=request.conversation.active_question,
+    )
+    semantic_errors = validate_draft_semantics(reconciled.draft)
+    capability_errors, _ = _capability_gate(
+        plan,
+        segments,
+        before,
+        reconciled.draft,
+        request,
+    )
+    hard_errors = [*semantic_errors, *capability_errors]
+    if hard_errors:
+        raise SetupTurnRejected(
+            "SEMANTIC_VALIDATION_FAILED",
+            "The proposed plan does not preserve the requested executable semantics.",
+            details=tuple(hard_errors[:12]),
+        )
+    if reconciled.draft.condition_ast is not None and not reconciled.draft.authoring_blocking:
+        try:
+            compile_strategy_draft_v2(reconciled.draft)
+        except StrategyV2CompileError as exc:
+            raise SetupTurnRejected(
+                "SEMANTIC_VALIDATION_FAILED",
+                "The proposed plan cannot compile to an equivalent strategy.",
+                details=(str(exc)[:450],),
+            ) from exc
+    return SetupTurnDryValidation(plan=plan, draft=reconciled.draft)
+
+
+def _validated_plan(
+    request: SetupTurnRequest,
+) -> tuple[SetupAgentTurnPlan, dict[str, TurnSegment]]:
+    plan = _locate_spans(request.plan, request.message)
+    plan = _canonicalize_grounded_directional_magnitudes(plan)
+    segments = {item.segment_id: item for item in plan.segments}
+    _verify_actionable_spans(plan, request.message)
+    _verify_capability_keys(plan, request.allowed_capability_keys, request.draft)
+    plan = _verify_condition_references(plan, request.draft)
+    plan = _normalize_future_unresolved_targets(plan, request.draft)
+    plan = _append_live_clarification_resolution(plan, request)
+    _verify_authorization(plan, segments, request)
+    return plan, segments
 
 
 # --------------------------------------------------------------------------------
@@ -1540,12 +1667,30 @@ def _condition_grounding(
     ):
         errors.append(f"{node.node_id}:threshold")
     # A timeframe is often stated once for the whole instruction — `on the 15m when X
-    # and Y` — so it may be grounded anywhere in the authorising segment.
-    if node.trigger_timeframe and not grounds_timeframe(text, node.trigger_timeframe):
+    # and Y` — so it may be grounded anywhere in the authorising segment. The role
+    # itself must remain explicit; mentioning both 15m and 4h cannot authorize a swap.
+    if node.trigger_timeframe and not (
+        grounds_timeframe_role(fragment, node.trigger_timeframe, "trigger")
+        or grounds_timeframe_role(text, node.trigger_timeframe, "trigger")
+    ):
         errors.append(f"{node.node_id}:trigger_timeframe")
-    for timeframe in (*node.context_timeframes, *node.confirmation_timeframes):
-        if not grounds_timeframe(text, timeframe):
-            errors.append(f"{node.node_id}:supporting_timeframe:{timeframe}")
+    for timeframe in node.context_timeframes:
+        if not grounds_timeframe_role(text, timeframe, "context"):
+            errors.append(f"{node.node_id}:context_timeframe:{timeframe}")
+    for timeframe in node.confirmation_timeframes:
+        if not grounds_timeframe_role(text, timeframe, "confirmation"):
+            errors.append(f"{node.node_id}:confirmation_timeframe:{timeframe}")
+    if node.reference_timeframe and not (
+        grounds_timeframe_role(text, node.reference_timeframe, "reference")
+        or (
+            node.reference_timeframe == node.trigger_timeframe
+            and (
+                grounds_timeframe_role(fragment, node.reference_timeframe, "trigger")
+                or grounds_timeframe_role(text, node.reference_timeframe, "trigger")
+            )
+        )
+    ):
+        errors.append(f"{node.node_id}:reference_timeframe")
     if not grounds_direction(fragment, node.movement_direction):
         errors.append(f"{node.node_id}:movement_direction")
     if not grounds_strategy_bias(fragment, node.strategy_bias):
@@ -1647,13 +1792,13 @@ def _update_grounding(
                     errors.append(f"{replacement.node_id}:threshold:clear")
             elif not grounds_number(text, now, unit=_threshold_unit(replacement)):
                 errors.append(f"{replacement.node_id}:threshold")
-        elif name == "unit" and not _grounds_unit(text, now):
+        elif name == "unit" and not grounds_unit(text, now):
             errors.append(f"{replacement.node_id}:unit")
         elif name == "trigger_timeframe":
             if now is None:
                 if not action_is_grounded(text, "clear"):
                     errors.append(f"{replacement.node_id}:trigger_timeframe:clear")
-            elif not grounds_timeframe(text, now):
+            elif not grounds_timeframe_role(text, now, "trigger"):
                 errors.append(f"{replacement.node_id}:trigger_timeframe")
         elif name == "operator" and now is not None:
             if not grounds_operator(text, now):
@@ -1674,8 +1819,11 @@ def _update_grounding(
                 errors.append(f"{replacement.node_id}:strategy_bias")
         elif name in {"context_timeframes", "confirmation_timeframes"}:
             old_values = set(getattr(existing, name))
+            role: Literal["context", "confirmation"] = (
+                "context" if name == "context_timeframes" else "confirmation"
+            )
             for timeframe in set(now) - old_values:
-                if not grounds_timeframe(text, timeframe):
+                if not grounds_timeframe_role(text, timeframe, role):
                     errors.append(f"{replacement.node_id}:{name}:{timeframe}")
             if old_values - set(now) and not action_is_grounded(text, "clear"):
                 errors.append(f"{replacement.node_id}:{name}:removal")
@@ -1683,7 +1831,7 @@ def _update_grounding(
             if now is None:
                 if not action_is_grounded(text, "clear"):
                     errors.append(f"{replacement.node_id}:reference_timeframe:clear")
-            elif not grounds_timeframe(text, now):
+            elif not grounds_timeframe_role(text, now, "reference"):
                 errors.append(f"{replacement.node_id}:reference_timeframe")
         elif name == "lookback":
             if now is None:
@@ -1755,20 +1903,6 @@ def _update_grounding(
         else:
             errors.append(f"{replacement.node_id}:{name}:no_grounding_rule")
     return errors
-
-
-def _grounds_unit(text: str, unit: str) -> bool:
-    lowered = text.casefold()
-    patterns = {
-        "percent": r"%|\bpercent(?:age)?\b",
-        "price": r"\bprice\b|\bopen\b|\bclose\b|\bhigh\b|\blow\b|\blevel\b",
-        "ratio": r"\bratio\b|\bmultiple\b|\bx\b",
-        "count": r"\bcount\b|\bcandles?\b|\bperiods?\b|\blookback\b",
-        "index": r"\bindex\b|\brsi\b",
-        "boolean": r"\btrue\b|\bfalse\b|\bsweep\b|\breclaim\b|\bmatch\b",
-        "none": r"\bno threshold\b|\bboolean\b",
-    }
-    return bool(re.search(patterns[unit], lowered))
 
 
 def _operand_grounding(node: ConditionNodeV2, text: str) -> list[str]:
@@ -2239,162 +2373,6 @@ def _assert_lifecycle(
         )
 
 
-# --------------------------------------------------------------------------------
-# Clarifications: an answer only closes a question if the target really resolved.
-# --------------------------------------------------------------------------------
-
-
-def _resolved_questions(
-    plan: SetupAgentTurnPlan,
-    before: StrategyDraftV2,
-    after: StrategyDraftV2,
-    conversation: SetupConversationContext,
-) -> list[str]:
-    """Which open questions this turn actually closed.
-
-    A mutating question closes only when its declared target changed in the resulting
-    canonical draft. Trusting ``resolves_question`` alone let a question disappear while
-    the draft stayed blocked for exactly the reason the question existed.
-    """
-    contract = conversation.active_question
-    closed: list[str] = []
-    for answer in plan.clarification_answers:
-        if not answer.resolves_question:
-            continue
-        if contract is None or contract.question_id != answer.question_id:
-            # No live contract to satisfy. Only a non-mutating acknowledgement can close
-            # something the server is not tracking, and that changes nothing anyway.
-            if answer.question_id in {item.key for item in before.unresolved_fields} and (
-                answer.question_id not in {item.key for item in after.unresolved_fields}
-            ):
-                closed.append(answer.question_id)
-            continue
-        if not contract.mutating:
-            closed.append(answer.question_id)
-            continue
-        if _target_resolved(contract, before, after):
-            closed.append(answer.question_id)
-    return list(dict.fromkeys(closed))
-
-
-def _verify_resolved_targets(
-    plan: SetupAgentTurnPlan,
-    before: StrategyDraftV2,
-    after: StrategyDraftV2,
-    *,
-    server_owned_option: bool = False,
-) -> None:
-    """A resolve operation may remove a blocker only after its typed target changed."""
-
-    pending = {item.key: item for item in before.unresolved_fields}
-    failures: list[str] = []
-    for operation in plan.operations:
-        if operation.kind != "resolve_unresolved_key" or not operation.target_key:
-            continue
-        item = pending.get(operation.target_key)
-        if item is None:
-            continue
-        if (
-            server_owned_option
-            and operation.authorizing_segment_id == "server_option"
-            and item.key
-            not in {pending_item.key for pending_item in after.unresolved_fields}
-        ):
-            continue
-        contract = ClarificationContract(
-            question_id=item.key,
-            question=item.question,
-            reason=item.reason,
-            target_type=item.target_type,
-            target_field=item.target_field,
-            target_condition_id=item.target_condition_id,
-            expected_answer_schema=json.dumps(
-                item.expected_answer_schema,
-                sort_keys=True,
-                separators=(",", ":"),
-            )[:200],
-            mutating=True,
-            allowed_options=item.allowed_options[:6],
-        )
-        if not _target_resolved(contract, before, after):
-            failures.append(
-                f"{operation.operation_id}:resolve_unresolved_key:target_unchanged"
-            )
-    if failures:
-        raise SetupTurnRejected(
-            "UNRESOLVED_TARGET_UNCHANGED",
-            "That answer did not fill the field its clarification asked for.",
-            details=tuple(failures),
-        )
-
-
-def _target_resolved(
-    contract: ClarificationContract,
-    before: StrategyDraftV2,
-    after: StrategyDraftV2,
-) -> bool:
-    """Did the thing this question was about actually change?"""
-
-    if contract.target_type in {"unsupported_requirement", "unsupported_resolution"}:
-        keys = {item.key for item in after.unsupported_requirements}
-        return contract.question_id not in keys
-    if contract.target_type == "universe":
-        return (
-            after.universe.included_symbols != before.universe.included_symbols
-            or after.universe.excluded_symbols != before.universe.excluded_symbols
-            or after.sharia_policy != before.sharia_policy
-        )
-    if contract.target_type in {"draft_field", "market_scope"}:
-        field_name = contract.target_field or ""
-        for holder_before, holder_after in (
-            (before, after),
-            (before.market_scope, after.market_scope),
-        ):
-            if hasattr(holder_after, field_name):
-                return getattr(holder_after, field_name) != getattr(holder_before, field_name)
-        return False
-    if contract.target_type in {"condition_field", "reference_definition"}:
-        node_id = contract.target_condition_id or ""
-        old = _existing_conditions(before).get(node_id)
-        new = _existing_conditions(after).get(node_id)
-        if new is None:
-            # The rule the question was about is gone, which resolves it either way.
-            return old is not None
-        if old is None:
-            return True
-        field_name = (
-            "reference_definition"
-            if contract.target_type == "reference_definition"
-            else contract.target_field or ""
-        )
-        return getattr(new, field_name, None) != getattr(
-            old, field_name, None
-        )
-    if contract.target_type == "capability_parameter":
-        node_id = contract.target_condition_id or ""
-        old = _existing_conditions(before).get(node_id)
-        new = _existing_conditions(after).get(node_id)
-        if new is None:
-            return old is not None
-        key = contract.target_field or ""
-        return new.capability_parameters.get(key) != (
-            old.capability_parameters.get(key) if old is not None else None
-        )
-    if contract.target_type == "condition_creation":
-        return len(_existing_conditions(after)) > len(_existing_conditions(before))
-    if contract.target_type == "boolean_structure":
-        return (
-            _boolean_shape(after.condition_ast)
-            if after.condition_ast is not None
-            else ""
-        ) != (
-            _boolean_shape(before.condition_ast)
-            if before.condition_ast is not None
-            else ""
-        )
-    return False
-
-
 def _allowed_clarifications(
     draft: StrategyDraftV2,
     conversation: SetupConversationContext,
@@ -2409,8 +2387,14 @@ def _allowed_clarifications(
     if conversation.clarifications_asked >= MAX_CLARIFICATIONS_PER_DRAFT:
         return []
     allowed: list[ClarificationContract] = []
+    blocking_states = blocking_requirement_states(draft)
+    blocking_paths = {item.target_path for item in blocking_states}
     for item in draft.unresolved_fields:
-        if not item.blocking or item.key in already:
+        if (
+            not item.blocking
+            or item.key in already
+            or unresolved_target_path(item) not in blocking_paths
+        ):
             continue
         allowed.append(
             ClarificationContract(
@@ -2430,7 +2414,11 @@ def _allowed_clarifications(
             )
         )
     for blocker in draft.unsupported_requirements:
-        if not blocker.blocking or blocker.key in already:
+        if (
+            not blocker.blocking
+            or blocker.key in already
+            or f"unsupported.{blocker.key}" not in blocking_paths
+        ):
             continue
         allowed.append(
             ClarificationContract(
@@ -2557,7 +2545,9 @@ def draft_read_model(draft: StrategyDraftV2, changes: list[DraftChange]) -> dict
             "trigger_timeframe": node.trigger_timeframe,
             "context_timeframes": list(node.context_timeframes),
             "confirmation_timeframes": list(node.confirmation_timeframes),
+            "reference_timeframe": node.reference_timeframe,
             "reference_definition": node.reference_definition,
+            "lookback": node.lookback,
             "capability_key": node.capability_key,
             "your_words": node.source_fragment,
         }
@@ -2579,6 +2569,13 @@ def draft_read_model(draft: StrategyDraftV2, changes: list[DraftChange]) -> dict
         "cannot_express": [
             item.missing_contract for item in draft.unsupported_requirements if item.blocking
         ],
+        "requirement_states": [
+            item.model_dump(mode="json") for item in draft.requirement_states
+        ],
+        "semantic_role_assignments": [
+            item.model_dump(mode="json") for item in draft.semantic_role_assignments
+        ],
+        "approval_intent_received": draft.approval_intent_received,
         "approved": draft.approval.approved,
     }
 
@@ -2688,6 +2685,9 @@ def _normalize_future_unresolved_targets(
     """
 
     existing = set(_existing_conditions(draft))
+    existing_unresolved = {
+        item.unresolved_id: item for item in draft.unresolved_fields
+    }
     condition_targets = {
         "condition_field",
         "capability_parameter",
@@ -2696,6 +2696,24 @@ def _normalize_future_unresolved_targets(
     operations: list[AuthorizedPatchOperation] = []
     for operation in plan.operations:
         item = operation.unresolved
+        if item is not None:
+            prior = existing_unresolved.get(operation.target_key or "")
+            semantic_object_id = (
+                prior.semantic_object_id
+                if prior is not None and prior.semantic_object_id
+                else item.semantic_object_id
+                or "object_"
+                + hashlib.sha256(
+                    (
+                        f"{plan.source_turn_id}:{operation.authorizing_segment_id}:"
+                        f"{item.target_type}:{item.target_condition_id or ''}"
+                    ).encode()
+                ).hexdigest()[:24]
+            )
+            item = item.model_copy(
+                update={"semantic_object_id": semantic_object_id}
+            )
+            operation = operation.model_copy(update={"unresolved": item})
         if (
             operation.kind == "add_unresolved"
             and item is not None
@@ -2705,6 +2723,14 @@ def _normalize_future_unresolved_targets(
             item = item.model_copy(
                 update={
                     "target_type": "condition_creation",
+                    "missing_slots": list(
+                        dict.fromkeys(
+                            [
+                                *item.missing_slots,
+                                *([item.target_field] if item.target_field else []),
+                            ]
+                        )
+                    ),
                     "target_field": None,
                     "target_condition_id": None,
                 }
@@ -2722,9 +2748,9 @@ def _append_live_clarification_resolution(
 
     The planner may create the complete rule and mark the active typed clarification
     answered while omitting a redundant ``resolve_unresolved_key`` operation. The
-    server adds that workflow operation with the same authorizing segment. The later
-    ``_verify_resolved_targets`` check still refuses removal unless the declared
-    target actually changed in the canonical draft.
+    server adds that workflow operation with the same authorizing segment. Final
+    requirement reconciliation still restores the blocker unless the canonical value
+    is satisfied and grounded by this completed turn.
     """
 
     active = request.conversation.active_question

@@ -19,6 +19,7 @@ from ai_market_monitor.schemas.strategy import (
     OperandKind,
     StrategyDefinition,
 )
+from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.services.setup_chat_lifecycle import (
     is_terminal,
     setup_lifecycle_state,
@@ -39,6 +40,7 @@ def build_setup_chat_evaluation_contract(
     strategy_version_number: int | None = None,
     immutable_version_hash: str | None = None,
     version_status: str | None = None,
+    draft_v2: StrategyDraftV2 | None = None,
 ) -> SetupChatEvaluationContract:
     """Project a validated strategy into a stable evaluator and Canvas contract."""
 
@@ -127,6 +129,10 @@ def build_setup_chat_evaluation_contract(
             nodes=canvas_nodes,
             groups=group_nodes,
             edges=canvas_edges,
+        ),
+        requirement_states=(list(draft_v2.requirement_states) if draft_v2 else []),
+        semantic_role_assignments=(
+            list(draft_v2.semantic_role_assignments) if draft_v2 else []
         ),
     )
 
@@ -224,10 +230,20 @@ def _condition_contract(
         capability_key=condition.capability_key,
         capability_version=condition.capability_version,
         timeframe=condition.timeframe,
+        context_timeframes=list(condition.context_timeframes),
+        confirmation_timeframes=list(condition.confirmation_timeframes),
+        reference_timeframe=condition.reference_timeframe,
+        movement_direction=(
+            str(condition.resolved_parameters["movement_direction"])
+            if condition.resolved_parameters.get("movement_direction") is not None
+            else None
+        ),
         comparator=condition.comparator.value,
         threshold=_threshold(condition),
         required=condition.required,
         source_fragment=condition.source_fragment,
+        source_turn_id=condition.source_turn_id,
+        ast_path=list(condition.ast_path),
         confidence=condition.confidence,
         provider_required=condition.provider_required,
         availability=condition.availability,

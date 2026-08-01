@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from rich.console import Console
@@ -17,6 +17,7 @@ from .config import (
     discard_stale_process_openai_key,
 )
 from .doctor import checks, fault_control_availability
+from .models import ApprovalMode
 from .profiles import (
     cases_per_topic,
     max_turns_for_topic,
@@ -153,7 +154,18 @@ def run(
     budget_usd: Annotated[float, typer.Option()] = 0,
     scenario: Annotated[str, typer.Option(help="Re-run one deterministic scenario ID")] = "",
     run_id: Annotated[str, typer.Option()] = "",
+    approval_mode: Annotated[
+        str,
+        typer.Option(
+            help="preserve_gate or execute_authenticated_approval"
+        ),
+    ] = "preserve_gate",
 ) -> None:
+    if approval_mode not in {"preserve_gate", "execute_authenticated_approval"}:
+        raise typer.BadParameter(
+            "approval_mode must be preserve_gate or execute_authenticated_approval",
+            param_hint="--approval-mode",
+        )
     settings = _settings()
     _require_fault_control_target(settings, mode=mode, topics=topics)
     actual_run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -175,6 +187,7 @@ def run(
                 judge_mode=judge_mode,
                 only_scenario=scenario or None,
                 selection_seed=selection_seed or None,
+                approval_mode=cast(ApprovalMode, approval_mode),
             )
             return summary, runner.run_dir
         finally:

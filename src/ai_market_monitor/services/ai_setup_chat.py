@@ -833,7 +833,7 @@ class AISetupChatService:
                     approved_v2.approval.approved
                     and expected_executable_version == approved_v2.executable_version
                     and expected_executable_hash == approved_v2.executable_hash
-                    and expected_schema_hash == context.get("approved_schema_hash")
+                    and expected_schema_hash == approved_v2.approval.schema_hash
                     and chat.approved_strategy_id is not None
                     and chat.approved_strategy_version_id is not None
                 ):
@@ -885,6 +885,7 @@ class AISetupChatService:
         screening_evidence: ReviewedScreeningEvidence | None = None
         snapshot_hash: str
         if context.get("strategy_state_authority") == "v2" and isinstance(v2_payload, dict):
+            from ai_market_monitor.engine.requirement_state import blocking_requirement_states
             from ai_market_monitor.engine.strategy_draft_v2 import (
                 conversation_snapshot_hash,
                 validate_draft_semantics,
@@ -895,7 +896,11 @@ class AISetupChatService:
             )
 
             draft_v2 = StrategyDraftV2.model_validate(v2_payload)
-            if draft_v2.authoring_blocking or validate_draft_semantics(draft_v2):
+            if (
+                draft_v2.authoring_blocking
+                or blocking_requirement_states(draft_v2)
+                or validate_draft_semantics(draft_v2)
+            ):
                 raise SetupChatError(
                     "setup_not_ready",
                     "Resolve every blocking V2 draft item before approval.",
@@ -943,6 +948,7 @@ class AISetupChatService:
                             user_id=chat.user_id,
                             executable_version=draft_v2.executable_version,
                             executable_hash=draft_v2.executable_hash,
+                            schema_hash=expected_schema_hash,
                             conversation_snapshot_hash=snapshot_hash,
                             # Which markets, under which policy, verified how. Bound so a
                             # later question about what was approved has one answer.
@@ -1148,6 +1154,14 @@ class AISetupChatService:
             "models": models,
             "model_call_count": len(correlated),
             "operation_counts": dict(sorted(operation_counts.items())),
+            "planner_repair_attempt_count": sum(
+                int((event.raw_usage or {}).get("_setup_repair_attempts") or 0)
+                for event in correlated
+            ),
+            "planner_repair_success_count": sum(
+                int((event.raw_usage or {}).get("_setup_repair_successes") or 0)
+                for event in correlated
+            ),
             "retry_count": sum(
                 int((event.raw_usage or {}).get("_traceedge_retry_count") or 0)
                 for event in correlated

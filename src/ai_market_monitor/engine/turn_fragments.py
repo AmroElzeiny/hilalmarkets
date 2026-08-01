@@ -1131,6 +1131,98 @@ def extract_timeframes(text: str) -> tuple[str, ...]:
     return _unique(canonical for _start, _end, canonical in _timeframe_spans(text))
 
 
+SemanticTimeframeRole = Literal["trigger", "context", "confirmation", "reference"]
+
+_SEMANTIC_TIMEFRAME_ROLE_TERMS: dict[SemanticTimeframeRole, tuple[str, ...]] = {
+    "trigger": (
+        "trigger", "entry", "signal", "fire", "alert", "setup candle",
+        "إشارة", "تفعيل", "trigger", "eshara",
+    ),
+    "context": (
+        "context", "backdrop", "regime", "higher timeframe", "htf", "macro",
+        "سياق", "خلفية", "seya2", "sya2",
+    ),
+    "confirmation": (
+        "confirmation", "confirm", "confirmed by", "independently confirm",
+        "تأكيد", "يأكد", "ta2keed", "confirmation",
+    ),
+    "reference": (
+        "reference", "baseline", "measured from", "compare with", "relative to",
+        "مرجع", "قياس", "marga3", "marja3",
+    ),
+}
+
+
+def timeframe_role_is_explicit(
+    text: str,
+    timeframe: str,
+    role: SemanticTimeframeRole,
+) -> bool:
+    """Verify one AI-proposed role without inferring it from order or relative size.
+
+    A role marker must grammatically bind to the canonical timeframe in the same
+    clause.  The sole trigger exception is an otherwise unambiguous one-timeframe
+    standard rule (``on 15m``); no context/confirmation/reference role is invented.
+    """
+
+    collapsed = _collapse(text)
+    mentions = _timeframe_spans(collapsed)
+    wanted = [(start, end) for start, end, value in mentions if value == timeframe]
+    if not wanted:
+        return False
+    role_terms = _SEMANTIC_TIMEFRAME_ROLE_TERMS[role]
+    all_role_terms = tuple(
+        term for terms in _SEMANTIC_TIMEFRAME_ROLE_TERMS.values() for term in terms
+    )
+    for clause in _split_fragments(collapsed):
+        clause_mentions = _timeframe_spans(clause)
+        if timeframe not in {value for _start, _end, value in clause_mentions}:
+            continue
+        lowered = clause.casefold()
+        term_pattern = "|".join(
+            sorted((re.escape(term) for term in role_terms), key=len, reverse=True)
+        )
+        timeframe_patterns = [
+            re.escape(clause[start:end])
+            for start, end, value in clause_mentions
+            if value == timeframe
+        ]
+        for timeframe_pattern in timeframe_patterns:
+            if re.search(
+                rf"(?:{term_pattern})(?:\s+timeframe)?\s*(?::|=|is|on|at|of|as)?\s*"
+                rf"(?:the\s+)?{timeframe_pattern}(?!\w)",
+                lowered,
+            ) or re.search(
+                rf"(?<!\w){timeframe_pattern}\s*(?:timeframe\s*)?"
+                rf"(?:is|as|for|used\s+as)?\s*(?:the\s+)?(?:{term_pattern})",
+                lowered,
+            ):
+                return True
+    if role != "trigger" or len(mentions) != 1:
+        return False
+    lowered = collapsed.casefold()
+    if any(
+        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", lowered)
+        for term in all_role_terms
+        if term not in _SEMANTIC_TIMEFRAME_ROLE_TERMS["trigger"]
+    ):
+        return False
+    timeframe_token = (
+        r"(?:\d+\s*(?:m|h|d|w)|hourly|daily|weekly|four[- ]hour)"
+    )
+    formula_token = (
+        r"(?:open[- ]to[- ]close|close[- ]to[- ]close|"
+        r"high[- ]to[- ]low|low[- ]to[- ]high|move)"
+    )
+    trigger_pattern = (
+        rf"\b(?:on|at|using|use)\s+(?:the\s+)?{timeframe_token}\b"
+        rf"|\bwhen\s+(?:the\s+)?{timeframe_token}\b"
+        rf"|\b{timeframe_token}\s+candles?\b"
+        rf"|\b{timeframe_token}\s+{formula_token}\b"
+    )
+    return bool(re.search(trigger_pattern, lowered))
+
+
 #: Words that mark the timeframe a rule actually fires on.
 _TRIGGER_ROLE_TERMS = (
     "trigger",

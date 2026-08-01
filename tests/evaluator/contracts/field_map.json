@@ -8,9 +8,17 @@
   "canvas_nodes": "canvas.nodes",
   "condition_groups": "condition_groups",
   "confidence": "confidence",
+  "confirmation_timeframe": {
+    "fallback_path": "timeframes",
+    "match": "semantic_role",
+    "path": "semantic_role_assignments",
+    "role": "confirmation"
+  },
   "context_timeframe": {
-    "match": "contains",
-    "path": "timeframes"
+    "fallback_path": "timeframes",
+    "match": "semantic_role",
+    "path": "semantic_role_assignments",
+    "role": "context"
   },
   "direction": {
     "fallback_path": "direction",
@@ -32,6 +40,12 @@
   },
   "operators": "operators",
   "provider_required_capabilities": "provider_required_capabilities",
+  "reference_timeframe": {
+    "fallback_path": "timeframes",
+    "match": "semantic_role",
+    "path": "semantic_role_assignments",
+    "role": "reference"
+  },
   "requires_explicit_approval": "requires_explicit_approval",
   "strategy_version": "approval.strategy_version_number",
   "symbol": {
@@ -45,8 +59,10 @@
   },
   "thresholds": "thresholds",
   "timeframe": {
-    "match": "contains",
-    "path": "timeframes"
+    "fallback_path": "timeframes",
+    "match": "semantic_role",
+    "path": "semantic_role_assignments",
+    "role": "trigger"
   },
   "timeframes": "timeframes",
   "turn_complete": "approval.terminal",

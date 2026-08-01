@@ -31,7 +31,7 @@ from typing import Any
 
 import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
@@ -73,6 +73,7 @@ from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
     SetupAgentTurnInput,
     SetupChatAgent,
+    _repair_eligible_validation_failure,
     deterministic_summary,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
@@ -82,6 +83,23 @@ from tests.support.setup_agent_plans import operations_from_patch
 BANNED_READINESS_PHRASE = "describe the market behavior you want to scan or monitor"
 
 TURN_ID = "turn-00000001"
+
+
+def test_genuine_unsupported_or_unoffered_mechanics_never_enter_repair() -> None:
+    assert not _repair_eligible_validation_failure(
+        SetupTurnRejected(
+            "SEMANTIC_VALIDATION_FAILED",
+            "Unsupported mechanic.",
+            details=("condition:unsupported_mechanic",),
+        )
+    )
+    assert not _repair_eligible_validation_failure(
+        SetupTurnRejected(
+            "SEMANTIC_VALIDATION_FAILED",
+            "Capability was not offered.",
+            details=("condition:capability_not_offered",),
+        )
+    )
 
 
 def _settings() -> Settings:
@@ -111,6 +129,9 @@ class Script:
     clarification_question_id: str | None = None
     #: Raise this instead of answering the planner call.
     plan_failure: Exception | None = None
+    plan_raw_text: str | None = None
+    repair_plan: SetupAgentPlanEnvelope | None = None
+    repair_raw_text: str | None = None
     #: Raise this instead of answering the composing call.
     reply_failure: Exception | None = None
     planner_payloads: list[dict[str, Any]] = field(default_factory=list)
@@ -127,8 +148,19 @@ class Script:
                 self.planner_payloads.append(payload)
                 if self.plan_failure is not None:
                     raise self.plan_failure
+                if self.plan_raw_text is not None:
+                    return httpx.Response(200, json=_responses_body(self.plan_raw_text))
                 assert self.plan is not None, "the test did not script a plan"
                 return httpx.Response(200, json=_responses_body(self.plan.model_dump_json()))
+            if name == "hilalmarkets_setup_turn_plan_repair":
+                self.planner_payloads.append(payload)
+                if self.repair_raw_text is not None:
+                    return httpx.Response(200, json=_responses_body(self.repair_raw_text))
+                assert self.repair_plan is not None, "the test did not script a repair plan"
+                return httpx.Response(
+                    200,
+                    json=_responses_body(self.repair_plan.model_dump_json()),
+                )
             self.composer_payloads.append(payload)
             if self.reply_failure is not None:
                 raise self.reply_failure
@@ -663,6 +695,90 @@ async def test_complete_condition_answer_removes_live_creation_blocker() -> None
     assert result.draft.unresolved_fields == []
     assert result.conversation.active_question_id is None
     assert len(_conditions(result.draft)) == 1
+
+
+def _single_exclusion_envelope(message: str, symbol: str) -> SetupAgentPlanEnvelope:
+    return SetupAgentPlanEnvelope(
+        plan=SetupAgentTurnPlan(
+            source_turn_id=TURN_ID,
+            segments=[
+                TurnSegment(
+                    segment_id="s1",
+                    exact_source_text=message,
+                    start_offset=0,
+                    end_offset=len(message),
+                    kind=SegmentKind.STRATEGY_INSTRUCTION,
+                    action_required=True,
+                    confidence=1.0,
+                )
+            ],
+            operations=[
+                AuthorizedPatchOperation(
+                    operation_id="exclude-1",
+                    authorizing_segment_id="s1",
+                    kind="add_exclusion",
+                    symbol=symbol,
+                )
+            ],
+            overall_confidence=1.0,
+        )
+    )
+
+
+async def test_schema_invalid_plan_gets_exactly_one_repair_before_one_execution() -> None:
+    message = "exclude LTC/USDT"
+    before = StrategyDraftV2()
+    script = Script(
+        plan_raw_text="{}",
+        repair_plan=_single_exclusion_envelope(message, "LTC/USDT"),
+    )
+
+    result = await _run(script, message, draft=before)
+
+    assert script.schema_names == [
+        "hilalmarkets_setup_turn_plan",
+        "hilalmarkets_setup_turn_plan_repair",
+    ]
+    assert result.trace.model_calls == 2
+    assert result.execution is not None
+    assert result.execution.previous_executable_version == before.executable_version
+    assert result.execution.current_executable_version == before.executable_version + 1
+    assert result.draft.universe.excluded_symbols == ["LTC/USDT"]
+
+
+async def test_failed_single_repair_leaves_the_authoritative_draft_unchanged() -> None:
+    message = "exclude LTC/USDT"
+    before = StrategyDraftV2()
+    script = Script(plan_raw_text="{}", repair_raw_text="{}")
+    agent = SetupChatAgent(_settings(), transport=script.transport())
+
+    with pytest.raises(SetupAgentError) as error:
+        await agent.run_turn(
+            SetupAgentTurnInput(
+                message=message,
+                source_turn_id=TURN_ID,
+                draft=before,
+            )
+        )
+
+    assert error.value.stage == "planner_repair"
+    assert agent.model_call_count == 2
+    assert before.universe.excluded_symbols == []
+    assert before.executable_version == 1
+
+
+async def test_dry_grounding_repair_cannot_keep_an_ungrounded_symbol() -> None:
+    message = "exclude LTC/USDT"
+    script = Script(
+        plan=_single_exclusion_envelope(message, "ETH/USDT"),
+        repair_plan=_single_exclusion_envelope(message, "LTC/USDT"),
+    )
+
+    result = await _run(script, message)
+
+    assert result.trace.model_calls == 2
+    assert result.draft.universe.excluded_symbols == ["LTC/USDT"]
+    assert "ETH/USDT" not in result.draft.universe.excluded_symbols
 
 
 async def test_a_reference_to_an_earlier_condition_reaches_the_planner() -> None:
@@ -1972,10 +2088,11 @@ def test_unsupported_operation_forces_server_owned_blocking() -> None:
     assert not hasattr(operation, "blocking")
 
 
-def test_schema_valid_but_incomplete_condition_fails_closed_as_unsupported() -> None:
+def test_incomplete_condition_is_rejected_for_the_bounded_repair_stage() -> None:
     message = "Use a clean liquidity signal near support."
-    plan = SetupAgentTurnPlan.model_validate(
-        {
+    with pytest.raises(ValidationError):
+        SetupAgentTurnPlan.model_validate(
+            {
             "source_turn_id": TURN_ID,
             "segments": [
                 {
@@ -2002,12 +2119,8 @@ def test_schema_valid_but_incomplete_condition_fails_closed_as_unsupported() -> 
                 }
             ],
             "overall_confidence": 0.9,
-        }
-    )
-
-    assert len(plan.operations) == 1
-    assert plan.operations[0].kind == "add_unsupported"
-    assert plan.operations[0].missing_contract == message
+            }
+        )
 
 
 def test_uniquely_wrapped_core_formula_is_normalized_without_guessing() -> None:
@@ -2053,8 +2166,9 @@ def test_uniquely_wrapped_core_formula_is_normalized_without_guessing() -> None:
 
 def test_unknown_wrapped_formula_fails_closed_without_a_type_error() -> None:
     message = "Use my private signal object."
-    plan = SetupAgentTurnPlan.model_validate(
-        {
+    with pytest.raises(ValidationError):
+        SetupAgentTurnPlan.model_validate(
+            {
             "source_turn_id": TURN_ID,
             "segments": [
                 {
@@ -2080,17 +2194,15 @@ def test_unknown_wrapped_formula_fails_closed_without_a_type_error() -> None:
                 }
             ],
             "overall_confidence": 0.4,
-        }
-    )
-
-    assert plan.operations[0].kind == "add_unsupported"
-    assert plan.operations[0].missing_contract == message
+            }
+        )
 
 
-def test_incomplete_restore_proposal_cannot_invalidate_independent_operations() -> None:
+def test_incomplete_restore_proposal_requires_bounded_plan_repair() -> None:
     message = "Use Scanner and keep approval explicit."
-    plan = SetupAgentTurnPlan.model_validate(
-        {
+    with pytest.raises(ValidationError):
+        SetupAgentTurnPlan.model_validate(
+            {
             "source_turn_id": TURN_ID,
             "segments": [
                 {
@@ -2130,10 +2242,8 @@ def test_incomplete_restore_proposal_cannot_invalidate_independent_operations() 
                 "accompanied_by_material_edit": True,
             },
             "overall_confidence": 0.9,
-        }
-    )
-
-    assert [operation.operation_id for operation in plan.operations] == ["set-mode"]
+            }
+        )
 
 
 def test_operation_payload_canonicalization_preserves_exact_unresolved_identity() -> None:
@@ -2299,16 +2409,6 @@ async def test_future_condition_id_is_normalized_to_one_typed_creation_question(
                 }
             ],
             "operations": [
-                {
-                    "operation_id": "incomplete-core-rule",
-                    "authorizing_segment_id": "s1",
-                    "kind": "add_condition",
-                    "condition": {
-                        "node_type": "condition",
-                        "formula": "close_to_close_percentage",
-                        "operator": None,
-                    },
-                },
                 {
                     "operation_id": "ask-strong-threshold",
                     "authorizing_segment_id": "s1",

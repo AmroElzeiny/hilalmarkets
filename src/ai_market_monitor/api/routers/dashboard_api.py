@@ -1084,6 +1084,7 @@ async def _setup_chat_response(
             version_status=(
                 approved_version.status.value if approved_version is not None else None
             ),
+            draft_v2=draft_v2,
         )
         if definition is not None
         else None

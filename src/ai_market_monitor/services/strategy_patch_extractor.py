@@ -445,7 +445,7 @@ def deterministic_strategy_patch(
     ):
         return None
     correction = (
-        CorrectionV2(target="current strategy", reason=_source_excerpt(cleaned))
+        CorrectionV2(target="current strategy", reason=_source_excerpt(cleaned)[:500])
         if re.search(r"\b(?:change|correct|instead|replace|remove)\b", lowered)
         else None
     )

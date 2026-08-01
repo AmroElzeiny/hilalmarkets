@@ -310,6 +310,7 @@ def test_approved_binding_carries_the_reviewed_evidence() -> None:
         user_id=uuid4(),
         executable_version=1,
         executable_hash="e" * 64,
+        schema_hash="d" * 64,
         conversation_snapshot_hash="f" * 64,
         screening_evidence=_evidence(),
         approved_at=datetime.now(UTC),

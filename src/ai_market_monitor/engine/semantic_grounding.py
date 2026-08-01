@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from ai_market_monitor.engine.comparators import detect_comparator, find_comparator
 from ai_market_monitor.engine.formula_compiler import parse_percentage_formula
@@ -32,6 +33,7 @@ from ai_market_monitor.engine.turn_fragments import (
     extract_symbols,
     extract_timeframes,
     split_symbol,
+    timeframe_role_is_explicit,
 )
 from ai_market_monitor.schemas.strategy import Comparator, StrategyDirection
 from ai_market_monitor.schemas.strategy_draft_v2 import (
@@ -160,6 +162,23 @@ def grounds_timeframe(text: str, timeframe: str) -> bool:
     return timeframe in extract_timeframes(text)
 
 
+def grounds_timeframe_role(
+    text: str,
+    timeframe: str,
+    role: Literal["trigger", "context", "confirmation", "reference"],
+) -> bool:
+    """Ground both a timeframe value and the semantic role assigned to it.
+
+    Two timeframe tokens in one instruction are not interchangeable evidence. The
+    role must be bound by the trader's own wording; aliases such as ``60m`` still
+    normalize through the shared timeframe reader before the role is checked.
+    """
+
+    return grounds_timeframe(text, timeframe) and timeframe_role_is_explicit(
+        text, timeframe, role
+    )
+
+
 def grounds_text_value(text: str, value: str) -> bool:
     """Ground a trader-controlled string or enum without substring accidents."""
 
@@ -199,6 +218,23 @@ def grounds_boolean(text: str, value: bool) -> bool:
         )
     )
     return bool(re.search(patterns, lowered, re.IGNORECASE))
+
+
+def grounds_unit(text: str, unit: str) -> bool:
+    """Ground a condition unit through the shared multilingual semantic vocabulary."""
+
+    lowered = text.casefold()
+    patterns = {
+        "percent": r"%|\bpercent(?:age)?\b|(?:نسبة|بالمئة)",
+        "price": r"\bprice\b|\bopen\b|\bclose\b|\bhigh\b|\blow\b|\blevel\b|(?:سعر|إغلاق)",
+        "ratio": r"\bratio\b|\bmultiple\b|\bx\b|(?:نسبة بين|مضاعف)",
+        "count": r"\bcount\b|\bcandles?\b|\bperiods?\b|\blookback\b|(?:شموع|فترات)",
+        "index": r"\bindex\b|\brsi\b|(?:مؤشر)",
+        "boolean": r"\btrue\b|\bfalse\b|\bsweep\b|\breclaim\b|\bmatch\b|(?:صحيح|خطأ)",
+        "none": r"\bno threshold\b|\bboolean\b|(?:بدون حد)",
+    }
+    pattern = patterns.get(unit)
+    return bool(pattern and re.search(pattern, lowered))
 
 
 def grounds_operator(text: str, operator: Comparator) -> bool:

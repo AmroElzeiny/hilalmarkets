@@ -11,6 +11,7 @@ class TargetReply:
     latency_ms: float
     status_code: int | None = None
     structured: dict[str, Any] | None = None
+    canonical_state: dict[str, Any] | None = None
     raw: Any = None
     raw_hash: str | None = None
     conversation_id: str | None = None
@@ -30,6 +31,11 @@ class ChatTarget(ABC):
     async def send(
         self, message: str, *, scenario_id: str, fault: str | None = None
     ) -> TargetReply: ...
+
+    async def approve(self, *, scenario_id: str) -> TargetReply:
+        """Execute the real authenticated approval action for the reviewed version."""
+
+        raise NotImplementedError(f"{self.kind} target does not implement approval")
 
     @abstractmethod
     async def close(self) -> None: ...

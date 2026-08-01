@@ -538,6 +538,7 @@ def _structural_checks() -> dict[str, bool]:
                         user_id=uuid4(),
                         executable_version=base.executable_version,
                         executable_hash=base.executable_hash,
+                        schema_hash="c" * 64,
                         conversation_snapshot_hash="a" * 64,
                         approved_at=datetime.now(UTC),
                     )
@@ -553,6 +554,7 @@ def _structural_checks() -> dict[str, bool]:
                             user_id=uuid4(),
                             executable_version=base.executable_version + 1,
                             executable_hash=base.executable_hash,
+                            schema_hash="d" * 64,
                             conversation_snapshot_hash="b" * 64,
                             approved_at=datetime.now(UTC),
                         )
