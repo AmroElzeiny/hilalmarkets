@@ -258,15 +258,18 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
     assert 'href="/signin"' in chrome
     for content in (
         "Choose how deeply you want to monitor the market.",
-        "Explore",
+        "Basic",
         "Monitor",
         "Pro",
         # Annual is not open on any plan, and Pro is not open at all.
         "annualAvailable: false",
         "monthlyAvailable: false",
-        "Try Monitor for 7 days",
-        "No charge for seven days. Cancel before the first payment.",
-        "2 active market monitors",
+        "Choose Monitor monthly",
+        "7-day money-back guarantee",
+        "Cancel within 7 days of payment for a full refund.",
+        "5 active market monitors",
+        "2 monitor notifications per week across all monitors",
+        "1 quick scan per week",
         "10 active market monitors",
         "Up to 50 monitor alerts per day",
         "Unlimited monitor alerts per day",

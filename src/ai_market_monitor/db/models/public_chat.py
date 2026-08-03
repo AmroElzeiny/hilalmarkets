@@ -50,9 +50,7 @@ class PublicChatAnswerEvent(UUIDPrimaryKeyMixin, Base):
     validation_failure: Mapped[str | None] = mapped_column(String(120))
     knowledge_gap_reason: Mapped[str | None] = mapped_column(String(120))
     is_greeting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    support_handoff_available: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
+    support_handoff_available: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     support_handoff_reason: Mapped[str | None] = mapped_column(String(500))
     coverage_score: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
     source_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
@@ -70,13 +68,9 @@ class PublicChatConversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     session_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     state_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    stage: Mapped[str] = mapped_column(
-        String(48), default="GREETING_AND_PROFILE", nullable=False
-    )
+    stage: Mapped[str] = mapped_column(String(48), default="GREETING_AND_PROFILE", nullable=False)
     message_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     model: Mapped[str | None] = mapped_column(String(100))
     reasoning_effort: Mapped[str | None] = mapped_column(String(20))
@@ -105,6 +99,31 @@ class PublicChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error_type: Mapped[str | None] = mapped_column(String(120))
 
 
+class PublicChatMessage(UUIDPrimaryKeyMixin, Base):
+    """Exact visible future transcript storage with the conversation retention boundary."""
+
+    __tablename__ = "public_chat_messages"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence", name="uq_public_chat_message_sequence"),
+        Index("ix_public_chat_message_conversation_created", "conversation_id", "created_at"),
+        Index("ix_public_chat_message_retain_until", "retain_until"),
+    )
+
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("public_chat_conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    turn_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("public_chat_turns.id", ondelete="SET NULL"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(String(40), default="text", nullable=False)
+    telemetry_redacted: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    retain_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PublicChatAnswerFeedback(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "public_chat_answer_feedback"
     __table_args__ = (
@@ -126,9 +145,7 @@ class PublicChatAnswerFeedback(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     session_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     helpful: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    support_form_requested: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
+    support_form_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     stage: Mapped[str] = mapped_column(String(48), nullable=False)
     mode: Mapped[str] = mapped_column(String(48), nullable=False)
     intent: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -159,9 +176,7 @@ class PublicInquiry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_page: Mapped[str] = mapped_column(String(240), nullable=False)
     referrer: Mapped[str | None] = mapped_column(String(500))
     attribution: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    support_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSON, default=dict, nullable=False
-    )
+    support_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     knowledge_gap_category: Mapped[str] = mapped_column(String(80), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="received", nullable=False)
@@ -195,9 +210,7 @@ class PublicInquiryEmailDelivery(UUIDPrimaryKeyMixin, Base):
 
 class PublicInquiryRating(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "public_inquiry_ratings"
-    __table_args__ = (
-        UniqueConstraint("inquiry_id", name="uq_public_inquiry_rating_inquiry"),
-    )
+    __table_args__ = (UniqueConstraint("inquiry_id", name="uq_public_inquiry_rating_inquiry"),)
 
     inquiry_id: Mapped[UUID] = mapped_column(
         ForeignKey("public_inquiries.id", ondelete="CASCADE"), nullable=False, index=True

@@ -317,9 +317,7 @@ class Settings(BaseSettings):
     setup_agent_simple_service_tier: Literal["default"] = "default"
     setup_agent_complex_service_tier: Literal["default", "fast"] = "default"
     setup_agent_max_estimated_cost_usd_per_turn: float = Field(default=0.10, gt=0, le=5)
-    setup_agent_max_estimated_cost_usd_per_user_day: float = Field(
-        default=2.0, gt=0, le=100
-    )
+    setup_agent_max_estimated_cost_usd_per_user_day: float = Field(default=2.0, gt=0, le=100)
     #: Consecutive provider failures before the agent stops trying for a while.
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)
     setup_agent_circuit_breaker_cooldown_seconds: int = Field(default=60, ge=5, le=900)
@@ -502,6 +500,18 @@ class Settings(BaseSettings):
         default=0.02,
         gt=0,
         le=1,
+    )
+    system_brain_agent_max_steps: int = Field(default=6, ge=1, le=12)
+    system_brain_agent_max_tool_calls: int = Field(default=8, ge=1, le=20)
+    system_brain_agent_max_repeated_calls: int = Field(default=1, ge=0, le=2)
+    system_brain_agent_tool_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    system_brain_agent_turn_timeout_seconds: int = Field(default=50, ge=5, le=180)
+    system_brain_agent_max_history_messages: int = Field(default=16, ge=2, le=40)
+    system_brain_agent_evidence_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    system_brain_agent_max_turns_per_hour: int = Field(default=30, ge=1, le=300)
+    system_brain_agent_max_cost_usd_per_day: float = Field(default=5.0, gt=0, le=1000)
+    system_brain_agent_max_tool_payload_characters: int = Field(
+        default=24_000, ge=2_000, le=100_000
     )
     openai_model_pricing_usd_per_million: dict[str, dict[str, float]] = Field(
         default_factory=lambda: {

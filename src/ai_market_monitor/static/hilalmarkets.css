@@ -269,6 +269,9 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .price-card.is-coming-soon.is-featured{background:#fff;color:var(--ink);transform:none}
 .badge-soon{margin-left:auto;padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:var(--ivory-2);color:var(--muted);font-size:.75rem;font-weight:700}
 .btn.is-disabled,.btn[disabled]{border-color:var(--line);background:var(--ivory-2);color:var(--muted);cursor:not-allowed;box-shadow:none}
+.pricing-money-back{margin:18px 0 12px;padding:14px 16px;display:grid;gap:3px;border:1px solid rgba(85,113,42,.42);border-radius:16px;background:#f4f8eb;color:#2b2e35}
+.pricing-money-back strong{color:#2b2e35;font-family:var(--hm-font-display);font-size:1rem;font-weight:500;line-height:1.35}
+.pricing-money-back span{color:#2b2e35;font-size:.78rem;line-height:1.5}
 .annual-soon{display:block;margin-top:-12px;color:var(--muted);font-size:.78rem}
 .offer-countdown{margin:-8px 0 18px;padding:12px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;border:1px solid var(--line);border-radius:16px;background:var(--ivory-2)}
 /* Three separate facts decide whether the launch offer shows, and each has one owner:

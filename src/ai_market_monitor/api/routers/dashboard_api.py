@@ -408,6 +408,22 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+async def _require_missed_alert_investigations(
+    session: AsyncSession,
+    user_id: UUID,
+) -> None:
+    try:
+        await EntitlementService(session).require_feature(
+            user_id,
+            "missed_alert_investigations",
+        )
+    except EntitlementError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="Why wasn't I alerted? is available on the Monitor plan.",
+        ) from exc
+
+
 async def get_dashboard_principal(
     request: Request,
     x_user_id: str | None = Header(default=None, alias="X-User-ID"),
@@ -2118,6 +2134,7 @@ async def create_forensic_investigation(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    await _require_missed_alert_investigations(session, principal.user_id)
     strategy = await _owned_strategy(session, principal.user_id, payload.strategy_id)
     investigation = await VerifiedStrategyService(session, settings).investigate(
         user_id=principal.user_id,
@@ -2571,6 +2588,7 @@ async def lifecycle_investigation(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    await _require_missed_alert_investigations(session, principal.user_id)
     try:
         return await SetupObservabilityService(session, settings).investigation(
             principal.user_id, setup_id
@@ -2587,6 +2605,7 @@ async def explain_lifecycle_investigation(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    await _require_missed_alert_investigations(session, principal.user_id)
     service = SetupObservabilityService(session, settings)
     try:
         evidence = await service.investigation(principal.user_id, setup_id)

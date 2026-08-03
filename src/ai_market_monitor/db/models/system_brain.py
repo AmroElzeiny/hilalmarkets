@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -120,9 +121,7 @@ class AIUsageEvent(UUIDPrimaryKeyMixin, Base):
         Index("ix_ai_usage_user_created", "user_id", "created_at"),
     )
 
-    user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     chat_session_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("ai_setup_chat_sessions.id", ondelete="SET NULL"), index=True
     )
@@ -202,3 +201,157 @@ class AgentToolCall(UUIDPrimaryKeyMixin, Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SystemBrainConversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Persistent administrator-owned System Brain conversation."""
+
+    __tablename__ = "system_brain_conversations"
+    __table_args__ = (
+        Index("ix_system_brain_conversation_admin_updated", "admin_user_id", "updated_at"),
+        Index("ix_system_brain_conversation_admin_archived", "admin_user_id", "archived_at"),
+    )
+
+    admin_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SystemBrainMessage(UUIDPrimaryKeyMixin, Base):
+    """One persisted message; browser state is never the conversation authority."""
+
+    __tablename__ = "system_brain_messages"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence", name="uq_system_brain_message_sequence"),
+        UniqueConstraint(
+            "conversation_id", "client_message_id", name="uq_system_brain_message_client_id"
+        ),
+        Index("ix_system_brain_message_conversation_created", "conversation_id", "created_at"),
+        Index("ix_system_brain_message_status_created", "status", "created_at"),
+    )
+
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("system_brain_conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    client_message_id: Mapped[str | None] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="completed", nullable=False)
+    agent_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), index=True
+    )
+    model: Mapped[str | None] = mapped_column(String(100))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    estimated_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), default=Decimal("0"), nullable=False
+    )
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    evidence_refs: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    metadata_redacted: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CustomerConversationEvent(Base):
+    """Monotonic privacy-safe cursor for the admin conversation explorer."""
+
+    __tablename__ = "customer_conversation_events"
+    __table_args__ = (
+        Index("ix_customer_conversation_event_source_cursor", "source_type", "id"),
+        Index("ix_customer_conversation_event_conversation_cursor", "conversation_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    conversation_id: Mapped[UUID] = mapped_column(nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    message_id: Mapped[UUID | None] = mapped_column()
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SystemBrainArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Safe internal output created by an authorized read/analysis turn."""
+
+    __tablename__ = "system_brain_artifacts"
+    __table_args__ = (
+        Index("ix_system_brain_artifact_admin_kind", "admin_user_id", "artifact_kind"),
+        Index("ix_system_brain_artifact_conversation_created", "conversation_id", "created_at"),
+    )
+
+    admin_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("system_brain_conversations.id", ondelete="SET NULL")
+    )
+    artifact_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content_redacted: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    evidence_refs: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SystemBrainActionProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Exact consequential action awaiting a separately authenticated confirmation."""
+
+    __tablename__ = "system_brain_action_proposals"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_system_brain_action_proposal_key"),
+        Index("ix_system_brain_action_proposal_admin_status", "admin_user_id", "status"),
+    )
+
+    admin_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("system_brain_conversations.id", ondelete="SET NULL")
+    )
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    exact_changes: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_refs: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    expected_effect: Mapped[str] = mapped_column(Text, nullable=False)
+    risks: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    rollback_path: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    confirmation_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    execution_result_redacted: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+
+
+class RepositoryEvidenceIndex(UUIDPrimaryKeyMixin, Base):
+    """Incremental, sensitivity-filtered repository evidence index."""
+
+    __tablename__ = "repository_evidence_index"
+    __table_args__ = (
+        UniqueConstraint("path", name="uq_repository_evidence_path"),
+        Index("ix_repository_evidence_hash", "content_hash"),
+        Index("ix_repository_evidence_sensitivity", "sensitivity_classification"),
+    )
+
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_commit: Mapped[str | None] = mapped_column(String(64))
+    symbol_names: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    searchable_text: Mapped[str] = mapped_column(Text, nullable=False)
+    line_references: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    sensitivity_classification: Mapped[str] = mapped_column(
+        String(32), default="internal", nullable=False
+    )
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

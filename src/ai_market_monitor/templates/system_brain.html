@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260802-launch-offer">
   <link rel="stylesheet" href="/static/system-brain.css?v=20260802-launch-offer">
   <script src="/static/hilalmarkets-icons.js" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260802-launch-offer" defer></script>
   <script src="/static/system-brain.js?v=20260802-launch-offer" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}">
@@ -105,21 +106,61 @@
       </aside>
     </section>
 
-    <section class="brain-section brain-reveal">
+    <section class="brain-section brain-reveal brain-workspace" data-system-brain-workspace data-testid="system-brain-workspace">
+      <aside class="brain-panel brain-agent-sidebar" aria-label="System Brain conversations">
+        <div class="brain-panel-title"><i data-icon="spark"></i><div><p class="brain-kicker">Persistent analysis</p><h3>Agent conversations</h3></div></div>
+        <button class="brain-action-button" type="button" data-brain-new-conversation><i data-icon="plus"></i>New conversation</button>
+        <label class="brain-compact-field"><span>Search</span><input type="search" maxlength="160" data-brain-agent-search placeholder="Conversation title"></label>
+        <div class="brain-agent-conversation-list" data-brain-agent-conversations role="list"></div>
+      </aside>
+
       <article class="brain-panel brain-assistant" data-system-brain-assistant data-testid="system-brain-assistant">
         <div class="brain-assistant-head">
           <span class="brain-metric-icon"><i data-icon="spark"></i></span>
-          <div><p class="brain-kicker">Read-only diagnostic assistant</p><h2>Ask System Brain</h2><p>Searches redacted repository evidence and live governance telemetry. It cannot decide, approve, publish, or change the system.</p></div>
-          <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ (assistant_model ~ ' · ' ~ assistant_reasoning_effort) if assistant_enabled else 'Disabled' }}</span>
+          <div><p class="brain-kicker">Evidence-led operational agent</p><h2 data-brain-agent-title>Ask System Brain</h2><p>Inspects only the evidence it needs through bounded, audited tools. Consequential changes remain inactive until you confirm the exact proposal.</p></div>
+          <div class="brain-agent-heading-actions">
+            <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ (assistant_model ~ ' · ' ~ assistant_reasoning_effort) if assistant_enabled else 'Disabled' }}</span>
+            <button type="button" class="brain-secondary-button" data-brain-rename-conversation>Rename</button>
+            <button type="button" class="brain-secondary-button" data-brain-archive-conversation>Archive</button>
+          </div>
         </div>
+        <div class="brain-agent-progress" data-brain-agent-progress hidden role="status">Selecting authorized evidence tools…</div>
         <div class="brain-assistant-messages" data-brain-assistant-messages aria-live="polite">
-          <div class="brain-assistant-message assistant"><p>Ask about a case, an error, a system mechanism, a file, or what deserves attention.</p></div>
+          <div class="brain-assistant-message assistant"><p>Ask about customer experience, quality, revenue, support, governance, operations, or engineering evidence.</p></div>
         </div>
         <form class="brain-assistant-form" data-brain-assistant-form>
-          <label for="brain-assistant-input">Question</label>
-          <textarea id="brain-assistant-input" maxlength="2000" required placeholder="Ask about reviews, evidence, errors, logs, or system behavior…" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
+          <label for="brain-assistant-input">Question or analysis request</label>
+          <textarea id="brain-assistant-input" maxlength="4000" required placeholder="For example: Where are trial users dropping out, and what evidence supports the highest-value experiment?" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
           <button type="submit" class="brain-action-button" {{ 'disabled' if not assistant_enabled else '' }}><span>Ask</span><i data-icon="arrow"></i></button>
+          <button type="button" class="brain-secondary-button" data-brain-cancel-turn hidden>Cancel</button>
         </form>
+      </article>
+
+      <aside class="brain-panel brain-evidence-drawer" aria-label="Evidence and actions">
+        <div class="brain-panel-title"><i data-icon="search"></i><div><p class="brain-kicker">Inspectable proof</p><h3>Evidence &amp; actions</h3></div></div>
+        <div data-brain-evidence><p class="brain-muted">Tool calls and evidence references appear here, separate from customer-visible content.</p></div>
+        <div data-brain-action-proposals></div>
+        <div class="brain-saved-insights">
+          <h4>Saved insights &amp; internal artifacts</h4>
+          <div data-brain-artifacts><p class="brain-muted">No saved artifacts in this conversation.</p></div>
+        </div>
+      </aside>
+
+      <article class="brain-panel brain-customer-explorer" data-customer-conversation-explorer>
+        <div class="brain-section-head"><div><p class="brain-kicker">Privileged customer-content view</p><h2>Customer conversation explorer</h2><p>Exact retained transcripts only. Every detail view is audited and secrets are redacted.</p></div><span class="brain-live-state" data-brain-live-state>Connecting live updates…</span></div>
+        <form class="brain-explorer-filters" data-brain-explorer-filters>
+          <label><span>Search</span><input type="search" name="search" maxlength="500" placeholder="Email, user ID, conversation ID, or permitted message text"></label>
+          <label><span>Source</span><select name="source"><option value="">All persisted sources</option><option value="authenticated_setup_chat">Setup Chat</option><option value="public_site_chat">Public Chat</option></select></label>
+          <label><span>Status</span><input name="lifecycle" maxlength="80" placeholder="Lifecycle or stage"></label>
+          <label><span>Identity</span><select name="identity"><option value="">All identities</option><option value="authenticated">Authenticated</option><option value="anonymous">Anonymous</option></select></label>
+          <label><span>Approval</span><select name="approval_state"><option value="">Any approval state</option><option value="approved">Approved</option><option value="unapproved">Unapproved</option></select></label>
+          <label class="brain-check"><input type="checkbox" name="error_only"><span>Errors only</span></label>
+          <button type="submit" class="brain-action-button">Filter</button>
+        </form>
+        <div class="brain-explorer-grid">
+          <div><div class="brain-conversation-results" data-brain-customer-conversations role="list"></div><button type="button" class="brain-secondary-button" data-brain-load-more hidden>Load more</button></div>
+          <section class="brain-conversation-detail" data-brain-conversation-detail aria-live="polite"><p>Select a conversation to inspect its retained messages.</p></section>
+        </div>
       </article>
     </section>
 

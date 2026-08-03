@@ -68,8 +68,8 @@ def test_settings_use_highlighted_channels_provider_and_schedule_controls():
     assert 'value="bybit"' in settings
     assert 'value="whatsapp"' in settings
     assert "data-near-miss-threshold" in settings
-    assert "data-schedule-options=\"days\"" in settings
-    assert "data-schedule-options=\"hours\"" in settings
+    assert 'data-schedule-options="days"' in settings
+    assert 'data-schedule-options="hours"' in settings
     assert "dashboard_notifications_enabled" in settings
     assert "dashboard_notification_sound" in settings
     assert "data-settings-save disabled" in settings
@@ -225,9 +225,7 @@ def test_requested_home_market_passport_and_scanner_refinements_are_bound():
     home = _read("templates/hilal/dashboard/home.html")
     market = _read("templates/hilal/dashboard/partials/live_market.html")
     passport = _read("templates/hilal/dashboard/passport.html")
-    quick_passport = _read(
-        "templates/hilal/dashboard/partials/passport_quick_view.html"
-    )
+    quick_passport = _read("templates/hilal/dashboard/partials/passport_quick_view.html")
     brain = _read("templates/system_brain.html")
     market_runtime = _read("static/sharia-market.js")
     dashboard_styles = _read("static/hilalmarkets-dashboard-v2.css")
@@ -286,14 +284,17 @@ def test_system_brain_is_reviewer_first_and_uses_five_sections():
     review = _read("templates/system_brain_review_workspace.html")
     styles = _read("static/system-brain.css")
     runtime = _read("static/system-brain.js")
+    shared_renderer = _read("static/chat-message-renderer.js")
 
     for label in ("Inbox", "Cases", "Operations", "Governance", "Audit &amp; Settings"):
         assert f"<span>{label}</span>" in template
     assert template.count("<nav>") == 1
     assert 'data-testid="system-brain-assistant"' in template
-    assert "/dashboard/system-brain/assistant" in runtime
+    assert "/api/v1/system-brain/conversations/" in runtime
+    assert "customer-conversation-stream" in runtime
     assert "X-CSRF-Token" in runtime
-    assert "textContent = text" in runtime
+    assert "HilalChatMessageRenderer.render" in runtime
+    assert "escapeHtml" in shared_renderer
     assert "brain-overview-grid" in styles
     assert "brain-field-list" in styles
     assert "brain-terminal-action" in styles

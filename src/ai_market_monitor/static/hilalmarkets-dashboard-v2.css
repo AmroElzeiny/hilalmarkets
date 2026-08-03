@@ -2398,6 +2398,15 @@ body.hilal-dashboard .dashboard-billing-toggle label:has(input:focus-visible) {
   outline-offset: 2px;
 }
 
+body.hilal-dashboard .dashboard-billing-toggle label.is-unavailable {
+  color: var(--hm-muted);
+  cursor: not-allowed;
+}
+
+body.hilal-dashboard .dashboard-billing-toggle label.is-unavailable small {
+  color: var(--hm-muted);
+}
+
 body.hilal-dashboard .dashboard-billing-toggle input {
   position: absolute;
   width: 1px;
@@ -2514,6 +2523,32 @@ body.hilal-dashboard .dashboard-trial-note {
   text-align: center;
   font-size: .78rem;
   font-weight: 750;
+}
+
+body.hilal-dashboard .dashboard-money-back {
+  width: 100%;
+  margin: 4px 0 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 3px;
+  color: var(--hm-ink);
+  background: #f4f8eb;
+  border: 1px solid rgba(85, 113, 42, .42);
+  border-radius: 16px;
+}
+
+body.hilal-dashboard .dashboard-money-back strong {
+  color: var(--hm-ink);
+  font-family: var(--hm-font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+body.hilal-dashboard .dashboard-money-back span {
+  color: var(--hm-ink);
+  font-size: .78rem;
+  line-height: 1.5;
 }
 
 body.hilal-dashboard .billing-plan-panel .dashboard-price-card > form,

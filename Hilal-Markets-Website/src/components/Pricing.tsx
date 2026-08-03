@@ -41,25 +41,29 @@ const DEFAULT_COMING_SOON_LABEL = 'Soon'
 const PLANS: Plan[] = [
   {
     code: 'demo',
-    name: 'Explore',
+    name: 'Basic',
     monthlyPrice: 0,
     annualPrice: 0,
     monthlyAvailable: true,
     annualAvailable: false,
     description:
-      'For traders who want to explore assets listed as Halal under a selected methodology, inspect the evidence, and follow changes to favorite coins.',
+      'For traders who want the AI assistant, screened-asset evidence, and a measured introduction to market monitoring.',
     button: 'Start free',
-    highlightedFeature: 'Halal assets, methodologies, and evidence reports',
+    highlightedFeature: 'AI assistant with Basic limits',
     visibleFeatures: [
+      'AI assistant with Basic limits',
+      'Approve 2 strategies per 30 days',
+      '1 active market monitor',
+      '2 monitor notifications per week across all monitors',
+      '1 quick scan per week',
       'Halal assets, methodologies, and evidence reports',
       'Full Evidence Passports',
-      'Methodology reasons, sources, versions, and review dates',
-      'Methodology comparison when available',
-      'Favorite coins',
-      'In-app Halal status-change alerts for favorites',
-      'Telegram Halal status-change alerts for favorites',
     ],
     additionalFeatures: [
+      'Methodology reasons, sources, versions, and review dates',
+      'Favorite coins and compliance-status changes',
+      'In-app and Telegram notifications',
+      'Why wasn\'t I alerted? available on Monitor',
       'Published compliance-status changes',
       'Standard email support',
     ],
@@ -74,13 +78,13 @@ const PLANS: Plan[] = [
     annualAvailable: false,
     description:
       'For regular traders who want AI-assisted market monitoring and clear evidence behind every alert.',
-    button: 'Try Monitor for 7 days',
-    trialNote: 'No charge for seven days. Cancel before the first payment.',
+    button: 'Choose Monitor monthly',
+    trialNote: 'Cancel within 7 days of payment for a full refund.',
     highlightedFeature: 'AI assistant for creating market monitors',
     visibleFeatures: [
-      'Everything in Explore',
+      'Everything in Basic',
       'AI assistant for creating market monitors',
-      '2 active market monitors',
+      '5 active market monitors',
       '10 quick scans per month',
       'Up to 50 monitor alerts per day',
       'Full Why wasn\'t I alerted? explanations',
@@ -130,16 +134,17 @@ const COMPARISON_ROWS = [
     'In-app + Telegram',
     'In-app + Telegram',
   ],
-  ['AI assistant', 'Not included', 'Included', 'Included'],
-  ['Active market monitors', 'Not included', '2', '10'],
-  ['Quick scans per month', 'Not included', '10', '100'],
-  ['Monitor alerts per day', 'Not included', 'Up to 50', 'Unlimited'],
+  ['AI assistant', 'Limited', 'Included', 'Included'],
+  ['Strategy approvals', '2 per 30 days', 'Included', 'Included'],
+  ['Active market monitors', '1', '5', '10'],
+  ['Quick scans', '1 per week', '10 per month', '100 per month'],
+  ['Monitor notifications', '2 per week', 'Up to 50 per day', 'Unlimited'],
   ['Condition proof', 'Not included', 'Full', 'Full'],
   ['Opportunity Journeys', 'Not included', 'Complete', 'Complete'],
-  ['Missed-alert investigations', 'Not included', 'Included', 'Included'],
-  ['Telegram monitor delivery', 'Not included', 'Included', 'Included'],
+  ['Why wasn\'t I alerted?', 'Not included', 'Included', 'Included'],
+  ['Telegram monitor delivery', 'Included', 'Included', 'Included'],
   ['WhatsApp', 'Not included', 'Not included', 'Coming soon'],
-  ['Monitor trial', 'Not included', '7 days, no payment', 'Not included'],
+  ['Money-back window', 'Not included', '7 days', 'Not included'],
 ] as const
 
 /** Can this plan be bought on this interval today? Missing means "yes", for older data. */
@@ -299,8 +304,8 @@ export default function Pricing() {
         <legend className="sr-only">Choose a billing interval</legend>
         {(['monthly', 'annual'] as const).map((value) => {
           // "Save up to $44" next to an interval nobody can buy is an offer that does
-          // not exist. The toggle still switches, so a visitor can see what annual will
-          // look like, and every card then says the same thing: soon.
+          // not exist. An unavailable interval remains visible for orientation but is
+          // not an interactive control.
           const anyAvailable = plans.some((plan) => isAvailable(plan, value))
           // Computed from the prices beside it, never written out: a monthly price
           // changed on the server must not leave the toggle promising an old saving.
@@ -311,12 +316,19 @@ export default function Pricing() {
               .map((plan) => (plan.monthlyPrice ?? 0) * 12 - (plan.annualPrice ?? 0)),
           )
           return (
-            <label key={value} className={interval === value ? 'is-selected' : ''}>
+            <label
+              key={value}
+              className={`${interval === value ? 'is-selected' : ''} ${
+                anyAvailable ? '' : 'is-unavailable'
+              }`}
+            >
               <input
                 type="radio"
                 name="billing-interval"
                 value={value}
                 checked={interval === value}
+                disabled={!anyAvailable}
+                aria-disabled={!anyAvailable}
                 onChange={() => setBillingInterval(value)}
               />
               <span>{value === 'monthly' ? 'Monthly' : 'Annual'}</span>
@@ -400,6 +412,14 @@ export default function Pricing() {
                   ? `Save $${plan.monthlyPrice * 12 - plan.annualPrice} per year`
                   : '\u00a0'}
               </p>
+              {plan.code === 'trader' && interval === 'monthly' && available && (
+                <aside className="money-back-guarantee" aria-label="Refund policy">
+                  <strong>7-day money-back guarantee</strong>
+                  <span>
+                    {plan.trialNote ?? 'Cancel within 7 days of payment for a full refund.'}
+                  </span>
+                </aside>
+              )}
               {available ? (
                 <a
                   href={checkoutHref(plan.code, interval)}
@@ -413,11 +433,6 @@ export default function Pricing() {
                 <button type="button" className="plan-cta is-disabled" disabled data-plan={plan.code}>
                   {ctaLabel}
                 </button>
-              )}
-              {plan.code === 'trader' && interval === 'monthly' && available && (
-                <p className="trial-payment-note">
-                  {plan.trialNote ?? 'No charge for seven days. Cancel before the first payment.'}
-                </p>
               )}
               <ul className="plan-features">
                 {plan.visibleFeatures.map((feature) => {
@@ -476,11 +491,11 @@ export default function Pricing() {
         </div>
         <div className="comparison-desktop">
           <table>
-            <caption className="sr-only">Explore, Monitor, and Pro plan comparison</caption>
+            <caption className="sr-only">Basic, Monitor, and Pro plan comparison</caption>
             <thead>
               <tr>
                 <th scope="col">Feature</th>
-                <th scope="col">Explore</th>
+                <th scope="col">Basic</th>
                 <th scope="col">Monitor</th>
                 <th scope="col">Pro</th>
               </tr>
@@ -498,15 +513,15 @@ export default function Pricing() {
           </table>
         </div>
         <div className="comparison-mobile">
-          {(['Explore', 'Monitor', 'Pro'] as const).map((planName, planIndex) => (
-            <article key={planName}>
-              <h4>{planName}</h4>
+          {plans.map((plan, planIndex) => (
+            <article key={plan.code}>
+              <h4>{plan.name}</h4>
               <dl>
                 {comparisonRows.map((row) => (
                   <div key={row[0]}>
                     <dt>{row[0]}</dt>
                     <dd>
-                      {row[0] === 'WhatsApp' && planName === 'Pro' && whatsappOperational
+                      {row[0] === 'WhatsApp' && plan.name === 'Pro' && whatsappOperational
                         ? 'Included'
                         : row[planIndex + 1]}
                     </dd>

@@ -199,8 +199,12 @@ class OnDemandScanService:
         )
         context = await EntitlementService(self.session).current(user_id)
         metric = "light_prompt_scans" if request.light_scan else "on_demand_scans"
+        usage_metric = "basic_user_initiated_scans" if context.plan.code == "demo" else metric
         quota_limit, quota_used, period_start, period_end = await self._quota(
-            context, user_id, metric=metric
+            context,
+            user_id,
+            metric=metric,
+            usage_metric=usage_metric,
         )
         if quota_limit <= 0:
             code = (
@@ -234,7 +238,7 @@ class OnDemandScanService:
         self._enforce_scan_limits(context.plan, definition, request)
         usage = await UsageService(self.session).record(
             user_id,
-            metric,
+            usage_metric,
             period_start=period_start,
             period_end=period_end,
             idempotency_key=f"on-demand-scan-run:{run.id}",
@@ -678,8 +682,25 @@ class OnDemandScanService:
         user_id: UUID,
         *,
         metric: str,
+        usage_metric: str | None = None,
     ) -> tuple[int, int, datetime, datetime]:
         now = datetime.now(UTC)
+        query_metric = usage_metric or metric
+        weekly_limit = context.limit("user_initiated_scans_per_week")
+        if weekly_limit is not None:
+            period_start = datetime(now.year, now.month, now.day, tzinfo=UTC) - timedelta(
+                days=now.weekday()
+            )
+            period_end = period_start + timedelta(days=7)
+            used = await self.session.scalar(
+                select(func.coalesce(func.sum(UsageRecord.quantity), 0)).where(
+                    UsageRecord.user_id == user_id,
+                    UsageRecord.metric == query_metric,
+                    UsageRecord.period_start >= period_start,
+                    UsageRecord.period_start < period_end,
+                )
+            )
+            return int(weekly_limit), int(used or 0), period_start, period_end
         if metric == "light_prompt_scans":
             if not context.feature_enabled("light_prompt_scan"):
                 return 0, 0, now, now
@@ -689,7 +710,7 @@ class OnDemandScanService:
             used = await self.session.scalar(
                 select(func.coalesce(func.sum(UsageRecord.quantity), 0)).where(
                     UsageRecord.user_id == user_id,
-                    UsageRecord.metric == metric,
+                    UsageRecord.metric == query_metric,
                     UsageRecord.period_start >= period_start,
                     UsageRecord.period_start < period_end,
                 )
@@ -703,7 +724,7 @@ class OnDemandScanService:
             used = await self.session.scalar(
                 select(func.coalesce(func.sum(UsageRecord.quantity), 0)).where(
                     UsageRecord.user_id == user_id,
-                    UsageRecord.metric == metric,
+                    UsageRecord.metric == query_metric,
                 )
             )
             return limit, int(used or 0), period_start, period_end
@@ -717,7 +738,7 @@ class OnDemandScanService:
         used = await self.session.scalar(
             select(func.coalesce(func.sum(UsageRecord.quantity), 0)).where(
                 UsageRecord.user_id == user_id,
-                UsageRecord.metric == metric,
+                UsageRecord.metric == query_metric,
                 UsageRecord.period_start >= period_start,
                 UsageRecord.period_start < period_end,
             )

@@ -17,6 +17,8 @@ from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    effective_monthly_price,
+    plan_offer,
 )
 from ai_market_monitor.db.models import (
     AuditEvent,
@@ -24,7 +26,6 @@ from ai_market_monitor.db.models import (
     BillingEvent,
     Plan,
     Subscription,
-    Trial,
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
@@ -783,23 +784,6 @@ class BillingService:
         plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
         if not plan.is_active or plan.price_monthly <= 0:
             raise BillingError("plan_not_available", "This paid plan is not available.")
-        if billing_cycle == "trial_7_day":
-            legacy_trial = await self.session.scalar(
-                select(Trial.id).where(Trial.user_id == user_id)
-            )
-            used_trial = await self.session.scalar(
-                select(BillingCheckoutAttempt.id).where(
-                    BillingCheckoutAttempt.user_id == user_id,
-                    BillingCheckoutAttempt.billing_cycle == "trial_7_day",
-                    BillingCheckoutAttempt.status == "completed",
-                )
-            )
-            if legacy_trial is not None or used_trial is not None:
-                raise BillingError(
-                    "trial_already_used",
-                    "The Monitor trial has already been used for this account.",
-                )
-
         current_plans = set(
             (
                 await self.session.scalars(
@@ -906,18 +890,24 @@ class BillingService:
 
     def _normalize_billing_cycle(self, *, plan_code: str, requested: str) -> str:
         normalized = requested.strip().lower()
+        offer = plan_offer(plan_code)
         if normalized == "trial_7_day":
-            if self.provider.provider_name != "creem" or plan_code != "trader":
-                raise BillingError(
-                    "billing_cycle_not_available",
-                    "The seven-day Monitor trial is available only through card checkout.",
-                )
-            if "trader_trial" not in self.settings.creem_product_ids:
-                raise BillingError(
-                    "creem_trial_product_missing",
-                    "The seven-day Monitor trial is not configured with the payment provider.",
-                )
-            return normalized
+            raise BillingError(
+                "billing_cycle_not_available",
+                "Monitor is available as a paid monthly plan with a seven-day refund window.",
+            )
+        if normalized in {"annual", "annual_auto_renewal"} and not offer.annual_available:
+            raise BillingError(
+                "billing_cycle_not_available",
+                "Annual billing is not available yet.",
+            )
+        if normalized in {"monthly", "monthly_auto_renewal", "one_time_30_day"} and not (
+            offer.monthly_available
+        ):
+            raise BillingError(
+                "plan_not_available",
+                "This plan is not available for checkout.",
+            )
         if self.provider.capabilities.supports_recurring_billing:
             aliases = {
                 "monthly": "monthly_auto_renewal",
@@ -948,7 +938,8 @@ class BillingService:
             return Decimal("0.00")
         if billing_cycle == "annual_auto_renewal":
             return PUBLIC_PLAN_PRESENTATIONS[plan_code].annual_price
-        return monthly_amount
+        del monthly_amount
+        return effective_monthly_price(plan_code)
 
     async def open_checkout_attempt(
         self,

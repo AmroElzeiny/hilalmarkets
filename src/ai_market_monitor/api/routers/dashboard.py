@@ -28,6 +28,7 @@ from ai_market_monitor.core.plans import (
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     maximum_annual_saving,
+    plan_offer,
     plan_offer_payload,
     promotion_is_active,
     visible_plan_comparison,
@@ -115,7 +116,6 @@ from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkService,
 )
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
-from ai_market_monitor.services.trials import TrialError, TrialLifecycleService
 from ai_market_monitor.services.verified_strategy import seal_alert_proof
 from ai_market_monitor.services.web_auth import (
     SESSION_COOKIE_NAME,
@@ -249,10 +249,19 @@ def _subscription_selection(
     plan_code: str | None,
     billing_interval: str | None,
 ) -> tuple[str | None, Literal["monthly", "annual"]]:
-    selected_plan = plan_code if plan_code in PUBLIC_PLAN_CODES else None
     selected_interval: Literal["monthly", "annual"] = (
         "annual" if billing_interval == "annual" else "monthly"
     )
+    selected_plan = plan_code if plan_code in PUBLIC_PLAN_CODES else None
+    if selected_plan is not None:
+        offer = plan_offer(selected_plan)
+        available = (
+            offer.annual_available
+            if selected_interval == "annual"
+            else offer.monthly_available
+        )
+        if not available:
+            selected_plan = None
     return selected_plan, selected_interval
 
 
@@ -334,7 +343,12 @@ def _billing_selection_available(
 ) -> bool:
     if not settings.billing_enabled or provider is None:
         return False
-    if billing_cycle == "trial_7_day" and provider != "creem":
+    offer = plan_offer(plan_code)
+    if billing_cycle == "trial_7_day":
+        return False
+    if billing_cycle == "monthly" and not offer.monthly_available:
+        return False
+    if billing_cycle == "annual" and not offer.annual_available:
         return False
     if provider == "creem":
         if settings.creem_api_key is None or settings.creem_webhook_secret is None:
@@ -398,7 +412,11 @@ async def _active_paid_plan_codes(
 def _plan_checkout_allowed(
     *, plan_code: str, active_paid_plan_codes: frozenset[str]
 ) -> bool:
-    return plan_code not in active_paid_plan_codes
+    offer = plan_offer(plan_code)
+    return (
+        plan_code not in active_paid_plan_codes
+        and (offer.monthly_available or offer.annual_available)
+    )
 
 
 def _billing_history_rows(
@@ -2811,32 +2829,18 @@ async def claim_trial(
 ) -> RedirectResponse:
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
-    if settings.billing_enabled:
-        return _redirect(
-            "/dashboard/billing?"
-            + urlencode(
-                {
-                    "selected_plan": "trader",
-                    "billing_interval": "monthly",
-                    "checkout": "1",
-                    "trial": "1",
-                }
-            )
+    if not settings.billing_enabled:
+        return _redirect("/dashboard/billing?error=billing_disabled")
+    return _redirect(
+        "/dashboard/billing?"
+        + urlencode(
+            {
+                "selected_plan": "trader",
+                "billing_interval": "monthly",
+                "checkout": "1",
+            }
         )
-    try:
-        existing = await session.scalar(select(Trial).where(Trial.user_id == user.id))
-        trial_service = TrialLifecycleService(session, settings)
-        await trial_service.activate(user.id)
-        await trial_service.start_monitoring_cycle(user.id)
-        await session.commit()
-        if existing is None:
-            await AdminNotificationService(settings).send(
-                f"Monitor trial claimed: {user.display_name or user.id}"
-            )
-        return _redirect("/dashboard/billing?message=trial_claimed")
-    except TrialError as exc:
-        await session.rollback()
-        return _redirect(f"/dashboard/billing?error={exc.code}")
+    )
 
 
 @router.get("/dashboard/billing", response_class=HTMLResponse, include_in_schema=False)
@@ -2850,13 +2854,6 @@ async def billing_page(
     await PlanCatalogService(session).sync_defaults()
     entitlement = await EntitlementService(session).current(user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
-    completed_provider_trial = await session.scalar(
-        select(BillingCheckoutAttempt.id).where(
-            BillingCheckoutAttempt.user_id == user.id,
-            BillingCheckoutAttempt.billing_cycle == "trial_7_day",
-            BillingCheckoutAttempt.status == "completed",
-        )
-    )
     primary_email = await session.scalar(
         select(UserIdentity.normalized_identifier)
         .where(
@@ -2896,17 +2893,7 @@ async def billing_page(
                 plan_code=code,
                 billing_cycle="monthly",
             ),
-            "trial": (
-                code == "trader"
-                and trial is None
-                and completed_provider_trial is None
-                and _billing_selection_available(
-                    settings,
-                    provider=card_provider,
-                    plan_code=code,
-                    billing_cycle="trial_7_day",
-                )
-            ),
+            "trial": False,
         }
         for code in PURCHASABLE_PLAN_CODES
     }
@@ -2979,28 +2966,22 @@ async def billing_page(
             plan_comparison_headers=visible_plan_comparison_headers(
                 billing_enabled=settings.billing_enabled
             ),
-            trial_claimable=(
-                trial is None
-                and completed_provider_trial is None
-                and _plan_checkout_allowed(
-                    plan_code="trader",
-                    active_paid_plan_codes=active_paid_plan_codes,
-                )
-            ),
+            trial_claimable=False,
             active_paid_plan_codes=active_paid_plan_codes,
             whatsapp_operational=settings.whatsapp_enabled,
             billing_enabled=settings.billing_enabled,
             billing_provider=billing.provider.provider_name,
             billing_capabilities=billing.provider_capabilities,
             billing_cycle_code=billing.billing_cycle_code,
-            checkout_selected_plan=request.query_params.get("selected_plan"),
-            checkout_selected_interval=(
-                "annual"
-                if request.query_params.get("billing_interval") == "annual"
-                else "monthly"
+            checkout_selected_plan=(
+                "trader" if request.query_params.get("selected_plan") == "trader" else None
             ),
-            checkout_auto_open=request.query_params.get("checkout") == "1",
-            checkout_trial_selected=request.query_params.get("trial") == "1",
+            checkout_selected_interval="monthly",
+            checkout_auto_open=(
+                request.query_params.get("checkout") == "1"
+                and request.query_params.get("selected_plan") == "trader"
+            ),
+            checkout_trial_selected=False,
             billing_profile_defaults={
                 "first_name": display_name_parts[0] if display_name_parts else "",
                 "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",

@@ -9,12 +9,16 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import Settings, get_settings
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    effective_monthly_price,
+)
 from ai_market_monitor.db.models import (
     AdminOverride,
     Alert,
     AlertDelivery,
     AuditEvent,
+    BillingCheckoutAttempt,
     BillingEvent,
     EntitlementSnapshot,
     PaymentEmailDelivery,
@@ -61,6 +65,9 @@ from ai_market_monitor.services.referrals import ReferralError, ReferralService
 from ai_market_monitor.services.trials import TrialLifecycleService
 from tests.factories import load_strategy
 
+MONITOR_CHECKOUT_AMOUNT = effective_monthly_price("trader")
+MONITOR_CHECKOUT_AMOUNT_TEXT = f"{MONITOR_CHECKOUT_AMOUNT:.2f}"
+
 
 async def create_user(session, display_name: str = "Trader") -> User:
     user = User(display_name=display_name)
@@ -99,15 +106,18 @@ async def test_plan_catalog_syncs_central_definitions(test_context):
 
 
 def test_public_plan_limits_match_the_published_catalog():
-    explore = PLAN_DEFINITIONS["demo"]
+    basic = PLAN_DEFINITIONS["demo"]
     monitor = PLAN_DEFINITIONS["trader"]
     pro = PLAN_DEFINITIONS["pro"]
 
-    assert explore.limits["saved_strategies"] == 0
-    assert explore.limits["active_strategies"] == 0
-    assert explore.limits["on_demand_scans_per_month"] == 0
-    assert explore.features["setup_lifecycle"] is False
-    assert monitor.limits["active_strategies"] == 2
+    assert basic.limits["saved_strategies"] == 2
+    assert basic.limits["strategy_approvals_per_30_days"] == 2
+    assert basic.limits["active_strategies"] == 1
+    assert basic.limits["alerts_per_week"] == 2
+    assert basic.limits["user_initiated_scans_per_week"] == 1
+    assert basic.features["ai_assistant"] is True
+    assert basic.features["missed_alert_investigations"] is False
+    assert monitor.limits["active_strategies"] == 5
     assert monitor.limits["alerts_per_day"] == 50
     assert monitor.limits["on_demand_scans_per_month"] == 10
     assert monitor.limits["forensic_investigations_per_month"] == 100_000
@@ -115,6 +125,48 @@ def test_public_plan_limits_match_the_published_catalog():
     assert pro.limits["active_strategies"] == 10
     assert pro.limits["alerts_per_day"] == 100_000
     assert pro.limits["on_demand_scans_per_month"] == 100
+
+
+async def test_basic_approval_limit_counts_distinct_strategies_over_30_days(test_context):
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Basic approval limit")
+        definition = load_strategy()
+        strategies = [
+            Strategy(user_id=user.id, name=f"Strategy {index}")
+            for index in range(3)
+        ]
+        session.add_all(strategies)
+        await session.flush()
+        for strategy in strategies[:2]:
+            session.add(
+                StrategyVersion(
+                    strategy_id=strategy.id,
+                    version_number=1,
+                    status=StrategyVersionStatus.APPROVED,
+                    source_type="structured",
+                    schema_json=definition.model_dump(mode="json"),
+                    schema_hash=definition.canonical_hash(),
+                    approved_by_user_id=user.id,
+                    approved_schema_hash=definition.canonical_hash(),
+                    approved_at=datetime.now(UTC),
+                    preview_status="succeeded",
+                )
+            )
+        await session.flush()
+
+        service = EntitlementService(session)
+        with pytest.raises(EntitlementError) as error:
+            await service.enforce_strategy_approval(
+                user.id,
+                strategy_id=strategies[2].id,
+            )
+        assert error.value.code == "strategy_approval_limit"
+
+        # A revision of one of the two approved strategies does not consume a third slot.
+        await service.enforce_strategy_approval(
+            user.id,
+            strategy_id=strategies[0].id,
+        )
 
 
 async def test_trial_lifecycle_uses_pro_trial_and_expires(test_context):
@@ -323,7 +375,7 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
         await activate_subscription(session, user.id, "trader")
-        for index in range(2):
+        for index in range(5):
             session.add(
                 Strategy(
                     user_id=user.id,
@@ -334,7 +386,7 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
             )
         await session.flush()
         definition = load_strategy()
-        with pytest.raises(EntitlementError, match="Plan allows 2 active"):
+        with pytest.raises(EntitlementError, match="Plan allows 5 active"):
             await EntitlementService(session).enforce_strategy_activation(user.id, definition)
 
         second_user = await create_user(session, "Symbol limit")
@@ -422,7 +474,7 @@ async def test_billing_webhook_is_idempotent_and_downgrade_pauses_excess_strateg
         assert event.payload_redacted["data"]["card"] == "[redacted]"
         assert await session.scalar(select(func.count(EntitlementSnapshot.id))) == 1
 
-        for index in range(4):
+        for index in range(7):
             session.add(
                 Strategy(
                     user_id=user.id,
@@ -453,7 +505,7 @@ async def test_billing_webhook_is_idempotent_and_downgrade_pauses_excess_strateg
         paused_count = await session.scalar(
             select(func.count(Strategy.id)).where(Strategy.status == StrategyStatus.PAUSED)
         )
-        assert active_count == 2
+        assert active_count == 5
         assert paused_count == 2
 
 
@@ -533,7 +585,7 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
         service = BillingService(session, settings)
         prepared = await service.prepare_checkout(
             user_id=user.id,
-            plan_code="pro",
+            plan_code="trader",
             billing_cycle="monthly",
             request_key="nowpayments-finished",
             terms_accepted=True,
@@ -541,8 +593,8 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
         payload = {
             "payment_id": "pay_456",
             "payment_status": "finished",
-            "order_id": f"hm|{prepared.attempt.id}|pro",
-            "price_amount": "22.00",
+            "order_id": f"hm|{prepared.attempt.id}|trader",
+            "price_amount": MONITOR_CHECKOUT_AMOUNT_TEXT,
             "price_currency": "USD",
             "pay_amount": "100.00",
             "actually_paid": "100.00",
@@ -590,7 +642,7 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
                         "checkout_attempt_id": str(prepared.attempt.id),
                         "provider_subscription_id": "nowpayments_second_payment",
                         "status": "active",
-                        "amount": "22.00",
+                        "amount": MONITOR_CHECKOUT_AMOUNT_TEXT,
                         "currency": "USD",
                         "settlement_expected_amount": "100.00",
                         "settlement_actual_amount": "100.00",
@@ -614,7 +666,7 @@ async def test_nowpayments_partial_payment_never_grants_access(test_context):
         service = BillingService(session, settings)
         prepared = await service.prepare_checkout(
             user_id=user.id,
-            plan_code="pro",
+            plan_code="trader",
             billing_cycle="one_time_30_day",
             request_key="nowpayments-partial",
             terms_accepted=True,
@@ -629,7 +681,7 @@ async def test_nowpayments_partial_payment_never_grants_access(test_context):
                     "checkout_attempt_id": str(prepared.attempt.id),
                     "provider_subscription_id": "nowpayments_partial",
                     "status": "partially_paid",
-                    "amount": "22.00",
+                    "amount": MONITOR_CHECKOUT_AMOUNT_TEXT,
                     "currency": "USD",
                 },
             },
@@ -668,7 +720,7 @@ async def test_nowpayments_settlement_uses_actual_crypto_received(
         service = BillingService(session, settings)
         prepared = await service.prepare_checkout(
             user_id=user.id,
-            plan_code="pro",
+            plan_code="trader",
             billing_cycle="one_time_30_day",
             request_key=f"settlement-{expected_code}",
             terms_accepted=True,
@@ -680,7 +732,7 @@ async def test_nowpayments_settlement_uses_actual_crypto_received(
                 "checkout_attempt_id": str(prepared.attempt.id),
                 "provider_subscription_id": f"sub-settlement-{expected_code}",
                 "status": "active",
-                "amount": "22.00",
+                "amount": MONITOR_CHECKOUT_AMOUNT_TEXT,
                 "currency": "USD",
                 "settlement_expected_amount": "100.00",
                 "settlement_actual_amount": actually_paid,
@@ -712,6 +764,44 @@ def test_billing_provider_capabilities_match_real_provider_semantics():
     assert creem.supports_customer_portal is True
     assert creem.supports_automatic_cancellation is True
     assert creem.supports_refunds is True
+
+
+async def test_checkout_allows_only_monitor_monthly(test_context):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        billing_provider="nowpayments",
+        billing_card_provider="disabled",
+        billing_crypto_provider="nowpayments",
+    )
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, "Monthly only")
+        service = BillingService(session, settings)
+
+        monthly = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="trader",
+            billing_cycle="monthly",
+            request_key="monitor-monthly",
+            terms_accepted=True,
+        )
+        assert monthly.attempt.billing_cycle == "one_time_30_day"
+        assert monthly.attempt.amount == MONITOR_CHECKOUT_AMOUNT
+
+        for plan_code, billing_cycle, expected_code in (
+            ("trader", "annual", "billing_cycle_not_available"),
+            ("trader", "trial_7_day", "billing_cycle_not_available"),
+            ("pro", "monthly", "plan_not_available"),
+        ):
+            with pytest.raises(BillingError) as error:
+                await service.prepare_checkout(
+                    user_id=user.id,
+                    plan_code=plan_code,
+                    billing_cycle=billing_cycle,
+                    request_key=f"closed-{plan_code}-{billing_cycle}",
+                    terms_accepted=True,
+                )
+            assert error.value.code == expected_code
 
 
 async def test_creem_creates_a_unique_server_bound_checkout(monkeypatch):
@@ -777,7 +867,7 @@ async def test_signed_creem_payment_activates_once_and_queues_one_receipt(test_c
         billing_card_provider="creem",
         creem_api_key="creem-test-key",
         creem_webhook_secret="creem-webhook-secret",
-        creem_product_ids={"pro_monthly": "prod_pro_monthly"},
+        creem_product_ids={"trader_monthly": "prod_monitor_monthly"},
     )
     async with test_context["session_factory"]() as session:
         user = await create_user(session, "Creem customer")
@@ -797,7 +887,7 @@ async def test_signed_creem_payment_activates_once_and_queues_one_receipt(test_c
         service = BillingService(session, settings)
         prepared = await service.prepare_checkout(
             user_id=user.id,
-            plan_code="pro",
+            plan_code="trader",
             billing_cycle="monthly",
             request_key="creem-paid-order",
             terms_accepted=True,
@@ -817,14 +907,14 @@ async def test_signed_creem_payment_activates_once_and_queues_one_receipt(test_c
                 "status": "active",
                 "customer": {"id": "cus_creem"},
                 "product": {
-                    "id": "prod_pro_monthly",
-                    "price": 2200,
+                    "id": "prod_monitor_monthly",
+                    "price": int(MONITOR_CHECKOUT_AMOUNT * 100),
                     "currency": "USD",
                 },
                 "metadata": {
                     "checkout_attempt_id": str(prepared.attempt.id),
                     "user_id": str(user.id),
-                    "plan_code": "pro",
+                    "plan_code": "trader",
                     "billing_cycle": "monthly_auto_renewal",
                 },
                 "current_period_start_date": "2035-01-01T00:00:00+00:00",
@@ -863,7 +953,7 @@ async def test_signed_creem_payment_activates_once_and_queues_one_receipt(test_c
         assert await session.scalar(select(func.count(PaymentEmailDelivery.id))) == 1
 
 
-async def test_signed_creem_trialing_event_activates_only_the_bound_trial(test_context):
+async def test_creem_trial_checkout_is_closed_in_favor_of_paid_monthly(test_context):
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
@@ -876,52 +966,19 @@ async def test_signed_creem_trialing_event_activates_only_the_bound_trial(test_c
     async with test_context["session_factory"]() as session:
         user = await create_user(session, "Creem trial")
         service = BillingService(session, settings)
-        prepared = await service.prepare_checkout(
-            user_id=user.id,
-            plan_code="trader",
-            billing_cycle="trial_7_day",
-            request_key="creem-trial-order",
-            terms_accepted=True,
-        )
-        payload = {
-            "id": "evt_creem_trialing",
-            "eventType": "subscription.trialing",
-            "object": {
-                "object": "subscription",
-                "id": "sub_creem_trial",
-                "status": "trialing",
-                "customer": {"id": "cus_creem_trial"},
-                "metadata": {
-                    "checkout_attempt_id": str(prepared.attempt.id),
-                    "user_id": str(user.id),
-                    "plan_code": "trader",
-                    "billing_cycle": "trial_7_day",
-                },
-                "current_period_start_date": "2035-01-01T00:00:00+00:00",
-                "current_period_end_date": "2035-01-08T00:00:00+00:00",
-            },
-        }
-        body = json.dumps(payload, separators=(",", ":")).encode()
-        signature = hmac.new(
-            b"creem-webhook-secret",
-            body,
-            digestmod="sha256",
-        ).hexdigest()
+        with pytest.raises(BillingError) as error:
+            await service.prepare_checkout(
+                user_id=user.id,
+                plan_code="trader",
+                billing_cycle="trial_7_day",
+                request_key="creem-trial-order",
+                terms_accepted=True,
+            )
 
-        await service.process_verified_webhook(
-            provider="creem",
-            body=body,
-            signature=signature,
-        )
-
-        subscription = await session.scalar(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-        assert subscription is not None
-        assert subscription.status == SubscriptionStatus.TRIALING
-        assert prepared.attempt.status == "completed"
-        assert prepared.attempt.amount == Decimal("0.00")
-        assert await session.scalar(select(func.count(PaymentEmailDelivery.id))) == 0
+        assert error.value.code == "billing_cycle_not_available"
+        assert await session.scalar(
+            select(func.count(BillingCheckoutAttempt.id))
+        ) == 0
 
 
 async def test_one_time_access_expires_at_verified_period_end(test_context):
@@ -960,9 +1017,17 @@ async def test_one_time_access_expires_at_verified_period_end(test_context):
 @pytest.mark.parametrize(
     ("amount", "currency", "expected_code"),
     [
-        ("21.99", "USD", "payment_underpaid"),
-        ("22.01", "USD", "payment_overpaid"),
-        ("22.00", "EUR", "payment_currency_mismatch"),
+        (
+            f"{MONITOR_CHECKOUT_AMOUNT - Decimal('0.01'):.2f}",
+            "USD",
+            "payment_underpaid",
+        ),
+        (
+            f"{MONITOR_CHECKOUT_AMOUNT + Decimal('0.01'):.2f}",
+            "USD",
+            "payment_overpaid",
+        ),
+        (MONITOR_CHECKOUT_AMOUNT_TEXT, "EUR", "payment_currency_mismatch"),
     ],
 )
 async def test_verified_payment_must_match_checkout_amount_and_currency(
@@ -985,7 +1050,7 @@ async def test_verified_payment_must_match_checkout_amount_and_currency(
         service = BillingService(session, settings)
         prepared = await service.prepare_checkout(
             user_id=user.id,
-            plan_code="pro",
+            plan_code="trader",
             billing_cycle="one_time_30_day",
             request_key=f"mismatch-{expected_code}",
             terms_accepted=True,
@@ -996,7 +1061,7 @@ async def test_verified_payment_must_match_checkout_amount_and_currency(
             "data": {
                 "checkout_attempt_id": str(prepared.attempt.id),
                 "user_id": str(user.id),
-                "plan_code": "pro",
+                "plan_code": "trader",
                 "provider_subscription_id": f"sub-{expected_code}",
                 "status": "active",
                 "amount": amount,
@@ -1104,7 +1169,7 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
         )
         prepared = await BillingService(session, nowpayments_settings).prepare_checkout(
             user_id=user.id,
-            plan_code="pro",
+            plan_code="trader",
             billing_cycle="monthly",
             request_key="admin-payment-notice",
             terms_accepted=True,
@@ -1117,8 +1182,8 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
     payload = {
         "payment_id": "pay_admin_notice",
         "payment_status": "finished",
-        "order_id": f"hm|{attempt_id}|pro",
-        "price_amount": "22.00",
+        "order_id": f"hm|{attempt_id}|trader",
+        "price_amount": MONITOR_CHECKOUT_AMOUNT_TEXT,
         "price_currency": "USD",
         "pay_amount": "100.00",
         "actually_paid": "100.00",
@@ -1161,7 +1226,7 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
         {
             "user_id": user.id,
             "email": "paid@example.com",
-            "plan_code": "pro",
+            "plan_code": "trader",
             "provider": "nowpayments",
             "event_type": "payment.finished",
         }

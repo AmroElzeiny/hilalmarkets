@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import Select, and_, func, or_, select
@@ -11,9 +11,11 @@ from ai_market_monitor.db.models import (
     EntitlementSnapshot,
     Plan,
     Strategy,
+    StrategyVersion,
     Subscription,
     Trial,
     UsageRecord,
+    User,
 )
 from ai_market_monitor.db.models.enums import StrategyStatus, SubscriptionStatus, TrialStatus
 from ai_market_monitor.schemas.strategy import StrategyDefinition
@@ -208,6 +210,42 @@ class EntitlementService:
             raise EntitlementError(
                 "delivery_channel_retired",
                 "This saved strategy uses a retired channel. Choose in-app or Telegram delivery.",
+            )
+        return context
+
+    async def enforce_strategy_approval(
+        self,
+        user_id: UUID,
+        *,
+        strategy_id: UUID,
+    ) -> EntitlementContext:
+        """Enforce the rolling approval allowance without blocking revisions.
+
+        The allowance counts distinct strategies first approved during the last 30 days.
+        A corrected version of one of those strategies remains approvable because it does
+        not consume another strategy slot.
+        """
+        await self.session.scalar(
+            select(User.id).where(User.id == user_id).with_for_update()
+        )
+        context = await self.current(user_id)
+        raw_limit = context.limit("strategy_approvals_per_30_days")
+        if raw_limit is None:
+            return context
+        limit = int(raw_limit)
+        approved_count = await self.session.scalar(
+            select(func.count(func.distinct(Strategy.id)))
+            .join(StrategyVersion, StrategyVersion.strategy_id == Strategy.id)
+            .where(
+                Strategy.user_id == user_id,
+                Strategy.id != strategy_id,
+                StrategyVersion.approved_at >= datetime.now(UTC) - timedelta(days=30),
+            )
+        )
+        if int(approved_count or 0) >= limit:
+            raise EntitlementError(
+                "strategy_approval_limit",
+                f"Plan allows approval of {limit} strategies per 30 days.",
             )
         return context
 

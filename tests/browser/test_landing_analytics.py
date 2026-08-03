@@ -212,15 +212,13 @@ def test_consent_cta_sections_and_pricing_events_are_grounded_and_deduplicated(
     page.wait_for_timeout(1200)
     assert _event_count(page, "pricing_section_view") == 1
 
-    page.get_by_label("Annual").check()
-    assert _event_count(page, "billing_interval_changed") == 1
-    expect(page.get_by_text("$120", exact=True)).to_be_visible()
-    expect(page.get_by_text("Save $24 per year", exact=True)).to_be_visible()
+    expect(page.get_by_label("Annual")).to_be_disabled()
+    assert _event_count(page, "billing_interval_changed") == 0
 
-    monitor_cta = page.get_by_role("link", name="Choose Monitor")
+    monitor_cta = page.get_by_role("link", name="Choose Monitor monthly")
     expect(monitor_cta).to_have_attribute(
         "href",
-        "/subscribe?plan_code=trader&billing_interval=annual",
+        "/subscribe?plan_code=trader&billing_interval=monthly",
     )
     monitor_cta.evaluate(
         "(element) => element.addEventListener('click', event => event.preventDefault())"
@@ -347,19 +345,19 @@ def test_missing_or_failed_tracking_provider_does_not_block_plan_navigation(
     )
 
 
-def test_paid_plan_selection_preserves_plan_and_interval_when_billing_is_disabled(
+def test_monitor_monthly_selection_is_preserved_when_billing_is_disabled(
     page: Page,
     base_url: str,
 ) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     page.locator("#pricing").scroll_into_view_if_needed()
-    page.get_by_label("Annual").check()
-    page.get_by_role("link", name="Choose Pro").click()
+    expect(page.get_by_label("Annual")).to_be_disabled()
+    page.get_by_role("link", name="Choose Monitor monthly").click()
     expect(page).to_have_url(
-        f"{base_url}/signup?plan_code=pro&billing_interval=annual"
+        f"{base_url}/signup?plan_code=trader&billing_interval=monthly"
     )
     expect(
-        page.get_by_text("Your Pro plan choice will be kept after authentication.")
+        page.get_by_text("Your Monitor plan choice will be kept after authentication.")
     ).to_be_visible()
 
 

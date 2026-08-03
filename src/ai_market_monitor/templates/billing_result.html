@@ -10,7 +10,7 @@
     {% if message == 'payment_successful' %}
       <p>Your payment is verified and your {{ plan.name if plan else 'selected' }} access is active. A branded receipt has been queued for your account email.</p>
     {% elif message == 'trial_started' %}
-      <p>Your seven-day Monitor trial is active. Creem will manage the payment method and the first charge date shown at checkout.</p>
+      <p>Your existing seven-day Monitor trial is active until the access end date shown in Billing.</p>
     {% elif message %}
       <p>You returned from the payment provider, but its signed confirmation has not arrived yet. Your access stays unchanged until it does.</p>
     {% else %}

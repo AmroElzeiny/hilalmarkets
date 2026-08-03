@@ -129,7 +129,7 @@
           </section>
 
           <section class="verified-two-column">
-            <article class="dash-panel verified-section">
+            {% if entitlement.feature_enabled('missed_alert_investigations') %}<article class="dash-panel verified-section">
               <p class="eyebrow">Guided reconstruction</p><h2>Why wasn't I alerted?</h2><p>Select the market moment. Hilal Markets separates market logic, data, monitor state, and delivery evidence.</p>
               <form class="verified-form compact" data-forensic-form>
                 <label>Exchange<select name="exchange"><option value="binance">Binance</option><option value="bybit">Bybit</option></select></label>
@@ -139,7 +139,7 @@
                 <button class="button button-primary verified-form-wide" type="submit">Investigate</button>
               </form>
               <div class="forensic-result" data-forensic-result></div>
-            </article>
+            </article>{% endif %}
             <article class="dash-panel verified-section">
               <p class="eyebrow">Portable strategy contract</p><h2>A complete record</h2><p>Export the prompt, approved mechanics, assumptions, tests, history, activation, delivery settings, and integrity hash.</p>
               <div class="contract-summary" data-contract-summary></div>

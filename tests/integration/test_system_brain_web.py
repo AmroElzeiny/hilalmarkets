@@ -1,10 +1,20 @@
 import re
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from sqlalchemy import func, select
 
-from ai_market_monitor.db.models import AuditEvent, ReviewCase, User, UserIdentity
+from ai_market_monitor.db.models import (
+    AuditEvent,
+    CustomerConversationEvent,
+    PublicChatConversation,
+    PublicChatMessage,
+    ReviewCase,
+    User,
+    UserIdentity,
+)
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
-from ai_market_monitor.schemas.system_brain import SystemBrainAssistantResponse
+from ai_market_monitor.schemas.system_brain import SystemBrainAgentTurnResponse
 
 
 async def _user(test_context, *, role: UserRole, email: str) -> User:
@@ -68,9 +78,7 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
         email="governance@example.com",
     )
     headers = {"X-User-ID": str(admin.id)}
-    dashboard = await test_context["client"].get(
-        "/dashboard/system-brain", headers=headers
-    )
+    dashboard = await test_context["client"].get("/dashboard/system-brain", headers=headers)
 
     assert dashboard.status_code == 200
     assert dashboard.headers["cache-control"] == "no-store, max-age=0"
@@ -89,18 +97,14 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
 
     assert "hilalmarkets-brand.css" in dashboard.text
     stylesheet = (await test_context["client"].get("/static/system-brain.css")).text
-    brand_stylesheet = (
-        await test_context["client"].get("/static/hilalmarkets-brand.css")
-    ).text
+    brand_stylesheet = (await test_context["client"].get("/static/hilalmarkets-brand.css")).text
     assert "--hm-apple: #cbfa4d" in brand_stylesheet
     # The page asks for the brand display face by token, and loads the one file that
     # both declares the face and defines the token. Naming the family here again would
     # be a second copy of the answer, free to drift from the first.
     assert "font-family: var(--hm-font-display)" in stylesheet
     assert "hilalmarkets-fonts.css" in dashboard.text
-    fonts_stylesheet = (
-        await test_context["client"].get("/static/hilalmarkets-fonts.css")
-    ).text
+    fonts_stylesheet = (await test_context["client"].get("/static/hilalmarkets-fonts.css")).text
     assert "--hm-font-display:" in fonts_stylesheet
     assert "@font-face" in fonts_stylesheet
     assert "#0b3b31" not in stylesheet.lower()
@@ -168,10 +172,15 @@ async def test_system_brain_assistant_is_admin_scoped_and_read_only(
     )
     assert csrf is not None
 
-    async def fake_answer(_service, _session, *, admin_user_id, request):
+    async def fake_answer(_service, _session, _conversation_id, *, admin_user_id, request):
         assert admin_user_id == admin.id
         assert request.message == "Why is this queue waiting?"
-        return SystemBrainAssistantResponse(
+        return SystemBrainAgentTurnResponse(
+            conversation_id=uuid4(),
+            user_message_id=uuid4(),
+            assistant_message_id=uuid4(),
+            run_id=uuid4(),
+            status="completed",
             answer="One retained case is waiting for independent evidence review.",
             findings=[
                 {
@@ -189,13 +198,16 @@ async def test_system_brain_assistant_is_admin_scoped_and_read_only(
             ],
             evidence_refs=["case:bounded-test"],
             limitations=["No terminal action was taken."],
+            opportunities=[],
+            tool_calls=[{"tool_name": "review_queue_summary", "status": "success"}],
             model="gpt-5.4-nano",
             reasoning_effort="low",
+            usage={"input_tokens": 10, "output_tokens": 10},
+            latency_ms=12,
         )
 
     monkeypatch.setattr(
-        "ai_market_monitor.api.routers.system_brain."
-        "SystemBrainAssistantService.answer",
+        "ai_market_monitor.api.routers.system_brain.SystemBrainAgentService.run_turn",
         fake_answer,
     )
     denied = await test_context["client"].post(
@@ -219,6 +231,122 @@ async def test_system_brain_assistant_is_admin_scoped_and_read_only(
     assert payload["reasoning_effort"] == "low"
     assert payload["evidence_refs"] == ["case:bounded-test"]
     assert "approve" not in payload["answer"].casefold()
+
+
+async def test_operational_workspace_apis_persist_and_audit_exact_transcripts(test_context):
+    admin = await _user(
+        test_context,
+        role=UserRole.ADMIN,
+        email="workspace-admin@example.com",
+    )
+    ordinary = await _user(
+        test_context,
+        role=UserRole.USER,
+        email="workspace-customer@example.com",
+    )
+    admin_headers = {"X-User-ID": str(admin.id)}
+    page = await test_context["client"].get("/dashboard/system-brain", headers=admin_headers)
+    csrf = re.search(r'data-system-brain-csrf="([a-f0-9]+)"', page.text)
+    assert csrf is not None
+    write_headers = {**admin_headers, "X-CSRF-Token": csrf.group(1)}
+
+    created = await test_context["client"].post(
+        "/api/v1/system-brain/conversations",
+        headers=write_headers,
+        json={"title": "Revenue evidence"},
+    )
+    assert created.status_code == 201
+    assert created.headers["cache-control"] == "no-store, max-age=0"
+    conversation_id = created.json()["conversation_id"]
+    renamed = await test_context["client"].patch(
+        f"/api/v1/system-brain/conversations/{conversation_id}",
+        headers=write_headers,
+        json={"title": "Retained revenue evidence"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Retained revenue evidence"
+
+    now = datetime.now(UTC)
+    public_id = uuid4()
+    public_message_id = uuid4()
+    async with test_context["session_factory"]() as session:
+        session.add(
+            PublicChatConversation(
+                id=public_id,
+                session_key_hash="a" * 64,
+                state_json={},
+                stage="ANSWER",
+                message_count=1,
+                model="test-model",
+                expires_at=now + timedelta(days=7),
+            )
+        )
+        session.add(
+            PublicChatMessage(
+                id=public_message_id,
+                conversation_id=public_id,
+                sequence=1,
+                role="user",
+                content="What does the monitor do?",
+                telemetry_redacted={},
+                created_at=now,
+                retain_until=now + timedelta(days=7),
+            )
+        )
+        session.add(
+            CustomerConversationEvent(
+                id=1,
+                source_type="public_site_chat",
+                conversation_id=public_id,
+                event_type="message_persisted",
+                message_id=public_message_id,
+                occurred_at=now,
+            )
+        )
+        await session.commit()
+
+    listed = await test_context["client"].get(
+        "/api/v1/system-brain/customer-conversations?source=public_site_chat",
+        headers=admin_headers,
+    )
+    assert listed.status_code == 200
+    assert listed.headers["cache-control"] == "no-store, max-age=0"
+    item = next(row for row in listed.json()["items"] if row["conversation_id"] == str(public_id))
+    assert item["display_name"] == "Anonymous visitor"
+    assert item["user_email"] is None
+
+    detail = await test_context["client"].get(
+        f"/api/v1/system-brain/customer-conversations/public_site_chat/{public_id}",
+        params={"access_reason": "support quality review"},
+        headers=admin_headers,
+    )
+    assert detail.status_code == 200
+    assert [message["content"] for message in detail.json()["messages"]] == [
+        "What does the monitor do?"
+    ]
+    events = await test_context["client"].get(
+        "/api/v1/system-brain/customer-conversation-events?after_id=0",
+        headers=admin_headers,
+    )
+    assert events.status_code == 200
+    assert events.json()["items"][0]["message_id"] == str(public_message_id)
+    denied = await test_context["client"].get(
+        "/api/v1/system-brain/customer-conversation-events?after_id=0",
+        headers={"X-User-ID": str(ordinary.id)},
+    )
+    assert denied.status_code == 403
+
+    async with test_context["session_factory"]() as session:
+        viewed = int(
+            await session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.action == "system_brain.customer_conversation.view",
+                    AuditEvent.target_id == str(public_id),
+                )
+            )
+            or 0
+        )
+    assert viewed == 1
 
 
 async def test_system_brain_all_sections_enforce_admin_role(test_context):
@@ -367,9 +495,7 @@ async def test_review_action_enforces_admin_csrf_state_and_audit(test_context):
         case_id = case.id
 
     headers = {"X-User-ID": str(admin.id)}
-    detail = await test_context["client"].get(
-        f"/system-brain/reviews/{case_id}", headers=headers
-    )
+    detail = await test_context["client"].get(f"/system-brain/reviews/{case_id}", headers=headers)
     assert detail.status_code == 200
     assert "Dismiss false positive" in detail.text
     csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', detail.text)

@@ -53,6 +53,14 @@ _ROUTING_TECHNICAL_TERMS = frozenset(
     }
 )
 
+# Provider model aliases do not necessarily support every value accepted by the
+# Responses API schema. Luna rejects ``minimal``; ``low`` is its first supported
+# reasoning level after ``none``. Keep this guard at the routing boundary so a stale
+# deployment override cannot turn an ordinary chat message into an HTTP 400.
+_MODEL_REASONING_EFFORT_OVERRIDES = {
+    ("gpt-5.6-luna", "minimal"): "low",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class AISetupModelRoute:
@@ -187,6 +195,13 @@ def select_setup_model(
         model = evaluator_target.model
         effort = evaluator_target.reasoning_effort
         unique_reasons = (*unique_reasons, "evaluator_target_version")
+    requested_effort = effort
+    effort = _MODEL_REASONING_EFFORT_OVERRIDES.get(
+        (model.casefold(), effort.casefold()),
+        effort,
+    )
+    if effort != requested_effort:
+        unique_reasons = (*unique_reasons, "model_reasoning_effort_normalized")
     configured_service_tier = (
         settings.setup_agent_complex_service_tier
         if complex_route

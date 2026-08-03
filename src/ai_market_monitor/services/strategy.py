@@ -224,6 +224,13 @@ class StrategyService:
                     "The approved strategy no longer matches its immutable schema hash.",
                 )
             return version
+        try:
+            await EntitlementService(self.session).enforce_strategy_approval(
+                user_id,
+                strategy_id=version.strategy_id,
+            )
+        except EntitlementError as exc:
+            raise StrategyGateError(exc.code, str(exc)) from exc
         version.approved_by_user_id = user_id
         version.approved_schema_hash = version.schema_hash
         version.approved_at = datetime.now(UTC)

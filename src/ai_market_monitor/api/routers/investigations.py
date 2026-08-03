@@ -1,11 +1,14 @@
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import UserPrincipal, get_user_principal
+from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models.enums import StrategyStatus
 from ai_market_monitor.engine.forensics import AlertEvidence, ForensicInvestigationService
 from ai_market_monitor.schemas.investigation import WhyNoAlertRequest, WhyNoAlertResponse
+from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import Candle
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
@@ -14,8 +17,19 @@ router = APIRouter(prefix="/investigations", tags=["investigations"])
 @router.post("/why-no-alert", response_model=WhyNoAlertResponse)
 async def why_no_alert(
     request: WhyNoAlertRequest,
-    _: UserPrincipal = Depends(get_user_principal),
+    principal: UserPrincipal = Depends(get_user_principal),
+    session: AsyncSession = Depends(get_db_session),
 ) -> WhyNoAlertResponse:
+    try:
+        await EntitlementService(session).require_feature(
+            principal.user_id,
+            "missed_alert_investigations",
+        )
+    except EntitlementError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="Why wasn't I alerted? is available on the Monitor plan.",
+        ) from exc
     candle_sets = {
         timeframe: [
             Candle(

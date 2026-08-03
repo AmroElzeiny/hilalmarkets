@@ -554,6 +554,49 @@ async def test_alert_fatigue_guard_suppresses_duplicate_event_hash(test_context)
         assert await session.scalar(select(Alert.id)) is not None
 
 
+async def test_alert_fatigue_guard_applies_weekly_budget_across_monitors(test_context):
+    strategy = load_strategy()
+    sets = candle_sets(volume_multiplier=1.6)
+    result = StrategyRuleEngine().evaluate(
+        strategy,
+        market(),
+        sets,
+        evaluation_time=sets["15m"][-1].timestamp,
+        strategy_version="weekly-budget",
+    )
+    async with test_context["session_factory"]() as session:
+        user_id = uuid4()
+        session.add_all(
+            [
+                Alert(
+                    user_id=user_id,
+                    strategy_version_id=uuid4(),
+                    alert_type=AlertType.CONFIRMED,
+                    deduplication_key=f"weekly-alert-{index}",
+                    title="Confirmed",
+                    body="Body",
+                    proof_receipt={"symbol": f"COIN{index}/USDT"},
+                )
+                for index in range(2)
+            ]
+        )
+        await session.commit()
+
+        decision = await AlertFatigueGuard(session).check(
+            result,
+            user_id=user_id,
+            strategy_version_id=uuid4(),
+            alert_type=AlertType.CONFIRMED,
+            cooldown_seconds=0,
+            maximum_alerts_per_hour=10,
+            daily_alert_budget=None,
+            weekly_alert_budget=2,
+        )
+
+        assert decision.allowed is False
+        assert decision.reason == "weekly_alert_budget"
+
+
 async def test_alert_fatigue_guard_cools_down_same_symbol_only(test_context):
     strategy = load_strategy()
     sets = candle_sets(volume_multiplier=1.6)

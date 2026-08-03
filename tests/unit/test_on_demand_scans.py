@@ -204,6 +204,45 @@ async def test_on_demand_scan_returns_proof_without_live_alert_persistence(test_
         assert exc.value.code == "on_demand_quota_exceeded"
 
 
+async def test_basic_plan_shares_one_weekly_quota_across_scanner_modes(test_context):
+    async with test_context["session_factory"]() as session:
+        user = User(display_name="Basic Scanner")
+        session.add(user)
+        await session.flush()
+        strategy = scan_strategy()
+        first_request = OnDemandScanRequest(
+            strategy=strategy,
+            approved_schema_hash=strategy.canonical_hash(),
+            symbols=["SOL/USDT"],
+            max_symbols=1,
+            light_scan=True,
+            idempotency_key="basic-light-scan",
+        )
+
+        first = await OnDemandScanService(session, OnDemandProvider()).run(
+            user.id,
+            first_request,
+        )
+        assert first.plan_code == "demo"
+        assert first.quota_limit == 1
+        assert first.quota_remaining == 0
+
+        with pytest.raises(OnDemandScanError) as error:
+            await OnDemandScanService(session, OnDemandProvider()).run(
+                user.id,
+                first_request.model_copy(
+                    update={
+                        "light_scan": False,
+                        "idempotency_key": "basic-on-demand-scan",
+                    }
+                ),
+            )
+        assert error.value.code == "on_demand_quota_exceeded"
+        usage = await session.scalar(select(UsageRecord))
+        assert usage is not None
+        assert usage.metric == "basic_user_initiated_scans"
+
+
 async def test_on_demand_retry_reuses_run_and_deliberate_rerun_consumes_quota(
     test_context,
 ):

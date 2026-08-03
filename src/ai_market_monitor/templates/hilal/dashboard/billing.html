@@ -98,32 +98,16 @@
           <button class="btn btn-secondary" type="button" disabled aria-disabled="true">{{ 'Current plan' if current else 'Included with your plan' }}</button>
         {% elif code == 'trader' and 'pro_trial' in active_paid_plan_codes %}
           <button class="btn btn-gold" type="button" disabled aria-disabled="true">Monitor trial active</button>
-          <p class="dashboard-trial-note">Your current seven-day access will not be charged.</p>
-        {% elif code == 'trader' and trial_claimable %}
-          <button
-            class="btn btn-gold"
-            type="button"
-            data-billing-dialog-trigger
-            data-dashboard-purchase-button
-            data-plan-code="trader"
-            data-plan-name="Monitor"
-            data-billing-cycle="trial_7_day"
-            data-monthly-cycle="trial_7_day"
-            data-annual-cycle="annual"
-            data-monthly-label="Try Monitor for 7 days"
-            data-annual-label="Choose Monitor annually"
-            {% if not (billing_selection_availability.trader.purchasable and billing_selection_availability.trader.trial) %}disabled aria-disabled="true"{% endif %}
-          >Try Monitor for 7 days</button>
-          <p class="dashboard-trial-note" data-dashboard-trial-note>
-            {% if billing_selection_availability.trader.purchasable and billing_selection_availability.trader.trial %}
-              No charge for seven days. Card checkout shows when the first payment would occur.
-            {% else %}
-              The seven-day Creem trial product is not available yet.
-            {% endif %}
-          </p>
+          <p class="dashboard-trial-note">Your existing trial access remains active until the date shown above.</p>
         {% elif current %}
           <button class="btn btn-gold" type="button" disabled aria-disabled="true">Current plan</button>
         {% else %}
+          {% if code == 'trader' %}
+            <aside class="dashboard-money-back" aria-label="Refund policy">
+              <strong>7-day money-back guarantee</strong>
+              <span>{{ presentation.trial_note }}</span>
+            </aside>
+          {% endif %}
           <button
             class="btn btn-primary"
             type="button"

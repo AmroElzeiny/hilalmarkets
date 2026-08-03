@@ -446,7 +446,7 @@ async def test_signup_with_telegram_link_sends_connected_notification(test_conte
     assert "Dashboard account connected" in delivered[0].text
 
 
-async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
+async def test_public_trial_claim_is_closed(test_context):
     await _signup_and_verify(test_context, email="trial@example.com")
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))
@@ -462,12 +462,11 @@ async def test_trial_claim_from_dashboard_blocks_duplicate_claim(test_context):
         data={"csrf_token": token},
         follow_redirects=False,
     )
-    assert first.headers["location"] == "/dashboard/billing?message=trial_claimed"
-    assert second.headers["location"] == "/dashboard/billing?message=trial_claimed"
+    assert first.headers["location"] == "/dashboard/billing?error=billing_disabled"
+    assert second.headers["location"] == "/dashboard/billing?error=billing_disabled"
     async with test_context["session_factory"]() as session:
         trials = (await session.scalars(select(Trial))).all()
-        assert len(trials) == 1
-        assert (trials[0].ends_at - trials[0].starts_at).days == 7
+        assert trials == []
 
 
 async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test_context):
@@ -481,8 +480,10 @@ async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test
     assert "Free forever" in page.text
     assert 'data-billing-page-interval' in page.text
     assert 'value="annual"' in page.text
-    assert "Try Monitor for 7 days" in page.text
-    assert "The seven-day Creem trial product is not available yet." in page.text
+    assert "Choose Monitor monthly" in page.text
+    assert "7-day money-back guarantee" in page.text
+    assert "Cancel within 7 days of payment for a full refund." in page.text
+    assert 'value="annual"' in page.text and 'disabled aria-disabled=true' in page.text
     assert 'id="billing-checkout-dialog"' in page.text
     # The Pro plan is not on sale yet, so the card says "Soon" and carries no price.
     # A number beside "Soon" reads as a charge the user is about to face.

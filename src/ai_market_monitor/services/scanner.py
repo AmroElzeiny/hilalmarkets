@@ -354,6 +354,7 @@ class ScanPersistenceService:
         result: EvaluationResult,
         is_candle_complete: bool,
         plan_alert_budget: int | None,
+        plan_weekly_alert_budget: int | None = None,
         evidence_only: bool = False,
         scan_context: dict[str, Any] | None = None,
     ) -> tuple[ScanResult, SetupInstance | None, Alert | None]:
@@ -433,6 +434,7 @@ class ScanPersistenceService:
             setup=setup,
             result=result,
             plan_alert_budget=plan_alert_budget,
+            plan_weekly_alert_budget=plan_weekly_alert_budget,
             definition=definition,
             scan_context=scan_context,
         )
@@ -748,6 +750,7 @@ class ScanPersistenceService:
         setup: SetupInstance | None,
         result: EvaluationResult,
         plan_alert_budget: int | None,
+        plan_weekly_alert_budget: int | None,
         definition: StrategyDefinition,
         scan_context: dict[str, Any] | None,
     ) -> Alert | None:
@@ -849,6 +852,7 @@ class ScanPersistenceService:
             cooldown_seconds=definition.alerts.cooldown_seconds,
             maximum_alerts_per_hour=definition.alerts.maximum_alerts_per_hour,
             daily_alert_budget=daily_budget,
+            weekly_alert_budget=plan_weekly_alert_budget,
         )
         if not decision.allowed:
             if setup.state == SetupLifecycleState.CONFIRMED:
@@ -1225,6 +1229,12 @@ class ScanOrchestrator:
                     plan_alert_budget = (
                         int(plan_budget_value) if plan_budget_value is not None else None
                     )
+                    plan_weekly_budget_value = entitlement.limit("alerts_per_week")
+                    plan_weekly_alert_budget = (
+                        int(plan_weekly_budget_value)
+                        if plan_weekly_budget_value is not None
+                        else None
+                    )
                     for evaluation in result["evaluations"]:
                         _, _, alert = await self.persistence.persist_evaluation(
                             job=job,
@@ -1234,6 +1244,7 @@ class ScanOrchestrator:
                             result=evaluation,
                             is_candle_complete=is_complete,
                             plan_alert_budget=plan_alert_budget,
+                            plan_weekly_alert_budget=plan_weekly_alert_budget,
                             evidence_only=experiment_mode == "dry_run",
                             scan_context={
                                 **(

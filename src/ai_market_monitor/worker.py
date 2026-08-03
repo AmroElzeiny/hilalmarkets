@@ -132,6 +132,10 @@ app.conf.update(
             "task": "ai_market_monitor.cleanup_public_chat_data",
             "schedule": 24 * 60 * 60,
         },
+        "refresh-system-brain-repository-index-every-five-minutes": {
+            "task": "ai_market_monitor.refresh_system_brain_repository_index",
+            "schedule": 5 * 60,
+        },
         "expire-ended-paid-access-every-five-minutes": {
             "task": "ai_market_monitor.expire_ended_paid_access",
             "schedule": 5 * 60,
@@ -174,6 +178,39 @@ def evaluate_due_trial_cycles() -> dict:
 @app.task(name="ai_market_monitor.send_trial_cycle_reminders")
 def send_trial_cycle_reminders() -> dict:
     return _run_async_task(_send_trial_cycle_reminders())
+
+
+@app.task(name="ai_market_monitor.refresh_system_brain_repository_index")
+def refresh_system_brain_repository_index() -> dict:
+    return _run_async_task(_refresh_system_brain_repository_index())
+
+
+async def _refresh_system_brain_repository_index() -> dict:
+    from datetime import UTC, datetime
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import AuditEvent
+    from ai_market_monitor.services.system_brain_repository_index import (
+        RepositoryEvidenceIndexService,
+    )
+
+    async with SessionFactory() as session:
+        result = await RepositoryEvidenceIndexService().refresh(session)
+        session.add(
+            AuditEvent(
+                actor_user_id=None,
+                actor_type="system_maintenance",
+                action="system_brain.repository_index.refreshed",
+                target_type="repository_evidence_index",
+                target_id=None,
+                request_id=None,
+                ip_hash=None,
+                metadata_redacted=result,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+        return result
 
 
 @app.task(name="ai_market_monitor.reconcile_trial_alert_deliveries")
@@ -1152,8 +1189,7 @@ async def _auto_publish_ready_imports() -> dict[str, int | str]:
                         ~select(PublishedAssetAssessment.id)
                         .join(
                             ReviewDecision,
-                            ReviewDecision.id
-                            == PublishedAssetAssessment.review_decision_id,
+                            ReviewDecision.id == PublishedAssetAssessment.review_decision_id,
                         )
                         .where(
                             ReviewDecision.review_case_id == ReviewCase.id,

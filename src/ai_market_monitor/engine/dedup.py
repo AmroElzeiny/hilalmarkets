@@ -42,6 +42,7 @@ class AlertFatigueGuard:
         cooldown_seconds: int,
         maximum_alerts_per_hour: int,
         daily_alert_budget: int | None,
+        weekly_alert_budget: int | None = None,
     ) -> DuplicateDecision:
         key = stable_event_hash(
             {
@@ -99,6 +100,19 @@ class AlertFatigueGuard:
             )
             if daily_count and daily_count >= daily_alert_budget:
                 return DuplicateDecision(False, key, "daily_alert_budget")
+        if weekly_alert_budget is not None:
+            week_start = datetime(now.year, now.month, now.day, tzinfo=UTC) - timedelta(
+                days=now.weekday()
+            )
+            weekly_count = await self.session.scalar(
+                select(func.count(Alert.id)).where(
+                    Alert.user_id == user_id,
+                    Alert.suppressed_reason.is_(None),
+                    Alert.created_at >= week_start,
+                )
+            )
+            if weekly_count and weekly_count >= weekly_alert_budget:
+                return DuplicateDecision(False, key, "weekly_alert_budget")
         return DuplicateDecision(True, key)
 
 

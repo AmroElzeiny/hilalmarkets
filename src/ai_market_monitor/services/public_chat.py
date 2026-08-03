@@ -21,9 +21,11 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import HELP_CATEGORIES, PUBLIC_PAGES, PURCHASE_FAQS
 from ai_market_monitor.db.models import (
+    CustomerConversationEvent,
     PublicChatAnswerEvent,
     PublicChatAnswerFeedback,
     PublicChatConversation,
+    PublicChatMessage,
     PublicChatTurn,
     PublicInquiry,
     PublicInquiryEmailDelivery,
@@ -195,14 +197,17 @@ class PublicKnowledgeService:
         question: str,
         *,
         authenticated: bool = False,
-    ) -> tuple[
-        PublicChatAnswerStatus,
-        str,
-        float,
-        list[str],
-        list[str],
-        str | None,
-    ] | None:
+    ) -> (
+        tuple[
+            PublicChatAnswerStatus,
+            str,
+            float,
+            list[str],
+            list[str],
+            str | None,
+        ]
+        | None
+    ):
         cleaned = _clean_text(question, maximum=800)
         if any(pattern.search(cleaned) for pattern in _INJECTION_PATTERNS):
             return (
@@ -352,9 +357,7 @@ class PublicKnowledgeService:
             reverse=True,
         )
         selected = [
-            (score, entry)
-            for score, entry in ranked
-            if score > 0 or entry.source_id in previous
+            (score, entry) for score, entry in ranked if score > 0 or entry.source_id in previous
         ][:limit]
         return [
             {
@@ -597,9 +600,7 @@ class PublicKnowledgeService:
         lowered = question.casefold()
         if title and title in lowered:
             score += 0.45
-        keyword_hits = sum(
-            1 for keyword in entry.keywords if keyword.casefold() in lowered
-        )
+        keyword_hits = sum(1 for keyword in entry.keywords if keyword.casefold() in lowered)
         score += min(0.30, keyword_hits * 0.10)
         return min(1.0, score)
 
@@ -675,8 +676,8 @@ class PublicChatService:
                 mode = "PRODUCT_CONVERSATION"
                 intent = "greeting"
             else:
-                status, message, score, source_ids, route_ids, gap = (
-                    self.knowledge.answer(payload.question)
+                status, message, score, source_ids, route_ids, gap = self.knowledge.answer(
+                    payload.question
                 )
                 stage = "ANSWER" if status == "answered" else "KNOWLEDGE_GAP"
                 mode = "PRODUCT_FACT"
@@ -696,17 +697,11 @@ class PublicChatService:
             )
             ai_state = _public_ai_state(state)
             if payload.profile is not None:
-                ai_state["visitor_profile"] = {
-                    "name": payload.profile.name.split()[0][:80]
-                }
-            if user_id is not None and not (ai_state.get("visitor_profile") or {}).get(
-                "name"
-            ):
+                ai_state["visitor_profile"] = {"name": payload.profile.name.split()[0][:80]}
+            if user_id is not None and not (ai_state.get("visitor_profile") or {}).get("name"):
                 user = await self.session.get(User, user_id)
                 if user is not None and user.display_name:
-                    ai_state["visitor_profile"] = {
-                        "name": user.display_name.split()[0][:80]
-                    }
+                    ai_state["visitor_profile"] = {"name": user.display_name.split()[0][:80]}
             allowed_tools = ["public_passport"]
             if user_id is not None:
                 allowed_tools.extend(
@@ -834,12 +829,16 @@ class PublicChatService:
                 validation_failure = type(exc).__name__
                 mode = "PRODUCT_CONVERSATION" if is_greeting else "PRODUCT_FACT"
                 status = "answered" if is_greeting else "unsupported"
-                message = _safe_greeting(
-                    state,
-                    supplied_name=payload.profile.name if payload.profile else None,
-                ) if is_greeting else (
-                    "I couldn't verify that answer just now. You can retry, ask it another "
-                    "way, or use the Support form below if you prefer."
+                message = (
+                    _safe_greeting(
+                        state,
+                        supplied_name=payload.profile.name if payload.profile else None,
+                    )
+                    if is_greeting
+                    else (
+                        "I couldn't verify that answer just now. You can retry, ask it another "
+                        "way, or use the Support form below if you prefer."
+                    )
                 )
                 score = 0.0
                 source_ids = []
@@ -855,8 +854,7 @@ class PublicChatService:
                 safety_boundary = "product_scope_only"
 
         support_handoff_explicitly_requested = bool(
-            explicit_support_request
-            and mode not in {"OUT_OF_SCOPE", "SAFETY_REFUSAL"}
+            explicit_support_request and mode not in {"OUT_OF_SCOPE", "SAFETY_REFUSAL"}
         )
         if support_handoff_explicitly_requested:
             support_handoff_available = True
@@ -877,9 +875,7 @@ class PublicChatService:
             output_tokens=usage["output_tokens"],
             reasoning_tokens=usage["reasoning_tokens"],
             latency_ms=(
-                usage["latency_ms"]
-                if ai_calls
-                else max(0, round((monotonic() - started) * 1000))
+                usage["latency_ms"] if ai_calls else max(0, round((monotonic() - started) * 1000))
             ),
             estimated_cost_usd=Decimal(str(usage["estimated_cost_usd"])),
             validation_failure=validation_failure,
@@ -931,14 +927,34 @@ class PublicChatService:
             authenticated_context_used=authenticated_context_used,
             support_handoff_available=support_handoff_available,
             support_handoff_reason=support_handoff_reason,
-            support_handoff_explicitly_requested=(
-                support_handoff_explicitly_requested
-            ),
+            support_handoff_explicitly_requested=(support_handoff_explicitly_requested),
             answer_event_id=event.id,
         )
         turn.status = "completed"
         turn.response_json = response.model_dump(mode="json")
         turn.error_type = validation_failure
+        self.session.add(
+            PublicChatMessage(
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                sequence=conversation.message_count,
+                role="assistant",
+                content=message,
+                message_type="text",
+                telemetry_redacted={
+                    "model": usage["model"],
+                    "input_tokens": usage["input_tokens"],
+                    "output_tokens": usage["output_tokens"],
+                    "reasoning_tokens": usage["reasoning_tokens"],
+                    "estimated_cost_usd": usage["estimated_cost_usd"],
+                    "latency_ms": event.latency_ms,
+                    "status": status,
+                    "failure_code": validation_failure,
+                },
+                created_at=now,
+                retain_until=conversation.expires_at,
+            )
+        )
         await self.session.flush()
         return response
 
@@ -964,17 +980,18 @@ class PublicChatService:
                 message_count=0,
                 model=self.settings.public_chat_ai_model or self.settings.openai_model,
                 reasoning_effort=self.settings.public_chat_ai_reasoning_effort,
-                expires_at=now
-                + timedelta(days=self.settings.public_chat_session_retention_days),
+                expires_at=now + timedelta(days=self.settings.public_chat_session_retention_days),
             )
             self.session.add(conversation)
             await self.session.flush()
         elif _as_utc(conversation.expires_at) <= now:
+            await self._clear_expired_transcript(conversation.id)
             conversation.state_json = {}
             conversation.message_count = 0
             conversation.stage = "GREETING_AND_PROFILE"
         elif conversation.user_id is not None and conversation.user_id != user_id:
             # Logout or account switching cannot expose a prior authenticated transcript.
+            await self._clear_expired_transcript(conversation.id)
             conversation.state_json = {}
             conversation.message_count = 0
             conversation.stage = "GREETING_AND_PROFILE"
@@ -983,6 +1000,15 @@ class PublicChatService:
             days=self.settings.public_chat_session_retention_days
         )
         return conversation
+
+    async def _clear_expired_transcript(self, conversation_id: UUID) -> None:
+        """Remove retained messages and idempotency rows before a session key is reused."""
+        await self.session.execute(
+            delete(PublicChatMessage).where(PublicChatMessage.conversation_id == conversation_id)
+        )
+        await self.session.execute(
+            delete(PublicChatTurn).where(PublicChatTurn.conversation_id == conversation_id)
+        )
 
     async def _begin_turn(
         self,
@@ -1018,9 +1044,7 @@ class PublicChatService:
                     if event is not None:
                         cached.answer_event_id = event.id
                         cached.mode = cast(PublicSupportMode, event.mode)
-                        cached.support_handoff_available = (
-                            event.support_handoff_available
-                        )
+                        cached.support_handoff_available = event.support_handoff_available
                         cached.support_handoff_reason = event.support_handoff_reason
                         existing.response_json = cached.model_dump(mode="json")
                 return existing, cached
@@ -1049,6 +1073,20 @@ class PublicChatService:
             response_json={},
         )
         self.session.add(turn)
+        await self.session.flush()
+        self.session.add(
+            PublicChatMessage(
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                sequence=conversation.message_count + 1,
+                role="user",
+                content=payload.question,
+                message_type="text",
+                telemetry_redacted={},
+                created_at=datetime.now(UTC),
+                retain_until=conversation.expires_at,
+            )
+        )
         await self.session.commit()
         await self.session.refresh(turn)
         return turn, None
@@ -1106,9 +1144,7 @@ class PublicChatService:
                     payload.question,
                     previous=list(state.get("product_entities") or []),
                 ),
-                "current_troubleshooting_step": (
-                    answer if stage == "TROUBLESHOOT" else None
-                ),
+                "current_troubleshooting_step": (answer if stage == "TROUBLESHOOT" else None),
                 "tool_results": [
                     {
                         "tool_name": item.tool_name,
@@ -1144,9 +1180,7 @@ class PublicChatService:
             for item in documents
             if item.get("authority") == "authoritative_product_fact"
         }
-        valid_sources.update(
-            reference for item in tool_results for reference in item.evidence_refs
-        )
+        valid_sources.update(reference for item in tool_results for reference in item.evidence_refs)
         if not set(response.source_ids).issubset(valid_sources):
             raise PublicSupportAIUnavailable("The assistant cited an unknown source.")
         if not set(response.related_route_ids).issubset(PUBLIC_ROUTE_PATHS):
@@ -1160,18 +1194,14 @@ class PublicChatService:
             item.status == "success" and item.tool_name != "public_passport"
             for item in tool_results
         )
-        cited_authoritative_source = bool(
-            set(response.source_ids) & authoritative_sources
-        )
+        cited_authoritative_source = bool(set(response.source_ids) & authoritative_sources)
         if (
             response.mode == "PRODUCT_FACT"
             and not response.requested_tools
             and not cited_authoritative_source
             and not successful_tool
         ):
-            raise PublicSupportAIUnavailable(
-                "The product answer had no authoritative evidence."
-            )
+            raise PublicSupportAIUnavailable("The product answer had no authoritative evidence.")
         if (
             response.mode == "ACCOUNT_SUPPORT"
             and not response.requested_tools
@@ -1232,9 +1262,7 @@ class PublicChatService:
     ) -> PublicChatAnswerFeedbackResponse:
         event = await self.session.get(PublicChatAnswerEvent, answer_event_id)
         session_hash = self._hash(f"session:{payload.session_id}")
-        if event is None or not hmac.compare_digest(
-            event.session_key_hash, session_hash
-        ):
+        if event is None or not hmac.compare_digest(event.session_key_hash, session_hash):
             raise ValueError("The answer event is unavailable for this chat session.")
         existing = await self.session.scalar(
             select(PublicChatAnswerFeedback).where(
@@ -1246,9 +1274,7 @@ class PublicChatService:
                 existing.helpful != payload.helpful
                 or existing.support_form_requested != payload.support_form_requested
             ):
-                raise ValueError(
-                    "Feedback was already recorded for this answer."
-                ) from None
+                raise ValueError("Feedback was already recorded for this answer.") from None
             return self._feedback_response(existing)
 
         feedback = PublicChatAnswerFeedback(
@@ -1278,16 +1304,12 @@ class PublicChatService:
                 )
             )
             if existing is None:
-                raise ValueError(
-                    "Feedback could not be recorded for this answer."
-                ) from None
+                raise ValueError("Feedback could not be recorded for this answer.") from None
             if (
                 existing.helpful != payload.helpful
                 or existing.support_form_requested != payload.support_form_requested
             ):
-                raise ValueError(
-                    "Feedback was already recorded for this answer."
-                ) from None
+                raise ValueError("Feedback was already recorded for this answer.") from None
             return self._feedback_response(existing)
         conversation = (
             await self.session.get(PublicChatConversation, event.conversation_id)
@@ -1323,9 +1345,7 @@ class PublicChatService:
     async def submit_inquiry(self, payload: PublicInquiryRequest) -> PublicInquiry:
         event = await self.session.get(PublicChatAnswerEvent, payload.answer_event_id)
         session_hash = self._hash(f"session:{payload.session_id}")
-        if event is None or not hmac.compare_digest(
-            event.session_key_hash, session_hash
-        ):
+        if event is None or not hmac.compare_digest(event.session_key_hash, session_hash):
             raise ValueError("The answer event is unavailable for this chat session.")
         feedback = await self.session.scalar(
             select(PublicChatAnswerFeedback).where(
@@ -1333,26 +1353,18 @@ class PublicChatService:
             )
         )
         if feedback is None or not feedback.support_form_requested:
-            raise ValueError(
-                "Choose 'No. Submit a support form' before sending an inquiry."
-            )
+            raise ValueError("Choose 'No. Submit a support form' before sending an inquiry.")
         if feedback.inquiry_id is not None:
             linked = await self.session.get(PublicInquiry, feedback.inquiry_id)
             if linked is not None:
                 await self._ensure_email_deliveries(linked)
                 return linked
         existing = await self.session.scalar(
-            select(PublicInquiry).where(
-                PublicInquiry.idempotency_key == payload.idempotency_key
-            )
+            select(PublicInquiry).where(PublicInquiry.idempotency_key == payload.idempotency_key)
         )
         if existing is not None:
-            if str((existing.support_metadata or {}).get("answer_event_id")) != str(
-                event.id
-            ):
-                raise ValueError(
-                    "The inquiry key belongs to a different answer."
-                ) from None
+            if str((existing.support_metadata or {}).get("answer_event_id")) != str(event.id):
+                raise ValueError("The inquiry key belongs to a different answer.") from None
             feedback.inquiry_id = existing.id
             await self._ensure_email_deliveries(existing)
             return existing
@@ -1406,12 +1418,8 @@ class PublicChatService:
             )
             if existing is None:
                 raise ValueError("The inquiry could not be recorded.") from None
-            if str((existing.support_metadata or {}).get("answer_event_id")) != str(
-                event.id
-            ):
-                raise ValueError(
-                    "The inquiry key belongs to a different answer."
-                ) from None
+            if str((existing.support_metadata or {}).get("answer_event_id")) != str(event.id):
+                raise ValueError("The inquiry key belongs to a different answer.") from None
             feedback.inquiry_id = existing.id
             await self._ensure_email_deliveries(existing)
             return existing
@@ -1436,14 +1444,10 @@ class PublicChatService:
         inquiry = await self.session.scalar(
             select(PublicInquiry).where(PublicInquiry.reference == payload.reference)
         )
-        if inquiry is None or not self.feedback_token_matches(
-            inquiry, payload.feedback_token
-        ):
+        if inquiry is None or not self.feedback_token_matches(inquiry, payload.feedback_token):
             raise ValueError("Inquiry reference or feedback token is invalid")
         existing = await self.session.scalar(
-            select(PublicInquiryRating).where(
-                PublicInquiryRating.inquiry_id == inquiry.id
-            )
+            select(PublicInquiryRating).where(PublicInquiryRating.inquiry_id == inquiry.id)
         )
         if existing is not None:
             return existing
@@ -1466,8 +1470,8 @@ class PublicChatService:
     ) -> dict[str, int]:
         now = datetime.now(UTC)
         legacy_delivery_cleanup = update(PublicInquiryEmailDelivery).where(
-                PublicInquiryEmailDelivery.recipient_kind == "office",
-                PublicInquiryEmailDelivery.status.not_in({"sent", "cancelled"}),
+            PublicInquiryEmailDelivery.recipient_kind == "office",
+            PublicInquiryEmailDelivery.status.not_in({"sent", "cancelled"}),
         )
         if inquiry_id is not None:
             legacy_delivery_cleanup = legacy_delivery_cleanup.where(
@@ -1503,8 +1507,7 @@ class PublicChatService:
         if inquiry_id is not None:
             query = query.where(PublicInquiryEmailDelivery.inquiry_id == inquiry_id)
         query = (
-            query
-            .order_by(PublicInquiryEmailDelivery.created_at.asc())
+            query.order_by(PublicInquiryEmailDelivery.created_at.asc())
             .limit(limit)
             .with_for_update(skip_locked=True)
         )
@@ -1544,9 +1547,7 @@ class PublicChatService:
                 )
                 row.status = "failed" if exhausted else "retryable"
                 provider_status = (
-                    f":smtp_status_{exc.provider_status}"
-                    if exc.provider_status is not None
-                    else ""
+                    f":smtp_status_{exc.provider_status}" if exc.provider_status is not None else ""
                 )
                 row.last_error = f"{exc.code}{provider_status}: {str(exc)}"[:500]
                 row.next_retry_at = (
@@ -1590,15 +1591,20 @@ class PublicChatService:
 
     async def cleanup_expired(self) -> dict[str, int]:
         now = datetime.now(UTC)
-        conversations = await self.session.execute(
-            delete(PublicChatConversation).where(
-                PublicChatConversation.expires_at <= now
+        expired_conversation_ids = select(PublicChatConversation.id).where(
+            PublicChatConversation.expires_at <= now
+        )
+        conversation_events = await self.session.execute(
+            delete(CustomerConversationEvent).where(
+                CustomerConversationEvent.source_type == "public_site_chat",
+                CustomerConversationEvent.conversation_id.in_(expired_conversation_ids),
             )
         )
+        conversations = await self.session.execute(
+            delete(PublicChatConversation).where(PublicChatConversation.expires_at <= now)
+        )
         events = await self.session.execute(
-            delete(PublicChatAnswerEvent).where(
-                PublicChatAnswerEvent.retain_until <= now
-            )
+            delete(PublicChatAnswerEvent).where(PublicChatAnswerEvent.retain_until <= now)
         )
         inquiries = list(
             (
@@ -1618,6 +1624,9 @@ class PublicChatService:
         await self.session.flush()
         return {
             "conversations_deleted": int(getattr(conversations, "rowcount", 0) or 0),
+            "conversation_events_deleted": int(
+                getattr(conversation_events, "rowcount", 0) or 0
+            ),
             "answer_events_deleted": int(getattr(events, "rowcount", 0) or 0),
             "inquiries_redacted": len(inquiries),
         }
@@ -1731,14 +1740,18 @@ class PublicChatService:
             )
         else:
             subject = f"Public inquiry {inquiry.reference}: {inquiry.category.replace('_', ' ')}"
-            attribution = ", ".join(
-                f"{key}={value}" for key, value in inquiry.attribution.items()
-            ) or "not provided"
-            support_metadata = ", ".join(
-                f"{key}={value}"
-                for key, value in (inquiry.support_metadata or {}).items()
-                if value not in (None, "", [])
-            ) or "not provided"
+            attribution = (
+                ", ".join(f"{key}={value}" for key, value in inquiry.attribution.items())
+                or "not provided"
+            )
+            support_metadata = (
+                ", ".join(
+                    f"{key}={value}"
+                    for key, value in (inquiry.support_metadata or {}).items()
+                    if value not in (None, "", [])
+                )
+                or "not provided"
+            )
             text = (
                 "A public Hilal Markets inquiry was received.\n\n"
                 "Summary\n"

@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.plans import effective_monthly_price
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     PaymentEmailDelivery,
@@ -107,13 +108,13 @@ async def test_checkout_uses_server_price_and_deduplicates_attempt(test_context)
         plan = await session.scalar(select(Plan).where(Plan.code == "trader"))
         assert len(attempts) == 1
         assert plan is not None
-        assert attempts[0].amount == plan.price_monthly
+        assert attempts[0].amount == effective_monthly_price("trader")
         assert attempts[0].currency == plan.currency
 
 
 async def test_verified_static_payment_activates_once_and_emails_once(test_context):
     await _signup(test_context, "paid-once@example.com")
-    form = await _review_form(test_context, "pro")
+    form = await _review_form(test_context, "trader")
     checkout = await test_context["client"].post(
         "/dashboard/billing/checkout",
         data=form,
@@ -135,7 +136,7 @@ async def test_verified_static_payment_activates_once_and_emails_once(test_conte
         if row.get("purpose") == "payment_success"
     ]
     assert len(payment_messages) == 1
-    assert payment_messages[0]["subject"] == "Your HilalMarkets Pro plan is active"
+    assert payment_messages[0]["subject"] == "Your HilalMarkets Monitor plan is active"
     assert "Create a Watchlist" in payment_messages[0]["body"]
     assert "Hilal Markets provides screening" in payment_messages[0]["body"]
 
@@ -160,7 +161,7 @@ async def test_creem_checkout_route_waits_for_signed_payment_before_activation(
             "billing_card_provider": "creem",
             "creem_api_key": SecretStr("creem-test-key"),
             "creem_webhook_secret": SecretStr("creem-webhook-secret"),
-            "creem_product_ids": {"pro_monthly": "prod_pro_monthly"},
+            "creem_product_ids": {"trader_monthly": "prod_monitor_monthly"},
         }
     )
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
@@ -185,7 +186,7 @@ async def test_creem_checkout_route_waits_for_signed_payment_before_activation(
     checkout = await test_context["client"].post(
         "/dashboard/billing/checkout",
         data={
-            "plan_code": "pro",
+            "plan_code": "trader",
             "billing_cycle": "monthly",
             "payment_method": "card",
             "checkout_request_id": request_id.group(1),
@@ -248,14 +249,14 @@ async def test_creem_checkout_route_waits_for_signed_payment_before_activation(
             "status": "active",
             "customer": {"id": "cus_creem_route"},
             "product": {
-                "id": "prod_pro_monthly",
-                "price": 2200,
+                "id": "prod_monitor_monthly",
+                "price": int(effective_monthly_price("trader") * 100),
                 "currency": "USD",
             },
             "metadata": {
                 "checkout_attempt_id": str(attempt_id),
                 "user_id": str(user_id),
-                "plan_code": "pro",
+                "plan_code": "trader",
                 "billing_cycle": "monthly_auto_renewal",
             },
             "current_period_start_date": "2035-01-01T00:00:00+00:00",
@@ -293,7 +294,7 @@ async def test_creem_checkout_route_waits_for_signed_payment_before_activation(
     portal_page = await test_context["client"].get("/dashboard/billing/portal")
     assert portal_page.status_code == 200
     assert "Manage your subscription" in portal_page.text
-    assert "Pro" in portal_page.text
+    assert "Monitor" in portal_page.text
     assert "Creem" in portal_page.text
     assert "Your payments and receipts" in portal_page.text
     portal_csrf = re.search(
@@ -326,7 +327,7 @@ async def test_checkout_json_error_stays_in_the_billing_dialog(test_context):
             "billing_card_provider": "creem",
             "creem_api_key": None,
             "creem_webhook_secret": SecretStr("creem-webhook-secret"),
-            "creem_product_ids": {"pro_monthly": "prod_pro_monthly"},
+            "creem_product_ids": {"trader_monthly": "prod_monitor_monthly"},
         }
     )
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
@@ -342,7 +343,7 @@ async def test_checkout_json_error_stays_in_the_billing_dialog(test_context):
     checkout = await test_context["client"].post(
         "/dashboard/billing/checkout",
         data={
-            "plan_code": "pro",
+            "plan_code": "trader",
             "billing_cycle": "monthly",
             "payment_method": "card",
             "checkout_request_id": request_id.group(1),
@@ -475,20 +476,21 @@ async def test_only_matching_paid_plan_blocks_checkout_and_admin_access_does_not
                 },
             )
 
-        other_plan = await BillingService(session, enabled).prepare_checkout(
-            user_id=user.id,
-            plan_code=pro.code,
-            billing_cycle="monthly",
-            request_key="active-monitor-can-select-pro",
-            terms_accepted=True,
-            billing_profile={
-                "first_name": "Billing",
-                "last_name": "Access",
-                "address_line1": "1 Market Street",
-                "country": "Egypt",
-            },
-        )
-        assert other_plan.attempt.plan_id == pro.id
+        with pytest.raises(BillingError) as error:
+            await BillingService(session, enabled).prepare_checkout(
+                user_id=user.id,
+                plan_code=pro.code,
+                billing_cycle="monthly",
+                request_key="pro-is-coming-soon",
+                terms_accepted=True,
+                billing_profile={
+                    "first_name": "Billing",
+                    "last_name": "Access",
+                    "address_line1": "1 Market Street",
+                    "country": "Egypt",
+                },
+            )
+        assert error.value.code == "plan_not_available"
 
 
 async def test_payment_email_preview_is_rendered_in_development(test_context):

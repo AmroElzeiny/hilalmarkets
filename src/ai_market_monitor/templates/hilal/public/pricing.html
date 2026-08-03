@@ -11,13 +11,13 @@
         <a class="btn btn-secondary" href="/#pricing">Compare on the home page</a>
       </div>
     </div>
-    <div class="hero-art"><img src="{{ url_for('static', path='/hilal/watch-plan-journey.svg') }}" alt="Explore, Monitor, and Pro access levels"></div>
+    <div class="hero-art"><img src="{{ url_for('static', path='/hilal/watch-plan-journey.svg') }}" alt="Basic, Monitor, and Pro access levels"></div>
   </div>
 </header>
 <section class="section">
   <div class="container">
     <div class="section-heading center">
-      <span class="eyebrow">Explore, Monitor, and Pro</span>
+      <span class="eyebrow">Basic, Monitor, and Pro</span>
       <h2>Pay for capacity, never for greater religious certainty.</h2>
       <p>The methodology, evidence sources, version, review date, and qualifications remain visible on every plan.</p>
     </div>
@@ -29,7 +29,7 @@
     <div class="section-heading"><span class="eyebrow">Compare</span><h2>Plan details at a glance.</h2></div>
     <div class="comparison-table-wrap">
       <table class="comparison-table">
-        <caption class="sr-only">Explore, Monitor, and Pro plan comparison</caption>
+        <caption class="sr-only">Basic, Monitor, and Pro plan comparison</caption>
         <thead><tr><th scope="col">Capability</th>{% for header in plan_comparison_headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in plan_comparison %}

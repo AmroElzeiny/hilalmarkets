@@ -234,8 +234,9 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     assert "$22" not in pricing.text
     assert "Pro is coming soon" in pricing.text
     assert "$29" not in pricing.text
-    assert "Try Monitor for 7 days" in pricing.text
-    assert "No charge for seven days. Cancel before the first payment." in pricing.text
+    assert "Choose Monitor monthly" in pricing.text
+    assert "7-day money-back guarantee" in pricing.text
+    assert "Cancel within 7 days of payment for a full refund." in pricing.text
     assert "Choose Core" not in pricing.text
     assert "Choose Pro" not in pricing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
@@ -250,7 +251,9 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     assert "What billing changes" not in billing.text
     assert "Screening evidence stays the same on every plan" not in billing.text
     assert 'data-billing-page-interval' in billing.text
-    assert "Try Monitor for 7 days" in billing.text
+    assert "Choose Monitor monthly" in billing.text
+    assert "7-day money-back guarantee" in billing.text
+    assert "5 active market monitors" in billing.text
     assert "No payment method needed" not in billing.text
     assert "10 active market monitors" in billing.text
     assert "Unlimited monitor alerts per day" in billing.text

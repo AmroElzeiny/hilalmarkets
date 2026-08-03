@@ -1,12 +1,14 @@
+import asyncio
 import csv
 import hashlib
 import hmac
 import io
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -18,9 +20,28 @@ from ai_market_monitor.api.dependencies import UserPrincipal
 from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.db.models import AccountEmailDelivery, AuditEvent, UserIdentity
+from ai_market_monitor.db.models import (
+    AccountEmailDelivery,
+    AgentRun,
+    AgentToolCall,
+    AuditEvent,
+    SystemBrainActionProposal,
+    SystemBrainArtifact,
+    SystemBrainMessage,
+    UserIdentity,
+)
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
-from ai_market_monitor.schemas.system_brain import SystemBrainAssistantRequest
+from ai_market_monitor.schemas.system_brain import (
+    ActionConfirmationRequest,
+    ActionProposalRead,
+    AdminConversationSource,
+    SystemBrainAgentTurnRequest,
+    SystemBrainArtifactRead,
+    SystemBrainAssistantRequest,
+    SystemBrainConversationCreate,
+    SystemBrainConversationUpdate,
+    SystemBrainRunProgress,
+)
 from ai_market_monitor.services.account_admin import (
     AccountAdminError,
     SystemBrainUserAdminService,
@@ -33,9 +54,21 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
-from ai_market_monitor.services.system_brain_assistant import (
-    SystemBrainAssistantService,
-    SystemBrainAssistantUnavailable,
+from ai_market_monitor.services.system_brain_actions import (
+    SystemBrainActionError,
+    SystemBrainActionService,
+)
+from ai_market_monitor.services.system_brain_agent import (
+    SystemBrainAgentService,
+    SystemBrainAgentUnavailable,
+    SystemBrainConversationService,
+)
+from ai_market_monitor.services.system_brain_conversations import (
+    AdminConversationExplorer,
+    AdminConversationNotFound,
+)
+from ai_market_monitor.services.system_brain_repository_index import (
+    RepositoryEvidenceIndexService,
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
@@ -66,8 +99,7 @@ async def _require_cloudflare_access(
         not access_assertion
         or not allowed_emails
         or not any(
-            hmac.compare_digest(access_email.strip().casefold(), email)
-            for email in allowed_emails
+            hmac.compare_digest(access_email.strip().casefold(), email) for email in allowed_emails
         )
     ):
         raise HTTPException(status_code=403, detail="Cloudflare Access is required.")
@@ -109,6 +141,35 @@ def _verify_csrf(settings: Settings, user_id: UUID, supplied: str) -> None:
         raise HTTPException(status_code=403, detail="Invalid form token.")
 
 
+def _request_ip_hash(request: Request, settings: Settings) -> str | None:
+    forwarded = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for")
+    raw = (forwarded.split(",", 1)[0].strip() if forwarded else "") or (
+        request.client.host if request.client else ""
+    )
+    if not raw:
+        return None
+    secret = settings.app_secret_key.get_secret_value().encode("utf-8")
+    return hmac.new(secret, raw.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _proposal_read(proposal: SystemBrainActionProposal) -> ActionProposalRead:
+    return ActionProposalRead(
+        proposal_id=proposal.id,
+        action=proposal.action,
+        target=f"{proposal.target_type}:{proposal.target_id}",
+        exact_changes=proposal.exact_changes,
+        reason=proposal.reason,
+        evidence=proposal.evidence_refs,
+        expected_effect=proposal.expected_effect,
+        risks=proposal.risks,
+        rollback_path=proposal.rollback_path,
+        idempotency_key=proposal.idempotency_key,
+        confirmation_token=proposal.confirmation_digest,
+        status=proposal.status,
+        expires_at=proposal.expires_at,
+    )
+
+
 def _apply_case_view(
     cases: list[dict],
     *,
@@ -120,11 +181,7 @@ def _apply_case_view(
     if view == "mine":
         return [item for item in cases if item["assigned_reviewer_id"] == reviewer_id]
     if view == "urgent":
-        return [
-            item
-            for item in cases
-            if item["priority"] == "urgent" or item["overdue"]
-        ]
+        return [item for item in cases if item["priority"] == "urgent" or item["overdue"]]
     if view == "evidence_missing":
         return [
             item
@@ -142,9 +199,7 @@ def _apply_case_view(
         return [item for item in cases if item["state"] == "safety_hold"]
     if view == "failed_processing":
         return [
-            item
-            for item in cases
-            if item["state"] in {"research_failed", "publication_failed"}
+            item for item in cases if item["state"] in {"research_failed", "publication_failed"}
         ]
     if view == "unassigned":
         return [item for item in cases if item["assigned_reviewer_id"] is None]
@@ -162,9 +217,7 @@ async def _admin_email(session: AsyncSession, user_id: UUID) -> str:
         .limit(1)
     )
     return (
-        identity.display_identifier
-        or identity.normalized_identifier
-        or "Application administrator"
+        identity.display_identifier or identity.normalized_identifier or "Application administrator"
         if identity
         else "Application administrator"
     )
@@ -201,9 +254,7 @@ async def system_brain_home(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
-    context = await _base_context(
-        request, session, settings, principal, section="overview"
-    )
+    context = await _base_context(request, session, settings, principal, section="overview")
     data = await ShariaAdminDashboardService(session).reviewer_overview()
     context["data"] = data
     context["assistant_enabled"] = settings.system_brain_ai_enabled
@@ -253,12 +304,16 @@ async def system_brain_reviews(
     }
     if kind is not None and kind not in allowed_kinds:
         raise HTTPException(status_code=404, detail="Review queue not found.")
-    section = "cases" if kind is None else (
-        "initial-reviews"
-        if kind == "initial_asset_review"
-        else "user-reports"
-        if kind == "user_factual_report"
-        else "change-reviews"
+    section = (
+        "cases"
+        if kind is None
+        else (
+            "initial-reviews"
+            if kind == "initial_asset_review"
+            else "user-reports"
+            if kind == "user_factual_report"
+            else "change-reviews"
+        )
     )
     context = await _base_context(request, session, settings, principal, section=section)
     cases = await ShariaAdminDashboardService(session).list_cases(
@@ -309,9 +364,7 @@ async def system_brain_review_detail(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
-    context = await _base_context(
-        request, session, settings, principal, section="review-detail"
-    )
+    context = await _base_context(request, session, settings, principal, section="review-detail")
     try:
         context["detail"] = await ShariaAdminDashboardService(session).case_detail(case_id)
     except LookupError as exc:
@@ -356,8 +409,7 @@ async def system_brain_import_authority_sources(
         query = urlencode(
             {
                 "error": (
-                    "The official-source import could not be queued. "
-                    "Check worker and Redis health."
+                    "The official-source import could not be queued. Check worker and Redis health."
                 )
             }
         )
@@ -534,33 +586,532 @@ async def system_brain_apply_user_access(
     return _user_admin_redirect(success=message)
 
 
-@router.get(
-    "/dashboard/system-brain/{section_name}",
-    response_class=HTMLResponse,
-    include_in_schema=False,
-)
-async def system_brain_workspace_section(
+@router.get("/api/v1/system-brain/conversations", include_in_schema=False)
+async def system_brain_agent_conversations(
+    q: str | None = Query(default=None, max_length=160),
+    include_archived: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    data = await SystemBrainConversationService().list(
+        session,
+        admin_user_id=principal.user_id,
+        query=q,
+        include_archived=include_archived,
+        limit=limit,
+    )
+    return _protect(JSONResponse({"items": data}))
+
+
+@router.post("/api/v1/system-brain/conversations", include_in_schema=False)
+async def system_brain_create_agent_conversation(
+    payload: SystemBrainConversationCreate,
     request: Request,
-    section_name: str,
     principal: UserPrincipal = Depends(_require_application_admin),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
-    if section_name not in {"operations", "governance", "audit-settings"}:
-        raise HTTPException(status_code=404, detail="Admin section not found.")
-    context = await _base_context(
-        request, session, settings, principal, section=section_name
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    conversation = await SystemBrainConversationService().create(
+        session, admin_user_id=principal.user_id, title=payload.title
     )
-    context.update(
-        await ShariaAdminDashboardService(session).workspace_section(section_name)
-    )
-    return _protect(
-        templates.TemplateResponse(
-            request=request,
-            name="system_brain.html",
-            context=context,
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="system_brain_admin",
+            action="system_brain.agent_conversation.created",
+            target_type="system_brain_conversation",
+            target_id=str(conversation.id),
+            request_id=request.headers.get("x-request-id"),
+            ip_hash=_request_ip_hash(request, settings),
+            metadata_redacted={"title_length": len(conversation.title)},
+            created_at=datetime.now(UTC),
         )
     )
+    await session.commit()
+    response = await SystemBrainConversationService().read(
+        session, conversation.id, admin_user_id=principal.user_id
+    )
+    return _protect(JSONResponse(response.model_dump(mode="json"), status_code=201))
+
+
+@router.get(
+    "/api/v1/system-brain/conversations/{conversation_id}",
+    include_in_schema=False,
+)
+async def system_brain_read_agent_conversation(
+    conversation_id: UUID,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    try:
+        result = await SystemBrainConversationService().read(
+            session, conversation_id, admin_user_id=principal.user_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.patch(
+    "/api/v1/system-brain/conversations/{conversation_id}",
+    include_in_schema=False,
+)
+async def system_brain_update_agent_conversation(
+    conversation_id: UUID,
+    payload: SystemBrainConversationUpdate,
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    try:
+        await SystemBrainConversationService().update(
+            session,
+            conversation_id,
+            admin_user_id=principal.user_id,
+            title=payload.title,
+            archived=payload.archived,
+        )
+        session.add(
+            AuditEvent(
+                actor_user_id=principal.user_id,
+                actor_type="system_brain_admin",
+                action="system_brain.agent_conversation.updated",
+                target_type="system_brain_conversation",
+                target_id=str(conversation_id),
+                request_id=request.headers.get("x-request-id"),
+                ip_hash=_request_ip_hash(request, settings),
+                metadata_redacted={
+                    "title_changed": payload.title is not None,
+                    "archived": payload.archived,
+                },
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+        result = await SystemBrainConversationService().read(
+            session, conversation_id, admin_user_id=principal.user_id
+        )
+    except LookupError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.post(
+    "/api/v1/system-brain/conversations/{conversation_id}/turns",
+    include_in_schema=False,
+)
+async def system_brain_agent_turn(
+    conversation_id: UUID,
+    payload: SystemBrainAgentTurnRequest,
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    try:
+        result = await SystemBrainAgentService(settings).run_turn(
+            session,
+            conversation_id,
+            admin_user_id=principal.user_id,
+            request=payload,
+        )
+    except LookupError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SystemBrainAgentUnavailable as exc:
+        await session.rollback()
+        return _protect(
+            JSONResponse(
+                status_code=503,
+                content={"detail": str(exc), "retryable": True},
+            )
+        )
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.get(
+    "/api/v1/system-brain/conversations/{conversation_id}/run-progress",
+    include_in_schema=False,
+)
+async def system_brain_agent_run_progress(
+    conversation_id: UUID,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    try:
+        await SystemBrainConversationService()._owned(session, conversation_id, principal.user_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    source = await session.scalar(
+        select(SystemBrainMessage)
+        .where(
+            SystemBrainMessage.conversation_id == conversation_id,
+            SystemBrainMessage.role == "user",
+            SystemBrainMessage.agent_run_id.is_not(None),
+        )
+        .order_by(SystemBrainMessage.sequence.desc())
+        .limit(1)
+    )
+    if source is None or source.agent_run_id is None:
+        result = SystemBrainRunProgress(status="idle")
+    else:
+        run = await session.get(AgentRun, source.agent_run_id)
+        assistant = await session.scalar(
+            select(SystemBrainMessage).where(
+                SystemBrainMessage.conversation_id == conversation_id,
+                SystemBrainMessage.agent_run_id == source.agent_run_id,
+                SystemBrainMessage.role == "assistant",
+            )
+        )
+        calls = list(
+            (
+                await session.scalars(
+                    select(AgentToolCall)
+                    .where(AgentToolCall.agent_run_id == source.agent_run_id)
+                    .order_by(AgentToolCall.created_at.asc())
+                    .limit(50)
+                )
+            ).all()
+        )
+        result = SystemBrainRunProgress(
+            run_id=source.agent_run_id,
+            status=run.status if run else "unavailable",
+            step_count=run.step_count if run else 0,
+            tool_call_count=run.tool_call_count if run else len(calls),
+            tool_calls=[
+                {
+                    "tool_name": row.tool_name,
+                    "status": row.result_status,
+                    "evidence_refs": row.evidence_refs,
+                    "duration_ms": row.duration_ms,
+                }
+                for row in calls
+            ],
+            assistant_message_id=assistant.id if assistant else None,
+            answer=assistant.content if assistant else None,
+        )
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.post(
+    "/api/v1/system-brain/conversations/{conversation_id}/cancel-active-run",
+    include_in_schema=False,
+)
+async def system_brain_cancel_agent_run(
+    conversation_id: UUID,
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    try:
+        await SystemBrainConversationService()._owned(
+            session, conversation_id, principal.user_id, lock=True
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    source = await session.scalar(
+        select(SystemBrainMessage)
+        .where(
+            SystemBrainMessage.conversation_id == conversation_id,
+            SystemBrainMessage.role == "user",
+            SystemBrainMessage.agent_run_id.is_not(None),
+        )
+        .order_by(SystemBrainMessage.sequence.desc())
+        .limit(1)
+    )
+    run = (
+        await session.scalar(
+            select(AgentRun).where(AgentRun.id == source.agent_run_id).with_for_update()
+        )
+        if source and source.agent_run_id
+        else None
+    )
+    if run is not None and run.status == "running":
+        run.status = "cancel_requested"
+        session.add(
+            AuditEvent(
+                actor_user_id=principal.user_id,
+                actor_type="system_brain_admin",
+                action="system_brain.agent.cancel_requested",
+                target_type="agent_run",
+                target_id=str(run.id),
+                request_id=request.headers.get("x-request-id"),
+                ip_hash=_request_ip_hash(request, settings),
+                metadata_redacted={"conversation_id": str(conversation_id)},
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+        status = "cancel_requested"
+    else:
+        status = run.status if run else "idle"
+    return _protect(JSONResponse({"status": status}))
+
+
+@router.get("/api/v1/system-brain/artifacts", include_in_schema=False)
+async def system_brain_artifacts(
+    conversation_id: UUID | None = None,
+    include_archived: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    statement = select(SystemBrainArtifact).where(
+        SystemBrainArtifact.admin_user_id == principal.user_id
+    )
+    if conversation_id:
+        statement = statement.where(SystemBrainArtifact.conversation_id == conversation_id)
+    if not include_archived:
+        statement = statement.where(SystemBrainArtifact.archived_at.is_(None))
+    rows = list(
+        (
+            await session.scalars(
+                statement.order_by(SystemBrainArtifact.created_at.desc()).limit(limit)
+            )
+        ).all()
+    )
+    items = []
+    for row in rows:
+        content = dict(row.content_redacted or {})
+        items.append(
+            SystemBrainArtifactRead(
+                artifact_id=row.id,
+                conversation_id=row.conversation_id,
+                artifact_kind=row.artifact_kind,
+                title=row.title,
+                content=str(content.get("content") or content.get("csv") or ""),
+                evidence_refs=row.evidence_refs,
+                target_id=content.get("target_id"),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                archived=row.archived_at is not None,
+                model_authored_draft=bool(content.get("model_authored_draft", True)),
+            ).model_dump(mode="json")
+        )
+    return _protect(JSONResponse({"items": items}))
+
+
+@router.get("/api/v1/system-brain/customer-conversations", include_in_schema=False)
+async def system_brain_customer_conversations(
+    request: Request,
+    search: str | None = Query(default=None, max_length=500),
+    source: AdminConversationSource | None = None,
+    lifecycle: str | None = Query(default=None, max_length=80),
+    error_only: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    identity: Literal["authenticated", "anonymous"] | None = None,
+    approval_state: str | None = Query(default=None, max_length=40),
+    cursor: str | None = Query(default=None, max_length=500),
+    limit: int = Query(default=30, ge=1, le=100),
+    seen_event_id: int = Query(default=0, ge=0),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    result = await AdminConversationExplorer(session).list_conversations(
+        search=search,
+        source=source,
+        lifecycle=lifecycle,
+        error_only=error_only,
+        date_from=date_from,
+        date_to=date_to,
+        identity=identity,
+        approval_state=approval_state,
+        cursor=cursor,
+        limit=limit,
+        seen_event_id=seen_event_id,
+    )
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="system_brain_admin",
+            action="system_brain.customer_conversation.list",
+            target_type="customer_conversation_page",
+            target_id=None,
+            request_id=request.headers.get("x-request-id"),
+            ip_hash=_request_ip_hash(request, settings),
+            metadata_redacted={
+                "access_category": "conversation_explorer_summary",
+                "conversation_ids": [str(item.conversation_id) for item in result.items],
+                "source": source,
+                "result_count": len(result.items),
+            },
+            created_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.get(
+    "/api/v1/system-brain/customer-conversations/{source}/{conversation_id}",
+    include_in_schema=False,
+)
+async def system_brain_customer_conversation(
+    source: AdminConversationSource,
+    conversation_id: UUID,
+    request: Request,
+    access_reason: str = Query(min_length=3, max_length=120),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    try:
+        result = await AdminConversationExplorer(session).conversation(
+            conversation_id,
+            source=source,
+            admin_user_id=principal.user_id,
+            access_reason=access_reason,
+            request_id=request.headers.get("x-request-id"),
+            ip_hash=_request_ip_hash(request, settings),
+        )
+        await session.commit()
+    except AdminConversationNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail="Conversation not found.") from exc
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.get("/api/v1/system-brain/customer-conversation-events", include_in_schema=False)
+async def system_brain_customer_conversation_events(
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+    session: AsyncSession = Depends(get_db_session),
+):
+    items = await AdminConversationExplorer(session).events(after_id=after_id, limit=limit)
+    return _protect(JSONResponse({"items": items}))
+
+
+@router.get("/api/v1/system-brain/customer-conversation-stream", include_in_schema=False)
+async def system_brain_customer_conversation_stream(
+    request: Request,
+    after_id: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db_session),
+):
+    header_cursor = request.headers.get("last-event-id", "").strip()
+    cursor = after_id
+    if header_cursor.isdigit():
+        cursor = max(cursor, int(header_cursor))
+
+    async def generate():
+        nonlocal cursor
+        deadline = asyncio.get_running_loop().time() + 25.0
+        yield "retry: 1500\n\n"
+        while asyncio.get_running_loop().time() < deadline:
+            if await request.is_disconnected():
+                return
+            session.expire_all()
+            events = await AdminConversationExplorer(session).events(after_id=cursor, limit=100)
+            if events:
+                for event in events:
+                    cursor = int(event["event_id"])
+                    payload = json.dumps(event, separators=(",", ":"))
+                    yield f"id: {cursor}\nevent: {event['event_type']}\ndata: {payload}\n\n"
+            else:
+                yield f": keepalive {cursor}\n\n"
+            await asyncio.sleep(0.5)
+
+    return _protect(
+        StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no"},
+        )
+    )
+
+
+@router.get("/api/v1/system-brain/action-proposals", include_in_schema=False)
+async def system_brain_action_proposals(
+    conversation_id: UUID | None = None,
+    status: str | None = Query(default=None, max_length=24),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    statement = select(SystemBrainActionProposal).where(
+        SystemBrainActionProposal.admin_user_id == principal.user_id
+    )
+
+    if conversation_id:
+        statement = statement.where(SystemBrainActionProposal.conversation_id == conversation_id)
+    if status:
+        statement = statement.where(SystemBrainActionProposal.status == status)
+    proposals = list(
+        (
+            await session.scalars(
+                statement.order_by(SystemBrainActionProposal.created_at.desc()).limit(100)
+            )
+        ).all()
+    )
+    return _protect(
+        JSONResponse(
+            {"items": [_proposal_read(item).model_dump(mode="json") for item in proposals]}
+        )
+    )
+
+
+@router.post("/api/v1/system-brain/repository-index/refresh", include_in_schema=False)
+async def system_brain_refresh_repository_index(
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Explicit maintenance action; interactive agent tools never scan the filesystem."""
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    result = await RepositoryEvidenceIndexService().refresh(session)
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="system_brain_admin",
+            action="system_brain.repository_index.refreshed",
+            target_type="repository_evidence_index",
+            target_id=None,
+            request_id=request.headers.get("x-request-id"),
+            ip_hash=_request_ip_hash(request, settings),
+            metadata_redacted=result,
+            created_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    return _protect(JSONResponse(result))
+
+
+@router.post(
+    "/api/v1/system-brain/action-proposals/{proposal_id}/confirm",
+    include_in_schema=False,
+)
+async def system_brain_confirm_action_proposal(
+    proposal_id: UUID,
+    payload: ActionConfirmationRequest,
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    try:
+        result = await SystemBrainActionService(session, settings).confirm(
+            proposal_id,
+            admin_user_id=principal.user_id,
+            confirmation_token=payload.confirmation_token,
+            human_reason=payload.reason,
+        )
+        await session.commit()
+    except SystemBrainActionError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
+    return _protect(JSONResponse({"status": "executed", "result": result}))
 
 
 @router.post(
@@ -575,30 +1126,58 @@ async def system_brain_assistant(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
-    _verify_csrf(
-        settings,
-        principal.user_id,
-        request.headers.get("x-csrf-token", ""),
+    """Compatibility adapter to the persistent bounded agent; no eager context path."""
+    _verify_csrf(settings, principal.user_id, request.headers.get("x-csrf-token", ""))
+    conversation = await SystemBrainConversationService().create(
+        session,
+        admin_user_id=principal.user_id,
+        title="Legacy assistant request",
     )
+    await session.commit()
     try:
-        response = await SystemBrainAssistantService(settings).answer(
+        result = await SystemBrainAgentService(settings).run_turn(
             session,
+            conversation.id,
             admin_user_id=principal.user_id,
-            request=payload,
+            request=SystemBrainAgentTurnRequest(
+                message=payload.message,
+                client_message_id=f"legacy-{uuid4().hex}",
+            ),
         )
-        await session.commit()
-    except SystemBrainAssistantUnavailable as exc:
+    except SystemBrainAgentUnavailable as exc:
         await session.rollback()
         return _protect(
             JSONResponse(
                 status_code=503,
-                content={
-                    "detail": str(exc),
-                    "retryable": True,
-                },
+                content={"detail": str(exc), "retryable": True},
             )
         )
-    return _protect(JSONResponse(response.model_dump(mode="json")))
+    return _protect(JSONResponse(result.model_dump(mode="json")))
+
+
+@router.get(
+    "/dashboard/system-brain/{section_name}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def system_brain_workspace_section(
+    request: Request,
+    section_name: str,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    if section_name not in {"operations", "governance", "audit-settings"}:
+        raise HTTPException(status_code=404, detail="Admin section not found.")
+    context = await _base_context(request, session, settings, principal, section=section_name)
+    context.update(await ShariaAdminDashboardService(session).workspace_section(section_name))
+    return _protect(
+        templates.TemplateResponse(
+            request=request,
+            name="system_brain.html",
+            context=context,
+        )
+    )
 
 
 @router.get(
@@ -625,9 +1204,7 @@ async def system_brain_section(
         "delivery-health": "operations",
         "audit-history": "audit-settings",
     }[section_name]
-    context = await _base_context(
-        request, session, settings, principal, section=target
-    )
+    context = await _base_context(request, session, settings, principal, section=target)
     service = ShariaAdminDashboardService(session)
     if target == "cases":
         context.update(
@@ -772,11 +1349,7 @@ async def system_brain_review_decision(
                 reason=reason,
             )
         elif action == "request_more_evidence":
-            evidence = [
-                line.strip()
-                for line in requested_evidence.splitlines()
-                if line.strip()
-            ]
+            evidence = [line.strip() for line in requested_evidence.splitlines() if line.strip()]
             await service.request_more_evidence(
                 case_id,
                 admin_user_id=principal.user_id,
@@ -828,9 +1401,7 @@ async def system_brain_review_decision(
             try:
                 from ai_market_monitor.worker import app as worker_app
 
-                worker_app.send_task(
-                    "ai_market_monitor.process_sharia_authority_imports"
-                )
+                worker_app.send_task("ai_market_monitor.process_sharia_authority_imports")
             except Exception as exc:
                 raise ShariaGovernanceError(
                     "research_queue_unavailable",
@@ -852,9 +1423,7 @@ async def system_brain_review_decision(
             f"/dashboard/system-brain/cases/{case_id}?{query}",
             status_code=303,
         )
-    query = urlencode(
-        {"success": f"{action.replace('_', ' ').title()} was recorded and audited."}
-    )
+    query = urlencode({"success": f"{action.replace('_', ' ').title()} was recorded and audited."})
     return RedirectResponse(
         f"/dashboard/system-brain/cases/{case_id}?{query}",
         status_code=303,
@@ -892,11 +1461,7 @@ async def system_brain_ai_field_review(
     try:
         detail = await ShariaAdminDashboardService(session).case_detail(case_id)
         field = next(
-            (
-                item
-                for item in detail["review_fields"]
-                if item["key"] == field_key
-            ),
+            (item for item in detail["review_fields"] if item["key"] == field_key),
             None,
         )
         if field is None:
@@ -925,8 +1490,7 @@ async def system_brain_ai_field_review(
     except (LookupError, ShariaGovernanceError) as exc:
         await session.rollback()
         return RedirectResponse(
-            "/dashboard/system-brain/cases/"
-            f"{case_id}?{urlencode({'error': str(exc)[:500]})}",
+            f"/dashboard/system-brain/cases/{case_id}?{urlencode({'error': str(exc)[:500]})}",
             status_code=303,
         )
     return RedirectResponse(
@@ -968,9 +1532,7 @@ async def system_brain_review_assignment(
     except (ValueError, ShariaGovernanceError) as exc:
         await session.rollback()
         query = urlencode({"error": str(exc)[:500]})
-        return RedirectResponse(
-            f"/dashboard/system-brain/cases/{case_id}?{query}", status_code=303
-        )
+        return RedirectResponse(f"/dashboard/system-brain/cases/{case_id}?{query}", status_code=303)
     query = urlencode({"success": "The assignment and due date were recorded."})
     return RedirectResponse(
         f"/dashboard/system-brain/cases/{case_id}?{query}",
@@ -1005,13 +1567,11 @@ async def system_brain_retry_notification(
     except ShariaGovernanceError as exc:
         await session.rollback()
         return RedirectResponse(
-            "/dashboard/system-brain/operations?"
-            f"{urlencode({'error': str(exc)[:500]})}",
+            f"/dashboard/system-brain/operations?{urlencode({'error': str(exc)[:500]})}",
             status_code=303,
         )
     return RedirectResponse(
-        "/dashboard/system-brain/operations?"
-        "success=Delivery+retry+was+queued+and+audited.",
+        "/dashboard/system-brain/operations?success=Delivery+retry+was+queued+and+audited.",
         status_code=303,
     )
 
@@ -1051,8 +1611,7 @@ async def system_brain_audit_export(
             )
             and (
                 not methodology_filter
-                or methodology_filter
-                in json.dumps(row.metadata_redacted or {}).casefold()
+                or methodology_filter in json.dumps(row.metadata_redacted or {}).casefold()
             )
         ]
     payload = [

@@ -121,5 +121,7 @@ volumes:
   caddy_data:
   caddy_config:
   postgres_data:
+    external: true
+    name: ${POSTGRES_VOLUME_NAME:?Set POSTGRES_VOLUME_NAME in .env.production}
   redis_data:
   exports_data:

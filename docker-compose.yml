@@ -113,3 +113,5 @@ services:
 
 volumes:
   postgres_data:
+    external: true
+    name: ${POSTGRES_VOLUME_NAME:?set POSTGRES_VOLUME_NAME to the authoritative PostgreSQL volume}

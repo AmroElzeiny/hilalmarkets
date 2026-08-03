@@ -298,6 +298,15 @@ body:hover *::-webkit-scrollbar-thumb {
   box-shadow: 0 10px 24px -18px rgb(43 46 53 / 65%);
 }
 
+.billing-toggle label.is-unavailable {
+  color: var(--color-ink-soft);
+  cursor: not-allowed;
+}
+
+.billing-toggle label.is-unavailable small {
+  color: var(--color-ink-soft);
+}
+
 .billing-toggle input {
   position: absolute;
   width: 1px;
@@ -550,13 +559,29 @@ body:hover *::-webkit-scrollbar-thumb {
   line-height: 1.45;
 }
 
-.trial-payment-note {
-  margin: 10px 2px 0;
-  color: var(--color-apple-deep);
+.money-back-guarantee {
+  margin: 4px 0 0;
+  padding: 14px 16px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgb(85 113 42 / 42%);
+  border-radius: 16px;
+  background: #f4f8eb;
+  color: var(--color-ink);
+}
+
+.money-back-guarantee strong {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.money-back-guarantee span {
+  color: var(--color-ink);
   font-size: 12.5px;
-  font-weight: 750;
-  line-height: 1.45;
-  text-align: center;
+  line-height: 1.5;
 }
 
 .plan-features {

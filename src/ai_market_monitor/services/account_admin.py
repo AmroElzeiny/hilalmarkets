@@ -51,7 +51,7 @@ ACCOUNT_PLAN_OPTIONS = (
     {
         "value": "free",
         "label": "Free plan",
-        "description": "A fresh 7-day Monitor trial with no payment method required.",
+        "description": "A fresh 7-day Monitor trial granted by an administrator.",
         "rank": 1,
     },
     {

@@ -35,6 +35,18 @@ def test_clear_single_condition_uses_configured_simple_tier() -> None:
     assert route.correction_count == 0
 
 
+def test_luna_minimal_effort_is_normalized_to_its_first_supported_level() -> None:
+    settings = _settings()
+    settings.ai_setup_simple_model = "gpt-5.6-luna"
+    settings.ai_setup_simple_reasoning_effort = "minimal"
+
+    route = select_setup_model(settings, current_message="hi there")
+
+    assert route.model == "gpt-5.6-luna"
+    assert route.reasoning_effort == "low"
+    assert "model_reasoning_effort_normalized" in route.reasons
+
+
 def test_complex_logic_and_multiple_timeframes_use_stable_complex_tier() -> None:
     route = select_setup_model(
         _settings(),
