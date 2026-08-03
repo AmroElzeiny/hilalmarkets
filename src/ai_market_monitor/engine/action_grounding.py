@@ -24,16 +24,25 @@ SemanticAction = Literal[
 ]
 
 _ACTION_PATTERNS: dict[SemanticAction, str] = {
+    # `watchlist` is the product's own word for the inclusion list, and `\bwatch\b`
+    # does not match inside it. A trader writing "a watchlist for ETHUSDT" therefore
+    # proved no inclusion at all and the turn was refused — for using our own noun.
     "include": (
-        r"\b(?:includ(?:e|ed|es|ing)|add|only|watch|monitor|scan)\b"
-        r"|(?:ضم|اضف|أضف|راقب|تابع|اسمح)"
-        r"|\b(?:dof|deef|add|ra2eb|tab3)\b"
+        r"\b(?:includ(?:e|ed|es|ing)|add|only|watch|watchlist|watchlists|watching|"
+        r"monitor|monitoring|scan|track|tracking|follow|following)\b"
+        r"|(?:ضم|اضف|أضف|راقب|تابع|اسمح|قائمة المتابعة|قائمة المراقبة)"
+        r"|\b(?:dof|deef|add|ra2eb|tab3|watchlist)\b"
     ),
+    # An exclusion is ordinarily written as a negation, not as the verb "exclude":
+    # "a watchlist for ETHUSDT, not BTCUSDT". Only the verb was recognised, so the
+    # commonest phrasing in the product proved nothing and failed closed.
     "exclude": (
-        r"\b(?:exclud(?:e|ed|es|ing)|avoid(?:ed|s|ing)?|block(?:ed|s|ing)?|except)\b"
+        r"\b(?:exclud(?:e|ed|es|ing)|avoid(?:ed|s|ing)?|block(?:ed|s|ing)?|except|"
+        r"omit(?:ted|s|ting)?|skip(?:ped|s|ping)?|ignor(?:e|ed|es|ing)|not|no|without|"
+        r"leave out|leaving out|keep out|keeping out|other than|apart from|minus)\b"
         r"|\b(?:do not|don't|never)\s+(?:include|watch|monitor|scan)\b"
-        r"|(?:استبعد|تجنب|امنع|ماعدا|إلا)"
-        r"|\b(?:estab3ed|mat7otsh|tganab|emn3)\b"
+        r"|(?:استبعد|تجنب|امنع|ماعدا|إلا|مش|بدون|من غير|ما عدا|غير)"
+        r"|\b(?:estab3ed|mat7otsh|tganab|emn3|mesh|men 8eer|bedoon|bidoon)\b"
     ),
     "remove_inclusion": (
         r"\b(?:remove|drop|stop including|no longer include|stop watching)\b"

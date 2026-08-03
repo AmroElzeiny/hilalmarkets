@@ -23,6 +23,7 @@ from ai_market_monitor.engine.planner_references import (
     PlannerReferenceContext,
     WatchlistReference,
 )
+from ai_market_monitor.engine.setup_failure_taxonomy import SetupFailureClass
 from ai_market_monitor.engine.setup_turn_execution import SetupTurnRequest, apply_setup_turn
 from ai_market_monitor.schemas.planner_intent import (
     FORBIDDEN_SCHEMA_MODELS,
@@ -324,7 +325,19 @@ def test_missing_trigger_timeframe_is_a_semantic_requirement_not_a_compiler_faul
 
 
 async def test_multiple_omitted_adjacent_roles_are_not_inserted_by_the_compiler() -> None:
-    """Several planner omissions cannot become deterministic trader semantics."""
+    """Several planner omissions cannot become deterministic trader semantics.
+
+    They are also not an internal compiler fault. This assertion used to require
+    ``COMPILER_INVARIANT_VIOLATION`` for two or more omissions, and that terminal class
+    is what made an ordinary sentence unanswerable: no repair, no question, HTTP 422,
+    and a user who could only send the same words again. Evaluator run
+    20260803T000036Z, case ``precedence_grouping-013-1996163001``, shows eight
+    identical refusals to one complete instruction.
+
+    Every omission is named instead, each with the field the model left out, so one
+    bounded correction can address all of them at once — and the compiler still
+    inserts nothing.
+    """
 
     scope = "Use 15m as context and 5m as the trigger timeframe."
     rule = "Require a bullish close-to-close move of at most 5%."
@@ -373,7 +386,17 @@ async def test_multiple_omitted_adjacent_roles_are_not_inserted_by_the_compiler(
             message=message,
             source_turn_id="turn-adjacent-role-evidence",
         )
-    assert omitted.value.outcome is SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION
+    assert omitted.value.code == "PLANNER_SEMANTIC_OMISSION"
+    assert omitted.value.outcome is SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED
+    # Both omitted roles are named, not just whichever was met first.
+    assert set(omitted.value.target_paths) == {
+        "condition.context_timeframes",
+        "condition.trigger_timeframe",
+    }
+    # And nothing was written into the intent on the trader's behalf.
+    condition = envelope.semantic_intents[0].payload.condition  # type: ignore[union-attr]
+    assert condition.trigger_timeframe is None
+    assert condition.context_timeframes == []
 
 
 async def test_role_evidence_never_crosses_a_question_or_another_operation() -> None:
@@ -915,6 +938,10 @@ def test_only_one_exact_model_owned_canonical_failure_is_repairable() -> None:
     assert repairable.intent_ref == "intent_1"
     assert repairable.target_path == "condition.threshold"
 
+    # Two complaints about the same intent are one correction, not an internal fault.
+    # Both fields are named so a single bounded correction can address both; requiring
+    # exactly one path here is what sent an ordinary two-field refusal down the
+    # terminal branch and left the trader with nothing to do but repeat themselves.
     multi_field = _classify_plan_failure(
         code="VALUE_NOT_GROUNDED",
         details=(
@@ -926,9 +953,25 @@ def test_only_one_exact_model_owned_canonical_failure_is_repairable() -> None:
         operation_intent_refs={"op_1": "intent_1"},
         intent_segments={"intent_1": "segment_1"},
     )
-    assert multi_field.outcome == SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION
-    assert multi_field.intent_ref is None
-    assert multi_field.target_path is None
+    assert multi_field.outcome == SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED
+    assert multi_field.intent_ref == "intent_1"
+    assert set(multi_field.paths) == {"condition.threshold", "condition.comparator"}
+
+    # Two complaints about *different* intents still cannot be one correction: there is
+    # no single verified span that authorises both.
+    two_intents = _classify_plan_failure(
+        code="VALUE_NOT_GROUNDED",
+        details=(
+            "op_1:condition:threshold:not_grounded",
+            "op_2:condition:threshold:not_grounded",
+        ),
+        envelope=envelope,
+        message=message,
+        operation_intent_refs={"op_1": "intent_1", "op_2": "intent_2"},
+        intent_segments={"intent_1": "segment_1", "intent_2": "segment_1"},
+    )
+    assert two_intents.outcome == SemanticIntentOutcome.NON_RECOVERABLE_FAILURE
+    assert two_intents.intent_ref is None
 
 
 def test_opaque_patch_failure_and_canonical_default_never_enter_repair() -> None:
@@ -961,7 +1004,20 @@ def test_opaque_patch_failure_and_canonical_default_never_enter_repair() -> None
             operation_intent_refs={"op_1": "intent_1"},
             intent_segments={"intent_1": "segment_1"},
         )
-        assert classified.outcome == SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION
+        # Not repairable, and not a compiler invariant either. A canonical gate refused
+        # what the server built; the trader wrote nothing wrong. Calling that
+        # COMPILER_INVARIANT_VIOLATION made the name meaningless and hid the real
+        # invariants inside a pile of ordinary refusals.
+        assert classified.outcome == SemanticIntentOutcome.NON_RECOVERABLE_FAILURE
+        # And never as a compiler invariant. That name has to keep meaning "the server
+        # built something invalid from a valid reading"; using it as the catch-all for
+        # every unattributable refusal buried the real ones and made an ordinary
+        # refusal terminal and unexplainable.
+        assert classified.failure_class in {
+            SetupFailureClass.CANONICAL_VALIDATION_FAILURE,
+            SetupFailureClass.GROUNDING_MISMATCH,
+        }
+        assert classified.failure_class is not SetupFailureClass.COMPILER_INVARIANT_VIOLATION
         assert classified.intent_ref is None
         assert classified.target_path is None
 

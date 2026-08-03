@@ -167,6 +167,7 @@ def deterministic_metrics(
     structured: dict[str, Any] | None,
     schema_errors: list[str],
     field_map: dict[str, Any],
+    canonical_state: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     assistant_text = "\n".join(t.text for t in turns if t.role == "assistant").lower()
     latencies = [t.latency_ms for t in turns if t.role == "assistant" and t.latency_ms is not None]
@@ -314,6 +315,29 @@ def deterministic_metrics(
         }
     )
     metrics.update(_approval_metrics(scenario, turns))
+    metrics.update(grouping_metrics(scenario_contract, canonical_state))
+    if structured is None:
+        # Nothing was captured, so nothing was correct. `1.0 - inversion_rate` reads a
+        # missing field as a matching one, and that is how run 20260803T000036Z reported
+        # operator, threshold, timeframe and universe accuracy of 1.0 for a case that
+        # produced no strategy at all and failed eight turns in a row. A criterion must
+        # never pass on absence.
+        for name in (
+            "operator_accuracy",
+            "threshold_accuracy",
+            "timeframe_accuracy",
+            "universe_accuracy",
+            "semantic_accuracy",
+            "correction_adherence",
+            "version_integrity",
+        ):
+            if name in metrics:
+                metrics[name] = 0.0
+        metrics["semantic_mismatch_rate"] = 1.0
+        metrics["structured_capture_rate"] = 0.0
+    else:
+        metrics["structured_capture_rate"] = 1.0
+    metrics.update(transport_parity_metrics(turns))
     metrics["semantic_contract_pass"] = float(
         metrics["schema_valid"] == 1.0
         and semantic_accuracy == 1.0
@@ -321,6 +345,7 @@ def deterministic_metrics(
         and metrics["excluded_symbol_leakage_rate"] == 0.0
         and metrics["approval_bypass_rate"] == 0.0
         and metrics["lifecycle_contradiction_rate"] == 0.0
+        and metrics.get("grouping_accuracy", 1.0) == 1.0
         and (
             not workflow
             or (
@@ -330,6 +355,203 @@ def deterministic_metrics(
         )
     )
     return metrics
+
+
+def transport_parity_metrics(turns: list[TurnRecord]) -> dict[str, float]:
+    """Whether the page a customer sees is the turn the server persisted.
+
+    This is **transport** parity, and it is a different question from whether two
+    independent conversations reach the same strategy. Confusing the two is why runs 9
+    to 11 reported "backend/UI parity" of 0.2-0.6 and left it unclear whether the UI was
+    broken or the model was simply non-deterministic. It was the second: two separate
+    conversations, two separate model calls, two separate outcomes.
+
+    The UI target already proves the real thing on every turn — the rendered contract
+    hash must equal the backend's, and the canvas node ids must match, or it raises. It
+    just never recorded that proof as a number. It does now.
+    """
+
+    checked = 0
+    matched = 0
+    for turn in turns:
+        contract = _ui_contract_of(turn)
+        if contract is None:
+            continue
+        # A turn that produced no structured preview has nothing to render, so it is
+        # not evidence either way.
+        if not contract.get("captured"):
+            continue
+        checked += 1
+        matched += int(
+            contract.get("canonical_hash_match") is True
+            and contract.get("canvas_node_match") is True
+        )
+    if not checked:
+        return {}
+    return {
+        "transport_contract_parity": matched / checked,
+        "transport_verified_turns": float(checked),
+    }
+
+
+def _ui_contract_of(turn: TurnRecord) -> dict[str, Any] | None:
+    """The UI target's own per-turn verification result, when this turn has one."""
+
+    return turn.ui_contract if isinstance(turn.ui_contract, dict) else None
+
+
+#: How a canonical group node names its operator.
+_GROUP_TYPES = frozenset({"and", "or", "not"})
+
+
+def _ast_shape(node: Any, leaf_identities: dict[int, str]) -> str | None:
+    """The structure of one compiled condition tree, and nothing else.
+
+    Wording, ids, provenance and field values are all excluded on purpose: this is the
+    one comparison that answers "did the rules end up joined the way they were
+    written", and mixing anything else into it is how a real grouping defect got
+    reported as a threshold problem.
+    """
+
+    if not isinstance(node, dict):
+        return None
+    node_type = str(node.get("node_type") or "").casefold()
+    if node_type == "condition":
+        reference = leaf_identities.get(id(node))
+        return f"leaf:{reference}" if reference else None
+    if node_type not in _GROUP_TYPES:
+        return None
+    children = [_ast_shape(child, leaf_identities) for child in node.get("children") or []]
+    if any(child is None for child in children):
+        return None
+    if node_type in {"and", "or"} and len(children) == 1:
+        # The registry's own outermost group holds a single rule while a draft has one
+        # rule. Unwrapping it here compares the trader's structure, not the container.
+        return children[0]
+    return f"{node_type}({','.join(sorted(str(child) for child in children))})"
+
+
+def _expected_shape(contract: ScenarioContract) -> str | None:
+    """The structure the scenario states, built from its own explicit expectations."""
+
+    groups = contract.get("expected_boolean_groups")
+    root = contract.get("expected_root_ref")
+    if not isinstance(groups, list) or not groups or not isinstance(root, str):
+        return None
+    by_ref = {
+        str(item.get("group_ref")): item
+        for item in groups
+        if isinstance(item, dict) and item.get("group_ref")
+    }
+
+    def render(reference: str, depth: int = 0) -> str:
+        if depth > 12:
+            return "invalid-depth"
+        group = by_ref.get(reference)
+        if group is None:
+            return f"leaf:{reference}"
+        operator = str(group.get("operator") or "")
+        children = [render(str(child), depth + 1) for child in group.get("child_refs") or []]
+        return f"{operator}({','.join(sorted(children))})"
+
+    return render(root)
+
+
+def _condition_leaves(node: Any) -> list[dict[str, Any]]:
+    if not isinstance(node, dict):
+        return []
+    if str(node.get("node_type") or "").casefold() == "condition":
+        return [node]
+    return [leaf for child in node.get("children") or [] for leaf in _condition_leaves(child)]
+
+
+def _leaf_matches_contract(node: dict[str, Any], expected: dict[str, Any]) -> bool:
+    """Match one compiled predicate to one explicit scenario leaf, field by field."""
+
+    aliases = {
+        "formula": "formula",
+        "movement_direction": "movement_direction",
+        "operator": "operator",
+        "trigger_timeframe": "trigger_timeframe",
+    }
+    for expected_key, actual_key in aliases.items():
+        if expected_key in expected and str(node.get(actual_key) or "") != str(
+            expected[expected_key]
+        ):
+            return False
+    expected_threshold = expected.get("threshold_percent", expected.get("threshold"))
+    if expected_threshold is not None:
+        actual_threshold = node.get("threshold")
+        if actual_threshold is None:
+            return False
+        try:
+            if abs(float(actual_threshold) - float(expected_threshold)) > 1e-9:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _leaf_identity_map(
+    root: Any,
+    contract: ScenarioContract,
+) -> tuple[dict[int, str], list[str]]:
+    expected = contract.get("expected_condition_leaves")
+    if not isinstance(expected, dict):
+        return {}, ["scenario:no_expected_leaf_contract"]
+    leaves = _condition_leaves(root)
+    identities: dict[int, str] = {}
+    used: set[str] = set()
+    problems: list[str] = []
+    for leaf in leaves:
+        candidates = [
+            str(reference)
+            for reference, specification in expected.items()
+            if isinstance(specification, dict)
+            and str(reference) not in used
+            and _leaf_matches_contract(leaf, specification)
+        ]
+        if len(candidates) != 1:
+            problems.append(
+                f"compiled_leaf:{leaf.get('formula')}:{leaf.get('trigger_timeframe')}:"
+                f"matches={len(candidates)}"
+            )
+            continue
+        identities[id(leaf)] = candidates[0]
+        used.add(candidates[0])
+    missing = sorted(set(map(str, expected)) - used)
+    problems.extend(f"expected_leaf:{reference}:missing" for reference in missing)
+    return identities, problems
+
+
+def grouping_metrics(
+    contract: ScenarioContract,
+    canonical_state: dict[str, Any] | None,
+) -> dict[str, float]:
+    """Deterministic ``grouping_accuracy``, from the compiled AST against the contract.
+
+    Before this existed the metric name was simply absent, so the release criterion
+    ``grouping_accuracy >= 0.98`` silently resolved to the AI judge's dimension score.
+    A judge cannot define the expected topology — the scenario does — and a topic whose
+    whole purpose is structure was therefore never measured deterministically at all.
+
+    Scenarios that state no expression contribute nothing here: the metric is omitted
+    rather than reported as a perfect 1.0, so a topic that was never exercised cannot
+    look like a topic that passed.
+    """
+
+    expected = _expected_shape(contract)
+    if expected is None:
+        return {}
+    root = (canonical_state or {}).get("condition_ast")
+    identities, leaf_problems = _leaf_identity_map(root, contract)
+    compiled = _ast_shape(root, identities)
+    matched = compiled is not None and not leaf_problems and compiled == expected
+    return {
+        "grouping_accuracy": 1.0 if matched else 0.0,
+        "grouping_structure_missing": 0.0 if compiled else 1.0,
+        "grouping_leaf_identity_accuracy": 1.0 if not leaf_problems else 0.0,
+    }
 
 
 def _approval_metrics(

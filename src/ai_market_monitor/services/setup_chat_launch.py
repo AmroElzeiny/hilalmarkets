@@ -14,8 +14,8 @@ from uuid import UUID
 from pydantic import ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -26,8 +26,10 @@ from ai_market_monitor.core.universe_membership import (
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
     AISetupChatSession,
+    AIUsageEvent,
     ApprovedWatchlist,
     SetupChatDraftSnapshot,
+    SetupChatOperationalIssue,
     SetupChatTurn,
     ShariaMethodology,
     ShariaMethodologyFamily,
@@ -60,6 +62,13 @@ from ai_market_monitor.engine.strategy_compiler_v2 import (
 from ai_market_monitor.engine.strategy_draft_migration import migrate_legacy_draft
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.turn_timing import TurnTelemetry
+from ai_market_monitor.engine.validated_intent_snapshot import (
+    ValidatedIntentSnapshot,
+    append_snapshot,
+    normalized_intent_hash,
+    repeat_state,
+    snapshot_history,
+)
 from ai_market_monitor.schemas.preflight_cache import PreflightCacheEntry
 from ai_market_monitor.schemas.screening_execution import (
     PreflightContract,
@@ -167,6 +176,15 @@ class SetupLaunchError(ValueError):
         self.status_code = status_code
 
 
+@dataclass(frozen=True, slots=True)
+class _CostReservation:
+    """One in-flight maximum-turn reservation, released after the turn settles."""
+
+    redis_key: str
+    amount_usd: float
+    ttl_seconds: int
+
+
 class SetupChatLaunchService:
     """The only writable Setup Chat strategy path outside test compatibility mode."""
 
@@ -219,10 +237,27 @@ class SetupChatLaunchService:
                 await session.flush()
                 await session.commit()
                 return replay
-            turn_record = await self._get_or_create_turn(
-                session,
-                chat,
-                client_message_id,
+
+        # Dynamic launch controls gate new work, never the exact read-only replay of a
+        # completed idempotent turn above. An emergency switch or beta-list change must
+        # not make a previously committed response disappear or regenerate wording.
+        if self.settings.setup_chat_emergency_disabled:
+            raise SetupLaunchError(
+                "SETUP_CHAT_EMERGENCY_DISABLED",
+                "Setup Chat is temporarily paused. Your existing draft is unchanged.",
+                stage="intent",
+                retryable=True,
+                status_code=503,
+            )
+        beta_users = {
+            item.casefold() for item in self.settings.setup_chat_private_beta_user_ids
+        }
+        if beta_users and str(chat.user_id).casefold() not in beta_users:
+            raise SetupLaunchError(
+                "SETUP_CHAT_PRIVATE_BETA_NOT_ENABLED",
+                "Setup Chat is not enabled for this account.",
+                stage="intent",
+                status_code=403,
             )
 
         # The raw text, exactly as typed. Collapsing whitespace here destroyed the line
@@ -231,6 +266,12 @@ class SetupChatLaunchService:
         raw = message or option_label or option_value or ""
         cleaned = " ".join(raw.split())
         if option_key:
+            if client_message_id:
+                turn_record = await self._get_or_create_turn(
+                    session,
+                    chat,
+                    client_message_id,
+                )
             selected_chat = await self._run_server_option_turn(
                 session,
                 chat,
@@ -242,42 +283,218 @@ class SetupChatLaunchService:
                 turn_record=turn_record,
             )
             return selected_chat
-        user_message = (
-            await session.get(AISetupChatMessage, turn_record.source_message_id)
-            if turn_record is not None and turn_record.source_message_id is not None
-            else None
-        )
-        if user_message is None:
-            user_message = await self.owner._append_message(
+
+        reservation = await self._reserve_user_cost_budget(session, chat.user_id)
+        try:
+            if client_message_id:
+                turn_record = await self._get_or_create_turn(
+                    session,
+                    chat,
+                    client_message_id,
+                )
+            user_message = (
+                await session.get(AISetupChatMessage, turn_record.source_message_id)
+                if turn_record is not None and turn_record.source_message_id is not None
+                else None
+            )
+            if user_message is None:
+                user_message = await self.owner._append_message(
+                    session,
+                    chat,
+                    role="user",
+                    message_type="text",
+                    # Stored as typed, so provenance quotes what the user can see they wrote.
+                    content=raw,
+                    payload={
+                        "semantic_layer": "ai_first",
+                        "launch_pipeline": "setup_agent_v3",
+                        "option_key": option_key,
+                        "option_value": option_value,
+                    },
+                    client_message_id=client_message_id,
+                )
+            if turn_record is not None:
+                turn_record.source_message_id = user_message.id
+                turn_record.status = TurnStatus.PLANNING.value
+                await session.flush()
+                await session.commit()
+
+            return await self._run_agent_turn(
                 session,
                 chat,
-                role="user",
-                message_type="text",
-                # Stored as typed, so provenance quotes what the user can see they wrote.
-                content=raw,
-                payload={
-                    "semantic_layer": "ai_first",
-                    "launch_pipeline": "setup_agent_v3",
-                    "option_key": option_key,
-                    "option_value": option_value,
-                },
+                message=raw,
+                source_turn_id=str(user_message.id),
+                started=started,
                 client_message_id=client_message_id,
+                turn_record=turn_record,
             )
-        if turn_record is not None:
-            turn_record.source_message_id = user_message.id
-            turn_record.status = TurnStatus.PLANNING.value
-            await session.flush()
-            await session.commit()
+        finally:
+            await self._release_user_cost_reservation(reservation)
 
-        return await self._run_agent_turn(
-            session,
-            chat,
-            message=raw,
-            source_turn_id=str(user_message.id),
-            started=started,
-            client_message_id=client_message_id,
-            turn_record=turn_record,
+    async def _reserve_user_cost_budget(
+        self,
+        session: AsyncSession,
+        user_id: UUID,
+    ) -> _CostReservation | None:
+        """Reserve only the concurrent, in-flight maximum-turn exposure.
+
+        Usage events are the immutable cost authority. Redis atomically reserves the
+        whole per-turn ceiling before provider work, so concurrent turns cannot share
+        one remaining allowance. The reservation is released in ``handle()`` after the
+        turn succeeds or fails; actual spend remains in ``AIUsageEvent``. The previous
+        implementation accumulated every maximum reservation until midnight, charging
+        ordinary $0.002 turns as $0.10 and blocking long evaluator sessions after about
+        twenty turns.
+
+        If Redis is unavailable, the immutable DB total and API rate window provide a
+        conservative degraded boundary without turning Redis health into an AI error.
+        """
+
+        day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        spent = await session.scalar(
+            select(func.coalesce(func.sum(AIUsageEvent.estimated_cost_usd), 0)).where(
+                AIUsageEvent.user_id == user_id,
+                AIUsageEvent.operation == "setup_agent_turn",
+                AIUsageEvent.created_at >= day_start,
+            )
         )
+        recorded_spend = float(spent or 0)
+        reserve = self.settings.setup_agent_max_estimated_cost_usd_per_turn
+        limit = self.settings.setup_agent_max_estimated_cost_usd_per_user_day
+        projected = recorded_spend + reserve
+        reservation: _CostReservation | None = None
+        if self._preflight_redis is not None:
+            now = datetime.now(UTC)
+            tomorrow = (now + timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            ttl = max(60, int((tomorrow - now).total_seconds()))
+            # v2 stores only outstanding reservations. The prior key accumulated each
+            # maximum reservation for the entire day and is deliberately not reused.
+            key = f"setup-chat:daily-cost:v2:{now.date().isoformat()}:{user_id}"
+            script = """
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local next_value = current + tonumber(ARGV[2])
+if tonumber(ARGV[1]) + next_value > tonumber(ARGV[3]) then return '-1' end
+redis.call('SET', KEYS[1], tostring(next_value), 'EX', ARGV[4])
+return tostring(next_value)
+"""
+            try:
+                redis_eval = cast(Any, self._preflight_redis.eval)
+                reserved = await redis_eval(
+                    script,
+                    1,
+                    key,
+                    str(recorded_spend),
+                    str(reserve),
+                    str(limit),
+                    str(ttl),
+                )
+                outstanding = float(reserved)
+                projected = -1 if outstanding < 0 else recorded_spend + outstanding
+                if outstanding >= 0:
+                    reservation = _CostReservation(
+                        redis_key=key,
+                        amount_usd=reserve,
+                        ttl_seconds=ttl,
+                    )
+            except (RedisError, TypeError, ValueError):
+                # Cost protection degrades to immutable DB usage plus the API's
+                # per-user rate window. Provider interpretation remains available;
+                # Redis availability is never recast as a semantic model failure.
+                projected = recorded_spend + reserve
+        if projected < 0 or projected > limit:
+            raise SetupLaunchError(
+                "SETUP_CHAT_DAILY_COST_BUDGET_REACHED",
+                "Setup Chat's daily AI allowance is reached. Your draft is unchanged.",
+                stage="intent",
+                retryable=True,
+                status_code=429,
+            )
+        return reservation
+
+    async def _release_user_cost_reservation(
+        self,
+        reservation: _CostReservation | None,
+    ) -> None:
+        """Release an in-flight reservation; immutable usage retains actual spend."""
+
+        if reservation is None or self._preflight_redis is None:
+            return
+        script = """
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local next_value = current - tonumber(ARGV[1])
+if next_value <= 0.0000001 then
+  redis.call('DEL', KEYS[1])
+  return '0'
+end
+redis.call('SET', KEYS[1], tostring(next_value), 'EX', ARGV[2])
+return tostring(next_value)
+"""
+        try:
+            redis_eval = cast(Any, self._preflight_redis.eval)
+            await redis_eval(
+                script,
+                1,
+                reservation.redis_key,
+                str(reservation.amount_usd),
+                str(reservation.ttl_seconds),
+            )
+        except (RedisError, TypeError, ValueError):
+            # The reservation expires at the UTC-day boundary. A release outage may
+            # conservatively reduce availability, but can never authorize overspend or
+            # replace the original turn result.
+            return
+
+    async def _queue_operational_issue(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn: SetupChatTurn | None,
+        *,
+        proof: dict[str, Any],
+        repeated_failure: bool,
+    ) -> None:
+        """Upsert one safe, deduplicated issue into the admin-owned queue."""
+
+        fingerprint = str(proof.get("support_reference") or "")
+        if not fingerprint:
+            fingerprint = hashlib.sha256(
+                json.dumps(proof, sort_keys=True, default=str).encode()
+            ).hexdigest()[:32]
+        now = datetime.now(UTC)
+        issue = await session.scalar(
+            select(SetupChatOperationalIssue)
+            .where(SetupChatOperationalIssue.fingerprint == fingerprint)
+            .with_for_update()
+        )
+        if issue is None:
+            issue = SetupChatOperationalIssue(
+                user_id=chat.user_id,
+                chat_session_id=chat.id,
+                setup_chat_turn_id=turn.id if turn is not None else None,
+                fingerprint=fingerprint,
+                issue_kind=("repeated_failure" if repeated_failure else "compiler_invariant"),
+                failure_class=str(proof.get("failure_class") or "UNKNOWN"),
+                status="open",
+                occurrence_count=1,
+                semantic_paths=[str(item) for item in proof.get("semantic_paths") or []],
+                safe_source_excerpt=str(proof.get("source_excerpt") or "")[:1000],
+                support_reference=str(proof.get("support_reference") or "")[:64],
+                failure_proof=proof,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+            session.add(issue)
+        else:
+            issue.occurrence_count += 1
+            issue.last_seen_at = now
+            issue.setup_chat_turn_id = turn.id if turn is not None else issue.setup_chat_turn_id
+            issue.failure_proof = proof
+            issue.status = "open"
+            issue.resolved_at = None
+            issue.resolution_note = None
+        await session.flush()
 
     async def _run_server_option_turn(
         self,
@@ -1797,6 +2014,7 @@ class SetupChatLaunchService:
             message=message,
             source_turn_id=source_turn_id,
             draft=draft,
+            session_id=str(chat.id),
             dialogue=tuple(
                 await self._recent_dialogue(session, chat, exclude_message_id=source_turn_id)
             ),
@@ -1809,6 +2027,15 @@ class SetupChatLaunchService:
             # a loop the user pays for in waiting.
             repeated_failure_codes=tuple(
                 str(item) for item in (context.get("setup_failure_history") or [])[-6:]
+            ),
+            # Everything earlier turns already proved about this exact request. Without
+            # it, a trader who restates the same instruction pays for a full planner
+            # call every time and reaches the same refusal — eight times, in evaluator
+            # run 20260803T000036Z.
+            repeats=repeat_state(
+                snapshot_history(context),
+                canonical_draft_hash=draft.executable_hash or "",
+                normalized_user_intent_hash=normalized_intent_hash(" ".join(message.split())),
             ),
             planner_references=planner_references,
             # Screening and provider availability are gates, so they run inside
@@ -1847,6 +2074,46 @@ class SetupChatLaunchService:
                 *(context.get("setup_failure_history") or []),
                 exc.code,
             ][-6:]
+            if exc.failure_record is not None:
+                context["last_turn_failure"]["failure_class"] = (
+                    exc.failure_record.failure_class.value
+                )
+                context["last_turn_failure"]["failure_owner"] = exc.failure_record.owner.value
+                context["last_turn_failure"]["support_reference"] = (
+                    exc.failure_record.support_reference
+                )
+                context["last_turn_failure"]["repair_decision"] = (
+                    exc.failure_record.repair_decision
+                )
+                context["last_turn_failure"]["proof"] = exc.failure_record.to_dict()
+                # A real compiler fault or a canonical refusal is a product defect, not
+                # something the trader can fix by rewriting. It goes to an operator
+                # queue; the customer gets a reference, never "please rephrase".
+                if exc.operator_alertable:
+                    context["setup_operator_review_queue"] = [
+                        *(context.get("setup_operator_review_queue") or []),
+                        exc.failure_record.to_dict(),
+                    ][-20:]
+                repeated_failure = int(
+                    telemetry.notes.get("same_failure_repeat_count") or 0
+                ) >= 1
+                if exc.operator_alertable or repeated_failure:
+                    try:
+                        async with session.begin_nested():
+                            await self._queue_operational_issue(
+                                session,
+                                chat,
+                                turn_record,
+                                proof=exc.failure_record.to_dict(),
+                                repeated_failure=repeated_failure,
+                            )
+                    except SQLAlchemyError:
+                        # The original Setup Chat failure remains authoritative. A queue
+                        # write outage must never replace it or mutate the draft.
+                        telemetry.notes["operator_queue_persist_failed"] = True
+            # A failed turn still established most of what the trader wrote. Keeping it
+            # is what lets the next turn answer without asking for everything again.
+            _record_intent_snapshot(context, telemetry)
             _record_funnel(
                 context,
                 outcome="refused",
@@ -1959,6 +2226,7 @@ class SetupChatLaunchService:
         context["last_turn_failed"] = False
         context.pop("last_turn_failure", None)
         context.pop("setup_failure_history", None)
+        _record_intent_snapshot(context, telemetry)
         _record_funnel(
             context,
             outcome=(
@@ -3281,6 +3549,20 @@ FUNNEL_OUTCOMES: tuple[str, ...] = ("changed", "no_change", "answered", "refused
 _FUNNEL_WINDOW = 40
 
 
+def _record_intent_snapshot(context: dict[str, Any], telemetry: TurnTelemetry) -> None:
+    """Persist what this turn established, whether or not the turn succeeded.
+
+    The agent builds the snapshot as soon as it has a reading, and adds the failure to
+    it if one happens. Storing it on both paths is the point: a refused turn is exactly
+    the turn whose evidence must survive, or the trader is asked to type it all again.
+    """
+
+    payload = telemetry.notes.get("validated_intent_snapshot")
+    if not isinstance(payload, dict):
+        return
+    append_snapshot(context, ValidatedIntentSnapshot.from_dict(payload))
+
+
 def _record_funnel(
     context: dict[str, Any],
     *,
@@ -3317,6 +3599,12 @@ def _record_funnel(
             "repaired": telemetry.stage_counts.get("repair_provider_wait", 0) > 0,
             "asked_question": asked_question,
             "approval_eligible": approval_eligible,
+            "same_intent_retry_count": int(
+                telemetry.notes.get("same_intent_retry_count") or 0
+            ),
+            "same_failure_repeat_count": int(
+                telemetry.notes.get("same_failure_repeat_count") or 0
+            ),
             # True when the previous turn asked something and this one is the answer.
             # A question that is never answered is the clearest signal of a user leaving.
             "answered_previous_question": bool(previous.get("asked_question")),
@@ -3348,6 +3636,24 @@ def _funnel_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             sum(1 for item in rows if item["model_calls"] <= 1) / total, 4
         ),
         "repair_attempt_share": round(sum(1 for item in rows if item["repaired"]) / total, 4),
+        "repeated_full_message_rate": round(
+            sum(1 for item in rows if item.get("same_intent_retry_count", 0) > 0) / total,
+            4,
+        ),
+        "user_resend_rate": round(
+            sum(1 for item in rows if item.get("same_intent_retry_count", 0) > 0) / total,
+            4,
+        ),
+        "failure_loop_turns": sum(
+            1 for item in rows if item.get("same_failure_repeat_count", 0) >= 2
+        ),
+        "abandonment_after_failure": bool(
+            rows[-1]["outcome"] == "refused"
+            and (
+                rows[-1].get("same_failure_repeat_count", 0) >= 2
+                or rows[-1].get("asked_question", False)
+            )
+        ),
         "clean_first_turn": bool(rows[0]["outcome"] != "refused" and not rows[0]["repaired"]),
         "questions_asked": sum(1 for item in rows if item["asked_question"]),
         "questions_left_unanswered": unanswered,

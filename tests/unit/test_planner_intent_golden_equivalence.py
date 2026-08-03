@@ -491,11 +491,33 @@ async def test_literal_boolean_replacement_preserves_offered_owned_nodes() -> No
                 "segment_ref": "s1",
                 "payload": {
                     "action": "replace_boolean_structure",
-                    "condition": {
-                        "boolean_relationship": "or",
-                        "child_intents": [
-                            {"target_reference": "condition_1"},
-                            {"target_reference": "condition_2"},
+                    "boolean_structure": {
+                        "root_ref": "g1",
+                        "condition_leaves": [
+                            {
+                                "leaf_ref": "l1",
+                                "segment_ref": "s1",
+                                "condition": {
+                                    "target_reference": "condition_1",
+                                    "source_quote": "the RSI rule",
+                                },
+                            },
+                            {
+                                "leaf_ref": "l2",
+                                "segment_ref": "s1",
+                                "condition": {
+                                    "target_reference": "condition_2",
+                                    "source_quote": "the price rule",
+                                },
+                            },
+                        ],
+                        "boolean_groups": [
+                            {
+                                "group_ref": "g1",
+                                "operator": "or",
+                                "child_refs": ["l1", "l2"],
+                                "source_quote": message,
+                            }
                         ],
                     },
                 },

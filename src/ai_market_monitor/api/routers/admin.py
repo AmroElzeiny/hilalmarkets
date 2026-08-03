@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,7 +14,12 @@ from ai_market_monitor.api.dependencies import (
 )
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.db.models import AuditEvent, Incident, SupportRequest
+from ai_market_monitor.db.models import (
+    AuditEvent,
+    Incident,
+    SetupChatOperationalIssue,
+    SupportRequest,
+)
 from ai_market_monitor.db.models.enums import IncidentSeverity
 from ai_market_monitor.services.admin import AdminError
 from ai_market_monitor.services.admin_dashboard import (
@@ -113,6 +119,82 @@ async def recent_activity(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     return await dashboard(session, settings).recent_activity()
+
+
+@router.get("/setup-chat/issues")
+async def setup_chat_operational_issues(
+    issue_status: str = Query(default="open", pattern="^(open|resolved|all)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: AdminPrincipal = Depends(get_admin_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Admin-owned queue for compiler invariants and repeated Setup Chat failures."""
+
+    statement = select(SetupChatOperationalIssue)
+    if issue_status != "all":
+        statement = statement.where(SetupChatOperationalIssue.status == issue_status)
+    rows = list(
+        await session.scalars(
+            statement.order_by(SetupChatOperationalIssue.last_seen_at.desc()).limit(limit)
+        )
+    )
+    return {
+        "issues": [
+            {
+                "id": str(item.id),
+                "issue_kind": item.issue_kind,
+                "failure_class": item.failure_class,
+                "status": item.status,
+                "occurrence_count": item.occurrence_count,
+                "semantic_paths": item.semantic_paths,
+                "safe_source_excerpt": item.safe_source_excerpt,
+                "support_reference": item.support_reference,
+                "failure_proof": item.failure_proof,
+                "chat_session_id": str(item.chat_session_id) if item.chat_session_id else None,
+                "setup_chat_turn_id": str(item.setup_chat_turn_id)
+                if item.setup_chat_turn_id
+                else None,
+                "first_seen_at": item.first_seen_at,
+                "last_seen_at": item.last_seen_at,
+                "resolved_at": item.resolved_at,
+                "resolution_note": item.resolution_note,
+            }
+            for item in rows
+        ]
+    }
+
+
+@router.post("/setup-chat/issues/{issue_id}/resolve")
+async def resolve_setup_chat_operational_issue(
+    issue_id: UUID,
+    request: ReasonRequest,
+    principal: AdminPrincipal = Depends(require_admin),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    issue = await session.get(SetupChatOperationalIssue, issue_id, with_for_update=True)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="setup_chat_issue_missing")
+    now = datetime.now(UTC)
+    issue.status = "resolved"
+    issue.resolved_at = now
+    issue.resolution_note = request.reason
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            actor_type="admin",
+            action="setup_chat_operational_issue_resolved",
+            target_type="setup_chat_operational_issue",
+            target_id=str(issue.id),
+            metadata_redacted={
+                "failure_class": issue.failure_class,
+                "support_reference": issue.support_reference,
+                "reason": request.reason,
+            },
+            created_at=now,
+        )
+    )
+    await session.commit()
+    return {"issue_id": str(issue.id), "status": issue.status, "resolved_at": now}
 
 
 @router.get("/incidents")

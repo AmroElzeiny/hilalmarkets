@@ -433,8 +433,12 @@ class UITarget(ChatTarget):
             raise RuntimeError("Canvas node ids differ from the backend evaluation contract")
         return {
             "captured": True,
-            "canonical_hash": ui_hash,
-            "canvas_node_ids": sorted(actual_nodes),
+            "backend_canonical_hash": expected_hash,
+            "rendered_canonical_hash": ui_hash,
+            "canonical_hash_match": ui_hash == expected_hash,
+            "backend_canvas_node_ids": sorted(expected_nodes),
+            "rendered_canvas_node_ids": sorted(actual_nodes),
+            "canvas_node_match": actual_nodes == expected_nodes,
             **self._turn_state(),
         }
 

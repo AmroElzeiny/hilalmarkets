@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from ai_market_monitor.db.models import (
     AuditEvent,
     BillingEvent,
+    SetupChatOperationalIssue,
     Strategy,
     SupportRequest,
     User,
@@ -36,6 +37,20 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
             context={"strategy_id": str(strategy.id)},
         )
         session.add_all([strategy, ticket])
+        setup_issue = SetupChatOperationalIssue(
+            fingerprint="setup-admin-queue-test",
+            issue_kind="compiler_invariant",
+            failure_class="COMPILER_INVARIANT_VIOLATION",
+            status="open",
+            occurrence_count=2,
+            semantic_paths=["condition.trigger_timeframe"],
+            safe_source_excerpt="trigger on 15m",
+            support_reference="setup-admin-queue-test",
+            failure_proof={"operator_alertable": True},
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(setup_issue)
         await ReliabilityService(session).record_market_data_health(
             provider="ccxt",
             exchange="binance",
@@ -49,6 +64,7 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
         await session.commit()
         admin_headers = {"X-User-ID": str(admin.id)}
         user_headers = {"X-User-ID": str(normal.id)}
+        setup_issue_id = setup_issue.id
 
     public_status = await client.get("/api/v1/status/summary")
     assert public_status.status_code == 200
@@ -64,6 +80,18 @@ async def test_status_and_admin_dashboard_require_roles_and_audit_actions(test_c
     support_queue = await client.get("/api/v1/admin/support", headers=admin_headers)
     assert support_queue.status_code == 200
     assert support_queue.json()["support_requests"][0]["category"] == "missing_alert"
+    setup_queue = await client.get(
+        "/api/v1/admin/setup-chat/issues", headers=admin_headers
+    )
+    assert setup_queue.status_code == 200
+    assert setup_queue.json()["issues"][0]["occurrence_count"] == 2
+    setup_resolved = await client.post(
+        f"/api/v1/admin/setup-chat/issues/{setup_issue_id}/resolve",
+        headers=admin_headers,
+        json={"reason": "Compiler regression fixed and replayed."},
+    )
+    assert setup_resolved.status_code == 200
+    assert setup_resolved.json()["status"] == "resolved"
 
     pause = await client.post(
         f"/api/v1/admin/strategies/{strategy.id}/pause",

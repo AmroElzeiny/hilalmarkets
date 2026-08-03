@@ -47,8 +47,25 @@ from ai_market_monitor.db.models.enums import (
     ShariaAssetStatus,
     ShariaUniverseMode,
 )
+from ai_market_monitor.engine.boolean_expression import BooleanNode
+from ai_market_monitor.engine.boolean_topology import (
+    BooleanTopology,
+    BooleanTopologyError,
+    TopologyComparison,
+    compare_topology,
+    parse_stated_topology,
+    validate_boolean_topology,
+)
 from ai_market_monitor.engine.capability_shortlist import CapabilityShortlist
-from ai_market_monitor.engine.planner_references import PlannerReferenceContext, semantic_key
+from ai_market_monitor.engine.operator_authority import (
+    OperatorNormalizationKind,
+    normalize_stated_comparator,
+)
+from ai_market_monitor.engine.planner_references import (
+    EMPTY_PLANNER_REFERENCES,
+    PlannerReferenceContext,
+    semantic_key,
+)
 from ai_market_monitor.engine.semantic_grounding import (
     grounds_boolean,
     grounds_direction,
@@ -62,9 +79,12 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_timeframe_role,
     grounds_unit,
 )
+from ai_market_monitor.engine.setup_failure_taxonomy import SetupFailureClass
 from ai_market_monitor.engine.turn_fragments import extract_timeframes
 from ai_market_monitor.schemas.planner_intent import (
     AddConditionPayload,
+    BooleanStrategyIntent,
+    BooleanTopologyRepair,
     CapabilityParameterIntent,
     CapabilityParameterIntentValue,
     ConditionIntent,
@@ -119,6 +139,15 @@ SANITATION_CLASSES: Final[dict[str, SemanticIntentOutcome]] = {
     "INTENT_SEGMENT_NOT_IN_MESSAGE": SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
     "INTENT_TARGET_UNKNOWN": SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
     "INTENT_VALUE_UNREADABLE": SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
+    # A planner omission is a model mistake with a named field, not an internal
+    # compiler fault. Reporting several of them as COMPILER_INVARIANT_VIOLATION is
+    # what made an ordinary sentence unanswerable in evaluator runs 10 and 11: the
+    # class is terminal, so the turn ended in HTTP 422 with no repair and no
+    # question, and the trader could only send the same words again.
+    "PLANNER_SEMANTIC_OMISSION": SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
+    "SOURCE_ASSOCIATION_MISMATCH": SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
+    "BOOLEAN_TOPOLOGY_MISSING": SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
+    "BOOLEAN_TOPOLOGY_AMBIGUOUS": SemanticIntentOutcome.USER_INFORMATION_REQUIRED,
     "INTENT_INCOMPLETE": SemanticIntentOutcome.USER_INFORMATION_REQUIRED,
     "INTENT_NOT_PERMITTED": SemanticIntentOutcome.NON_RECOVERABLE_FAILURE,
     "SHARIA_PREFERENCE_AMBIGUOUS": SemanticIntentOutcome.USER_INFORMATION_REQUIRED,
@@ -127,6 +156,44 @@ SANITATION_CLASSES: Final[dict[str, SemanticIntentOutcome]] = {
     "UNSUPPORTED_REQUIREMENT": SemanticIntentOutcome.UNSUPPORTED_REQUIREMENT,
     "COMPILER_INVARIANT_VIOLATION": SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION,
 }
+
+#: The sanitation class each compiler code reports as, for the typed taxonomy the
+#: turn persists. One table, so a code can never mean one thing to the compiler and
+#: another to the record an operator reads.
+FAILURE_CLASS_FOR_CODE: Final[dict[str, SetupFailureClass]] = {
+    "TARGET_INVALID_JSON": SetupFailureClass.PLANNER_SCHEMA_INVALID,
+    "TARGET_EMPTY_RESPONSE": SetupFailureClass.PLANNER_SCHEMA_INVALID,
+    "TARGET_SCHEMA_VALIDATION": SetupFailureClass.PLANNER_SCHEMA_INVALID,
+    "INTENT_SEGMENT_NOT_IN_MESSAGE": SetupFailureClass.SOURCE_ASSOCIATION_MISMATCH,
+    "SOURCE_ASSOCIATION_MISMATCH": SetupFailureClass.SOURCE_ASSOCIATION_MISMATCH,
+    "INTENT_TARGET_UNKNOWN": SetupFailureClass.PLANNER_VALUE_MISMATCH,
+    "INTENT_VALUE_UNREADABLE": SetupFailureClass.PLANNER_VALUE_MISMATCH,
+    "PLANNER_SEMANTIC_OMISSION": SetupFailureClass.PLANNER_SEMANTIC_OMISSION,
+    "BOOLEAN_TOPOLOGY_MISSING": SetupFailureClass.BOOLEAN_TOPOLOGY_MISSING,
+    "BOOLEAN_TOPOLOGY_AMBIGUOUS": SetupFailureClass.BOOLEAN_TOPOLOGY_AMBIGUOUS,
+    "INTENT_INCOMPLETE": SetupFailureClass.USER_INFORMATION_REQUIRED,
+    "INTENT_NOT_PERMITTED": SetupFailureClass.NON_RECOVERABLE_FAILURE,
+    "SHARIA_PREFERENCE_AMBIGUOUS": SetupFailureClass.USER_INFORMATION_REQUIRED,
+    "SHARIA_PREFERENCE_UNAVAILABLE": SetupFailureClass.NON_RECOVERABLE_FAILURE,
+    "SHARIA_FAIL_OPEN_UNSUPPORTED": SetupFailureClass.UNSUPPORTED_REQUIREMENT,
+    "UNSUPPORTED_REQUIREMENT": SetupFailureClass.UNSUPPORTED_REQUIREMENT,
+    "VALUE_NOT_GROUNDED": SetupFailureClass.GROUNDING_MISMATCH,
+    "COMPILER_INVARIANT_VIOLATION": SetupFailureClass.COMPILER_INVARIANT_VIOLATION,
+}
+
+
+def failure_class_for_code(code: str) -> SetupFailureClass:
+    """The typed class one compiler or canonical code belongs to."""
+
+    if code in FAILURE_CLASS_FOR_CODE:
+        return FAILURE_CLASS_FOR_CODE[code]
+    if code.startswith("TARGET_") or code in {
+        "TURN_DEADLINE_EXCEEDED",
+        "SETUP_AGENT_COST_LIMIT",
+        "SETUP_AGENT_MODEL_PRICING_UNAVAILABLE",
+    }:
+        return SetupFailureClass.PROVIDER_FAILURE
+    return SetupFailureClass.CANONICAL_VALIDATION_FAILURE
 
 
 class IntentCompileError(ValueError):
@@ -140,6 +207,7 @@ class IntentCompileError(ValueError):
         details: tuple[str, ...] = (),
         intent_ref: str | None = None,
         target_path: str | None = None,
+        target_paths: Sequence[str] = (),
         segment_ref: str | None = None,
     ) -> None:
         super().__init__(message)
@@ -149,8 +217,18 @@ class IntentCompileError(ValueError):
         self.details = details
         self.outcome = SANITATION_CLASSES[code]
         self.intent_ref = intent_ref
-        self.target_path = target_path
+        # Several fields can be omitted from one rule at once, and each is
+        # independently provable from the trader's own words. Carrying only the first
+        # one is what made the second omission look like an internal fault.
+        named = [*(target_paths or ()), *((target_path,) if target_path else ())]
+        paths = tuple(dict.fromkeys(named))
+        self.target_paths = paths
+        self.target_path = paths[0] if paths else None
         self.segment_ref = segment_ref
+
+    @property
+    def failure_class(self) -> SetupFailureClass:
+        return failure_class_for_code(self.code)
 
     @property
     def repairable(self) -> bool:
@@ -168,6 +246,9 @@ class IntentCompilation:
     outcome: SemanticIntentOutcome = SemanticIntentOutcome.DETERMINISTIC_INTENT_NORMALIZATION
     operation_intent_refs: dict[str, str] = field(default_factory=dict)
     intent_segments: dict[str, str] = field(default_factory=dict)
+    #: The structure the trader stated against the structure that was compiled, when
+    #: they stated one. Approval eligibility requires this to match.
+    topology_check: TopologyComparison | None = None
 
 
 #: Which canonical operation each trader-level action becomes. One table, so an action
@@ -363,8 +444,9 @@ def compile_planner_intents(
         normalize_planner_envelope(envelope),
         message,
     )
-    segments = _compiled_segments(envelope, message, source_turn_id=source_turn_id)
     derivations: list[str] = []
+    envelope = assemble_stated_boolean_structure(envelope, message, derivations)
+    segments = _compiled_segments(envelope, message, source_turn_id=source_turn_id)
     operations: list[dict[str, Any]] = []
     operation_intent_refs: dict[str, str] = {}
     intent_segments: dict[str, str] = {}
@@ -582,11 +664,210 @@ def compile_planner_intents(
             "The semantic compiler disagreed with the envelope about mutation.",
             details=("requires_tool:disagreement",),
         )
+    topology_check = _check_stated_topology(envelope, message=message)
     return IntentCompilation(
         plan=plan,
         derivations=tuple(derivations),
         operation_intent_refs=operation_intent_refs,
         intent_segments=intent_segments,
+        topology_check=topology_check,
+    )
+
+
+def assemble_stated_boolean_structure(
+    envelope: PlannerIntentEnvelope,
+    message: str,
+    derivations: list[str],
+) -> PlannerIntentEnvelope:
+    """Join separate rules the way the trader's own words join them.
+
+    The common failure is not that the model misunderstood the rules. In evaluator run
+    20260803T000036Z it read ``A AND (B OR C)`` as three correct, fully grounded rules —
+    and then returned them as unrelated ``add_condition`` intents, so the draft joined
+    all three with AND and the OR disappeared.
+
+    Nothing about that needs a second model call. The rules are the model's, already
+    grounded, and untouched here. The *shape* comes from the trader's own text, read
+    deterministically by ``engine/boolean_topology``. This is normalization, not
+    invention: no field is read from a new source, no rule is added, and if every
+    operand cannot be matched to exactly one rule the envelope is returned unchanged
+    and the mismatch is reported as a typed failure instead.
+    """
+
+    expected = parse_stated_topology(message)
+    if expected is None:
+        return envelope
+    if any(isinstance(item.payload, ReplaceBooleanPayload) for item in envelope.semantic_intents):
+        # The planner already described the structure. Its arrangement is checked
+        # against the trader's words later; overwriting it here would hide a real
+        # disagreement between what was written and what was understood.
+        return envelope
+    conditions: list[tuple[int, str, ConditionIntent]] = [
+        (index, item.segment_ref, item.payload.condition)
+        for index, item in enumerate(envelope.semantic_intents)
+        if isinstance(item.payload, AddConditionPayload)
+    ]
+    if len(conditions) < 2:
+        return envelope
+    assignments: dict[int, int] = {}
+    used: set[int] = set()
+    for leaf_index, leaf in enumerate(expected.root.leaves):
+        matches = [
+            index
+            for index, _segment_ref, condition in conditions
+            if index not in used and _quote_matches(leaf.text, condition.source_quote or "")
+        ]
+        if len(matches) != 1:
+            return envelope
+        assignments[leaf_index] = matches[0]
+        used.add(matches[0])
+    if len(used) != len(conditions):
+        # A rule the stated expression does not mention would silently be dropped from
+        # the structure, or joined by an implicit AND nobody wrote.
+        return envelope
+
+    leaves: list[dict[str, Any]] = []
+    groups: list[dict[str, Any]] = []
+    counter = [0]
+    leaf_refs: dict[int, str] = {}
+    by_index = {index: (segment_ref, condition) for index, segment_ref, condition in conditions}
+    for leaf_index, intent_index in assignments.items():
+        segment_ref, condition = by_index[intent_index]
+        reference = f"leaf_{leaf_index + 1}"
+        leaf_refs[leaf_index] = reference
+        leaves.append(
+            {
+                "leaf_ref": reference,
+                "segment_ref": segment_ref,
+                "condition": condition.model_dump(mode="json", exclude_none=True),
+            }
+        )
+
+    def build(node: BooleanNode) -> str:
+        if node.is_leaf:
+            index = counter[0]
+            counter[0] += 1
+            return leaf_refs[index]
+        children = [build(child) for child in node.children]
+        reference = f"group_{len(groups) + 1}"
+        groups.append(
+            {
+                "group_ref": reference,
+                "operator": node.operator,
+                "child_refs": children,
+                "source_quote": message[expected.span[0] : expected.span[1]][:_QUOTE_LIMIT],
+            }
+        )
+        return reference
+
+    root_ref = build(expected.root)
+    structure = {
+        "condition_leaves": leaves,
+        "boolean_groups": groups,
+        "root_ref": root_ref,
+    }
+    kept = [
+        item.model_dump(mode="json", exclude_none=True)
+        for index, item in enumerate(envelope.semantic_intents)
+        if index not in used
+    ]
+    first = envelope.semantic_intents[min(used)]
+    document = envelope.model_dump(mode="json")
+    document["semantic_intents"] = [
+        *kept,
+        {
+            "segment_ref": first.segment_ref,
+            "payload": {
+                "action": "replace_boolean_structure",
+                "boolean_structure": structure,
+            },
+        },
+    ]
+    try:
+        assembled = PlannerIntentEnvelope.model_validate(document)
+    except ValueError:
+        # A shape the flat contract refuses is not something to force through. The
+        # unchanged envelope will be reported as a topology mismatch, which is honest.
+        return envelope
+    derivations.append(f"boolean:deterministic_assembly:{expected.shape}")
+    return assembled
+
+
+#: Group quotes are trimmed to the same ceiling every source fragment uses.
+_QUOTE_LIMIT: Final[int] = 600
+
+
+def _quote_matches(operand: str, quote: str) -> bool:
+    left = " ".join(operand.split()).casefold().strip(" ,.;:-–—")
+    right = " ".join(quote.split()).casefold().strip(" ,.;:-–—")
+    return bool(left) and bool(right) and (left in right or right in left)
+
+
+def _check_stated_topology(
+    envelope: PlannerIntentEnvelope,
+    *,
+    message: str,
+) -> TopologyComparison | None:
+    """Refuse a turn that lost the combination the trader wrote.
+
+    This is the check that was missing. When a trader writes ``A AND (B OR C)`` and the
+    planner returns two unrelated rules, the draft still validates: each rule is
+    complete, each is grounded, and the registry joins whatever exists with AND. The
+    artifact looks correct and monitors something else.
+
+    So the server reads the stated structure itself, deterministically, and compares.
+    A mismatch is a model failure with a named cause, not an internal fault: the leaves
+    and operators are all in the trader's message, so one bounded structure-only
+    correction can fix it.
+    """
+
+    expected = parse_stated_topology(message)
+    if expected is None:
+        return None
+    structures = [
+        (f"intent_{index + 1}", intent.segment_ref, intent.payload.boolean_structure)
+        for index, intent in enumerate(envelope.semantic_intents)
+        if isinstance(intent.payload, ReplaceBooleanPayload)
+    ]
+    if len(structures) > 1:
+        raise IntentCompileError(
+            "BOOLEAN_TOPOLOGY_AMBIGUOUS",
+            "That turn described the combination of rules more than once.",
+            details=(f"boolean_structure:count:{len(structures)}",),
+            target_paths=("boolean_structure",),
+        )
+    intent_ref = structures[0][0] if structures else None
+    segment_ref = structures[0][1] if structures else None
+    topology: BooleanTopology | None = None
+    if structures:
+        try:
+            topology = validate_boolean_topology(structures[0][2])
+        except BooleanTopologyError as exc:
+            raise IntentCompileError(
+                exc.code,
+                str(exc),
+                details=exc.details,
+                intent_ref=intent_ref,
+                target_paths=("boolean_structure",),
+                segment_ref=segment_ref,
+            ) from exc
+    comparison = compare_topology(expected, topology)
+    if comparison.matches:
+        return comparison
+    raise IntentCompileError(
+        "BOOLEAN_TOPOLOGY_MISSING",
+        "The rules were understood, but not the way they were combined.",
+        details=(
+            f"stated:{comparison.expected_shape[:160]}",
+            f"compiled:{comparison.compiled_shape[:160] or 'no_structure'}",
+            *comparison.details,
+        ),
+        # Attribution only exists when the planner really returned a structure. With no
+        # structure there is nothing to rearrange, so no correction is authorized and
+        # the turn reports the mismatch instead of paying for a hopeless call.
+        intent_ref=intent_ref,
+        target_paths=("boolean_structure",),
+        segment_ref=segment_ref,
     )
 
 
@@ -607,7 +888,7 @@ _REPAIRABLE_PATHS: Final[frozenset[str]] = frozenset(
         "fail_closed_preference",
         "symbol",
         "target_reference",
-        *(f"condition.{name}" for name in ConditionIntent.model_fields if name != "child_intents"),
+        *(f"condition.{name}" for name in ConditionIntent.model_fields),
     }
 )
 
@@ -620,6 +901,7 @@ def apply_repair_deltas(
     validation_code: str,
     invalid_intent_ref: str,
     invalid_target_path: str | None = None,
+    invalid_target_paths: Sequence[str] = (),
     references: PlannerReferenceContext = PlannerReferenceContext(),
 ) -> PlannerIntentEnvelope:
     """Apply minimal corrections to already-parsed intents.
@@ -628,8 +910,19 @@ def apply_repair_deltas(
     may only touch a field on the allowlist. A delta that fails either test is dropped —
     the turn then keeps its typed blocker open, which is the honest outcome, rather than
     accepting a correction nothing authorised.
+
+    Several fields may be corrected in one envelope when the same failure named several.
+    Each is still proved on its own against the same verified span. Accepting only the
+    first named field is what made a two-omission turn unrecoverable even after a paid
+    correction: the second omission survived, the recompile failed identically, and the
+    turn reported the original problem with the money already spent.
     """
 
+    named_paths = [
+        *invalid_target_paths,
+        *((invalid_target_path,) if invalid_target_path else ()),
+    ]
+    allowed_paths = {path.removeprefix("payload.") for path in named_paths}
     by_ref = {
         f"intent_{index + 1}": item.model_dump(mode="json")
         for index, item in enumerate(envelope.semantic_intents)
@@ -644,9 +937,7 @@ def apply_repair_deltas(
         if delta.validation_code != validation_code or delta.intent_ref != invalid_intent_ref:
             continue
         normalized_delta_path = delta.target_path.removeprefix("payload.")
-        if invalid_target_path and normalized_delta_path != invalid_target_path.removeprefix(
-            "payload."
-        ):
+        if allowed_paths and normalized_delta_path not in allowed_paths:
             continue
         intent = by_ref.get(delta.intent_ref)
         if intent is None:
@@ -745,6 +1036,76 @@ def apply_repair_deltas(
             details=(str(exc)[:400],),
             intent_ref=invalid_intent_ref,
         ) from exc
+
+
+def apply_topology_repair(
+    envelope: PlannerIntentEnvelope,
+    repair: BooleanTopologyRepair,
+    *,
+    invalid_intent_ref: str,
+) -> PlannerIntentEnvelope:
+    """Rearrange already-grounded rules, and change nothing else.
+
+    The proof is structural, so it is complete. The repaired expression must name
+    exactly the leaves that already exist — not a subset, not one more — and every leaf
+    keeps its own fields, its own quote and its own segment untouched. There is no path
+    through this function that can add a rule, a symbol, a timeframe, a comparator, a
+    threshold or a Sharia preference, because none of those are in its input.
+    """
+
+    index = _intent_index_number(invalid_intent_ref)
+    if index is None or index >= len(envelope.semantic_intents):
+        raise IntentCompileError(
+            "BOOLEAN_TOPOLOGY_MISSING",
+            "The correction named a part of the turn that does not exist.",
+            details=(f"intent_ref:{invalid_intent_ref}",),
+        )
+    intent = envelope.semantic_intents[index]
+    payload = intent.payload
+    if not isinstance(payload, ReplaceBooleanPayload):
+        raise IntentCompileError(
+            "BOOLEAN_TOPOLOGY_MISSING",
+            "The correction named something that is not a combination of rules.",
+            details=(f"intent_ref:{invalid_intent_ref}:not_boolean",),
+        )
+    current = payload.boolean_structure
+    existing_refs = {leaf.leaf_ref for leaf in current.condition_leaves}
+    if set(repair.existing_leaf_refs) != existing_refs:
+        # A different set of leaves is a different strategy, not a rearrangement.
+        raise IntentCompileError(
+            "BOOLEAN_TOPOLOGY_MISSING",
+            "The correction changed which rules the setup contains.",
+            details=(
+                f"leaves:before:{','.join(sorted(existing_refs))}",
+                f"leaves:after:{','.join(sorted(repair.existing_leaf_refs))}",
+            ),
+            intent_ref=invalid_intent_ref,
+            target_paths=("boolean_structure",),
+        )
+    repaired_structure = current.model_copy(
+        update={"boolean_groups": list(repair.groups), "root_ref": repair.root_ref}
+    )
+    document = envelope.model_dump(mode="json")
+    document["semantic_intents"][index]["payload"]["boolean_structure"] = (
+        repaired_structure.model_dump(mode="json", exclude_none=True)
+    )
+    try:
+        return PlannerIntentEnvelope.model_validate(document)
+    except ValueError as exc:
+        raise IntentCompileError(
+            "BOOLEAN_TOPOLOGY_MISSING",
+            "The corrected arrangement could not be read as valid logic.",
+            details=(str(exc)[:400],),
+            intent_ref=invalid_intent_ref,
+            target_paths=("boolean_structure",),
+        ) from exc
+
+
+def _intent_index_number(intent_ref: str | None) -> int | None:
+    if not intent_ref or not intent_ref.startswith("intent_"):
+        return None
+    suffix = intent_ref.removeprefix("intent_")
+    return int(suffix) - 1 if suffix.isdigit() and int(suffix) >= 1 else None
 
 
 def _contiguous_repair_evidence(
@@ -942,13 +1303,24 @@ def _repair_value_is_grounded(
                 return False
         elif path.endswith("movement_direction"):
             try:
-                if not grounds_direction(source, MovementDirection(str(item))):
+                direction = MovementDirection(str(item))
+                if direction in {
+                    MovementDirection.NEUTRAL,
+                    MovementDirection.NOT_APPLICABLE,
+                } and not _explicit_neutral_role(source, role="movement_direction"):
+                    return False
+                if not grounds_direction(source, direction):
                     return False
             except ValueError:
                 return False
         elif path.endswith("strategy_bias"):
             try:
-                if not grounds_strategy_bias(source, StrategyBias(str(item))):
+                bias = StrategyBias(str(item))
+                if bias == StrategyBias.NEUTRAL and not _explicit_neutral_role(
+                    source, role="strategy_bias"
+                ):
+                    return False
+                if not grounds_strategy_bias(source, bias):
                     return False
             except ValueError:
                 return False
@@ -964,6 +1336,30 @@ def _repair_value_is_grounded(
         elif not grounds_text_value(source, str(item)):
             return False
     return True
+
+
+def semantic_value_is_grounded(
+    value: Any,
+    source: str,
+    *,
+    path: str,
+    references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES,
+    replacement_kind: str | None = None,
+) -> bool:
+    """Public, read-only proof used by retry snapshots and repair.
+
+    A persisted ``ValidatedIntentSnapshot`` must never trust a value merely because a
+    model returned it.  Both snapshots and repair therefore use this exact field/type
+    grounding authority.  It creates no intent, operation, or canonical state.
+    """
+
+    return _repair_value_is_grounded(
+        value,
+        source,
+        path=path,
+        references=references,
+        replacement_kind=replacement_kind,
+    )
 
 
 def _compiled_segments(
@@ -1166,35 +1562,51 @@ def _reject_omitted_explicit_role(
     """Require the semantic plan—not the compiler—to carry authored semantic roles.
 
     This is a post-AI cross-check.  It may notice that the model omitted an exact role,
-    but it never writes that role into the intent.  One uniquely attributable omission
-    is eligible for the turn's single compact repair; multiple omissions are not reduced
-    to whichever field happened to be encountered first.
+    but it never writes that role into the intent.  Every omission it finds is named,
+    each with the exact span of the trader's words that authorises it, so one bounded
+    correction can address all of them at once.
+
+    Boolean leaves are checked against their own exact source quote: comparing a leaf
+    with the whole message would report a neighbouring rule's timeframe as missing from
+    this one.
     """
 
     payload = intent.payload
-    if not isinstance(payload, AddConditionPayload):
-        return
-    condition = payload.condition
-    if condition.boolean_relationship is not None:
-        # Boolean groups do not themselves carry trader roles.  Validate each leaf
-        # against its own exact source quote; comparing the whole message with the
-        # empty group node would falsely report every child timeframe as omitted from
-        # the group.
-        for child in condition.child_intents:
-            nested = intent.model_copy(
-                update={"payload": payload.model_copy(update={"condition": child})}
-            )
-            _reject_omitted_explicit_role(
-                nested,
+    if isinstance(payload, ReplaceBooleanPayload):
+        for leaf in payload.boolean_structure.condition_leaves:
+            _reject_omitted_role_on_condition(
+                leaf.condition,
                 intent_ref=intent_ref,
                 selected_ref=selected_ref,
                 segments=segments,
-                claimed_semantic_segment_refs=claimed_semantic_segment_refs,
                 condition_segment_refs=condition_segment_refs,
                 message=message,
                 scope_to_source_quote=True,
             )
         return
+    if not isinstance(payload, AddConditionPayload):
+        return
+    _reject_omitted_role_on_condition(
+        payload.condition,
+        intent_ref=intent_ref,
+        selected_ref=selected_ref,
+        segments=segments,
+        condition_segment_refs=condition_segment_refs,
+        message=message,
+        scope_to_source_quote=scope_to_source_quote,
+    )
+
+
+def _reject_omitted_role_on_condition(
+    condition: ConditionIntent,
+    *,
+    intent_ref: str,
+    selected_ref: str,
+    segments: Mapping[str, Mapping[str, Any]],
+    condition_segment_refs: frozenset[str],
+    message: str,
+    scope_to_source_quote: bool,
+) -> None:
     represented: dict[SemanticTimeframeRole, set[str]] = {
         "trigger": ({condition.trigger_timeframe} if condition.trigger_timeframe else set()),
         "context": set(condition.context_timeframes),
@@ -1293,6 +1705,11 @@ def _reject_omitted_explicit_role(
                     directions[0].value,
                     reference,
                 )
+            elif _explicit_neutral_role(text, role="movement_direction"):
+                omissions["condition.movement_direction"] = (
+                    MovementDirection.NEUTRAL.value,
+                    reference,
+                )
         if condition.strategy_bias is None:
             biases = [
                 value
@@ -1301,30 +1718,65 @@ def _reject_omitted_explicit_role(
             ]
             if len(biases) == 1:
                 omissions["condition.strategy_bias"] = (biases[0].value, reference)
+            elif _explicit_neutral_role(text, role="strategy_bias"):
+                omissions["condition.strategy_bias"] = (
+                    StrategyBias.NEUTRAL.value,
+                    reference,
+                )
         if condition.required is None and re.search(
             r"\b(?:optional|not required)\b", text.casefold()
         ):
             omissions["condition.required"] = ("false", reference)
     if not omissions:
         return
-    if len(omissions) != 1:
-        raise IntentCompileError(
-            "COMPILER_INVARIANT_VIOLATION",
-            "The semantic plan omitted several independently authored roles.",
-            details=tuple(
-                f"{intent_ref}:add_condition:{path}:omitted" for path in sorted(omissions)
-            ),
-            intent_ref=intent_ref,
-            segment_ref=selected_ref,
-        )
-    path, (_timeframe, evidence_ref) = next(iter(omissions.items()))
+    # Every omission is a model mistake with an exact field name and an exact span of
+    # the trader's own words behind it. One or five, the reason is the same and so is
+    # the recovery: name them all in one bounded correction.
+    #
+    # Reporting more than one as COMPILER_INVARIANT_VIOLATION is the defect measured in
+    # evaluator runs 20260802T232050Z and 20260803T000036Z. That class is terminal, so
+    # the turn returned HTTP 422 with no repair and no question, and the trader could do
+    # nothing but send the same sentence again. `precedence_grouping-013-1996163001`
+    # shows eight identical refusals to one ordinary instruction.
+    ordered = sorted(omissions)
+    evidence_refs = {omissions[path][1] for path in ordered}
     raise IntentCompileError(
-        "INTENT_VALUE_UNREADABLE",
-        "The semantic plan omitted one explicitly authored semantic role.",
-        details=(f"{intent_ref}:add_condition:{path}:omitted",),
+        "PLANNER_SEMANTIC_OMISSION",
+        (
+            "The semantic plan left out one explicitly authored role."
+            if len(ordered) == 1
+            else "The semantic plan left out roles the trader stated."
+        ),
+        details=tuple(f"{intent_ref}:add_condition:{path}:omitted" for path in ordered),
         intent_ref=intent_ref,
-        target_path=path,
-        segment_ref=evidence_ref,
+        target_paths=tuple(ordered),
+        # A correction is authorised by one verified span. When the omissions were
+        # found across several adjacent spans there is no single authorising span, so
+        # the selected action segment — which the intent already owns — is used.
+        segment_ref=(
+            next(iter(evidence_refs)) if len(evidence_refs) == 1 else selected_ref
+        ),
+    )
+
+
+def _explicit_neutral_role(text: str, *, role: str) -> bool:
+    """Require both the neutral value and its semantic role in the source.
+
+    Canonical condition nodes have neutral defaults, so the general grounding helpers
+    intentionally accept them without wording. The compact planner boundary is
+    stricter: a model-authored neutral value is trader-controlled only when the source
+    explicitly assigns neutral to movement/direction or to strategy bias.
+    """
+
+    normalized = " ".join(text.casefold().split())
+    neutral = r"(?:neutral|not[ _-]?applicable|n/?a|محايد|غير قابل للتطبيق)"
+    if role == "strategy_bias":
+        role_words = r"(?:strategy\s+bias|trade\s+bias|bias|انحياز(?:\s+الاستراتيجية)?)"
+    else:
+        role_words = r"(?:movement(?:\s+direction)?|direction|trend|حركة|اتجاه)"
+    return bool(
+        re.search(rf"{role_words}\s*(?:is|=|:)?\s*{neutral}", normalized)
+        or re.search(rf"{neutral}\s*{role_words}", normalized)
     )
 
 
@@ -1442,6 +1894,11 @@ def _operation(
     ):
         return {**base, "fields": _draft_patch(payload)}
     if isinstance(payload, ShariaPreferencePayload):
+        _validate_sharia_universe_choice(
+            payload,
+            intent_ref=intent_ref,
+            segment_ref=intent.segment_ref,
+        )
         _validate_sharia_preference_source(
             payload,
             segment_text,
@@ -1494,9 +1951,10 @@ def _operation(
                 parameter_schemas=parameter_schemas,
                 capability_versions=capability_versions,
                 derivations=derivations,
+                authorizing_text=segment_text,
             ),
         }
-    if isinstance(payload, (AddConditionPayload, ReplaceBooleanPayload)):
+    if isinstance(payload, AddConditionPayload):
         condition = _resolve_condition_references(
             payload.condition, references, intent_ref=intent_ref, segment_ref=intent.segment_ref
         )
@@ -1506,12 +1964,12 @@ def _operation(
             intent_ref=intent_ref,
             segment_ref=intent.segment_ref,
         )
-        if condition.boolean_relationship is None and condition.source_quote != segment_text:
+        if condition.source_quote != segment_text:
             # A simple new rule owns the complete verified action segment. Keeping a
             # narrower model-authored quote here would let it hide evidence for a value
             # that the repaired intent now carries, and the canonical grounding gate
-            # would then reject the same valid turn. Boolean children retain their own
-            # per-child quotes because those quotes are the role-separation boundary.
+            # would then reject the same valid turn. Boolean leaves keep their own
+            # per-leaf quotes because those quotes are the role-separation boundary.
             condition = condition.model_copy(update={"source_quote": segment_text})
             derivations.append(f"condition:{intent_ref}:verified_segment_as_source_fragment")
         return {
@@ -1524,6 +1982,24 @@ def _operation(
                 parameter_schemas=parameter_schemas,
                 capability_versions=capability_versions,
                 path=(),
+                derivations=derivations,
+                segment_text=segment_text,
+            ),
+        }
+    if isinstance(payload, ReplaceBooleanPayload):
+        return {
+            **base,
+            "condition": _boolean_structure_node(
+                payload.boolean_structure,
+                intent_ref=intent_ref,
+                segment_ref=intent.segment_ref,
+                segment_text=segment_text,
+                source_turn_id=source_turn_id,
+                operation_id=operation_id,
+                existing=existing,
+                parameter_schemas=parameter_schemas,
+                capability_versions=capability_versions,
+                references=references,
                 derivations=derivations,
             ),
         }
@@ -1565,19 +2041,14 @@ def _draft_patch(
     return {"market_type": payload.market_type}
 
 
-def _policy_patch(
+def _validate_sharia_universe_choice(
     payload: ShariaPreferencePayload,
-    draft: StrategyDraftV2,
-    references: PlannerReferenceContext,
     *,
-    source_text: str,
     intent_ref: str,
     segment_ref: str,
-    derivations: list[str],
-) -> dict[str, Any]:
-    """Resolve explicit preferences into the governed canonical policy."""
+) -> None:
+    """Reject a missing/conflicting governed alternative before polarity grounding."""
 
-    policy = draft.sharia_policy.model_dump(mode="json")
     screened = payload.screened_assets_only
     watchlist_only = payload.approved_watchlist_only
     if screened is True and watchlist_only is True:
@@ -1602,6 +2073,21 @@ def _policy_patch(
             ),
             segment_ref=segment_ref,
         )
+
+
+def _policy_patch(
+    payload: ShariaPreferencePayload,
+    draft: StrategyDraftV2,
+    references: PlannerReferenceContext,
+    *,
+    source_text: str,
+    intent_ref: str,
+    segment_ref: str,
+    derivations: list[str],
+) -> dict[str, Any]:
+    """Resolve explicit preferences into the governed canonical policy."""
+
+    policy = draft.sharia_policy.model_dump(mode="json")
     if payload.methodology_family or payload.methodology_identifier:
         matches = references.methodology_matches(
             family=payload.methodology_family,
@@ -1715,28 +2201,40 @@ def _validate_sharia_preference_source(
         # than the generic word "watchlist". Add the internal marker only for the
         # existing vocabulary check below; no identity crosses the planner boundary.
         lowered = f"{lowered} watchlist"
-    if payload.screened_assets_only is not None and not any(
-        phrase in lowered
-        for phrase in ("screened", "eligible market", "eligible assets", "فحص", "mo2ahal")
+    if payload.screened_assets_only is not None and not _grounds_preference_polarity(
+        lowered,
+        ("screened", "eligible market", "eligible assets", "فحص", "mo2ahal"),
+        payload.screened_assets_only,
     ):
         missing.append("screened_assets_only")
-    if payload.approved_watchlist_only is not None and not any(
-        phrase in lowered for phrase in ("watchlist", "favorites", "favourites", "مفض", "mofadala")
-    ):
-        missing.append("approved_watchlist_only")
-    if payload.fail_closed_preference is not None and not any(
-        phrase in lowered
-        for phrase in (
-            "fail closed",
-            "fail open",
-            "strict sharia",
-            "eligible only",
-            "screened only",
-            "اقفل عند الشك",
-            "ma t3adish el mashkook",
+    named_watchlist = bool(references.watchlist_matches_in_text(source))
+    if payload.approved_watchlist_only is not None and not (
+        payload.approved_watchlist_only is True
+        and named_watchlist
+        or _grounds_preference_polarity(
+            lowered,
+            ("watchlist", "favorites", "favourites", "مفض", "mofadala"),
+            payload.approved_watchlist_only,
         )
     ):
-        missing.append("fail_closed_preference")
+        missing.append("approved_watchlist_only")
+    if payload.fail_closed_preference is not None:
+        fail_closed = any(
+            phrase in lowered
+            for phrase in (
+                "fail closed",
+                "strict sharia",
+                "eligible only",
+                "screened only",
+                "اقفل عند الشك",
+                "ma t3adish el mashkook",
+            )
+        )
+        fail_open = "fail open" in lowered
+        if (payload.fail_closed_preference and not fail_closed) or (
+            payload.fail_closed_preference is False and not fail_open
+        ):
+            missing.append("fail_closed_preference")
     if missing:
         raise IntentCompileError(
             "INTENT_VALUE_UNREADABLE",
@@ -1746,6 +2244,38 @@ def _validate_sharia_preference_source(
             target_path=missing[0],
             segment_ref=segment_ref,
         )
+
+
+_PREFERENCE_NEGATION_RE = re.compile(
+    r"(?:\bnot\b|\bno\b|\bwithout\b|\bdon't\b|\bdo not\b|\bavoid\b|"
+    r"\bmesh\b|\bmsh\b|\bla2\b|\bla\b|مش|لا|بدون)",
+    re.IGNORECASE,
+)
+
+
+def _grounds_preference_polarity(
+    source: str,
+    markers: tuple[str, ...],
+    expected: bool,
+) -> bool:
+    """Prove both the governed choice and its positive/negative polarity.
+
+    Merely seeing ``screened`` is not evidence for ``screened_assets_only=False``.
+    That bug allowed the planner to invert a user's explicit universe preference while
+    still passing the category-only grounding check.
+    """
+
+    readings: list[bool] = []
+    for marker in markers:
+        for match in re.finditer(re.escape(marker.casefold()), source.casefold()):
+            # Negation may govern a coordinated object ("do not use screened assets
+            # or a watchlist"), but must not leak across a new clause ("do not use a
+            # watchlist; use screened assets").
+            prefix = source[: match.start()]
+            clause_start = max(prefix.rfind(token) for token in (";", ".", "!", "?", "\n"))
+            prefix = prefix[clause_start + 1 :]
+            readings.append(not bool(_PREFERENCE_NEGATION_RE.search(prefix)))
+    return expected in readings
 
 
 def _known_condition(
@@ -1819,16 +2349,6 @@ def _resolve_condition_references(
                 segment_ref=segment_ref,
             )
         update["target_reference"] = canonical
-    if condition.child_intents:
-        update["child_intents"] = [
-            _resolve_condition_references(
-                child,
-                references,
-                intent_ref=intent_ref,
-                segment_ref=segment_ref,
-            )
-            for child in condition.child_intents
-        ]
     return condition.model_copy(update=update) if update else condition
 
 
@@ -1841,24 +2361,11 @@ def _validate_new_condition(
 ) -> None:
     """Reject genuinely incomplete user meaning before an internal operation exists."""
 
-    if condition.target_reference and condition.target_reference in existing:
+    target_reference = condition.target_reference
+    if target_reference and target_reference in existing:
         # Boolean restructuring may reference a complete owned rule without restating
         # it. `_new_node` preserves that immutable node exactly; requiring its formula
         # again would make "use the RSI rule OR the volume rule" impossible.
-        return
-    if condition.boolean_relationship is not None:
-        children = condition.child_intents or (
-            [condition.model_copy(update={"boolean_relationship": None})]
-            if condition.states_a_rule
-            else []
-        )
-        for child in children:
-            _validate_new_condition(
-                child,
-                existing=existing,
-                intent_ref=intent_ref,
-                segment_ref=segment_ref,
-            )
         return
     missing: list[str] = []
     if condition.formula_key is None and condition.capability_key is None:
@@ -1903,39 +2410,21 @@ def _new_node(
     capability_versions: Mapping[str, str],
     path: tuple[int, ...],
     derivations: list[str],
+    segment_text: str = "",
 ) -> dict[str, Any]:
-    """Build one rule, or one AND/OR/NOT group, from the trader's terms."""
+    """Build one executable rule from the trader's terms.
 
-    if intent.boolean_relationship is not None:
-        node_id = _child_node_id(intent, existing, source_turn_id, operation_id, path)
-        children = list(intent.child_intents)
-        if not children and intent.states_a_rule:
-            # "NOT this rule" arrived as one node. Canonically a NOT is a group holding
-            # exactly one rule, so the rule moves inside its own negation. Nothing is
-            # added: the same fields, the same quote, one level down.
-            derivations.append(f"condition:{node_id}:wrapped_negated_rule")
-            children = [intent.model_copy(update={"boolean_relationship": None})]
-        return {
-            "node_id": node_id,
-            "node_type": _BOOLEAN_NODE_TYPE[intent.boolean_relationship].value,
-            "children": [
-                _new_node(
-                    child,
-                    source_turn_id=source_turn_id,
-                    operation_id=operation_id,
-                    existing=existing,
-                    parameter_schemas=parameter_schemas,
-                    capability_versions=capability_versions,
-                    path=(*path, index),
-                    derivations=derivations,
-                )
-                for index, child in enumerate(children)
-            ],
-        }
-    if intent.target_reference and intent.target_reference in existing:
+    Combining rules is not done here. A Boolean expression arrives as a flat graph and
+    is turned into a tree by :func:`_boolean_structure_node`, which calls this once per
+    leaf. Keeping node construction and structure construction apart is what stops a
+    single rule from being wrapped in an invented group.
+    """
+
+    target_reference = intent.target_reference
+    if target_reference and target_reference in existing:
         # A restructure keeps rules the trader did not change. Rebuilding them from the
         # intent would drop every field the intent did not restate.
-        inherited = existing[intent.target_reference]
+        inherited = existing[target_reference]
         derivations.append(f"condition:{inherited.node_id}:kept_unchanged_in_structure")
         return inherited.model_dump(mode="json")
     node = _condition_fields(
@@ -1943,6 +2432,9 @@ def _new_node(
         parameter_schemas,
         capability_versions,
         derivations,
+        # The trader's own words for this rule. The operator authority reads them so a
+        # comparator the model guessed cannot outrank a comparison the trader wrote.
+        authorizing_text=intent.source_quote or segment_text,
     )
     node["node_id"] = _child_node_id(intent, existing, source_turn_id, operation_id, path)
     node["node_type"] = ConditionNodeType.CONDITION.value
@@ -1956,10 +2448,83 @@ def _child_node_id(
     operation_id: str,
     path: tuple[int, ...],
 ) -> str:
-    if intent.target_reference and intent.target_reference in existing:
-        return intent.target_reference
+    target_reference = intent.target_reference
+    if target_reference and target_reference in existing:
+        return target_reference
     rendered = ".".join(map(str, path)) or "root"
     return f"condition_{_identity(source_turn_id, operation_id, rendered)[:16]}"
+
+
+def _boolean_structure_node(
+    structure: BooleanStrategyIntent,
+    *,
+    intent_ref: str,
+    segment_ref: str,
+    segment_text: str,
+    source_turn_id: str,
+    operation_id: str,
+    existing: Mapping[str, ConditionNodeV2],
+    parameter_schemas: Mapping[str, Mapping[str, Any]],
+    capability_versions: Mapping[str, str],
+    references: PlannerReferenceContext,
+    derivations: list[str],
+) -> dict[str, Any]:
+    """Turn one validated flat Boolean graph into the canonical condition tree.
+
+    The graph is proved to be a single finite tree first. Only then is each leaf built
+    with the same ``_new_node`` every simple rule uses, so a leaf inside ``(B OR C)``
+    is validated, grounded and compiled exactly like a rule written on its own.
+    """
+
+    try:
+        topology = validate_boolean_topology(structure)
+    except BooleanTopologyError as exc:
+        raise IntentCompileError(
+            exc.code,
+            str(exc),
+            details=exc.details,
+            intent_ref=intent_ref,
+            target_paths=("boolean_structure",),
+            segment_ref=segment_ref,
+        ) from exc
+
+    resolved: dict[str, ConditionIntent] = {}
+    for leaf in structure.condition_leaves:
+        condition = _resolve_condition_references(
+            leaf.condition, references, intent_ref=intent_ref, segment_ref=segment_ref
+        )
+        _validate_new_condition(
+            condition, existing=existing, intent_ref=intent_ref, segment_ref=segment_ref
+        )
+        resolved[leaf.leaf_ref] = condition
+
+    groups = topology.groups
+
+    def build(ref: str, path: tuple[int, ...]) -> dict[str, Any]:
+        group = groups.get(ref)
+        if group is None:
+            return _new_node(
+                resolved[ref],
+                source_turn_id=source_turn_id,
+                operation_id=operation_id,
+                existing=existing,
+                parameter_schemas=parameter_schemas,
+                capability_versions=capability_versions,
+                path=path,
+                derivations=derivations,
+                segment_text=segment_text,
+            )
+        rendered = ".".join(map(str, path)) or "root"
+        return {
+            "node_id": f"group_{_identity(source_turn_id, operation_id, rendered)[:16]}",
+            "node_type": _BOOLEAN_NODE_TYPE[group.operator].value,
+            "children": [
+                build(child, (*path, index)) for index, child in enumerate(group.child_refs)
+            ],
+        }
+
+    derivations.append(f"boolean:{intent_ref}:topology:{topology.shape()}")
+    return build(topology.root_ref, ())
 
 
 def _inherited_node(
@@ -1969,6 +2534,7 @@ def _inherited_node(
     parameter_schemas: Mapping[str, Mapping[str, Any]],
     capability_versions: Mapping[str, str],
     derivations: list[str],
+    authorizing_text: str = "",
 ) -> dict[str, Any]:
     """The existing rule with only the fields the trader restated changed.
 
@@ -1983,6 +2549,7 @@ def _inherited_node(
         parameter_schemas,
         capability_versions,
         derivations,
+        authorizing_text=authorizing_text,
     )
     unchanged = sorted(set(node) - set(stated) - {"node_id", "node_type", "children"})
     node.update(stated)
@@ -1998,12 +2565,18 @@ def _condition_fields(
     parameter_schemas: Mapping[str, Mapping[str, Any]],
     capability_versions: Mapping[str, str],
     derivations: list[str],
+    *,
+    authorizing_text: str = "",
 ) -> dict[str, Any]:
     """Exactly the canonical fields the trader stated. Absent stays absent.
 
     Absent is not the same as a default. A field the trader did not mention is inherited
     on an edit and reported as missing on a create — filling it with a platform default
     here would be the platform choosing a rule the trader never described.
+
+    One field is not simply passed through: the comparator. When the trader's own words
+    state a comparison for this threshold, those words are authoritative and a different
+    comparator from the model is corrected here, before any canonical operation exists.
     """
 
     stated: dict[str, Any] = {}
@@ -2014,12 +2587,24 @@ def _condition_fields(
         stated["source_fragment"] = intent.source_quote
     if intent.formula_key is not None:
         stated["formula"] = intent.formula_key.value
-    if intent.movement_direction is not None:
+    if intent.movement_direction is not None and (
+        intent.movement_direction
+        not in {MovementDirection.NEUTRAL, MovementDirection.NOT_APPLICABLE}
+        or _explicit_neutral_role(authorizing_text, role="movement_direction")
+    ):
         stated["movement_direction"] = intent.movement_direction.value
-    if intent.strategy_bias is not None:
+    elif intent.movement_direction is not None:
+        derivations.append("condition:movement_direction:ungrounded_platform_default_removed")
+    if intent.strategy_bias is not None and (
+        intent.strategy_bias != StrategyBias.NEUTRAL
+        or _explicit_neutral_role(authorizing_text, role="strategy_bias")
+    ):
         stated["strategy_bias"] = intent.strategy_bias.value
-    if intent.comparator is not None:
-        stated["operator"] = intent.comparator.value
+    elif intent.strategy_bias is not None:
+        derivations.append("condition:strategy_bias:ungrounded_platform_default_removed")
+    comparator = _authoritative_comparator(intent, authorizing_text, derivations)
+    if comparator is not None:
+        stated["operator"] = comparator.value
     if intent.threshold is not None:
         stated["threshold"] = intent.threshold
     if intent.unit is not None:
@@ -2064,6 +2649,42 @@ def _condition_fields(
     if operands is not None:
         stated["operands"] = operands
     return stated
+
+
+def _authoritative_comparator(
+    intent: ConditionIntent,
+    authorizing_text: str,
+    derivations: list[str],
+) -> Comparator | None:
+    """The comparison this rule compiles with: the trader's words over the model's.
+
+    ``at most 1%`` is an inclusive ceiling. A model that answers ``lt`` for it builds a
+    monitor that stays silent on exactly 1% — the move the trader asked to see. In
+    evaluator run 20260803T000036Z that is what shipped, and the only reason it did is
+    that nothing checked the model's comparator against the words it came from.
+
+    Correcting it is not a repair and costs nothing: no trader-controlled choice is
+    still open, so a second model call could only agree or be wrong.
+    """
+
+    normalization = normalize_stated_comparator(
+        authorizing_text,
+        threshold=intent.threshold,
+        proposed=intent.comparator,
+    )
+    if normalization.kind == OperatorNormalizationKind.AMBIGUOUS:
+        raise IntentCompileError(
+            "INTENT_INCOMPLETE",
+            "That rule states more than one comparison for the same number.",
+            details=(
+                "condition.comparator:ambiguous:"
+                + ",".join(item.value for item in normalization.competing),
+            ),
+            target_path="condition.comparator",
+        )
+    if normalization.corrected:
+        derivations.append(f"condition:operator:{normalization.trace()}")
+    return normalization.resolved
 
 
 def _formula_operands(

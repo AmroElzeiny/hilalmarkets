@@ -303,6 +303,40 @@ class SetupChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SetupChatOperationalIssue(UUIDPrimaryKeyMixin, Base):
+    """Deduplicated admin queue for compiler faults and repeated customer loops."""
+
+    __tablename__ = "setup_chat_operational_issues"
+    __table_args__ = (
+        UniqueConstraint("fingerprint", name="uq_setup_chat_operational_issue_fingerprint"),
+        Index("ix_setup_chat_operational_issue_status_seen", "status", "last_seen_at"),
+        Index("ix_setup_chat_operational_issue_chat", "chat_session_id", "last_seen_at"),
+    )
+
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    chat_session_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_setup_chat_sessions.id", ondelete="SET NULL"), index=True
+    )
+    setup_chat_turn_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("setup_chat_turns.id", ondelete="SET NULL"), index=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    issue_kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    failure_class: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="open", nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    semantic_paths: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    safe_source_excerpt: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    support_reference: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    failure_proof: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+
+
 class SetupChatDraftSnapshot(UUIDPrimaryKeyMixin, Base):
     """Immutable executable draft state owned by one user and chat session."""
 

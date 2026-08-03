@@ -352,6 +352,7 @@ def validate_draft_semantics(draft: StrategyDraftV2) -> list[str]:
     ids = [item.node_id for item in nodes]
     if len(ids) != len(set(ids)):
         errors.append("duplicate_condition_node_id")
+    errors.extend(_boolean_structure_errors(draft.condition_ast))
     excluded = set(draft.universe.excluded_symbols)
     for node in condition_nodes:
         if not node.source_turn_id or not node.source_fragment:
@@ -384,6 +385,47 @@ def validate_draft_semantics(draft: StrategyDraftV2) -> list[str]:
     ):
         errors.append("approval_binding_mismatch")
     return list(dict.fromkeys(errors))
+
+
+#: How deeply a trader's own expression may nest. A person does not hand-write eight
+#: levels; anything past this is a structure nobody described.
+_MAX_BOOLEAN_DEPTH = 6
+
+
+def _boolean_structure_errors(root: ConditionNodeV2 | None) -> list[str]:
+    """Refuse a combination that does not actually combine anything.
+
+    A *nested* ``AND`` or ``OR`` holding one child is not a choice or a requirement — it
+    is the shape left behind when a real expression was flattened. It compiles, it
+    validates, and it monitors something narrower than the trader asked for, with
+    nothing in the artifact showing that a branch went missing.
+
+    The root is exempt. Every draft's outermost node is the registry's own ``all
+    conditions`` group, and it legitimately holds one rule when the trader has written
+    only one rule so far.
+    """
+
+    if root is None:
+        return []
+    errors: list[str] = []
+
+    def walk(node: ConditionNodeV2, depth: int) -> None:
+        if depth > _MAX_BOOLEAN_DEPTH:
+            errors.append(f"boolean_group_too_deep:{node.node_id}:{depth}")
+            return
+        if node.node_type == ConditionNodeType.CONDITION:
+            return
+        if (
+            depth > 1
+            and node.node_type in {ConditionNodeType.AND, ConditionNodeType.OR}
+            and len(node.children) < 2
+        ):
+            errors.append(f"boolean_group_single_child:{node.node_id}:{node.node_type.value}")
+        for child in node.children:
+            walk(child, depth + 1)
+
+    walk(root, 1)
+    return errors
 
 
 def _formula_contract_errors(node: ConditionNodeV2) -> list[str]:

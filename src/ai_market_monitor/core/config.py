@@ -287,6 +287,12 @@ class Settings(BaseSettings):
     #: The authenticated Setup Chat path. Kept true: the agent pipeline *is* the
     #: production path, and there is no other writable route to fall back to.
     setup_chat_launch_v2_enabled: bool = True
+    #: Operational circuit breakers for the authenticated launch path. The emergency
+    #: switch blocks every new turn without falling back to a legacy writer. A non-empty
+    #: allowlist limits the private beta to the named user UUIDs; empty keeps the normal
+    #: entitlement-controlled availability.
+    setup_chat_emergency_disabled: bool = False
+    setup_chat_private_beta_user_ids: list[str] = Field(default_factory=list, max_length=10000)
     setup_chat_legacy_test_compat_enabled: bool = False
 
     # --- Setup Agent bounds. These are the ones that control Setup Chat traffic. ---
@@ -311,6 +317,9 @@ class Settings(BaseSettings):
     setup_agent_simple_service_tier: Literal["default"] = "default"
     setup_agent_complex_service_tier: Literal["default", "fast"] = "default"
     setup_agent_max_estimated_cost_usd_per_turn: float = Field(default=0.10, gt=0, le=5)
+    setup_agent_max_estimated_cost_usd_per_user_day: float = Field(
+        default=2.0, gt=0, le=100
+    )
     #: Consecutive provider failures before the agent stops trying for a while.
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)
     setup_agent_circuit_breaker_cooldown_seconds: int = Field(default=60, ge=5, le=900)
@@ -568,6 +577,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SETUP_CHAT_LEGACY_TEST_COMPAT_ENABLED is forbidden outside local tests"
             )
+        invalid_beta_ids = [
+            item
+            for item in self.setup_chat_private_beta_user_ids
+            if not re.fullmatch(
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+                r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+                item,
+            )
+        ]
+        if invalid_beta_ids:
+            raise ValueError("SETUP_CHAT_PRIVATE_BETA_USER_IDS contains an invalid UUID")
         if self.ai_agent_parallel_tool_calls:
             raise ValueError("AI_AGENT_PARALLEL_TOOL_CALLS must remain false for bounded control")
         if self.ai_agent_tool_timeout_seconds > self.ai_agent_timeout_seconds:

@@ -23,6 +23,7 @@ from ai_market_monitor.db.models import (
     IdentityLinkToken,
     OnboardingSession,
     PendingEmailSignup,
+    SetupChatOperationalIssue,
     Strategy,
     Subscription,
     TelegramConnection,
@@ -330,6 +331,20 @@ class SystemBrainUserAdminService:
         )
         await self.session.execute(
             delete(DashboardPreference).where(DashboardPreference.user_id == target_user_id)
+        )
+        # Operational fingerprints and failure classes remain useful for aggregate
+        # reliability, but the trader's quoted source text and proof payload are not
+        # needed after profile deletion. Remove that content and the direct owner link.
+        await self.session.execute(
+            update(SetupChatOperationalIssue)
+            .where(SetupChatOperationalIssue.user_id == target_user_id)
+            .values(
+                user_id=None,
+                chat_session_id=None,
+                setup_chat_turn_id=None,
+                safe_source_excerpt="",
+                failure_proof={},
+            )
         )
         access_deliveries = list(
             (

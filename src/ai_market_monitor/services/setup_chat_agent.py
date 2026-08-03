@@ -44,21 +44,34 @@ from ai_market_monitor.engine.claim_evidence import (
     requires_factual_answer,
     validate_claims,
 )
+from ai_market_monitor.engine.comparators import detect_comparator
 from ai_market_monitor.engine.planner_intent_compiler import (
     SANITATION_CLASSES,
     IntentCompileError,
     SemanticIntentOutcome,
     apply_repair_deltas,
+    apply_topology_repair,
     compile_planner_intents,
+    failure_class_for_code,
     intent_fingerprint,
     normalize_planner_envelope,
+    semantic_value_is_grounded,
 )
 from ai_market_monitor.engine.planner_references import (
     EMPTY_PLANNER_REFERENCES,
     PlannerReferenceContext,
     SnapshotReference,
 )
+from ai_market_monitor.engine.price_movement import movement_direction
+from ai_market_monitor.engine.repair_eligibility import RepairDecision, decide_repair
 from ai_market_monitor.engine.requirement_state import active_requirement_states
+from ai_market_monitor.engine.setup_failure_taxonomy import (
+    SetupFailureClass,
+    TurnFailureRecord,
+    failure_fingerprint,
+    is_operator_alertable,
+    owner_for,
+)
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
     RuntimePreflight,
@@ -72,15 +85,28 @@ from ai_market_monitor.engine.setup_turn_execution import (
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
+from ai_market_monitor.engine.turn_fragments import (
+    extract_symbols,
+    extract_timeframes,
+    timeframe_role_is_explicit,
+)
 from ai_market_monitor.engine.turn_timing import (
     TurnDeadline,
     TurnTelemetry,
     null_telemetry,
 )
+from ai_market_monitor.engine.validated_intent_snapshot import (
+    GroundedRequirement,
+    RepeatState,
+    ValidatedIntentSnapshot,
+    normalized_intent_hash,
+)
 from ai_market_monitor.schemas.planner_intent import (
     FORBIDDEN_SCHEMA_MODELS,
+    BooleanTopologyRepair,
     PlannerIntentEnvelope,
     PlannerRepairEnvelope,
+    ReplaceBooleanPayload,
     SemanticIntent,
     compact_json_schema,
     schema_complexity,
@@ -156,6 +182,7 @@ class SetupAgentError(ValueError):
         retryable: bool = False,
         details: tuple[str, ...] = (),
         usage: dict[str, Any] | None = None,
+        failure_record: TurnFailureRecord | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -166,6 +193,21 @@ class SetupAgentError(ValueError):
         # proposed operation. Preserve that paid usage across the error boundary so
         # the launch service and evaluator cannot report the turn as costing $0.
         self.usage = dict(usage or {})
+        # The typed forensics for this failure: who owns it, which field, which of the
+        # trader's own words, and whether a correction was even possible. Persisted by
+        # the caller so an operator can read it without a stack trace and a customer
+        # gets a reference instead of "say that again".
+        self.failure_record = failure_record
+
+    @property
+    def failure_class(self) -> SetupFailureClass:
+        if self.failure_record is not None:
+            return self.failure_record.failure_class
+        return failure_class_for_code(self.code)
+
+    @property
+    def operator_alertable(self) -> bool:
+        return is_operator_alertable(self.failure_class)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +218,20 @@ class _PlanFailure:
     intent_ref: str | None = None
     target_path: str | None = None
     segment_ref: str | None = None
+    #: Every model-owned field the same failure names. One rule can lose several
+    #: stated values at once, and each is independently provable from the trader's
+    #: words, so one bounded correction may address all of them.
+    target_paths: tuple[str, ...] = ()
+
+    @property
+    def failure_class(self) -> SetupFailureClass:
+        return failure_class_for_code(self.code)
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        if self.target_paths:
+            return self.target_paths
+        return (self.target_path,) if self.target_path else ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +261,9 @@ class SetupAgentTurnInput:
     message: str
     source_turn_id: str
     draft: StrategyDraftV2
+    #: The authenticated chat/session identity. It is distinct from the message id and
+    #: is used only for persisted retry evidence and operational correlation.
+    session_id: str = ""
     #: Recent user/assistant messages, oldest first, **excluding this turn** — it is
     #: already supplied as `current_user_turn`, and sending it twice invited the model
     #: to treat its own echo as prior context.
@@ -232,6 +291,10 @@ class SetupAgentTurnInput:
     #: survived a repair twice will not be given a third paid attempt: the answer is
     #: known, and spending on it again only makes the user wait longer for it.
     repeated_failure_codes: tuple[str, ...] = ()
+    #: What earlier turns already established about this exact request: how many times
+    #: it has been sent, which failures were already tried, and which values are already
+    #: proved. Supplied by the service that owns the chat's stored context.
+    repeats: RepeatState = field(default_factory=RepeatState)
     #: Governed identities hidden behind public, turn-local aliases. Conditions,
     #: clarifications and snapshots are added from the authoritative draft/history.
     planner_references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES
@@ -316,6 +379,8 @@ class SetupAgentTurnResult:
     #: whether to archive a previous approval.
     material_change: bool = False
     usage: dict[str, Any] = field(default_factory=dict)
+    #: What this turn established, kept whether it succeeded or not.
+    snapshot: ValidatedIntentSnapshot | None = None
 
     @property
     def message(self) -> str:
@@ -564,6 +629,15 @@ class SetupChatAgent:
         telemetry.notes.setdefault("planner_repair_mode", _PlannerRepairState.UNUSED.value)
         telemetry.notes.setdefault("planner_repair_attempt_count", 0)
         telemetry.notes.setdefault("planner_repair_success_count", 0)
+        telemetry.notes.update(turn.repeats.to_dict())
+        # Even an unreadable/empty provider response gets an immutable turn snapshot.
+        # It contains no claimed requirements until fields are independently grounded.
+        telemetry.notes["validated_intent_snapshot"] = ValidatedIntentSnapshot(
+            session_id=turn.session_id or turn.source_turn_id,
+            source_turn_id=turn.source_turn_id,
+            canonical_draft_hash=turn.draft.executable_hash or "",
+            normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
+        ).to_dict()
         with telemetry.stage("context_selection"):
             shortlist = build_capability_shortlist(
                 turn.normalized_message,
@@ -591,6 +665,8 @@ class SetupChatAgent:
             envelope, plan_usage = await self._plan_once(turn, shortlist, route)
         except StructuredCallError as exc:
             if not _answer_did_not_parse(exc):
+                record = _structured_failure_record(turn, exc)
+                telemetry.notes["turn_failure_record"] = record.to_dict()
                 raise SetupAgentError(
                     exc.code,
                     str(exc),
@@ -598,6 +674,7 @@ class SetupChatAgent:
                     retryable=exc.retryable,
                     details=exc.details,
                     usage={**exc.usage, **route.usage_metadata()},
+                    failure_record=record,
                 ) from exc
             # Nothing came back that can be corrected field by field, so a delta has
             # nothing to name. One more attempt at the same compact contract is the only
@@ -607,6 +684,8 @@ class SetupChatAgent:
                     turn, shortlist, route, prior_usage=exc.usage, retry_after_bad_shape=True
                 )
             except StructuredCallError as retry_exc:
+                record = _structured_failure_record(turn, retry_exc)
+                telemetry.notes["turn_failure_record"] = record.to_dict()
                 raise SetupAgentError(
                     retry_exc.code,
                     str(retry_exc),
@@ -614,6 +693,7 @@ class SetupChatAgent:
                     retryable=retry_exc.retryable,
                     details=retry_exc.details,
                     usage={**retry_exc.usage, **route.usage_metadata()},
+                    failure_record=record,
                 ) from retry_exc
             plan_usage["_setup_repair_attempts"] = 1
             repair_state = _PlannerRepairState.SHAPE_RECOVERY
@@ -638,6 +718,22 @@ class SetupChatAgent:
             lexical_hint="",
             model_calls=self.model_call_count,
         )
+
+        # Record what this reading established *before* anything can refuse it. A turn
+        # that fails still proved most of what the trader wrote, and keeping that is
+        # what lets the next turn answer without asking for the whole instruction
+        # again. Written to telemetry so the success and failure paths both persist it.
+        telemetry.notes["validated_intent_snapshot"] = ValidatedIntentSnapshot(
+            session_id=turn.session_id or turn.source_turn_id,
+            source_turn_id=turn.source_turn_id,
+            canonical_draft_hash=turn.draft.executable_hash or "",
+            normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
+            grounded_requirements=grounded_requirements_from(
+                envelope,
+                turn.message,
+                _planner_references(turn),
+            ),
+        ).to_dict()
 
         # Sanitation, compilation and dry validation are one bounded attempt, and at most
         # one repair call for the whole turn. Both failure sources — a reading the server
@@ -870,28 +966,88 @@ class SetupChatAgent:
             return failure, envelope, plan_usage, False
 
         code, details = failure.code, failure.details
+        turn.telemetry.notes["turn_failure_class"] = failure.failure_class.value
+        turn.telemetry.notes["turn_failure_owner"] = owner_for(failure.failure_class).value
         if failure.outcome == SemanticIntentOutcome.USER_INFORMATION_REQUIRED:
             return _ServerClarification(
                 contract=_clarification_for_failure(turn, failure),
                 envelope=envelope,
                 usage=plan_usage,
             )
-        if (
-            repair_state is not _PlannerRepairState.UNUSED
-            or not _repair_can_help(code, details)
-            or turn.repeated_failure_codes.count(code) >= 2
-        ):
+
+        # Decide, deterministically and before spending anything, whether a correction
+        # is possible at all. Runs 9-11 attempted 18 corrections and recovered none;
+        # every one of those calls was decidable as hopeless from facts already in hand.
+        fingerprint = failure_fingerprint(
+            canonical_draft_hash=turn.draft.executable_hash or "",
+            normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
+            failure_class=failure.failure_class,
+            failure_paths=failure.paths,
+        )
+        plan_decision = decide_repair(
+            failure.failure_class,
+            intent_parsed=True,
+            target_paths=failure.paths,
+            intent_ref=failure.intent_ref,
+            segment_ref=failure.segment_ref,
+            source_verified=_segment_is_in_message(envelope, failure.segment_ref, turn.message),
+            replacement_is_groundable=bool(failure.paths),
+            seconds_remaining=(
+                turn.deadline.remaining_seconds
+                if turn.deadline.budget_seconds > 0
+                else _UNBOUNDED_TURN_SECONDS
+            ),
+            budget_remaining_usd=max(
+                0.0,
+                self.settings.setup_agent_max_estimated_cost_usd_per_turn
+                - float(plan_usage.get("_setup_reserved_cost_usd") or 0.0),
+            ),
+            # Every fingerprint this chat has already spent a correction on. Paying
+            # again for a problem that already survived one correction is the loop that
+            # turned 18 attempts into 0 recoveries.
+            attempted_fingerprints=turn.repeats.attempted_fingerprints,
+            fingerprint=fingerprint,
+            repair_already_used=repair_state is not _PlannerRepairState.UNUSED,
+        )
+        turn.telemetry.notes.update(plan_decision.to_dict())
+        turn.telemetry.notes.update(turn.repeats.to_dict())
+        turn.telemetry.notes["turn_failure_fingerprint"] = fingerprint
+        record = _failure_record(
+            turn,
+            envelope,
+            failure,
+            fingerprint=fingerprint,
+            repair_decision=plan_decision.decision.value,
+            repair_eligible=plan_decision.spends_model_call,
+        )
+        turn.telemetry.notes["turn_failure_record"] = record.to_dict()
+        stored = turn.telemetry.notes.get("validated_intent_snapshot")
+        if isinstance(stored, dict):
+            # Same snapshot, now carrying why this turn failed and where. The next turn
+            # reads it to see that this exact problem was already tried.
+            turn.telemetry.notes["validated_intent_snapshot"] = {
+                **stored,
+                "failure_class": failure.failure_class.value,
+                "failure_paths": list(failure.paths),
+                "failure_fingerprint": fingerprint,
+            }
+        if not plan_decision.spends_model_call:
             raise SetupAgentError(
                 code,
-                _refusal_message(code),
+                _loop_aware_refusal(code, turn.repeats, failure),
                 stage="tool_validation",
                 details=details,
                 usage=plan_usage,
+                failure_record=record,
             )
         repair_state = _PlannerRepairState.SEMANTIC_REPAIR
         turn.telemetry.notes["planner_repair_mode"] = repair_state.value
+        turn.telemetry.notes["planner_repair_attempt_count"] = (
+            int(turn.telemetry.notes.get("planner_repair_attempt_count") or 0) + 1
+        )
+        topology_repair = plan_decision.decision is RepairDecision.BOOLEAN_TOPOLOGY_REPAIR
         try:
-            deltas, repair_usage = await self._repair_once(
+            correction, repair_usage = await self._repair_once(
                 turn,
                 shortlist,
                 route,
@@ -900,8 +1056,10 @@ class SetupChatAgent:
                 validation_details=details,
                 invalid_intent_ref=failure.intent_ref,
                 target_path=failure.target_path,
+                target_paths=failure.paths,
                 source_segment_ref=failure.segment_ref,
                 prior_usage=plan_usage,
+                topology_only=topology_repair,
             )
         except StructuredCallError as repair_exc:
             raise SetupAgentError(
@@ -911,21 +1069,34 @@ class SetupChatAgent:
                 retryable=repair_exc.retryable,
                 details=repair_exc.details,
                 usage={**repair_exc.usage, **route.usage_metadata()},
+                failure_record=record,
             ) from None
         repair_usage = {**repair_usage, **route.usage_metadata()}
 
         before = intent_fingerprint(envelope)
         with turn.telemetry.stage("repair_delta_application"):
             try:
-                repaired_envelope = apply_repair_deltas(
-                    envelope,
-                    deltas.deltas,
-                    message=turn.message,
-                    validation_code=code,
-                    invalid_intent_ref=failure.intent_ref or "",
-                    invalid_target_path=failure.target_path,
-                    references=_planner_references(turn),
-                )
+                if isinstance(correction, BooleanTopologyRepair):
+                    repaired_envelope = (
+                        envelope
+                        if correction.cannot_repair
+                        else apply_topology_repair(
+                            envelope,
+                            correction,
+                            invalid_intent_ref=failure.intent_ref or "",
+                        )
+                    )
+                else:
+                    repaired_envelope = apply_repair_deltas(
+                        envelope,
+                        correction.deltas,
+                        message=turn.message,
+                        validation_code=code,
+                        invalid_intent_ref=failure.intent_ref or "",
+                        invalid_target_path=failure.target_path,
+                        invalid_target_paths=failure.paths,
+                        references=_planner_references(turn),
+                    )
             except IntentCompileError as exc:
                 raise SetupAgentError(
                     exc.code,
@@ -933,23 +1104,32 @@ class SetupChatAgent:
                     stage="planner_repair",
                     details=exc.details,
                     usage=repair_usage,
+                    failure_record=record,
                 ) from None
         with turn.telemetry.stage("intent_normalization"):
             repaired_envelope = normalize_planner_envelope(repaired_envelope)
-        if deltas.cannot_repair or intent_fingerprint(repaired_envelope) == before:
+        if correction.cannot_repair or intent_fingerprint(repaired_envelope) == before:
             # Nothing changed, so re-running every gate would reach the same answer at
             # the same cost. Report the original problem instead of hiding it behind a
             # second identical failure.
+            turn.telemetry.notes["planner_repair_result"] = "no_change"
             raise SetupAgentError(
                 code,
-                _refusal_message(code),
+                _loop_aware_refusal(code, turn.repeats, failure),
                 stage="planner_repair",
                 details=details,
                 usage=repair_usage,
+                failure_record=record,
             )
 
+        # Verify the correction: the whole path runs again — semantic validation,
+        # canonical compilation, grounding, dry validation. A correction is successful
+        # only when the original failure is gone, not when a delta was merely returned.
         second = self._checked_plan(turn, shortlist, repaired_envelope, recompiling=True)
         if isinstance(second, _PlanFailure):
+            turn.telemetry.notes["planner_repair_result"] = (
+                "same_failure" if second.code == code else f"new_failure:{second.code}"
+            )
             if second.outcome == SemanticIntentOutcome.USER_INFORMATION_REQUIRED:
                 return _ServerClarification(
                     contract=_clarification_for_failure(turn, second),
@@ -958,11 +1138,23 @@ class SetupChatAgent:
                 )
             raise SetupAgentError(
                 second.code,
-                _refusal_message(second.code),
+                _loop_aware_refusal(second.code, turn.repeats, second),
                 stage="planner_repair",
                 details=second.details,
                 usage=repair_usage,
+                failure_record=_failure_record(
+                    turn,
+                    repaired_envelope,
+                    second,
+                    fingerprint=fingerprint,
+                    repair_decision=plan_decision.decision.value,
+                    repair_eligible=False,
+                ),
             )
+        turn.telemetry.notes["planner_repair_result"] = "applied"
+        turn.telemetry.notes["planner_repair_success_count"] = (
+            int(turn.telemetry.notes.get("planner_repair_success_count") or 0) + 1
+        )
         repair_usage["_setup_repair_successes"] = 1
         return second, repaired_envelope, repair_usage, True
 
@@ -1002,6 +1194,10 @@ class SetupChatAgent:
                 declared_outcome=exc.outcome,
                 intent_ref=exc.intent_ref,
                 target_path=exc.target_path,
+                # Every field the compiler named, not only the first. Forwarding one
+                # path made a two-omission turn spend its single correction on one
+                # field and then fail identically on the other.
+                target_paths=exc.target_paths,
                 segment_ref=exc.segment_ref,
             )
             if failure.outcome == SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION:
@@ -1188,22 +1384,46 @@ class SetupChatAgent:
         validation_details: tuple[str, ...],
         invalid_intent_ref: str | None,
         target_path: str | None,
+        target_paths: tuple[str, ...] = (),
         source_segment_ref: str | None,
         prior_usage: dict[str, Any],
-    ) -> tuple[PlannerRepairEnvelope, dict[str, Any]]:
-        """Make the single bounded pre-mutation repair call allowed for this turn."""
+        topology_only: bool = False,
+    ) -> tuple[PlannerRepairEnvelope | BooleanTopologyRepair, dict[str, Any]]:
+        """Make the single bounded pre-mutation repair call allowed for this turn.
+
+        Two contracts, chosen by what actually went wrong. A structure-only failure
+        gets a contract that cannot express a semantic value at all, so the correction
+        physically cannot become a second reading of the turn.
+        """
 
         telemetry = turn.telemetry
+        schema_model: type[Any] = BooleanTopologyRepair if topology_only else PlannerRepairEnvelope
+        instructions = _TOPOLOGY_REPAIR_INSTRUCTIONS if topology_only else _REPAIR_INSTRUCTIONS
+        schema_name = (
+            "hilalmarkets_setup_boolean_topology_repair"
+            if topology_only
+            else "hilalmarkets_setup_intent_repair"
+        )
         with telemetry.stage("repair_context_build"):
-            payload = self._repair_payload(
-                turn,
-                shortlist,
-                envelope=envelope,
-                validation_code=validation_code,
-                validation_details=validation_details,
-                invalid_intent_ref=invalid_intent_ref,
-                target_path=target_path,
-                source_segment_ref=source_segment_ref,
+            payload = (
+                self._topology_repair_payload(
+                    turn,
+                    envelope=envelope,
+                    invalid_intent_ref=invalid_intent_ref,
+                    validation_details=validation_details,
+                )
+                if topology_only
+                else self._repair_payload(
+                    turn,
+                    shortlist,
+                    envelope=envelope,
+                    validation_code=validation_code,
+                    validation_details=validation_details,
+                    invalid_intent_ref=invalid_intent_ref,
+                    target_path=target_path,
+                    target_paths=target_paths,
+                    source_segment_ref=source_segment_ref,
+                )
             )
             for section, value in payload.items():
                 telemetry.record_payload(
@@ -1212,8 +1432,8 @@ class SetupChatAgent:
                 )
         reserved = estimate_structured_call_cost(
             self.settings,
-            schema_model=PlannerRepairEnvelope,
-            instructions=_REPAIR_INSTRUCTIONS,
+            schema_model=schema_model,
+            instructions=instructions,
             payload=payload,
             model=route.model,
             max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
@@ -1247,9 +1467,9 @@ class SetupChatAgent:
                 telemetry.record_model_call("planner_repair")
                 deltas, usage = await structured_call(
                     self.settings,
-                    schema_model=PlannerRepairEnvelope,
-                    schema_name="hilalmarkets_setup_intent_repair",
-                    instructions=_REPAIR_INSTRUCTIONS,
+                    schema_model=schema_model,
+                    schema_name=schema_name,
+                    instructions=instructions,
                     payload=payload,
                     model=route.model,
                     reasoning_effort=route.reasoning_effort,
@@ -1300,6 +1520,7 @@ class SetupChatAgent:
         validation_details: tuple[str, ...],
         invalid_intent_ref: str | None,
         target_path: str | None,
+        target_paths: tuple[str, ...] = (),
         source_segment_ref: str | None,
     ) -> dict[str, Any]:
         """What the repair call sees: the reading, the words, and what went wrong.
@@ -1342,6 +1563,9 @@ class SetupChatAgent:
             "validation": {
                 "code": validation_code,
                 "path": target_path or "",
+                # Every field this failure named. Correcting one and leaving the rest
+                # is what made a paid correction end in the identical refusal.
+                "paths": list(target_paths or ((target_path,) if target_path else ())),
                 "sanitized_paths": _sanitized_validation_paths(validation_details)[:3],
             },
             "allowed_repair_kinds": [
@@ -1357,6 +1581,54 @@ class SetupChatAgent:
             "minimum_target_references": _minimum_reference_context(
                 invalid_intent, _planner_references(turn)
             ),
+        }
+
+    def _topology_repair_payload(
+        self,
+        turn: SetupAgentTurnInput,
+        *,
+        envelope: PlannerIntentEnvelope,
+        invalid_intent_ref: str | None,
+        validation_details: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """What a structure-only correction sees: the rules, and how they were joined.
+
+        Not the whole plan. The rules are already correct and already grounded; sending
+        them back for re-authoring is how a correction turns into a second reading.
+        Only references and the shape are on the table here.
+        """
+
+        index = _intent_index(invalid_intent_ref)
+        intent = (
+            envelope.semantic_intents[index]
+            if index is not None and index < len(envelope.semantic_intents)
+            else None
+        )
+        payload = intent.payload if intent is not None else None
+        structure = getattr(payload, "boolean_structure", None)
+        leaves = (
+            [
+                {"leaf_ref": leaf.leaf_ref, "exact_words": leaf.source_quote}
+                for leaf in structure.condition_leaves
+            ]
+            if structure is not None
+            else []
+        )
+        return {
+            "user_message": turn.message,
+            "rules_already_understood": leaves,
+            "arrangement_you_returned": (
+                {
+                    "groups": [
+                        item.model_dump(mode="json", exclude_none=True)
+                        for item in structure.boolean_groups
+                    ],
+                    "root_ref": structure.root_ref,
+                }
+                if structure is not None
+                else None
+            ),
+            "why_it_was_refused": _sanitized_validation_paths(validation_details)[:4],
         }
 
     async def _compose_once(
@@ -1566,6 +1838,15 @@ class SetupChatAgent:
             },
             "approval_eligible": draft.approval_eligible,
             "semantic_violations": _public_semantic_violations(draft, references),
+            # Read-only evidence from a materially identical earlier request. These
+            # values were independently proved against the trader's own source text;
+            # they are not canonical state and cannot bypass this turn's semantic,
+            # grounding, dry-validation, or execution gates.
+            "prior_grounded_retry_evidence": [
+                item.to_dict() for item in turn.repeats.reusable_requirements[:20]
+            ]
+            if turn.repeats.is_repeat
+            else [],
             "core_primitives": _core_primitives(),
             "capability_shortlist": _model_capability_shortlist(shortlist),
             "product_boundaries": _PRODUCT_BOUNDARIES,
@@ -1731,6 +2012,7 @@ def _classify_plan_failure(
     declared_outcome: SemanticIntentOutcome | None = None,
     intent_ref: str | None = None,
     target_path: str | None = None,
+    target_paths: tuple[str, ...] = (),
     segment_ref: str | None = None,
     operation_intent_refs: dict[str, str] | None = None,
     intent_segments: dict[str, str] | None = None,
@@ -1738,9 +2020,18 @@ def _classify_plan_failure(
     """Classify every semantic/compiler/canonical failure at one boundary.
 
     Repair is a narrow proof, never the default.  For compiler failures the compiler
-    must supply one exact compact intent, field and verified segment.  For canonical
-    failures every structured detail must independently map back to the same one of
-    each.  An operation id, an exception string, or a canonical default is not enough.
+    must supply one exact compact intent, one or more named fields, and a verified
+    segment.  For canonical failures every structured detail must independently map
+    back to the same intent.  An operation id, an exception string, or a canonical
+    default is not enough.
+
+    What this must **not** do is call an unproven attribution a compiler invariant.
+    ``COMPILER_INVARIANT_VIOLATION`` is terminal: no repair, no question, HTTP 422 and
+    a message saying nothing changed. Using it as the catch-all is what turned an
+    ordinary instruction into an unanswerable one in evaluator runs 20260802T232050Z
+    and 20260803T000036Z. A failure the server cannot attribute is a
+    ``CANONICAL_VALIDATION_FAILURE``: still not repairable, but truthfully named, and
+    it reaches the trader as a support reference rather than as "rephrase this".
     """
 
     terminal_outcomes = {
@@ -1760,6 +2051,7 @@ def _classify_plan_failure(
             outcome=declared_outcome,
             intent_ref=intent_ref,
             target_path=target_path,
+            target_paths=target_paths,
             segment_ref=segment_ref,
         )
 
@@ -1771,13 +2063,15 @@ def _classify_plan_failure(
             message=message,
             intent_ref=intent_ref,
             target_path=target_path,
+            target_paths=target_paths,
             segment_ref=segment_ref,
-            allow_omitted_field=code == "INTENT_VALUE_UNREADABLE",
+            allow_omitted_field=code
+            in {"INTENT_VALUE_UNREADABLE", "PLANNER_SEMANTIC_OMISSION"},
         )
-        return candidate or _compiler_invariant_failure(details)
+        return candidate or _unattributed_failure(code, details)
 
     if code not in _REPAIRABLE_VALIDATION_CODES or not details:
-        return _compiler_invariant_failure(details)
+        return _unattributed_failure(code, details)
     operation_intent_refs = operation_intent_refs or {}
     intent_segments = intent_segments or {}
     attributed_intents: set[str] = set()
@@ -1785,34 +2079,56 @@ def _classify_plan_failure(
     for detail in details:
         parts = str(detail).split(":")
         if len(parts) < 3:
-            return _compiler_invariant_failure(details)
+            return _unattributed_failure(code, details)
         attributed_intent = operation_intent_refs.get(parts[0])
         if attributed_intent is None:
-            return _compiler_invariant_failure(details)
+            return _unattributed_failure(code, details)
         index = _intent_index(attributed_intent)
         if index is None or index >= len(envelope.semantic_intents):
-            return _compiler_invariant_failure(details)
+            return _unattributed_failure(code, details)
         path = _model_owned_semantic_path(envelope.semantic_intents[index], parts)
         if path is None:
-            return _compiler_invariant_failure(details)
+            return _unattributed_failure(code, details)
         attributed_intents.add(attributed_intent)
         attributed_paths.add(path)
-    if len(attributed_intents) != 1 or len(attributed_paths) != 1:
-        return _compiler_invariant_failure(details)
+    # Several canonical complaints about the *same* intent are one correction, not an
+    # internal fault. Requiring exactly one path here is what sent a two-field refusal
+    # down the terminal branch.
+    if len(attributed_intents) != 1 or not attributed_paths:
+        return _unattributed_failure(code, details)
     attributed_intent = next(iter(attributed_intents))
+    ordered_paths = tuple(sorted(attributed_paths))
     candidate = _verified_repair_attribution(
         code=code,
         details=details,
         envelope=envelope,
         message=message,
         intent_ref=attributed_intent,
-        target_path=next(iter(attributed_paths)),
+        target_path=ordered_paths[0],
+        target_paths=ordered_paths,
         segment_ref=intent_segments.get(attributed_intent),
     )
-    return candidate or _compiler_invariant_failure(details)
+    return candidate or _unattributed_failure(code, details)
+
+
+def _unattributed_failure(code: str, details: tuple[str, ...]) -> _PlanFailure:
+    """A real refusal the server could not pin on one model-owned field.
+
+    This is not a compiler invariant. The compiler produced something a canonical gate
+    refused, which is a canonical validation failure — reportable, alertable, and never
+    recoverable by asking the trader to say it differently.
+    """
+
+    return _PlanFailure(
+        code=code if code != "COMPILER_INVARIANT_VIOLATION" else "CANONICAL_VALIDATION_FAILURE",
+        details=tuple(_sanitized_validation_paths(details)),
+        outcome=SemanticIntentOutcome.NON_RECOVERABLE_FAILURE,
+    )
 
 
 def _compiler_invariant_failure(details: tuple[str, ...]) -> _PlanFailure:
+    """Reserved for the one thing the name means: the server built something invalid."""
+
     return _PlanFailure(
         code="COMPILER_INVARIANT_VIOLATION",
         details=tuple(_sanitized_validation_paths(details)),
@@ -1828,12 +2144,22 @@ def _verified_repair_attribution(
     message: str,
     intent_ref: str | None,
     target_path: str | None,
+    target_paths: tuple[str, ...] = (),
     segment_ref: str | None,
     allow_omitted_field: bool = False,
 ) -> _PlanFailure | None:
-    """Return a repair failure only after its complete provenance proof succeeds."""
+    """Return a repair failure only after its complete provenance proof succeeds.
 
-    if not _repair_can_help(code, details) or not intent_ref or not target_path or not segment_ref:
+    Every named field is proved separately. A path the intent does not own is dropped
+    rather than failing the whole attribution: correcting three of four stated values
+    is still progress, and refusing all four because of one is how a turn that had a
+    correct partial reading ended with nothing.
+    """
+
+    if not _repair_can_help(code, details) or not intent_ref or not segment_ref:
+        return None
+    named = tuple(dict.fromkeys([*target_paths, *((target_path,) if target_path else ())]))
+    if not named:
         return None
     index = _intent_index(intent_ref)
     if index is None or index >= len(envelope.semantic_intents):
@@ -1844,14 +2170,20 @@ def _verified_repair_attribution(
     segment = next((item for item in envelope.segments if item.segment_ref == segment_ref), None)
     if segment is None or segment.exact_source_text not in message:
         return None
-    if not _intent_owns_path(intent, target_path, allow_omitted=allow_omitted_field):
+    owned = tuple(
+        path
+        for path in named
+        if _intent_owns_path(intent, path, allow_omitted=allow_omitted_field)
+    )
+    if not owned:
         return None
     return _PlanFailure(
         code=code,
         details=tuple(_sanitized_validation_paths(details)),
         outcome=SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
         intent_ref=intent_ref,
-        target_path=target_path,
+        target_path=owned[0],
+        target_paths=owned,
         segment_ref=segment_ref,
     )
 
@@ -1865,6 +2197,10 @@ def _intent_owns_path(
     """Whether one compact field, not canonical metadata, owns ``target_path``."""
 
     payload = intent.payload
+    if target_path == "boolean_structure":
+        # Structure is model-owned, and it is the one path a correction may rearrange
+        # without touching any rule's meaning.
+        return isinstance(payload, ReplaceBooleanPayload)
     if target_path.startswith("condition."):
         condition = getattr(payload, "condition", None)
         if condition is None:
@@ -1906,11 +2242,19 @@ def _model_owned_semantic_path(intent: SemanticIntent, parts: list[str]) -> str 
     condition = getattr(payload, "condition", None)
     if condition is None:
         return None
+    # Canonical names and model-facing names are not the same word for the same thing.
+    # A missing entry here is not cosmetic: the path resolves to nothing, the failure
+    # loses its attribution, and a perfectly repairable grounding problem becomes an
+    # unrecoverable refusal. `operator`/`comparator` and `formula`/`formula_key` were
+    # both missing, which made every comparator and formula grounding failure terminal.
     canonical_to_semantic = {
         "context_timeframe": "context_timeframes",
         "confirmation_timeframe": "confirmation_timeframes",
         "condition_symbol": "condition_symbols",
-        "boolean_shape": "boolean_relationship",
+        "operator": "comparator",
+        "formula": "formula_key",
+        "source_fragment": "source_quote",
+        "capability_version": "capability_key",
     }
     semantic_field = canonical_to_semantic.get(field_name, field_name)
     if semantic_field not in condition.model_fields_set:
@@ -1981,7 +2325,295 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     "INTENT_NOT_PERMITTED": (
         "Part of that would change the setup, but nothing in the message asked for it."
     ),
+    "PLANNER_SEMANTIC_OMISSION": (
+        "I read your rule but lost part of what you wrote. Nothing was changed."
+    ),
+    "SOURCE_ASSOCIATION_MISMATCH": (
+        "I matched part of that to the wrong words in your message. Nothing was changed."
+    ),
+    "BOOLEAN_TOPOLOGY_MISSING": (
+        "I understood each rule, but not the way you joined them. Nothing was changed."
+    ),
+    "BOOLEAN_TOPOLOGY_AMBIGUOUS": (
+        "That logic can be read in more than one way, so I did not choose one."
+    ),
+    # A canonical gate refused what the server built. The trader wrote nothing wrong,
+    # so never ask them to rephrase: give them something support can look up.
+    "CANONICAL_VALIDATION_FAILURE": (
+        "Something on my side would not accept that change, so I made none. "
+        "This is not a problem with how you wrote it — our team can see the details."
+    ),
 }
+
+
+#: A turn created without a budget (helpers, tests, replay) never runs out of time.
+#: Reporting it as "no time left" would refuse corrections that are perfectly possible.
+_UNBOUNDED_TURN_SECONDS = 3600.0
+
+
+def _normalized_intent_hash(normalized_message: str) -> str:
+    """One key for "the trader is asking for the same thing again"."""
+
+    return normalized_intent_hash(normalized_message)
+
+
+def grounded_requirements_from(
+    envelope: PlannerIntentEnvelope,
+    message: str,
+    references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES,
+) -> tuple[GroundedRequirement, ...]:
+    """Every stated value in this reading that the trader's own words authorise.
+
+    Kept even when the turn ends in a refusal. That is the whole point: a turn that
+    lost one value out of six still established the other five, and throwing them away
+    is what made the trader retype the whole instruction — and what made the retry cost
+    another full planner call to reach the same place.
+    """
+
+    rows: dict[str, GroundedRequirement] = {}
+    segment_text = {item.segment_ref: item.exact_source_text for item in envelope.segments}
+
+    def keep(path: str, value: Any, source: str, *, kind: str | None = None) -> None:
+        rendered_value = value.value if hasattr(value, "value") else value
+        if not semantic_value_is_grounded(
+            rendered_value,
+            source,
+            path=path,
+            references=references,
+            replacement_kind=kind,
+        ):
+            return
+        rendered = (
+            json.dumps(rendered_value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+            if isinstance(rendered_value, (list, dict))
+            else str(rendered_value)
+        )
+        rows[path] = GroundedRequirement(
+            semantic_path=path,
+            value=rendered[:120],
+            source_excerpt=source,
+        )
+
+    for intent_index, intent in enumerate(envelope.semantic_intents):
+        source = segment_text.get(intent.segment_ref, "")
+        if not source or source not in message:
+            continue
+        payload = intent.payload
+        action = intent.action.value
+        intent_path = f"semantic_intents[{intent_index}].payload"
+        if action in {
+            "include_symbol",
+            "exclude_symbol",
+            "remove_included_symbol",
+            "remove_excluded_symbol",
+        }:
+            keep(f"{intent_path}.symbol", cast(Any, payload).symbol, source, kind="symbol")
+            continue
+        if action.startswith("set_") and action != "set_sharia_preferences":
+            field_name = action.removeprefix("set_")
+            keep(f"{intent_path}.{field_name}", getattr(payload, field_name), source)
+            continue
+        conditions: list[tuple[Any, str]] = []
+        condition = getattr(payload, "condition", None)
+        if condition is not None:
+            conditions.append((condition, f"{intent_path}.condition"))
+        structure = getattr(payload, "boolean_structure", None)
+        if structure is not None:
+            conditions.extend(
+                (
+                    leaf.condition,
+                    f"{intent_path}.boolean_structure.condition_leaves[{leaf_index}].condition",
+                )
+                for leaf_index, leaf in enumerate(structure.condition_leaves)
+            )
+        for condition, condition_path in conditions:
+            condition_source = condition.source_quote or source
+            if condition_source not in source and condition_source not in message:
+                continue
+            for name in type(condition).model_fields:
+                if name not in condition.model_fields_set or name in {
+                    "target_reference",
+                    "source_quote",
+                }:
+                    continue
+                value = getattr(condition, name, None)
+                if value in (None, [], {}):
+                    continue
+                if name == "capability_parameters":
+                    for parameter in cast(list[Any], value):
+                        keep(
+                            f"{condition_path}.capability_parameters.{parameter.name}",
+                            parameter.semantic_value(),
+                            condition_source,
+                        )
+                    continue
+                if name == "formula_key" and getattr(value, "value", value) == "capability":
+                    # ``capability`` is server/registry metadata. The explicitly named
+                    # capability key below is the trader-authored requirement.
+                    continue
+                kind = (
+                    "symbol"
+                    if name == "condition_symbols"
+                    else "timeframe"
+                    if "timeframe" in name
+                    else None
+                )
+                keep(f"{condition_path}.{name}", value, condition_source, kind=kind)
+
+    for answer in envelope.clarification_answers:
+        source = segment_text.get(answer.segment_ref, "")
+        if source and answer.answer_text in source:
+            rows[f"clarification.{answer.clarification_ref}"] = GroundedRequirement(
+                semantic_path=f"clarification.{answer.clarification_ref}",
+                value=answer.answer_text[:120],
+                source_excerpt=source,
+            )
+    return tuple(rows.values())
+
+
+def _segment_is_in_message(
+    envelope: PlannerIntentEnvelope,
+    segment_ref: str | None,
+    message: str,
+) -> bool:
+    """Whether the words that would authorise a correction are really in this turn."""
+
+    if not segment_ref:
+        return False
+    segment = next((item for item in envelope.segments if item.segment_ref == segment_ref), None)
+    return segment is not None and segment.exact_source_text in message
+
+
+def _failure_record(
+    turn: SetupAgentTurnInput,
+    envelope: PlannerIntentEnvelope,
+    failure: _PlanFailure,
+    *,
+    fingerprint: str,
+    repair_decision: str,
+    repair_eligible: bool,
+) -> TurnFailureRecord:
+    """The typed forensics one failed turn persists.
+
+    Everything here is either the server's own classification or the trader's own
+    words. No model reasoning, no provider payload, no prompt, no credential — so the
+    record is safe to store, safe to show an operator, and safe to reference back to
+    the customer.
+    """
+
+    segment = next(
+        (item for item in envelope.segments if item.segment_ref == failure.segment_ref),
+        None,
+    )
+    observed: str | None = None
+    observed_rows: list[tuple[str, str]] = []
+    index = _intent_index(failure.intent_ref)
+    if index is not None and index < len(envelope.semantic_intents):
+        payload = envelope.semantic_intents[index].payload
+        holder = getattr(payload, "condition", payload)
+        for path in failure.paths:
+            field = path.removeprefix("condition.").removeprefix("payload.").split(".", 1)[0]
+            value = getattr(holder, field, None)
+            rendered = "absent" if value in (None, [], {}) else str(value)[:80]
+            observed_rows.append((path, rendered))
+        observed = observed_rows[0][1] if observed_rows else None
+    expected_rows = tuple(
+        (path, value)
+        for path in failure.paths
+        if (value := _expected_grounded_value(segment.exact_source_text if segment else "", path))
+        is not None
+    )
+    failure_class = failure.failure_class
+    return TurnFailureRecord(
+        failure_class=failure_class,
+        owner=owner_for(failure_class),
+        intent_ref=failure.intent_ref,
+        segment_ref=failure.segment_ref,
+        semantic_path=failure.target_path,
+        semantic_paths=failure.paths,
+        source_excerpt=segment.exact_source_text if segment else "",
+        expected_value=expected_rows[0][1] if expected_rows else None,
+        expected_values=expected_rows,
+        observed_value=observed,
+        observed_values=tuple(observed_rows),
+        repair_eligible=repair_eligible,
+        repair_decision=repair_decision,
+        support_reference=fingerprint,
+        details=failure.details,
+    )
+
+
+def _structured_failure_record(
+    turn: SetupAgentTurnInput,
+    error: StructuredCallError,
+) -> TurnFailureRecord:
+    """Safe persisted taxonomy for failures that produced no parseable envelope."""
+
+    failure_class = failure_class_for_code(error.code)
+    support_reference = failure_fingerprint(
+        canonical_draft_hash=turn.draft.executable_hash or "",
+        normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
+        failure_class=failure_class,
+        failure_paths=(),
+    )
+    return TurnFailureRecord(
+        failure_class=failure_class,
+        owner=owner_for(failure_class),
+        repair_eligible=False,
+        repair_decision="SHAPE_RECOVERY_EXHAUSTED"
+        if failure_class is SetupFailureClass.PLANNER_SCHEMA_INVALID
+        else "PROVIDER_BOUNDARY",
+        support_reference=support_reference,
+        details=tuple(_sanitized_validation_paths(error.details)),
+    )
+
+
+def _expected_grounded_value(source: str, path: str) -> str | None:
+    """Derive a safe expected value only when the user's words make it unique."""
+
+    field = path.removeprefix("condition.").removeprefix("payload.")
+    if field in {
+        "trigger_timeframe",
+        "context_timeframes",
+        "confirmation_timeframes",
+        "reference_timeframe",
+    }:
+        role = field.removesuffix("_timeframes").removesuffix("_timeframe")
+        matches = [
+            item
+            for item in extract_timeframes(source)
+            if timeframe_role_is_explicit(source, item, cast(Any, role))
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1 and field.endswith("timeframes"):
+            return json.dumps(matches, separators=(",", ":"))
+        return None
+    if field in {"comparator", "operator"}:
+        comparator = detect_comparator(source)
+        return comparator.value if comparator is not None else None
+    if field == "movement_direction":
+        return movement_direction(source)
+    if field == "strategy_bias":
+        lowered = source.casefold()
+        matches = [value for value in ("long", "short", "neutral") if value in lowered]
+        return matches[0] if len(matches) == 1 else None
+    if field == "threshold":
+        numeric_matches = {
+            float(item)
+            for item in re.findall(
+                r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)",
+                source,
+                re.I,
+            )
+        }
+        return str(next(iter(numeric_matches))) if len(numeric_matches) == 1 else None
+    if field == "unit" and re.search(r"%|\bpercent(?:age)?\b|\bpct\b", source, re.I):
+        return "percent"
+    if "symbol" in field:
+        symbols = extract_symbols(source)
+        return symbols[0] if len(symbols) == 1 else None
+    return None
 
 
 def _refusal_message(code: str) -> str:
@@ -1989,6 +2621,37 @@ def _refusal_message(code: str) -> str:
         code,
         "I could not turn that into an exact change. Nothing in your setup was altered.",
     )
+
+
+def _loop_aware_refusal(code: str, repeats: RepeatState, failure: _PlanFailure) -> str:
+    """The refusal to show when the trader has already sent this instruction.
+
+    Repeating "I could not turn that into an exact change" is what produced eight
+    identical turns in evaluator run 20260803T000036Z. The second time, the honest
+    answer is different: say what *was* understood, name the one thing that is not, and
+    stop implying the message needs rewriting.
+    """
+
+    base = _refusal_message(code)
+    if not repeats.is_repeat:
+        return base
+    understood = ", ".join(
+        sorted(
+            {
+                item.semantic_path.rsplit(".", 1)[-1]
+                for item in repeats.reusable_requirements
+            }
+        )
+    )
+    missing = ", ".join(path.removeprefix("condition.") for path in failure.paths)
+    lines = ["I have kept everything you already told me, so you do not need to send it again."]
+    if understood:
+        lines.append(f"Already saved from your earlier messages: {understood}.")
+    if missing:
+        lines.append(f"The one part I still cannot place is: {missing}.")
+    else:
+        lines.append(base)
+    return " ".join(lines)
 
 
 def _clarification_for_failure(
@@ -2440,6 +3103,37 @@ Give every rule inside a multi-rule instruction its own `source_quote`: the exac
 of that one rule. "15m ... AND (1h ... OR NOT 4h ...)" names three timeframes, and
 without a per-rule quote nothing shows which timeframe belongs to which rule.
 
+HOW RULES COMBINE
+When the trader says how rules combine — with brackets, with AND, with OR, with NOT —
+use ONE `replace_boolean_structure` intent that carries the whole expression, and no
+separate `add_condition` intents for its parts.
+
+The expression is flat, not nested JSON:
+
+* `condition_leaves` — one entry per rule. Give each a `leaf_ref` you invent for this
+  turn ("l1", "l2"), the `segment_ref` its words came from, and a `condition` holding
+  that rule's own fields and its own exact `source_quote`.
+* `boolean_groups` — one entry per bracket or connector. Give each a `group_ref` you
+  invent ("g1"), `operator` of "and", "or" or "not", and `child_refs` naming the
+  leaves or groups directly inside it. "not" takes exactly one child; "and" and "or"
+  take at least two.
+* `root_ref` — the outermost group.
+
+`A AND (B OR C)` is: leaves l1, l2, l3; group g1 = or[l2, l3]; group g2 = and[l1, g1];
+root g2. `(A OR B) AND C` is a different expression and must come back differently.
+
+These refs are yours for this turn only. They are never database ids and never appear
+again.
+
+Use this ONLY for executable market logic. A watchlist is not an expression: "watch
+ETHUSDT, not BTCUSDT" is one `include_symbol` and one `exclude_symbol`. A timeframe
+role is not an expression: "1m for context and 1h for the trigger" is two fields on one
+rule. The word "and" between two of those is English, not logic. One rule on its own
+stays one `add_condition`; never wrap it in a group.
+
+If the trader stated how rules combine but you cannot tell which reading they meant,
+do not guess a shape — say so in `unsupported_intents` with their exact words.
+
 CLARIFICATION ANSWERS
 If conversation_context has an active_clarification_ref and this turn answers it, record a
 clarification_answers entry. An answer resolves that question; it does not become a
@@ -2490,10 +3184,10 @@ identity or asset status.
 
 DIRECTION
 movement_direction is up, down, neutral or not_applicable. strategy_bias is long,
-short or neutral. Default strategy_bias to neutral unless the trader explicitly says
-long or short. A falling market does not imply short, and a rising market does not
-imply long. Likewise, "bullish" authorizes movement_direction=up only; it never
-authorizes strategy_bias=long.
+short or neutral. Leave strategy_bias absent unless the trader explicitly states long,
+short or neutral; the server owns the canonical neutral default. A falling market does
+not imply short, and a rising market does not imply long. Likewise, "bullish"
+authorizes movement_direction=up only; it never authorizes strategy_bias=long.
 
 For directional percentage rules, keep the user's comparator and positive magnitude
 exactly as stated. "Bearish move of at least 2.5%" means movement_direction=down,
@@ -2501,6 +3195,19 @@ operator=gte and threshold=2.5. Never encode direction by negating the threshold
 flipping the comparator (for example, never rewrite it as lte -2.5). When asking what
 "strong" means, ask for a comparator and positive percent magnitude without suggesting
 a signed negative convention.
+
+COMPARISONS
+Copy the comparison the trader wrote, including whether it includes the number itself.
+
+  at most / no more than / not more than / up to / not exceeding / capped at / <=  -> lte
+  at least / no less than / not less than / minimum of / >=                        -> gte
+  below / less than / strictly below / <                                           -> lt
+  above / greater than / strictly above / >                                        -> gt
+  exactly / equal to / =                                                           -> eq
+
+"At most 1%" includes 1% and "below 1%" does not; a monitor built from the wrong one
+stays silent on the exact move the trader asked to see. The server checks your answer
+against the trader's own words and the words win, so guessing here only wastes a turn.
 
 APPROVAL
 You may record approval_intent. You can never approve. Approval happens only through
@@ -2557,6 +3264,40 @@ a nearby one. Never approve, activate, create policy identity or assign Sharia s
 
 If the reading cannot be corrected honestly, set cannot_repair to true and return no
 corrections. Keeping the blocker open is the right answer; inventing a value is not.
+
+`validation.paths` lists every field this failure named. Return one correction for
+each of them that you can prove from the verified source segment. Correcting only the
+first one leaves the turn failing for the same reason with the correction already
+spent.
+"""
+
+
+_TOPOLOGY_REPAIR_INSTRUCTIONS = """\
+The rules in this HilalMarkets setup were understood correctly. Only the way they were
+joined together was wrong. Fix the arrangement and nothing else.
+
+You are given the trader's message, the rules already understood — each with the exact
+words it came from and a `leaf_ref` — and the arrangement that was refused.
+
+Return:
+
+* `existing_leaf_refs` — exactly the leaf_refs you were given. Not a subset, not one
+  more. You may not add or remove a rule here.
+* `groups` — one entry per bracket or connector, each with a `group_ref` you invent
+  ("g1"), an `operator` of "and", "or" or "not", `child_refs` naming the leaves or
+  groups directly inside it, and the exact words of the message it comes from.
+  "not" takes exactly one child; "and" and "or" take at least two.
+* `root_ref` — the outermost group.
+
+`A AND (B OR C)` is: g1 = or[l2, l3], g2 = and[l1, g1], root g2.
+`(A OR B) AND C` is: g1 = or[l1, l2], g2 = and[g1, l3], root g2.
+These are different setups and must stay different.
+
+You cannot add a rule, a symbol, a timeframe, a comparator, a threshold, or a Sharia
+preference, and you cannot approve anything. Those fields are not in this contract.
+
+If the trader's words support more than one arrangement, set cannot_repair to true.
+Asking them which one they meant is correct; guessing is not.
 """
 
 

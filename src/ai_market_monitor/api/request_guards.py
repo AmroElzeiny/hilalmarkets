@@ -49,7 +49,7 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
             "ai_chat",
             {"POST"},
             (
-                r"^/api/v1/(setup-chat|strategies/interpret|scan-now/interpret)"
+                r"^/api/v1/(?:dashboard/)?(setup-chat|strategies/interpret|scan-now/interpret)"
                 r"|^/dashboard/system-brain/assistant$"
             ),
             configured,

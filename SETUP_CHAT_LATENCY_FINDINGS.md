@@ -1,7 +1,9 @@
 # Setup Chat compact-planner findings
 
-Updated 2026-08-02 from the authenticated production path, independent literal
-goldens, focused integration tests, and bounded live provider calls.
+Updated 2026-08-03 from the authenticated production path, Runs 9-11 artifacts,
+independent literal goldens, focused production-path integration tests, schema export,
+type/lint checks, and migration verification. Real-provider claims are kept separate
+from deterministic or mocked-provider evidence.
 
 ## Production request path
 
@@ -75,21 +77,25 @@ strict_json_schema(PlannerIntentEnvelope, compact=True)
 
 | Measurement | Final |
 |---|---:|
-| Minified bytes | 9,303 |
-| `$defs` | 27 |
-| Maximum object depth | 6 |
-| Optional fields | 28 |
-| Union branches | 68 |
+| Minified bytes | 10,016 |
+| `$defs` | 30 |
+| Maximum object depth | 8 |
+| Optional fields | 27 |
+| Union branches | 66 |
 | Canonical persistence models reachable | 0 |
 | Envelope fields | 7 |
 
-The early 4,096-byte target was an unmeasured prototype target. The final
-action-specific schema was tested against the real provider. The measured regression
-ceiling is 9,500 bytes and depth 6; tests fail if either ceiling is exceeded, if a
+The early 4,096-byte target was an unmeasured prototype target. The current flat
+Boolean action-specific schema has a regression ceiling of 10,500 bytes and depth 8;
+tests fail if either ceiling is exceeded, if a
 canonical model becomes reachable, if a server-owned field returns, or if a generic
 `semantic_target + value/values` intent language is restored. The extra bounded branch
 is a typed capability parameter: a scalar, homogeneous scalar list, or one shallow
 registry-declared object. It is not a free-form JSON value.
+
+The ceiling is not being presented as provider acceptance. It preserves measured room
+for the non-recursive Boolean graph. A fresh real-provider matrix is still required for
+the exact 10,016-byte schema.
 
 Timeframe fields accept language-boundary aliases and normalize them through the
 shared timeframe authority. For example, `60m -> 1h`, `24h -> 1d`,
@@ -257,109 +263,106 @@ mode. The evaluator fault-integration contract was aligned with the production
 one-shape-recovery rule: an `empty_once` fault can recover once, still records the
 applied-fault header, and never permits another repair.
 
-## Live provider evidence
+## Runs 9-11 reproduced baseline
 
-The prior 8,461-byte probe evidence is migration history only; it is not evidence for
-the current contract. The exact current 9,303-byte schema was accepted by the real
-provider during normal authenticated backend/UI evaluation: the provider returned
-strictly parseable semantic envelopes and reached deterministic grounding and
-compilation. That run is `chatbot_eval_runs/compact-timeframe-normal-20260802`.
+The stored artifacts were inspected before changing behavior. Their aggregate is:
 
-| Run | Schema result | Production result | Notes |
+| Run | Focus | Cases | Strict | Schema | Semantic | Repair |
+|---|---|---:|---:|---:|---:|---:|
+| `20260802T220621Z` | timeframe mapping | 10 | 80% | 80% | 80% | 0/1 |
+| `20260802T232050Z` | nested Boolean logic | 10 | 10% | 50% | 40% | 0/7 |
+| `20260803T000036Z` | operators and precedence | 20 | 50% | 60% | 50% | 0/10 |
+| Combined | | 40 | 47.5% | 62.5% | 55% | 0/18 |
+
+The largest measured failure family was Boolean/schema handling (Runs 10-11), followed
+by repair returning no recovery value, repeated terminal 422 loops, and inclusive
+operator loss. The named failure artifacts are preserved as production-path regression
+tests in `test_setup_chat_run_9_11_closure.py`.
+
+Root-cause traces:
+
+1. `ConditionIntent.child_intents` made model output recursively describe executable
+   trees. The provider omitted or flattened topology; the old classifier then called
+   model omissions compiler invariants.
+2. The repair path selected an arbitrary first path or received a contract that could
+   not express the missing structure. Eighteen paid attempts recovered zero cases.
+3. No persisted same-intent proof survived a refusal, so equivalent instructions paid
+   again and hit the same 422.
+4. Comparator output was trusted even when exact text said `at most`; one case compiled
+   `lt` instead of inclusive `lte`.
+5. Old Boolean evaluator scenarios reused generic scope/timeframe goals and could not
+   distinguish correct membership from a same-shaped wrong tree.
+
+## Code closure and proof
+
+| Boundary | Production enforcement | Persisted/returned proof | Regression proof |
 |---|---|---|---|
-| Normal paired `timeframe_mapping` sample | accepted | one backend case reached `awaiting_approval`; the paired case exposed grounding/classification defects | 2 cases, $0.027850435 measured spend |
+| Flat Boolean grammar | `validate_boolean_topology()`, `compare_topology()`, `compile_planner_intents()` | canonical `condition_ast`, topology derivations, executable hash | `test_invariant_boolean_topology.py`, Run 10/11 closure tests |
+| Exact operators | `normalize_stated_comparator()` before operation creation | `DETERMINISTIC_OPERATOR_NORMALIZATION` derivation and canonical operator | `test_invariant_operator_authority.py`, operator-026 regression |
+| Typed taxonomy | `_classify_plan_failure()`, `_failure_record()` | `SetupChatTurn.reply_json.failure_proof`, `last_turn_failure.proof` | `test_invariant_failure_taxonomy.py` |
+| Bounded repair | `decide_repair()`, `SetupChatAgent._settled_plan()` | repair decision, attempts, usage, latency and cost in turn telemetry | failure-taxonomy and Run 9-11 integration suites |
+| Retry convergence | `grounded_requirements_from()`, `repeat_state()` | `validated_intent_snapshots`, retry/failure funnel counters | unrelated-evidence, multi-leaf evidence and repeated-loop tests |
+| Approval completeness | `apply_setup_turn()`, `validate_draft_semantics()`, `compile_strategy_draft_v2()` and launch gates | approval eligibility, executable/schema hashes, screening/preflight evidence | closure and approval lifecycle suites |
+| Transport parity | persisted `SetupChatTurn` result rendered by backend/UI target adapters | explicit rendered/backend contract, status and requirement match fields | `test_run_9_11_semantic_contracts.py` |
+| Operational controls | `SetupChatLaunchService.handle()`, `_enforce_user_cost_budget()` | fail-closed error code, immutable usage events, Redis reservation | launch-config and request-guard tests |
+| Operator/repeat queue | `_queue_operational_issue()` and admin issue endpoints | `setup_chat_operational_issues` row plus immutable admin audit event | launch V2 and admin API integration tests |
 
-The failure artifacts showed that explicit chart/view role wording was not accepted by
-the shared timeframe-role grammar, and that a missing planner trigger was surfacing as
-an internal compiler violation. `timeframe_role_is_explicit()` now accepts neutral
-view nouns/linking verbs while retaining same-clause role binding, and
-`_validate_new_condition()` reports a missing trigger as a typed semantic requirement
-before canonical operation construction. The next normal run
-(`compact-timeframe-normal-20260802-r2`) was unable to begin quality measurement
-because the external model connection returned `TARGET_CONNECTION_REFUSED` twice at
-readiness; the API, database, Redis, and evaluator authentication were healthy. That
-is an external provider-connectivity dependency, not proof of a passing rerun.
+`SystemBrainUserAdminService.delete_profile()` removes the issue row's user/chat/turn
+links, exact source excerpt and proof payload while retaining only non-identifying
+aggregate failure classification. Completed idempotent replays are checked before
+dynamic kill-switch, beta-list and cost gates because replay is a read-only return of
+the exact committed result, not new model work.
 
-The current-schema replay of the previously failing ambiguous-language case is
-`chatbot_eval_runs/compact-closure-replay-009-backend-20260802`. It completed 1/1
-backend case with strict pass, zero schema failures, zero repair attempts, zero
-grounding rejection, and zero semantic-role swaps. It reached approval eligibility in
-two turns with 16,406 ms total target latency and $0.00776566 target cost. Its first
-report exposed an evaluator polarity defect: the judge's zero-is-bad score was being
-misread as the zero-is-good `unsafe_guess_rate`. `deterministic_metrics()` now emits
-the authoritative deterministic rate.
+Retry evidence is scoped to the same normalized request and the same canonical draft.
+Each condition/Boolean leaf gets an independent semantic path, so two thresholds or
+timeframes cannot overwrite each other. It is planner context only; it cannot create an
+operation or bypass the canonical writer.
 
-The post-fix paired replay is
-`chatbot_eval_runs/compact-closure-replay-010-paired-20260802`. Both fresh routes
-completed with strict pass and a passing release gate: 2/2 cases, schema and semantic
-contract rates 1.0, clean/eventual success 1.0, zero unsafe guessing, zero role swaps,
-zero repairs, and $0.020465475 measured spend. Mean latency/cost to a valid and
-approval-eligible draft were 9,470.14 ms and $0.00460712 per case.
+The evaluator now uses topic-specific Boolean builders, a deterministic AST comparator,
+typed product-failure proof, explicit transport versus stochastic metrics, zero semantic
+coverage when no structured strategy exists, and challenger stopping only after the
+same typed failure fingerprint repeats.
 
-That paired run also found a real convergence limit: status, error class, turn count,
-and approval state matched, but normalized contract and requirement-state match were
-0.0. In one independent model sample the UI path retained Scanner mode while the
-backend path stayed at its Monitor default after an incomplete first turn. This is not
-redacted from the report and prevents a comprehensive parity claim.
+## Verification performed on 2026-08-03
 
-The completed current-schema runs prove provider schema acceptance, not reliability or
-p95. The broader repeated real-model matrix remains required.
+- Exact schema: 10,016 bytes, 30 definitions, depth 8, 27 optional fields, 66 union
+  branches, zero forbidden canonical models, exactly seven envelope fields.
+- Focused production/evaluator suite: 592 passed.
+- Wider unit/integration/evaluator suite: 3,608 passed, 1 skipped, 0 failed in
+  549.6 seconds (3,609 collected).
+- `ruff` over every changed and untracked Python file: passed.
+- targeted `mypy` over 37 production/evaluator source files: passed.
+- evaluator contract export `--check`: passed.
+- Alembic graph: one head, `f6c24d8a10b7`.
+- clean temporary SQLite upgrade through Alembic head: passed.
+- all four environment files: 374 keys each, zero missing and zero duplicates.
 
-## Remaining measurement and production limits
+## Real-provider evidence and acceptance boundary
 
-- The historical 24-case-per-topic evaluator matrix was not rerun in this closure pass.
-- The bounded paired replay passed both cases but exposed mode/requirement convergence
-  variance across independent model calls. A 24-case-per-topic paired matrix is still
-  required to measure and close that reliability risk.
-- Dynamic screening, methodology publication, watchlist content identity, provider
-  adapters, and runtime preflight still depend on healthy production services.
-- Recursively nested capability parameter containers remain intentionally unsupported
-  by the bounded compact contract. Scalars, homogeneous scalar lists, and one shallow
-  registry-declared object are supported and schema-grounded; deeper structures fail
-  closed rather than being represented as generic model JSON.
+Earlier artifacts prove that older compact schemas reached the configured provider and
+also expose the Run 9-11 failures. They do **not** prove acceptance or reliability of
+the final 10,016-byte flat-Boolean schema. On 2026-08-03 the Docker daemon was
+unavailable, so the normal authenticated target could not be rebuilt or started. No
+paid evaluator budget was authorized in this turn. Consequently, no new run ID, fresh
+backend/UI pair, three-run critical-topic matrix, p50/p95 latency, or fresh cost result
+exists for this exact tree.
 
-These are reasons not to claim 10/10 launch readiness from this pass alone.
+## Remaining limits and readiness
 
-## Closure update — current working tree
+- Run at least 24 unique scenarios per affected topic, backend and UI, for three fresh
+  consecutive runs against this exact schema and code.
+- Demonstrate >=98% independent canonical convergence; transport equality alone does
+  not prove stochastic model consistency.
+- Establish operator/timeframe/topology, 422, repair, latency and cost gates from those
+  fresh runs.
+- Exercise real authenticated approval separately from textual approval intent.
+- Verify live methodology/watchlist registries, Sharia screening, provider adapters,
+  market data, delivery and billing entitlement in monitored smoke tests.
+- Drill the rollback/runbook and connect the new issue queue and anomaly metrics to the
+  deployed alert destination.
+- Recursively nested capability parameter objects remain intentionally unsupported;
+  scalar, homogeneous-list and one shallow registry-owned object forms are supported.
 
-The remaining compact-planner code limits identified above are now closed:
-
-- `CapabilityParameterIntent` carries a typed scalar, homogeneous scalar list, or
-  shallow registry-declared object. `_typed_parameter()` verifies the exact registry
-  schema before a canonical operation exists.
-- `_policy_patch()` resolves an explicitly named offered watchlist through
-  `PlannerReferenceContext.watchlist_matches_in_text()`; the governed ID/version stays
-  server-owned and `_ground_sharia_policy()` verifies the public answer.
-- `_condition_evidence_segment()` creates one server-owned contiguous evidence span
-  only from adjacent, unclaimed, exact actionable segments. It cannot cross a question
-  or another operation.
-- `_reject_omitted_explicit_role()` never inserts an omitted trader-controlled role.
-  One exact, grounded missing role becomes `SEMANTIC_INTENT_REPAIR_REQUIRED` and uses
-  the single repair allowance; ambiguous or genuinely missing roles become
-  `USER_INFORMATION_REQUIRED`; unsupported relationships stay explicit and fail
-  closed. The rule applies to timeframe roles and every other role-bearing trader
-  value.
-- `timeframe_role_is_explicit()` accepts neutral chart/view wording such as “the 4h
-  chart provides directional context” without relaxing same-clause role binding.
-- `semantic_contract_hash()` normalizes session-owned evaluator provenance, not trader
-  semantics. Backend/UI parity now compares the same normalized contract.
-- Explicit new capabilities are accepted only when the current governed shortlist
-  contains the exact capability, and the compiler binds its server-owned version.
-  Partial edits inherit unchanged capability identity/version without rediscovery.
-
-`chatbot_eval_runs/compact-timeframe-role-completion-20260802` is the final
-real-provider replay before parity normalization: both fresh routes completed cleanly
-in one turn, reached `awaiting_approval`, preserved `15m` context and `5m` trigger,
-had zero repair attempts, zero grounding rejections, and spent $0.01141696. Recomputing
-that artifact with the current evaluator yields 1.0 for normalized contract, status,
-error-class, approval-state, and requirement-state parity, with a zero turn-count
-delta. The final replay after the evaluator normalization is recorded separately by
-the active run.
-
-Code-owned Corrections 1-6 are enforced by the focused production-path suite and the
-independent literal goldens. Comprehensive real-provider acceptance is still open:
-repeat the 24-case critical-topic matrix, close the observed backend/UI mode and
-requirement convergence variance, establish real p95 latency/cost, and keep governed
-screening, watchlist, provider-adapter, and runtime-preflight services healthy.
-Arbitrarily recursive capability parameter objects remain intentionally unsupported
-and fail closed.
+Code-owned Run 9-11 closure is strongly regression-covered, but controlled private-beta
+readiness is **not yet proven**. Current rating: **8/10 code readiness, ungraded launch
+acceptance** until the external target and required repeated real-provider matrix pass.

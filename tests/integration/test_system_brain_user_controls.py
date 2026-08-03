@@ -12,6 +12,7 @@ from ai_market_monitor.db.models import (
     AccountEmailDelivery,
     AuditEvent,
     Plan,
+    SetupChatOperationalIssue,
     Subscription,
     Trial,
     User,
@@ -297,6 +298,24 @@ async def test_delete_anonymizes_profile_and_releases_email_for_new_signup(
         test_context,
         email="reusable-after-delete@example.com",
     )
+    async with test_context["session_factory"]() as session:
+        setup_issue = SetupChatOperationalIssue(
+            user_id=customer.id,
+            fingerprint=f"delete-profile-{customer.id}",
+            issue_kind="repeated_failure",
+            failure_class="PLANNER_SEMANTIC_OMISSION",
+            status="open",
+            occurrence_count=2,
+            semantic_paths=["condition.threshold"],
+            safe_source_excerpt="my private threshold is 2.5 percent",
+            support_reference="delete-profile-proof",
+            failure_proof={"source_excerpt": "my private threshold is 2.5 percent"},
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(setup_issue)
+        await session.commit()
+        setup_issue_id = setup_issue.id
     _page, csrf = await _user_page(test_context, admin)
     access_applied = await test_context["client"].post(
         f"/dashboard/system-brain/users/{customer.id}/access",
@@ -369,6 +388,9 @@ async def test_delete_anonymizes_profile_and_releases_email_for_new_signup(
                 AccountEmailDelivery.admin_action_id.is_not(None),
             )
         )
+        anonymized_setup_issue = await session.get(
+            SetupChatOperationalIssue, setup_issue_id
+        )
     assert old_user is not None and old_user.status == UserStatus.DELETED
     assert old_identity is not None
     assert old_identity.normalized_identifier is None
@@ -379,6 +401,12 @@ async def test_delete_anonymizes_profile_and_releases_email_for_new_signup(
     assert access_delivery.user_id is None
     assert access_delivery.recipient.endswith("@invalid.local")
     assert access_delivery.payload_redacted == {}
+    assert anonymized_setup_issue is not None
+    assert anonymized_setup_issue.user_id is None
+    assert anonymized_setup_issue.chat_session_id is None
+    assert anonymized_setup_issue.setup_chat_turn_id is None
+    assert anonymized_setup_issue.safe_source_excerpt == ""
+    assert anonymized_setup_issue.failure_proof == {}
 
 
 async def test_provider_managed_subscription_blocks_destructive_local_replacement(

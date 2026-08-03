@@ -87,6 +87,26 @@ def has_explicit_structure(text: str) -> bool:
     return bool(re.search(r"[(\[][^)\]]{4,}[)\]]", collapsed) and _AND_RE.search(collapsed))
 
 
+def leading_prefix_span(text: str) -> int:
+    """Length of a lead-in phrase that cannot be the first operand, else ``0``.
+
+    ``Alert me when (A or B) and C`` and ``Show a setup when NOT A or B`` both open
+    with words that introduce the expression rather than state a rule. Structurally
+    they are recognisable: the span is followed by ``(`` or ``NOT``, and neither can
+    act as a binary connective, so nothing joins the span to what follows.
+
+    This reports the span; it does not decide to drop it. Whether the words state a
+    rule of their own is a question about market vocabulary, and the caller that owns
+    that vocabulary answers it. ``RSI above 70 (my overbought line) and volume high``
+    must keep its first operand.
+    """
+    collapsed = " ".join((text or "").split())
+    tokens = _tokenize(collapsed)
+    if len(tokens) < 2 or tokens[0][0] != "leaf" or tokens[1][0] not in {"open", "not"}:
+        return 0
+    return len(tokens[0][1])
+
+
 def parse_boolean_expression(text: str) -> BooleanNode | None:
     """Parse the shape, or ``None`` when the text states none.
 
@@ -125,6 +145,20 @@ def _protected_spans(text: str) -> list[tuple[int, int]]:
     return [(match.start(), match.end()) for match in _PROTECTED_SPAN_RE.finditer(text)]
 
 
+#: A span is a rule only when it contains something a rule can be made of. The
+#: sentence-ending "." after a closing bracket is not an operand, and reading it as
+#: one left a dangling leaf token that made the whole parse fail: `A and (B or C).`
+#: — the ordinary way anyone writes a grouped expression — silently returned `None`,
+#: so the caller kept its flattening behaviour and the OR was lost with no warning.
+_SUBSTANTIVE_RE = re.compile(r"[^\W_]", re.UNICODE)
+
+
+def _leaf_text(text: str) -> str:
+    """The operand inside a span, or "" when the span is only punctuation."""
+    stripped = text.strip(" \t\n,;:.!?-–—")
+    return stripped if _SUBSTANTIVE_RE.search(stripped) else ""
+
+
 def _tokenize(text: str) -> list[tuple[str, str]]:
     """Split into operator tokens and the leaf spans between them."""
     protected = _protected_spans(text)
@@ -133,13 +167,13 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
     for match in _TOKEN_RE.finditer(text):
         if any(start <= match.start() and match.end() <= end for start, end in protected):
             continue
-        leaf = text[cursor : match.start()].strip(" ,;:-")
+        leaf = _leaf_text(text[cursor : match.start()])
         if leaf:
             tokens.append(("leaf", leaf))
         kind = match.lastgroup or ""
         tokens.append((kind, match.group(0)))
         cursor = match.end()
-    tail = text[cursor:].strip(" ,;:-")
+    tail = _leaf_text(text[cursor:])
     if tail:
         tokens.append(("leaf", tail))
     return tokens

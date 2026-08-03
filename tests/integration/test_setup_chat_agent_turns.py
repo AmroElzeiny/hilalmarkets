@@ -1177,7 +1177,7 @@ async def test_one_omitted_explicit_timeframe_role_uses_the_single_repair() -> N
                     "string_items": ["15m"],
                 },
                 "source_segment_ref": "segment_1",
-                "validation_code": "INTENT_VALUE_UNREADABLE",
+                "validation_code": "PLANNER_SEMANTIC_OMISSION",
             }
         ],
     )
@@ -1261,7 +1261,7 @@ async def test_repaired_role_in_adjacent_noop_clause_keeps_one_grounded_evidence
                     "string_value": "1m",
                 },
                 "source_segment_ref": "scope_clause",
-                "validation_code": "INTENT_VALUE_UNREADABLE",
+                "validation_code": "PLANNER_SEMANTIC_OMISSION",
             }
         ],
     )
@@ -1329,7 +1329,7 @@ async def test_one_explicitly_authored_formula_omission_uses_one_compact_repair(
                     "string_value": "close_to_close_percentage",
                 },
                 "source_segment_ref": "s1",
-                "validation_code": "INTENT_VALUE_UNREADABLE",
+                "validation_code": "PLANNER_SEMANTIC_OMISSION",
             }
         ],
     )
@@ -1395,7 +1395,7 @@ async def test_narrow_source_quote_cannot_hide_formula_from_verified_condition_s
                     "string_value": "close_to_close_percentage",
                 },
                 "source_segment_ref": "s1",
-                "validation_code": "INTENT_VALUE_UNREADABLE",
+                "validation_code": "PLANNER_SEMANTIC_OMISSION",
             }
         ],
     )

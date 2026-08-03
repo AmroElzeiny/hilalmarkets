@@ -14,6 +14,7 @@ from ai_market_monitor.db.models import (
     AISetupChatSession,
     AIUsageEvent,
     SetupChatDraftSnapshot,
+    SetupChatOperationalIssue,
     SetupChatTurn,
     User,
 )
@@ -293,6 +294,9 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
             )
         )
         measured_before_replay = dict((chat.context_json or {})["turn_runtime"]["measured"])
+        # Operational gates block new work, not the exact read-only result already
+        # committed for this idempotency key.
+        service.settings.setup_chat_emergency_disabled = True
         await service.handle_message(session, chat, **kwargs)
         second = load_strategy_draft_v2(chat)
 
@@ -995,6 +999,16 @@ async def test_compiler_invariant_failure_persists_complete_turn_telemetry(
         assert persisted_turn is not None
         assert persisted_turn.telemetry_json == persisted_measurement
         assert persisted_turn.telemetry_json["stage_counts"]["persistence"] >= 1
+        issue = await verification_session.scalar(
+            select(SetupChatOperationalIssue).where(
+                SetupChatOperationalIssue.chat_session_id == chat_id
+            )
+        )
+        assert issue is not None
+        assert issue.issue_kind == "compiler_invariant"
+        assert issue.failure_class == "COMPILER_INVARIANT_VIOLATION"
+        assert issue.status == "open"
+        assert issue.support_reference
 
 
 async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_context):
@@ -1015,7 +1029,7 @@ async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_contex
         result = await service.handle_message(
             session,
             chat,
-            message=("Should the move use close-to-close or a swing high? Choose one for me."),
+            message="What is the difference between close-to-close and a swing high?",
             client_message_id="launch-v2-model-non-mutation",
         )
         current = load_strategy_draft_v2(result)

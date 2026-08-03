@@ -87,6 +87,57 @@ def _product_failure_code(reply: TargetReply) -> str | None:
     return None
 
 
+def _product_failure_record(reply: TargetReply) -> dict[str, Any] | None:
+    """Extract only the safe typed proof persisted by the authenticated target."""
+
+    raw = reply.raw
+    if not isinstance(raw, dict):
+        return None
+    candidates: list[dict[str, Any]] = []
+    direct = raw.get("failure_proof")
+    if isinstance(direct, dict):
+        candidates.append(direct)
+    for item in reversed(raw.get("messages") or []):
+        if not isinstance(item, dict):
+            continue
+        payload = item.get("payload")
+        if isinstance(payload, dict) and isinstance(payload.get("failure_proof"), dict):
+            candidates.append(payload["failure_proof"])
+            break
+    proof = candidates[0] if candidates else {}
+    code = _product_failure_code(reply)
+    if code is None:
+        return None
+    return {
+        "failure_class": str(proof.get("failure_class") or code),
+        "failure_code": code,
+        "failure_owner": str(proof.get("failure_owner") or "product"),
+        "semantic_paths": [str(item) for item in (proof.get("semantic_paths") or [])],
+        "source_excerpt": str(proof.get("source_excerpt") or "")[:240],
+        "expected_values": dict(proof.get("expected_values") or {}),
+        "observed_values": dict(proof.get("observed_values") or {}),
+        "repair_eligible": bool(proof.get("repair_eligible")),
+        "repair_decision": str(proof.get("repair_decision") or ""),
+        "support_reference": str(proof.get("support_reference") or ""),
+    }
+
+
+def _ui_contract(reply: TargetReply) -> dict[str, Any] | None:
+    """The UI target's per-turn transport proof, when this reply came from the UI.
+
+    The UI target already refuses a turn whose rendered contract hash or canvas node
+    ids differ from what the server persisted. Carrying that proof onto the turn record
+    is what turns an invisible assertion into a reportable parity number.
+    """
+
+    raw = reply.raw
+    if isinstance(raw, dict):
+        contract = raw.get("_evaluator_ui_contract")
+        if isinstance(contract, dict):
+            return contract
+    return None
+
+
 def _approval_lifecycle_from_structured(structured: dict[str, Any] | None) -> str:
     approval = structured.get("approval") if isinstance(structured, dict) else None
     return str(approval.get("lifecycle_state") or "") if isinstance(approval, dict) else ""
@@ -650,6 +701,7 @@ class EvaluationRunner:
         fault_used = False
         clean_turn_success = True
         product_failures: list[str] = []
+        product_failure_records: list[dict[str, Any]] = []
         try:
             await target.start(scenario.id, variant)
             for turn_number in range(1, scenario.max_turns + 1):
@@ -689,6 +741,8 @@ class EvaluationRunner:
                         model=reply.model,
                         usage=reply.usage,
                         error=reply.error,
+                        ui_contract=_ui_contract(reply),
+                        product_failure=_product_failure_record(reply),
                     )
                 )
                 raw_path = self.evidence_dir / f"{scenario.id}-{kind}-{turn_number}.json"
@@ -713,6 +767,9 @@ class EvaluationRunner:
                 if product_failure is not None:
                     clean_turn_success = False
                     product_failures.append(product_failure)
+                    record = _product_failure_record(reply)
+                    if record is not None:
+                        product_failure_records.append(record)
                     # A handled target-side 422/schema/grounding failure is product
                     # reliability, not evaluator infrastructure.  Both routes get the
                     # same remaining-turn recovery policy.
@@ -777,6 +834,8 @@ class EvaluationRunner:
                             model=approval_reply.model,
                             usage=approval_reply.usage,
                             error=approval_reply.error,
+                            ui_contract=_ui_contract(approval_reply),
+                            product_failure=_product_failure_record(approval_reply),
                         )
                     )
                     approval_failure = self._reply_failure(
@@ -817,7 +876,14 @@ class EvaluationRunner:
                 product_failures.append("TARGET_NO_STRUCTURED_STRATEGY")
             schema_errors = validate_schema(structured, self.schema)
             deterministic = deterministic_metrics(
-                scenario, turns, structured, schema_errors, self.settings.target_field_map
+                scenario,
+                turns,
+                structured,
+                schema_errors,
+                self.settings.target_field_map,
+                # The compiled condition tree, so grouping is measured against what the
+                # server actually built rather than against a judge's reading of prose.
+                canonical_state=canonical_state,
             )
             paired_only = scenario.topic_id == "ui_backend_parity"
             judge_eligible = not paired_only and structured is not None and any(
@@ -882,6 +948,7 @@ class EvaluationRunner:
                 clean_turn_success=clean_turn_success,
                 eventual_case_success=eventual_success,
                 product_failure_classes=list(dict.fromkeys(product_failures)),
+                product_failure_records=product_failure_records,
                 canonical_state=canonical_state,
             )
         except (BudgetExceeded, CostAccountingError, EvaluationInfrastructureError):

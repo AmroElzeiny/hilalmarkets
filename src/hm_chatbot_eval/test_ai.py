@@ -76,12 +76,20 @@ class TestAI:
         workflow_turn = _workflow_turn(scenario, turns)
         if workflow_turn is not None:
             return workflow_turn
+        boolean_turn = _boolean_contract_turn(scenario, turns)
+        if boolean_turn is not None:
+            return boolean_turn
         contract_turn = _contract_mapping_turn(scenario, turns)
         if contract_turn is not None:
             return contract_turn
         ambiguity_turn = _ambiguous_language_turn(scenario, turns)
         if ambiguity_turn is not None:
             return ambiguity_turn
+        if _repeated_known_failure(turns):
+            # The same request has already failed the same way twice. A third rewording
+            # measures the same defect again and takes budget from a scenario that has
+            # not been covered at all.
+            return "", True, 0.0
         transcript = [{"id": t.turn_id, "role": t.role, "text": t.text} for t in turns]
         instructions = """You are the trader using an AI Setup Chat, never the assistant
 or implementer. State your own monitoring requirements and choices. Never ask the
@@ -277,6 +285,85 @@ _CONTRACT_DRIVEN_MAPPING_TOPICS = frozenset(
         "exclusion_mapping",
     }
 )
+
+
+def _boolean_contract_turn(
+    scenario: ScenarioSpec,
+    turns: list[TurnRecord],
+) -> tuple[str, bool, float] | None:
+    """State the exact expression the scenario is about, and then stop.
+
+    Runs 10 and 11 measured these topics with a generative challenger against a hidden
+    goal that contained no expression at all. The challenger produced ordinary
+    watchlist sentences, the target refused them, and the "nested groups exact"
+    criterion scored a strategy nobody had asked for. Both effects hid the real defect:
+    an explicit ``A AND (B OR C)`` was silently flattened.
+
+    The expression now comes from the contract, written the way a person writes it, so
+    what is measured is the structure and nothing else.
+    """
+
+    contract = ScenarioContract.from_value(scenario.expected_contract)
+    expression = str(contract.get("boolean_expression") or "")
+    if not expression:
+        return None
+    if not turns:
+        symbol = str(contract.get("symbol") or "BTCUSDT")
+        return (
+            f"Build a watchlist for {symbol} and alert me when {expression}. "
+            "Keep the brackets exactly as I wrote them, and keep approval explicit.",
+            False,
+            0.0,
+        )
+    assistants = [turn for turn in turns if turn.role == "assistant"]
+    if not assistants:
+        return None
+    lifecycle = _approval_lifecycle(assistants[-1])
+    if lifecycle == "awaiting_approval":
+        return "I approve this exact reviewed version.", False, 0.0
+    if lifecycle == "compiled":
+        return "Thanks. That matches the reviewed version.", True, 0.0
+    # The target refused. Restate the same expression exactly once; a second identical
+    # refusal is a known product defect, and spending the remaining budget on more
+    # rephrasings measures nothing new.
+    user_turns = [turn for turn in turns if turn.role == "user"]
+    if len(user_turns) >= 2:
+        return None
+    return (
+        f"To be exact, the logic is: {expression}. "
+        "Do not flatten the brackets or change how the rules are joined.",
+        False,
+        0.0,
+    )
+
+
+def _repeated_known_failure(turns: list[TurnRecord]) -> bool:
+    """True when the same normalized request has produced the same failure twice.
+
+    Continuing past that point spends the run's budget re-proving one defect instead of
+    covering another scenario. The evidence is already complete after the second
+    identical outcome.
+    """
+
+    failures: list[tuple[str, tuple[str, ...], str]] = []
+    for turn in turns:
+        if turn.role != "assistant":
+            continue
+        proof = turn.product_failure if isinstance(turn.product_failure, dict) else {}
+        if not proof and not turn.error:
+            continue
+        support_reference = str(proof.get("support_reference") or "")
+        failure_class = str(
+            proof.get("failure_class") or proof.get("failure_code") or turn.status_code or ""
+        )
+        paths = tuple(sorted(str(item) for item in (proof.get("semantic_paths") or [])))
+        # The server support reference already binds normalized intent, canonical draft,
+        # failure class and paths. It is the strongest possible repeat identity. Older
+        # targets fall back to sanitized text instead of being treated as equivalent
+        # merely because both returned HTTP 422.
+        fingerprint = support_reference or " ".join((turn.error or "").casefold().split())
+        failures.append((failure_class, paths, fingerprint))
+    return len(failures) >= 2 and failures[-1] == failures[-2]
 
 
 def _contract_mapping_turn(

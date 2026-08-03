@@ -107,8 +107,14 @@ _TIMEFRAME_UNITS = (
     r"دقيقة|دقائق|دقيقه|د|ساعة|ساعات|ساعه|س|يوم|أيام|ايام|ي|أسبوع|اسبوع|أسابيع|اسابيع|"
     r"de2i2a|da2i2a|da2aye2|de2aye2|sa3a|sa3at|yom|ayam|esboo3|osboo3"
 )
+#: A hyphen between the number and the unit is how people ordinarily write this in a
+#: sentence: "use the 1-minute chart for context and the 1-hour chart for the trigger".
+#: Requiring whitespace made every such turn produce *no timeframes at all*, so both
+#: roles looked absent, the canonical grounding gate refused the turn, and the trader
+#: was told to say it again — eight times, in evaluator run 20260803T000036Z. This
+#: product is built for beginners, and that is exactly how a beginner writes it.
 _TIMEFRAME_RE = re.compile(
-    r"(?<![a-z0-9؀-ۿ])(\d{1,2})\s*" rf"({_TIMEFRAME_UNITS})(?![a-z0-9؀-ۿ])",
+    r"(?<![a-z0-9؀-ۿ])(\d{1,2})\s*[-–—]?\s*" rf"({_TIMEFRAME_UNITS})(?![a-z0-9؀-ۿ])",
     re.IGNORECASE,
 )
 

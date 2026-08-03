@@ -4040,6 +4040,32 @@ class AISetupChatService:
             if user_safe_validation
             else _TURN_FAILURE_MESSAGE.format(request_id=envelope.request_id)
         )
+        stored_failure = (chat.context_json or {}).get("last_turn_failure")
+        safe_failure_proof = None
+        if isinstance(stored_failure, dict) and isinstance(stored_failure.get("proof"), dict):
+            proof = stored_failure["proof"]
+            # This allowlist is deliberately narrower than the internal record. It
+            # contains only server classification and the user's own source excerpt.
+            safe_failure_proof = {
+                key: proof.get(key)
+                for key in (
+                    "failure_class",
+                    "failure_owner",
+                    "intent_ref",
+                    "segment_ref",
+                    "semantic_path",
+                    "semantic_paths",
+                    "source_excerpt",
+                    "expected_value",
+                    "expected_values",
+                    "observed_value",
+                    "observed_values",
+                    "repair_eligible",
+                    "repair_decision",
+                    "support_reference",
+                    "operator_alertable",
+                )
+            }
         assistant = await self._assistant(
             session,
             chat,
@@ -4051,6 +4077,7 @@ class AISetupChatService:
                 "authoritative_draft_preserved": has_authoritative_draft,
                 "authoritative_draft_hash": current_hash,
                 "approval_state": _strategy_approval_state(chat),
+                "failure_proof": safe_failure_proof,
             },
         )
         if client_message_id:
@@ -4079,6 +4106,7 @@ class AISetupChatService:
                     "message": assistant_content,
                     "execution_result": None,
                     "error": envelope.model_dump(mode="json"),
+                    "failure_proof": safe_failure_proof,
                 }
                 turn.executable_version_after = draft.executable_version
                 turn.workflow_revision_after = draft.workflow_revision

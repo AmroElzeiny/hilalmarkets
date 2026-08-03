@@ -17,6 +17,12 @@ def _case_score(case: CaseResult) -> float:
     return case.judge.score if case.judge else case.deterministic_metrics.get("schema_valid", 0.0)
 
 
+def _product_failure_proof(case: CaseResult) -> dict[str, Any]:
+    """The latest safe target-owned product proof for one case, if present."""
+
+    return dict(case.product_failure_records[-1]) if case.product_failure_records else {}
+
+
 #: Metrics that only have meaning when the same scenario ran against a baseline and
 #: a candidate variant. With one variant there is nothing to compare, so they are
 #: reported as NOT_MEASURED rather than counted as a drift failure.
@@ -501,6 +507,12 @@ def aggregate(cases: list[CaseResult]) -> dict[str, Any]:
         gate = "PASS"
     reliability_metrics = _turn_reliability_metrics(quality_cases)
     milestone_metrics = _milestone_metrics(quality_cases)
+    # These compare two *independent* conversations — one driven through the API, one
+    # through the browser — each with its own model calls. That measures whether the
+    # product converges on the same strategy from the same request, not whether the two
+    # transports show the same persisted turn. Runs 9-11 reported 0.2-0.6 here under the
+    # name "backend/UI parity", which read like a broken UI and was really model
+    # variance. Transport parity is measured separately, per turn, by the UI target.
     parity_metrics: dict[str, float | None] = {}
     for metric in (
         "backend_ui_contract_match",
@@ -511,6 +523,18 @@ def aggregate(cases: list[CaseResult]) -> dict[str, Any]:
         "backend_ui_requirement_state_match",
     ):
         values = _metric_values(cases, metric)
+        parity_metrics[metric] = mean(values) if values else None
+        # The honest name for the same number, kept alongside so existing gates and
+        # dashboards keep working while the reports say what is actually measured.
+        parity_metrics[metric.replace("backend_ui_", "independent_convergence_")] = (
+            parity_metrics[metric]
+        )
+    for metric in ("transport_contract_parity", "transport_verified_turns"):
+        values = [
+            case.deterministic_metrics[metric]
+            for case in quality_cases
+            if metric in case.deterministic_metrics
+        ]
         parity_metrics[metric] = mean(values) if values else None
     return {
         "cases": len(cases),
@@ -528,6 +552,15 @@ def aggregate(cases: list[CaseResult]) -> dict[str, Any]:
                 for failure in case.product_failure_classes
             }
         ),
+        "product_failure_records": [
+            {
+                "scenario_id": case.scenario.id,
+                "target": case.target_kind,
+                **record,
+            }
+            for case in quality_cases
+            for record in case.product_failure_records
+        ],
         **reliability_metrics,
         **milestone_metrics,
         **parity_metrics,
@@ -635,6 +668,8 @@ def write_reports(
                 "score",
                 "error",
                 "failure_class",
+                "source_path",
+                "recommended_owner",
                 "is_quality_signal",
                 "proof",
                 "recommended_fix",
@@ -643,7 +678,11 @@ def write_reports(
         )
         writer.writeheader()
         for c in failures:
-            proof = "; ".join(e.detail for e in (c.judge.evidence if c.judge else [])[:3])
+            product_proof = _product_failure_proof(c)
+            judge_proof = "; ".join(
+                e.detail for e in (c.judge.evidence if c.judge else [])[:3]
+            )
+            proof = str(product_proof.get("source_excerpt") or judge_proof)
             recommended_fix = "; ".join(
                 str(item.get("action", item)) for item in (c.judge.fixes if c.judge else [])[:2]
             )
@@ -656,7 +695,13 @@ def write_reports(
                     "error": c.error or "",
                     # Names the infrastructure cause when there is one, so a reader
                     # can tell a transport fault from a wrong answer at a glance.
-                    "failure_class": str((c.failure or {}).get("failure_class") or ""),
+                    "failure_class": str(
+                        product_proof.get("failure_class")
+                        or (c.failure or {}).get("failure_class")
+                        or ""
+                    ),
+                    "source_path": ",".join(product_proof.get("semantic_paths") or []),
+                    "recommended_owner": str(product_proof.get("failure_owner") or ""),
                     "is_quality_signal": "false" if c.failure else "true",
                     "proof": proof,
                     "recommended_fix": recommended_fix,
@@ -674,6 +719,11 @@ def write_reports(
             "backend_ui_approval_state_match",
             "backend_ui_requirement_state_match",
         )
+    )
+    transport_summary = " · ".join(
+        f"{key.replace('_', ' ')}: "
+        + ("NOT MEASURED" if summary.get(key) is None else f"{summary[key]:.3f}")
+        for key in ("transport_contract_parity", "transport_verified_turns")
     )
     md = [
         "# HilalMarkets AI Setup Chat Evaluation\n",
@@ -723,7 +773,12 @@ def write_reports(
         f"{summary['latency_ms_to_approval_eligibility']:.0f} ms, "
         f"${summary['cost_usd_to_approval_eligibility']:.4f} average "
         f"(coverage {summary['approval_eligibility_coverage']:.1%})\n",
-        f"**Backend/UI parity:** {parity_summary}\n",
+        # Two different questions, two different lines. The first is whether the page a
+        # customer sees is the turn the server persisted. The second is whether two
+        # independent conversations reach the same strategy — a model-variance measure
+        # that used to be reported under the parity name and read as a broken UI.
+        f"**Transport parity (same persisted turn, API and UI):** {transport_summary}\n",
+        f"**Independent convergence (separate conversations):** {parity_summary}\n",
         "## Topic results\n",
         "| Topic | Severity | Cases | Pass | Score |",
         "|---|---:|---:|---:|---:|",
@@ -775,6 +830,18 @@ def write_reports(
             md.append(f"- Runtime error: `{case.error}`")
         if case.schema_errors:
             md.append(f"- Schema: {case.schema_errors[0]}")
+        product_proof = _product_failure_proof(case)
+        if product_proof:
+            md.append(
+                "- Product failure: "
+                f"`{product_proof.get('failure_class')}`; owner "
+                f"`{product_proof.get('failure_owner')}`; source paths "
+                f"`{','.join(product_proof.get('semantic_paths') or []) or 'not-attributable'}`"
+            )
+            if product_proof.get("source_excerpt"):
+                md.append(f"- Target proof: {product_proof['source_excerpt']}")
+            if product_proof.get("support_reference"):
+                md.append(f"- Support reference: `{product_proof['support_reference']}`")
         if case.judge:
             for failure in case.judge.failures[:4]:
                 md.append(f"- Failure: {failure}")
@@ -796,7 +863,9 @@ def write_reports(
             f"<article><h3>{html.escape(c.scenario.id)} <span>{_case_score(c):.3f}</span></h3>"
             f"<p><b>Topic:</b> {html.escape(c.scenario.topic_id)} · <b>Target:</b> {c.target_kind}:{html.escape(c.target_variant)}</p>"
             f"<p><b>Observed:</b> {html.escape(str(c.judge.failures[0] if c.judge and c.judge.failures else c.error or c.schema_errors[:1]))}</p>"
-            f"<p><b>Proof:</b> {html.escape('; '.join(e.detail for e in (c.judge.evidence if c.judge else [])[:3]))}</p>"
+            f"<p><b>Failure class / owner:</b> {html.escape(str(_product_failure_proof(c).get('failure_class') or ''))} / {html.escape(str(_product_failure_proof(c).get('failure_owner') or ''))}</p>"
+            f"<p><b>Source path:</b> {html.escape(','.join(_product_failure_proof(c).get('semantic_paths') or []))}</p>"
+            f"<p><b>Proof:</b> {html.escape(str(_product_failure_proof(c).get('source_excerpt') or '; '.join(e.detail for e in (c.judge.evidence if c.judge else [])[:3])))}</p>"
             f"<p><b>Fix:</b> {html.escape('; '.join(str(x) for x in (c.judge.fixes if c.judge else [])[:2]))}</p></article>"
             for c in sorted(failures, key=_case_score)[:100]
         )
@@ -820,6 +889,6 @@ def write_reports(
     )
     page = f"""<!doctype html><html><head><meta charset="utf-8"><title>HilalMarkets Chatbot Evaluation</title><style>
 body{{font:15px system-ui;margin:0;background:#f6f4ec;color:#18231e}}main{{max-width:1200px;margin:auto;padding:32px}}header{{background:#073f34;color:white;padding:28px;border-radius:18px}}.kpis{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}}.kpi,article{{background:white;border:1px solid #ddd8c8;border-radius:14px;padding:16px}}.kpi b{{font-size:26px;display:block}}table{{width:100%;border-collapse:collapse;background:white}}th,td{{padding:10px;border-bottom:1px solid #eee;text-align:left}}th{{position:sticky;top:0;background:#eee9da}}.fail{{color:#a02d2d}}.pass{{color:#0b6b51}}article h3{{margin-top:0;display:flex;justify-content:space-between}}code{{white-space:pre-wrap}}@media(max-width:700px){{.kpis{{grid-template-columns:1fr 1fr}}}}
-</style></head><body><main><header><h1>AI Setup Chat Evaluation</h1><p>Evidence-backed AI-vs-AI quality and reliability report</p><h2 class="{"pass" if summary["release_gate"] == "PASS" else "fail"}">Release gate: {summary["release_gate"]}</h2><p>Quality: {summary["quality_status"]} | Critical release: {summary["critical_release_status"]} | Workflow: {summary["workflow_status"]} | Measurement: {summary["measurement_status"]} | Infrastructure: {summary["infrastructure_status"]}</p></header><section class="kpis"><div class="kpi"><b>{summary["quality_measured_cases"]}/{summary["cases"]}</b>Measured answers</div><div class="kpi"><b>{summary["strict_pass_rate"]:.1%}</b>Strict end-to-end pass</div><div class="kpi"><b>{summary["schema_valid_rate"]:.1%}</b>Schema valid</div><div class="kpi"><b>{summary["semantic_contract_pass_rate"]:.1%}</b>Semantic contract</div><div class="kpi"><b>${summary["target_api_cost_usd"]:.4f}</b>Target API cost</div><div class="kpi"><b>${summary["evaluator_api_cost_usd"]:.4f}</b>Evaluator API cost</div>{budget_card}</section><h2>Reliability and convergence</h2><section class="kpis">{reliability_cards}</section><p>{html.escape(parity_summary)}</p><h2>Topic results</h2><div style="overflow:auto;max-height:650px"><table><thead><tr><th>Topic</th><th>Severity</th><th>Cases</th><th>Pass</th><th>Score</th><th>Criteria</th><th>Latency</th></tr></thead><tbody>{topic_cards}</tbody></table></div><h2>Failures and fixes with proof</h2>{failure_cards}</main></body></html>"""
+</style></head><body><main><header><h1>AI Setup Chat Evaluation</h1><p>Evidence-backed AI-vs-AI quality and reliability report</p><h2 class="{"pass" if summary["release_gate"] == "PASS" else "fail"}">Release gate: {summary["release_gate"]}</h2><p>Quality: {summary["quality_status"]} | Critical release: {summary["critical_release_status"]} | Workflow: {summary["workflow_status"]} | Measurement: {summary["measurement_status"]} | Infrastructure: {summary["infrastructure_status"]}</p></header><section class="kpis"><div class="kpi"><b>{summary["quality_measured_cases"]}/{summary["cases"]}</b>Measured answers</div><div class="kpi"><b>{summary["strict_pass_rate"]:.1%}</b>Strict end-to-end pass</div><div class="kpi"><b>{summary["schema_valid_rate"]:.1%}</b>Schema valid</div><div class="kpi"><b>{summary["semantic_contract_pass_rate"]:.1%}</b>Semantic contract</div><div class="kpi"><b>${summary["target_api_cost_usd"]:.4f}</b>Target API cost</div><div class="kpi"><b>${summary["evaluator_api_cost_usd"]:.4f}</b>Evaluator API cost</div>{budget_card}</section><h2>Reliability and convergence</h2><section class="kpis">{reliability_cards}</section><p><b>Transport parity:</b> {html.escape(transport_summary)}</p><p><b>Independent convergence:</b> {html.escape(parity_summary)}</p><h2>Topic results</h2><div style="overflow:auto;max-height:650px"><table><thead><tr><th>Topic</th><th>Severity</th><th>Cases</th><th>Pass</th><th>Score</th><th>Criteria</th><th>Latency</th></tr></thead><tbody>{topic_cards}</tbody></table></div><h2>Failures and fixes with proof</h2>{failure_cards}</main></body></html>"""
     (run_dir / "report.html").write_text(page, encoding="utf-8")
     return summary

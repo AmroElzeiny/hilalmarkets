@@ -220,10 +220,7 @@ def condition_intent(
     """The trader-level meaning of one canonical condition node."""
 
     if node.node_type.value in {"and", "or", "not"}:
-        return {
-            "boolean_relationship": node.node_type.value,
-            "child_intents": [condition_intent(child, condition_refs) for child in node.children],
-        }
+        raise ValueError("Boolean groups must use the flat boolean_structure adapter")
     stated: dict[str, Any] = {}
     if condition_refs and node.node_id in condition_refs:
         stated["target_reference"] = condition_refs[node.node_id]
@@ -267,6 +264,56 @@ def condition_intent(
         left = next((item for item in node.operands if item.kind == "price"), None)
         stated["measured_price_field"] = (left.field if left else None) or "close"
     return stated
+
+
+def boolean_structure_intent(
+    root: Any,
+    condition_refs: dict[str, str] | None = None,
+    *,
+    segment_ref: str = "segment_1",
+) -> dict[str, Any]:
+    """Render a canonical test tree through the real non-recursive wire contract."""
+
+    leaves: list[dict[str, Any]] = []
+    groups: list[dict[str, Any]] = []
+
+    def visit(node: Any) -> str:
+        if node.node_type.value == "condition":
+            reference = f"leaf_{len(leaves) + 1}"
+            condition = condition_intent(node, condition_refs)
+            quote = condition.get("source_quote") or node.source_fragment
+            if not quote:
+                raise ValueError("a Boolean fixture leaf needs exact source text")
+            condition["source_quote"] = quote
+            leaves.append(
+                {
+                    "leaf_ref": reference,
+                    "segment_ref": segment_ref,
+                    "condition": condition,
+                }
+            )
+            return reference
+        child_refs = [visit(child) for child in node.children]
+        reference = f"group_{len(groups) + 1}"
+        quote = node.source_fragment or " ".join(
+            child.source_fragment for child in node.children if child.source_fragment
+        )
+        groups.append(
+            {
+                "group_ref": reference,
+                "operator": node.node_type.value,
+                "child_refs": child_refs,
+                "source_quote": quote or node.node_type.value,
+            }
+        )
+        return reference
+
+    root_ref = visit(root)
+    return {
+        "condition_leaves": leaves,
+        "boolean_groups": groups,
+        "root_ref": root_ref,
+    }
 
 
 def _compact_capability_parameter(name: str, value: Any) -> dict[str, Any]:
@@ -393,10 +440,20 @@ def _compact_envelope_from_plan(plan: SetupAgentTurnPlan) -> dict[str, Any]:
                 )
             continue
         elif operation.kind == "add_condition" and operation.condition is not None:
-            payload = {
-                "action": "add_condition",
-                "condition": condition_intent(operation.condition, condition_refs),
-            }
+            if operation.condition.node_type.value in {"and", "or", "not"}:
+                payload = {
+                    "action": "replace_boolean_structure",
+                    "boolean_structure": boolean_structure_intent(
+                        operation.condition,
+                        condition_refs,
+                        segment_ref=segment_ref,
+                    ),
+                }
+            else:
+                payload = {
+                    "action": "add_condition",
+                    "condition": condition_intent(operation.condition, condition_refs),
+                }
         elif operation.kind == "update_condition" and operation.condition is not None:
             payload = {
                 "action": "update_condition",
@@ -411,7 +468,11 @@ def _compact_envelope_from_plan(plan: SetupAgentTurnPlan) -> dict[str, Any]:
         elif operation.kind == "replace_groups" and operation.condition is not None:
             payload = {
                 "action": "replace_boolean_structure",
-                "condition": condition_intent(operation.condition, condition_refs),
+                "boolean_structure": boolean_structure_intent(
+                    operation.condition,
+                    condition_refs,
+                    segment_ref=segment_ref,
+                ),
             }
         elif operation.kind == "restore_snapshot":
             payload = {

@@ -92,6 +92,13 @@ class TurnRecord:
     model: str | None = None
     usage: dict[str, Any] | None = None
     error: str | None = None
+    #: The UI target's own proof that the rendered page carries the exact contract the
+    #: server persisted: matching contract hash and matching canvas node ids. Present
+    #: only for UI turns. This is transport parity, and it is a different measurement
+    #: from whether two independent conversations converge on the same strategy.
+    ui_contract: dict[str, Any] | None = None
+    #: Safe server-owned product-failure proof carried by the persisted turn response.
+    product_failure: dict[str, Any] | None = None
 
 
 @dataclass
@@ -144,6 +151,7 @@ class CaseResult:
     clean_turn_success: bool = True
     eventual_case_success: bool = False
     product_failure_classes: list[str] = field(default_factory=list)
+    product_failure_records: list[dict[str, Any]] = field(default_factory=list)
     canonical_state: dict[str, Any] | None = None
 
     @property
@@ -197,5 +205,6 @@ def case_result_from_dict(data: dict[str, Any]) -> CaseResult:
         clean_turn_success=data.get("clean_turn_success", True),
         eventual_case_success=data.get("eventual_case_success", data.get("passed", False)),
         product_failure_classes=data.get("product_failure_classes", []),
+        product_failure_records=data.get("product_failure_records", []),
         canonical_state=data.get("canonical_state"),
     )

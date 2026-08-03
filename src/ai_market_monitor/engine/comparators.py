@@ -44,9 +44,22 @@ OPERATOR_TERMS: tuple[tuple[str, Comparator], ...] = (
     ("and higher", Comparator.GREATER_THAN_OR_EQUAL),
     ("and up", Comparator.GREATER_THAN_OR_EQUAL),
     ("minimum", Comparator.GREATER_THAN_OR_EQUAL),
+    ("minimum of", Comparator.GREATER_THAN_OR_EQUAL),
+    ("no lower than", Comparator.GREATER_THAN_OR_EQUAL),
+    ("floored at", Comparator.GREATER_THAN_OR_EQUAL),
     ("at most", Comparator.LESS_THAN_OR_EQUAL),
     ("no more than", Comparator.LESS_THAN_OR_EQUAL),
     ("not more than", Comparator.LESS_THAN_OR_EQUAL),
+    ("no bigger than", Comparator.LESS_THAN_OR_EQUAL),
+    ("no larger than", Comparator.LESS_THAN_OR_EQUAL),
+    ("no higher than", Comparator.LESS_THAN_OR_EQUAL),
+    ("not exceeding", Comparator.LESS_THAN_OR_EQUAL),
+    ("does not exceed", Comparator.LESS_THAN_OR_EQUAL),
+    ("do not exceed", Comparator.LESS_THAN_OR_EQUAL),
+    ("without exceeding", Comparator.LESS_THAN_OR_EQUAL),
+    ("capped at", Comparator.LESS_THAN_OR_EQUAL),
+    ("maximum of", Comparator.LESS_THAN_OR_EQUAL),
+    ("up to", Comparator.LESS_THAN_OR_EQUAL),
     ("less than or equal", Comparator.LESS_THAN_OR_EQUAL),
     ("at or below", Comparator.LESS_THAN_OR_EQUAL),
     ("or less", Comparator.LESS_THAN_OR_EQUAL),
@@ -70,7 +83,12 @@ OPERATOR_TERMS: tuple[tuple[str, Comparator], ...] = (
     ("less than", Comparator.LESS_THAN),
     ("lower than", Comparator.LESS_THAN),
     ("strictly below", Comparator.LESS_THAN),
+    ("strictly under", Comparator.LESS_THAN),
+    ("strictly less than", Comparator.LESS_THAN),
+    ("strictly greater than", Comparator.GREATER_THAN),
     ("equal to", Comparator.EQUAL),
+    ("exactly equal", Comparator.EQUAL),
+    ("exactly", Comparator.EQUAL),
     ("above", Comparator.GREATER_THAN),
     ("over", Comparator.GREATER_THAN),
     ("below", Comparator.LESS_THAN),
@@ -84,6 +102,13 @@ OPERATOR_TERMS: tuple[tuple[str, Comparator], ...] = (
     ("بحد أدنى", Comparator.GREATER_THAN_OR_EQUAL),
     ("بحد ادنى", Comparator.GREATER_THAN_OR_EQUAL),
     ("لا يقل عن", Comparator.GREATER_THAN_OR_EQUAL),
+    # Arabic verbs agree in gender with their subject. `حركة` (a move) is feminine, so
+    # the natural sentence is `لا تقل عن`, not `لا يقل عن`. Listing only the masculine
+    # form meant a correctly written Arabic ceiling or floor read as no comparison at
+    # all, and the caller's default silently supplied the opposite bound.
+    ("لا تقل عن", Comparator.GREATER_THAN_OR_EQUAL),
+    ("ما يقل عن", Comparator.GREATER_THAN_OR_EQUAL),
+    ("ما تقل عن", Comparator.GREATER_THAN_OR_EQUAL),
     ("3ala el a2al", Comparator.GREATER_THAN_OR_EQUAL),
     ("3al a2al", Comparator.GREATER_THAN_OR_EQUAL),
     ("على الأكثر", Comparator.LESS_THAN_OR_EQUAL),
@@ -91,6 +116,11 @@ OPERATOR_TERMS: tuple[tuple[str, Comparator], ...] = (
     ("بحد أقصى", Comparator.LESS_THAN_OR_EQUAL),
     ("بحد اقصى", Comparator.LESS_THAN_OR_EQUAL),
     ("لا يزيد عن", Comparator.LESS_THAN_OR_EQUAL),
+    ("لا تزيد عن", Comparator.LESS_THAN_OR_EQUAL),
+    ("ما يزيد عن", Comparator.LESS_THAN_OR_EQUAL),
+    ("ما تزيد عن", Comparator.LESS_THAN_OR_EQUAL),
+    ("لا يتجاوز", Comparator.LESS_THAN_OR_EQUAL),
+    ("لا تتجاوز", Comparator.LESS_THAN_OR_EQUAL),
     ("3ala el aktar", Comparator.LESS_THAN_OR_EQUAL),
     ("أو أكثر", Comparator.GREATER_THAN_OR_EQUAL),
     ("او اكثر", Comparator.GREATER_THAN_OR_EQUAL),
@@ -180,6 +210,16 @@ def comparator_terms() -> tuple[str, ...]:
     return tuple(term for term, _comparator in OPERATOR_TERMS)
 
 
+#: Every symbolic comparison, longest token first so ``>=`` is never read as the
+#: ``>`` inside it. A bare ``=`` is last and deliberately narrow: it must be
+#: surrounded by whitespace and followed by a number, so ``rsi=30`` in a key/value
+#: fragment or a stray ``=`` in prose never becomes an equality comparison.
+_SYMBOLIC_ALTERNATION = (
+    r"(?<![-=<>!])(?:>=|≤|≥|<=|==|>|<)(?![-=<>])"
+    r"|(?<![-=<>!])=(?![-=<>])(?=\s*[-+]?\d)"
+)
+
+
 def find_comparator(text: str) -> tuple[Comparator, int, int] | None:
     """Locate the comparison wording and return ``(comparator, start, end)``.
 
@@ -188,18 +228,9 @@ def find_comparator(text: str) -> tuple[Comparator, int, int] | None:
     read as the level.
     """
     lowered = " ".join((text or "").split()).casefold()
-    symbolic = re.search(r"(?<![-=<>])(?:>=|≤|≥|<=|==|>|<)(?![-=<>])", lowered)
+    symbolic = re.search(_SYMBOLIC_ALTERNATION, lowered)
     if symbolic:
-        token = symbolic.group(0)
-        comparator = {
-            ">=": Comparator.GREATER_THAN_OR_EQUAL,
-            "≥": Comparator.GREATER_THAN_OR_EQUAL,
-            "<=": Comparator.LESS_THAN_OR_EQUAL,
-            "≤": Comparator.LESS_THAN_OR_EQUAL,
-            ">": Comparator.GREATER_THAN,
-            "<": Comparator.LESS_THAN,
-            "==": Comparator.EQUAL,
-        }[token]
+        comparator = _SYMBOLIC_COMPARATORS[symbolic.group(0)]
         return comparator, symbolic.start(), symbolic.end()
     for term, comparator in OPERATOR_TERMS:
         match = re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", lowered)
@@ -211,7 +242,7 @@ def find_comparator(text: str) -> tuple[Comparator, int, int] | None:
 #: Every symbolic operator, and every phrase from the table, as one alternation.
 #: Built from ``OPERATOR_TERMS`` in table order so the longest phrase wins at any
 #: given position: ``no less than`` is never read as the ``less than`` inside it.
-_ANY_OPERATOR_ALTERNATION = r"(?<![-=<>])(?:>=|≤|≥|<=|==|>|<)(?![-=<>])|" + "|".join(
+_ANY_OPERATOR_ALTERNATION = _SYMBOLIC_ALTERNATION + "|" + "|".join(
     rf"(?<![a-z]){re.escape(term)}(?![a-z])" for term, _c in OPERATOR_TERMS
 )
 
@@ -241,6 +272,7 @@ _SYMBOLIC_COMPARATORS: dict[str, Comparator] = {
     ">": Comparator.GREATER_THAN,
     "<": Comparator.LESS_THAN,
     "==": Comparator.EQUAL,
+    "=": Comparator.EQUAL,
 }
 
 _PHRASE_COMPARATORS: dict[str, Comparator] = {

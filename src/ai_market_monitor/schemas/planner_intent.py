@@ -165,7 +165,18 @@ class CapabilityParameterIntent(PlannerModel):
 
 
 class ConditionIntent(PlannerModel):
-    """One rule containing only values stated by the trader."""
+    """One rule containing only values stated by the trader.
+
+    Deliberately **not** recursive.  The earlier contract let one condition hold
+    ``child_intents`` of its own type, which is a self-referencing JSON Schema. Strict
+    structured output accepted the schema and then, across real provider calls in
+    evaluator runs 20260802T232050Z and 20260803T000036Z, never used it: an explicit
+    ``A AND (B OR C)`` came back as two unrelated flat rules and one unsupported note,
+    and the stated grouping was silently lost. Boolean structure now travels in the
+    flat :class:`BooleanStrategyIntent`, whose leaves wrap *this* model rather than
+    redeclaring its fields — one definition on the wire, so a field can never be
+    understood inside a group and not outside it.
+    """
 
     target_reference: str | None = Field(default=None, max_length=40)
     source_quote: str | None = Field(default=None, max_length=_QUOTE_MAX)
@@ -193,8 +204,6 @@ class ConditionIntent(PlannerModel):
     measured_price_field: Literal["open", "high", "low", "close"] | None = None
     required: bool | None = None
     condition_symbols: list[str] = Field(default_factory=list, max_length=12)
-    boolean_relationship: Literal["and", "or", "not"] | None = None
-    child_intents: list[ConditionIntent] = Field(default_factory=list, max_length=8)
 
     @property
     def states_a_rule(self) -> bool:
@@ -203,21 +212,94 @@ class ConditionIntent(PlannerModel):
             for name in ("formula_key", "comparator", "threshold", "capability_key")
         )
 
+
+class ConditionLeafIntent(PlannerModel):
+    """One operand of a Boolean expression, named by a turn-local reference.
+
+    ``leaf_ref`` and ``segment_ref`` are temporary and belong to this turn only. They
+    are never a database identity, never returned to the model as one, and never
+    survive the turn: the server assigns canonical node ids afterward.
+
+    The rule itself is a plain :class:`ConditionIntent`. A leaf inside ``(B OR C)`` is
+    therefore validated, grounded and compiled by exactly the code that handles a rule
+    written on its own.
+    """
+
+    leaf_ref: str = Field(min_length=1, max_length=40)
+    segment_ref: str = Field(min_length=1, max_length=40)
+    condition: ConditionIntent
+
     @model_validator(mode="after")
-    def validate_shape(self) -> ConditionIntent:
-        if self.boolean_relationship is None and self.child_intents:
-            raise ValueError("child rules need a boolean relationship")
-        if self.boolean_relationship == "not":
-            if self.child_intents and len(self.child_intents) != 1:
-                raise ValueError("not takes exactly one child rule")
-            if not self.child_intents and not self.states_a_rule:
-                raise ValueError("not needs either one child rule or a rule of its own")
-        if self.boolean_relationship in {"and", "or"} and len(self.child_intents) < 2:
-            raise ValueError(f"{self.boolean_relationship} needs at least two child rules")
+    def leaf_quotes_its_own_words(self) -> ConditionLeafIntent:
+        # Per-leaf quotes are the role-separation boundary: without one, a timeframe
+        # belonging to the neighbouring operand looks like this operand's own.
+        if not (self.condition.source_quote or "").strip():
+            raise ValueError("every rule inside a combination needs its own exact quote")
+        return self
+
+    @property
+    def source_quote(self) -> str:
+        return self.condition.source_quote or ""
+
+
+class BooleanGroupIntent(PlannerModel):
+    """One AND/OR/NOT node, naming its children by their turn-local references."""
+
+    group_ref: str = Field(min_length=1, max_length=40)
+    operator: Literal["and", "or", "not"]
+    child_refs: list[str] = Field(min_length=1, max_length=8)
+    source_quote: str = Field(min_length=1, max_length=_QUOTE_MAX)
+
+    @model_validator(mode="after")
+    def validate_arity(self) -> BooleanGroupIntent:
+        if self.operator == "not" and len(self.child_refs) != 1:
+            raise ValueError("not takes exactly one child")
+        if self.operator in {"and", "or"} and len(self.child_refs) < 2:
+            raise ValueError(f"{self.operator} needs at least two children")
+        if len(self.child_refs) != len(set(self.child_refs)):
+            raise ValueError("a group cannot name the same child twice")
+        if self.group_ref in self.child_refs:
+            raise ValueError("a group cannot be its own child")
         return self
 
 
-ConditionIntent.model_rebuild()
+#: How deep and how wide one turn's Boolean expression may be. Both are bounds on the
+#: *trader's* expression, not on the schema: a person does not write eight levels of
+#: nesting by hand, and an unbounded graph is a denial-of-service surface.
+BOOLEAN_MAX_NODES: int = 24
+BOOLEAN_MAX_DEPTH: int = 6
+
+
+class BooleanStrategyIntent(PlannerModel):
+    """A whole Boolean expression as a flat graph: leaves, groups, and one root.
+
+    Structural validation (single root, every reference resolved exactly once, no
+    cycles, bounded size) is deterministic and happens server-side in
+    ``engine/boolean_topology.py``. What is checked here is only what a shape can
+    check: references are unique, and the root names something in this turn.
+    """
+
+    condition_leaves: list[ConditionLeafIntent] = Field(min_length=1, max_length=12)
+    boolean_groups: list[BooleanGroupIntent] = Field(default_factory=list, max_length=12)
+    root_ref: str = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_references(self) -> BooleanStrategyIntent:
+        leaf_refs = [item.leaf_ref for item in self.condition_leaves]
+        group_refs = [item.group_ref for item in self.boolean_groups]
+        every = [*leaf_refs, *group_refs]
+        if len(every) != len(set(every)):
+            raise ValueError("leaf and group references must be unique within one turn")
+        if self.root_ref not in set(every):
+            raise ValueError("the root names a node that is not in this expression")
+        known = set(every)
+        for group in self.boolean_groups:
+            unknown = [ref for ref in group.child_refs if ref not in known]
+            if unknown:
+                raise ValueError(f"group {group.group_ref} names unknown children: {unknown}")
+        if len(every) > BOOLEAN_MAX_NODES:
+            raise ValueError("that expression has more parts than one turn may carry")
+        return self
 
 
 class SetModePayload(PlannerModel):
@@ -298,8 +380,14 @@ class RemoveConditionPayload(PlannerModel):
 
 
 class ReplaceBooleanPayload(PlannerModel):
+    """The whole executable Boolean expression, replacing what is there now.
+
+    Only used when the trader stated how rules combine. A single rule stays a single
+    ``add_condition``; wrapping it in an artificial group would invent structure.
+    """
+
     action: Literal["replace_boolean_structure"]
-    condition: ConditionIntent
+    boolean_structure: BooleanStrategyIntent
 
 
 class RestoreSnapshotPayload(PlannerModel):
@@ -544,6 +632,41 @@ class PlannerRepairEnvelope(PlannerModel):
     cannot_repair: bool = False
 
 
+class BooleanTopologyRepair(PlannerModel):
+    """Rearrange rules that are already grounded. Nothing else.
+
+    This contract exists because the failure it corrects is narrow: every rule and
+    every connector is present and proved against the trader's words, and only their
+    arrangement came back wrong. Resending the whole plan to fix that invites a second
+    reading of the turn — new rules, new symbols, new thresholds — which is how a
+    "repair" quietly becomes a different strategy.
+
+    So the shape itself makes that impossible. There are no condition fields here: only
+    references to leaves that already exist, and the groups joining them.
+    """
+
+    existing_leaf_refs: list[str] = Field(min_length=1, max_length=12)
+    groups: list[BooleanGroupIntent] = Field(default_factory=list, max_length=12)
+    root_ref: str = Field(min_length=1, max_length=40)
+    cannot_repair: bool = False
+
+    @model_validator(mode="after")
+    def references_resolve(self) -> BooleanTopologyRepair:
+        if self.cannot_repair:
+            return self
+        group_refs = [item.group_ref for item in self.groups]
+        if len(group_refs) != len(set(group_refs)):
+            raise ValueError("group references must be unique")
+        known = set(self.existing_leaf_refs) | set(group_refs)
+        if self.root_ref not in known:
+            raise ValueError("the root names a node that is not in this arrangement")
+        for group in self.groups:
+            unknown = [ref for ref in group.child_refs if ref not in known]
+            if unknown:
+                raise ValueError(f"group {group.group_ref} names unknown children: {unknown}")
+        return self
+
+
 def compact_json_schema(model: type[Any]) -> dict[str, Any]:
     """The exact schema used by the structured provider call."""
 
@@ -613,11 +736,21 @@ def schema_complexity(schema: dict[str, Any]) -> dict[str, int]:
 
 
 # The action-specific union is larger than the early aspirational 4,096-byte target.
-# The current 9,303-byte contract keeps capability values typed (including shallow
-# lists and objects) while remaining well below this deliberately narrow ceiling.
-# Provider acceptance evidence is recorded in SETUP_CHAT_LATENCY_FINDINGS.md.
-PLANNER_SCHEMA_BYTE_BUDGET = 9500
-PLANNER_SCHEMA_DEPTH_BUDGET = 6
+#
+# The previous 9,303-byte / depth-6 contract met this ceiling and did not work. Its
+# Boolean support was a self-referencing ``child_intents`` array, and across real
+# provider calls in evaluator runs 20260802T232050Z and 20260803T000036Z the model
+# never once used it: an explicit ``A AND (B OR C)`` came back as flat, unrelated
+# rules. A schema that fits a byte budget while losing the trader's meaning is not the
+# cheaper option.
+#
+# The flat Boolean contract costs about 700 bytes and two levels more. It costs no
+# duplicated condition definition: ``ConditionLeafIntent`` wraps ``ConditionIntent``
+# rather than restating its fields, so there is still exactly one rule definition on
+# the wire. Provider acceptance and the measured effect are recorded in
+# SETUP_CHAT_LATENCY_FINDINGS.md.
+PLANNER_SCHEMA_BYTE_BUDGET = 10500
+PLANNER_SCHEMA_DEPTH_BUDGET = 8
 
 FORBIDDEN_SCHEMA_MODELS: frozenset[str] = frozenset(
     {

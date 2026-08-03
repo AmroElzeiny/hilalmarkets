@@ -52,6 +52,7 @@ def test_named_sensitive_routes_have_rate_limit_scopes() -> None:
         "/signin": "authentication",
         "/forgot-password": "authentication",
         "/api/v1/setup-chat/sessions": "ai_chat",
+        "/api/v1/dashboard/setup-chat/sessions": "ai_chat",
         "/api/v1/on-demand-scans": "market_check",
         "/api/v1/billing/checkout": "checkout",
         "/dashboard/billing/checkout": "checkout",
