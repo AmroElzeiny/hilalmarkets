@@ -99,6 +99,7 @@ from ai_market_monitor.services.ai_setup_chat import (
     AISetupChatService,
     SetupChatError,
     setup_chat_error_envelope,
+    v2_scanner_approval_matches,
 )
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     AISetupEvaluatorControlError,
@@ -1131,7 +1132,27 @@ async def _setup_chat_response(
         unsupported_conditions=chat.unsupported_conditions or [],
         setup_mode=setup_mode,
         can_approve=can_approve,
-        can_scan=(response_status == "ready_to_scan" and not blocking_lint),
+        can_scan=(
+            not blocking_lint
+            and setup_mode == "scanner"
+            and (
+                (
+                    response_status == "approved"
+                    and draft_v2 is not None
+                    and definition is not None
+                    and v2_scanner_approval_matches(
+                        chat,
+                        draft_v2,
+                        definition,
+                        user_id=chat.user_id,
+                    )
+                )
+                or (
+                    chat_context.get("strategy_state_authority") != "v2"
+                    and response_status == "ready_to_scan"
+                )
+            )
+        ),
         scanner_result=chat_context.get("scanner_result"),
         approved_strategy_id=chat.approved_strategy_id,
         approved_strategy_version_id=chat.approved_strategy_version_id,
@@ -3282,7 +3303,7 @@ async def notification_center(
                 "status": alert.alert_type.value,
                 "created_at": alert.created_at,
                 "action_url": (
-                    "/dashboard/activity?tab=compliance_changes"
+                    "/dashboard/opportunities?tab=compliance_changes"
                     if compliance
                     else f"/dashboard/alerts/{alert.id}/proof"
                 ),

@@ -35,7 +35,7 @@
 html{scroll-behavior:smooth}
 body.hilal-dashboard [hidden]{display:none!important}
 body{margin:0;line-height:1.55;-webkit-font-smoothing:antialiased}
-body:not(.hm-react-site){background:var(--ivory-2);color:var(--ink);font-family:"DM Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+body:not(.hm-react-site){background:var(--ivory-2);color:var(--ink);font-family:var(--hm-font-ui)}
 body.no-scroll{overflow:hidden}
 a{color:inherit;text-decoration:none}
 button,input,select,textarea{font:inherit}
@@ -43,7 +43,7 @@ button{color:inherit}
 :where(a,button,input,select,textarea,summary):focus-visible{outline:3px solid rgba(31,139,116,.34);outline-offset:3px}
 img,svg{display:block;max-width:100%}
 body:not(.hm-react-site) :is(h1,h2,h3,h4,p){margin-top:0}
-body:not(.hm-react-site) :is(h1,h2,h3,h4){font-family:"Manrope",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.08;letter-spacing:-.035em}
+body:not(.hm-react-site) :is(h1,h2,h3,h4){font-family:var(--hm-font-display);line-height:1.08;letter-spacing:-.035em}
 body:not(.hm-react-site) h1{font-weight:800}
 body:not(.hm-react-site) h3{font-size:1.2rem;font-weight:750}
 body:not(.hm-react-site) p{color:var(--muted)}
@@ -130,9 +130,9 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .status-dot.red{background:var(--red);box-shadow:0 0 0 5px rgba(185,74,74,.12)}
 .avatar{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:var(--emerald-100);color:var(--emerald-800);font-weight:800}
 .avatar-lg{width:52px;height:52px}
-.logo{display:flex;align-items:center;gap:11px;font-family:"Manrope";font-weight:800;letter-spacing:-.03em;font-size:1.22rem}
+.logo{display:flex;align-items:center;gap:11px;font-family:var(--hm-font-display);font-weight:800;letter-spacing:-.03em;font-size:1.22rem}
 .logo img{width:39px;height:39px}
-.logo small{display:block;color:var(--muted);font-family:"DM Sans";font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.logo small{display:block;color:var(--muted);font-family:var(--hm-font-ui);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
 
 /* Public navigation */
 .public-nav{position:fixed;z-index:80;top:14px;left:0;right:0}
@@ -204,7 +204,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .opportunity-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
 .opportunity-title h3{margin:0 0 2px}
 .readiness{display:flex;align-items:baseline;gap:5px;margin:18px 0 9px}
-.readiness strong{font-family:"Manrope";font-size:2.2rem;line-height:1}
+.readiness strong{font-family:var(--hm-font-display);font-size:2.2rem;line-height:1}
 .readiness span{font-size:.78rem;color:var(--muted)}
 .mini-criteria{display:grid;gap:7px;margin-top:16px}
 .mini-criterion{display:flex;align-items:center;gap:8px;font-size:.82rem;color:#45534e}
@@ -224,7 +224,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .flow-line{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;position:relative}
 .flow-line:before{content:"";position:absolute;left:8%;right:8%;top:32px;height:2px;background:linear-gradient(90deg,var(--emerald-700),var(--gold));z-index:0}
 .flow-step{position:relative;z-index:1;text-align:center}
-.flow-number{width:64px;height:64px;margin:0 auto 15px;border-radius:20px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow-sm);color:var(--emerald-700);font-family:"Manrope";font-weight:800}
+.flow-number{width:64px;height:64px;margin:0 auto 15px;border-radius:20px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow-sm);color:var(--emerald-700);font-family:var(--hm-font-display);font-weight:800}
 .flow-step p{font-size:.83rem}
 .compliance-stage{display:grid;grid-template-columns:1.05fr .95fr;gap:28px}
 .drift-card{padding:24px;border-radius:24px;border:1px solid #efd9a9;background:linear-gradient(145deg,#fffaf0,#fff);position:relative}
@@ -239,7 +239,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .price-card.is-featured{background:var(--emerald-900);color:#fff;transform:translateY(-10px);box-shadow:var(--shadow)}
 .price-card.is-featured p,.price-card.is-featured li{color:#bed0ca}
 .price{display:flex;align-items:baseline;gap:5px;margin:22px 0}
-.price strong{font-family:"Manrope";font-size:2.8rem}
+.price strong{font-family:var(--hm-font-display);font-size:2.8rem}
 .feature-list{list-style:none;padding:0;margin:22px 0;display:grid;gap:11px}
 .feature-list li{display:flex;gap:9px;color:#53615c;font-size:.88rem}
 .feature-list .icon{width:17px;color:var(--emerald-600)}
@@ -249,29 +249,43 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .public-plan-title h3{margin:0}
 .public-plan-title .badge{margin-left:auto}
 .price-card .feature-list li.is-highlighted{margin-inline:-8px;padding:9px 8px;border:1px solid rgba(85,113,42,.24);border-radius:12px;background:#f1fadf;color:#2b2e35;font-weight:750}
-/* Launch offer. One apple-green focal point per card: the accent goes on the label
-   above the new price and nowhere else. The old price is struck through in the muted
-   neutral, so the change reads as information rather than a sales flash. */
-.price .price-original{align-self:baseline;color:var(--muted);font-family:"Manrope";font-size:1.5rem;font-weight:600;text-decoration-line:line-through;text-decoration-thickness:2px}
-.price-card.is-featured .price .price-original{color:#bed0ca}
+/* Launch offer. One design, rendered the same way on the public pricing page and in the
+   dashboard, and matching the landing page rule for rule.
+
+   There is deliberately no "featured card" variant. `is-featured` means a dark green card
+   on the public site and a light card in the dashboard, so a colour written for one of
+   them was always wrong on the other: the countdown used to render white numbers on the
+   dashboard's white card. Anything that must follow the card now derives from
+   `currentColor`; everything else carries its own light surface and is readable on both.
+
+   One apple-green focal point per card: the accent goes on the countdown label and
+   nowhere else. The old price is struck through in the card's own muted tone, so the
+   change reads as information rather than as a sales flash. Weight 500 and Geometria,
+   per section 11 of the brand guide. */
+.price .price-original{align-self:baseline;color:color-mix(in srgb,currentColor 60%,transparent);font-family:var(--hm-font-display);font-size:1.5rem;font-weight:500;line-height:1;text-decoration-line:line-through;text-decoration-thickness:2px}
 .price.is-coming-soon strong{font-size:1.9rem;color:var(--muted)}
 .price.is-coming-soon span{color:var(--muted)}
 .price-card.is-coming-soon{border-style:dashed;box-shadow:none}
 .price-card.is-coming-soon.is-featured{background:#fff;color:var(--ink);transform:none}
-.badge-soon{margin-left:auto;padding:5px 11px;border:1px solid var(--line);border-radius:999px;background:var(--ivory-2);color:var(--muted);font-size:.72rem;font-weight:700}
+.badge-soon{margin-left:auto;padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:var(--ivory-2);color:var(--muted);font-size:.75rem;font-weight:700}
 .btn.is-disabled,.btn[disabled]{border-color:var(--line);background:var(--ivory-2);color:var(--muted);cursor:not-allowed;box-shadow:none}
 .annual-soon{display:block;margin-top:-12px;color:var(--muted);font-size:.78rem}
 .offer-countdown{margin:-8px 0 18px;padding:12px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;border:1px solid var(--line);border-radius:16px;background:var(--ivory-2)}
-.offer-countdown[hidden]{display:none}
-.offer-countdown-label{color:#55712a;font-size:.78rem;font-weight:600}
-.offer-countdown-parts{display:flex;gap:14px}
+/* Three separate facts decide whether the launch offer shows, and each has one owner:
+   the server renders `hidden` until the script has a real count, the offer script marks
+   `data-offer-live` while the deadline is still ahead and `data-offer-ended` once it is
+   not, and the billing script marks `data-offer-inactive` on a billing interval the
+   offer does not cover. The stylesheet is the only thing that hides anything. */
+.offer-countdown[hidden],.offer-countdown:not([data-offer-live]),.offer-countdown[data-offer-inactive]{display:none}
+[data-offer-original-price][data-offer-inactive],[data-offer-card][data-offer-ended] [data-offer-original-price]{display:none}
+.offer-countdown-label{color:var(--hm-apple-deep,#55712a);font-size:.78rem;font-weight:500}
+.offer-countdown-parts{display:flex;flex-wrap:wrap;gap:6px 14px}
 .offer-countdown-part{display:flex;align-items:baseline;gap:4px}
-.offer-countdown-part strong{font-family:"Manrope";font-size:1.25rem;font-weight:600;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
-.offer-countdown-part small{color:var(--muted);font-size:.72rem}
-.price-card.is-featured .offer-countdown{border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.08)}
-.price-card.is-featured .offer-countdown-label{color:var(--gold-2)}
-.price-card.is-featured .offer-countdown-part strong{color:#fff}
-.price-card.is-featured .offer-countdown-part small{color:#bed0ca}
+/* Fixed number width, so a second falling from 10 to 9 does not shift the units beside
+   it. Tabular figures keep every digit the same width; this keeps the count the same
+   width too. */
+.offer-countdown-part strong{min-width:2ch;text-align:right;font-family:var(--hm-font-display);font-size:1.25rem;font-weight:500;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.offer-countdown-part small{color:var(--muted);font-size:.75rem}
 .public-plan-details{margin-top:14px}
 .public-plan-details summary{min-height:44px;display:inline-flex;align-items:center;cursor:pointer;font-weight:750;text-decoration:underline;text-underline-offset:5px}
 .checkout-heading{align-items:flex-end}
@@ -286,11 +300,11 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .checkout-limit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:20px}
 .checkout-limit-grid article{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--ivory)}
 .checkout-limit-grid article>.icon{grid-row:1/3;color:var(--emerald-700)}
-.checkout-limit-grid strong{font-family:"Manrope",sans-serif;font-size:18px}
+.checkout-limit-grid strong{font-family:var(--hm-font-display);font-size:18px}
 .checkout-limit-grid article>span:last-child{font-size:12px;color:var(--muted)}
 .checkout-action-card{position:sticky;top:92px}
 .checkout-total{display:flex;justify-content:space-between;gap:16px;margin:16px 0;padding:16px 0;border-block:1px solid var(--line);font-size:17px}
-.checkout-total strong{font-family:"Manrope",sans-serif}
+.checkout-total strong{font-family:var(--hm-font-display)}
 .checkout-consent{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;margin:18px 0;color:var(--muted);font-size:13px;line-height:1.55}
 .checkout-consent input{width:18px;height:18px;margin-top:2px;accent-color:var(--emerald-700)}
 .checkout-confirm-form .btn{width:100%;justify-content:center}
@@ -358,7 +372,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;margin-bottom:22px}
 .stat-card{padding:20px;border-radius:18px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow-sm)}
 .stat-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
-.stat-card .value{font-family:"Manrope";font-size:2rem;font-weight:800;letter-spacing:-.04em;line-height:1.1}
+.stat-card .value{font-family:var(--hm-font-display);font-size:2rem;font-weight:800;letter-spacing:-.04em;line-height:1.1}
 .stat-card .caption{font-size:.75rem;color:var(--muted);margin-top:5px}
 .home-start-card{display:flex;align-items:center;justify-content:space-between;gap:28px;margin-bottom:22px;padding:26px;border:1px solid #d8dfc4;border-radius:24px;background:linear-gradient(135deg,#fffdf8,var(--emerald-50));box-shadow:var(--shadow-sm)}
 .home-start-copy{display:flex;align-items:flex-start;gap:16px;min-width:0}.home-start-copy .icon-box{flex:0 0 auto}.home-start-copy h2{margin:4px 0 7px;font-size:clamp(1.4rem,2.2vw,2rem)}.home-start-copy p{max-width:680px;margin:0}.home-start-actions{display:grid;justify-items:center;gap:12px;flex:0 0 auto}.home-start-actions .btn{white-space:nowrap}
@@ -378,7 +392,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .donut{width:150px;height:150px;border-radius:50%;background:conic-gradient(var(--emerald-600) 0 78%,#e7eeeb 78% 100%);display:grid;place-items:center;position:relative}
 .donut:after{content:"";width:104px;height:104px;background:#fff;border-radius:50%;position:absolute}
 .donut-center{position:relative;z-index:1;text-align:center}
-.donut-center strong{display:block;font-family:"Manrope";font-size:1.8rem}
+.donut-center strong{display:block;font-family:var(--hm-font-display);font-size:1.8rem}
 .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:17px}
 .data-table{width:100%;border-collapse:collapse;min-width:700px}
 .data-table th{text-align:left;padding:12px 14px;background:#f4f7f5;font-size:.71rem;text-transform:uppercase;letter-spacing:.06em;color:#6e7b76}

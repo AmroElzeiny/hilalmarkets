@@ -438,7 +438,7 @@ class ComplianceWatchService:
                 state.policy_decision = ShariaPolicyDecision.PAUSED_FOR_COMPLIANCE
                 state.policy_reason = (
                     f"Screening status changed to {new_status.value}; the asset no longer "
-                    "meets this Watch Plan's selected policy."
+                    "meets this Watchlist's selected policy."
                 )
                 if behavior == ComplianceChangeBehavior.PAUSE_MONITOR_IF_ANY_ASSET_CHANGES:
                     strategy.status = StrategyStatus.PAUSED
@@ -594,7 +594,7 @@ class ComplianceWatchService:
         automatic_action = monitor_impact.replace("_", " ")
         affected_watch_plans = [strategy.name] if strategy else []
         next_user_action = (
-            "Review the updated Passport and the affected Watch Plan before resuming."
+            "Review the updated Passport and the affected Watchlist before resuming."
             if new_status
             in {
                 ShariaAssetStatus.UNDER_REVIEW,
@@ -609,8 +609,8 @@ class ComplianceWatchService:
             f"Methodology: {methodology_name} v{methodology_version}\n"
             f"Reason: {change.summary}\n"
             f"Review state: {change.status.value}\n"
-            f"Automatic Watch Plan action: {automatic_action}\n"
-            f"Affected Watch Plans: {', '.join(affected_watch_plans) or 'none'}\n"
+            f"Automatic Watchlist action: {automatic_action}\n"
+            f"Affected Watchlists: {', '.join(affected_watch_plans) or 'none'}\n"
             f"Next: {next_user_action}"
         )
         proof = {
@@ -865,13 +865,13 @@ class ComplianceDigestService:
                     body=(
                         "Your daily Sharia screening summary:\n\n"
                         + "\n".join(lines)
-                        + "\n\nOpen Activity to review the stored evidence and Watch Plan impact."
+                        + "\n\nOpen Activity to review the stored evidence and Watchlist impact."
                     ),
                     proof_receipt={
                         "event_type": "sharia.compliance_daily_digest",
                         "event_count": len(user_rows),
                         "drift_notification_ids": event_ids,
-                        "evidence_path": "/dashboard/activity?tab=compliance_changes",
+                        "evidence_path": "/dashboard/opportunities?tab=compliance_changes",
                         "generated_at": now.isoformat(),
                         "ai_generated_ruling": False,
                     },

@@ -67,15 +67,14 @@ const PLANS: Plan[] = [
   {
     code: 'trader',
     name: 'Monitor',
-    monthlyPrice: 8,
-    originalMonthlyPrice: 12,
+    monthlyPrice: 7,
+    originalMonthlyPrice: 20,
     annualPrice: 120,
     monthlyAvailable: true,
     annualAvailable: false,
     description:
       'For regular traders who want AI-assisted market monitoring and clear evidence behind every alert.',
     button: 'Try Monitor for 7 days',
-    badge: 'Most Popular',
     trialNote: 'No charge for seven days. Cancel before the first payment.',
     highlightedFeature: 'AI assistant for creating market monitors',
     visibleFeatures: [
@@ -153,7 +152,11 @@ type Price =
   | { kind: 'coming_soon'; label: string }
   | { kind: 'price'; amount: string; period: string; original?: string }
 
-function priceLabel(plan: Plan, interval: BillingInterval): Price {
+function priceLabel(
+  plan: Plan,
+  interval: BillingInterval,
+  promotionRunning: boolean,
+): Price {
   const amount = interval === 'annual' ? plan.annualPrice : plan.monthlyPrice
   if (!isAvailable(plan, interval) || amount === null || amount === undefined) {
     // No price at all for something nobody can buy yet. A number next to "Soon" reads
@@ -164,14 +167,18 @@ function priceLabel(plan: Plan, interval: BillingInterval): Price {
   if (interval === 'annual') {
     return { kind: 'price', amount: `$${amount}`, period: 'per year' }
   }
+  const discounted = Boolean(plan.originalMonthlyPrice && plan.originalMonthlyPrice > amount)
+  if (discounted && !promotionRunning) {
+    // The deadline passed while this page was open. The plan costs its normal price
+    // again, so the page says so rather than holding an offer that has ended: the same
+    // rule the server applies, applied to the copy the visitor is looking at.
+    return { kind: 'price', amount: `$${plan.originalMonthlyPrice}`, period: 'per month' }
+  }
   return {
     kind: 'price',
     amount: `$${amount}`,
     period: 'per month',
-    original:
-      plan.originalMonthlyPrice && plan.originalMonthlyPrice > amount
-        ? `$${plan.originalMonthlyPrice}`
-        : undefined,
+    original: discounted ? `$${plan.originalMonthlyPrice}` : undefined,
   }
 }
 
@@ -179,47 +186,67 @@ function checkoutHref(planCode: PublicPlanCode, interval: BillingInterval) {
   return `/subscribe?plan_code=${encodeURIComponent(planCode)}&billing_interval=${interval}`
 }
 
-type Remaining = { days: number; hours: number; minutes: number } | null
+type Remaining = {
+  days: number
+  hours: number
+  minutes: number
+  seconds: number
+} | null
+
+const SECOND = 1_000
 
 function remainingUntil(endsAt: string, now: number): Remaining {
   const end = Date.parse(endsAt)
   if (Number.isNaN(end)) return null
   const ms = end - now
   if (ms <= 0) return null
-  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.floor(ms / SECOND)
   return {
-    days: Math.floor(minutes / 1440),
-    hours: Math.floor((minutes % 1440) / 60),
-    minutes: minutes % 60,
+    days: Math.floor(seconds / 86_400),
+    hours: Math.floor((seconds % 86_400) / 3_600),
+    minutes: Math.floor((seconds % 3_600) / 60),
+    seconds: seconds % 60,
   }
 }
 
-/**
- * How long the launch price lasts, in days, hours and minutes.
- *
- * Deliberately quiet: it ticks once a minute rather than once a second, it does not
- * animate, and it says what it is next to the price instead of shouting a deadline. The
- * brand rules ask for calm, not urgency, so this states a fact and stops there.
- */
-function OfferCountdown({ endsAt }: { endsAt: string }) {
+/** One clock for the whole section, so the price and the countdown cannot disagree. */
+function useNow(everyMs: number) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    const timer = window.setInterval(() => setNow(Date.now()), everyMs)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [everyMs])
+  return now
+}
+
+/**
+ * How long the launch price lasts, in days, hours, minutes and seconds.
+ *
+ * It counts down live, one step per second, so a visitor sitting on the page watches the
+ * number fall. It stays quiet while it does: no animation, no colour change, no alarm —
+ * the brand rules ask for calm, so this states a fact beside the price and stops there.
+ *
+ * When the deadline passes it removes itself, and the price beside it goes back to
+ * normal in the same render, so a page left open overnight never shows an offer that has
+ * ended.
+ */
+function OfferCountdown({ endsAt, now }: { endsAt: string; now: number }) {
   const left = remainingUntil(endsAt, now)
   if (!left) return null
   const parts: Array<[number, string]> = [
     [left.days, left.days === 1 ? 'day' : 'days'],
     [left.hours, left.hours === 1 ? 'hour' : 'hours'],
     [left.minutes, left.minutes === 1 ? 'minute' : 'minutes'],
+    [left.seconds, left.seconds === 1 ? 'second' : 'seconds'],
   ]
   return (
     <div className="offer-countdown" role="group" aria-label="Time left at this price">
       <span className="offer-countdown-label">Launch price ends in</span>
       <span className="offer-countdown-parts tnum">
         {parts.map(([value, unit]) => (
-          <span className="offer-countdown-part" key={unit}>
+          // Keyed on position, not on the unit word: "1 second" becomes "0 seconds" and
+          // a key that changes with the wording would remount the element every minute.
+          <span className="offer-countdown-part" key={unit.replace(/s$/, '')}>
             <strong>{value}</strong>
             <small>{unit}</small>
           </span>
@@ -244,6 +271,9 @@ export default function Pricing() {
   const comparisonRows =
     commerce?.comparisonRows?.length ? commerce.comparisonRows : COMPARISON_ROWS
   const promotionEndsAt = commerce?.promotionEndsAt ?? DEFAULT_PROMOTION_ENDS_AT
+  const now = useNow(SECOND)
+  const promotionEnd = Date.parse(promotionEndsAt)
+  const promotionRunning = !Number.isNaN(promotionEnd) && promotionEnd > now
 
   function setBillingInterval(next: BillingInterval) {
     setInterval(next)
@@ -272,6 +302,14 @@ export default function Pricing() {
           // not exist. The toggle still switches, so a visitor can see what annual will
           // look like, and every card then says the same thing: soon.
           const anyAvailable = plans.some((plan) => isAvailable(plan, value))
+          // Computed from the prices beside it, never written out: a monthly price
+          // changed on the server must not leave the toggle promising an old saving.
+          const bestSaving = Math.max(
+            0,
+            ...plans
+              .filter((plan) => isAvailable(plan, 'annual'))
+              .map((plan) => (plan.monthlyPrice ?? 0) * 12 - (plan.annualPrice ?? 0)),
+          )
           return (
             <label key={value} className={interval === value ? 'is-selected' : ''}>
               <input
@@ -283,7 +321,9 @@ export default function Pricing() {
               />
               <span>{value === 'monthly' ? 'Monthly' : 'Annual'}</span>
               {value === 'annual' && (
-                <small>{anyAvailable ? 'Save up to $44' : DEFAULT_COMING_SOON_LABEL}</small>
+                <small>
+                  {anyAvailable ? `Save up to $${bestSaving}` : DEFAULT_COMING_SOON_LABEL}
+                </small>
               )}
             </label>
           )
@@ -295,7 +335,7 @@ export default function Pricing() {
       </p>
       <div className="pricing-grid">
         {plans.map((plan) => {
-          const price = priceLabel(plan, interval)
+          const price = priceLabel(plan, interval, promotionRunning)
           const available = isAvailable(plan, interval)
           const expanded = expandedPlans.has(plan.code)
           const ctaLabel = !available
@@ -346,7 +386,7 @@ export default function Pricing() {
                 </div>
               )}
               {price.kind === 'price' && price.original && (
-                <OfferCountdown endsAt={promotionEndsAt} />
+                <OfferCountdown endsAt={promotionEndsAt} now={now} />
               )}
               <p
                 className={`annual-saving ${

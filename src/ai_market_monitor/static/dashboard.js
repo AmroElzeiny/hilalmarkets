@@ -4568,7 +4568,7 @@
     } catch (error) {
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "#7a8089";
-      ctx.font = "14px DM Sans, Arial";
+      ctx.font = "14px Onest, ui-sans-serif, system-ui, sans-serif";
       ctx.fillText(error.message, 20, 40);
     }
   }
@@ -4682,7 +4682,7 @@
       ctx.fillText(eventLabel, Math.min(x + 6, width - pad - 140), pointY - 6);
     });
     ctx.fillStyle = colors.text;
-    ctx.font = "12px DM Sans, Arial";
+    ctx.font = "12px Onest, ui-sans-serif, system-ui, sans-serif";
     ctx.fillText(`High ${max.toFixed(4)} · Low ${min.toFixed(4)}`, pad, 16);
   }
 
@@ -4725,7 +4725,7 @@
     });
     ctx.stroke();
     ctx.fillStyle = colors.text;
-    ctx.font = "12px DM Sans, Arial";
+    ctx.font = "12px Onest, ui-sans-serif, system-ui, sans-serif";
     ctx.fillText(`Hypothetical quality index ${min.toFixed(3)} - ${max.toFixed(3)}`, pad, 16);
   }
 
@@ -4857,11 +4857,19 @@
     async function loadRadar({ quiet = false } = {}) {
       if (!radarList) return;
       if (!quiet) radarList.setAttribute("aria-busy", "true");
-      const params = new URLSearchParams({ page: String(radarPage), page_size: "50", sort: radarSort?.value || "readiness" });
-      if (selectedMonitorId()) params.set("monitor_id", selectedMonitorId());
-      if (radarState?.value) params.set("lifecycle_state", radarState.value);
-      try { renderRadar(await api(`/observability/radar?${params}`)); }
-      catch (error) { radarList.innerHTML = `<div class="observability-error"><strong>Readiness evidence is unavailable</strong><p>${escapeHtml(error.message)}</p><button type="button" data-radar-retry>Retry</button></div>`; radarList.querySelector("[data-radar-retry]")?.addEventListener("click", loadRadar); }
+      // Everything that can fail lives inside the try, including building the request
+      // and rendering the answer. A throw outside it used to leave the placeholder
+      // spinning with no message, which reads to a user as a page that never loads.
+      try {
+        const params = new URLSearchParams({ page: String(radarPage), page_size: "50", sort: radarSort?.value || "readiness" });
+        if (selectedMonitorId()) params.set("monitor_id", selectedMonitorId());
+        if (radarState?.value) params.set("lifecycle_state", radarState.value);
+        renderRadar(await api(`/observability/radar?${params}`));
+      } catch (error) {
+        radarList.setAttribute("aria-busy", "false");
+        radarList.innerHTML = `<div class="observability-error"><strong>Readiness evidence is unavailable</strong><p>${escapeHtml(error.message)}</p><button type="button" data-radar-retry>Retry</button></div>`;
+        radarList.querySelector("[data-radar-retry]")?.addEventListener("click", () => loadRadar());
+      }
     }
 
     function renderHealth(payload) {
@@ -4873,7 +4881,7 @@
         <div class="health-dimension"><span>Technical health</span><strong class="health-status ${escapeHtml(item.technical_status)}"><i></i>${escapeHtml(pretty(item.technical_status))}</strong>${safeArray(item.technical_causes).map((cause) => `<p>${escapeHtml(cause.message)}</p>`).join("")}</div>
         <div class="health-dimension"><span>Strategy health</span><strong class="health-status ${escapeHtml(item.strategy_status)}"><i></i>${escapeHtml(pretty(item.strategy_status))}</strong>${safeArray(item.strategy_causes).map((cause) => `<p>${escapeHtml(cause.message)}</p>`).join("")}</div>
         <div class="health-metrics"><span><strong>${safeNumber(item.metrics?.symbols_scanned)}/${safeNumber(item.metrics?.symbols_expected)}</strong> symbols</span><span><strong>${safeNumber(item.metrics?.provider_errors)}</strong> provider errors</span><span><strong>${safeNumber(item.metrics?.alerts_24h)}</strong> alerts/24h</span></div>
-        <div class="health-actions"><a href="/dashboard/lifecycles?monitor=${escapeHtml(item.monitor_id)}">Open candidates</a><a href="#condition-bottlenecks">Inspect top blocker</a><button type="button" data-health-explain="${escapeHtml(item.monitor_id)}">Ask AI to explain</button><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}">Refine in Chat</a><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Edit in Canvas</a></div>
+        <div class="health-actions"><a href="/dashboard/opportunities?monitor=${escapeHtml(item.monitor_id)}">Open candidates</a><a href="#condition-bottlenecks">Inspect top blocker</a><button type="button" data-health-explain="${escapeHtml(item.monitor_id)}">Ask AI to explain</button><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}">Refine in Chat</a><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Edit in Canvas</a></div>
       </article>`).join("");
       healthList.querySelectorAll("[data-health-explain]").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -4891,9 +4899,10 @@
 
     async function loadHealth() {
       if (!healthList) return;
-      const suffix = selectedMonitorId() ? `?monitor_id=${encodeURIComponent(selectedMonitorId())}` : "";
-      try { renderHealth(await api(`/observability/health${suffix}`)); }
-      catch (error) { healthList.innerHTML = `<div class="observability-error"><strong>Health summary unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
+      try {
+        const suffix = selectedMonitorId() ? `?monitor_id=${encodeURIComponent(selectedMonitorId())}` : "";
+        renderHealth(await api(`/observability/health${suffix}`));
+      } catch (error) { healthList.innerHTML = `<div class="observability-error"><strong>Health summary unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
     }
 
     function renderBottlenecks(payload) {
@@ -4907,11 +4916,12 @@
 
     async function loadBottlenecks() {
       if (!bottleneckList) return;
-      const params = new URLSearchParams();
-      if (selectedMonitorId()) params.set("monitor_id", selectedMonitorId());
-      if (bottleneckRequired?.checked) params.set("required", "true");
-      try { renderBottlenecks(await api(`/observability/bottlenecks?${params}`)); }
-      catch (error) { bottleneckList.innerHTML = `<div class="observability-error"><strong>Bottleneck history unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
+      try {
+        const params = new URLSearchParams();
+        if (selectedMonitorId()) params.set("monitor_id", selectedMonitorId());
+        if (bottleneckRequired?.checked) params.set("required", "true");
+        renderBottlenecks(await api(`/observability/bottlenecks?${params}`));
+      } catch (error) { bottleneckList.innerHTML = `<div class="observability-error"><strong>Bottleneck history unavailable</strong><p>${escapeHtml(error.message)}</p></div>`; }
     }
 
     function openDrawer(trigger) {
@@ -5025,9 +5035,18 @@
       radarView?.addEventListener("click", () => { const compact = radarList.classList.toggle("compact"); radarView.setAttribute("aria-pressed", String(compact)); radarView.querySelector("span").textContent = compact ? "Expanded" : "Compact"; });
       bottleneckRequired?.addEventListener("change", loadBottlenecks);
       syncLifecycleCards();
-      Promise.all([loadRadar(), loadHealth(), loadBottlenecks()]);
+      // A rejected promise here is invisible: no error appears, and every placeholder
+      // stays in its loading state for good. Report it instead.
+      Promise.all([loadRadar(), loadHealth(), loadBottlenecks()]).catch((error) => {
+        console.error("[dashboard] readiness panels could not load", error);
+      });
       const interval = Math.max(5, safeNumber(observabilityRoot.dataset.pollSeconds, 15)) * 1000;
-      window.setInterval(() => { if (!document.hidden) Promise.all([loadRadar({ quiet: true }), loadHealth()]); }, interval);
+      window.setInterval(() => {
+        if (document.hidden) return;
+        Promise.all([loadRadar({ quiet: true }), loadHealth()]).catch((error) => {
+          console.error("[dashboard] readiness refresh failed", error);
+        });
+      }, interval);
     }
 
     const filterTrigger = document.querySelector("[data-monitor-filter-trigger]");
@@ -6669,7 +6688,7 @@
           try {
             await publishStrategyVersion(strategyId, state.version);
             showToast("Monitor activated with the reviewed strategy version.");
-            window.setTimeout(() => window.location.assign("/dashboard/lifecycles"), 500);
+            window.setTimeout(() => window.location.assign("/dashboard/opportunities"), 500);
           } catch (error) {
             if (error.message.includes("Connect Telegram")) {
               savePendingMonitorPublish(strategyId, state.version);
@@ -6953,20 +6972,39 @@
     });
   }
 
+  // Every dashboard feature used to start inside one handler, one after another. A single
+  // failure in any of them stopped the whole list, so an unrelated bug silently disabled
+  // every feature below it — most visibly the Opportunities panels, which then sat in
+  // their loading state for ever with nothing to say why. Each part now starts on its
+  // own: a failure is reported by name and the rest of the page still works.
+  function startFeature(name, start) {
+    try {
+      const result = start();
+      if (result && typeof result.catch === "function") {
+        result.catch((error) => console.error(`[dashboard] ${name} failed`, error));
+      }
+    } catch (error) {
+      console.error(`[dashboard] ${name} failed`, error);
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
-    initSidebar();
-    initVisualBuilder();
-    initScanNow();
-    initExports();
-    initSupport();
-    initChart();
-    initLifecycles();
-    initSettings();
-    initReferralCopy();
-    initIntegrations();
-    initOverviewChannelStatus();
-    initInboxFilter();
-    initVerifiedStrategyWorkspace();
-    initAlertProofReceipt();
+    const features = {
+      initSidebar,
+      initVisualBuilder,
+      initScanNow,
+      initExports,
+      initSupport,
+      initChart,
+      initLifecycles,
+      initSettings,
+      initReferralCopy,
+      initIntegrations,
+      initOverviewChannelStatus,
+      initInboxFilter,
+      initVerifiedStrategyWorkspace,
+      initAlertProofReceipt,
+    };
+    for (const [name, start] of Object.entries(features)) startFeature(name, start);
   });
 })();

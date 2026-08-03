@@ -14,7 +14,7 @@ Your main limits:
 {% for limit in limits %}- {{ limit.label }}: {{ limit.value }}
 {% endfor %}
 Open Hilal Markets: {{ dashboard_url }}
-Create a Watch Plan: {{ create_watch_plan_url }}
+Create a Watchlist: {{ create_watch_plan_url }}
 Manage billing: {{ billing_url }}
 Support: {{ support_url }}
 

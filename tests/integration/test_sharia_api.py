@@ -287,7 +287,7 @@ async def test_saved_asset_removal_requires_review_of_active_watch_plans(test_co
         )
         strategy = Strategy(
             user_id=user.id,
-            name="SOL structure Watch Plan",
+            name="SOL structure Watchlist",
             status=StrategyStatus.ACTIVE,
         )
         session.add_all([saved_asset, strategy])
@@ -334,7 +334,7 @@ async def test_saved_asset_removal_requires_review_of_active_watch_plans(test_co
     assert impact.json()["affected_watch_plans"] == [
         {
             "strategy_id": str(strategy.id),
-            "name": "SOL structure Watch Plan",
+            "name": "SOL structure Watchlist",
             "status": "active",
             "strategy_version_id": str(version.id),
             "strategy_version_number": 3,

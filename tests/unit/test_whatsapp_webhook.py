@@ -92,7 +92,7 @@ def test_webhook_parser_reads_every_message_and_every_status_in_batch():
             "type": "interactive",
             "interactive": {
                 "type": "list_reply",
-                "list_reply": {"id": "nav:monitors", "title": "My Watch Plans"},
+                "list_reply": {"id": "nav:monitors", "title": "My Watchlists"},
             },
         },
         {

@@ -74,7 +74,7 @@ def _ai_answer(
                 "support_handoff_available": support_handoff_available,
                 "support_handoff_reason": support_handoff_reason,
                 "safety_boundary": safety_boundary,
-                "suggested_follow_ups": ["How do I create a Watch Plan?"],
+                "suggested_follow_ups": ["How do I create a Watchlist?"],
             }
         ),
         "output": [],
@@ -276,7 +276,7 @@ async def test_public_chat_rate_limit_always_includes_remote_ip(test_context):
             "/api/v1/public-chat/answers",
             headers={"X-CSRF-Token": token, "X-User-ID": "visitor-two"},
             json={
-                "question": "What is a Watch Plan?",
+                "question": "What is a Watchlist?",
                 "session_id": "public_ip_limit_session_two",
                 "client_message_id": "public-ip-limit-2",
                 "source_page": "/features",
@@ -785,7 +785,7 @@ async def test_public_chat_session_limit_preserves_idempotent_retry(test_context
         headers={"X-CSRF-Token": token},
         json={
             **first_payload,
-            "question": "What is a Watch Plan?",
+            "question": "What is a Watchlist?",
             "client_message_id": "public-turn-limit-2",
         },
     )

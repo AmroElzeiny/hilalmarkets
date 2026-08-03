@@ -207,6 +207,10 @@ async def system_brain_home(
     data = await ShariaAdminDashboardService(session).reviewer_overview()
     context["data"] = data
     context["assistant_enabled"] = settings.system_brain_ai_enabled
+    # The badge used to spell out a model name by hand, so it kept saying "5.4 nano"
+    # after the setting moved on. It now reports what the assistant will really call.
+    context["assistant_model"] = settings.system_brain_ai_model
+    context["assistant_reasoning_effort"] = settings.system_brain_ai_reasoning_effort
     return _protect(
         templates.TemplateResponse(
             request=request,

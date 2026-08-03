@@ -105,7 +105,7 @@ async def test_admin_notification_retries_timeout_and_rate_limit_without_duplica
     final_message = adapter.messages[-1]
     assert final_message.chat_id == "test-admin-chat"
     assert f"Methodology: {methodology.name} v{methodology.version}" in final_message.text
-    assert "Affected Watch Plans/users: 0/0" in final_message.text
+    assert "Affected Watchlists/users: 0/0" in final_message.text
     assert final_message.buttons[0].url is not None
     assert final_message.buttons[0].url.endswith(
         f"/dashboard/system-brain/cases/{case.id}"

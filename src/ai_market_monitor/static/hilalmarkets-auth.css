@@ -7,7 +7,7 @@ body.hilal-auth-page {
 
 body.hilal-auth-page {
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
 }
 
 .hilal-auth-page [hidden] { display: none !important; }
@@ -107,7 +107,7 @@ body.hilal-auth-page {
 .hilal-auth-page .auth-brand-copy h1 {
   margin: 18px 0;
   color: var(--hm-surface);
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-size: clamp(2.65rem, 5vw, 5.3rem);
   font-weight: 500;
   line-height: .98;
@@ -197,7 +197,7 @@ body.hilal-auth-page {
 .hilal-auth-page .auth-form h1 {
   margin: 10px 0 8px;
   color: var(--hm-ink);
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-size: clamp(2.25rem, 4vw, 3.45rem);
   font-weight: 500;
   letter-spacing: -.045em;
@@ -258,7 +258,7 @@ body.hilal-auth-page {
 }
 
 .hilal-auth-page :where(.btn, .text-link) {
-  font-family: "Onest", sans-serif;
+  font-family: var(--hm-font-ui);
   font-weight: 650;
 }
 

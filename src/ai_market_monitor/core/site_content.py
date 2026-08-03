@@ -9,6 +9,11 @@ class NavigationItem:
     page: str
     icon: str | None = None
     active_pages: tuple[str, ...] = ()
+    #: Name of the contextual guide step that points at this menu entry, if any.
+    #: The sidebar renders its links from a loop, so a marker written straight into the
+    #: template could never be unique. Declaring it here keeps one marker per name,
+    #: which is the property the guide's exact targeting depends on.
+    guide_target: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +78,7 @@ FOOTER_NAVIGATION = (
             NavigationItem("How It Works", "public_how_it_works", "how_it_works"),
             NavigationItem("Pricing", "public_pricing", "pricing"),
             NavigationItem(
-                "Halal Market",
+                "Halal Assets",
                 "screened_market_page",
                 "screened_market",
             ),
@@ -116,11 +121,12 @@ DASHBOARD_NAVIGATION = (
         (
             NavigationItem("Home", "dashboard_home", "home", "home"),
             NavigationItem(
-                "Halal Market",
+                "Halal Assets",
                 "screened_market_page",
                 "screened_market",
                 "market",
                 ("asset_passport",),
+                guide_target="nav-halal-assets",
             ),
         ),
     ),
@@ -140,10 +146,11 @@ DASHBOARD_NAVIGATION = (
                 ),
             ),
             NavigationItem(
-                "Market Scanner",
+                "Trading Assistant",
                 "dashboard_check_market",
                 "check_market",
                 "scan",
+                guide_target="nav-trading-assistant",
             ),
         ),
     ),
@@ -156,6 +163,7 @@ DASHBOARD_NAVIGATION = (
                 "activity",
                 "activity",
                 ("lifecycles", "alert_proof"),
+                guide_target="nav-opportunities",
             ),
         ),
     ),
@@ -188,7 +196,7 @@ PUBLIC_PAGES = (
         "/features",
         "Features",
         (
-            "Explore Sharia-screened discovery, guided Watch Plans, evidence, "
+            "Explore Sharia-screened discovery, guided Watchlists, evidence, "
             "and compliance monitoring."
         ),
         "hilal/public/features.html",
@@ -199,7 +207,7 @@ PUBLIC_PAGES = (
         "/how-it-works",
         "How It Works",
         (
-            "See how HilalMarkets turns a Halal Market idea into an approved, "
+            "See how HilalMarkets turns an idea from Halal Assets into an approved, "
             "explainable Watchlist."
         ),
         "hilal/public/how_it_works.html",
@@ -229,7 +237,7 @@ PUBLIC_PAGES = (
         "/help",
         "Help Center",
         (
-            "Get clear answers about the Halal Market, Watchlists, alerts, evidence, "
+            "Get clear answers about Halal Assets, Watchlists, alerts, evidence, "
             "billing, and account safety."
         ),
         "hilal/public/help.html",
@@ -378,7 +386,7 @@ HELP_CATEGORIES: tuple[HelpCategory, ...] = (
                 ),
             },
             {
-                "question": "What is Market Scanner?",
+                "question": "What is Trading Assistant?",
                 "answer": (
                     "It runs the same validated rules once against the eligible screened "
                     "universe. It does not create continuous monitoring unless you choose to."

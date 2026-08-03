@@ -29,13 +29,30 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260801-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260802-launch-offer">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260801-launch-offer">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260801-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260802-launch-offer">
 </head>
+{#- The page guide's identity is decided on the server, not parsed from the URL. Where one
+    route owns two workflows, the mode is part of the key so the right guide is loaded. -#}
+{%- set guide_page_key = {
+  'home': 'dashboard-home',
+  'screened_market': 'screened-market',
+  'asset_passport': 'asset-passport',
+  'watchlists': 'watch-plans',
+  'activity': 'activity',
+  'integrations': 'integrations',
+  'billing': 'billing',
+  'settings': 'settings'
+}.get(page, '') -%}
+{%- if page == 'strategy_builder' -%}
+  {%- set guide_page_key = 'strategy-builder-scanner' if request.query_params.get('mode') == 'scanner' else 'strategy-builder-monitor' -%}
+{%- endif -%}
 {% set shell_prefs = (dashboard_preference.notification_preferences if dashboard_preference else {}) or {} %}
-<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root">
+<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root"{% if guide_page_key %} data-hm-guide-page="{{ guide_page_key }}" data-hm-guide-new-user="{{ 'true' if (onboarding_complete is defined and not onboarding_complete) else 'false' }}"{% endif %}>
   <div class="app-shell">
     {% include "hilal/partials/dashboard_sidebar.html" %}
     <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
@@ -62,12 +79,13 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260801-launch-offer"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260801-launch-offer"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260801-launch-offer"></script>
-  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260801-launch-offer"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260801-launch-offer"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260801-launch-offer" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260802-launch-offer" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260802-launch-offer" defer></script>
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

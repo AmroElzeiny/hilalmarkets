@@ -31,12 +31,14 @@ CUSTOMER_LANGUAGE_FILES = (
     ROOT / "src" / "ai_market_monitor" / "core" / "site_content.py",
     ROOT / "src" / "ai_market_monitor" / "services" / "product_language.py",
 )
+# The customer-facing name for a monitor is "Watchlist". "Watch Plan" was the older
+# name; both together taught two words for one thing, so the old one is now blocked
+# here rather than left to reappear one template at a time.
 FORBIDDEN_CUSTOMER_PHRASES = (
-    "watchlist builder",
-    "guided watchlist",
-    "create a watchlist",
-    "create your first watchlist",
-    "watchlists follow approved",
+    "watch plan",
+    "watch plans",
+    "halal market",
+    "market scanner",
 )
 ACTIVE_DISCORD_SCAN_ROOTS = (
     ROOT / "src" / "ai_market_monitor" / "api",
@@ -147,7 +149,7 @@ def main() -> int:
                 if phrase in content:
                     relative = candidate.relative_to(ROOT)
                     failures.append(
-                        f"Deprecated Watch Plan terminology in {relative}: {phrase!r}"
+                        f"Deprecated product terminology in {relative}: {phrase!r}"
                     )
 
     for source in ACTIVE_DISCORD_SCAN_ROOTS:

@@ -16,12 +16,14 @@ composer call after canonical execution; simple mutations use an evidence-only s
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from time import monotonic
 from typing import Any, cast
 
@@ -42,10 +44,21 @@ from ai_market_monitor.engine.claim_evidence import (
     requires_factual_answer,
     validate_claims,
 )
-from ai_market_monitor.engine.requirement_state import (
-    active_requirement_states,
-    unresolved_target_path,
+from ai_market_monitor.engine.planner_intent_compiler import (
+    SANITATION_CLASSES,
+    IntentCompileError,
+    SemanticIntentOutcome,
+    apply_repair_deltas,
+    compile_planner_intents,
+    intent_fingerprint,
+    normalize_planner_envelope,
 )
+from ai_market_monitor.engine.planner_references import (
+    EMPTY_PLANNER_REFERENCES,
+    PlannerReferenceContext,
+    SnapshotReference,
+)
+from ai_market_monitor.engine.requirement_state import active_requirement_states
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
     RuntimePreflight,
@@ -54,12 +67,24 @@ from ai_market_monitor.engine.setup_turn_execution import (
     SetupTurnRequest,
     apply_setup_turn,
     conversation_from_segments,
-    draft_read_model,
     validate_setup_turn_plan,
     validated_clarification,
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
+from ai_market_monitor.engine.turn_timing import (
+    TurnDeadline,
+    TurnTelemetry,
+    null_telemetry,
+)
+from ai_market_monitor.schemas.planner_intent import (
+    FORBIDDEN_SCHEMA_MODELS,
+    PlannerIntentEnvelope,
+    PlannerRepairEnvelope,
+    SemanticIntent,
+    compact_json_schema,
+    schema_complexity,
+)
 from ai_market_monitor.schemas.screening_execution import PreflightManifest
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
@@ -69,15 +94,14 @@ from ai_market_monitor.schemas.setup_agent import (
     ComposedReply,
     FactualClaim,
     SegmentKind,
-    SetupAgentPlanEnvelope,
     SetupAgentReply,
     SetupAgentTurnPlan,
     SetupConversationContext,
     SetupTurnExecutionResult,
 )
 from ai_market_monitor.schemas.setup_authorization import (
-    AuthorizedPatchOperation,
     ClarificationContract,
+    ClarificationTargetType,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
@@ -85,13 +109,34 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     DraftMode,
     StrategyDraftV2,
 )
-from ai_market_monitor.services.agent_tools import strict_json_schema
 from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.openai_structured_call import (
     StructuredCallError,
     estimate_structured_call_cost,
     structured_call,
 )
+
+#: Time kept back from a provider call for the deterministic work that must follow it:
+#: validation, canonical execution, compilation and persistence. A planner call allowed
+#: to consume the whole budget leaves a turn that cannot be saved.
+_POST_PLANNER_RESERVE_SECONDS = 6.0
+
+#: Below this there is no point starting a provider call: it cannot return in time, and
+#: an attempt that cannot land is a paid failure.
+_MINIMUM_PROVIDER_SECONDS = 1.5
+
+#: Composition happens after the mutation is already canonical, so only persistence has
+#: to fit after it.
+_POST_COMPOSER_RESERVE_SECONDS = 2.0
+
+#: How long the shared circuit breaker may take to answer before the turn stops waiting
+#: for it. It is a coordination hint between workers, not a correctness check: an answer
+#: that arrives later than this costs more than the outage it reports.
+_CIRCUIT_REDIS_TIMEOUT_SECONDS = 0.25
+
+#: After a miss, stop asking for this long. Without it every provider call in the turn
+#: pays the timeout again, which is how one unreachable cache became ten seconds.
+_CIRCUIT_REDIS_COOLDOWN_SECONDS = 30.0
 
 
 class SetupAgentError(ValueError):
@@ -124,6 +169,31 @@ class SetupAgentError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class _PlanFailure:
+    code: str
+    details: tuple[str, ...]
+    outcome: SemanticIntentOutcome
+    intent_ref: str | None = None
+    target_path: str | None = None
+    segment_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ServerClarification:
+    """A typed question derived from a validated missing/ambiguous requirement."""
+
+    contract: ClarificationContract
+    envelope: PlannerIntentEnvelope
+    usage: dict[str, Any]
+
+
+class _PlannerRepairState(StrEnum):
+    UNUSED = "unused"
+    SHAPE_RECOVERY = "shape_recovery"
+    SEMANTIC_REPAIR = "semantic_repair"
+
+
+@dataclass(frozen=True, slots=True)
 class SetupAgentTurnInput:
     """One authenticated free-text turn and the context needed to understand it."""
 
@@ -152,6 +222,23 @@ class SetupAgentTurnInput:
     #: user and the promise bound into approval are the same recorded fact.
     preflight_manifest: Callable[[], PreflightManifest | None] | None = None
     stage_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
+    #: The turn's one clock: what each stage spent, and how much time is left.
+    #:
+    #: Supplied by the request boundary that owns the budget. A turn created without one
+    #: records nothing and never expires, so helper and test call sites keep working
+    #: without inheriting another turn's remaining time.
+    telemetry: TurnTelemetry = field(default_factory=null_telemetry)
+    #: Failure classes this chat has already hit, newest last. A class that has already
+    #: survived a repair twice will not be given a third paid attempt: the answer is
+    #: known, and spending on it again only makes the user wait longer for it.
+    repeated_failure_codes: tuple[str, ...] = ()
+    #: Governed identities hidden behind public, turn-local aliases. Conditions,
+    #: clarifications and snapshots are added from the authoritative draft/history.
+    planner_references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES
+
+    @property
+    def deadline(self) -> TurnDeadline:
+        return self.telemetry.deadline
 
     @property
     def normalized_message(self) -> str:
@@ -234,10 +321,7 @@ class SetupAgentTurnResult:
     def message(self) -> str:
         if self.clarification is None:
             return self.reply.message_without_question
-        return (
-            f"{self.reply.message_without_question.rstrip()}\n\n"
-            f"{self.clarification.question}"
-        )
+        return f"{self.reply.message_without_question.rstrip()}\n\n{self.clarification.question}"
 
 
 def _turn_request(
@@ -259,6 +343,43 @@ def _turn_request(
         providers=turn.providers if include_gates else None,
         runtime_preflight=turn.runtime_preflight if include_gates else None,
         preflight_manifest=turn.preflight_manifest if include_gates else None,
+        telemetry=turn.telemetry,
+        planner_references=_planner_references(turn),
+    )
+
+
+def _planner_references(turn: SetupAgentTurnInput) -> PlannerReferenceContext:
+    """Build stable turn-local aliases without exposing canonical identities."""
+
+    condition_ids: dict[str, str] = {}
+    if turn.draft.condition_ast is not None:
+        for node in turn.draft.condition_ast.walk():
+            if node.node_type == ConditionNodeType.CONDITION:
+                condition_ids[f"condition_{len(condition_ids) + 1}"] = node.node_id
+
+    clarification_ids: dict[str, str] = {}
+    for item in turn.draft.unresolved_fields:
+        if item.blocking and item.unresolved_id not in clarification_ids.values():
+            clarification_ids[f"clarification_{len(clarification_ids) + 1}"] = item.unresolved_id
+    active_id = turn.conversation.active_question_id
+    if active_id and active_id not in clarification_ids.values():
+        clarification_ids[f"clarification_{len(clarification_ids) + 1}"] = active_id
+
+    snapshots = tuple(
+        SnapshotReference(
+            reference=f"snapshot_{index + 1}",
+            snapshot_id=str(item["snapshot_id"]),
+            executable_version=int(item["executable_version"]),
+        )
+        for index, item in enumerate(turn.history[-20:])
+        if item.get("snapshot_id") and item.get("executable_version") is not None
+    )
+    return PlannerReferenceContext(
+        condition_ids=condition_ids,
+        clarification_ids=clarification_ids,
+        snapshots=snapshots,
+        methodologies=turn.planner_references.methodologies,
+        watchlists=turn.planner_references.watchlists,
     )
 
 
@@ -281,14 +402,44 @@ class SetupChatAgent:
             else Redis.from_url(settings.redis_url, decode_responses=True)
         )
         self._local_circuit: dict[str, tuple[int, float]] = {}
+        #: When Redis last refused to answer in time. Until this passes, the breaker
+        #: uses its process-local state instead of paying the timeout again.
+        self._redis_unavailable_until: float = 0.0
 
     def _circuit_key(self, model: str) -> str:
-        provider = (
-            f"{str(self.settings.openai_base_url).rstrip('/')}:"
-            f"{model}"
-        )
+        provider = f"{str(self.settings.openai_base_url).rstrip('/')}:{model}"
         digest = hashlib.sha256(provider.encode("utf-8")).hexdigest()[:24]
         return f"hm:setup-agent:circuit:{digest}"
+
+    async def _circuit_redis_call(
+        self,
+        operation: Callable[[Redis], Awaitable[Any]],
+    ) -> tuple[bool, Any]:
+        """Ask Redis, briefly, and never let the question cost more than the answer.
+
+        The breaker exists to stop the turn wasting time on a provider already known to
+        be failing. Measured on this machine, an unreachable Redis took **2.7 seconds**
+        to say so, on every provider call — four times on a repaired turn. The diagnostic
+        was costing far more than the outage it was watching for.
+
+        Two bounds. Each attempt is capped, so a hung socket cannot hold the turn. And a
+        miss is remembered for a cooldown, so one turn pays the cap once instead of once
+        per call. Both failure paths return "unknown", and an unknown breaker permits the
+        call exactly as `RedisError` already did — coordination is an optimisation here,
+        never the authority.
+        """
+
+        client = self._circuit_redis
+        if client is None or monotonic() < self._redis_unavailable_until:
+            return False, None
+        try:
+            return True, await asyncio.wait_for(
+                operation(client),
+                timeout=_CIRCUIT_REDIS_TIMEOUT_SECONDS,
+            )
+        except (RedisError, TimeoutError, OSError):
+            self._redis_unavailable_until = monotonic() + _CIRCUIT_REDIS_COOLDOWN_SECONDS
+            return False, None
 
     async def _before_provider_call(self, model: str) -> None:
         if self._circuit_redis is None:
@@ -311,10 +462,10 @@ class SetupChatAgent:
         redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
         return 1
         """
-        try:
-            allowed = await cast(
+        answered, allowed = await self._circuit_redis_call(
+            lambda client: cast(
                 Awaitable[Any],
-                self._circuit_redis.eval(
+                client.eval(
                     script,
                     1,
                     self._circuit_key(model),
@@ -323,7 +474,8 @@ class SetupChatAgent:
                     str(max(cooldown * 3, 300)),
                 ),
             )
-        except RedisError:
+        )
+        if not answered:
             # Redis coordinates workers but is not semantic authority. A cache outage
             # falls back to a conservative process-local breaker and still permits a
             # healthy provider call.
@@ -354,15 +506,12 @@ class SetupChatAgent:
 
     async def _provider_succeeded(self, model: str) -> None:
         self._local_circuit.pop(self._circuit_key(model), None)
-        if self._circuit_redis is None:
-            return
-        try:
-            await self._circuit_redis.delete(self._circuit_key(model))
-        except RedisError:
-            # The provider result is already complete and authoritative. Losing the
-            # success marker may leave the circuit conservative for a later turn, but
-            # must never discard this result or cause a second paid model call.
-            return
+        # The provider result is already complete and authoritative. Losing the success
+        # marker may leave the circuit conservative for a later turn, but must never
+        # discard this result, cause a second paid model call, or delay the reply.
+        await self._circuit_redis_call(
+            lambda client: cast(Awaitable[Any], client.delete(self._circuit_key(model)))
+        )
 
     async def _provider_failed(self, exc: StructuredCallError, model: str) -> None:
         if not exc.retryable:
@@ -390,10 +539,13 @@ class SetupChatAgent:
         redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
         return failures
         """
-        try:
-            await cast(
+        # Preserve the original provider classification. Redis health is diagnosed
+        # separately and must not turn a provider timeout into another error, nor add
+        # its own wait to a turn that has already failed.
+        await self._circuit_redis_call(
+            lambda client: cast(
                 Awaitable[Any],
-                self._circuit_redis.eval(
+                client.eval(
                     script,
                     1,
                     self._circuit_key(model),
@@ -402,40 +554,43 @@ class SetupChatAgent:
                     str(max(cooldown * 3, 300)),
                 ),
             )
-        except RedisError:
-            # Preserve the original provider classification. Redis health is diagnosed
-            # separately and must not turn a provider timeout into another error.
-            return
+        )
 
     async def run_turn(self, turn: SetupAgentTurnInput) -> SetupAgentTurnResult:
         self.model_call_count = 0
         self.last_usage = {}
-        shortlist = build_capability_shortlist(
-            turn.normalized_message,
-            available_provider_requirements=configured_runtime_provider_requirements(
-                self.settings.market_data_provider
-            ),
-        )
+        telemetry = turn.telemetry
+        telemetry.notes.setdefault("compiler_invariant_violation_count", 0)
+        telemetry.notes.setdefault("planner_repair_mode", _PlannerRepairState.UNUSED.value)
+        telemetry.notes.setdefault("planner_repair_attempt_count", 0)
+        telemetry.notes.setdefault("planner_repair_success_count", 0)
+        with telemetry.stage("context_selection"):
+            shortlist = build_capability_shortlist(
+                turn.normalized_message,
+                available_provider_requirements=configured_runtime_provider_requirements(
+                    self.settings.market_data_provider
+                ),
+            )
+            route = select_setup_model(
+                self.settings,
+                current_message=turn.normalized_message,
+                history=list(turn.dialogue),
+                active_clarification=(
+                    {"question": turn.conversation.question_text}
+                    if turn.conversation.active_question_id
+                    else None
+                ),
+                capability_context=_routing_context(shortlist),
+                draft_condition_count=_condition_count(turn.draft),
+                unresolved_field_count=len(turn.draft.unresolved_fields),
+                previous_turn_failed=turn.previous_turn_failed,
+            )
         started = monotonic()
-        route = select_setup_model(
-            self.settings,
-            current_message=turn.normalized_message,
-            history=list(turn.dialogue),
-            active_clarification=(
-                {"question": turn.conversation.question_text}
-                if turn.conversation.active_question_id
-                else None
-            ),
-            capability_context=_routing_context(shortlist),
-            draft_condition_count=_condition_count(turn.draft),
-            unresolved_field_count=len(turn.draft.unresolved_fields),
-            previous_turn_failed=turn.previous_turn_failed,
-        )
-        repaired = False
+        repair_state = _PlannerRepairState.UNUSED
         try:
             envelope, plan_usage = await self._plan_once(turn, shortlist, route)
         except StructuredCallError as exc:
-            if not _repair_eligible_provider_failure(exc):
+            if not _answer_did_not_parse(exc):
                 raise SetupAgentError(
                     exc.code,
                     str(exc),
@@ -444,29 +599,29 @@ class SetupChatAgent:
                     details=exc.details,
                     usage={**exc.usage, **route.usage_metadata()},
                 ) from exc
+            # Nothing came back that can be corrected field by field, so a delta has
+            # nothing to name. One more attempt at the same compact contract is the only
+            # recovery available, and it replaces the repair this turn is allowed.
             try:
-                envelope, plan_usage = await self._repair_once(
-                    turn,
-                    shortlist,
-                    route,
-                    original_candidate=exc.candidate,
-                    validation_code=exc.code,
-                    validation_details=exc.details,
-                    prior_usage=exc.usage,
+                envelope, plan_usage = await self._plan_once(
+                    turn, shortlist, route, prior_usage=exc.usage, retry_after_bad_shape=True
                 )
-            except StructuredCallError as repair_exc:
+            except StructuredCallError as retry_exc:
                 raise SetupAgentError(
-                    repair_exc.code,
-                    str(repair_exc),
+                    retry_exc.code,
+                    str(retry_exc),
                     stage="planner_repair",
-                    retryable=repair_exc.retryable,
-                    details=repair_exc.details,
-                    usage={**repair_exc.usage, **route.usage_metadata()},
-                ) from repair_exc
-            repaired = True
+                    retryable=retry_exc.retryable,
+                    details=retry_exc.details,
+                    usage={**retry_exc.usage, **route.usage_metadata()},
+                ) from retry_exc
+            plan_usage["_setup_repair_attempts"] = 1
+            repair_state = _PlannerRepairState.SHAPE_RECOVERY
+            telemetry.notes["planner_repair_mode"] = repair_state.value
         planner_model = route.model
         planner_reasons = route.reasons
         plan_usage = {**plan_usage, **route.usage_metadata()}
+        _record_cost_telemetry(telemetry, plan_usage, self.settings, route.model)
         planner_latency = (monotonic() - started) * 1000
         # `_plan_once` already counted its model call. Counting again here would make
         # the per-turn cost and latency telemetry inaccurate.
@@ -477,7 +632,53 @@ class SetupChatAgent:
             planner_model=planner_model,
             planner_reasons=planner_reasons,
             planner_latency_ms=planner_latency,
-            plan_confidence=envelope.plan.overall_confidence if envelope.plan else 1.0,
+            plan_confidence=envelope.overall_confidence,
+            segments=_segment_trace(envelope),
+            shortlist_keys=tuple(sorted(shortlist.allowed_keys)),
+            lexical_hint="",
+            model_calls=self.model_call_count,
+        )
+
+        # Sanitation, compilation and dry validation are one bounded attempt, and at most
+        # one repair call for the whole turn. Both failure sources — a reading the server
+        # cannot compile, and a plan the authorization gates refuse — go through the same
+        # narrow correction, so a turn can never spend two repairs or loop between them.
+        settled = await self._settled_plan(
+            turn,
+            shortlist,
+            route,
+            envelope,
+            plan_usage,
+            repair_state=repair_state,
+        )
+        if isinstance(settled, _ServerClarification):
+            clarification = settled.contract
+            reply = deterministic_reply(
+                "I need one exact choice before I can change this setup.",
+                selected_clarification_id=clarification.question_id,
+            )
+            trace = _with(
+                trace,
+                model_calls=self.model_call_count,
+                patch_validation="user_information_required",
+                response_model="deterministic_clarification",
+            )
+            conversation = turn.conversation.with_question(clarification)
+            return SetupAgentTurnResult(
+                reply=reply,
+                execution=None,
+                draft=turn.draft,
+                conversation=conversation,
+                plan=None,
+                trace=trace,
+                clarification=clarification,
+                usage=settled.usage,
+            )
+        plan, envelope, plan_usage, repaired = settled
+        self.last_usage = plan_usage
+        trace = _with(
+            trace,
+            plan_confidence=plan.overall_confidence,
             segments=tuple(
                 {
                     "segment_id": item.segment_id,
@@ -486,104 +687,27 @@ class SetupChatAgent:
                     "confidence": item.confidence,
                     "action_required": item.action_required,
                 }
-                for item in (envelope.plan.segments if envelope.plan else ())
+                for item in plan.segments
             ),
-            shortlist_keys=tuple(sorted(shortlist.allowed_keys)),
-            lexical_hint="",
             model_calls=self.model_call_count,
+            patch_validation="repaired" if repaired else "dry_validated",
         )
-
-        plan = envelope.plan
-        if plan is not None and plan.requires_tool:
-            try:
-                dry = validate_setup_turn_plan(
-                    _turn_request(turn, plan, shortlist.allowed_keys, include_gates=False)
-                )
-            except SetupTurnRejected as exc:
-                if repaired or not _repair_eligible_validation_failure(exc):
-                    raise SetupAgentError(
-                        exc.code,
-                        str(exc),
-                        stage="tool_validation",
-                        details=exc.details,
-                        usage=self.last_usage,
-                    ) from exc
-                try:
-                    envelope, repair_usage = await self._repair_once(
-                        turn,
-                        shortlist,
-                        route,
-                        original_candidate=envelope.model_dump(mode="json"),
-                        validation_code=exc.code,
-                        validation_details=exc.details,
-                        prior_usage=plan_usage,
-                    )
-                except StructuredCallError as repair_exc:
-                    raise SetupAgentError(
-                        repair_exc.code,
-                        str(repair_exc),
-                        stage="planner_repair",
-                        retryable=repair_exc.retryable,
-                        details=repair_exc.details,
-                        usage={**repair_exc.usage, **route.usage_metadata()},
-                    ) from repair_exc
-                repaired = True
-                plan_usage = repair_usage
-                self.last_usage = {**repair_usage, **route.usage_metadata()}
-                plan = envelope.plan
-                if plan is None or not plan.requires_tool:
-                    raise SetupAgentError(
-                        "PLANNER_REPAIR_DROPPED_ACTION",
-                        "The planner repair did not preserve the requested action.",
-                        stage="planner_repair",
-                        usage=self.last_usage,
-                    ) from exc
-                try:
-                    dry = validate_setup_turn_plan(
-                        _turn_request(turn, plan, shortlist.allowed_keys, include_gates=False)
-                    )
-                except SetupTurnRejected as final_exc:
-                    raise SetupAgentError(
-                        final_exc.code,
-                        str(final_exc),
-                        stage="planner_repair",
-                        details=final_exc.details,
-                        usage=self.last_usage,
-                    ) from final_exc
-            plan = dry.plan
-            trace = _with(
-                trace,
-                plan_confidence=plan.overall_confidence,
-                segments=tuple(
-                    {
-                        "segment_id": item.segment_id,
-                        "kind": item.kind.value,
-                        "text": item.exact_source_text,
-                        "confidence": item.confidence,
-                        "action_required": item.action_required,
-                    }
-                    for item in plan.segments
-                ),
-                model_calls=self.model_call_count,
-                patch_validation="repaired" if repaired else "dry_validated",
-            )
         if turn.stage_callback is not None:
             await turn.stage_callback(
-                "EXECUTING" if plan is not None and plan.requires_tool else "COMPOSING",
+                "EXECUTING" if plan.requires_tool else "COMPOSING",
                 {
                     "planner_model": planner_model,
-                    "plan": plan.model_dump(mode="json") if plan is not None else None,
+                    "plan": plan.model_dump(mode="json"),
                 },
             )
-        if plan is None or not plan.requires_tool:
+        if not plan.requires_tool:
             # Pure conversation. No tool, no new version, no status change, and still a
             # real answer. A greeting cannot touch approval because it never gets here.
             # A pure-conversation turn asserts nothing about the platform: no operations
             # ran, no gates were evaluated, and there is no evidence ledger to check
             # against. The planner's own wording is the reply.
             reply = deterministic_reply(
-                _trimmed(envelope.direct_reply)
-                or _deterministic_conversation_reply(turn.draft)
+                _deterministic_conversation_reply(turn.draft, envelope=envelope)
             )
             return SetupAgentTurnResult(
                 reply=reply,
@@ -591,7 +715,7 @@ class SetupChatAgent:
                 draft=turn.draft,
                 conversation=conversation_from_segments(
                     turn.conversation,
-                    list(plan.segments) if plan else [],
+                    list(plan.segments),
                     assistant_summary=reply.message,
                 ),
                 plan=plan,
@@ -600,9 +724,10 @@ class SetupChatAgent:
             )
 
         try:
-            outcome = await apply_setup_turn(
-                _turn_request(turn, plan, shortlist.allowed_keys, include_gates=True)
-            )
+            with telemetry.stage("canonical_execution"):
+                outcome = await apply_setup_turn(
+                    _turn_request(turn, plan, shortlist.allowed_keys, include_gates=True)
+                )
         except SetupTurnRejected as exc:
             raise SetupAgentError(
                 exc.code,
@@ -613,6 +738,7 @@ class SetupChatAgent:
             ) from exc
         if repaired:
             self.last_usage["_setup_repair_successes"] = 1
+            _record_cost_telemetry(telemetry, self.last_usage, self.settings, route.model)
 
         trace = _with(
             trace,
@@ -708,18 +834,264 @@ class SetupChatAgent:
             usage=self.last_usage,
         )
 
+    async def _settled_plan(
+        self,
+        turn: SetupAgentTurnInput,
+        shortlist: CapabilityShortlist,
+        route: Any,
+        envelope: PlannerIntentEnvelope,
+        plan_usage: dict[str, Any],
+        *,
+        repair_state: _PlannerRepairState,
+    ) -> (
+        tuple[SetupAgentTurnPlan, PlannerIntentEnvelope, dict[str, Any], bool]
+        | _ServerClarification
+    ):
+        """One reading, checked; and at most one narrow correction for the whole turn.
+
+        Two things can go wrong after the model answers: the server cannot turn the
+        reading into a canonical change, or it can but the authorization gates refuse it.
+        Both used to have their own repair path, which is how a turn could pay for two
+        corrections and still fail. They share one here, and it runs once.
+
+        The repair call is skipped entirely when it cannot help: an unrepairable class,
+        a turn that already repaired, or a failure this chat has already seen fail after
+        a repair. Spending a paid call on a known-hopeless retry is the loop this closes.
+        """
+
+        with turn.telemetry.stage("intent_normalization"):
+            semantic_count_before = len(envelope.semantic_intents)
+            envelope = normalize_planner_envelope(envelope)
+            turn.telemetry.notes["deduplicated_semantic_intent_count"] = (
+                semantic_count_before - len(envelope.semantic_intents)
+            )
+        failure = self._checked_plan(turn, shortlist, envelope)
+        if not isinstance(failure, _PlanFailure):
+            return failure, envelope, plan_usage, False
+
+        code, details = failure.code, failure.details
+        if failure.outcome == SemanticIntentOutcome.USER_INFORMATION_REQUIRED:
+            return _ServerClarification(
+                contract=_clarification_for_failure(turn, failure),
+                envelope=envelope,
+                usage=plan_usage,
+            )
+        if (
+            repair_state is not _PlannerRepairState.UNUSED
+            or not _repair_can_help(code, details)
+            or turn.repeated_failure_codes.count(code) >= 2
+        ):
+            raise SetupAgentError(
+                code,
+                _refusal_message(code),
+                stage="tool_validation",
+                details=details,
+                usage=plan_usage,
+            )
+        repair_state = _PlannerRepairState.SEMANTIC_REPAIR
+        turn.telemetry.notes["planner_repair_mode"] = repair_state.value
+        try:
+            deltas, repair_usage = await self._repair_once(
+                turn,
+                shortlist,
+                route,
+                envelope=envelope,
+                validation_code=code,
+                validation_details=details,
+                invalid_intent_ref=failure.intent_ref,
+                target_path=failure.target_path,
+                source_segment_ref=failure.segment_ref,
+                prior_usage=plan_usage,
+            )
+        except StructuredCallError as repair_exc:
+            raise SetupAgentError(
+                repair_exc.code,
+                str(repair_exc),
+                stage="planner_repair",
+                retryable=repair_exc.retryable,
+                details=repair_exc.details,
+                usage={**repair_exc.usage, **route.usage_metadata()},
+            ) from None
+        repair_usage = {**repair_usage, **route.usage_metadata()}
+
+        before = intent_fingerprint(envelope)
+        with turn.telemetry.stage("repair_delta_application"):
+            try:
+                repaired_envelope = apply_repair_deltas(
+                    envelope,
+                    deltas.deltas,
+                    message=turn.message,
+                    validation_code=code,
+                    invalid_intent_ref=failure.intent_ref or "",
+                    invalid_target_path=failure.target_path,
+                    references=_planner_references(turn),
+                )
+            except IntentCompileError as exc:
+                raise SetupAgentError(
+                    exc.code,
+                    _refusal_message(exc.code),
+                    stage="planner_repair",
+                    details=exc.details,
+                    usage=repair_usage,
+                ) from None
+        with turn.telemetry.stage("intent_normalization"):
+            repaired_envelope = normalize_planner_envelope(repaired_envelope)
+        if deltas.cannot_repair or intent_fingerprint(repaired_envelope) == before:
+            # Nothing changed, so re-running every gate would reach the same answer at
+            # the same cost. Report the original problem instead of hiding it behind a
+            # second identical failure.
+            raise SetupAgentError(
+                code,
+                _refusal_message(code),
+                stage="planner_repair",
+                details=details,
+                usage=repair_usage,
+            )
+
+        second = self._checked_plan(turn, shortlist, repaired_envelope, recompiling=True)
+        if isinstance(second, _PlanFailure):
+            if second.outcome == SemanticIntentOutcome.USER_INFORMATION_REQUIRED:
+                return _ServerClarification(
+                    contract=_clarification_for_failure(turn, second),
+                    envelope=repaired_envelope,
+                    usage=repair_usage,
+                )
+            raise SetupAgentError(
+                second.code,
+                _refusal_message(second.code),
+                stage="planner_repair",
+                details=second.details,
+                usage=repair_usage,
+            )
+        repair_usage["_setup_repair_successes"] = 1
+        return second, repaired_envelope, repair_usage, True
+
+    def _checked_plan(
+        self,
+        turn: SetupAgentTurnInput,
+        shortlist: CapabilityShortlist,
+        envelope: PlannerIntentEnvelope,
+        *,
+        recompiling: bool = False,
+    ) -> SetupAgentTurnPlan | _PlanFailure:
+        """Compile the reading and dry-run it, or return the typed reason it failed."""
+
+        telemetry = turn.telemetry
+        try:
+            with telemetry.stage("intent_validation"):
+                envelope = PlannerIntentEnvelope.model_validate(envelope.model_dump(mode="json"))
+            references = _planner_references(turn)
+            with telemetry.stage(
+                "semantic_recompilation" if recompiling else "semantic_compilation"
+            ):
+                compilation = compile_planner_intents(
+                    envelope,
+                    draft=turn.draft,
+                    message=turn.message,
+                    source_turn_id=turn.source_turn_id,
+                    shortlist=shortlist,
+                    history=list(turn.history),
+                    references=references,
+                )
+        except IntentCompileError as exc:
+            failure = _classify_plan_failure(
+                code=exc.code,
+                details=exc.details,
+                envelope=envelope,
+                message=turn.message,
+                declared_outcome=exc.outcome,
+                intent_ref=exc.intent_ref,
+                target_path=exc.target_path,
+                segment_ref=exc.segment_ref,
+            )
+            if failure.outcome == SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION:
+                telemetry.notes["compiler_invariant_violation_count"] = (
+                    int(telemetry.notes.get("compiler_invariant_violation_count") or 0) + 1
+                )
+            return failure
+        plan = compilation.plan
+        with telemetry.stage("canonical_operation_validation"):
+            # SetupAgentTurnPlan validation already occurred at the compiler boundary;
+            # recording this explicit hand-off keeps internal-schema failures distinct.
+            plan = SetupAgentTurnPlan.model_validate(plan.model_dump(mode="json"))
+        telemetry.notes["intent_derivations"] = list(compilation.derivations)
+        intent_count = len(envelope.semantic_intents)
+        operation_count = len(plan.operations)
+        telemetry.notes.update(
+            {
+                "semantic_intent_count": intent_count,
+                "compiled_operation_count": operation_count,
+                "semantic_to_operation_expansion_ratio": (
+                    round(operation_count / intent_count, 4) if intent_count else 0.0
+                ),
+            }
+        )
+        if not plan.requires_tool:
+            return plan
+        try:
+            with telemetry.stage("dry_validation"):
+                dry = validate_setup_turn_plan(
+                    _turn_request(turn, plan, shortlist.allowed_keys, include_gates=False)
+                )
+        except SetupTurnRejected as exc:
+            failure = _classify_plan_failure(
+                code=exc.code,
+                details=exc.details,
+                envelope=envelope,
+                message=turn.message,
+                operation_intent_refs=compilation.operation_intent_refs,
+                intent_segments=compilation.intent_segments,
+            )
+            if failure.outcome == SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION:
+                telemetry.notes["compiler_invariant_violation_count"] = (
+                    int(telemetry.notes.get("compiler_invariant_violation_count") or 0) + 1
+                )
+            return failure
+        return dry.plan
+
     async def _plan_once(
         self,
         turn: SetupAgentTurnInput,
         shortlist: CapabilityShortlist,
         route: Any,
-    ) -> tuple[SetupAgentPlanEnvelope, dict[str, Any]]:
+        *,
+        prior_usage: dict[str, Any] | None = None,
+        retry_after_bad_shape: bool = False,
+    ) -> tuple[PlannerIntentEnvelope, dict[str, Any]]:
         """Make at most one bounded structured model call for a free-text turn."""
-        planner_payload = self._planner_payload(turn, shortlist)
-        reserved_cost = estimate_structured_call_cost(
+        telemetry = turn.telemetry
+        instructions = (
+            f"{_PLANNER_INSTRUCTIONS}\n{_SHAPE_RETRY_NOTE}"
+            if retry_after_bad_shape
+            else _PLANNER_INSTRUCTIONS
+        )
+        with telemetry.stage("planner_schema_serialization"):
+            wire_schema = compact_json_schema(PlannerIntentEnvelope)
+            complexity = schema_complexity(wire_schema)
+            definitions = set((wire_schema.get("$defs") or {}).keys())
+            telemetry.notes.update(
+                {
+                    "model_facing_schema_bytes": complexity["minified_schema_bytes"],
+                    "model_facing_schema_depth": complexity["maximum_nesting_depth"],
+                    "model_facing_definition_count": complexity["definition_count"],
+                    "canonical_models_exposed_to_model": sorted(
+                        definitions & FORBIDDEN_SCHEMA_MODELS
+                    ),
+                }
+            )
+        with telemetry.stage("planner_payload_serialization"):
+            planner_payload = self._planner_payload(turn, shortlist)
+            for section, value in planner_payload.items():
+                telemetry.record_payload(
+                    section,
+                    len(json.dumps(value, ensure_ascii=False, default=str)),
+                )
+            telemetry.record_payload("_instructions", len(instructions))
+        prior_reserved = float((prior_usage or {}).get("_setup_reserved_cost_usd") or 0.0)
+        reserved_cost = prior_reserved + estimate_structured_call_cost(
             self.settings,
-            schema_model=SetupAgentPlanEnvelope,
-            instructions=_PLANNER_INSTRUCTIONS,
+            schema_model=PlannerIntentEnvelope,
+            instructions=instructions,
             payload=planner_payload,
             model=route.model,
             max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
@@ -732,47 +1104,78 @@ class SetupChatAgent:
                 stage="planning",
             )
         provider_attempted = False
-        try:
-            await self._before_provider_call(route.model)
-            provider_attempted = True
-            envelope, usage = await structured_call(
-                self.settings,
-                schema_model=SetupAgentPlanEnvelope,
-                schema_name="hilalmarkets_setup_turn_plan",
-                instructions=_PLANNER_INSTRUCTIONS,
-                payload=planner_payload,
-                model=route.model,
-                reasoning_effort=route.reasoning_effort,
-                max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
-                service_tier=route.service_tier,
-                timeout_seconds=self.settings.setup_agent_planner_timeout_seconds,
-                estimated_cost_limit=self.settings.setup_agent_max_estimated_cost_usd_per_turn,
+        # A call that cannot finish inside the turn's remaining time is not started.
+        # Starting it is what produces a client timeout plus a paid answer nobody reads.
+        planner_timeout = turn.deadline.timeout_for(
+            self.settings.setup_agent_planner_timeout_seconds,
+            reserve_seconds=_POST_PLANNER_RESERVE_SECONDS,
+        )
+        if turn.deadline.budget_seconds > 0 and planner_timeout < _MINIMUM_PROVIDER_SECONDS:
+            raise StructuredCallError(
+                "TURN_DEADLINE_EXCEEDED",
+                "There was not enough time left in this turn to plan it.",
                 stage="planning",
-                transport=self.transport,
             )
+        try:
+            # The breaker check is inside the measured window on purpose: it is time
+            # spent getting a provider answer, and measuring only the HTTP call is how
+            # 2.7 seconds of it stayed invisible.
+            with telemetry.stage("planner_provider_wait"):
+                await self._before_provider_call(route.model)
+                provider_attempted = True
+                telemetry.record_provider_call()
+                telemetry.record_model_call("planning")
+                envelope, usage = await structured_call(
+                    self.settings,
+                    schema_model=PlannerIntentEnvelope,
+                    schema_name="hilalmarkets_setup_turn_intent",
+                    instructions=instructions,
+                    payload=planner_payload,
+                    model=route.model,
+                    reasoning_effort=route.reasoning_effort,
+                    max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+                    service_tier=route.service_tier,
+                    timeout_seconds=planner_timeout
+                    or self.settings.setup_agent_planner_timeout_seconds,
+                    estimated_cost_limit=(
+                        self.settings.setup_agent_max_estimated_cost_usd_per_turn
+                    ),
+                    stage="planning",
+                    transport=self.transport,
+                )
         except StructuredCallError as exc:
-            self.model_call_count = 1
+            self.model_call_count += 1
             if provider_attempted:
                 # A timeout has no response usage, but it may still be billed. Carry
                 # the pessimistic reservation so the account and evaluator do not
                 # present a paid attempt as free.
-                exc.usage = {
-                    **exc.usage,
-                    "_setup_reserved_cost_usd": reserved_cost,
-                    "_setup_planner_attempts": 1,
-                }
-            if _counts_toward_circuit(exc):
-                await self._provider_failed(exc, route.model)
-            else:
-                await self._provider_succeeded(route.model)
+                exc.usage = _merged_usage(prior_usage or {}, exc.usage)
+                exc.usage["_setup_reserved_cost_usd"] = reserved_cost
+                exc.usage["_setup_planner_attempts"] = (
+                    int((prior_usage or {}).get("_setup_planner_attempts") or 0) + 1
+                )
+                _record_cost_telemetry(telemetry, exc.usage, self.settings, route.model)
+            with telemetry.stage("planner_provider_wait"):
+                if _counts_toward_circuit(exc):
+                    await self._provider_failed(exc, route.model)
+                else:
+                    await self._provider_succeeded(route.model)
             raise
-        self.model_call_count = 1
-        await self._provider_succeeded(route.model)
-        return envelope, {
-            **usage,
-            "_setup_reserved_cost_usd": reserved_cost,
-            "_setup_planner_attempts": 1,
-        }
+        self.model_call_count += 1
+        with telemetry.stage("planner_provider_wait"):
+            await self._provider_succeeded(route.model)
+        with telemetry.stage("intent_deserialization"):
+            telemetry.record_output(
+                "plan_envelope",
+                len(envelope.model_dump_json(exclude_none=True)),
+            )
+        merged_usage = _merged_usage(prior_usage or {}, usage)
+        merged_usage["_setup_reserved_cost_usd"] = reserved_cost
+        merged_usage["_setup_planner_attempts"] = (
+            int((prior_usage or {}).get("_setup_planner_attempts") or 0) + 1
+        )
+        _record_cost_telemetry(telemetry, merged_usage, self.settings, route.model)
+        return envelope, merged_usage
 
     async def _repair_once(
         self,
@@ -780,41 +1183,36 @@ class SetupChatAgent:
         shortlist: CapabilityShortlist,
         route: Any,
         *,
-        original_candidate: dict[str, Any] | None,
+        envelope: PlannerIntentEnvelope,
         validation_code: str,
         validation_details: tuple[str, ...],
+        invalid_intent_ref: str | None,
+        target_path: str | None,
+        source_segment_ref: str | None,
         prior_usage: dict[str, Any],
-    ) -> tuple[SetupAgentPlanEnvelope, dict[str, Any]]:
+    ) -> tuple[PlannerRepairEnvelope, dict[str, Any]]:
         """Make the single bounded pre-mutation repair call allowed for this turn."""
 
-        payload = {
-            "exact_original_user_text": turn.message,
-            "authoritative_source_segments": _authoritative_source_segments(
-                turn.message,
-                original_candidate,
-            ),
-            "current_canonical_read_model": draft_read_model(turn.draft, []),
-            "current_requirement_states": [
-                item.model_dump(mode="json")
-                for item in active_requirement_states(turn.draft)
-            ],
-            "active_clarification_contract": (
-                turn.conversation.active_question.model_dump(mode="json")
-                if turn.conversation.active_question is not None
-                else None
-            ),
-            "original_plan_when_parseable": original_candidate,
-            "allowed_capabilities": shortlist.to_prompt_dict(),
-            "authorized_operation_schema": strict_json_schema(AuthorizedPatchOperation),
-            "operation_kinds": _OPERATION_GUIDE,
-            "validation": {
-                "code": validation_code,
-                "paths": _sanitized_validation_paths(validation_details),
-            },
-        }
+        telemetry = turn.telemetry
+        with telemetry.stage("repair_context_build"):
+            payload = self._repair_payload(
+                turn,
+                shortlist,
+                envelope=envelope,
+                validation_code=validation_code,
+                validation_details=validation_details,
+                invalid_intent_ref=invalid_intent_ref,
+                target_path=target_path,
+                source_segment_ref=source_segment_ref,
+            )
+            for section, value in payload.items():
+                telemetry.record_payload(
+                    f"repair.{section}",
+                    len(json.dumps(value, ensure_ascii=False, default=str)),
+                )
         reserved = estimate_structured_call_cost(
             self.settings,
-            schema_model=SetupAgentPlanEnvelope,
+            schema_model=PlannerRepairEnvelope,
             instructions=_REPAIR_INSTRUCTIONS,
             payload=payload,
             model=route.model,
@@ -829,29 +1227,43 @@ class SetupChatAgent:
                 stage="planner_repair",
                 usage=prior_usage,
             )
+        repair_timeout = turn.deadline.timeout_for(
+            self.settings.setup_agent_planner_timeout_seconds,
+            reserve_seconds=_POST_PLANNER_RESERVE_SECONDS,
+        )
+        if turn.deadline.budget_seconds > 0 and repair_timeout < _MINIMUM_PROVIDER_SECONDS:
+            raise StructuredCallError(
+                "TURN_DEADLINE_EXCEEDED",
+                "There was not enough time left in this turn to repair the plan.",
+                stage="planner_repair",
+                usage=prior_usage,
+            )
         provider_attempted = False
         try:
-            await self._before_provider_call(route.model)
-            provider_attempted = True
-            envelope, usage = await structured_call(
-                self.settings,
-                schema_model=SetupAgentPlanEnvelope,
-                schema_name="hilalmarkets_setup_turn_plan_repair",
-                instructions=_REPAIR_INSTRUCTIONS,
-                payload=payload,
-                model=route.model,
-                reasoning_effort=route.reasoning_effort,
-                max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
-                service_tier=route.service_tier,
-                timeout_seconds=self.settings.setup_agent_planner_timeout_seconds,
-                estimated_cost_limit=max(
-                    0.000001,
-                    self.settings.setup_agent_max_estimated_cost_usd_per_turn
-                    - prior_reserved,
-                ),
-                stage="planner_repair",
-                transport=self.transport,
-            )
+            with telemetry.stage("repair_provider_wait"):
+                await self._before_provider_call(route.model)
+                provider_attempted = True
+                telemetry.record_provider_call()
+                telemetry.record_model_call("planner_repair")
+                deltas, usage = await structured_call(
+                    self.settings,
+                    schema_model=PlannerRepairEnvelope,
+                    schema_name="hilalmarkets_setup_intent_repair",
+                    instructions=_REPAIR_INSTRUCTIONS,
+                    payload=payload,
+                    model=route.model,
+                    reasoning_effort=route.reasoning_effort,
+                    max_output_tokens=self.settings.setup_agent_planner_max_output_tokens,
+                    service_tier=route.service_tier,
+                    timeout_seconds=repair_timeout
+                    or self.settings.setup_agent_planner_timeout_seconds,
+                    estimated_cost_limit=max(
+                        0.000001,
+                        self.settings.setup_agent_max_estimated_cost_usd_per_turn - prior_reserved,
+                    ),
+                    stage="planner_repair",
+                    transport=self.transport,
+                )
         except StructuredCallError as exc:
             self.model_call_count += 1
             exc.usage = _merged_usage(
@@ -862,17 +1274,90 @@ class SetupChatAgent:
                     "_setup_repair_attempts": 1,
                 },
             )
-            if provider_attempted and _counts_toward_circuit(exc):
-                await self._provider_failed(exc, route.model)
-            elif provider_attempted:
-                await self._provider_succeeded(route.model)
+            _record_cost_telemetry(telemetry, exc.usage, self.settings, route.model)
+            with telemetry.stage("repair_provider_wait"):
+                if provider_attempted and _counts_toward_circuit(exc):
+                    await self._provider_failed(exc, route.model)
+                elif provider_attempted:
+                    await self._provider_succeeded(route.model)
             raise
         self.model_call_count += 1
-        await self._provider_succeeded(route.model)
+        with telemetry.stage("repair_provider_wait"):
+            await self._provider_succeeded(route.model)
         merged = _merged_usage(prior_usage, usage)
         merged["_setup_reserved_cost_usd"] = prior_reserved + reserved
         merged["_setup_repair_attempts"] = 1
-        return envelope, merged
+        _record_cost_telemetry(telemetry, merged, self.settings, route.model)
+        return deltas, merged
+
+    def _repair_payload(
+        self,
+        turn: SetupAgentTurnInput,
+        shortlist: CapabilityShortlist,
+        *,
+        envelope: PlannerIntentEnvelope,
+        validation_code: str,
+        validation_details: tuple[str, ...],
+        invalid_intent_ref: str | None,
+        target_path: str | None,
+        source_segment_ref: str | None,
+    ) -> dict[str, Any]:
+        """What the repair call sees: the reading, the words, and what went wrong.
+
+        No internal mutation schema, no canonical requirement dump. The old repair
+        payload re-sent the whole 12 KB operation schema and the entire requirement
+        state — around 19,000 characters of it — which made the call meant to recover
+        from a failure larger than the call that failed.
+        """
+
+        del shortlist
+        index = _intent_index(invalid_intent_ref)
+        invalid_intent = (
+            envelope.semantic_intents[index]
+            if index is not None and index < len(envelope.semantic_intents)
+            else None
+        )
+        segment_ref = source_segment_ref or (
+            invalid_intent.segment_ref if invalid_intent is not None else None
+        )
+        source_segment = next(
+            (item for item in envelope.segments if item.segment_ref == segment_ref),
+            None,
+        )
+        return {
+            "invalid_intent": (
+                invalid_intent.model_dump(mode="json", exclude_none=True)
+                if invalid_intent is not None
+                else None
+            ),
+            "verified_source_segment": (
+                source_segment.model_dump(mode="json") if source_segment else None
+            ),
+            "relevant_existing_value": _relevant_existing_value(
+                turn.draft,
+                target_path,
+                invalid_intent,
+                _planner_references(turn),
+            ),
+            "validation": {
+                "code": validation_code,
+                "path": target_path or "",
+                "sanitized_paths": _sanitized_validation_paths(validation_details)[:3],
+            },
+            "allowed_repair_kinds": [
+                "remove_intent",
+                "remove_field",
+                "replace_with_grounded_value",
+                "relink_source_segment",
+                "inherit_existing_value",
+                "correct_semantic_role",
+                "replace_target_reference",
+                "preserve_as_unsupported",
+            ],
+            "minimum_target_references": _minimum_reference_context(
+                invalid_intent, _planner_references(turn)
+            ),
+        }
 
     async def _compose_once(
         self,
@@ -913,14 +1398,11 @@ class SetupChatAgent:
             "draft_read_model": result.draft_read_model,
             "screening_evidence": result.screening_evidence,
             "market_data_check": result.preflight_manifest,
-            "response_points": [
-                item.model_dump(mode="json") for item in plan.response_points
-            ],
+            "response_points": [item.model_dump(mode="json") for item in plan.response_points],
             "questions_to_answer": list(plan.questions_to_answer),
             "grounded_product_knowledge": knowledge,
             "authorized_clarification_list": [
-                item.model_dump(mode="json")
-                for item in result.allowed_clarifications
+                item.model_dump(mode="json") for item in result.allowed_clarifications
             ],
             # Every id a factual claim may cite this turn. Nothing outside this list is
             # citable, so nothing outside it can be asserted.
@@ -936,48 +1418,68 @@ class SetupChatAgent:
             max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
             service_tier=service_tier,
         )
-        planner_reserved = float(
-            planner_usage.get("_setup_reserved_cost_usd") or 0.0
-        )
-        if (
-            planner_reserved + reserved
-            > self.settings.setup_agent_max_estimated_cost_usd_per_turn
-        ):
+        planner_reserved = float(planner_usage.get("_setup_reserved_cost_usd") or 0.0)
+        if planner_reserved + reserved > self.settings.setup_agent_max_estimated_cost_usd_per_turn:
             raise StructuredCallError(
                 "SETUP_AGENT_COST_LIMIT",
                 "Contextual wording would exceed the configured per-turn AI budget.",
                 stage="response_composition",
             )
-        try:
-            await self._before_provider_call(model)
-            reply, usage = await structured_call(
-                self.settings,
-                schema_model=SetupAgentReply,
-                schema_name="hilalmarkets_setup_turn_reply",
-                instructions=_COMPOSER_INSTRUCTIONS,
-                payload=payload,
-                model=model,
-                reasoning_effort="low",
-                max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
-                service_tier=service_tier,
-                timeout_seconds=self.settings.setup_agent_composer_timeout_seconds,
-                estimated_cost_limit=max(
-                    0.000001,
-                    self.settings.setup_agent_max_estimated_cost_usd_per_turn
-                    - planner_reserved,
-                ),
-                stage="response_composition",
-                transport=self.transport,
+        telemetry = turn.telemetry
+        for section, value in payload.items():
+            telemetry.record_payload(
+                f"composer.{section}",
+                len(json.dumps(value, ensure_ascii=False, default=str)),
             )
+        # Wording is the one thing a turn can finish without. When the budget is nearly
+        # spent the deterministic summary is used instead of starting a call that would
+        # arrive after the client gave up.
+        composer_timeout = turn.deadline.timeout_for(
+            self.settings.setup_agent_composer_timeout_seconds,
+            reserve_seconds=_POST_COMPOSER_RESERVE_SECONDS,
+        )
+        if turn.deadline.budget_seconds > 0 and composer_timeout < _MINIMUM_PROVIDER_SECONDS:
+            raise StructuredCallError(
+                "TURN_DEADLINE_EXCEEDED",
+                "There was not enough time left in this turn to word the reply.",
+                stage="response_composition",
+            )
+        try:
+            with telemetry.stage("response_composition"):
+                await self._before_provider_call(model)
+                telemetry.record_provider_call()
+                telemetry.record_model_call("response_composition")
+                reply, usage = await structured_call(
+                    self.settings,
+                    schema_model=SetupAgentReply,
+                    schema_name="hilalmarkets_setup_turn_reply",
+                    instructions=_COMPOSER_INSTRUCTIONS,
+                    payload=payload,
+                    model=model,
+                    reasoning_effort="low",
+                    max_output_tokens=self.settings.setup_agent_composer_max_output_tokens,
+                    service_tier=service_tier,
+                    timeout_seconds=composer_timeout
+                    or self.settings.setup_agent_composer_timeout_seconds,
+                    estimated_cost_limit=max(
+                        0.000001,
+                        self.settings.setup_agent_max_estimated_cost_usd_per_turn
+                        - planner_reserved,
+                    ),
+                    stage="response_composition",
+                    transport=self.transport,
+                )
         except StructuredCallError as exc:
             self.model_call_count += 1
-            if _counts_toward_circuit(exc):
-                await self._provider_failed(exc, model)
-            else:
-                await self._provider_succeeded(model)
+            with telemetry.stage("response_composition"):
+                if _counts_toward_circuit(exc):
+                    await self._provider_failed(exc, model)
+                else:
+                    await self._provider_succeeded(model)
             raise
         self.model_call_count += 1
-        await self._provider_succeeded(model)
+        with telemetry.stage("response_composition"):
+            await self._provider_succeeded(model)
         # Structural check first, and it decides. Every factual claim has to state a
         # proposition that matches the evidence; anything that does not is replaced by
         # deterministic text built from the evidence. Reading ids and values rather than
@@ -990,9 +1492,7 @@ class SetupChatAgent:
                 reconciled_operations=[
                     item.model_dump(mode="json") for item in result.reconciled_operations
                 ],
-                response_points=[
-                    item.model_dump(mode="json") for item in plan.response_points
-                ],
+                response_points=[item.model_dump(mode="json") for item in plan.response_points],
                 questions_to_answer=list(plan.questions_to_answer),
             ),
             fallback_message=deterministic_summary(result),
@@ -1018,6 +1518,7 @@ class SetupChatAgent:
             model,
         )
         merged["_setup_combined_actual_cost_usd"] = combined_actual
+        _record_cost_telemetry(telemetry, merged, self.settings, model)
         return composed, merged
 
     def _planner_payload(
@@ -1025,71 +1526,562 @@ class SetupChatAgent:
         turn: SetupAgentTurnInput,
         shortlist: CapabilityShortlist,
     ) -> dict[str, Any]:
+        """Everything the model needs to read this turn, and nothing it cannot act on.
+
+        Measured on a one-condition draft, ``requirement_states`` was **18,026 of the
+        24,595 characters** sent — 73% of the payload — for 34 records of which 9 were
+        blocking and 10 were governed Sharia-policy internals. Between 39% and 44%
+        of the characters were ``null``, ``false``, ``""`` or ``[]``.
+
+        What replaces it is the same facts in the form a reader can use: the open
+        questions that are actually blocking, in plain words.
+        """
+
         draft = turn.draft
+        references = _planner_references(turn)
         return {
             "current_user_turn": turn.message,
-            "source_turn_id": turn.source_turn_id,
             "recent_dialogue": list(turn.dialogue)[-DIALOGUE_WINDOW_MAX:],
             "setup_mode": turn.setup_mode.value,
             "draft": {
-                "draft_id": str(draft.draft_id),
-                "executable_version": draft.executable_version,
-                "workflow_revision": draft.workflow_revision,
                 "name": draft.name,
                 "included_symbols": draft.universe.included_symbols[:50],
                 "excluded_symbols": draft.universe.excluded_symbols[:50],
                 "market_scope": draft.market_scope.model_dump(mode="json"),
-                "sharia_policy": draft.sharia_policy.model_dump(mode="json"),
-                "conditions": _condition_labels(draft),
-                "boolean_shape": _boolean_shape(draft),
+                "sharia_preferences": _public_sharia_preferences(draft, references),
+                "conditions": _condition_labels(draft, references),
+                "boolean_shape": _boolean_shape(draft, references),
             },
-            "requirement_states": [
-                item.model_dump(mode="json")
-                for item in active_requirement_states(draft)
-            ],
-            "unresolved_fields": [
-                item.model_dump(mode="json")
-                for item in draft.unresolved_fields
-                if unresolved_target_path(item)
-                in {
-                    state.target_path
-                    for state in active_requirement_states(draft)
-                    if state.blocking
-                }
-            ],
+            "open_questions": _open_questions(draft, references),
             "unsupported_requirements": [
-                {"key": item.key, "missing": item.missing_contract}
-                for item in draft.unsupported_requirements
+                {"missing": item.missing_contract} for item in draft.unsupported_requirements
             ],
-            "recent_semantic_diff": list(turn.conversation.last_changed_condition_ids)[:12],
             "available_snapshots": [
-                {
-                    "snapshot_id": str(item.get("snapshot_id") or ""),
-                    "executable_version": int(item.get("executable_version") or 0),
-                }
-                for item in turn.history[-20:]
-                if item.get("snapshot_id") and item.get("executable_version")
+                {"snapshot_ref": item.reference} for item in references.snapshots
             ],
-            "conversation_context": turn.conversation.model_dump(mode="json"),
+            "conversation_context": _conversation_context(turn.conversation, references),
+            "governed_sharia_choices": {
+                "methodologies": [item.prompt_dict() for item in references.methodologies],
+                "approved_watchlists": [item.prompt_dict() for item in references.watchlists],
+            },
             "approval_eligible": draft.approval_eligible,
-            "semantic_violations": validate_draft_semantics(draft),
+            "semantic_violations": _public_semantic_violations(draft, references),
             "core_primitives": _core_primitives(),
-            "capability_shortlist": shortlist.to_prompt_dict(),
+            "capability_shortlist": _model_capability_shortlist(shortlist),
             "product_boundaries": _PRODUCT_BOUNDARIES,
             "product_knowledge": product_knowledge(),
-            "operation_kinds": _OPERATION_GUIDE,
         }
+
+
+def _open_questions(
+    draft: StrategyDraftV2,
+    references: PlannerReferenceContext,
+) -> list[dict[str, Any]]:
+    """The questions that actually block this draft, in the words a reader needs.
+
+    Only blocking requirements and only fields a planner can act on. Governed Sharia
+    identities and assessments stay out of this list: the planner may identify an
+    explicit public preference, while only the registry may resolve policy identity or
+    asset status.
+    """
+
+    blocking = [item for item in active_requirement_states(draft) if item.blocking]
+    open_by_path = {item.target_path: item for item in blocking}
+    rows: list[dict[str, Any]] = []
+    clarification_by_id = {
+        canonical: reference for reference, canonical in references.clarification_ids.items()
+    }
+    condition_by_id = {
+        canonical: reference for reference, canonical in references.condition_ids.items()
+    }
+    for item in draft.unresolved_fields:
+        if not item.blocking:
+            continue
+        rows.append(
+            {
+                "clarification_ref": clarification_by_id.get(item.unresolved_id),
+                "about": item.target_field or item.target_type,
+                "rule_ref": condition_by_id.get(item.target_condition_id or ""),
+                "question": item.question,
+                "options": list(item.allowed_options[:6]),
+            }
+        )
+    for path, state in open_by_path.items():
+        if state.semantic_type.startswith("sharia") or any(row["about"] == path for row in rows):
+            continue
+        rows.append(
+            {
+                "clarification_ref": clarification_by_id.get(state.requirement_id),
+                "about": _public_requirement_path(path, condition_by_id),
+                "rule_ref": condition_by_id.get(state.target_condition_id or ""),
+                "question": state.reason,
+                "options": [],
+            }
+        )
+    return rows[:20]
+
+
+def _public_requirement_path(
+    path: str,
+    condition_by_id: dict[str, str],
+) -> str:
+    public = path
+    for canonical, reference in condition_by_id.items():
+        public = public.replace(canonical, reference)
+    return public
+
+
+def _public_semantic_violations(
+    draft: StrategyDraftV2,
+    references: PlannerReferenceContext,
+) -> list[str]:
+    condition_by_id = {
+        canonical: reference for reference, canonical in references.condition_ids.items()
+    }
+    return [
+        _public_requirement_path(item, condition_by_id) for item in validate_draft_semantics(draft)
+    ]
+
+
+def _model_capability_shortlist(shortlist: CapabilityShortlist) -> dict[str, Any]:
+    """Public mechanics only; registry identity remains a server validation input."""
+
+    candidates: list[dict[str, Any]] = []
+    for item in shortlist.candidates:
+        candidate = item.to_prompt_dict()
+        candidate.pop("capability_version", None)
+        candidates.append(candidate)
+    return {
+        "candidates": candidates,
+        "unknown_terms": list(shortlist.unknown_terms),
+        "rule": (
+            "Choose only a listed capability_key. If none is exact, preserve the "
+            "request as unsupported. Never invent or substitute a nearby mechanic."
+        ),
+    }
+
+
+def _conversation_context(
+    conversation: SetupConversationContext,
+    references: PlannerReferenceContext,
+) -> dict[str, Any]:
+    """What the last few turns were about. Language only, never executable."""
+
+    return {
+        "active_clarification_ref": next(
+            (
+                reference
+                for reference, canonical in references.clarification_ids.items()
+                if canonical == conversation.active_question_id
+            ),
+            None,
+        ),
+        "question_text": conversation.question_text,
+        "valid_answer_shape": conversation.valid_answer_shape,
+        "last_assistant_summary": conversation.last_assistant_summary,
+    }
+
+
+def _segment_trace(envelope: PlannerIntentEnvelope) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "segment_ref": item.segment_ref,
+            "kind": item.segment_kind.value,
+            "text": item.exact_source_text,
+        }
+        for item in envelope.segments
+    )
+
+
+def _repair_can_help(code: str, details: tuple[str, ...]) -> bool:
+    """Would asking the model once more have any chance of a different answer?
+
+    A paid call that cannot succeed is worse than a refusal: it costs money, it costs the
+    user seconds, and it ends in the same message. Two families can never be talked out
+    of — the sanitation classes marked unrepairable, and any refusal whose reason is a
+    boundary rather than a mistake.
+    """
+
+    if code in SANITATION_CLASSES:
+        return SANITATION_CLASSES[code] == SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED
+    if code not in _REPAIRABLE_VALIDATION_CODES:
+        return False
+    boundary_markers = {
+        "authentication",
+        "authorization",
+        "ownership",
+        "approval",
+        "screening",
+        "provider",
+        "capability_not_offered",
+        "capability_not_registered",
+        "unsupported_requirement",
+        "unsupported_mechanic",
+    }
+    joined = " ".join(details).casefold()
+    return not any(marker in joined for marker in boundary_markers)
+
+
+def _classify_plan_failure(
+    *,
+    code: str,
+    details: tuple[str, ...],
+    envelope: PlannerIntentEnvelope,
+    message: str,
+    declared_outcome: SemanticIntentOutcome | None = None,
+    intent_ref: str | None = None,
+    target_path: str | None = None,
+    segment_ref: str | None = None,
+    operation_intent_refs: dict[str, str] | None = None,
+    intent_segments: dict[str, str] | None = None,
+) -> _PlanFailure:
+    """Classify every semantic/compiler/canonical failure at one boundary.
+
+    Repair is a narrow proof, never the default.  For compiler failures the compiler
+    must supply one exact compact intent, field and verified segment.  For canonical
+    failures every structured detail must independently map back to the same one of
+    each.  An operation id, an exception string, or a canonical default is not enough.
+    """
+
+    terminal_outcomes = {
+        SemanticIntentOutcome.USER_INFORMATION_REQUIRED,
+        SemanticIntentOutcome.UNSUPPORTED_REQUIREMENT,
+        SemanticIntentOutcome.NON_RECOVERABLE_FAILURE,
+        SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION,
+    }
+    if declared_outcome in terminal_outcomes:
+        return _PlanFailure(
+            code=code,
+            details=(
+                tuple(_sanitized_validation_paths(details))
+                if declared_outcome == SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION
+                else details
+            ),
+            outcome=declared_outcome,
+            intent_ref=intent_ref,
+            target_path=target_path,
+            segment_ref=segment_ref,
+        )
+
+    if declared_outcome == SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED:
+        candidate = _verified_repair_attribution(
+            code=code,
+            details=details,
+            envelope=envelope,
+            message=message,
+            intent_ref=intent_ref,
+            target_path=target_path,
+            segment_ref=segment_ref,
+            allow_omitted_field=code == "INTENT_VALUE_UNREADABLE",
+        )
+        return candidate or _compiler_invariant_failure(details)
+
+    if code not in _REPAIRABLE_VALIDATION_CODES or not details:
+        return _compiler_invariant_failure(details)
+    operation_intent_refs = operation_intent_refs or {}
+    intent_segments = intent_segments or {}
+    attributed_intents: set[str] = set()
+    attributed_paths: set[str] = set()
+    for detail in details:
+        parts = str(detail).split(":")
+        if len(parts) < 3:
+            return _compiler_invariant_failure(details)
+        attributed_intent = operation_intent_refs.get(parts[0])
+        if attributed_intent is None:
+            return _compiler_invariant_failure(details)
+        index = _intent_index(attributed_intent)
+        if index is None or index >= len(envelope.semantic_intents):
+            return _compiler_invariant_failure(details)
+        path = _model_owned_semantic_path(envelope.semantic_intents[index], parts)
+        if path is None:
+            return _compiler_invariant_failure(details)
+        attributed_intents.add(attributed_intent)
+        attributed_paths.add(path)
+    if len(attributed_intents) != 1 or len(attributed_paths) != 1:
+        return _compiler_invariant_failure(details)
+    attributed_intent = next(iter(attributed_intents))
+    candidate = _verified_repair_attribution(
+        code=code,
+        details=details,
+        envelope=envelope,
+        message=message,
+        intent_ref=attributed_intent,
+        target_path=next(iter(attributed_paths)),
+        segment_ref=intent_segments.get(attributed_intent),
+    )
+    return candidate or _compiler_invariant_failure(details)
+
+
+def _compiler_invariant_failure(details: tuple[str, ...]) -> _PlanFailure:
+    return _PlanFailure(
+        code="COMPILER_INVARIANT_VIOLATION",
+        details=tuple(_sanitized_validation_paths(details)),
+        outcome=SemanticIntentOutcome.COMPILER_INVARIANT_VIOLATION,
+    )
+
+
+def _verified_repair_attribution(
+    *,
+    code: str,
+    details: tuple[str, ...],
+    envelope: PlannerIntentEnvelope,
+    message: str,
+    intent_ref: str | None,
+    target_path: str | None,
+    segment_ref: str | None,
+    allow_omitted_field: bool = False,
+) -> _PlanFailure | None:
+    """Return a repair failure only after its complete provenance proof succeeds."""
+
+    if not _repair_can_help(code, details) or not intent_ref or not target_path or not segment_ref:
+        return None
+    index = _intent_index(intent_ref)
+    if index is None or index >= len(envelope.semantic_intents):
+        return None
+    intent = envelope.semantic_intents[index]
+    if intent.segment_ref != segment_ref and not allow_omitted_field:
+        return None
+    segment = next((item for item in envelope.segments if item.segment_ref == segment_ref), None)
+    if segment is None or segment.exact_source_text not in message:
+        return None
+    if not _intent_owns_path(intent, target_path, allow_omitted=allow_omitted_field):
+        return None
+    return _PlanFailure(
+        code=code,
+        details=tuple(_sanitized_validation_paths(details)),
+        outcome=SemanticIntentOutcome.SEMANTIC_INTENT_REPAIR_REQUIRED,
+        intent_ref=intent_ref,
+        target_path=target_path,
+        segment_ref=segment_ref,
+    )
+
+
+def _intent_owns_path(
+    intent: SemanticIntent,
+    target_path: str,
+    *,
+    allow_omitted: bool,
+) -> bool:
+    """Whether one compact field, not canonical metadata, owns ``target_path``."""
+
+    payload = intent.payload
+    if target_path.startswith("condition."):
+        condition = getattr(payload, "condition", None)
+        if condition is None:
+            return False
+        field_name = target_path.removeprefix("condition.").split(".", 1)[0]
+        supported = field_name in type(condition).model_fields
+        return supported and (allow_omitted or field_name in condition.model_fields_set)
+    field_name = target_path.removeprefix("payload.").split(".", 1)[0]
+    supported = field_name in type(payload).model_fields
+    return supported and (allow_omitted or field_name in payload.model_fields_set)
+
+
+def _model_owned_semantic_path(intent: SemanticIntent, parts: list[str]) -> str | None:
+    """Map one safe canonical error path back to a field the model supplied."""
+
+    payload = intent.payload
+    operation_kind = parts[1]
+    field_name = parts[2]
+    if operation_kind == "set_fields":
+        return field_name if field_name in payload.model_fields_set else None
+    if operation_kind in {
+        "add_inclusion",
+        "add_exclusion",
+        "remove_inclusion",
+        "remove_exclusion",
+    }:
+        return "symbol" if "symbol" in payload.model_fields_set else None
+    if operation_kind == "sharia_policy":
+        candidates = {
+            "universe_mode": ("screened_assets_only", "approved_watchlist_only"),
+            "approved_watchlist": ("approved_watchlist_only",),
+            "methodology_identifier": ("methodology_identifier", "methodology_family"),
+            "allowed_statuses": ("fail_closed_preference",),
+        }.get(field_name, (field_name,))
+        supplied = [name for name in candidates if name in payload.model_fields_set]
+        return supplied[0] if len(supplied) == 1 else None
+    if operation_kind not in {"condition", "add_condition", "update_condition"}:
+        return None
+    condition = getattr(payload, "condition", None)
+    if condition is None:
+        return None
+    canonical_to_semantic = {
+        "context_timeframe": "context_timeframes",
+        "confirmation_timeframe": "confirmation_timeframes",
+        "condition_symbol": "condition_symbols",
+        "boolean_shape": "boolean_relationship",
+    }
+    semantic_field = canonical_to_semantic.get(field_name, field_name)
+    if semantic_field not in condition.model_fields_set:
+        return None
+    return f"condition.{semantic_field}"
+
+
+def _intent_index(intent_ref: str | None) -> int | None:
+    match = re.fullmatch(r"intent_(\d+)", str(intent_ref or ""))
+    return int(match.group(1)) - 1 if match else None
+
+
+def _relevant_existing_value(
+    draft: StrategyDraftV2,
+    target_path: str | None,
+    intent: SemanticIntent | None,
+    references: PlannerReferenceContext,
+) -> Any:
+    if intent is None or not target_path:
+        return None
+    payload = intent.payload
+    reference = getattr(payload, "target_reference", None)
+    condition = getattr(payload, "condition", None)
+    reference = reference or getattr(condition, "target_reference", None)
+    condition_id = references.condition_id(reference)
+    if condition_id and draft.condition_ast is not None:
+        node = next(
+            (item for item in draft.condition_ast.walk() if item.node_id == condition_id),
+            None,
+        )
+        field_name = target_path.removeprefix("condition.")
+        if node is not None and field_name in node.model_fields:
+            value = getattr(node, field_name)
+            return value.value if hasattr(value, "value") else value
+    return None
+
+
+def _minimum_reference_context(
+    intent: SemanticIntent | None,
+    references: PlannerReferenceContext,
+) -> dict[str, Any]:
+    if intent is None:
+        return {}
+    action = intent.action.value
+    if "condition" in action or action == "replace_boolean_structure":
+        return {"condition_refs": sorted(references.condition_ids)}
+    if action == "restore_owned_version":
+        return {"snapshot_refs": [item.reference for item in references.snapshots]}
+    if action == "set_sharia_preferences":
+        return {
+            "methodologies": [item.prompt_dict() for item in references.methodologies],
+            "watchlists": [item.prompt_dict() for item in references.watchlists],
+        }
+    return {}
+
+
+#: What the user reads when a turn is refused. Plain words, one per class, and never a
+#: code or a field path — those go to the operator trace.
+_REFUSAL_MESSAGES: dict[str, str] = {
+    "INTENT_SEGMENT_NOT_IN_MESSAGE": (
+        "I could not match part of that to your exact words. Could you say it again?"
+    ),
+    "INTENT_TARGET_UNKNOWN": (
+        "That pointed at a rule or a question this setup does not have right now."
+    ),
+    "INTENT_VALUE_UNREADABLE": "I could not read one of the values in that message.",
+    "INTENT_INCOMPLETE": "That message is missing something I need before I can set it up.",
+    "INTENT_NOT_PERMITTED": (
+        "Part of that would change the setup, but nothing in the message asked for it."
+    ),
+}
+
+
+def _refusal_message(code: str) -> str:
+    return _REFUSAL_MESSAGES.get(
+        code,
+        "I could not turn that into an exact change. Nothing in your setup was altered.",
+    )
+
+
+def _clarification_for_failure(
+    turn: SetupAgentTurnInput,
+    failure: _PlanFailure,
+) -> ClarificationContract:
+    """Derive one minimal typed question from a validated requirement failure."""
+
+    path = (failure.target_path or "").removeprefix("payload.")
+    references = _planner_references(turn)
+    sharia_universe_choice = any(
+        marker in failure.details
+        for marker in (
+            "sharia_preferences:universe_conflict",
+            "sharia_preferences:negative_universe_without_alternative",
+        )
+    )
+    if sharia_universe_choice:
+        question = "Should this setup use the screened market or one approved watchlist?"
+        reason = (
+            "A negative preference is usable only when the same instruction selects "
+            "the governed alternative."
+        )
+        target_type: ClarificationTargetType = "sharia_policy"
+        target_field = "universe_mode"
+        options = ["Screened market", "Approved watchlist"]
+        expected = {"type": "string", "enum": options}
+    elif path in {"methodology_family", "methodology_identifier"}:
+        question = "Which offered Sharia methodology should this setup use?"
+        reason = "More than one governed methodology matches that preference."
+        target_type = "sharia_policy"
+        target_field = "methodology_id"
+        options = [item.public_identifier for item in references.methodologies][:6]
+        expected = {"type": "string", "enum": options} if options else {"type": "string"}
+    elif path == "approved_watchlist_only":
+        question = "Which offered approved watchlist should this setup use?"
+        reason = "More than one executable owned watchlist matches that preference."
+        target_type = "sharia_policy"
+        target_field = "approved_watchlist_id"
+        options = [item.public_name for item in references.watchlists][:6]
+        expected = {"type": "string", "enum": options} if options else {"type": "string"}
+    else:
+        field = path.removeprefix("condition.") or "rule"
+        question = {
+            "formula_key": (
+                "What exact price movement, candle pattern, or supported indicator "
+                "should this rule measure?"
+            ),
+            "comparator": (
+                "Should this rule use at least, at most, above, below, or exactly?"
+            ),
+            "threshold": "What exact numeric threshold should this rule use?",
+            "trigger_timeframe": "What exact trigger timeframe should this rule use?",
+        }.get(field, f"What exact {field.replace('_', ' ')} should this rule use?")
+        reason = "That value is required to compile the rule without guessing."
+        target_type = "condition_creation"
+        target_field = None
+        options = []
+        expected_type = (
+            "number" if field in {"threshold"} else "integer" if field in {"lookback"} else "string"
+        )
+        expected = {"type": expected_type}
+    digest = hashlib.sha256(
+        f"{turn.source_turn_id}:{target_type}:{target_field or path}".encode()
+    ).hexdigest()[:20]
+    return ClarificationContract(
+        question_id=f"clarification_{digest}",
+        question=question,
+        reason=reason,
+        target_type=target_type,
+        target_field=target_field,
+        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
+        mutating=True,
+        allowed_options=options,
+    )
 
 
 def _requires_contextual_composer(
     plan: SetupAgentTurnPlan,
     result: SetupTurnExecutionResult,
 ) -> bool:
-    """Use a second bounded call only when factual summary cannot answer the turn."""
+    """Use a second model call only when the evidence cannot answer the turn itself.
 
-    reply_bearing_kinds = {
-        SegmentKind.SOCIAL_REPLY,
-        SegmentKind.CONVERSATIONAL_CONTEXT,
+    Wording is the one thing a turn can finish without, and the second call is the whole
+    difference between a one-call turn and a two-call one. It is worth paying for exactly
+    when the user asked something that the before/after diff does not answer.
+
+    A change with no question attached is *not* one of those cases. The deterministic
+    summary states what changed from the canonical diff, which is the same fact the
+    composer would have to cite anyway — and it states it without a second wait.
+    """
+
+    asks_a_question = {
         SegmentKind.USER_QUESTION,
         SegmentKind.PRODUCT_QUESTION,
         SegmentKind.EXPLANATION_REQUEST,
@@ -1097,9 +2089,8 @@ def _requires_contextual_composer(
     }
     return bool(
         plan.questions_to_answer
-        or len(plan.response_points) > 1
-        or any(item.kind in reply_bearing_kinds for item in plan.segments)
-        or any(item.kind == "explain_refusal" for item in plan.response_points)
+        or any(item.kind in asks_a_question for item in plan.segments)
+        or any(item.kind in {"explain_refusal", "answer_question"} for item in plan.response_points)
         or plan.unsupported_segments
         or result.safe_errors
     )
@@ -1136,12 +2127,27 @@ def deterministic_summary(result: SetupTurnExecutionResult) -> str:
     return "\n".join(lines) or "Nothing changed on this turn."
 
 
-def _deterministic_conversation_reply(draft: StrategyDraftV2) -> str:
+def _deterministic_conversation_reply(
+    draft: StrategyDraftV2,
+    *,
+    envelope: PlannerIntentEnvelope,
+) -> str:
     """Last-resort words for a conversation turn the model left empty.
 
     Deliberately reports the real state instead of asking the user to start over.
     """
 
+    kinds = {item.segment_kind for item in envelope.segments}
+    if SegmentKind.APPROVAL_INTENT in kinds:
+        return (
+            "I recorded your approval intent, but chat text cannot approve or activate "
+            "anything. Review the exact inactive preview and use Review and approve."
+        )
+    if envelope.questions_to_answer:
+        return (
+            "No strategy state changed. Scanner checks a strategy on demand; Monitor "
+            "keeps evaluating an explicitly approved strategy. Neither path places trades."
+        )
     count = _condition_count(draft)
     if count == 0:
         return (
@@ -1157,23 +2163,27 @@ def _deterministic_conversation_reply(draft: StrategyDraftV2) -> str:
 def _condition_count(draft: StrategyDraftV2) -> int:
     if draft.condition_ast is None:
         return 0
-    return sum(
-        node.node_type == ConditionNodeType.CONDITION for node in draft.condition_ast.walk()
-    )
+    return sum(node.node_type == ConditionNodeType.CONDITION for node in draft.condition_ast.walk())
 
 
-def _condition_labels(draft: StrategyDraftV2) -> list[dict[str, Any]]:
+def _condition_labels(
+    draft: StrategyDraftV2,
+    references: PlannerReferenceContext,
+) -> list[dict[str, Any]]:
     """Short, stable labels so the model can refer to a rule the user means."""
 
     if draft.condition_ast is None:
         return []
     labels: list[dict[str, Any]] = []
+    condition_by_id = {
+        canonical: reference for reference, canonical in references.condition_ids.items()
+    }
     for node in draft.condition_ast.walk():
         if node.node_type != ConditionNodeType.CONDITION:
             continue
         labels.append(
             {
-                "condition_id": node.node_id,
+                "condition_ref": condition_by_id[node.node_id],
                 "formula": node.formula.value if node.formula else None,
                 "operator": node.operator.value if node.operator else None,
                 "threshold": node.threshold,
@@ -1190,17 +2200,55 @@ def _condition_labels(draft: StrategyDraftV2) -> list[dict[str, Any]]:
     return labels[:40]
 
 
-def _boolean_shape(draft: StrategyDraftV2) -> str:
+def _boolean_shape(
+    draft: StrategyDraftV2,
+    references: PlannerReferenceContext,
+) -> str:
+    condition_by_id = {
+        canonical: reference for reference, canonical in references.condition_ids.items()
+    }
+
     def shape(node: Any) -> str:
         if not node.children:
-            return node.node_id
-        return (
-            f"{node.node_type.value}("
-            + ", ".join(shape(child) for child in node.children)
-            + ")"
-        )
+            return condition_by_id.get(node.node_id, "condition")
+        return f"{node.node_type.value}(" + ", ".join(shape(child) for child in node.children) + ")"
 
     return shape(draft.condition_ast) if draft.condition_ast is not None else ""
+
+
+def _public_sharia_preferences(
+    draft: StrategyDraftV2,
+    references: PlannerReferenceContext,
+) -> dict[str, Any]:
+    policy = draft.sharia_policy
+    methodology = next(
+        (
+            item.reference
+            for item in references.methodologies
+            if item.methodology_id == str(policy.methodology_id)
+            and item.methodology_version == policy.methodology_version
+        ),
+        None,
+    )
+    watchlist = next(
+        (
+            item.reference
+            for item in references.watchlists
+            if item.watchlist_id == str(policy.approved_watchlist_id)
+            and item.watchlist_version == policy.approved_watchlist_version
+        ),
+        None,
+    )
+    return {
+        "universe_choice": policy.universe_mode.value,
+        "methodology_ref": methodology,
+        "approved_watchlist_ref": watchlist,
+        "fail_closed": (
+            {item.value for item in policy.allowed_statuses} == {"eligible"}
+            and policy.qualification_policy == "exclude"
+            and policy.disputed_asset_policy == "exclude"
+        ),
+    }
 
 
 def _core_primitives() -> dict[str, Any]:
@@ -1292,50 +2340,13 @@ def product_knowledge() -> dict[str, Any]:
             "evidence. This chat never decides or guesses whether something is halal."
         ),
         "costs_nothing_to_preview": (
-            "Building and previewing a draft changes nothing in the market and places "
-            "no orders."
+            "Building and previewing a draft changes nothing in the market and places no orders."
         ),
         "if_unsure": (
             "If a fact is not listed here, say you are not certain and offer to point "
             "the user at support rather than guessing."
         ),
     }
-
-
-#: How each operation kind is used, so the planner emits authorised operations rather
-#: than a free-floating patch.
-_OPERATION_GUIDE = {
-    "rule": (
-        "Every change is one entry in `operations` with a stable unique operation_id, "
-        "and every entry names the "
-        "`authorizing_segment_id` of the STRATEGY_INSTRUCTION or CLARIFICATION_ANSWER "
-        "segment that asked for it. A SOCIAL_REPLY, USER_QUESTION, PRODUCT_QUESTION, "
-        "EXPLANATION_REQUEST, APPROVAL_INTENT or UNSUPPORTED_REQUEST segment can never "
-        "authorize an operation, and every value in an operation must appear in that "
-        "one segment's own text."
-    ),
-    "kinds": {
-        "set_fields": "change the mode, name, exchange or quote asset",
-        "set_sharia_policy": (
-            "change the canonical static Sharia policy, including methodology, universe "
-            "mode, statuses, watchlist identity, explicit symbols or drift behavior"
-        ),
-        "add_condition": "create one new rule",
-        "update_condition": "change one existing rule, named by target_condition_id",
-        "remove_condition": "delete one existing rule",
-        "replace_groups": "replace the whole AND/OR/NOT structure",
-        "add_inclusion": "add one symbol to the watchlist",
-        "add_exclusion": "keep one symbol out",
-        "remove_inclusion": "stop watching one symbol",
-        "remove_exclusion": "stop excluding one symbol",
-        "add_unresolved": "persist one typed missing value before asking about it",
-        "update_unresolved": "replace one typed unresolved contract",
-        "add_unsupported": "record a market rule the platform cannot express exactly",
-        "resolve_unresolved_key": "close an open question by its exact key",
-        "remove_unsupported_key": "drop an unsupported item by its exact key",
-        "restore_snapshot": "request a server-verified immutable prior executable version",
-    },
-}
 
 
 _PRODUCT_BOUNDARIES = {
@@ -1366,50 +2377,76 @@ A single message can do several things at once — greet, instruct, correct, ask
 it into segments. Each segment's exact_source_text must be a substring of the current
 message, copied character for character — not a paraphrase, not a normalised copy, not
 a quote from an earlier turn. The server searches the real message for that text; if it
-is not there, the whole turn is refused. Do not spend effort on start_offset and
-end_offset: give your best estimate, the server finds the real position itself. Never
-let two actionable segments cover the same words.
+is not there, the whole turn is refused. Give each segment only a turn-local
+`segment_ref`; the server finds offsets and persisted identity. Never let two actionable
+segments cover the same words.
 
 Never force the whole message into one kind. Never discard technical content because
 conversation surrounds it. Never turn conversation into a rule.
 
 WHAT YOU MAY PROPOSE
-Every change is one entry in `operations` with a unique stable operation_id, and each
-entry names the
-`authorizing_segment_id` of the segment that asked for it. Only a STRATEGY_INSTRUCTION
-or a CLARIFICATION_ANSWER segment may authorize one. See operation_kinds for the list.
+You say what the trader meant. You never write the platform's own records: no ids, no
+character positions, no versions, no hashes, no defaults. The server builds all of that.
 
-Every threshold, timeframe, symbol, operator, movement_direction, explicit strategy_bias
-and formula in an operation must
-appear in **that authorizing segment's own text** — not merely somewhere in the message.
-A number written inside a question does not authorize a rule. The exception is an
-`update_condition`: fields you leave unchanged are inherited from the rule you name, so
-`change that to at least 8%` does not have to restate the timeframe.
+Every change is one action-specific payload in `semantic_intents`, linked only by the
+turn-local `segment_ref`. Do not create intent ids, condition ids, question ids,
+versions, hashes or database identities. Only a STRATEGY_INSTRUCTION or a
+CLARIFICATION_ANSWER segment may author a change.
+
+Every threshold, timeframe, symbol, comparator, movement_direction, explicit
+strategy_bias and formula in an intent must appear in **that segment's own text** — not
+merely somewhere in the message. A number written inside a question does not authorize a
+rule. The exception is `update_condition`: leave out every field the trader did not
+restate and the server inherits it from the rule you name, so `change that to at least
+8%` needs only the comparator and the number.
+
+Use one actionable segment for one complete semantic action, not one segment per
+grammatical clause. If one new rule is described across adjacent clauses — for example,
+one clause supplies its timeframe role and the next supplies its formula or threshold —
+the `add_condition` intent must use one exact, contiguous segment that covers all of
+those clauses. Never attach a rule to a narrow clause while putting one of that rule's
+timeframes, symbols, or threshold in another segment. Separate segments are for
+independent actions, not for different pieces of the same rule.
 
 condition_symbols is a symbol-specific restriction, not the draft watchlist. Keep it
-empty unless the same authorizing segment explicitly names that symbol for the rule.
-Never copy symbols from draft.universe into condition_symbols merely because the
-watchlist currently contains one symbol.
+empty unless the same segment explicitly names that symbol for the rule. Never copy
+symbols from the draft into condition_symbols merely because the watchlist has one.
 
-If a value is not in the authorizing segment's words, do not supply one. Create an
-add_unresolved operation with a typed target, answer schema and smallest useful
-canonical question. Use condition_creation when the missing item is a whole rule.
+If a value is not in the segment's words, leave it absent. The server derives and
+reconciles any clarification from final canonical requirement state.
 
-For a registered mechanic, choose a capability_key from capability_shortlist and
-nothing else. If no candidate expresses the request exactly, return an
-add_unsupported operation with the user's own wording, or add one typed unresolved item.
+Do not propose an `add_condition` that cannot yet form an executable rule. When the
+user named a rule but genuinely omitted a required comparator, threshold, formula, or
+trigger timeframe, preserve that exact span in `unsupported_intents` with the missing
+contract stated plainly. Still return every independent, complete intent in the same
+turn. A later complete instruction replaces that blocker through server reconciliation;
+do not ask for a value the user already supplied.
+
+For a registered mechanic, choose a capability_key from capability_shortlist and nothing
+else. If no candidate expresses the request exactly, add an entry to
+`unsupported_intents` with the trader's own wording.
 Never invent a key. Never substitute a mechanic that is merely similar — a near miss
 watches the wrong market and looks like success.
 
-For the core primitives listed in core_primitives, use no capability_key at all.
+For the core primitives listed in core_primitives, use no capability_key at all. When a
+rule compares a price directly, say which price in `measured_price_field`; only a price
+the trader named.
+
+`required` is true unless the trader called that rule optional. Do not set it to false
+because a rule sounds secondary — an optional rule does not have to match for an alert,
+which is a different setup from the one they described.
+
+Give every rule inside a multi-rule instruction its own `source_quote`: the exact words
+of that one rule. "15m ... AND (1h ... OR NOT 4h ...)" names three timeframes, and
+without a per-rule quote nothing shows which timeframe belongs to which rule.
 
 CLARIFICATION ANSWERS
-If conversation_context has an active_question_id and this turn answers it, record a
+If conversation_context has an active_clarification_ref and this turn answers it, record a
 clarification_answers entry. An answer resolves that question; it does not become a
-new condition. "yes" is not a market rule. Include every grounded operation needed to
-make the final canonical value correct. You may link a resolve_unresolved_key operation,
-but the server—not that operation—decides whether the requirement is satisfied and
-closes it after all operations complete.
+new condition. "yes" is not a market rule. Include every grounded intent needed to make
+the final value correct. Do not add an operation merely to close the question;
+but the server—not that intent—decides whether the requirement is satisfied and closes
+it after everything else has been applied.
 
 For an active condition_creation question, a complete explicit supported rule is the
 operation that fills the target: propose add_condition. One complete grounded operation
@@ -1433,13 +2470,23 @@ an EMA, candle count, ratio or extra condition from a context label.
 REFERENCES
 Use recent_dialogue and conversation_context to resolve "that one", "the second
 option", "the one we just added", "make it stricter". Point at the existing
-condition_id rather than rebuilding the rule. For undo or restore language, propose
-restore_snapshot; the server, not you, resolves and verifies the history target.
+condition_ref rather than rebuilding the rule. For undo or restore language, use
+`restore_owned_version`; the server, not you, resolves and verifies the history target.
 
-target_condition_id names a condition that ALREADY EXISTS in draft.conditions. Leave it
-null when you are creating a new rule — there is no id for a rule that does not exist
-yet. To change an existing rule use update_condition with its exact node_id; to delete
-one use remove_condition. An id that is not in draft.conditions is refused.
+target_reference names a rule that ALREADY EXISTS in draft.conditions. Leave it null
+when you are creating a new rule — there is no id for a rule that does not exist yet. To
+change an existing rule use `update_condition` with its offered reference; to delete one
+use `remove_condition`. An unoffered reference is refused.
+
+SHARIA PREFERENCES
+The planner may identify only an explicit user preference with
+`set_sharia_preferences`: a stated methodology family or public identifier, screened
+assets only, an approved watchlist only, or a fail-closed preference. Choose only from
+the compact governed shortlist. Never create policy records, methodology UUIDs or
+versions, watchlist database ids, governance decisions, screening results, rulings,
+evidence conclusions, publication state, or asset statuses. Asking whether an asset is
+halal is a question, not a policy change. Only governed server services resolve policy
+identity or asset status.
 
 DIRECTION
 movement_direction is up, down, neutral or not_applicable. strategy_bias is long,
@@ -1460,46 +2507,56 @@ You may record approval_intent. You can never approve. Approval happens only thr
 the authenticated Review and approve control.
 
 OUTPUT
-Return a plan when the turn needs the server to change or re-check state. Return
-direct_reply instead, with no plan, only when the turn is purely conversational and
-nothing needs applying — and then write the reply yourself, in plain words, in the
-user's language. Never tell a user to describe a setup when they have already given
-you technical content. Never claim anything changed; that is decided after you.
+Always return the segments. Add semantic_intents only when the turn asks the server to
+change or re-check something. When the turn is purely conversational and nothing needs
+applying, return no intents. Put the segment_ref of every user or product question in
+`questions_to_answer`. Never claim anything changed; that is decided after you.
+"""
 
-The envelope has exactly two fields: plan and direct_reply. response_points,
-questions_to_answer and overall_confidence belong inside plan only. For a pure
-conversation return exactly plan=null and direct_reply=<your reply>; never copy plan
-fields beside direct_reply at the envelope root.
 
-Use response_points to record what the final reply must cover, including answers to
-their questions and honest explanations of anything refused.
+#: Appended for the one retry allowed when an answer could not be read at all.
+_SHAPE_RETRY_NOTE = """\
+
+YOUR LAST ANSWER DID NOT MATCH THE REQUIRED SHAPE
+Return the same reading again, in exactly the shape the schema describes, and nothing
+else. Do not change what you understood; only the shape was wrong.
 """
 
 
 _REPAIR_INSTRUCTIONS = """\
-You repair one HilalMarkets Setup Chat planner response before any canonical mutation.
-Return the same strict SetupAgentPlanEnvelope schema.
+You correct one HilalMarkets Setup Chat reading, before anything is saved.
 
-The original user text is authoritative. Source segments must quote it exactly. The
-current canonical read model and requirement states are server-owned truth. The active
-clarification contract is the only open question you may claim to resolve. Use only an
-offered capability and only the authorized operation schema.
+You are given only the invalid semantic intent, its verified exact source segment, at
+most one relevant existing value, a sanitized code/path, and the minimum turn-local
+references. Return the **smallest** correction that would make it valid—not a new
+reading.
 
-Fix only the sanitized validation code and paths. You may remove an ungrounded
-model-added value, inherit an unchanged existing field, relink an operation to the exact
-authorizing segment, remove a stale/redundant resolution operation, or correct a role
-assignment that the user's exact wording already states. Do not add a symbol,
-timeframe, semantic role, formula, movement direction, strategy bias, comparator,
-threshold, unit, lookback, capability, Sharia value, approval action, or executable
-relationship that is absent from the exact user text and canonical context. Platform
-and registry defaults may remain only where the canonical contract owns them.
+Each correction names the server-assigned `intent_ref`, one `target_path`, the supplied
+`validation_code`, and one permitted `repair_kind`:
 
-Never replace an unknown capability with a nearby one. Never approve or activate.
-Never assign Sharia status. Never turn contextual information into a new executable
-condition. If a genuine requested mechanic is unsupported, preserve valid supported
-requirements and record one typed unsupported requirement. If the plan cannot be
-repaired safely, return a non-mutating plan that keeps the typed blocker open; do not
-invent a value.
+- remove_intent
+- remove_field
+- replace_with_grounded_value
+- relink_source_segment
+- inherit_existing_value
+- correct_semantic_role
+- replace_target_reference
+- preserve_as_unsupported
+
+`target_path` is a field name, or `condition.<field>` for a rule's field. You cannot
+change which rules exist or how they are joined; drop the intent instead.
+
+Every replacement must be authorized by the verified source segment itself, not merely
+by words elsewhere in the complete message.
+
+Never add a symbol, timeframe, semantic role, formula, movement direction, strategy
+bias, comparator, threshold, unit, lookback, capability or Sharia preference that the
+trader did not write. You may remove, relink or correct an already-grounded Sharia
+preference, but may never introduce a new one. Never replace an unknown capability with
+a nearby one. Never approve, activate, create policy identity or assign Sharia status.
+
+If the reading cannot be corrected honestly, set cannot_repair to true and return no
+corrections. Keeping the blocker open is the right answer; inventing a value is not.
 """
 
 
@@ -1633,6 +2690,26 @@ def _estimated_usage_cost(
     ) / 1_000_000
 
 
+def _record_cost_telemetry(
+    telemetry: TurnTelemetry,
+    usage: dict[str, Any],
+    settings: Settings,
+    model: str,
+) -> None:
+    """Store one combined cost reading using the estimator that guards the turn."""
+
+    telemetry.notes["combined_estimated_cost_usd"] = round(
+        float(usage.get("_setup_reserved_cost_usd") or 0.0), 9
+    )
+    actual = float(usage.get("_setup_combined_actual_cost_usd") or 0.0)
+    if actual <= 0:
+        actual = _estimated_usage_cost(usage, settings, model)
+    telemetry.notes["combined_actual_cost_usd"] = round(actual, 9)
+    telemetry.notes["planner_attempt_count"] = int(usage.get("_setup_planner_attempts") or 0)
+    telemetry.notes["planner_repair_attempt_count"] = int(usage.get("_setup_repair_attempts") or 0)
+    telemetry.notes["planner_repair_success_count"] = int(usage.get("_setup_repair_successes") or 0)
+
+
 _CIRCUIT_FAILURE_CODES = frozenset(
     {
         "TARGET_CONNECT_TIMEOUT",
@@ -1646,42 +2723,24 @@ _CIRCUIT_FAILURE_CODES = frozenset(
     }
 )
 
-_REPAIRABLE_PROVIDER_CODES = frozenset(
+#: Failures where the answer arrived but could not be read at all. There are no intents
+#: to correct, so the only recovery is one more attempt at the same compact contract.
+_UNPARSEABLE_ANSWER_CODES = frozenset(
     {"TARGET_INVALID_JSON", "TARGET_SCHEMA_VALIDATION", "TARGET_EMPTY_RESPONSE"}
 )
 _REPAIRABLE_VALIDATION_CODES = frozenset(
     {
-        "SPAN_NOT_GROUNDED",
+        # This is the sole canonical gate whose structured details name an
+        # operation, canonical field and grounding result. Generic PATCH_REJECTED,
+        # authorization, span, condition-target and semantic failures can contain
+        # operation ids, but they do not prove one model-owned field caused them.
         "VALUE_NOT_GROUNDED",
-        "UNAUTHORIZED_OPERATION",
-        "PATCH_REJECTED",
-        "CONDITION_NOT_FOUND",
-        "SEMANTIC_VALIDATION_FAILED",
     }
 )
 
 
-def _repair_eligible_provider_failure(exc: StructuredCallError) -> bool:
-    return exc.code in _REPAIRABLE_PROVIDER_CODES and not exc.retryable
-
-
-def _repair_eligible_validation_failure(exc: SetupTurnRejected) -> bool:
-    if exc.code not in _REPAIRABLE_VALIDATION_CODES:
-        return False
-    non_repairable_markers = {
-        "authentication",
-        "authorization",
-        "ownership",
-        "approval",
-        "screening",
-        "provider",
-        "capability_not_offered",
-        "capability_not_registered",
-        "unsupported_requirement",
-        "unsupported_mechanic",
-    }
-    details = " ".join(exc.details).casefold()
-    return not any(marker in details for marker in non_repairable_markers)
+def _answer_did_not_parse(exc: StructuredCallError) -> bool:
+    return exc.code in _UNPARSEABLE_ANSWER_CODES and not exc.retryable
 
 
 def _sanitized_validation_paths(details: tuple[str, ...]) -> list[str]:
@@ -1779,8 +2838,7 @@ def compose_final_reply(
             for item in accepted
         ],
         refused_claims=[
-            f"{item.claim_id or item.claim_type}: {item.reason}"[:200]
-            for item in refused
+            f"{item.claim_id or item.claim_type}: {item.reason}"[:200] for item in refused
         ][:12],
         selected_clarification_id=reply.selected_clarification_id,
     )
@@ -1818,20 +2876,15 @@ def _composer_reply_is_grounded(
         return False
     if re.search(r"\b(?:running|activated|active now|live now)\b", lowered):
         return False
-    positive_ready = bool(
-        re.search(r"\b(?:is|it's|it is|now|fully|setup is)\s+ready\b", lowered)
-    )
+    positive_ready = bool(re.search(r"\b(?:is|it's|it is|now|fully|setup is)\s+ready\b", lowered))
     if positive_ready and not result.approval_eligible:
         return False
-    positive_approved = bool(
-        re.search(r"\b(?:is|it's|it is|now|has been)\s+approved\b", lowered)
-    )
+    positive_approved = bool(re.search(r"\b(?:is|it's|it is|now|has been)\s+approved\b", lowered))
     if positive_approved and result.approval_status != "approved":
         return False
-    if (
-        re.search(r"\b(?:verified|provider available|runtime available)\b", lowered)
-        and result.provider_status not in {"available", "not_required"}
-    ):
+    if re.search(
+        r"\b(?:verified|provider available|runtime available)\b", lowered
+    ) and result.provider_status not in {"available", "not_required"}:
         return False
     if re.search(r"\b(?:compiled|compile-ready)\b", lowered) and (
         result.compile_status != "compiled"
@@ -1871,8 +2924,6 @@ def _with(trace: SetupAgentTrace, **updates: Any) -> SetupAgentTrace:
 
 
 def planner_schema_json() -> str:
-    """The plan schema, for the rebuild report and operator tooling."""
+    """The exact schema the planner call sends, for the report and operator tooling."""
 
-    from ai_market_monitor.services.agent_tools import strict_json_schema
-
-    return json.dumps(strict_json_schema(SetupAgentPlanEnvelope), indent=2, sort_keys=True)
+    return json.dumps(compact_json_schema(PlannerIntentEnvelope), indent=2, sort_keys=True)

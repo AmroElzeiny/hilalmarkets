@@ -27,6 +27,7 @@ from ai_market_monitor.core.plans import (
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    maximum_annual_saving,
     plan_offer_payload,
     promotion_is_active,
     visible_plan_comparison,
@@ -789,6 +790,12 @@ async def _context(
         "plans": PLAN_DEFINITIONS,
         "dashboard_navigation": DASHBOARD_NAVIGATION,
         "dashboard_preference": dashboard_preference,
+        # The one server-owned answer to "is this person new?". It is written by
+        # OnboardingService.complete(), so it records a step the user actually finished.
+        # The page guide auto-starts on this and nothing else: an empty dashboard, a
+        # recent signup date or a missing Watchlist are all states an experienced user
+        # can be in, and starting a tour over their work would be wrong.
+        "onboarding_complete": bool(user and user.onboarding_completed_at),
         "entitlement": entitlement,
         "whatsapp_plan_included": bool(
             entitlement and entitlement.feature_enabled("whatsapp")
@@ -1592,7 +1599,7 @@ async def screened_market_page(
     preference_methodology = stored_policy.get("default_methodology_id") or preference_values.get(
         "default_sharia_methodology_id"
     )
-    # The Halal Market starts with the explicit All methodology. A saved
+    # The Halal Assets starts with the explicit All methodology. A saved
     # user preference remains useful after a user deliberately picks another
     # methodology, but it must not silently replace the product default.
     if methodology_id is None and not (methodology_id_input or "").strip():
@@ -1741,7 +1748,7 @@ async def screened_market_page(
             settings=settings,
             user=user,
             page="screened_market",
-            title="Halal Market",
+            title="Halal Assets",
             screened=screened,
             methodologies=methodologies,
             selected_methodology_id=selected_methodology_id,
@@ -2012,7 +2019,7 @@ async def compliance_changes_page(
     query_values = [("tab", "compliance_changes")]
     if asset:
         query_values.append(("symbol", canonical_asset(asset)))
-    return _redirect(f"/dashboard/activity?{urlencode(query_values)}")
+    return _redirect(f"/dashboard/opportunities?{urlencode(query_values)}")
 
 
 @router.get("/dashboard/methodology", response_class=HTMLResponse, include_in_schema=False)
@@ -2428,7 +2435,7 @@ async def quarantine_capability_extension(
         session,
         extension=extension,
         user_id=user.id,
-        reason="Owner requested immediate quarantine from the Watch Plan dashboard.",
+        reason="Owner requested immediate quarantine from the Watchlist dashboard.",
     )
     await session.commit()
     return _redirect("/dashboard/strategies/new?message=mechanic_quarantined#monitors")
@@ -2513,8 +2520,12 @@ async def setups_page(
     raise HTTPException(status_code=404, detail="Latest Setups was removed. Use Lifecycles.")
 
 
+# One page, three paths. Decorators register bottom-up, so the bottom one is the path
+# `url_for('lifecycles_page')` produces — that is the address the product shows. The two
+# above it stay registered so older links and bookmarks keep working instead of 404ing.
 @router.get("/dashboard/activity", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/dashboard/lifecycles", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/dashboard/opportunities", response_class=HTMLResponse, include_in_schema=False)
 async def lifecycles_page(
     request: Request,
     user: User = Depends(_require_user),
@@ -2624,7 +2635,7 @@ async def lifecycles_page(
 async def alerts_page(
     user: User = Depends(_require_user),
 ) -> RedirectResponse:
-    return _redirect("/dashboard/lifecycles?message=alerts_moved_to_lifecycles")
+    return _redirect("/dashboard/opportunities?message=alerts_moved_to_lifecycles")
 
 
 @router.get(
@@ -2640,7 +2651,7 @@ async def alert_detail_page(
     alert = await session.get(Alert, alert_id)
     if alert is None or alert.user_id != user.id:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return _redirect("/dashboard/lifecycles?message=alert_context_moved_to_lifecycles")
+    return _redirect("/dashboard/opportunities?message=alert_context_moved_to_lifecycles")
 
 
 @router.get(
@@ -2959,6 +2970,9 @@ async def billing_page(
             promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
             promotion_active=promotion_is_active(),
             promotion_coming_soon_label=COMING_SOON_LABEL,
+            # Computed from the prices beside it, so the toggle cannot promise a saving
+            # no plan gives.
+            maximum_annual_saving=int(maximum_annual_saving()),
             plan_comparison=visible_plan_comparison(
                 billing_enabled=settings.billing_enabled
             ),
@@ -3796,7 +3810,7 @@ async def settings_submit(
                 else "immediate"
             ),
             "qualification_change_alerts": qualification_change_alerts == "true",
-            # Active Watch Plans must retain at least in-app notices for these events.
+            # Active Watchlists must retain at least in-app notices for these events.
             "under_review_alerts": True,
             "exclusion_alerts": True,
             "advanced_sharia_override_acknowledged": advanced_ack,

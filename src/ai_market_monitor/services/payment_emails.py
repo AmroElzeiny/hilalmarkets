@@ -319,8 +319,8 @@ def _safe_url(value: Any) -> str | None:
 
 def _main_limits(limits: dict[str, Any]) -> list[dict[str, str]]:
     labels = (
-        ("active_strategies", "Active Watch Plans"),
-        ("symbols_per_strategy", "Markets per Watch Plan"),
+        ("active_strategies", "Active Watchlists"),
+        ("symbols_per_strategy", "Markets per Watchlist"),
         ("on_demand_scans_per_month", "Market checks per month"),
         ("detailed_history_days", "Detailed evidence history"),
     )

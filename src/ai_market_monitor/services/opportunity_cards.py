@@ -92,7 +92,7 @@ class OpportunityCardReadService:
             "mapping_state": "verified" if market is not None else "unavailable",
             "summary": assessment.summary,
             "qualifications": tuple(assessment.qualifications[:3]),
-            "journey_href": "/dashboard/activity",
+            "journey_href": "/dashboard/opportunities",
             "can_create_watch_plan": (
                 market is not None
                 and assessment.status

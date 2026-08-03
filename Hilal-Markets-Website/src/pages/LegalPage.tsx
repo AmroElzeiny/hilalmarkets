@@ -48,7 +48,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
       content: (
         <>
           <Paragraph>
-            This Privacy Policy explains how Hilal Markets handles personal information when you visit our public pages, join the waitlist, contact us, create or use an account, build Watch Plans, review Shariah-screening evidence, receive alerts, or ask for support.
+            This Privacy Policy explains how Hilal Markets handles personal information when you visit our public pages, join the waitlist, contact us, create or use an account, build Watchlists, review Shariah-screening evidence, receive alerts, or ask for support.
           </Paragraph>
           <Paragraph>
             The service is currently being prepared for private beta. Features and data practices may develop as the beta progresses. Material changes will be reflected in an updated policy and, where required, brought to your attention before they take effect.
@@ -73,7 +73,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
         <BulletList>
           <Bullet><strong>Waitlist and contact details:</strong> email address, message title, message content, submission time, source page, and optional first-touch campaign details. Country may be recorded from a trusted edge-provider country header; we do not ask your browser to disclose precise location.</Bullet>
           <Bullet><strong>Account and security information:</strong> name, email, password hash, verification and recovery records, session data, consent choices, security events, and audit records.</Bullet>
-          <Bullet><strong>Product information:</strong> Screened Watchlist selections, Watch Plan descriptions and approved rules, strategy versions, scans, setup lifecycles, alert evidence, settings, and notification preferences.</Bullet>
+          <Bullet><strong>Product information:</strong> Screened Watchlist selections, Watchlist descriptions and approved rules, strategy versions, scans, setup lifecycles, alert evidence, settings, and notification preferences.</Bullet>
           <Bullet><strong>Shariah-evidence interactions:</strong> methodologies and Passport versions viewed or attached to evaluations. AI may support factual research, but it does not issue Shariah decisions.</Bullet>
           <Bullet><strong>Communications:</strong> support requests, public-assistant feedback, delivery status, and connected-channel identifiers needed to send requested notifications.</Bullet>
           <Bullet><strong>Technical information:</strong> timestamps, page paths, browser or device category, security logs, provider errors, and limited diagnostics needed to operate and protect the service.</Bullet>
@@ -95,7 +95,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
       title: '5. Why we use information',
       content: (
         <BulletList>
-          <Bullet>Provide accounts, approved Watch Plans, market monitoring, evidence Passports, lifecycle records, alerts, and support.</Bullet>
+          <Bullet>Provide accounts, approved Watchlists, market monitoring, evidence Passports, lifecycle records, alerts, and support.</Bullet>
           <Bullet>Verify identity, preserve immutable approvals and evidence, prevent abuse, investigate incidents, and maintain service integrity.</Bullet>
           <Bullet>Respond to waitlist and contact requests and deliver communications you asked to receive.</Bullet>
           <Bullet>Understand consented public-site usage and improve product reliability and usability.</Bullet>
@@ -118,7 +118,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
       content: (
         <>
           <Paragraph>
-            AI helps interpret user-authored monitoring ideas, explain product information, and support bounded factual research. Executable strategy logic is validated by deterministic services, and you must review and approve material strategy changes. AI cannot activate a Watch Plan, execute a trade, or issue a Shariah ruling on its own.
+            AI helps interpret user-authored monitoring ideas, explain product information, and support bounded factual research. Executable strategy logic is validated by deterministic services, and you must review and approve material strategy changes. AI cannot activate a Watchlist, execute a trade, or issue a Shariah ruling on its own.
           </Paragraph>
           <Paragraph>
             Relevant conversation context and structured product state may be sent to configured AI providers when an AI feature is used. We limit tools and data to the current task, apply ownership checks, and do not intentionally send passwords, authentication codes, exchange credentials, or unrelated account data.
@@ -213,7 +213,7 @@ function termsSections(supportEmail: string): LegalSection[] {
       title: '1. Agreement and provider',
       content: (
         <>
-          <Paragraph>These Terms govern access to Hilal Markets and its public pages, private-beta product, research tools, Watch Plans, evidence Passports, monitoring, alerts, and related services. By creating an account or using the service, you agree to these Terms and the related Privacy Policy, Cookie Policy, and Risk Disclosure.</Paragraph>
+          <Paragraph>These Terms govern access to Hilal Markets and its public pages, private-beta product, research tools, Watchlists, evidence Passports, monitoring, alerts, and related services. By creating an account or using the service, you agree to these Terms and the related Privacy Policy, Cookie Policy, and Risk Disclosure.</Paragraph>
           <Paragraph>Hilal Markets provides the service described in these Terms. Questions about the service or these Terms may be sent to <PrivacyContact email={supportEmail} />.</Paragraph>
         </>
       ),
@@ -233,7 +233,7 @@ function termsSections(supportEmail: string): LegalSection[] {
     {
       id: 'service',
       title: '3. What Hilal Markets provides',
-      content: <Paragraph>Hilal Markets is an explainable crypto spot research and monitoring platform. It can help you review Shariah-screening evidence, translate your own setup into measurable rules, run a one-time market check, continuously monitor an approved Watch Plan, follow setup lifecycles, and receive evidence-backed notifications. Private-beta scope, supported assets, providers, and channels may be limited.</Paragraph>,
+      content: <Paragraph>Hilal Markets is an explainable crypto spot research and monitoring platform. It can help you review Shariah-screening evidence, translate your own setup into measurable rules, run a one-time market check, continuously monitor an approved Watchlist, follow setup lifecycles, and receive evidence-backed notifications. Private-beta scope, supported assets, providers, and channels may be limited.</Paragraph>,
     },
     {
       id: 'boundaries',
@@ -243,7 +243,7 @@ function termsSections(supportEmail: string): LegalSection[] {
           <Bullet>Hilal Markets is not an exchange, broker, custodian, investment adviser, portfolio manager, or trade-execution service.</Bullet>
           <Bullet>It does not hold funds, connect exchange trading credentials, or place trades.</Bullet>
           <Bullet>Monitoring results and alerts are not personalized buy or sell recommendations and do not promise profit or prevent loss.</Bullet>
-          <Bullet>AI can assist with explanation and structure, but cannot silently approve rules, activate Watch Plans, or make authoritative market or Shariah decisions.</Bullet>
+          <Bullet>AI can assist with explanation and structure, but cannot silently approve rules, activate Watchlists, or make authoritative market or Shariah decisions.</Bullet>
           <Bullet>You remain responsible for reviewing every strategy, decision, transaction, and legal or religious obligation relevant to you.</Bullet>
         </BulletList>
       ),
@@ -255,11 +255,11 @@ function termsSections(supportEmail: string): LegalSection[] {
     },
     {
       id: 'plans',
-      title: '6. Watch Plans, Scanner, and AI',
+      title: '6. Watchlists, Scanner, and AI',
       content: (
         <>
           <Paragraph>You provide the monitoring idea. Hilal Markets may ask clarifying questions, match approved capabilities, and compile a deterministic rule set for your review. You must resolve critical ambiguity and explicitly approve executable mechanics before activation. An approved live version is not silently changed; revisions create traceable versions and require renewed approval.</Paragraph>
-          <Paragraph>Check the Market Now is a one-time scan and does not create persistent alerts unless you convert and approve the tested configuration as a Watch Plan. Custom capabilities remain bounded by provider, validation, certification, quarantine, and approval controls.</Paragraph>
+          <Paragraph>Check the Market Now is a one-time scan and does not create persistent alerts unless you convert and approve the tested configuration as a Watchlist. Custom capabilities remain bounded by provider, validation, certification, quarantine, and approval controls.</Paragraph>
         </>
       ),
     },
@@ -288,7 +288,7 @@ function termsSections(supportEmail: string): LegalSection[] {
     {
       id: 'content',
       title: '10. Your content and privacy',
-      content: <Paragraph>You retain responsibility for setup descriptions, Watch Plan names, rules, support messages, and other content you submit. You grant us the limited permission needed to host, process, validate, display, and transmit that content to provide and secure the service. We do not acquire ownership of your private strategies. Personal information is handled under the Privacy Policy.</Paragraph>,
+      content: <Paragraph>You retain responsibility for setup descriptions, Watchlist names, rules, support messages, and other content you submit. You grant us the limited permission needed to host, process, validate, display, and transmit that content to provide and secure the service. We do not acquire ownership of your private strategies. Personal information is handled under the Privacy Policy.</Paragraph>,
     },
     {
       id: 'ownership',

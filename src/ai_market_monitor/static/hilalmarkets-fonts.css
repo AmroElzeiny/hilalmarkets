@@ -1,0 +1,53 @@
+/* The brand typefaces, declared once for every server-rendered surface.
+
+   `brand guide.md` section 11: Geometria carries headings and figures, Onest carries
+   body and interface text. Both are self-hosted, so they are available on the dashboard,
+   which loads no third-party font service.
+
+   One declaration site on purpose. Naming a face in a stylesheet that never loads it is
+   how the dashboard ended up rendering prices in the browser's default serif: the rule
+   said "Manrope", nothing on the page had fetched Manrope, and there was no fallback
+   behind it. Every surface that uses `--hm-font-display` or `--hm-font-ui` loads this
+   file, so the name and the file can never drift apart.
+
+   The React landing site bundles these same four files through Vite and declares them in
+   its own `index.css`; it shares no stylesheet with the server-rendered pages. */
+
+@font-face {
+  font-family: "Geometria";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/landing/fonts/Geometria-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Geometria";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/static/landing/fonts/Geometria-Medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Geometria";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/static/landing/fonts/Geometria-Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/static/landing/fonts/Onest-Variable.ttf") format("truetype");
+}
+
+:root {
+  /* Headings, prices and any other figure that should read as a display number. */
+  --hm-font-display: "Geometria", "Onest", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Body copy, buttons, labels and controls. */
+  --hm-font-ui: "Onest", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}

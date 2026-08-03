@@ -4,7 +4,7 @@
 {% if screened is defined and (screened.warning or screened.total == 0) %}
 <div class="notice notice-warning" role="status">
   <span data-icon="info" data-icon-class="icon"></span>
-  <div><strong>No Halal Market assets are available yet.</strong><p>Assets appear only after evidence and methodology review are complete. Missing information never becomes an eligible result.</p></div>
+  <div><strong>No Halal Assets are available yet.</strong><p>An asset is listed here only after its evidence and methodology review are complete. Missing information never becomes an eligible result.</p></div>
 </div>
 {% elif market_data_warning %}
 <div class="notice is-info" role="status">
@@ -63,4 +63,4 @@
   </form>
 </dialog>
 {% endblock %}
-{% block page_scripts %}{% if selected_methodology_id %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260801-launch-offer"></script>{% endif %}{% endblock %}
+{% block page_scripts %}{% if selected_methodology_id %}<script type="module" src="{{ url_for('static', path='/sharia-market.js') }}?v=20260802-launch-offer"></script>{% endif %}{% endblock %}

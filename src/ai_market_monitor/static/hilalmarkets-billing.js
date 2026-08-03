@@ -96,10 +96,12 @@
               : "per month";
       }
       // The crossed-out price and the countdown belong to the monthly launch offer, so
-      // both disappear together on any other interval.
+      // both disappear together on any other interval. Marked, not hidden: the offer
+      // script owns whether the offer is still running, and two scripts setting the same
+      // `hidden` flag would take turns undoing each other every second.
       const promoted = available && interval === "monthly" && Boolean(originalPrice);
-      if (original) original.hidden = !promoted;
-      if (countdown) countdown.hidden = !promoted;
+      if (original) original.toggleAttribute("data-offer-inactive", !promoted);
+      if (countdown) countdown.toggleAttribute("data-offer-inactive", !promoted);
     });
     document.querySelectorAll("[data-dashboard-purchase-button]").forEach((button) => {
       const planCode = button.getAttribute("data-plan-code") || "";
@@ -212,8 +214,14 @@
     selectedPlan = planCode;
     trialSelected = cycle === "trial_7_day";
     activeTrigger = trigger || null;
+    // A period the server switched off cannot be chosen, not even by a link that asks
+    // for it. Fall back to monthly rather than opening checkout on something unbuyable.
+    const annualRadio = periodRadios.find((radio) => radio.value === "annual");
+    const wanted = cycle === "annual" && annualRadio && !annualRadio.disabled
+      ? "annual"
+      : "monthly";
     periodRadios.forEach((radio) => {
-      radio.checked = radio.value === (cycle === "annual" ? "annual" : "monthly");
+      radio.checked = radio.value === wanted;
     });
     refresh();
     dialog.showModal();

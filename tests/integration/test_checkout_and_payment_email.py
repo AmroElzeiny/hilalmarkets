@@ -136,7 +136,7 @@ async def test_verified_static_payment_activates_once_and_emails_once(test_conte
     ]
     assert len(payment_messages) == 1
     assert payment_messages[0]["subject"] == "Your HilalMarkets Pro plan is active"
-    assert "Create a Watch Plan" in payment_messages[0]["body"]
+    assert "Create a Watchlist" in payment_messages[0]["body"]
     assert "Hilal Markets provides screening" in payment_messages[0]["body"]
 
     async with test_context["session_factory"]() as session:

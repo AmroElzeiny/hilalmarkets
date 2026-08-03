@@ -60,7 +60,12 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     UnresolvedFieldV2,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
-from tests.support.setup_agent_plans import operations_from_patch, responses_body, segment
+from tests.support.setup_agent_plans import (
+    operations_from_patch,
+    planner_envelope_json,
+    responses_body,
+    segment,
+)
 
 TURN = "turn-closure-1"
 RULE = "Monitor BTC/USDT on the 15m when the candle rises open-to-close by at least 5%"
@@ -605,7 +610,7 @@ async def test_8_an_answered_question_is_not_offered_again() -> None:
 
 async def test_10_a_screening_block_prevents_approval_eligibility() -> None:
     async def blocked(_definition):
-        return None, "Choose and validate a Halal Market first."
+        return None, "Choose and validate Halal Assets first."
 
     plan = _plan(RULE, SegmentKind.STRATEGY_INSTRUCTION, operations=operations_from_patch(
         _patch(RULE), segment_id="s1"
@@ -1103,6 +1108,18 @@ async def test_timeframe_aliases_keep_roles_and_role_swaps_are_rejected() -> Non
     assert error.value.code == "VALUE_NOT_GROUNDED"
 
 
+def test_timeframe_chart_view_language_keeps_each_explicit_role_bound() -> None:
+    """Neutral chart/view words must not make an explicit role look ungrounded."""
+
+    message = (
+        "The 4h chart provides directional context, and the 5m chart supplies the trigger."
+    )
+    assert grounds_timeframe_role(message, "4h", "context")
+    assert grounds_timeframe_role(message, "5m", "trigger")
+    assert not grounds_timeframe_role(message, "4h", "trigger")
+    assert not grounds_timeframe_role(message, "5m", "context")
+
+
 async def test_requirement_state_separates_defaults_and_normalized_symbols() -> None:
     message = "Monitor BTCUSDT when the 15m candle rises open-to-close by at least 5%."
     outcome = await _run(
@@ -1312,7 +1329,7 @@ async def test_14_simple_mutation_uses_exactly_one_planner_call() -> None:
         return httpx.Response(
             200,
             json=responses_body(
-                SetupAgentPlanEnvelope(plan=plan).model_dump_json()
+                planner_envelope_json(SetupAgentPlanEnvelope(plan=plan))
             ),
         )
 

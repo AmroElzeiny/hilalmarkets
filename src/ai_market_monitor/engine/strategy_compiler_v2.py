@@ -24,6 +24,7 @@ from ai_market_monitor.schemas.strategy import (
     UniverseDefinition,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    CapabilityParameterValue,
     ConditionNodeType,
     ConditionNodeV2,
     DraftMode,
@@ -349,12 +350,9 @@ def _compile_operand(operand: OperandV2) -> Operand:
 
 def _formula_parameters(
     node: ConditionNodeV2,
-) -> dict[str, int | float | str | bool | list[int | float | str | bool]]:
+) -> dict[str, CapabilityParameterValue]:
     assert node.formula is not None
-    parameters: dict[
-        str,
-        int | float | str | bool | list[int | float | str | bool],
-    ] = {}
+    parameters: dict[str, CapabilityParameterValue] = {}
     for operand in node.operands:
         parameters.update(operand.parameters)
     parameters.update(

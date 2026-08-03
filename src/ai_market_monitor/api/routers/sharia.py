@@ -689,7 +689,7 @@ async def remove_watchlist_asset(
             detail={
                 "code": "watchlist_asset_in_use",
                 "message": (
-                    "Review the affected Watch Plans before removing this saved asset."
+                    "Review the affected Watchlists before removing this saved asset."
                 ),
                 "impact": impact.model_dump(mode="json"),
             },

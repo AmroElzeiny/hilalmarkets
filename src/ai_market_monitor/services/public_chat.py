@@ -120,7 +120,7 @@ _RELIGIOUS_RULING_PATTERNS = (
     re.compile(r"\b(give|issue|make)\s+(me\s+)?(a\s+)?fatwa\b", re.IGNORECASE),
 )
 _PRIVATE_ACCOUNT_PATTERNS = (
-    re.compile(r"\b(my|our)\s+(account|watch plan|passport|subscription|payment)\b", re.I),
+    re.compile(r"\b(my|our)\s+(account|watchlist|passport|subscription|payment)\b", re.I),
     re.compile(r"\blook\s+up\s+(my|this)\s+(account|email)\b", re.I),
 )
 _CROSS_ACCOUNT_PATTERNS = (
@@ -248,7 +248,7 @@ class PublicKnowledgeService:
         ):
             return (
                 "refused",
-                "I cannot inspect private accounts or Watch Plans without an authenticated "
+                "I cannot inspect private accounts or Watchlists without an authenticated "
                 "session. Sign in to use read-only account support.",
                 1.0,
                 ["boundary:no-private-account-access"],
@@ -408,14 +408,14 @@ class PublicKnowledgeService:
             ),
             PublicKnowledgeEntry(
                 source_id="product:screened-market:v1",
-                title="Halal Market and My Screened Watchlist",
+                title="Halal Assets and My Screened Watchlist",
                 answer=(
-                    "Halal Market shows assets allowed by the active user policy and "
+                    "Halal Assets shows assets allowed by the active user policy and "
                     "methodology. My Screened Watchlist saves assets to follow or use as a "
-                    "Watch Plan universe; saving an asset never overrides its current status."
+                    "Watchlist universe; saving an asset never overrides its current status."
                 ),
                 route_id="features",
-                keywords=("halal market", "screened market", "saved assets", "screened watchlist"),
+                keywords=("halal assets", "screened market", "saved assets", "screened watchlist"),
             ),
             PublicKnowledgeEntry(
                 source_id="product:evidence-passport:v1",
@@ -433,7 +433,7 @@ class PublicKnowledgeService:
                 source_id="product:opportunity-journey:v1",
                 title="Opportunity Cards and Opportunity Journeys",
                 answer=(
-                    "Opportunity Cards summarize real evaluated Watch Plan evidence. An "
+                    "Opportunity Cards summarize real evaluated Watchlist evidence. An "
                     "Opportunity Journey preserves how one occurrence moved through forming, "
                     "confirmation, invalidation, expiry, policy holds, and delivery outcomes."
                 ),
@@ -442,10 +442,10 @@ class PublicKnowledgeService:
             ),
             PublicKnowledgeEntry(
                 source_id="product:compliance-change:v1",
-                title="Compliance status changes and affected Watch Plans",
+                title="Compliance status changes and affected Watchlists",
                 answer=(
                     "When a published screening status changes, Hilal Markets preserves the old "
-                    "and current Passport versions, re-resolves affected Watch Plans, applies "
+                    "and current Passport versions, re-resolves affected Watchlists, applies "
                     "the selected fail-closed policy, and explains the impact."
                 ),
                 route_id="how_we_screen",
@@ -1850,7 +1850,7 @@ def _product_entities(value: str, *, previous: list[str]) -> list[str]:
         "ETH": r"\bETH\b|\bEthereum\b",
         "SOL": r"\bSOL\b|\bSolana\b",
         "Telegram": r"\bTelegram\b",
-        "Watch Plan": r"\bWatch\s+Plan\b|\bmonitor\b",
+        "Watchlist": r"\bWatch\s+Plan\b|\bmonitor\b",
         "Scanner": r"\bScanner\b|\bmarket\s+check\b",
         "Evidence Passport": r"\bPassport\b|\bscreening\s+record\b",
         "My Screened Watchlist": r"\bscreened\s+watchlist\b|\bsaved\s+assets\b",

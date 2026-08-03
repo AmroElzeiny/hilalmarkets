@@ -69,12 +69,12 @@ async def test_cloud_adapter_builds_supported_payloads_and_returns_wamid():
         await adapter.deliver(
             WhatsAppInteractiveList(
                 to="12025550123",
-                body="Choose a Watch Plan",
+                body="Choose a Watchlist",
                 button_text="Open list",
                 sections=[
                     WhatsAppListSection(
-                        title="Watch Plans",
-                        rows=[WhatsAppListRow(id="monitor:1", title="BTC Watch Plan")],
+                        title="Watchlists",
+                        rows=[WhatsAppListRow(id="monitor:1", title="BTC Watchlist")],
                     )
                 ],
             )

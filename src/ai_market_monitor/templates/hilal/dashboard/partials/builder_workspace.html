@@ -1,6 +1,6 @@
       <section class="builder-shell" data-builder-shell data-testid="strategy-builder-root" {% if not strategy %}hidden{% endif %}>
         <section class="dash-panel builder-start-screen" data-builder-intro data-testid="strategy-builder-entry">
-          <p class="eyebrow">Advanced Watch Plan Builder</p>
+          <p class="eyebrow">Advanced Watchlist Builder</p>
           <h2>How do you want to create your monitor?</h2>
           <div class="creation-direction-grid">
             <article class="creation-card recommended">
@@ -191,7 +191,7 @@
             </div>
             <div class="builder-screened-market-banner {{ 'ready' if builder_screening.configured else 'blocked' }}" role="status">
               <span data-icon="compliance" data-icon-class="icon"></span>
-              <div><span>Halal Market</span><strong>{% if builder_screening.configured %}{{ builder_screening.methodology_name }} | v{{ builder_screening.methodology_version }}{% else %}Approved methodology required{% endif %}</strong><small>{% if builder_screening.configured %}Default scope: eligible assets and eligible assets with qualifications. Status changes pause the affected asset.{% else %}This draft can be edited, but validation and activation stay blocked until qualified governance activates a real methodology.{% endif %}</small></div>
+              <div><span>Halal Assets</span><strong>{% if builder_screening.configured %}{{ builder_screening.methodology_name }} | v{{ builder_screening.methodology_version }}{% else %}Approved methodology required{% endif %}</strong><small>{% if builder_screening.configured %}Default scope: eligible assets and eligible assets with qualifications. Status changes pause the affected asset.{% else %}This draft can be edited, but validation and activation stay blocked until qualified governance activates a real methodology.{% endif %}</small></div>
               <a href="/how-we-screen">How We Screen</a>
             </div>
 

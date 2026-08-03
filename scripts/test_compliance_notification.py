@@ -39,7 +39,7 @@ def _payload(chat_id: str) -> TelegramOutboundMessage:
             "Previous: Eligible\n"
             "Current: Under Review\n"
             "Methodology: Test methodology v1\n"
-            "Affected Watch Plans: 1\n"
+            "Affected Watchlists: 1\n"
             f"Recorded: {event_time}\n\n"
             "Test payload only. No real asset status was changed."
         ),

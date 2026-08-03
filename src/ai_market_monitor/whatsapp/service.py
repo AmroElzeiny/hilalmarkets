@@ -661,7 +661,7 @@ class WhatsAppConversationService:
                     rows=[
                         WhatsAppListRow(
                             id="nav:monitors",
-                            title="My Watch Plans",
+                            title="My Watchlists",
                             description="Status and controls",
                         ),
                         WhatsAppListRow(
@@ -676,7 +676,7 @@ class WhatsAppConversationService:
                         ),
                         WhatsAppListRow(
                             id="nav:create",
-                            title="Create Watch Plan",
+                            title="Create Watchlist",
                             description="Secure setup workspace",
                         ),
                     ],
@@ -699,7 +699,7 @@ class WhatsAppConversationService:
         self, connection: WhatsAppConnection, destination: str
     ) -> WhatsAppOutboundMessage:
         paths = {
-            "lifecycles": "/dashboard/lifecycles",
+            "lifecycles": "/dashboard/opportunities",
             "check": "/dashboard/market",
             "create": "/dashboard/strategies/new",
             "settings": "/dashboard/settings",
@@ -751,7 +751,7 @@ class WhatsAppConversationService:
             url = await self._dashboard_url(connection, "/dashboard/strategies/new")
             return WhatsAppSessionText(
                 to=connection.wa_id,
-                body=f"You have no Watch Plans yet. Create one securely: {url}",
+                body=f"You have no Watchlists yet. Create one securely: {url}",
             )
         conversation.state_data = {
             **(conversation.state_data or {}),
@@ -759,11 +759,11 @@ class WhatsAppConversationService:
         }
         return WhatsAppInteractiveList(
             to=connection.wa_id,
-            body="Your Watch Plans. Select one to view safe controls.",
-            button_text="Choose Watch Plan",
+            body="Your Watchlists. Select one to view safe controls.",
+            button_text="Choose Watchlist",
             sections=[
                 WhatsAppListSection(
-                    title="Watch Plans",
+                    title="Watchlists",
                     rows=[
                         WhatsAppListRow(
                             id=f"monitor:view:{strategy.id}",
@@ -782,19 +782,19 @@ class WhatsAppConversationService:
         parts = action_id.split(":", 2)
         if len(parts) != 3:
             return WhatsAppSessionText(
-                to=connection.wa_id, body="That Watch Plan action is invalid. Send MENU."
+                to=connection.wa_id, body="That Watchlist action is invalid. Send MENU."
             )
         _, action, raw_id = parts
         try:
             strategy_id = UUID(raw_id)
         except ValueError:
             return WhatsAppSessionText(
-                to=connection.wa_id, body="That Watch Plan action is invalid. Send MENU."
+                to=connection.wa_id, body="That Watchlist action is invalid. Send MENU."
             )
         strategy = await self.session.get(Strategy, strategy_id)
         if strategy is None or strategy.user_id != connection.user_id:
             return WhatsAppSessionText(
-                to=connection.wa_id, body="Watch Plan not found. Send MONITORS to refresh."
+                to=connection.wa_id, body="Watchlist not found. Send MONITORS to refresh."
             )
         if action == "view":
             controls: list[WhatsAppReplyButton] = []
@@ -814,7 +814,7 @@ class WhatsAppConversationService:
                 to=connection.wa_id,
                 body=(
                     f"{strategy.name}\nStatus: {strategy.status.value.replace('_', ' ').title()}\n"
-                    "Pausing stops future notifications but keeps the Watch Plan saved."
+                    "Pausing stops future notifications but keeps the Watchlist saved."
                 ),
                 buttons=controls,
             )
@@ -823,7 +823,7 @@ class WhatsAppConversationService:
                 connection, f"/dashboard/strategies/new?strategy_id={strategy.id}#monitors"
             )
             return WhatsAppSessionText(
-                to=connection.wa_id, body=f"Open this Watch Plan securely: {url}"
+                to=connection.wa_id, body=f"Open this Watchlist securely: {url}"
             )
         operations = MonitorOperationService(self.session, settings=self.settings)
         try:
@@ -847,7 +847,7 @@ class WhatsAppConversationService:
             to=connection.wa_id,
             body=(
                 f"{strategy.name} is now {strategy.status.value.replace('_', ' ')}. "
-                "Send MONITORS to review all Watch Plans."
+                "Send MONITORS to review all Watchlists."
             ),
         )
 
@@ -1009,9 +1009,9 @@ class WhatsAppDeliveryService:
             alert, public_base_url=str(self.settings.public_base_url)
         )
         dashboard_path = (
-            "/dashboard/activity?tab=compliance_changes"
+            "/dashboard/opportunities?tab=compliance_changes"
             if presentation.alert_type == "compliance"
-            else "/dashboard/lifecycles"
+            else "/dashboard/opportunities"
         )
         dashboard_url = await DashboardLinkService(self.session, self.settings).create(
             user_id=connection.user_id,

@@ -26,12 +26,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <meta name="description" content="Secure access to HilalMarkets Halal Market intelligence and guided monitoring.">
+  <meta name="description" content="Secure access to HilalMarkets Halal Assets intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260714-prototype">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260723-auth">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260723-auth">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260802-launch-offer">
 </head>
 <body class="hilal-auth-page">
   <div class="auth-shell">
@@ -188,9 +189,9 @@
   </div>
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260723-auth"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260714-production"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-x-pixel"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260802-launch-offer"></script>
   <script>
     function clearSensitiveAuthFields() {
       document

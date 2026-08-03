@@ -21,9 +21,11 @@ the final chat status, and the only thing the reply may state as fact.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -47,6 +49,10 @@ from ai_market_monitor.engine.operation_target import (
     merged_unresolved_key,
     targets_by_operation_id,
     unsupported_key_for,
+)
+from ai_market_monitor.engine.planner_references import (
+    EMPTY_PLANNER_REFERENCES,
+    PlannerReferenceContext,
 )
 from ai_market_monitor.engine.requirement_state import (
     blocking_requirement_states,
@@ -76,6 +82,7 @@ from ai_market_monitor.engine.strategy_draft_v2 import (
     finalize_strategy_turn,
     validate_draft_semantics,
 )
+from ai_market_monitor.engine.turn_timing import TurnTelemetry, null_telemetry
 from ai_market_monitor.schemas.screening_execution import (
     PreflightManifest,
     ScreeningExecutionResult,
@@ -102,7 +109,6 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeV2,
     ConditionUpdateV2,
     DraftFieldPatch,
-    DraftMode,
     FormulaKind,
     ProviderRequirementV2,
     ProviderRuntimeStatusV2,
@@ -162,12 +168,8 @@ ScreeningGate = Callable[
 ]
 
 #: Marks each provider requirement available or not.
-ProviderGate = Callable[
-    [list[ProviderRequirementV2]], Awaitable[list[ProviderRuntimeStatusV2]]
-]
-RuntimePreflight = Callable[
-    [StrategyDefinition], Awaitable[list[ProviderRuntimeStatusV2]]
-]
+ProviderGate = Callable[[list[ProviderRequirementV2]], Awaitable[list[ProviderRuntimeStatusV2]]]
+RuntimePreflight = Callable[[StrategyDefinition], Awaitable[list[ProviderRuntimeStatusV2]]]
 
 
 def _preflight_evidence(request: SetupTurnRequest) -> dict[str, Any]:
@@ -226,6 +228,13 @@ class SetupTurnRequest:
     #: True only for an allowlisted server-rendered UI control. It bypasses language
     #: grounding, never operation validation, lifecycle gates, or canonical mutation.
     server_owned_option: bool = False
+    #: The turn's clock. Execution runs the three slowest remaining stages — compiling,
+    #: screening and the market-data check — and none of them were being timed, so the
+    #: ranking could not see them at all.
+    telemetry: TurnTelemetry = field(default_factory=null_telemetry)
+    #: Canonical Sharia and owned-target identities resolved from turn-local public
+    #: aliases. This is server context and never crosses the model boundary.
+    planner_references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,7 +430,8 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         compile_status = "blocked"
     else:
         try:
-            definition = compile_strategy_draft_v2(draft)
+            with request.telemetry.stage("compilation"):
+                definition = compile_strategy_draft_v2(draft)
             compile_status = "compiled"
         except StrategyV2CompileError as exc:
             compile_status = "failed"
@@ -433,14 +443,58 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     #: resolves a universe, after which it carries the permitted markets and `definition`
     #: keeps the authored policy.
     preflight_definition: StrategyDefinition | None = definition
-    if definition is not None and request.screening is not None:
+
+    # Screening and provider availability answer two unrelated questions — "which markets
+    # may this watch?" and "can this account reach the data these rules need?" — and
+    # neither needs the other's answer. Waiting for one and then the other made the turn
+    # pay both waits end to end for nothing. They start together; their effects are
+    # applied below in the original order, so what the user is told is unchanged.
+    telemetry = request.telemetry
+    spent: list[float] = []
+
+    async def timed[T](stage: str, awaitable: Awaitable[T]) -> T:
+        began = time.monotonic()
+        try:
+            with telemetry.stage(stage):
+                return await awaitable
+        finally:
+            spent.append((time.monotonic() - began) * 1000)
+
+    screening_task = (
+        asyncio.ensure_future(timed("screening", request.screening(definition)))
+        if definition is not None and request.screening is not None
+        else None
+    )
+    provider_task = (
+        asyncio.ensure_future(
+            timed("provider_validation", request.providers(provider_requirements))
+        )
+        if provider_requirements and request.providers is not None
+        else None
+    )
+    screening_answer: tuple[ScreeningExecutionResult | None, str | None] | None = None
+    provider_answer: list[ProviderRuntimeStatusV2] | None = None
+    if screening_task is not None or provider_task is not None:
+        gate_started = time.monotonic()
+        if screening_task is not None:
+            screening_answer = await screening_task
+        if provider_task is not None:
+            provider_answer = await provider_task
+        # `serial_ms` is what the two gates would have cost one after the other, so the
+        # saving reported is measured rather than assumed.
+        telemetry.record_concurrency(
+            wall_ms=(time.monotonic() - gate_started) * 1000,
+            serial_ms=sum(spent),
+        )
+
+    if screening_answer is not None:
         screening_status = "not_attempted"
-        screening_result, reason = await request.screening(definition)
+        screening_result, reason = screening_answer
         if screening_result is None:
             screening_status = "blocked"
             definition = None
             preflight_definition = None
-            safe_errors.append(reason or "Choose and validate a Halal Market first.")
+            safe_errors.append(reason or "Choose and validate Halal Assets first.")
         else:
             screening_status = "passed"
             # Two objects, deliberately not one.
@@ -459,8 +513,8 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
     resolved_provider_statuses: list[ProviderRuntimeStatusV2] = []
     if provider_requirements:
         resolved_provider_statuses = (
-            await request.providers(provider_requirements)
-            if request.providers is not None
+            provider_answer
+            if provider_answer is not None
             else [
                 ProviderRuntimeStatusV2(
                     provider=item.provider,
@@ -475,8 +529,7 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
             definition = None
             preflight_definition = None
             safe_errors.append(
-                "One rule needs a data feed this account cannot use yet, so the draft "
-                "cannot run."
+                "One rule needs a data feed this account cannot use yet, so the draft cannot run."
             )
         elif provider_status == "runtime_unverified":
             safe_errors.append(
@@ -484,7 +537,10 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
                 "yet. Retry before approval."
             )
     if preflight_definition is not None and request.runtime_preflight is not None:
-        preflight_statuses = await request.runtime_preflight(preflight_definition)
+        # This one genuinely depends on screening: it checks the markets screening
+        # permitted, so it cannot start until that answer exists.
+        with telemetry.stage("runtime_preflight"):
+            preflight_statuses = await request.runtime_preflight(preflight_definition)
         resolved_provider_statuses.extend(preflight_statuses)
         provider_status = _provider_status(resolved_provider_statuses)
         if provider_status == "unavailable":
@@ -623,9 +679,7 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         ),
         allowed_clarifications=allowed,
         draft_read_model=draft_read_model(draft, list(reconciliation.net_changes)),
-        screening_evidence=(
-            screening_result.evidence() if screening_result is not None else {}
-        ),
+        screening_evidence=(screening_result.evidence() if screening_result is not None else {}),
         preflight_manifest=_preflight_evidence(request),
     )
     return SetupTurnOutcome(
@@ -777,9 +831,7 @@ def _verify_capability_keys(
         for node in operation.condition.walk():
             if not node.capability_key:
                 continue
-            inherited = existing.get(
-                operation.target_condition_id or node.node_id
-            )
+            inherited = existing.get(operation.target_condition_id or node.node_id)
             if (
                 operation.kind == "update_condition"
                 and inherited is not None
@@ -809,6 +861,14 @@ def _verify_authorization(
         segment = segments.get(operation.authorizing_segment_id)
         if segment is None:
             problems.append(f"{operation.kind}: no segment {operation.authorizing_segment_id}")
+            continue
+        if (
+            operation.kind == "add_unsupported"
+            and segment.kind == SegmentKind.UNSUPPORTED_REQUEST
+        ):
+            # This is a workflow blocker, not executable market logic.  The explicit
+            # unsupported segment is the only reply-only segment permitted to author
+            # this one fail-closed canonical operation.
             continue
         if segment.kind in REPLY_ONLY_KINDS:
             # A question, a greeting, a boundary refusal or an approval request can
@@ -942,6 +1002,9 @@ def _ground_sharia_policy(
             "eligible_market": (
                 "all eligible",
                 "eligible market",
+                "screened assets",
+                "screened market",
+                "screened only",
                 "كل المؤهلة",
                 "kol el eligible",
             ),
@@ -960,19 +1023,49 @@ def _ground_sharia_policy(
                 "mo7adad",
             ),
         }[policy.universe_mode.value]
-        if not any(word in lowered for word in mode_words):
+        selected_watchlist_words: tuple[str, ...] = ()
+        if policy.universe_mode.value == "approved_watchlist":
+            selected_watchlist_words = tuple(
+                word
+                for item in request.planner_references.watchlists
+                if item.watchlist_id == str(policy.approved_watchlist_id)
+                and item.watchlist_version == policy.approved_watchlist_version
+                for word in (item.public_name, *item.aliases)
+            )
+        if not any(
+            word and str(word).casefold() in lowered
+            for word in (*mode_words, *selected_watchlist_words)
+        ):
             errors.append(f"{operation.operation_id}:sharia_policy:universe_mode")
-    for field_name in ("methodology_id", "methodology_version"):
-        previous = getattr(old, field_name)
-        current = getattr(policy, field_name)
-        if current == previous:
-            continue
-        if current is None:
-            grounded = action_is_grounded(text, "clear")
-        else:
-            grounded = str(current).casefold() in lowered
-        if not grounded:
-            errors.append(f"{operation.operation_id}:sharia_policy:{field_name}")
+    methodology_changed = (
+        policy.methodology_id != old.methodology_id
+        or policy.methodology_version != old.methodology_version
+    )
+    if methodology_changed:
+        matched = next(
+            (
+                item
+                for item in request.planner_references.methodologies
+                if item.methodology_id == str(policy.methodology_id)
+                and item.methodology_version == policy.methodology_version
+            ),
+            None,
+        )
+        public_words = (
+            (
+                matched.reference,
+                matched.public_identifier,
+                matched.public_name,
+                matched.family,
+                *matched.aliases,
+            )
+            if matched is not None
+            else ()
+        )
+        if matched is None or not any(
+            word and str(word).casefold() in lowered for word in public_words
+        ):
+            errors.append(f"{operation.operation_id}:sharia_policy:methodology_identifier")
 
     status_aliases = {
         "eligible": ("eligible", "مؤهل", "mo2ahal"),
@@ -995,15 +1088,24 @@ def _ground_sharia_policy(
     new_statuses = {item.value for item in policy.allowed_statuses}
     for status in new_statuses - old_statuses:
         if not any(alias in lowered for alias in status_aliases[status]):
-            errors.append(
-                f"{operation.operation_id}:sharia_policy:allowed_statuses:{status}"
-            )
-    if old_statuses - new_statuses and not (
-        action_is_grounded(text, "change") or action_is_grounded(text, "clear")
-    ):
-        errors.append(
-            f"{operation.operation_id}:sharia_policy:allowed_statuses:removal"
+            errors.append(f"{operation.operation_id}:sharia_policy:allowed_statuses:{status}")
+    fail_closed_grounded = any(
+        phrase in lowered
+        for phrase in (
+            "fail closed",
+            "strict sharia",
+            "eligible only",
+            "screened only",
+            "اقفل عند الشك",
+            "ma t3adish el mashkook",
         )
+    )
+    if old_statuses - new_statuses and not (
+        fail_closed_grounded
+        or action_is_grounded(text, "change")
+        or action_is_grounded(text, "clear")
+    ):
+        errors.append(f"{operation.operation_id}:sharia_policy:allowed_statuses:removal")
 
     choice_aliases: dict[str, dict[str, tuple[str, ...]]] = {
         "qualification_policy": {
@@ -1045,35 +1147,58 @@ def _ground_sharia_policy(
         if current == previous:
             continue
         rendered = current.value if hasattr(current, "value") else str(current)
-        if not any(
+        if not fail_closed_grounded and not any(
             alias in lowered for alias in aliases_by_value[str(rendered)]
         ):
             errors.append(f"{operation.operation_id}:sharia_policy:{field_name}")
 
-    for field_name in ("approved_watchlist_id", "approved_watchlist_version"):
-        previous = getattr(old, field_name)
-        current = getattr(policy, field_name)
-        if current == previous:
-            continue
-        if current is None:
-            grounded = action_is_grounded(text, "clear")
-        else:
-            grounded = str(current).casefold() in lowered
-        if not grounded:
-            errors.append(f"{operation.operation_id}:sharia_policy:{field_name}")
+    watchlist_changed = (
+        policy.approved_watchlist_id != old.approved_watchlist_id
+        or policy.approved_watchlist_version != old.approved_watchlist_version
+    )
+    if watchlist_changed and policy.approved_watchlist_id is not None:
+        matched_watchlist = next(
+            (
+                item
+                for item in request.planner_references.watchlists
+                if item.watchlist_id == str(policy.approved_watchlist_id)
+                and item.watchlist_version == policy.approved_watchlist_version
+            ),
+            None,
+        )
+        words = (
+            (
+                matched_watchlist.reference,
+                matched_watchlist.public_name,
+                *matched_watchlist.aliases,
+            )
+            if matched_watchlist is not None
+            else ()
+        )
+        if matched_watchlist is None or not any(
+            word and str(word).casefold() in lowered for word in words
+        ):
+            errors.append(f"{operation.operation_id}:sharia_policy:approved_watchlist")
+    elif watchlist_changed and policy.approved_watchlist_id is None:
+        if not (action_is_grounded(text, "clear") or policy.universe_mode != old.universe_mode):
+            errors.append(f"{operation.operation_id}:sharia_policy:approved_watchlist")
 
     for symbol in set(policy.explicit_symbols) - set(old.explicit_symbols):
         if not grounds_symbol(text, symbol):
             errors.append(f"{operation.operation_id}:sharia_policy:symbol:{symbol}")
     removed_symbols = set(old.explicit_symbols) - set(policy.explicit_symbols)
-    if removed_symbols and not action_is_grounded(text, "clear"):
+    universe_selection_clears_explicit_symbols = (
+        policy.universe_mode != old.universe_mode
+        and policy.universe_mode.value != "explicit_assets"
+    )
+    if removed_symbols and not (
+        action_is_grounded(text, "clear") or universe_selection_clears_explicit_symbols
+    ):
         errors.append(f"{operation.operation_id}:sharia_policy:symbols:removal")
     elif removed_symbols and policy.explicit_symbols:
         for symbol in removed_symbols:
             if not grounds_symbol(text, symbol):
-                errors.append(
-                    f"{operation.operation_id}:sharia_policy:symbol:{symbol}:removal"
-                )
+                errors.append(f"{operation.operation_id}:sharia_policy:symbol:{symbol}:removal")
     return errors
 
 
@@ -1093,10 +1218,10 @@ def _ground_symbol_operation(
     action_name = cast(
         SemanticAction,
         {
-        "add_inclusion": "include",
-        "add_exclusion": "exclude",
-        "remove_inclusion": "remove_inclusion",
-        "remove_exclusion": "remove_exclusion",
+            "add_inclusion": "include",
+            "add_exclusion": "exclude",
+            "remove_inclusion": "remove_inclusion",
+            "remove_exclusion": "remove_exclusion",
         }[operation.kind],
     )
     action_grounded = action_is_grounded(text, action_name)
@@ -1108,9 +1233,11 @@ def _ground_symbol_operation(
             and candidate.kind in {"add_condition", "replace_groups"}
             for candidate in request.plan.operations
         )
-    return [] if action_grounded else [
-        f"{operation.operation_id}:{operation.kind}:action_not_grounded"
-    ]
+    return (
+        []
+        if action_grounded
+        else [f"{operation.operation_id}:{operation.kind}:action_not_grounded"]
+    )
 
 
 def _ground_condition_operation(
@@ -1143,10 +1270,14 @@ def _ground_condition_operation(
         previous = existing.get(node.node_id)
         if operation.kind == "replace_groups" and previous == node:
             continue
-        errors.extend(
+        node_errors = (
             _update_grounding(previous, node, text, request.source_turn_id)
             if previous is not None
             else _condition_grounding(node, text, request.source_turn_id)
+        )
+        errors.extend(
+            f"{operation.operation_id}:condition:{detail.split(':', 1)[-1]}"
+            for detail in node_errors
         )
     return errors
 
@@ -1181,13 +1312,12 @@ def _ground_remove_condition(
 _ANSWER_TYPES_BY_TARGET: dict[str, frozenset[str]] = {
     "universe": frozenset({"string", "array"}),
     "market_scope": frozenset({"string"}),
+    "sharia_policy": frozenset({"string"}),
     "boolean_structure": frozenset({"string", "object", "array"}),
     # Before a condition exists, the clarification can be the one missing scalar
     # (for example the number that defines "strong") or a full structured rule.
     # The subsequent turn still has to create and ground the whole condition.
-    "condition_creation": frozenset(
-        {"string", "number", "integer", "boolean", "object", "array"}
-    ),
+    "condition_creation": frozenset({"string", "number", "integer", "boolean", "object", "array"}),
     "reference_definition": frozenset({"string"}),
     "unsupported_resolution": frozenset({"string", "boolean"}),
 }
@@ -1200,6 +1330,7 @@ _DETERMINING_KINDS: dict[str, frozenset[str]] = {
         {"set_sharia_policy", "add_inclusion", "add_exclusion", "remove_inclusion"}
     ),
     "market_scope": frozenset({"set_fields", "set_sharia_policy"}),
+    "sharia_policy": frozenset({"set_sharia_policy"}),
     "draft_field": frozenset({"set_fields"}),
     "boolean_structure": frozenset({"replace_groups"}),
 }
@@ -1279,11 +1410,15 @@ def _ground_unresolved_operation(
     ):
         return [f"{operation.operation_id}:{operation.kind}:target_already_determined"]
 
-    if item.target_type in {
-        "condition_field",
-        "capability_parameter",
-        "reference_definition",
-    } and (item.target_condition_id or "") not in existing:
+    if (
+        item.target_type
+        in {
+            "condition_field",
+            "capability_parameter",
+            "reference_definition",
+        }
+        and (item.target_condition_id or "") not in existing
+    ):
         return [f"{operation.operation_id}:{operation.kind}:condition_target_missing"]
 
     # (4) the answer has to be something the target can hold.
@@ -1307,9 +1442,7 @@ def _turn_determines_target(
     if plan is None:
         return False
     same_segment = [
-        operation
-        for operation in plan.operations
-        if operation.authorizing_segment_id == segment_id
+        operation for operation in plan.operations if operation.authorizing_segment_id == segment_id
     ]
     if not same_segment:
         return False
@@ -1344,6 +1477,15 @@ def _turn_determines_target(
             for operation in same_segment
         )
 
+    if target_type == "sharia_policy":
+        field_name = _unresolved_field_name(item)
+        return any(
+            operation.kind == "set_sharia_policy"
+            and operation.sharia_policy is not None
+            and getattr(operation.sharia_policy, field_name, None) not in (None, "", [], {})
+            for operation in same_segment
+        )
+
     determining = _DETERMINING_KINDS.get(target_type, frozenset())
     return any(operation.kind in determining for operation in same_segment)
 
@@ -1365,6 +1507,12 @@ def _draft_determines_target(
         field_name = _unresolved_field_name(item)
         return _authored(draft, field_name) and not _is_model_default(
             StrategyDraftV2, field_name, getattr(draft, field_name, None)
+        )
+    if target_type == "sharia_policy":
+        field_name = _unresolved_field_name(item)
+        value = getattr(draft.sharia_policy, field_name, None)
+        return value not in (None, "", [], {}) and not _is_model_default(
+            type(draft.sharia_policy), field_name, value
         )
     if target_type == "universe":
         return _universe_is_determined(draft)
@@ -1439,9 +1587,9 @@ def _answer_schema_mismatch(item: Any) -> str | None:
 
     accepted: frozenset[str] | None = _ANSWER_TYPES_BY_TARGET.get(target_type)
     if target_type == "condition_field":
-        accepted = _json_types_for_model_field(ConditionNodeV2, field_name)
+        accepted = answer_types_for_model_field(ConditionNodeV2, field_name)
     elif target_type == "draft_field":
-        accepted = _json_types_for_model_field(StrategyDraftV2, field_name)
+        accepted = answer_types_for_model_field(StrategyDraftV2, field_name)
     elif target_type == "capability_parameter":
         # Parameter types belong to the capability registry and are checked there when
         # the answer is applied; any scalar can name one here.
@@ -1463,8 +1611,13 @@ _JSON_TYPES_BY_PYTHON: dict[type, frozenset[str]] = {
 }
 
 
-def _json_types_for_model_field(model: type[Any], field_name: str) -> frozenset[str] | None:
-    """Which answer types could fill this pydantic field. ``None`` means unknown."""
+def answer_types_for_model_field(model: type[Any], field_name: str) -> frozenset[str] | None:
+    """Which answer types could fill this pydantic field. ``None`` means unknown.
+
+    Public because the semantic-intent compiler builds each open question's answer
+    schema and this gate then checks it. Two implementations of "what type does this slot
+    hold" would let the compiler write a question the validator then refuses.
+    """
 
     field = model.model_fields.get(field_name)
     if field is None:
@@ -1579,11 +1732,16 @@ def _ground_unsupported_operation(
     unsupported: dict[str, Any],
 ) -> list[str]:
     del request, existing, unresolved, unsupported
-    if segment.kind != SegmentKind.STRATEGY_INSTRUCTION:
+    if segment.kind not in {
+        SegmentKind.STRATEGY_INSTRUCTION,
+        SegmentKind.UNSUPPORTED_REQUEST,
+    }:
         return [f"{operation.operation_id}:add_unsupported:reply_only_segment"]
-    return [] if operation.missing_contract else [
-        f"{operation.operation_id}:add_unsupported:missing_contract"
-    ]
+    return (
+        []
+        if operation.missing_contract
+        else [f"{operation.operation_id}:add_unsupported:missing_contract"]
+    )
 
 
 def _ground_remove_unsupported(
@@ -1619,8 +1777,7 @@ def _ground_restore_snapshot(
             item
             for item in request.history
             if str(item.get("snapshot_id") or "") == operation.target_snapshot_id
-            and int(item.get("executable_version") or 0)
-            == operation.target_executable_version
+            and int(item.get("executable_version") or 0) == operation.target_executable_version
             and isinstance(item.get("draft"), dict)
         ),
         None,
@@ -1808,8 +1965,7 @@ def _update_grounding(
                 errors.append(f"{replacement.node_id}:formula")
         elif name == "movement_direction":
             if not grounds_direction(text, now) or (
-                now.value in {"neutral", "not_applicable"}
-                and not action_is_grounded(text, "clear")
+                now.value in {"neutral", "not_applicable"} and not action_is_grounded(text, "clear")
             ):
                 errors.append(f"{replacement.node_id}:movement_direction")
         elif name == "strategy_bias":
@@ -1840,15 +1996,13 @@ def _update_grounding(
             elif not grounds_lookback(
                 text,
                 now,
-                timeframe=replacement.reference_timeframe
-                or replacement.trigger_timeframe,
+                timeframe=replacement.reference_timeframe or replacement.trigger_timeframe,
             ):
                 errors.append(f"{replacement.node_id}:lookback")
         elif name == "operands":
             errors.extend(_operand_grounding(replacement, text))
-            if (
-                len(replacement.operands) < len(existing.operands)
-                and not action_is_grounded(text, "clear")
+            if len(replacement.operands) < len(existing.operands) and not action_is_grounded(
+                text, "clear"
             ):
                 errors.append(f"{replacement.node_id}:operands:removal")
         elif name == "reference_definition":
@@ -1869,13 +2023,10 @@ def _update_grounding(
         elif name == "children":
             if not grounds_boolean_shape(text, _boolean_shape(replacement)):
                 errors.append(f"{replacement.node_id}:boolean_shape")
-        elif (
-            name == "required"
-            and not (
-                action_is_grounded(text, "optional")
-                if now is False
-                else action_is_grounded(text, "required")
-            )
+        elif name == "required" and not (
+            action_is_grounded(text, "optional")
+            if now is False
+            else action_is_grounded(text, "required")
         ):
             errors.append(f"{replacement.node_id}:required")
         elif name == "capability_key":
@@ -1883,8 +2034,7 @@ def _update_grounding(
                 if not action_is_grounded(text, "clear"):
                     errors.append(f"{replacement.node_id}:capability_key:clear")
             elif not (
-                grounds_text_value(text, now)
-                or grounds_text_value(text, now.split("_", 1)[0])
+                grounds_text_value(text, now) or grounds_text_value(text, now.split("_", 1)[0])
             ):
                 errors.append(f"{replacement.node_id}:capability_key")
         elif name == "capability_version":
@@ -1895,9 +2045,7 @@ def _update_grounding(
             if now is None and not action_is_grounded(text, "clear"):
                 errors.append(f"{replacement.node_id}:capability_version:clear")
         elif name == "capability_parameters":
-            removed = set(existing.capability_parameters) - set(
-                replacement.capability_parameters
-            )
+            removed = set(existing.capability_parameters) - set(replacement.capability_parameters)
             if removed and not action_is_grounded(text, "clear"):
                 errors.append(f"{replacement.node_id}:capability_parameters:removal")
         else:
@@ -2039,14 +2187,10 @@ def _reference_grounding(node: ConditionNodeV2, text: str) -> list[str]:
             r"\blookback\b|\bprevious\s+\d+\s+candles?\b|\bhighest\b|\blowest\b"
         ),
     }
-    formula_pattern = (
-        formula_patterns.get(node.formula) if node.formula is not None else None
-    )
+    formula_pattern = formula_patterns.get(node.formula) if node.formula is not None else None
     if formula_pattern is not None:
         return (
-            []
-            if re.search(formula_pattern, lowered)
-            else [f"{node.node_id}:reference_definition"]
+            [] if re.search(formula_pattern, lowered) else [f"{node.node_id}:reference_definition"]
         )
     markers = {
         "previous_candle": r"\bprevious candle\b|\bprior candle\b|\blast closed\b",
@@ -2087,8 +2231,7 @@ def _capability_gate(
     nodes = [
         node
         for node in (draft.condition_ast.walk() if draft.condition_ast else [])
-        if node.node_type == ConditionNodeType.CONDITION
-        and node.formula == FormulaKind.CAPABILITY
+        if node.node_type == ConditionNodeType.CONDITION and node.formula == FormulaKind.CAPABILITY
     ]
     if not nodes:
         return [], []
@@ -2100,10 +2243,7 @@ def _capability_gate(
         or previous[node.node_id].capability_key != node.capability_key
         or previous[node.node_id].capability_version != node.capability_version
     )
-    authorizing: dict[str, str] = {
-        node.node_id: node.source_fragment or ""
-        for node in nodes
-    }
+    authorizing: dict[str, str] = {node.node_id: node.source_fragment or "" for node in nodes}
     for operation in plan.operations:
         segment = segments.get(operation.authorizing_segment_id)
         if segment is None or operation.condition is None:
@@ -2201,18 +2341,14 @@ def _build_patch(
         elif operation.kind == "resolve_unresolved_key" and operation.target_key:
             resolved_keys.append(operation.target_key)
         elif operation.kind == "add_unresolved" and operation.unresolved is not None:
-            unresolved_items.append(
-                _merge_unresolved_target(operation.unresolved, request.draft)
-            )
+            unresolved_items.append(_merge_unresolved_target(operation.unresolved, request.draft))
         elif (
             operation.kind == "update_unresolved"
             and operation.unresolved is not None
             and operation.target_key
         ):
             resolved_keys.append(operation.target_key)
-            unresolved_items.append(
-                _merge_unresolved_target(operation.unresolved, request.draft)
-            )
+            unresolved_items.append(_merge_unresolved_target(operation.unresolved, request.draft))
         elif operation.kind == "remove_unsupported_key" and operation.target_key:
             removed_unsupported.append(operation.target_key)
         elif operation.kind == "restore_snapshot" and operation.target_executable_version:
@@ -2271,8 +2407,8 @@ def _merge_unresolved_target(item: Any, draft: StrategyDraftV2) -> Any:
     """
 
     merged = merged_unresolved_key(item, draft)
-    return item if merged == item.unresolved_id else item.model_copy(
-        update={"unresolved_id": merged}
+    return (
+        item if merged == item.unresolved_id else item.model_copy(update={"unresolved_id": merged})
     )
 
 
@@ -2330,7 +2466,10 @@ def _final_chat_status(
         return "approved"
     if not approval_eligible:
         return "needs_clarification"
-    return "ready_to_scan" if draft.mode == DraftMode.SCANNER else "ready_for_approval"
+    # Scanner and Monitor share the same reviewed-draft boundary. A Scanner run is
+    # deterministic execution against market data, but it must still be bound to the
+    # exact authenticated approval before that execution is exposed.
+    return "ready_for_approval"
 
 
 def _assert_lifecycle(
@@ -2482,9 +2621,7 @@ def _applied_instructions(
                 operation_id=operation.operation_id,
                 segment_id=operation.authorizing_segment_id,
                 source_text=segment.exact_source_text,
-                summary="; ".join(
-                    change.describe() for change in result.net_changes
-                )[:400]
+                summary="; ".join(change.describe() for change in result.net_changes)[:400]
                 or "updated the setup",
                 condition_ids=list(result.final_condition_ids)[:24],
                 operation=operation.kind,
@@ -2520,9 +2657,7 @@ def _operation_result(
             for item in changes
         ],
         affected_condition_ids=list(
-            dict.fromkeys(
-                node_id for change in changes for node_id in change.condition_ids
-            )
+            dict.fromkeys(node_id for change in changes for node_id in change.condition_ids)
         ),
     )
 
@@ -2569,9 +2704,7 @@ def draft_read_model(draft: StrategyDraftV2, changes: list[DraftChange]) -> dict
         "cannot_express": [
             item.missing_contract for item in draft.unsupported_requirements if item.blocking
         ],
-        "requirement_states": [
-            item.model_dump(mode="json") for item in draft.requirement_states
-        ],
+        "requirement_states": [item.model_dump(mode="json") for item in draft.requirement_states],
         "semantic_role_assignments": [
             item.model_dump(mode="json") for item in draft.semantic_role_assignments
         ],
@@ -2685,9 +2818,7 @@ def _normalize_future_unresolved_targets(
     """
 
     existing = set(_existing_conditions(draft))
-    existing_unresolved = {
-        item.unresolved_id: item for item in draft.unresolved_fields
-    }
+    existing_unresolved = {item.unresolved_id: item for item in draft.unresolved_fields}
     condition_targets = {
         "condition_field",
         "capability_parameter",
@@ -2710,9 +2841,7 @@ def _normalize_future_unresolved_targets(
                     ).encode()
                 ).hexdigest()[:24]
             )
-            item = item.model_copy(
-                update={"semantic_object_id": semantic_object_id}
-            )
+            item = item.model_copy(update={"semantic_object_id": semantic_object_id})
             operation = operation.model_copy(update={"unresolved": item})
         if (
             operation.kind == "add_unresolved"
@@ -2758,8 +2887,7 @@ def _append_live_clarification_resolution(
         return plan
     pending = {item.key for item in request.draft.unresolved_fields}
     if active.question_id not in pending or any(
-        operation.kind == "resolve_unresolved_key"
-        and operation.target_key == active.question_id
+        operation.kind == "resolve_unresolved_key" and operation.target_key == active.question_id
         for operation in plan.operations
     ):
         return plan
@@ -2837,9 +2965,7 @@ def _safe_compile_message(exc: StrategyV2CompileError) -> str:
         "draft_blocked": "The draft still has an item that must be resolved before it can run.",
         "timeframe_missing": "One rule still needs the timeframe it should be measured on.",
         "conditions_missing": "The draft has no measurable rule yet.",
-        "semantic_validation_failed": (
-            "One rule does not yet hold together well enough to run."
-        ),
+        "semantic_validation_failed": ("One rule does not yet hold together well enough to run."),
     }.get(exc.code, "This draft could not be turned into runnable rules yet.")
 
 
@@ -2891,9 +3017,9 @@ def _next_conversation(
     return context.model_copy(
         update={
             "last_changed_condition_ids": list(dict.fromkeys(changed))[:24],
-            "recent_references": list(
-                dict.fromkeys([*references, *context.recent_references])
-            )[:12],
+            "recent_references": list(dict.fromkeys([*references, *context.recent_references]))[
+                :12
+            ],
         }
     )
 

@@ -1,0 +1,238 @@
+[
+  {
+    "name": "all_supported_draft_fields",
+    "starting_draft": {},
+    "source_turn_id": "golden-fields-1",
+    "message": "Set Scanner mode, name Alpha, exchange Binance, quote asset USDT, and spot market.",
+    "envelope": {
+      "segments": [
+        {
+          "segment_ref": "s1",
+          "exact_source_text": "Set Scanner mode, name Alpha, exchange Binance, quote asset USDT, and spot market.",
+          "segment_kind": "STRATEGY_INSTRUCTION"
+        }
+      ],
+      "semantic_intents": [
+        {"segment_ref": "s1", "payload": {"action": "set_mode", "mode": "scanner"}},
+        {"segment_ref": "s1", "payload": {"action": "set_name", "name": "Alpha"}},
+        {"segment_ref": "s1", "payload": {"action": "set_exchange", "exchange": "Binance"}},
+        {"segment_ref": "s1", "payload": {"action": "set_quote_asset", "quote_asset": "USDT"}},
+        {"segment_ref": "s1", "payload": {"action": "set_market_type", "market_type": "spot"}}
+      ],
+      "clarification_answers": [],
+      "questions_to_answer": [],
+      "unsupported_intents": [],
+      "approval_intent": null,
+      "overall_confidence": 0.99
+    },
+    "expected_operations": [
+      {"kind": "set_fields", "fields": {"mode": "scanner"}},
+      {"kind": "set_fields", "fields": {"name": "Alpha"}},
+      {"kind": "set_fields", "fields": {"exchange": "Binance"}},
+      {"kind": "set_fields", "fields": {"quote_asset": "USDT"}},
+      {"kind": "set_fields", "fields": {"market_type": "spot"}}
+    ],
+    "expected_state": {
+      "final_draft": {"mode": "scanner", "name": "Alpha", "included_symbols": [], "excluded_symbols": [], "exchange": "binance", "quote_asset": "USDT", "market_type": "spot", "unsupported": [], "approval_intent_received": false, "executable_version": 2, "workflow_revision": 2},
+      "requirement_states": [
+        {"semantic_type": "market_scope", "target_path": "market_scope.exchange", "normalized_value": "binance", "value_role": "value"},
+        {"semantic_type": "market_scope", "target_path": "market_scope.market_type", "normalized_value": "spot", "value_role": "value"},
+        {"semantic_type": "mode", "target_path": "mode", "normalized_value": "scanner", "value_role": "value"},
+        {"semantic_type": "workflow", "target_path": "name", "normalized_value": "Alpha", "value_role": "value"}
+      ],
+      "semantic_role_assignments": [],
+      "executable_hash": "2c092cde815cc17a05b987e8306df76c983e1a93a40854414a718b473580c2b5",
+      "workflow_state_hash": "13dc8b24d5fa6c688e00d1946f60c57019f64ab80496f3d7456b9be0b2dd3426",
+      "compile_status": "not_attempted", "approval_eligible": false, "screening_status": "not_required", "provider_status": "not_required", "preflight_behavior": null
+    }
+  },
+  {
+    "name": "all_symbol_membership_actions",
+    "starting_draft": {"universe": {"included_symbols": ["ETH/USDT"], "excluded_symbols": ["SOL/USDT"]}},
+    "source_turn_id": "golden-symbols-1",
+    "message": "Include BTC/USDT, exclude DOGE/USDT, remove ETH/USDT from included assets, and stop excluding SOL/USDT.",
+    "envelope": {
+      "segments": [
+        {
+          "segment_ref": "s1",
+          "exact_source_text": "Include BTC/USDT, exclude DOGE/USDT, remove ETH/USDT from included assets, and stop excluding SOL/USDT.",
+          "segment_kind": "STRATEGY_INSTRUCTION"
+        }
+      ],
+      "semantic_intents": [
+        {"segment_ref": "s1", "payload": {"action": "include_symbol", "symbol": "BTC/USDT"}},
+        {"segment_ref": "s1", "payload": {"action": "exclude_symbol", "symbol": "DOGE/USDT"}},
+        {"segment_ref": "s1", "payload": {"action": "remove_included_symbol", "symbol": "ETH/USDT"}},
+        {"segment_ref": "s1", "payload": {"action": "remove_excluded_symbol", "symbol": "SOL/USDT"}}
+      ],
+      "clarification_answers": [],
+      "questions_to_answer": [],
+      "unsupported_intents": [],
+      "approval_intent": null,
+      "overall_confidence": 0.99
+    },
+    "expected_operations": [
+      {"kind": "add_inclusion", "symbol": "BTC/USDT"},
+      {"kind": "add_exclusion", "symbol": "DOGE/USDT"},
+      {"kind": "remove_inclusion", "symbol": "ETH/USDT"},
+      {"kind": "remove_exclusion", "symbol": "SOL/USDT"}
+    ],
+    "expected_state": {
+      "final_draft": {"mode": "monitor", "name": "Untitled Monitor", "included_symbols": ["BTC/USDT"], "excluded_symbols": ["DOGE/USDT"], "exchange": "binance", "quote_asset": "USDT", "market_type": "spot", "unsupported": [], "approval_intent_received": false, "executable_version": 2, "workflow_revision": 2},
+      "requirement_states": [
+        {"semantic_type": "symbol", "target_path": "universe.excluded_symbols.DOGE/USDT", "normalized_value": "DOGE/USDT", "value_role": "exclude"},
+        {"semantic_type": "symbol", "target_path": "universe.excluded_symbols.SOL/USDT", "normalized_value": null, "value_role": "exclude_removal"},
+        {"semantic_type": "symbol", "target_path": "universe.included_symbols.BTC/USDT", "normalized_value": "BTC/USDT", "value_role": "include"},
+        {"semantic_type": "symbol", "target_path": "universe.included_symbols.ETH/USDT", "normalized_value": null, "value_role": "include_removal"}
+      ],
+      "semantic_role_assignments": [
+        {"semantic_type": "symbol", "role": "exclude", "normalized_value": "DOGE/USDT", "target_path": "universe.excluded_symbols.DOGE/USDT"},
+        {"semantic_type": "symbol", "role": "include", "normalized_value": "BTC/USDT", "target_path": "universe.included_symbols.BTC/USDT"}
+      ],
+      "executable_hash": "973a5ed1fcfe98d041bf13ecec8a67495ecfb84bbe04efd4c0ba5ad342079030",
+      "workflow_state_hash": "de2833cdda006a2fe61be6543f67e395246470c10938f511b33096b7623ad630",
+      "compile_status": "not_attempted", "approval_eligible": false, "screening_status": "not_required", "provider_status": "not_required", "preflight_behavior": null
+    }
+  },
+  {
+    "name": "unsupported_and_textual_approval_stay_separate",
+    "starting_draft": {},
+    "source_turn_id": "golden-boundary-1",
+    "message": "Use a moon-phase rule. I approve this.",
+    "envelope": {
+      "segments": [
+        {
+          "segment_ref": "s1",
+          "exact_source_text": "Use a moon-phase rule.",
+          "segment_kind": "UNSUPPORTED_REQUEST"
+        },
+        {
+          "segment_ref": "s2",
+          "exact_source_text": "I approve this.",
+          "segment_kind": "APPROVAL_INTENT"
+        }
+      ],
+      "semantic_intents": [],
+      "clarification_answers": [],
+      "questions_to_answer": [],
+      "unsupported_intents": [
+        {"segment_ref": "s1", "missing_contract": "moon-phase market condition"}
+      ],
+      "approval_intent": {"segment_ref": "s2"},
+      "overall_confidence": 0.99
+    },
+    "expected_operations": [
+      {"kind": "add_unsupported", "missing_contract": "moon-phase market condition"}
+    ],
+    "expected_approval_intent": true,
+    "expected_state": {
+      "final_draft": {"mode": "monitor", "name": "Untitled Monitor", "included_symbols": [], "excluded_symbols": [], "exchange": "binance", "quote_asset": "USDT", "market_type": "spot", "unsupported": ["moon-phase market condition"], "approval_intent_received": true, "executable_version": 1, "workflow_revision": 2},
+      "requirement_states": [
+        {"semantic_type": "approval_intent", "target_path": "workflow.approval_intent_received", "normalized_value": true, "value_role": "intent_only"}
+      ],
+      "semantic_role_assignments": [
+        {"semantic_type": "approval_intent", "role": "intent_only", "normalized_value": true, "target_path": "workflow.approval_intent_received"}
+      ],
+      "executable_hash": "0060ebac51106dba091f8f5056b394f73755d8a069b71eb22e9de95be8a3c914",
+      "workflow_state_hash": "0015eb23d18c2d091f72531cf97bfd8b43797cd1d4483c411e0ddcdbf1926a51",
+      "compile_status": "not_attempted", "approval_eligible": false, "screening_status": "not_required", "provider_status": "not_required", "preflight_behavior": null
+    }
+  },
+  {
+    "name": "governed_sharia_preference",
+    "starting_draft": {"sharia_policy": {"universe_mode": "explicit_assets", "explicit_symbols": ["BTC/USDT"]}},
+    "source_turn_id": "golden-sharia-1",
+    "message": "Use AAOIFI methodology and screened assets only",
+    "references": {
+      "methodologies": [
+        {
+          "reference": "methodology_1",
+          "public_identifier": "AAOIFI",
+          "public_name": "AAOIFI Standard",
+          "family": "AAOIFI",
+          "aliases": [],
+          "methodology_id": "11111111-1111-4111-8111-111111111111",
+          "methodology_version": "1.0"
+        }
+      ]
+    },
+    "envelope": {
+      "segments": [
+        {
+          "segment_ref": "s1",
+          "exact_source_text": "Use AAOIFI methodology and screened assets only",
+          "segment_kind": "STRATEGY_INSTRUCTION"
+        }
+      ],
+      "semantic_intents": [
+        {
+          "segment_ref": "s1",
+          "payload": {
+            "action": "set_sharia_preferences",
+            "methodology_identifier": "AAOIFI",
+            "screened_assets_only": true
+          }
+        }
+      ],
+      "clarification_answers": [],
+      "questions_to_answer": [],
+      "unsupported_intents": [],
+      "approval_intent": null,
+      "overall_confidence": 0.99
+    },
+    "expected_operations": [
+      {
+        "kind": "set_sharia_policy",
+        "sharia_policy": {
+          "universe_mode": "eligible_market",
+          "methodology_id": "11111111-1111-4111-8111-111111111111",
+          "methodology_version": "1.0",
+          "allowed_statuses": ["eligible", "eligible_with_qualifications"],
+          "qualification_policy": "include_with_warning",
+          "disputed_asset_policy": "exclude",
+          "compliance_change_behavior": "pause_asset",
+          "explicit_symbols": []
+        }
+      }
+    ],
+    "expected_state": {
+      "final_draft": {
+        "mode": "monitor",
+        "name": "Untitled Monitor",
+        "included_symbols": [],
+        "excluded_symbols": [],
+        "exchange": "binance",
+        "quote_asset": "USDT",
+        "market_type": "spot",
+        "unsupported": [],
+        "approval_intent_received": false,
+        "executable_version": 2,
+        "workflow_revision": 2,
+        "sharia_policy": {
+          "universe_mode": "eligible_market",
+          "methodology_id": "11111111-1111-4111-8111-111111111111",
+          "methodology_version": "1.0",
+          "allowed_statuses": ["eligible", "eligible_with_qualifications"],
+          "qualification_policy": "include_with_warning",
+          "disputed_asset_policy": "exclude",
+          "compliance_change_behavior": "pause_asset",
+          "approved_watchlist_id": null,
+          "approved_watchlist_version": null,
+          "explicit_symbols": []
+        }
+      },
+      "requirement_states": [
+        {"semantic_type": "sharia_policy", "target_path": "sharia_policy.methodology_id", "normalized_value": "11111111-1111-4111-8111-111111111111", "value_role": "methodology_id"},
+        {"semantic_type": "sharia_policy", "target_path": "sharia_policy.universe_mode", "normalized_value": "eligible_market", "value_role": "universe_mode"}
+      ],
+      "semantic_role_assignments": [],
+      "executable_hash": "7cc71d1c3c6d0c5e67b3e70b895acd20633336016e8ecbcc905f81a8b7fcaffb",
+      "workflow_state_hash": "e77f98db90227eb58a61203a4869f440cb2673777cbb6f2120eff4a520b1411a",
+      "compile_status": "not_attempted",
+      "approval_eligible": false,
+      "screening_status": "not_required",
+      "provider_status": "not_required",
+      "preflight_behavior": null
+    }
+  }
+]

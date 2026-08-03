@@ -182,7 +182,7 @@ class ShariaPassportReadService:
         )
         if not enriched.can_create_watch_plan:
             enriched.restriction_explanation = (
-                "The historical version remains available as evidence, but a new Watch Plan "
+                "The historical version remains available as evidence, but a new Watchlist "
                 "cannot use it because the current status is unavailable or restricted."
             )
         return enriched
@@ -687,7 +687,7 @@ class ShariaPassportReadService:
             None
             if can_create
             else (
-                "A Watch Plan requires an allowed current status, an active exact spot-market "
+                "A Watchlist requires an allowed current status, an active exact spot-market "
                 "mapping, explicit reviewed spot-use coverage, permission under your selected "
                 "screening policy, and no safety hold."
             )
@@ -794,7 +794,7 @@ class ShariaPassportReadService:
                 reference_id=row.id,
                 label=f"{row.symbol} · {row.state.value.replace('_', ' ').title()}",
                 event_time=row.last_evaluated_at,
-                url=f"/dashboard/activity?setup={row.id}",
+                url=f"/dashboard/opportunities?setup={row.id}",
                 strategy_version_id=row.strategy_version_id,
             )
             for row in opportunities

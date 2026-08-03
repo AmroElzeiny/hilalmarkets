@@ -1,43 +1,30 @@
 """The timeframes this platform supports, and what each one is worth in minutes.
 
-Kept in its own module with no imports of its own. It used to live in
-``prompt_semantics``, which meant every reader that needed only this table had to
-depend on the whole semantic parser — and a new shared reader could not be imported
-back into it without a cycle.
+The vocabulary itself now lives in :mod:`ai_market_monitor.schemas.timeframes`, which has
+no imports of its own. It had to move: ``schemas.strategy`` needs the same list to build
+its ``Timeframe`` pattern, and importing anything under ``engine`` pulls in
+``engine/__init__``, which imports the evaluator and everything below it — a cycle.
 
-``prompt_semantics`` re-exports both names, so existing importers are unaffected.
+Every name is re-exported here, so importers of ``engine.timeframes`` are unaffected.
+``prompt_semantics`` re-exports them in turn.
 """
 
 from __future__ import annotations
 
-#: Every timeframe a strategy may be evaluated on.
-SUPPORTED_TIMEFRAMES: set[str] = {
-    "1m",
-    "3m",
-    "5m",
-    "15m",
-    "30m",
-    "1h",
-    "2h",
-    "4h",
-    "6h",
-    "8h",
-    "12h",
-    "1d",
-}
+from ai_market_monitor.schemas.timeframes import (
+    ORDERED_TIMEFRAMES,
+    SUPPORTED_TIMEFRAMES,
+    TIMEFRAME_MINUTES,
+    WORD_TIMEFRAME_ALIASES,
+    TimeframeChoice,
+    normalize_timeframe_alias,
+)
 
-#: Minutes per closed candle, used to convert a wall-clock window into a bar count.
-TIMEFRAME_MINUTES: dict[str, int] = {
-    "1m": 1,
-    "3m": 3,
-    "5m": 5,
-    "15m": 15,
-    "30m": 30,
-    "1h": 60,
-    "2h": 120,
-    "4h": 240,
-    "6h": 360,
-    "8h": 480,
-    "12h": 720,
-    "1d": 1440,
-}
+__all__ = [
+    "ORDERED_TIMEFRAMES",
+    "SUPPORTED_TIMEFRAMES",
+    "TIMEFRAME_MINUTES",
+    "TimeframeChoice",
+    "WORD_TIMEFRAME_ALIASES",
+    "normalize_timeframe_alias",
+]

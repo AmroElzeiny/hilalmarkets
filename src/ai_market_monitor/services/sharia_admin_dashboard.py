@@ -1011,7 +1011,7 @@ class ShariaAdminDashboardService:
                 ),
                 "evidence_snapshot_count": len(snapshots),
                 "customer_visibility": (
-                    f"{len({row.strategy_id for row in impact_rows})} Watch Plans and "
+                    f"{len({row.strategy_id for row in impact_rows})} Watchlists and "
                     f"{len({row.user_id for row in impact_rows})} users may be affected "
                     "only after a separate publication or safety-hold action."
                 ),

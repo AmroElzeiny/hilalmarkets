@@ -233,7 +233,7 @@ async def _alert(session, user: User, alert_type=AlertType.TRIAL, suffix="1") ->
         title="HilalMarkets update",
         body="Evidence is available in the dashboard.",
         proof_receipt={
-            "strategy_name": "BTC Watch Plan",
+            "strategy_name": "BTC Watchlist",
             "symbol": "BTC/USDT",
             "timeframe": "15m",
             "setup_state": "confirmed",

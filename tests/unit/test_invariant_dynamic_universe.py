@@ -1,14 +1,13 @@
 """The dynamic-universe, preflight-evidence and response-proof invariants.
 
 Each test names the invariant it proves and the production function that enforces it.
-They assert a *rule* across a family вЂ” every universe mode, every contract, every claim
-type, every operation kind вЂ” so a fix that only helps one reported example fails here.
+They assert a *rule* across a family — every universe mode, every contract, every claim
+type, every operation kind — so a fix that only helps one reported example fails here.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -748,9 +747,9 @@ def test_a_condition_claim_must_state_the_value_the_draft_actually_holds(
     "text",
     [
         "I added ETH for you.",
-        "ШЄЩ…ШЄ ШҐШ¶Ш§ЩЃШ© ETH.",
+        "تمت إضافة ETH.",
         "Ana zawedt ETH.",
-        "е·Іж·»еЉ  ETHгЂ‚",
+        "已添加 ETH。",
     ],
 )
 def test_the_proposition_check_is_the_same_in_every_language(text: str) -> None:
@@ -1214,13 +1213,18 @@ def test_the_launch_price_and_the_countdown_come_from_one_rule() -> None:
 
     before = PROMOTION_ENDS_AT - timedelta(minutes=1)
     after = PROMOTION_ENDS_AT
+    # Both numbers come from the offer itself, so changing a price cannot leave this
+    # test asserting an old one.
+    launch_price = plan_offer("trader").promotional_monthly_price
+    normal_price = PLAN_DEFINITIONS["trader"].monthly_price
+    assert launch_price is not None and launch_price < normal_price
 
     assert promotion_is_active(before) is True
-    assert effective_monthly_price("trader", now=before) == Decimal("8.00")
-    assert original_monthly_price("trader", now=before) == Decimal("12.00")
+    assert effective_monthly_price("trader", now=before) == launch_price
+    assert original_monthly_price("trader", now=before) == normal_price
 
     assert promotion_is_active(after) is False
-    assert effective_monthly_price("trader", now=after) == Decimal("12.00")
+    assert effective_monthly_price("trader", now=after) == normal_price
     # Nothing to cross out once the offer is over.
     assert original_monthly_price("trader", now=after) is None
 
@@ -1251,9 +1255,10 @@ def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
     # An interval that is not open carries no number at all, so the page source cannot
     # leak a price for something nobody can buy.
     assert payload["annualPrice"] is None
-    if code == "trader":
-        assert payload["monthlyPrice"] == 8.0
-        assert payload["originalMonthlyPrice"] == 12.0
+    promotional = plan_offer(code).promotional_monthly_price
+    if promotional is not None:
+        assert payload["monthlyPrice"] == float(promotional)
+        assert payload["originalMonthlyPrice"] == float(PLAN_DEFINITIONS[code].monthly_price)
     else:
         assert payload["originalMonthlyPrice"] is None
     if not payload["monthlyAvailable"]:

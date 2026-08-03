@@ -136,7 +136,13 @@ class UITarget(ChatTarget):
         ).first
         if not await button.is_visible():
             return
-        await button.click()
+        # The dashboard cookie banner animates into a fixed stacking context. In
+        # headless Chromium, Playwright's actionability probe can keep reporting
+        # that the otherwise-visible button is intercepted by the banner itself.
+        # Dispatching the element's native click still exercises the production
+        # consent listener and persistence code, without making chat readiness
+        # depend on animation geometry.
+        await button.evaluate("element => element.click()")
         await self.page.locator("[data-cookie-banner]").wait_for(
             state="hidden",
             timeout=self.settings.target_ui_timeout_ms,

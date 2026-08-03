@@ -30,6 +30,7 @@ from ai_market_monitor.engine.turn_fragments import (
     extract_timeframes,
 )
 from ai_market_monitor.schemas.strategy import (
+    CapabilityParameterValue,
     Comparator,
     ConditionGroup,
     ConditionRule,
@@ -177,9 +178,7 @@ class PercentageFormulaSpec:
     lookback: int = 1
     source_fragment: str = ""
 
-    def parameters(
-        self,
-    ) -> dict[str, int | float | str | bool | list[int | float | str | bool]]:
+    def parameters(self) -> dict[str, CapabilityParameterValue]:
         return {
             "formula": self.formula,
             "direction": self.direction,

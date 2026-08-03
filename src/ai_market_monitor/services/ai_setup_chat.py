@@ -78,6 +78,7 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
     StrategyDirection,
 )
+from ai_market_monitor.schemas.strategy_draft_v2 import DraftMode, StrategyDraftV2
 from ai_market_monitor.services.agent_control import (
     AgentControlService,
     AgentResponsesClient,
@@ -2426,7 +2427,7 @@ class AISetupChatService:
                 (
                     "Screened monitoring is not available yet because no real approved "
                     "methodology is active. The development/test methodology is not a "
-                    "religious ruling and cannot be used for scans or Watch Plans."
+                    "religious ruling and cannot be used for scans or Watchlists."
                 ),
                 message_type="screening_unavailable",
                 payload={"can_approve": False, "can_scan": False},
@@ -2466,7 +2467,7 @@ class AISetupChatService:
                         label="My Favorites",
                         value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
                         description=(
-                            "Use only eligible assets you have favorited in Halal Market."
+                            "Use only eligible assets you have favorited in Halal Assets."
                         ),
                     ),
                     SetupChatOption(
@@ -2712,12 +2713,12 @@ class AISetupChatService:
         context.pop("awaiting_clarification_key", None)
         chat.context_json = context
         chat.status = "interviewing"
-        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watch Plan"
+        mode_name = "Scanner" if _setup_mode(chat) == "scanner" else "Watchlist"
         await self._assistant(
             session,
             chat,
             (
-                f"Halal Market set: {scope_label}. {eligible_count} currently eligible "
+                f"Halal Assets set: {scope_label}. {eligible_count} currently eligible "
                 f"asset{'s' if eligible_count != 1 else ''} match this screening scope. "
                 f"If a status changes, the affected asset will be paused. "
                 + (
@@ -3196,7 +3197,7 @@ class AISetupChatService:
             except (KeyError, ValueError, ShariaUniverseError) as exc:
                 screening_error = {
                     "code": getattr(exc, "code", "screened_universe_required"),
-                    "message": str(exc) or "Choose and validate a Halal Market before approval.",
+                    "message": str(exc) or "Choose and validate Halal Assets before approval.",
                 }
         requires_monitor_name = context.get("setup_mode") == "monitor" and not context.get(
             "confirmed_monitor_name"
@@ -3493,15 +3494,33 @@ class AISetupChatService:
                 "Choose Scanner before running a one-time scan.",
                 status_code=409,
             )
-        if chat.status != "ready_to_scan" or not chat.draft_schema_json:
+        context = dict(chat.context_json or {})
+        v2_authority = context.get("strategy_state_authority") == "v2"
+        required_status = "approved" if v2_authority else "ready_to_scan"
+        if chat.status != required_status or not chat.draft_schema_json:
             raise SetupChatError(
                 "scanner_not_ready",
-                "Add and resolve at least one measurable current-match condition before "
-                "running Scanner.",
+                (
+                    "Review and approve the exact Scanner draft before running it."
+                    if v2_authority
+                    else "Add and resolve at least one measurable current-match condition "
+                    "before running Scanner."
+                ),
                 status_code=409,
             )
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
         draft = load_strategy_draft_v2(chat)
+        if v2_authority and not v2_scanner_approval_matches(
+            chat,
+            draft,
+            definition,
+            user_id=user_id,
+        ):
+            raise SetupChatError(
+                "scanner_approval_mismatch",
+                "The Scanner approval no longer matches the exact reviewed draft.",
+                status_code=409,
+            )
         has_executable_required_rule = any(
             rule.required
             and rule.key != "clarification_required"
@@ -3665,14 +3684,31 @@ class AISetupChatService:
         chat: AISetupChatSession,
         expected_hash: str,
     ) -> dict[str, Any]:
-        if _setup_mode(chat) != "scanner" or not chat.draft_schema_json:
+        context = dict(chat.context_json or {})
+        v2_authority = context.get("strategy_state_authority") == "v2"
+        if (
+            _setup_mode(chat) != "scanner"
+            or not chat.draft_schema_json
+            or (v2_authority and chat.status != "approved")
+        ):
             raise SetupChatError(
                 "scanner_not_ready",
-                "Scanner needs a current validated Scanner-mode draft.",
+                "Scanner needs the current validated and authenticated approved draft.",
                 status_code=409,
             )
         definition = StrategyDefinition.model_validate(chat.draft_schema_json)
         draft = load_strategy_draft_v2(chat)
+        if v2_authority and not v2_scanner_approval_matches(
+            chat,
+            draft,
+            definition,
+            user_id=chat.user_id,
+        ):
+            raise SetupChatError(
+                "scanner_approval_mismatch",
+                "The Scanner approval no longer matches the exact reviewed draft.",
+                status_code=409,
+            )
         if definition.canonical_hash() != expected_hash:
             raise SetupChatError(
                 "strategy_hash_mismatch",
@@ -4930,6 +4966,29 @@ def _requests_favorites_universe(value: str) -> bool:
 
 def _setup_mode(chat: AISetupChatSession) -> Literal["scanner", "monitor"]:
     return "scanner" if (chat.context_json or {}).get("setup_mode") == "scanner" else "monitor"
+
+
+def v2_scanner_approval_matches(
+    chat: AISetupChatSession,
+    draft: StrategyDraftV2,
+    definition: StrategyDefinition,
+    *,
+    user_id: UUID,
+) -> bool:
+    """One read-only proof that Scanner may execute the reviewed V2 draft."""
+
+    return bool(
+        (chat.context_json or {}).get("strategy_state_authority") == "v2"
+        and chat.status == "approved"
+        and draft.mode == DraftMode.SCANNER
+        and draft.approval.approved
+        and draft.approval.user_id == user_id
+        and draft.approval.executable_version == draft.executable_version
+        and draft.approval.executable_hash == draft.executable_hash
+        and draft.approval.schema_hash == definition.canonical_hash()
+        and chat.approved_strategy_id is not None
+        and chat.approved_strategy_version_id is not None
+    )
 
 
 def _parse_screened_symbols(value: str) -> list[str]:

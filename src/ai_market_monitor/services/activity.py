@@ -219,7 +219,7 @@ class ActivityReadService:
                         f"{readiness_copy(float(setup.completion_score), setup.state)}. "
                         f"{presentation.explanation}"
                     ),
-                    evidence_reference=f"/dashboard/activity?setup={setup.id}",
+                    evidence_reference=f"/dashboard/opportunities?setup={setup.id}",
                     delivery_status=(
                         "sent" if setup.state == SetupLifecycleState.ALERT_SENT else None
                     ),
@@ -481,7 +481,7 @@ class ActivityReadService:
                     ),
                     title=f"Why didn't this alert happen? - {row.symbol}",
                     summary=row.conclusion,
-                    evidence_reference=f"/dashboard/activity?investigation={row.id}",
+                    evidence_reference=f"/dashboard/opportunities?investigation={row.id}",
                     delivery_status=(row.delivery_diagnostics or {}).get("status"),
                     requires_attention=row.status != "completed",
                 )

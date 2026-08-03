@@ -2567,7 +2567,7 @@ class ShariaAdminTelegramService:
         if methodology:
             lines.append(f"Methodology: {methodology.name} v{methodology.version}")
         lines.append(
-            f"Affected Watch Plans/users: {int(affected_watch_plans or 0)}/"
+            f"Affected Watchlists/users: {int(affected_watch_plans or 0)}/"
             f"{int(affected_users or 0)}"
         )
         lines.extend(

@@ -77,7 +77,7 @@
           {% if version_mismatch %}<a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/verify?version={{ current_version.id }}#version-control">Compare with current</a>{% endif %}
           {% if sharia_passport_asset %}<button class="button button-secondary" type="button" data-passport-quick-view data-passport-asset="{{ sharia_passport_asset }}"{% if sharia_passport_version_id %} data-passport-version-id="{{ sharia_passport_version_id }}"{% endif %}{% if sharia_passport_canonical_asset_id %} data-passport-canonical-asset-id="{{ sharia_passport_canonical_asset_id }}"{% endif %} data-passport-event-time="{{ (alert.candle_timestamp or alert.created_at).isoformat() }}">Passport Quick View</button>{% endif %}
           {% if sharia_passport_url %}<a class="button button-secondary" href="{{ sharia_passport_url }}">View Full Passport</a>{% endif %}
-          <a class="button button-secondary" href="/dashboard/activity">Back to evidence</a>
+          <a class="button button-secondary" href="/dashboard/opportunities">Back to evidence</a>
         </div>
         <script type="application/json" data-alert-proof-json>{{ {'alert_id': alert.id|string, 'proof_hash': proof_hash, 'proof_schema_version': alert.proof_schema_version, 'proof': proof} | tojson }}</script>
       </main>

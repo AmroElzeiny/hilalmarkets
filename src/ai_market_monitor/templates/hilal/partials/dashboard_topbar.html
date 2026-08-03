@@ -21,6 +21,9 @@
         <div class="notification-center-list" data-notification-center-list><div class="skeleton"></div><div class="skeleton"></div></div>
       </section>
     </div>
+    {# One launcher for every dashboard page. The guide engine hides it when the current
+       page has no configured steps, so no template decides that for itself. #}
+    <button class="btn btn-secondary btn-sm hm-guide-launcher" type="button" data-hm-guide-launcher aria-label="Guide this page" title="Guide this page" hidden><span data-icon="guide" data-icon-class="icon"></span><span class="hm-guide-launcher-label">Guide this page</span></button>
     <a class="btn btn-primary btn-sm sidebar-create-quick" href="{{ url_for('new_strategy_builder_page') }}"><span data-icon="plus" data-icon-class="icon"></span>New Watchlist</a>
   </div>
 </header>

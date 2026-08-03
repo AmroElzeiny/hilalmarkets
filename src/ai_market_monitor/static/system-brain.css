@@ -22,7 +22,7 @@ body {
   margin: 0;
   background: var(--hm-canvas);
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -38,7 +38,7 @@ button, input, select, textarea { font: inherit; }
 a { color: inherit; }
 img, svg { display: block; max-width: 100%; }
 .icon { width: 19px; height: 19px; }
-:where(h1, h2, h3, h4) { font-family: "Geometria", "Onest", sans-serif; font-weight: 500; letter-spacing: -.025em; }
+:where(h1, h2, h3, h4) { font-family: var(--hm-font-display); font-weight: 500; letter-spacing: -.025em; }
 .brain-skip { position: fixed; top: -80px; left: 16px; z-index: 100; padding: 10px 14px; border-radius: 999px; background: var(--hm-apple); color: var(--hm-ink); font-weight: 600; }
 .brain-skip:focus { top: 16px; }
 
@@ -80,7 +80,7 @@ img, svg { display: block; max-width: 100%; }
 }
 .brain-auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 46px; }
 .brain-auth-brand .brain-logo { width: 52px; height: 52px; }
-.brain-auth-brand strong { color: var(--hm-surface); font-family: "Geometria", "Onest", sans-serif; font-size: 18px; font-weight: 500; text-transform: lowercase; }
+.brain-auth-brand strong { color: var(--hm-surface); font-family: var(--hm-font-display); font-size: 18px; font-weight: 500; text-transform: lowercase; }
 .brain-auth-visual h1 { max-width: 570px; margin: 4px 0 18px; color: var(--hm-surface); font-size: clamp(2.45rem, 5vw, 4.5rem); line-height: 1.02; }
 .brain-auth-visual > p:not(.brain-kicker) { max-width: 560px; color: rgba(255, 255, 255, .76); font-size: 1.02rem; }
 .brain-auth-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 36px; }
@@ -120,7 +120,7 @@ img, svg { display: block; max-width: 100%; }
 .brain-brand img { width: 38px; height: 38px; }
 .brain-brand span, .brain-sidebar-foot div { min-width: 0; }
 .brain-brand strong, .brain-brand small, .brain-sidebar-foot strong, .brain-sidebar-foot small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.brain-brand strong { font-family: "Geometria", "Onest", sans-serif; font-size: 15px; font-weight: 500; text-transform: lowercase; }
+.brain-brand strong { font-family: var(--hm-font-display); font-size: 15px; font-weight: 500; text-transform: lowercase; }
 .brain-brand small, .brain-sidebar-foot small { color: var(--hm-muted); font-size: 10px; }
 .brain-sidebar nav { display: grid; gap: 3px; margin-top: 15px; }
 .brain-sidebar nav a { position: relative; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 11px; border: 1px solid transparent; border-radius: 13px; color: var(--hm-copy); text-decoration: none; transition: background var(--hm-motion), border-color var(--hm-motion), color var(--hm-motion), transform var(--hm-motion); }
@@ -187,7 +187,7 @@ img, svg { display: block; max-width: 100%; }
 .brain-metric::after { position: absolute; right: -28px; bottom: -38px; width: 92px; height: 92px; border: 18px solid var(--hm-apple-soft); border-radius: 30px 0 30px 30px; transform: rotate(45deg); content: ""; }
 .brain-metric-icon { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--hm-hairline); border-radius: 12px; background: var(--hm-surface-soft); color: var(--hm-ink); }
 .brain-metric p { margin: 13px 0 3px; color: var(--hm-copy); }
-.brain-metric strong { display: block; color: var(--hm-ink); font-family: "Geometria", "Onest", sans-serif; font-size: 27px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.brain-metric strong { display: block; color: var(--hm-ink); font-family: var(--hm-font-display); font-size: 27px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .brain-metric small { display: block; margin-top: 6px; color: var(--hm-muted); font-size: 11px; }
 
 .brain-chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -380,7 +380,7 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-action-metrics strong,
 .brain-action-metrics small { display: block; }
 .brain-action-metrics span { min-height: 36px; font-size: 12px; font-weight: 650; }
-.brain-action-metrics strong { margin: 5px 0; color: var(--hm-ink); font-family: "Geometria", "Onest", sans-serif; font-size: 28px; font-weight: 500; }
+.brain-action-metrics strong { margin: 5px 0; color: var(--hm-ink); font-family: var(--hm-font-display); font-size: 28px; font-weight: 500; }
 .brain-action-metrics small { color: var(--hm-muted); font-size: 10px; }
 .brain-overview-grid { display: grid; grid-template-columns: 1fr; align-items: start; gap: 12px; }
 .brain-attention-panel { min-width: 0; }
@@ -579,7 +579,7 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   border-radius: 15px;
   background: var(--hm-ink);
   color: var(--hm-apple);
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-size: 18px;
   font-weight: 600;
 }

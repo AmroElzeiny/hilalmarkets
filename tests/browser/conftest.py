@@ -68,13 +68,16 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
             from ai_market_monitor.services.strategy_patch_extractor import (
                 deterministic_strategy_patch,
             )
-            from tests.support.setup_agent_plans import operations_from_patch
+            from tests.support.setup_agent_plans import (
+                operations_from_patch,
+                planner_envelope_json,
+            )
 
             length = int(self.headers.get("Content-Length") or 0)
             request = json.loads(self.rfile.read(length) or b"{}")
             schema_name = request["text"]["format"]["name"]
             payload = json.loads(request["input"])
-            if schema_name == "hilalmarkets_setup_turn_plan":
+            if schema_name == "hilalmarkets_setup_turn_intent":
                 message = str(payload["current_user_turn"])
                 turn_id = str(payload["source_turn_id"])
                 patch = deterministic_strategy_patch(
@@ -100,7 +103,8 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
                             overall_confidence=1,
                         ),
                         direct_reply="Happy to help.",
-                    ).model_dump_json()
+                    )
+                    output = planner_envelope_json(output)
                 else:
                     segment_id = "browser_stub_instruction"
                     output = SetupAgentPlanEnvelope(
@@ -129,7 +133,8 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
                             ],
                             overall_confidence=1,
                         )
-                    ).model_dump_json()
+                    )
+                    output = planner_envelope_json(output)
             else:
                 output = SetupAgentReply(
                     message_without_question="I applied the verified draft update.",

@@ -704,7 +704,7 @@ class CapabilityExtensionService:
         await self._status(
             session,
             extension,
-            "This custom mechanic is quarantined. Watch Plans using it will not scan until "
+            "This custom mechanic is quarantined. Watchlists using it will not scan until "
             "you restore it.",
             stage="quarantined",
         )

@@ -122,7 +122,7 @@ class ShariaUniverseResolver:
             )
             raise ShariaUniverseError(
                 reason,
-                "The Halal Market could not be verified, so no asset was made eligible.",
+                "Halal Assets could not be verified, so no asset was made eligible.",
             ) from exc
 
         self._queue_resolution_metrics(resolution, elapsed=monotonic() - started)
@@ -148,7 +148,7 @@ class ShariaUniverseResolver:
         ):
             raise ShariaUniverseError(
                 "explicit_assets_required",
-                "Choose at least one specific eligible asset for this Watch Plan.",
+                "Choose at least one specific eligible asset for this Watchlist.",
             )
 
         try:
@@ -270,7 +270,7 @@ class ShariaUniverseResolver:
                         reason_code=ShariaPolicyDecision.EXCLUDED_STATUS.value,
                         reason=(
                             f"Current screening status {effective_status.value!r} is not "
-                            "included by this Watch Plan's policy."
+                            "included by this Watchlist's policy."
                         ),
                         status=effective_status,
                         assessment_id=assessment.id,
@@ -332,7 +332,7 @@ class ShariaUniverseResolver:
                         symbol=item.symbol,
                         canonical_asset=item.canonical_asset,
                         reason_code="symbol_limit",
-                        reason="The current plan or Watch Plan symbol limit was reached.",
+                        reason="The current plan or Watchlist symbol limit was reached.",
                         status=item.status,
                         assessment_id=item.assessment_id,
                     )
@@ -637,7 +637,7 @@ class ShariaUniverseResolver:
             if not considered:
                 raise ShariaUniverseError(
                     "explicit_assets_required",
-                    "Choose at least one specific eligible asset for this Watch Plan.",
+                    "Choose at least one specific eligible asset for this Watchlist.",
                 )
             return considered, []
         if user_id is None or policy.approved_watchlist_id is None:
@@ -666,7 +666,7 @@ class ShariaUniverseResolver:
             raise ShariaUniverseError(
                 "approved_watchlist_changed",
                 "The markets in that Favorites list changed. Review and approve the "
-                "Watch Plan again before it can run.",
+                "Watchlist again before it can run.",
             )
         assets = set(
             (
@@ -700,7 +700,7 @@ class ShariaUniverseResolver:
         if self.settings.sharia_screening_enforced:
             raise ShariaUniverseError(
                 "sharia_policy_required",
-                "Choose an approved methodology and Halal Market before scanning.",
+                "Choose an approved methodology and Halal Assets before scanning.",
             )
         if self.settings.is_deployed or not self.settings.sharia_allow_legacy_unscreened_local:
             raise ShariaUniverseError(

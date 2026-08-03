@@ -21,6 +21,7 @@ from ai_market_monitor.engine.turn_fragments import (
 from ai_market_monitor.schemas.strategy import Comparator, StrategyDirection
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
+    CapabilityParameterValue,
     ConditionNodeType,
     ConditionNodeV2,
     CorrectionV2,
@@ -124,7 +125,13 @@ class LaunchStrategyPatchExtractor:
             current_message=message,
             accumulated_setup="",
         )
-        schema = strict_json_schema(StrategyPatchExtraction)
+        # This extractor is the offline evaluation path, not the authenticated Setup
+        # Chat. It still sends the canonical draft models, so its schema carries
+        # `ConditionNodeV2.capability_parameters` — an open map, which a strict schema
+        # turns into an object accepting nothing. The escape keeps this path working
+        # exactly as it did while the production planner uses the compact intent
+        # contract, where parameters travel as name/value pairs and can actually arrive.
+        schema = strict_json_schema(StrategyPatchExtraction, allow_open_maps=True)
         payload = {
             "model": route.model,
             "store": False,
@@ -860,10 +867,7 @@ def _reference_node(
     confirmation_timeframes: list[str],
     left_field: str,
     reference_name: str,
-    reference_parameters: dict[
-        str,
-        int | float | str | bool | list[int | float | str | bool],
-    ],
+    reference_parameters: dict[str, CapabilityParameterValue],
     reference_definition: str,
 ) -> ConditionNodeV2:
     return ConditionNodeV2(

@@ -96,7 +96,7 @@ def readiness_copy(score: float, state: SetupLifecycleState | str) -> str:
 
 def product_term(term: str) -> str:
     return {
-        "strategy": "Watch Plan",
+        "strategy": "Watchlist",
         "candidate": "Opportunity",
         "lifecycle": "Opportunity journey",
         "partial_match": "Forming",
@@ -107,7 +107,7 @@ def product_term(term: str) -> str:
         "expired": "Ended",
         "blocker": "What is still missing",
         "rule_evaluation": "Market check",
-        "universe": "Halal Market",
+        "universe": "Halal Assets",
         "alert_proof": "Why you received this alert",
         "missed_alert": "Why didn't this alert happen?",
         "completion_score": "Readiness",

@@ -730,7 +730,7 @@ async def test_approved_compliance_review_pauses_asset_and_deduplicates_alert(te
         assert "Review the updated Passport" in (
             compliance_alert.proof_receipt["next_user_action"]
         )
-        assert "Automatic Watch Plan action: paused" in compliance_alert.body
+        assert "Automatic Watchlist action: paused" in compliance_alert.body
         assert compliance_alert.proof_receipt["evidence_passport_path"] == (
             "/dashboard/market/sol"
         )

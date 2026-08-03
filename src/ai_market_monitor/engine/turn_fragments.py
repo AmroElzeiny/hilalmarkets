@@ -24,14 +24,11 @@ from ai_market_monitor.engine.comparators import OPERATOR_TERMS, detect_comparat
 from ai_market_monitor.engine.price_movement import PHRASAL_PARTICLE_GUARD
 from ai_market_monitor.engine.prompt_aliases import normalized_phrases
 from ai_market_monitor.engine.text_normalization import repair_utf8_mojibake
-from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES, TIMEFRAME_MINUTES
+from ai_market_monitor.engine.timeframes import (
+    WORD_TIMEFRAME_ALIASES,
+    normalize_timeframe_alias,
+)
 from ai_market_monitor.schemas.strategy import Comparator, StrategyDirection
-
-_TIMEFRAME_BY_MINUTES = {
-    timeframe: minutes
-    for timeframe, minutes in TIMEFRAME_MINUTES.items()
-    if timeframe in SUPPORTED_TIMEFRAMES
-}
 
 FragmentKind = Literal[
     "symbol",
@@ -1064,9 +1061,7 @@ class TurnFragmentReport:
 
     @property
     def is_sweep(self) -> bool:
-        return any(
-            item.is_sweep for item in self.fragments if item.contributes_strategy_state
-        )
+        return any(item.is_sweep for item in self.fragments if item.contributes_strategy_state)
 
     @property
     def is_approval(self) -> bool:
@@ -1135,20 +1130,49 @@ SemanticTimeframeRole = Literal["trigger", "context", "confirmation", "reference
 
 _SEMANTIC_TIMEFRAME_ROLE_TERMS: dict[SemanticTimeframeRole, tuple[str, ...]] = {
     "trigger": (
-        "trigger", "entry", "signal", "fire", "alert", "setup candle",
-        "إشارة", "تفعيل", "trigger", "eshara",
+        "trigger",
+        "entry",
+        "signal",
+        "fire",
+        "alert",
+        "setup candle",
+        "إشارة",
+        "تفعيل",
+        "trigger",
+        "eshara",
     ),
     "context": (
-        "context", "backdrop", "regime", "higher timeframe", "htf", "macro",
-        "سياق", "خلفية", "seya2", "sya2",
+        "context",
+        "backdrop",
+        "regime",
+        "higher timeframe",
+        "htf",
+        "macro",
+        "سياق",
+        "خلفية",
+        "seya2",
+        "sya2",
     ),
     "confirmation": (
-        "confirmation", "confirm", "confirmed by", "independently confirm",
-        "تأكيد", "يأكد", "ta2keed", "confirmation",
+        "confirmation",
+        "confirm",
+        "confirmed by",
+        "independently confirm",
+        "تأكيد",
+        "يأكد",
+        "ta2keed",
+        "confirmation",
     ),
     "reference": (
-        "reference", "baseline", "measured from", "compare with", "relative to",
-        "مرجع", "قياس", "marga3", "marja3",
+        "reference",
+        "baseline",
+        "measured from",
+        "compare with",
+        "relative to",
+        "مرجع",
+        "قياس",
+        "marga3",
+        "marja3",
     ),
 }
 
@@ -1188,13 +1212,23 @@ def timeframe_role_is_explicit(
             if value == timeframe
         ]
         for timeframe_pattern in timeframe_patterns:
+            # Traders very commonly name the rendered market view between the
+            # timeframe and its purpose: ``the 4h chart provides directional
+            # context`` or ``the 5m candle supplies the trigger``.  Those words do
+            # not change the role, but the previous grammar treated them as a gap and
+            # rejected an otherwise exact, same-clause binding.  Keep the role and
+            # timeframe in the same clause; this merely accepts neutral view nouns
+            # and linking verbs between them.
+            view_noun = r"(?:timeframe|chart|candle(?:s)?|interval|period)?"
+            role_modifier = r"(?:directional\s+|market\s+|trend\s+)?"
+            linking_verb = r"(?:is|as|for|used\s+as|provides?|supplies?|sets?|serves\s+as)?"
             if re.search(
                 rf"(?:{term_pattern})(?:\s+timeframe)?\s*(?::|=|is|on|at|of|as)?\s*"
                 rf"(?:the\s+)?{timeframe_pattern}(?!\w)",
                 lowered,
             ) or re.search(
-                rf"(?<!\w){timeframe_pattern}\s*(?:timeframe\s*)?"
-                rf"(?:is|as|for|used\s+as)?\s*(?:the\s+)?(?:{term_pattern})",
+                rf"(?<!\w){timeframe_pattern}\s*{view_noun}\s*{linking_verb}\s*"
+                rf"(?:the\s+)?{role_modifier}(?:{term_pattern})",
                 lowered,
             ):
                 return True
@@ -1207,9 +1241,7 @@ def timeframe_role_is_explicit(
         if term not in _SEMANTIC_TIMEFRAME_ROLE_TERMS["trigger"]
     ):
         return False
-    timeframe_token = (
-        r"(?:\d+\s*(?:m|h|d|w)|hourly|daily|weekly|four[- ]hour)"
-    )
+    timeframe_token = r"(?:\d+\s*(?:m|h|d|w)|hourly|daily|weekly|four[- ]hour)"
     formula_token = (
         r"(?:open[- ]to[- ]close|close[- ]to[- ]close|"
         r"high[- ]to[- ]low|low[- ]to[- ]high|move)"
@@ -1324,9 +1356,7 @@ def extract_timeframe_roles(text: str) -> TimeframeRoles:
                 role = explicit_role
             elif lone_span is not None and lone_role is not None:
                 role = (
-                    lone_role
-                    if (start, end, canonical) == lone_span
-                    else _OPPOSITE_ROLE[lone_role]
+                    lone_role if (start, end, canonical) == lone_span else _OPPOSITE_ROLE[lone_role]
                 )
             elif lone_role is not None:
                 role = lone_role
@@ -1397,10 +1427,8 @@ _ROLE_PROXIMITY_LIMIT = 40
 
 #: `daily`/`weekly` name timeframes without a digit, so the numeric pattern misses them.
 _WORD_TIMEFRAMES = {
-    "hourly": "1h",
-    "daily": "1d",
-    "four hour": "4h",
-    "four-hour": "4h",
+    **WORD_TIMEFRAME_ALIASES,
+    "four-hour": WORD_TIMEFRAME_ALIASES["four hour"],
 }
 
 
@@ -1630,9 +1658,7 @@ def classify_fragment(text: str) -> ClassifiedFragment:
         # ``enters_capability_resolution`` remains false.
         return build("trading_condition")
 
-    def by_carried_state(
-        *, empty_kind: FragmentKind = "conversational"
-    ) -> ClassifiedFragment:
+    def by_carried_state(*, empty_kind: FragmentKind = "conversational") -> ClassifiedFragment:
         """Classify by whatever the fragment still carries.
 
         Text that is not a mechanic can still hold real configuration: `add SOLUSDT`
@@ -1881,10 +1907,7 @@ def _split_fragments(text: str) -> tuple[str, ...]:
     parts = re.split(r"[\n.;]+|,\s*|\s+\b(?:and|but|then|also|plus|except)\b\s+", protected)
     cleaned = tuple(
         " ".join(
-            part.replace("\x00", ".")
-            .replace("__hm_compound_and__", "and")
-            .strip(" -:\t")
-            .split()
+            part.replace("\x00", ".").replace("__hm_compound_and__", "and").strip(" -:\t").split()
         )
         for part in parts
     )
@@ -1935,10 +1958,7 @@ def _excluded_symbols(text: str, symbols: tuple[str, ...]) -> tuple[str, ...]:
                 prefix,
             )
         )
-        keep_out = bool(
-            re.search(r"\bkeep(?:ing)?\W*$", prefix)
-            and re.match(r"^\W*out\b", suffix)
-        )
+        keep_out = bool(re.search(r"\bkeep(?:ing)?\W*$", prefix) and re.match(r"^\W*out\b", suffix))
         # `not` immediately before a symbol, with nothing in between. The bare word is
         # ambiguous in general — `not below 30` is a comparison — but a symbol cannot
         # be compared to, so here it can only mean "keep this one out". Without it,
@@ -1953,12 +1973,16 @@ def _excluded_symbols(text: str, symbols: tuple[str, ...]) -> tuple[str, ...]:
             )
             for marker in _TRAILING_EXCLUSION_MARKERS
         )
-        if explicit_exclude or keep_out or (
-            not explicit_include
-            and (
-                any(marker in prefix for marker in _EXCLUSION_MARKERS)
-                or adjacent_negation
-                or trailing_exclude
+        if (
+            explicit_exclude
+            or keep_out
+            or (
+                not explicit_include
+                and (
+                    any(marker in prefix for marker in _EXCLUSION_MARKERS)
+                    or adjacent_negation
+                    or trailing_exclude
+                )
             )
         ):
             excluded.append(symbol)
@@ -2042,10 +2066,7 @@ def extract_explicit_exclusions(text: str) -> tuple[str, ...]:
             r"ممنوع|مستبعد|مش\s+عايز(?:ه|ة)?)\b",
             suffix,
         )
-        keep_out = bool(
-            re.search(r"\bkeep(?:ing)?\W*$", prefix)
-            and re.match(r"^\W*out\b", suffix)
-        )
+        keep_out = bool(re.search(r"\bkeep(?:ing)?\W*$", prefix) and re.match(r"^\W*out\b", suffix))
         if before or after or keep_out:
             excluded.append(symbol)
     return _unique(excluded)
@@ -2319,24 +2340,7 @@ def _residual_vocabulary(
 
 def _canonical_timeframe(amount: str, unit: str) -> str | None:
     unit = _UNIT_ALIASES.get(unit.casefold(), unit.casefold())
-    try:
-        value = int(amount)
-    except ValueError:
-        return None
-    if unit.startswith(("m", "min")):
-        minutes = value
-    elif unit.startswith(("h", "hr", "hour")):
-        minutes = value * 60
-    elif unit.startswith(("d", "day")):
-        minutes = value * 1440
-    elif unit.startswith(("w", "week")):
-        minutes = value * 10080
-    else:
-        return None
-    for candidate, candidate_minutes in _TIMEFRAME_BY_MINUTES.items():
-        if candidate_minutes == minutes:
-            return candidate
-    return None
+    return normalize_timeframe_alias(f"{amount}{unit}")
 
 
 def _collapse(value: str) -> str:

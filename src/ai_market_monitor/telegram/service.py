@@ -568,7 +568,7 @@ class TelegramBotService:
                 "Lifecycles\n\nReplay is hidden. Use lifecycle cards for setup state, "
                 "missing conditions, proof context and chart evidence.",
                 buttons=[
-                    self._dashboard_button("Open Lifecycles", "/dashboard/lifecycles"),
+                    self._dashboard_button("Open Lifecycles", "/dashboard/opportunities"),
                     TelegramButton("Support", "support:missing_alert"),
                     TelegramButton("Go Back", "back:previous"),
                 ],
@@ -877,7 +877,7 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_confirmed_alert(result),
             buttons=[
-                self._dashboard_button("🔄 View lifecycle", "/dashboard/lifecycles"),
+                self._dashboard_button("🔄 View lifecycle", "/dashboard/opportunities"),
                 self._dashboard_button("📊 Dashboard"),
                 TelegramButton("🔕 Mute symbol", "mute_strategy"),
             ],
@@ -891,7 +891,7 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_lifecycle_update(result),
             buttons=[
-                self._dashboard_button("🔄 View lifecycle", "/dashboard/lifecycles"),
+                self._dashboard_button("🔄 View lifecycle", "/dashboard/opportunities"),
                 self._dashboard_button("📊 Dashboard"),
                 TelegramButton("🔕 Mute symbol", "mute_strategy"),
             ],
@@ -1065,7 +1065,7 @@ class TelegramBotService:
             f"🔕 Muted {symbol} for this strategy. "
             "Future setups from this pair will not be delivered.",
             buttons=[
-                self._dashboard_button("🔄 Lifecycles", "/dashboard/lifecycles"),
+                self._dashboard_button("🔄 Lifecycles", "/dashboard/opportunities"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2076,7 +2076,7 @@ class TelegramBotService:
             buttons=[
                 TelegramButton("Top Near-Misses", "near:top"),
                 TelegramButton("One Condition Remaining", "near:one_left"),
-                self._dashboard_button("Dashboard", "/dashboard/lifecycles"),
+                self._dashboard_button("Dashboard", "/dashboard/opportunities"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2248,7 +2248,7 @@ class TelegramBotService:
                 TelegramButton("✅ Confirmed", "latest:confirmed"),
                 TelegramButton("❌ Invalidated", "latest:invalidated"),
                 TelegramButton("⌛ Expired", "latest:expired"),
-                self._dashboard_button("Dashboard", "/dashboard/lifecycles"),
+                self._dashboard_button("Dashboard", "/dashboard/opportunities"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2969,7 +2969,7 @@ class TelegramBotService:
             callback,
             "Feedback recorded. I will not change your strategy without explicit approval.",
             buttons=[
-                self._dashboard_button("Lifecycles", "/dashboard/lifecycles"),
+                self._dashboard_button("Lifecycles", "/dashboard/opportunities"),
                 self._dashboard_button("Dashboard"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
@@ -3547,16 +3547,16 @@ class TelegramBotService:
             "create_monitor": "/dashboard/strategies/new",
             "monitors": "/dashboard/strategies/new#monitors",
             "scan": "/dashboard/scan-now",
-            "near_miss": "/dashboard/lifecycles",
-            "lifecycles": "/dashboard/lifecycles",
-            "setups": "/dashboard/lifecycles",
-            "alerts": "/dashboard/lifecycles",
+            "near_miss": "/dashboard/opportunities",
+            "lifecycles": "/dashboard/opportunities",
+            "setups": "/dashboard/opportunities",
+            "alerts": "/dashboard/opportunities",
             "settings": "/dashboard/settings",
             "support": "/dashboard/support",
             "connections": "/dashboard/connections",
             "performance": "/dashboard",
-            "setup_replay": "/dashboard/lifecycles",
-            "why_no_alert": "/dashboard/lifecycles",
+            "setup_replay": "/dashboard/opportunities",
+            "why_no_alert": "/dashboard/opportunities",
         }.get(page, "/dashboard")
 
     @staticmethod

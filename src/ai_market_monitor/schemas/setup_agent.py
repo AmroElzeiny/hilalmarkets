@@ -118,6 +118,7 @@ def _bind_condition_tree_provenance(
     source_fragment: str,
     node_id_seed: str | None = None,
     node_path: tuple[int, ...] = (),
+    preserve_existing: bool = False,
 ) -> dict[str, object]:
     """Return a copied proposed tree with authoritative server-owned metadata."""
 
@@ -128,17 +129,26 @@ def _bind_condition_tree_provenance(
             "condition_"
             + hashlib.sha256(f"{node_id_seed}:{rendered_path}".encode()).hexdigest()[:16]
         )
-    node["source_turn_id"] = source_turn_id
+    proposed_turn = node.get("source_turn_id")
     proposed_fragment = node.get("source_fragment")
-    grounded_fragment = (
-        proposed_fragment
-        if isinstance(proposed_fragment, str)
-        and proposed_fragment.strip()
-        and " ".join(proposed_fragment.split()).casefold()
-        in " ".join(source_fragment.split()).casefold()
-        else source_fragment
+    inherited_provenance = (
+        preserve_existing
+        and isinstance(proposed_turn, str)
+        and bool(proposed_turn.strip())
+        and isinstance(proposed_fragment, str)
+        and bool(proposed_fragment.strip())
     )
-    node["source_fragment"] = grounded_fragment
+    if not inherited_provenance:
+        node["source_turn_id"] = source_turn_id
+        grounded_fragment = (
+            proposed_fragment
+            if isinstance(proposed_fragment, str)
+            and proposed_fragment.strip()
+            and " ".join(proposed_fragment.split()).casefold()
+            in " ".join(source_fragment.split()).casefold()
+            else source_fragment
+        )
+        node["source_fragment"] = grounded_fragment
     node["formula"] = _canonical_formula_identifier(node.get("formula"))
     node["operands"] = _canonicalize_core_operand_metadata(node)
     children = node.get("children")
@@ -150,6 +160,7 @@ def _bind_condition_tree_provenance(
                 source_fragment=source_fragment,
                 node_id_seed=node_id_seed,
                 node_path=(*node_path, index),
+                preserve_existing=preserve_existing,
             )
             if isinstance(child, dict)
             else child
@@ -263,9 +274,7 @@ def _canonicalize_core_operand_metadata(
         operand = dict(raw_operand)
         if operand.get("kind") == "market_metric":
             parameters = (
-                dict(operand["parameters"])
-                if isinstance(operand.get("parameters"), dict)
-                else {}
+                dict(operand["parameters"]) if isinstance(operand.get("parameters"), dict) else {}
             )
             if formula in percentage_formulas:
                 if not operand.get("field") and not operand.get("name"):
@@ -466,9 +475,7 @@ class SetupAgentTurnPlan(_StrictModel):
     )
     clarification_answers: list[ClarificationAnswer] = Field(default_factory=list, max_length=8)
     questions_to_answer: list[str] = Field(default_factory=list, max_length=8)
-    clarifications_to_ask: list[ClarificationRequest] = Field(
-        default_factory=list, max_length=3
-    )
+    clarifications_to_ask: list[ClarificationRequest] = Field(default_factory=list, max_length=3)
     approval_intent: ApprovalIntent | None = None
     unsupported_segments: list[UnsupportedSegment] = Field(default_factory=list, max_length=12)
     response_points: list[ResponseDirective] = Field(default_factory=list, max_length=12)
@@ -526,6 +533,7 @@ class SetupAgentTurnPlan(_StrictModel):
                         if item.get("kind") == "add_condition"
                         else None
                     ),
+                    preserve_existing=item.get("kind") == "replace_groups",
                 )
             if isinstance(item.get("unresolved"), dict):
                 unresolved = dict(item["unresolved"])
@@ -678,9 +686,7 @@ class ReconciledOperationRecord(BaseModel):
     operation_id: str = Field(min_length=1, max_length=80)
     authorizing_segment_id: str = Field(min_length=1, max_length=80)
     operation_kind: str = Field(min_length=1, max_length=60)
-    net_effect: Literal[
-        "effective", "overwritten", "cancelled", "no_net_effect", "rejected"
-    ]
+    net_effect: Literal["effective", "overwritten", "cancelled", "no_net_effect", "rejected"]
     #: Only ids present or materially changed in the final draft.
     final_condition_ids: list[str] = Field(default_factory=list, max_length=100)
     summary: str = Field(default="", max_length=400)
@@ -750,9 +756,7 @@ class SetupTurnExecutionResult(BaseModel):
     #: Whether the Sharia policy and screened universe resolved. Every gate runs inside
     #: execution now: the reply used to be written from a *pre*-screening compile, so a
     #: message could announce a ready draft that screening then blocked.
-    screening_status: Literal["passed", "blocked", "not_required", "not_attempted"] = (
-        "not_required"
-    )
+    screening_status: Literal["passed", "blocked", "not_required", "not_attempted"] = "not_required"
     provider_status: Literal[
         "available",
         "unavailable",
@@ -773,9 +777,7 @@ class SetupTurnExecutionResult(BaseModel):
     safe_errors: list[str] = Field(default_factory=list, max_length=20)
     suggested_next_actions: list[str] = Field(default_factory=list, max_length=6)
     #: The only questions the composer may ask. It cannot invent an executable one.
-    allowed_clarifications: list[ClarificationContract] = Field(
-        default_factory=list, max_length=6
-    )
+    allowed_clarifications: list[ClarificationContract] = Field(default_factory=list, max_length=6)
     #: Deterministic read model for answering questions about the current draft.
     draft_read_model: dict[str, object] = Field(default_factory=dict)
     #: The universe the Sharia resolver actually permitted, and the identity of that
@@ -1027,12 +1029,8 @@ class SetupAgentReply(_StrictModel):
         if not isinstance(data, dict):
             return data
         migrated = dict(data)
-        legacy = migrated.pop("message", None) or migrated.pop(
-            "message_without_question", None
-        )
-        if isinstance(legacy, str) and legacy.strip() and not migrated.get(
-            "conversational_text"
-        ):
+        legacy = migrated.pop("message", None) or migrated.pop("message_without_question", None)
+        if isinstance(legacy, str) and legacy.strip() and not migrated.get("conversational_text"):
             migrated["conversational_text"] = legacy
         if "clarification_question_id" in migrated:
             migrated.setdefault(

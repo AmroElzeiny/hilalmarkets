@@ -1,6 +1,6 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260801-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260802-launch-offer">
 {% endblock %}
 {% block content %}
 {% macro monitor_filter() %}
@@ -13,14 +13,14 @@
     </button>
     <div class="monitor-filter-menu" role="listbox" hidden data-monitor-filter-menu>
       {% if lifecycle_monitors|length > 7 %}<label class="monitor-filter-search"><span class="sr-only">Search Watchlists</span><input type="search" class="input" placeholder="Search Watchlists" data-monitor-filter-search></label>{% endif %}
-      <a role="option" href="/dashboard/activity?tab={{ activity_tab }}" aria-selected="{{ 'true' if not selected_monitor_id else 'false' }}" data-monitor-option="">All Watchlists</a>
-      {% for monitor_id, monitor_name in lifecycle_monitors %}<a role="option" href="/dashboard/activity?tab={{ activity_tab }}&monitor={{ monitor_id }}" aria-selected="{{ 'true' if selected_monitor_id == monitor_id else 'false' }}" data-monitor-option="{{ monitor_id }}" data-monitor-name="{{ monitor_name|lower }}">{{ monitor_name }}</a>{% endfor %}
+      <a role="option" href="/dashboard/opportunities?tab={{ activity_tab }}" aria-selected="{{ 'true' if not selected_monitor_id else 'false' }}" data-monitor-option="">All Watchlists</a>
+      {% for monitor_id, monitor_name in lifecycle_monitors %}<a role="option" href="/dashboard/opportunities?tab={{ activity_tab }}&monitor={{ monitor_id }}" aria-selected="{{ 'true' if selected_monitor_id == monitor_id else 'false' }}" data-monitor-option="{{ monitor_id }}" data-monitor-name="{{ monitor_name|lower }}">{{ monitor_name }}</a>{% endfor %}
     </div>
   </div>
 {% endmacro %}
 
 {% if activity_tab != 'forming' %}
-<article class="panel activity-notification-panel">
+<article class="panel activity-notification-panel" data-hm-guide-target="activity-updates-panel">
   <div class="panel-head"><div><span class="kicker">Recent updates</span><h2>{{ 'Screening changes' if activity_tab == 'compliance_changes' else activity_tab.replace('_', ' ').title() }}</h2></div><div class="activity-panel-actions">{{ monitor_filter() }}<span class="badge badge-neutral">{{ activity.total }} records</span></div></div>
   {% if activity.items %}
   <div class="activity-feed">
@@ -109,4 +109,8 @@
 <div class="observability-drawer-backdrop" data-observability-drawer-backdrop hidden></div><aside class="observability-drawer" data-observability-drawer hidden aria-modal="true" role="dialog" tabindex="-1"><header><div><span class="kicker">Opportunity investigation</span><h2>Why wasn't I alerted?</h2></div><button type="button" data-observability-drawer-close aria-label="Close"><span data-icon="close" data-icon-class="icon"></span></button></header><div data-observability-drawer-content></div></aside>
 <dialog id="lifecycle-chart-dialog" class="lifecycle-chart-dialog"><div class="lifecycle-dialog-shell"><header class="lifecycle-dialog-header"><div><span class="kicker">Interactive lifecycle evidence</span><h2 id="lifecycle-chart-title">Lifecycle chart</h2><p id="lifecycle-chart-subtitle"></p></div><button type="button" data-lifecycle-dialog-close aria-label="Close"><span data-icon="close" data-icon-class="icon"></span></button></header><div class="lifecycle-chart-layout"><div class="lifecycle-chart-stage"><div id="lifecycle-tradingview-widget" class="tradingview-widget-host"></div><p id="lifecycle-chart-status"></p></div><aside class="lifecycle-condition-panel"><h3>Still monitored</h3><div id="lifecycle-missing-conditions"></div><h3>Completed</h3><div id="lifecycle-completed-conditions"></div></aside></div></div></dialog>
 {% endblock %}
-{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}"></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260801-launch-offer"></script>{% endblock %}
+{#- Both scripts are deferred. The chart library used to block the parser: while it was
+    being fetched nothing else on the page could run, so a slow or unreachable source left
+    this page loading for ever with no message. Deferred scripts still run in order, so
+    dashboard.js keeps seeing the chart library, and the page finishes loading either way. -#}
+{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260802-launch-offer" defer></script>{% endblock %}

@@ -20,7 +20,9 @@
       <div class="nav-label">{{ group.label }}</div>
       {% for item in group.items %}
       {% set is_active = page == item.page or page in item.active_pages %}
-      <a class="nav-item {{ 'is-active' if is_active else '' }}" href="{{ url_for(item.endpoint) }}" {% if is_active %}aria-current="page"{% endif %}>
+      {#- The guide marker comes from the navigation data, never from this loop, so each
+          name is declared exactly once. See NavigationItem.guide_target. -#}
+      <a class="nav-item {{ 'is-active' if is_active else '' }}" href="{{ url_for(item.endpoint) }}" {% if is_active %}aria-current="page"{% endif %}{% if item.guide_target %} data-hm-guide-target="{{ item.guide_target }}"{% endif %}>
         <span class="nav-icon nav-icon-{{ item.icon }}" aria-hidden="true"></span>
         <span>{{ item.label }}</span>
       </a>
@@ -34,7 +36,7 @@
     <div class="avatar">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</div>
     <div class="meta">
       <strong>{{ (user.display_name or 'Hilal Markets user') if user else 'Hilal Markets' }}</strong>
-      <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Halal Market intelligence') }}</small>
+      <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Halal Assets intelligence') }}</small>
     </div>
     {% if user %}
     <form method="post" action="/logout"><button class="btn btn-ghost btn-icon" type="submit" aria-label="Sign out"><span data-icon="logout" data-icon-class="icon"></span></button></form>

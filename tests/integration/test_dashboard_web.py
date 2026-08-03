@@ -5,6 +5,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 
 from ai_market_monitor.core.csrf import csrf_token
+from ai_market_monitor.core.plans import plan_offer_payload
 from ai_market_monitor.core.security import hash_password
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
@@ -97,7 +98,7 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
 
     dashboard = await test_context["client"].get("/dashboard")
     assert dashboard.status_code == 200
-    assert "Create your first Watch Plan" in dashboard.text
+    assert "Create your first Watchlist" in dashboard.text
     assert "Your next useful action" in dashboard.text
     assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
@@ -260,7 +261,7 @@ async def test_consolidated_market_and_notification_pages_use_only_persisted_use
     compliance_redirect = await test_context["client"].get("/dashboard/compliance")
     assert compliance_redirect.status_code == 303
     assert compliance_redirect.headers["location"] == (
-        "/dashboard/activity?tab=compliance_changes"
+        "/dashboard/opportunities?tab=compliance_changes"
     )
     compliance_page = await test_context["client"].get(compliance_redirect.headers["location"])
     assert compliance_page.status_code == 200
@@ -487,10 +488,16 @@ async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test
     # A number beside "Soon" reads as a charge the user is about to face.
     assert "Pro is coming soon" in page.text
     assert "$22" not in page.text
-    # The Monitor launch price, with the old one crossed out beside it.
-    assert "$8" in page.text
-    assert 'class="price-original"' in page.text
-    assert "data-offer-countdown" in page.text
+    # The Monitor launch price, with the old one crossed out beside it. Both numbers
+    # come from `core.plans`, not from this file, and the assertion still holds on the
+    # day the offer ends, when there is no crossed-out price left to show.
+    trader_offer = plan_offer_payload("trader")
+    assert f"${int(trader_offer['monthlyPrice'])}" in page.text  # type: ignore[arg-type]
+    original = trader_offer["originalMonthlyPrice"]
+    if original:
+        assert f"${int(original)}" in page.text  # type: ignore[arg-type]
+        assert 'class="price-original"' in page.text
+        assert "data-offer-countdown" in page.text
     review = await test_context["client"].get(
         "/dashboard/billing/checkout?plan_code=trader",
         follow_redirects=False,

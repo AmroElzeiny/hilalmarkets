@@ -1,0 +1,102 @@
+[
+  {
+    "name": "scanner_with_all_timeframe_roles_and_explicit_bias",
+    "source_turn_id": "golden-complex-1",
+    "message": "Create a Scanner named Breakout, include BTC/USDT, and add a required long-bias rule: BTC/USDT open-to-close rises at least 2 percent on trigger 15m, with context 1h, confirmation 4h, and reference 1d.",
+    "envelope": {
+      "segments": [
+        {
+          "segment_ref": "s1",
+          "exact_source_text": "Create a Scanner named Breakout, include BTC/USDT, and add a required long-bias rule: BTC/USDT open-to-close rises at least 2 percent on trigger 15m, with context 1h, confirmation 4h, and reference 1d.",
+          "segment_kind": "STRATEGY_INSTRUCTION"
+        }
+      ],
+      "semantic_intents": [
+        {"segment_ref": "s1", "payload": {"action": "set_mode", "mode": "scanner"}},
+        {"segment_ref": "s1", "payload": {"action": "set_name", "name": "Breakout"}},
+        {"segment_ref": "s1", "payload": {"action": "include_symbol", "symbol": "BTC/USDT"}},
+        {
+          "segment_ref": "s1",
+          "payload": {
+            "action": "add_condition",
+            "condition": {
+              "source_quote": "a required long-bias rule: BTC/USDT open-to-close rises at least 2 percent on trigger 15m, with context 1h, confirmation 4h, and reference 1d",
+              "formula_key": "open_to_close_percentage",
+              "movement_direction": "up",
+              "strategy_bias": "long",
+              "comparator": "gte",
+              "threshold": 2,
+              "unit": "percent",
+              "trigger_timeframe": "15m",
+              "context_timeframes": ["1h"],
+              "confirmation_timeframes": ["4h"],
+              "reference_timeframe": "1d",
+              "required": true,
+              "condition_symbols": ["BTC/USDT"]
+            }
+          }
+        }
+      ],
+      "clarification_answers": [],
+      "questions_to_answer": [],
+      "unsupported_intents": [],
+      "approval_intent": null,
+      "overall_confidence": 0.99
+    },
+    "expected": {
+      "operation_kinds": ["set_fields", "set_fields", "add_inclusion", "add_condition"],
+      "mode": "scanner",
+      "name": "Breakout",
+      "included_symbols": ["BTC/USDT"],
+      "condition_node_id": "condition_a26f45e8608a9012",
+      "formula": "open_to_close_percentage",
+      "movement_direction": "up",
+      "strategy_bias": "long",
+      "comparator": "gte",
+      "threshold": 2.0,
+      "unit": "percent",
+      "trigger_timeframe": "15m",
+      "context_timeframes": ["1h"],
+      "confirmation_timeframes": ["4h"],
+      "reference_timeframe": "1d",
+      "executable_version": 2,
+      "workflow_revision": 2,
+      "executable_hash": "316f14b5b19ab1137e634ee06139b35b504ca2b667c7635cba03df5d449135b2",
+      "workflow_state_hash": "1b52e402f06e5568b1ee3116cb171fd1b6f4901f54b711639a3b6b01e43af33b",
+      "requirement_states": [
+        {"semantic_type": "symbol", "target_path": "condition_ast.condition_a26f45e8608a9012.condition_symbols", "normalized_value": ["BTC/USDT"], "value_role": "condition_symbols"},
+        {"semantic_type": "timeframe", "target_path": "condition_ast.condition_a26f45e8608a9012.confirmation_timeframes", "normalized_value": ["4h"], "value_role": "confirmation"},
+        {"semantic_type": "timeframe", "target_path": "condition_ast.condition_a26f45e8608a9012.context_timeframes", "normalized_value": ["1h"], "value_role": "context"},
+        {"semantic_type": "formula", "target_path": "condition_ast.condition_a26f45e8608a9012.formula", "normalized_value": "open_to_close_percentage", "value_role": "formula"},
+        {"semantic_type": "direction", "target_path": "condition_ast.condition_a26f45e8608a9012.movement_direction", "normalized_value": "up", "value_role": "movement_direction"},
+        {"semantic_type": "condition_field", "target_path": "condition_ast.condition_a26f45e8608a9012.operator", "normalized_value": "gte", "value_role": "operator"},
+        {"semantic_type": "timeframe", "target_path": "condition_ast.condition_a26f45e8608a9012.reference_timeframe", "normalized_value": "1d", "value_role": "reference"},
+        {"semantic_type": "condition_field", "target_path": "condition_ast.condition_a26f45e8608a9012.required", "normalized_value": true, "value_role": "required"},
+        {"semantic_type": "direction", "target_path": "condition_ast.condition_a26f45e8608a9012.strategy_bias", "normalized_value": "long", "value_role": "strategy_bias"},
+        {"semantic_type": "numeric_requirement", "target_path": "condition_ast.condition_a26f45e8608a9012.threshold", "normalized_value": 2.0, "value_role": "threshold"},
+        {"semantic_type": "timeframe", "target_path": "condition_ast.condition_a26f45e8608a9012.trigger_timeframe", "normalized_value": "15m", "value_role": "trigger"},
+        {"semantic_type": "condition_field", "target_path": "condition_ast.condition_a26f45e8608a9012.unit", "normalized_value": "percent", "value_role": "unit"},
+        {"semantic_type": "mode", "target_path": "mode", "normalized_value": "scanner", "value_role": "value"},
+        {"semantic_type": "workflow", "target_path": "name", "normalized_value": "Breakout", "value_role": "value"},
+        {"semantic_type": "symbol", "target_path": "universe.included_symbols.BTC/USDT", "normalized_value": "BTC/USDT", "value_role": "include"}
+      ],
+      "semantic_role_assignments": [
+        {"semantic_type": "timeframe", "role": "confirmation", "normalized_value": ["4h"], "target_path": "condition_ast.condition_a26f45e8608a9012.confirmation_timeframes"},
+        {"semantic_type": "timeframe", "role": "context", "normalized_value": ["1h"], "target_path": "condition_ast.condition_a26f45e8608a9012.context_timeframes"},
+        {"semantic_type": "formula", "role": "formula", "normalized_value": "open_to_close_percentage", "target_path": "condition_ast.condition_a26f45e8608a9012.formula"},
+        {"semantic_type": "direction", "role": "movement_direction", "normalized_value": "up", "target_path": "condition_ast.condition_a26f45e8608a9012.movement_direction"},
+        {"semantic_type": "timeframe", "role": "reference", "normalized_value": "1d", "target_path": "condition_ast.condition_a26f45e8608a9012.reference_timeframe"},
+        {"semantic_type": "direction", "role": "strategy_bias", "normalized_value": "long", "target_path": "condition_ast.condition_a26f45e8608a9012.strategy_bias"},
+        {"semantic_type": "numeric_requirement", "role": "threshold", "normalized_value": 2.0, "target_path": "condition_ast.condition_a26f45e8608a9012.threshold"},
+        {"semantic_type": "timeframe", "role": "trigger", "normalized_value": "15m", "target_path": "condition_ast.condition_a26f45e8608a9012.trigger_timeframe"},
+        {"semantic_type": "symbol", "role": "include", "normalized_value": "BTC/USDT", "target_path": "universe.included_symbols.BTC/USDT"}
+      ],
+      "compile_status": "compiled",
+      "approval_eligible": true,
+      "screening_status": "not_required",
+      "provider_status": "not_required",
+      "final_chat_status": "ready_for_approval",
+      "preflight_behavior": null
+    }
+  }
+]

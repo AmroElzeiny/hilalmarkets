@@ -10,7 +10,7 @@ from typing import Any
 
 from .models import CaseResult
 from .topics import TOPIC_BY_ID
-from .util import ensure_dir
+from .util import ensure_dir, normalized_evaluation_contract, semantic_contract_hash
 
 
 def _case_score(case: CaseResult) -> float:
@@ -82,7 +82,15 @@ def _metric_values(items: list[CaseResult], metric: str) -> list[float]:
                 continue
             backend, ui = pair["backend"], pair["ui"]
             if metric == "backend_ui_contract_match":
-                values.append(float(backend.structured_hash == ui.structured_hash))
+                backend_contract = backend.structured_output or backend.canonical_state
+                ui_contract = ui.structured_output or ui.canonical_state
+                if backend_contract is not None and ui_contract is not None:
+                    values.append(
+                        float(
+                            semantic_contract_hash(backend_contract)
+                            == semantic_contract_hash(ui_contract)
+                        )
+                    )
             elif metric == "backend_ui_status_match":
                 values.append(float(_case_lifecycle(backend) == _case_lifecycle(ui)))
             elif metric == "backend_ui_error_class_match":
@@ -98,12 +106,12 @@ def _metric_values(items: list[CaseResult], metric: str) -> list[float]:
             elif metric == "backend_ui_approval_state_match":
                 values.append(float(_case_approval(backend) == _case_approval(ui)))
             elif metric == "backend_ui_requirement_state_match":
-                backend_requirements = _canonical_requirements(
+                backend_requirements = _parity_requirements(
                     backend.canonical_state
-                ) or _canonical_requirements(backend.structured_output)
-                ui_requirements = _canonical_requirements(
+                ) or _parity_requirements(backend.structured_output)
+                ui_requirements = _parity_requirements(
                     ui.canonical_state
-                ) or _canonical_requirements(ui.structured_output)
+                ) or _parity_requirements(ui.structured_output)
                 if backend_requirements or ui_requirements:
                     values.append(float(backend_requirements == ui_requirements))
         return values
@@ -135,7 +143,8 @@ def _metric_values(items: list[CaseResult], metric: str) -> list[float]:
 
 def _case_approval(case: CaseResult) -> dict[str, Any]:
     approval = (case.structured_output or {}).get("approval")
-    return dict(approval) if isinstance(approval, dict) else {}
+    normalized = normalized_evaluation_contract(approval)
+    return dict(normalized) if isinstance(normalized, dict) else {}
 
 
 def _case_lifecycle(case: CaseResult) -> str:
@@ -144,6 +153,12 @@ def _case_lifecycle(case: CaseResult) -> str:
 
 def _canonical_requirements(value: dict[str, Any] | None) -> list[dict[str, Any]]:
     values = (value or {}).get("requirement_states")
+    return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
+
+
+def _parity_requirements(value: dict[str, Any] | None) -> list[dict[str, Any]]:
+    normalized = normalized_evaluation_contract(value or {})
+    values = normalized.get("requirement_states") if isinstance(normalized, dict) else None
     return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
 
 

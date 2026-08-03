@@ -52,10 +52,7 @@ async def test_real_backend_adapter_uses_owned_session_compile_contract(test_con
     )
     await target.start("integration-001", {"name": "current"})
     reply = await target.send(
-        (
-            "Monitor BTC/USDT when the 15m candle rises open-to-close "
-            "by at least 3%"
-        ),
+        ("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"),
         scenario_id="integration-001",
     )
     assert reply.status_code == 200
@@ -111,8 +108,8 @@ async def test_evaluator_headers_fail_closed_when_test_control_is_disabled(test_
     assert "AI_SETUP_EVALUATOR_ENABLED" in detail or "APP_ENV" in detail
 
 
-async def test_consumed_evaluator_fault_marks_the_error_response(test_context):
-    """The readiness marker proves a real model-boundary fault, not header admission."""
+async def test_consumed_one_shot_shape_fault_marks_the_recovered_response(test_context):
+    """The marker survives the single shape recovery allowed by production."""
 
     await _signup(test_context, "evaluator-consumed@example.com")
     settings = test_context["settings"]
@@ -136,9 +133,9 @@ async def test_consumed_evaluator_fault_marks_the_error_response(test_context):
         },
     )
 
-    assert response.status_code >= 400
+    assert response.status_code == 200
     assert response.headers["X-HM-Eval-Fault-Applied"] == "empty_once"
-    assert planner.plan_calls == 0, "the injected fault replaced the planner provider call"
+    assert planner.plan_calls == 1, "the injected first call was followed by one recovery only"
 
 
 async def test_authenticated_builder_exposes_only_targeted_evaluator_selectors(test_context):

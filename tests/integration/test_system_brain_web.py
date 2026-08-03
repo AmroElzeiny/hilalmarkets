@@ -93,7 +93,16 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
         await test_context["client"].get("/static/hilalmarkets-brand.css")
     ).text
     assert "--hm-apple: #cbfa4d" in brand_stylesheet
-    assert 'font-family: "Geometria"' in stylesheet
+    # The page asks for the brand display face by token, and loads the one file that
+    # both declares the face and defines the token. Naming the family here again would
+    # be a second copy of the answer, free to drift from the first.
+    assert "font-family: var(--hm-font-display)" in stylesheet
+    assert "hilalmarkets-fonts.css" in dashboard.text
+    fonts_stylesheet = (
+        await test_context["client"].get("/static/hilalmarkets-fonts.css")
+    ).text
+    assert "--hm-font-display:" in fonts_stylesheet
+    assert "@font-face" in fonts_stylesheet
     assert "#0b3b31" not in stylesheet.lower()
     assert "prefers-reduced-motion" in stylesheet
 

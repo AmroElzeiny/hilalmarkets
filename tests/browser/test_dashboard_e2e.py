@@ -548,7 +548,7 @@ def test_public_product_chat_session_profile_offline_and_focus_containment(
     expect(page.locator("[data-public-chat-connectivity]")).to_be_hidden()
     expect(page.locator("[data-public-chat-send]")).to_be_enabled()
 
-    question = "Can you explain Watch Plans?"
+    question = "Can you explain Watchlists?"
     page.locator("[data-public-chat-input]").fill(question)
     page.locator("[data-public-chat-send]").click()
     feedback = page.locator("[data-public-chat-answer-feedback]")
@@ -826,7 +826,7 @@ def test_screening_change_opens_evidence_difference_dialog(
     seed_sharia_screened_market(browser_app.database_url, email)
 
     page.goto(
-        f"{base_url}/dashboard/activity?tab=compliance_changes",
+        f"{base_url}/dashboard/opportunities?tab=compliance_changes",
         wait_until="domcontentloaded",
     )
     expect(page.get_by_role("heading", name="Screening changes")).to_be_visible()
@@ -1288,7 +1288,7 @@ def test_approve_and_publish_executable_monitor(
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.once("dialog", lambda dialog: dialog.accept())
     page.locator("[data-activate-version]").click()
-    page.wait_for_url(re.compile(r".*/dashboard/lifecycles.*"), timeout=30_000)
+    page.wait_for_url(re.compile(r".*/dashboard/opportunities.*"), timeout=30_000)
 
     page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
     row = page.get_by_test_id("monitor-row").first
@@ -1461,7 +1461,7 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     page.locator(f'[data-monitor-option="{seeded["strategy_id"]}"]').click()
     page.wait_for_url(
         re.compile(
-            rf".*/dashboard/activity\?tab=forming&monitor={seeded['strategy_id']}"
+            rf".*/dashboard/opportunities\?tab=forming&monitor={seeded['strategy_id']}"
         )
     )
     expect(page.locator("[data-monitor-filter-label]")).to_contain_text(

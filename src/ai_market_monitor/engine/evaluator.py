@@ -71,7 +71,10 @@ def _operand_parameter(
     default: int | float | str | bool,
 ) -> int | float | str | bool:
     value = operand.parameters.get(key, default)
-    if isinstance(value, list):
+    # A mapping is refused for the same reason a list is: this reader hands the value
+    # straight to arithmetic, and a container reaching that point would either crash
+    # further away from the cause or be coerced into a number nobody wrote.
+    if isinstance(value, list | dict):
         raise ValueError(f"Operand parameter {key!r} must be a scalar value")
     return value
 

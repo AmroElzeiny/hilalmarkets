@@ -132,7 +132,7 @@ class AlertPresentation:
             asset = str(proof.get("canonical_asset") or "Asset")
             passport_url = f"{base}/dashboard/market/{asset.lower()}" if base else None
             activity_url = (
-                f"{base}/dashboard/activity?tab=compliance_changes" if base else None
+                f"{base}/dashboard/opportunities?tab=compliance_changes" if base else None
             )
             return cls(
                 alert_id=str(alert.id),
@@ -143,7 +143,7 @@ class AlertPresentation:
                 body=alert.body,
                 symbol=asset,
                 direction="screening status",
-                strategy=str(proof.get("strategy_name") or "Halal Market"),
+                strategy=str(proof.get("strategy_name") or "Halal Assets"),
                 exchange="spot",
                 timeframe="status change",
                 setup_score=None,
@@ -178,7 +178,7 @@ class AlertPresentation:
                     *(
                         [
                             AlertActionPresentation(
-                                "View affected Watch Plans",
+                                "View affected Watchlists",
                                 f"compliance_activity:{alert.id}",
                                 activity_url,
                             )
@@ -211,8 +211,8 @@ class AlertPresentation:
             for target in proof.get("target_levels", [])
         ]
         base = (public_base_url or "").rstrip("/")
-        proof_url = f"{base}/dashboard/lifecycles" if base else None
-        dashboard_url = f"{base}/dashboard/lifecycles" if base else None
+        proof_url = f"{base}/dashboard/opportunities" if base else None
+        dashboard_url = f"{base}/dashboard/opportunities" if base else None
         screening = sharia_evidence_from_proof(proof)
         raw_screening_asset = screening.get("asset")
         screening_asset = (

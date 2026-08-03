@@ -138,9 +138,7 @@ class AuthorizedPatchOperation(StrictModel):
             "add_unsupported": frozenset({"missing_contract"}),
             "resolve_unresolved_key": frozenset({"target_key"}),
             "remove_unsupported_key": frozenset({"target_key"}),
-            "restore_snapshot": frozenset(
-                {"target_snapshot_id", "target_executable_version"}
-            ),
+            "restore_snapshot": frozenset({"target_snapshot_id", "target_executable_version"}),
         }
         payload_fields = {
             "fields",
@@ -161,11 +159,7 @@ class AuthorizedPatchOperation(StrictModel):
             return migrated
         encoded = json.dumps(
             {
-                key: (
-                    value.model_dump(mode="json")
-                    if hasattr(value, "model_dump")
-                    else value
-                )
+                key: (value.model_dump(mode="json") if hasattr(value, "model_dump") else value)
                 for key, value in migrated.items()
             },
             sort_keys=True,
@@ -215,15 +209,12 @@ class AuthorizedPatchOperation(StrictModel):
         }
         allowed = set(required[self.kind])
         unexpected = sorted(
-            name
-            for name in payload_fields - allowed
-            if getattr(self, name) is not None
+            name for name in payload_fields - allowed if getattr(self, name) is not None
         )
         if unexpected:
-            raise ValueError(
-                f"{self.kind} cannot carry payload fields: {', '.join(unexpected)}"
-            )
+            raise ValueError(f"{self.kind} cannot carry payload fields: {', '.join(unexpected)}")
         return self
+
 
 #: What kind of thing a clarification is asking about, so an answer can be checked
 #: against the slot it claims to fill.
@@ -234,6 +225,7 @@ ClarificationTargetType = Literal[
     "condition_creation",
     "universe",
     "market_scope",
+    "sharia_policy",
     "boolean_structure",
     "capability_parameter",
     "reference_definition",
@@ -268,16 +260,25 @@ class ClarificationContract(StrictModel):
     def validate_target(self) -> ClarificationContract:
         if self.mutating and self.target_type == "conversational":
             raise ValueError("a conversational question cannot be mutating")
-        if self.target_type in {
-            "condition_field",
-            "capability_parameter",
-            "reference_definition",
-        } and not self.target_condition_id:
+        if (
+            self.target_type
+            in {
+                "condition_field",
+                "capability_parameter",
+                "reference_definition",
+            }
+            and not self.target_condition_id
+        ):
             raise ValueError("a condition question must name its condition")
-        if self.target_type in {
-            "draft_field",
-            "condition_field",
-            "capability_parameter",
-        } and not self.target_field:
+        if (
+            self.target_type
+            in {
+                "draft_field",
+                "condition_field",
+                "capability_parameter",
+                "sharia_policy",
+            }
+            and not self.target_field
+        ):
             raise ValueError("a field question must name its field")
         return self

@@ -17,6 +17,12 @@ from ai_market_monitor.db.models.enums import (
     ShariaUniverseMode,
 )
 from ai_market_monitor.schemas.screening_execution import ReviewedScreeningEvidence
+from ai_market_monitor.schemas.strategy import (
+    CapabilityParameterScalar as _CapabilityParameterScalar,
+)
+from ai_market_monitor.schemas.strategy import (
+    CapabilityParameterValue as _CapabilityParameterValue,
+)
 from ai_market_monitor.schemas.strategy import Comparator, Timeframe
 
 # A Setup Chat message is bounded at 5,000 characters. One legitimate semantic
@@ -191,10 +197,10 @@ class OperandV2(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     value: float | str | bool | None = None
     unit: ConditionUnit | None = None
-    parameters: dict[
-        str,
-        int | float | str | bool | list[int | float | str | bool],
-    ] = Field(default_factory=dict)
+    # The same parameter type the compiled `Operand` holds. Writing it out again here is
+    # what let the two drift, and a draft operand that cannot hold what the compiled one
+    # does turns a valid rule into a validation error on the way through.
+    parameters: dict[str, _CapabilityParameterValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_value(self) -> OperandV2:
@@ -205,7 +211,11 @@ class OperandV2(BaseModel):
         return self
 
 
-CapabilityParameterValue = int | float | str | bool | list[int | float | str | bool]
+#: Re-exported, not re-declared. A capability parameter is one concept, and a second
+#: copy of its type is a copy that stops matching the first — which is exactly what
+#: happened: `Operand.parameters` gained a mapping variant and the copies did not.
+CapabilityParameterScalar = _CapabilityParameterScalar
+CapabilityParameterValue = _CapabilityParameterValue
 
 
 class ConditionNodeV2(BaseModel):
@@ -239,9 +249,7 @@ class ConditionNodeV2(BaseModel):
         pattern=r"^[a-z][a-z0-9_]*$",
     )
     capability_version: str | None = Field(default=None, max_length=40)
-    capability_parameters: dict[str, CapabilityParameterValue] = Field(
-        default_factory=dict
-    )
+    capability_parameters: dict[str, CapabilityParameterValue] = Field(default_factory=dict)
     condition_symbols: list[str] = Field(default_factory=list, max_length=1000)
     children: list[ConditionNodeV2] = Field(default_factory=list, max_length=100)
 
@@ -254,11 +262,16 @@ class ConditionNodeV2(BaseModel):
         old = str(migrated.pop("direction") or "neutral").casefold()
         migrated.setdefault(
             "movement_direction",
-            "up" if old in {"long", "bullish", "up"} else "down" if old in {
+            "up"
+            if old in {"long", "bullish", "up"}
+            else "down"
+            if old
+            in {
                 "short",
                 "bearish",
                 "down",
-            } else "neutral",
+            }
+            else "neutral",
         )
         # Old direction encoded price movement, not a user-authored trade instruction.
         migrated.setdefault("strategy_bias", "neutral")
@@ -367,13 +380,11 @@ class ShariaPolicyV2(BaseModel):
         min_length=1,
         max_length=6,
     )
-    qualification_policy: Literal[
-        "include_with_warning", "exclude", "require_acknowledgement"
-    ] = "include_with_warning"
-    disputed_asset_policy: Literal["exclude", "include_with_warning"] = "exclude"
-    compliance_change_behavior: ComplianceChangeBehavior = (
-        ComplianceChangeBehavior.PAUSE_ASSET
+    qualification_policy: Literal["include_with_warning", "exclude", "require_acknowledgement"] = (
+        "include_with_warning"
     )
+    disputed_asset_policy: Literal["exclude", "include_with_warning"] = "exclude"
+    compliance_change_behavior: ComplianceChangeBehavior = ComplianceChangeBehavior.PAUSE_ASSET
     approved_watchlist_id: UUID | None = None
     approved_watchlist_version: str | None = Field(default=None, max_length=80)
     explicit_symbols: list[str] = Field(default_factory=list, max_length=100000)
@@ -381,9 +392,7 @@ class ShariaPolicyV2(BaseModel):
     @field_validator("explicit_symbols")
     @classmethod
     def normalize_explicit_symbols(cls, values: list[str]) -> list[str]:
-        return list(
-            dict.fromkeys(_canonical_symbol(item) for item in values if item.strip())
-        )
+        return list(dict.fromkeys(_canonical_symbol(item) for item in values if item.strip()))
 
     @model_validator(mode="after")
     def validate_static_policy(self) -> ShariaPolicyV2:
@@ -399,6 +408,7 @@ UnresolvedTargetType = Literal[
     "condition_creation",
     "universe",
     "market_scope",
+    "sharia_policy",
     "boolean_structure",
     "capability_parameter",
     "reference_definition",
@@ -441,15 +451,17 @@ class UnresolvedFieldV2(BaseModel):
         migrated.setdefault("unresolved_id", key)
         target_type = migrated.get("target_type")
         if target_type is None:
-            target_type = "condition_creation" if key == "conditions" else (
-                "universe" if key in {"universe", "symbols"} else "draft_field"
+            target_type = (
+                "condition_creation"
+                if key == "conditions"
+                else ("universe" if key in {"universe", "symbols"} else "draft_field")
             )
             migrated["target_type"] = target_type
-        if (
-            target_type
-            in {"condition_field", "capability_parameter", "reference_definition"}
-            and not migrated.get("target_condition_id")
-        ):
+        if target_type in {
+            "condition_field",
+            "capability_parameter",
+            "reference_definition",
+        } and not migrated.get("target_condition_id"):
             # Before a condition exists there is no owned condition id to target.
             # Preserve the blocker as typed condition creation; never invent an id
             # or let one incomplete clarification discard the rest of the turn.
@@ -484,15 +496,20 @@ class UnresolvedFieldV2(BaseModel):
     @model_validator(mode="after")
     def validate_target(self) -> UnresolvedFieldV2:
         if (
-            self.target_type in {"draft_field", "condition_field", "capability_parameter"}
+            self.target_type
+            in {"draft_field", "condition_field", "capability_parameter", "sharia_policy"}
             and not self.target_field
         ):
             raise ValueError(f"{self.target_type} requires target_field")
-        if self.target_type in {
-            "condition_field",
-            "capability_parameter",
-            "reference_definition",
-        } and not self.target_condition_id:
+        if (
+            self.target_type
+            in {
+                "condition_field",
+                "capability_parameter",
+                "reference_definition",
+            }
+            and not self.target_condition_id
+        ):
             raise ValueError(f"{self.target_type} requires target_condition_id")
         if self.target_type == "condition_creation" and self.target_condition_id:
             raise ValueError("condition_creation cannot name a condition_id")
@@ -580,9 +597,7 @@ class ApprovalBindingV2(BaseModel):
     executable_version: int | None = Field(default=None, ge=1)
     executable_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     schema_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
-    conversation_snapshot_hash: str | None = Field(
-        default=None, pattern=r"^[a-f0-9]{64}$"
-    )
+    conversation_snapshot_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     #: The screening facts the user could see when they reviewed this setup: which
     #: markets, under which policy and methodology, and what the market-data check
     #: promised. Bound so approval can be refused when any of them moved.
@@ -849,16 +864,13 @@ class StrategyDraftV2(BaseModel):
             (item.provider, item.capability): item.status
             for item in self.runtime_state.provider_status
         }
-        return (
-            self.authoring_blocking
-            or any(
-                runtime_by_contract.get(
-                    (requirement.provider, requirement.capability),
-                    "unknown",
-                )
-                != "available"
-                for requirement in self.static_provider_requirements
+        return self.authoring_blocking or any(
+            runtime_by_contract.get(
+                (requirement.provider, requirement.capability),
+                "unknown",
             )
+            != "available"
+            for requirement in self.static_provider_requirements
         )
 
     @property
@@ -889,9 +901,7 @@ class StrategyDraftV2(BaseModel):
     def calculate_workflow_state_hash(self) -> str:
         payload = {
             "name": self.name,
-            "unresolved_fields": [
-                item.model_dump(mode="json") for item in self.unresolved_fields
-            ],
+            "unresolved_fields": [item.model_dump(mode="json") for item in self.unresolved_fields],
             "unsupported_requirements": [
                 item.model_dump(mode="json") for item in self.unsupported_requirements
             ],
@@ -1046,5 +1056,5 @@ def _canonical_symbol(value: str) -> str:
     compact = re.sub(r"[\s/_-]", "", value).upper()
     for quote in ("USDT", "USDC", "FDUSD", "BTC", "ETH", "USD"):
         if compact.endswith(quote) and len(compact) > len(quote):
-            return f"{compact[:-len(quote)]}/{quote}"
+            return f"{compact[: -len(quote)]}/{quote}"
     return compact

@@ -35,6 +35,7 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_timeframe_role,
     grounds_unit,
 )
+from ai_market_monitor.engine.turn_fragments import extract_symbols, extract_timeframes
 from ai_market_monitor.schemas.setup_agent import (
     OperationExecutionResult,
     SetupAgentTurnPlan,
@@ -43,6 +44,7 @@ from ai_market_monitor.schemas.setup_agent import (
 from ai_market_monitor.schemas.setup_authorization import (
     ClarificationContract,
 )
+from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
     ConditionNodeV2,
@@ -73,6 +75,7 @@ class _Assignment:
     grounded: bool
     changed: bool
     registry_owned: bool = False
+    inherited_existing: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,11 +140,13 @@ def reconcile_requirement_state(
     """
 
     applied = {
-        item.operation_id: item
-        for item in operation_results
-        if item.applied and not item.rejected
+        item.operation_id: item for item in operation_results if item.applied and not item.rejected
     }
     assignments = _operation_assignments(before, working, plan, segments, applied)
+    working, supported_assessments = _reconcile_supported_requirements(
+        working,
+        assignments=assignments,
+    )
     unresolved_values = [*before.unresolved_fields, *working.unresolved_fields]
     if (
         active_clarification is not None
@@ -155,6 +160,7 @@ def reconcile_requirement_state(
             "condition_creation",
             "universe",
             "market_scope",
+            "sharia_policy",
             "boolean_structure",
             "capability_parameter",
             "reference_definition",
@@ -166,7 +172,12 @@ def reconcile_requirement_state(
         except (TypeError, ValueError):
             expected_schema = {"type": "string"}
         if not isinstance(expected_schema, dict) or expected_schema.get("type") not in {
-            "string", "number", "integer", "boolean", "array", "object"
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "array",
+            "object",
         }:
             expected_schema = {"type": "string"}
         unresolved_values.append(
@@ -183,7 +194,7 @@ def reconcile_requirement_state(
             )
         )
     pending = _coalesced_unresolved(unresolved_values)
-    assessments: list[RequirementAssessmentV2] = []
+    assessments: list[RequirementAssessmentV2] = list(supported_assessments)
     retained: list[UnresolvedFieldV2] = []
     answered: list[str] = []
 
@@ -197,9 +208,7 @@ def reconcile_requirement_state(
             segments=segments,
             assignments=assignments,
             active_question_id=(
-                active_clarification.question_id
-                if active_clarification is not None
-                else None
+                active_clarification.question_id if active_clarification is not None else None
             ),
         )
         assessments.append(assessment)
@@ -215,8 +224,7 @@ def reconcile_requirement_state(
             retained_paths.add(unresolved_target_path(conflict))
 
     approval_intent = plan.approval_intent is not None or (
-        before.approval_intent_received
-        and working.executable_hash == before.executable_hash
+        before.approval_intent_received and working.executable_hash == before.executable_hash
     )
     staged = _rehash(
         working,
@@ -287,6 +295,188 @@ def reconcile_requirement_state(
     )
 
 
+def _reconcile_supported_requirements(
+    draft: StrategyDraftV2,
+    *,
+    assignments: list[_Assignment],
+) -> tuple[StrategyDraftV2, tuple[RequirementAssessmentV2, ...]]:
+    """Close an older unsupported blocker only when this turn now implements it.
+
+    An incomplete but recognizable core rule can initially be preserved as an
+    unsupported workflow blocker so the independent mode/symbol instructions in the
+    same turn are not discarded.  Once a later, fully grounded condition supplies the
+    missing values, leaving that blocker in place makes a valid draft permanently
+    unapprovable.  The model has no authority to delete it, so final requirement
+    reconciliation proves the relationship from the old source and the newly applied
+    canonical condition.
+
+    The proof needs a grounded mechanic plus another matching semantic anchor.  A
+    generic phrase such as "some custom rule" therefore cannot be erased by an
+    unrelated condition, and a conflicting direction, comparator, timeframe or symbol
+    keeps the blocker open.
+    """
+
+    if not draft.unsupported_requirements:
+        return draft, ()
+    conditions = _conditions(draft)
+    by_condition: dict[str, list[_Assignment]] = {}
+    for assignment in assignments:
+        if assignment.condition_id and assignment.changed and assignment.grounded:
+            by_condition.setdefault(assignment.condition_id, []).append(assignment)
+    if not by_condition:
+        return draft, ()
+
+    retained = []
+    assessments: list[RequirementAssessmentV2] = []
+    for blocker in draft.unsupported_requirements:
+        matched: tuple[str, list[_Assignment]] | None = None
+        for condition_id, evidence in by_condition.items():
+            node = conditions.get(condition_id)
+            if node is not None and _condition_satisfies_unsupported_source(
+                blocker.source_fragment,
+                node,
+                draft,
+            ):
+                matched = (condition_id, evidence)
+                break
+        if matched is None:
+            retained.append(blocker)
+            continue
+        condition_id, evidence = matched
+        assessments.append(
+            RequirementAssessmentV2(
+                requirement_id=_requirement_id(
+                    "unsupported_requirement",
+                    f"unsupported.{blocker.key}",
+                    None,
+                ),
+                target_path=f"unsupported.{blocker.key}",
+                target_exists=False,
+                final_value=None,
+                expected_or_authorized_value=condition_id,
+                satisfied=True,
+                changed_this_turn=True,
+                explicitly_confirmed_this_turn=False,
+                authorization_grounded=True,
+                satisfying_operation_ids=list(
+                    dict.fromkeys(item.operation_id for item in evidence)
+                ),
+                satisfying_segment_ids=list(
+                    dict.fromkeys(item.segment_id for item in evidence)
+                ),
+                unresolved_reason=None,
+            )
+        )
+    if len(retained) == len(draft.unsupported_requirements):
+        return draft, tuple(assessments)
+    return _rehash(draft, unsupported_requirements=retained), tuple(assessments)
+
+
+def _condition_satisfies_unsupported_source(
+    source: str,
+    node: ConditionNodeV2,
+    draft: StrategyDraftV2,
+) -> bool:
+    """Prove that one new canonical condition covers an older stated mechanic."""
+
+    anchors = 0
+    mechanic_grounded = bool(
+        node.formula is not None
+        and node.formula != FormulaKind.CAPABILITY
+        and grounds_formula(source, node.formula)
+    )
+    if node.capability_key:
+        mechanic_grounded = mechanic_grounded or grounds_text_value(
+            source,
+            node.capability_key,
+        ) or grounds_text_value(source, node.capability_key.split("_", 1)[0])
+    if not mechanic_grounded:
+        return False
+    anchors += 1
+
+    directions = [
+        value
+        for value in (MovementDirection.UP, MovementDirection.DOWN)
+        if grounds_direction(source, value)
+    ]
+    if directions:
+        if len(directions) != 1 or node.movement_direction != directions[0]:
+            return False
+        anchors += 1
+
+    biases = [
+        value
+        for value in (StrategyBias.LONG, StrategyBias.SHORT)
+        if grounds_strategy_bias(source, value)
+    ]
+    if biases:
+        if len(biases) != 1 or node.strategy_bias != biases[0]:
+            return False
+        anchors += 1
+
+    comparators = [
+        value
+        for value in Comparator
+        if value not in {Comparator.IS_TRUE, Comparator.IS_FALSE}
+        and grounds_operator(source, value)
+    ]
+    if comparators:
+        if len(comparators) != 1 or node.operator != comparators[0]:
+            return False
+        anchors += 1
+
+    if node.threshold is not None and grounds_number(
+        source,
+        node.threshold,
+        unit=node.unit or "plain",
+    ):
+        anchors += 1
+
+    for timeframe in extract_timeframes(source):
+        matches = (
+            bool(
+                node.trigger_timeframe == timeframe
+                and grounds_timeframe_role(source, timeframe, "trigger")
+            )
+            or bool(
+                timeframe in node.context_timeframes
+                and grounds_timeframe_role(source, timeframe, "context")
+            )
+            or bool(
+                timeframe in node.confirmation_timeframes
+                and grounds_timeframe_role(source, timeframe, "confirmation")
+            )
+            or bool(
+                node.reference_timeframe == timeframe
+                and grounds_timeframe_role(source, timeframe, "reference")
+            )
+        )
+        if not matches:
+            return False
+        anchors += 1
+
+    allowed_symbols = {
+        *node.condition_symbols,
+        *draft.universe.included_symbols,
+        *draft.sharia_policy.explicit_symbols,
+    }
+    symbols = set(extract_symbols(source))
+    if symbols:
+        canonical_allowed = {
+            value.upper().replace("/", "").replace("-", "").replace("_", "")
+            for value in allowed_symbols
+        }
+        if any(
+            symbol.upper().replace("/", "").replace("-", "").replace("_", "")
+            not in canonical_allowed
+            for symbol in symbols
+        ):
+            return False
+        anchors += len(symbols)
+
+    return anchors >= 2
+
+
 def build_requirement_state(
     draft: StrategyDraftV2,
     *,
@@ -323,25 +513,31 @@ def build_requirement_state(
         assignment = assignment_by_path.get(path)
         old = previous_by_path.get(path)
         preserved_old = bool(
-            assignment is None
-            and old is not None
-            and old.normalized_value == normalized
+            assignment is None and old is not None and old.normalized_value == normalized
         )
         explicit = bool(
-            (assignment and assignment.grounded and not assignment.registry_owned)
+            (
+                assignment
+                and assignment.grounded
+                and not assignment.registry_owned
+                and not assignment.inherited_existing
+            )
             or (preserved_old and old and old.explicit)
         )
-        inherited = bool(preserved_old and old and old.inherited)
+        inherited = bool(
+            (assignment and assignment.inherited_existing)
+            or (preserved_old and old and old.inherited)
+        )
         inherited_registry = bool(
-            preserved_old
-            and old is not None
-            and old.provenance_kind == "registry_owned"
+            preserved_old and old is not None and old.provenance_kind == "registry_owned"
         )
         provenance = (
             "registry_owned"
             if registry_owned
             or inherited_registry
             or bool(assignment and assignment.registry_owned)
+            else "inherited_existing"
+            if assignment and assignment.inherited_existing
             else "user_explicit"
             if explicit
             else old.provenance_kind
@@ -596,6 +792,8 @@ def unresolved_target_path(item: UnresolvedFieldV2) -> str:
         return f"market_scope.{item.target_field or 'scope'}"
     if item.target_type == "draft_field":
         return item.target_field or f"draft.{item.unresolved_id}"
+    if item.target_type == "sharia_policy":
+        return f"sharia_policy.{item.target_field or 'policy'}"
     if item.target_type == "universe":
         return "universe"
     if item.target_type == "boolean_structure":
@@ -633,8 +831,7 @@ def _assess_unresolved(
     same_turn_segments = {
         operation.authorizing_segment_id
         for operation in plan.operations
-        if operation.unresolved is not None
-        and operation.unresolved.unresolved_id in linked_ids
+        if operation.unresolved is not None and operation.unresolved.unresolved_id in linked_ids
     }
     authorized_segments = answer_segments | resolve_segments | same_turn_segments
 
@@ -714,8 +911,7 @@ def _assess_unresolved(
     grounded_ops = [
         assignment
         for assignment in relevant
-        if assignment.grounded
-        and _assignment_satisfies_final(assignment, item, value, working)
+        if assignment.grounded and _assignment_satisfies_final(assignment, item, value, working)
     ]
     confirmation_segments: list[str] = []
     for answer in plan.clarification_answers:
@@ -777,6 +973,7 @@ def _operation_assignments(
             role: str = "value",
             condition_id: str | None = None,
             registry_owned: bool = False,
+            inherited_existing: bool = False,
             force_grounded: bool | None = None,
             _source: str = source,
             _operation_id: str = operation.operation_id,
@@ -807,6 +1004,7 @@ def _operation_assignments(
                     grounded=bool(grounded or registry_owned),
                     changed=_changed,
                     registry_owned=registry_owned,
+                    inherited_existing=inherited_existing,
                 )
             )
 
@@ -815,6 +1013,15 @@ def _operation_assignments(
                 path = field if field in {"mode", "name"} else f"market_scope.{field}"
                 record(path, "mode" if field == "mode" else "market_scope", value)
         elif operation.kind == "set_sharia_policy" and operation.sharia_policy is not None:
+            registry_policy_fields = {
+                "methodology_version",
+                "approved_watchlist_version",
+                "allowed_statuses",
+                "qualification_policy",
+                "disputed_asset_policy",
+                "compliance_change_behavior",
+                "explicit_symbols",
+            }
             for field in operation.sharia_policy.model_dump(mode="python"):
                 final_value = getattr(working.sharia_policy, field)
                 old_value = getattr(before.sharia_policy, field)
@@ -829,6 +1036,7 @@ def _operation_assignments(
                         # The dedicated Sharia grounding gate has already verified the
                         # complete changed policy field.  It remains deterministic.
                         force_grounded=True,
+                        registry_owned=field in registry_policy_fields,
                     )
         elif operation.kind == "add_inclusion" and operation.symbol:
             symbol = _canonical_member(operation.symbol, working.universe.included_symbols)
@@ -928,14 +1136,36 @@ def _operation_assignments(
                                     MovementDirection.NOT_APPLICABLE,
                                 }
                             )
-                            or field == "strategy_bias" and value == StrategyBias.NEUTRAL
+                            or field == "strategy_bias"
+                            and value == StrategyBias.NEUTRAL
                         )
                     )
-                    if old is None or old_value != value or _grounds_target_value(
-                        source, value, field=field, node=final
-                    ):
+                    path = f"condition_ast.{final.node_id}.{field}"
+                    if old is not None and old_value == value:
+                        if not any(item.target_path == path for item in before.requirement_states):
+                            if registry_owned:
+                                record(
+                                    path,
+                                    _semantic_type(field),
+                                    value,
+                                    role=_ROLE_BY_FIELD.get(field, field),
+                                    condition_id=final.node_id,
+                                    registry_owned=True,
+                                )
+                            elif not _is_default(ConditionNodeV2, field, value):
+                                record(
+                                    path,
+                                    _semantic_type(field),
+                                    value,
+                                    role=_ROLE_BY_FIELD.get(field, field),
+                                    condition_id=final.node_id,
+                                    force_grounded=True,
+                                    inherited_existing=True,
+                                )
+                        continue
+                    if old is None or old_value != value:
                         record(
-                            f"condition_ast.{final.node_id}.{field}",
+                            path,
                             _semantic_type(field),
                             value,
                             role=_ROLE_BY_FIELD.get(field, field),
@@ -949,11 +1179,23 @@ def _operation_assignments(
                         capability_parameter_metadata(final.capability_key or "", key)
                     )
                     registry_default = has_default and _equal(value, default_value)
-                    if old is None or old_value != value or _grounds_target_value(
-                        source, value, field=key, node=final
-                    ):
+                    path = f"condition_ast.{final.node_id}.capability_parameters.{key}"
+                    if old is not None and old_value == value:
+                        if not any(item.target_path == path for item in before.requirement_states):
+                            record(
+                                path,
+                                "capability_parameter",
+                                value,
+                                role="parameter",
+                                condition_id=final.node_id,
+                                registry_owned=registry_default,
+                                force_grounded=True,
+                                inherited_existing=not registry_default,
+                            )
+                        continue
+                    if old is None or old_value != value:
                         record(
-                            f"condition_ast.{final.node_id}.capability_parameters.{key}",
+                            path,
                             "capability_parameter",
                             value,
                             role="parameter",
@@ -1104,6 +1346,9 @@ def _target_value(item: UnresolvedFieldV2, draft: StrategyDraftV2) -> tuple[bool
     if target_type == "draft_field":
         value = getattr(draft, field, None)
         return _determined(value, model=StrategyDraftV2, field=field), value
+    if target_type == "sharia_policy":
+        value = getattr(draft.sharia_policy, field, None)
+        return _determined(value, model=type(draft.sharia_policy), field=field), value
     if target_type == "market_scope":
         value = getattr(draft.market_scope, field, None)
         return _determined(value, model=MarketScopeV2, field=field, defaults_are_empty=True), value
@@ -1125,8 +1370,7 @@ def _target_value(item: UnresolvedFieldV2, draft: StrategyDraftV2) -> tuple[bool
         return bool(draft.condition_ast and draft.condition_ast.children), value
     if target_type == "unsupported_resolution":
         remains = any(
-            item.unresolved_id == candidate.key
-            for candidate in draft.unsupported_requirements
+            item.unresolved_id == candidate.key for candidate in draft.unsupported_requirements
         )
         return not remains, not remains
     return False, None
@@ -1151,8 +1395,12 @@ def _grounds_target_value(
         role: Literal["context", "confirmation"] = (
             "context" if field == "context_timeframes" else "confirmation"
         )
-        return isinstance(value, list) and bool(value) and all(
-            isinstance(item, str) and grounds_timeframe_role(text, item, role) for item in value
+        return (
+            isinstance(value, list)
+            and bool(value)
+            and all(
+                isinstance(item, str) and grounds_timeframe_role(text, item, role) for item in value
+            )
         )
     if field == "movement_direction":
         try:
@@ -1195,9 +1443,7 @@ def _grounds_target_value(
         return grounds_unit(text, value)
     if field == "reference_definition" and isinstance(value, str):
         return bool(
-            node is not None
-            and node.formula is not None
-            and grounds_formula(text, node.formula)
+            node is not None and node.formula is not None and grounds_formula(text, node.formula)
         )
     if field == "required" and isinstance(value, bool):
         return grounds_boolean(text, value)
@@ -1284,9 +1530,9 @@ def _unresolved_requirement_id(item: UnresolvedFieldV2) -> str:
 
 
 def _requirement_id(semantic_type: str, path: str, condition_id: str | None) -> str:
-    digest = hashlib.sha256(
-        f"{semantic_type}:{path}:{condition_id or ''}".encode()
-    ).hexdigest()[:24]
+    digest = hashlib.sha256(f"{semantic_type}:{path}:{condition_id or ''}".encode()).hexdigest()[
+        :24
+    ]
     return f"req_{digest}"
 
 
@@ -1385,10 +1631,7 @@ def _json_value(value: Any) -> Any:
         return json.dumps(rendered_list, sort_keys=True, separators=(",", ":"))
     if isinstance(value, dict):
         rendered_dict = {str(key): _json_value(item) for key, item in value.items()}
-        if all(
-            isinstance(item, str | int | float | bool)
-            for item in rendered_dict.values()
-        ):
+        if all(isinstance(item, str | int | float | bool) for item in rendered_dict.values()):
             return rendered_dict
         return json.dumps(rendered_dict, sort_keys=True, separators=(",", ":"))
     return str(value)

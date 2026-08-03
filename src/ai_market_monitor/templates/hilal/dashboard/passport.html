@@ -18,7 +18,7 @@
       <p>{{ passport.identity.symbol if passport.identity else passport.assessment.canonical_asset }}{% if passport.identity and passport.identity.network %} | {{ passport.identity.network }}{% endif %} | {{ 'Native asset' if passport.identity and passport.identity.native_asset else 'Token' if passport.identity and passport.identity.native_asset == false else 'Asset type not recorded' }}</p>
     </div>
   </div>
-  <div class="passport-summary-status">
+  <div class="passport-summary-status" data-hm-guide-target="passport-status">
     <span class="badge {{ status_class }}">{{ passport.assessment.status_label }}</span>
     {% if passport.last_verified_at %}<span class="passport-freshness">Research verified {{ passport.last_verified_at|short_dt(user.timezone) }}</span>{% endif %}
   </div>
@@ -91,7 +91,7 @@
   {% else %}<div class="empty-state"><h3>Verified identity details are unavailable</h3><p>This Passport remains visible, but Hilal Markets will not invent a canonical mapping from a ticker.</p></div>{% endif %}
 </section>
 
-<section id="criteria-evidence" class="passport-section">
+<section id="criteria-evidence" class="passport-section" data-hm-guide-target="passport-evidence">
   <div class="section-head"><div><span class="kicker">Criteria &amp; evidence</span><h2>How the decision was supported</h2><p>Human criterion outcomes remain separate from AI-organized factual research.</p></div></div>
   <div class="passport-page-grid">
     <div class="stack">
@@ -105,7 +105,7 @@
   </div>
 </section>
 
-<section id="decision-history" class="passport-section">
+<section id="decision-history" class="passport-section" data-hm-guide-target="passport-history">
   <div class="section-head"><div><span class="kicker">Decision history</span><h2>Human decision and audit trail</h2><p>Review and publication are retained as distinct actions.</p></div></div>
   <div class="passport-page-grid">
     <article class="panel">{% if passport.decision_record %}<div class="panel-head"><div><h3>{{ passport.decision_record.decision.replace('_', ' ').title() }}</h3><p>{{ passport.decision_record.reason }}</p></div><span class="badge {{ status_class }}">Human decision</span></div><div class="rule-row"><span>Role at decision</span><strong>{{ passport.decision_record.actor_role.replace('_', ' ').title() }}</strong></div><div class="rule-row"><span>Decision time</span><strong>{{ passport.decision_record.decided_at|short_dt(user.timezone) if passport.decision_record.decided_at else 'Not recorded' }}</strong></div><div class="rule-row"><span>Publication time</span><strong>{{ passport.decision_record.published_at|short_dt(user.timezone) if passport.decision_record.published_at else 'Not published' }}</strong></div>{% if passport.decision_record.qualifications %}<div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Qualifications</strong><p>{{ passport.decision_record.qualifications|join(' | ') }}</p></div></div>{% endif %}<details class="technical-details"><summary>Technical decision details</summary><dl><div><dt>Integrity hash</dt><dd>{{ passport.decision_record.integrity_hash or 'Not retained for this legacy version' }}</dd></div><div><dt>Evidence snapshots reviewed</dt><dd>{{ passport.decision_record.evidence_snapshot_ids|length }}</dd></div></dl></details>{% else %}<div class="empty-state compact"><h3>Legacy decision details are limited</h3><p>The published assessment remains dated, but a structured human-decision record was not retained for this version.</p></div>{% endif %}</article>
@@ -129,4 +129,4 @@
 <section class="passport-section"><article class="panel"><div class="panel-head"><div><span class="kicker">Report a factual issue</span><h2>Something looks wrong?</h2><p>Your report opens a review item. It never changes a published status automatically.</p></div></div><form class="passport-problem-form stack" data-passport-problem-form data-canonical-asset-id="{{ passport.identity.canonical_asset_id }}"><input type="hidden" name="passport_version_id" value="{{ passport.passport_version_id or '' }}"><label class="field"><span>Issue type</span><span class="passport-select-control"><select class="select" name="report_type" required><option value="wrong_asset_identity">Wrong asset identity</option><option value="broken_source">Broken source</option><option value="outdated_evidence">Outdated evidence</option><option value="incorrect_qualification">Incorrect qualification</option><option value="status_disagreement">Status disagreement</option><option value="other">Other factual issue</option></select><span data-icon="chevron" data-icon-class="icon-sm"></span></span></label><label class="field"><span>What should we review?</span><textarea class="textarea" name="details" minlength="20" maxlength="5000" rows="4" required></textarea></label><div class="row wrap"><button class="btn btn-secondary" type="submit">Report a problem</button><span class="field-help" data-passport-problem-status aria-live="polite"></span></div></form></article></section>
 {% endif %}
 {% endblock %}
-{% block page_scripts %}<script src="{{ url_for('static', path='/passport-page.js') }}?v=20260801-launch-offer"></script>{% endblock %}
+{% block page_scripts %}<script src="{{ url_for('static', path='/passport-page.js') }}?v=20260802-launch-offer"></script>{% endblock %}

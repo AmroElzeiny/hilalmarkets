@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal
 
 import pytest
 
@@ -16,7 +17,10 @@ from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
+    PUBLIC_PLAN_PRESENTATIONS,
+    annual_saving,
     effective_monthly_price,
+    maximum_annual_saving,
     original_monthly_price,
     plan_offer,
 )
@@ -105,6 +109,48 @@ async def test_the_pricing_page_offers_no_annual_checkout(test_context: dict) ->
     assert "Annual billing: soon." in body
 
 
+async def _signup(test_context: dict, email: str) -> None:
+    response = await test_context["client"].post(
+        "/signup",
+        data={
+            "email": email,
+            "display_name": "Launch Offer Test",
+            "password": "CorrectHorse123!",
+            "repeat_password": "CorrectHorse123!",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    verified = await test_context["client"].post(
+        "/signup/verify",
+        data={"email": email, "code": code},
+        follow_redirects=False,
+    )
+    assert verified.status_code == 303
+
+
+@pytest.mark.anyio
+async def test_the_dashboard_shows_the_same_offer_as_the_public_page(
+    test_context: dict,
+) -> None:
+    """Signed in or signed out, the price and the deadline are the same numbers."""
+
+    await _signup(test_context, "launch-offer@example.com")
+    response = await test_context["client"].get("/dashboard/billing")
+    assert response.status_code == 200
+    body = response.text
+    assert f"${int(original_monthly_price('trader'))}" in body
+    assert f"${int(effective_monthly_price('trader'))}" in body
+    assert 'class="price-original"' in body
+    assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+    # No price anywhere for a plan nobody can buy yet.
+    from ai_market_monitor.core.plans import PLAN_DEFINITIONS
+
+    assert f"${int(PLAN_DEFINITIONS['pro'].monthly_price)}" not in body
+    assert "Pro is coming soon" in body
+
+
 @pytest.mark.anyio
 async def test_every_pricing_surface_agrees_on_what_is_for_sale() -> None:
     """One definition, so the three surfaces cannot drift apart."""
@@ -112,3 +158,13 @@ async def test_every_pricing_surface_agrees_on_what_is_for_sale() -> None:
     assert plan_offer("trader").monthly_available is True
     assert plan_offer("pro").monthly_available is False
     assert all(not plan_offer(code).annual_available for code in PUBLIC_PLAN_CODES)
+
+
+def test_the_annual_saving_is_computed_from_the_prices_beside_it() -> None:
+    """A saving typed out by hand survives a price change and starts lying."""
+
+    presentation = PUBLIC_PLAN_PRESENTATIONS["trader"]
+    expected = (effective_monthly_price("trader") * 12) - presentation.annual_price
+    assert annual_saving("trader") == max(expected, Decimal("0.00"))
+    # Nothing is on annual sale yet, so there is no saving anyone can buy.
+    assert maximum_annual_saving() == Decimal("0.00")

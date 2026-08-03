@@ -16,7 +16,7 @@ class IntentDecision:
 
 
 _PRODUCT_RE = re.compile(
-    r"\b(?:hilalmarkets|watchlists?|market scanner|halal market|passport|"
+    r"\b(?:hilalmarkets|watchlists?|market scanner|halal assets|passport|"
     r"methodolog(?:y|ies)|pricing|plan|telegram|notification|favorite|"
     r"how (?:does|do|can)|what (?:is|are|does))\b",
     re.IGNORECASE,

@@ -1136,7 +1136,10 @@ async def test_the_real_composer_path_keeps_only_evidence_backed_wording(
         SetupAgentTurnInput,
         SetupChatAgent,
     )
-    from tests.support.setup_agent_plans import operations_from_patch
+    from tests.support.setup_agent_plans import (
+        operations_from_patch,
+        planner_envelope_json,
+    )
 
     message = RULE
     patch = deterministic_strategy_patch(StrategyDraftV2(), message, source_turn_id=TURN)
@@ -1173,11 +1176,11 @@ async def test_the_real_composer_path_keeps_only_evidence_backed_wording(
         body = _json.loads(request.content)
         name = body["text"]["format"]["name"]
         payload = _json.loads(body["input"])
-        if name == "hilalmarkets_setup_turn_plan":
+        if name == "hilalmarkets_setup_turn_intent":
             return httpx.Response(
                 200,
                 json=_responses_body(
-                    SetupAgentPlanEnvelope(plan=plan).model_dump_json()
+                    planner_envelope_json(SetupAgentPlanEnvelope(plan=plan))
                 ),
             )
         seen["composer_payload"] = payload

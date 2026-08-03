@@ -1178,11 +1178,11 @@ class SetupObservabilityService:
                 for item in deliveries
             ],
             "actions": {
-                "view_full_lifecycle": f"/dashboard/lifecycles?setup={setup.id}",
+                "view_full_lifecycle": f"/dashboard/opportunities?setup={setup.id}",
                 "open_canvas": f"/dashboard/strategies/{strategy.id}/builder",
                 "refine_chat": f"/dashboard/strategies/new?refine={strategy.id}",
                 "view_monitor_health": (
-                    f"/dashboard/lifecycles?monitor={strategy.id}#monitor-health"
+                    f"/dashboard/opportunities?monitor={strategy.id}#monitor-health"
                 ),
                 "retry_delivery_id": str(failed_delivery.id)
                 if failed_delivery and not successful

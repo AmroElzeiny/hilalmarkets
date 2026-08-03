@@ -50,7 +50,7 @@ from .targets.base import ChatTarget, TargetReply
 from .targets.ui import UITarget
 from .test_ai import TestAI
 from .topics import TOPIC_BY_ID, TOPICS
-from .util import ensure_dir, stable_hash, utc_now
+from .util import ensure_dir, semantic_contract_hash, stable_hash, utc_now
 
 _EXPECTED_EVALUATOR_FAULT_ERRORS: dict[str, frozenset[str]] = {
     "empty_once": frozenset({"TARGET_EMPTY_RESPONSE"}),
@@ -538,7 +538,7 @@ class EvaluationRunner:
             deterministic_metrics={},
             judge=None,
             structured_output=structured,
-            structured_hash=stable_hash(structured) if structured else None,
+            structured_hash=semantic_contract_hash(structured) if structured else None,
             schema_errors=[],
             total_latency_ms=sum(turn.latency_ms or 0 for turn in turns),
             target_cost_usd=target_cost,
@@ -867,7 +867,7 @@ class EvaluationRunner:
                 deterministic_metrics=deterministic,
                 judge=judge,
                 structured_output=structured,
-                structured_hash=stable_hash(structured) if structured else None,
+                structured_hash=semantic_contract_hash(structured) if structured else None,
                 schema_errors=schema_errors,
                 total_latency_ms=sum(t.latency_ms or 0 for t in turns),
                 target_cost_usd=target_cost,
@@ -929,7 +929,7 @@ class EvaluationRunner:
                 deterministic_metrics={},
                 judge=None,
                 structured_output=structured,
-                structured_hash=stable_hash(structured) if structured else None,
+                structured_hash=semantic_contract_hash(structured) if structured else None,
                 schema_errors=[],
                 total_latency_ms=sum(t.latency_ms or 0 for t in turns),
                 target_cost_usd=target_cost,
@@ -972,7 +972,7 @@ class EvaluationRunner:
                 deterministic_metrics={},
                 judge=None,
                 structured_output=structured,
-                structured_hash=stable_hash(structured) if structured else None,
+                structured_hash=semantic_contract_hash(structured) if structured else None,
                 schema_errors=[],
                 total_latency_ms=sum(t.latency_ms or 0 for t in turns),
                 target_cost_usd=target_cost,

@@ -175,9 +175,7 @@ def instruction_plan(
             )
         ],
         operations=operations_from_patch(patch, segment_id="s1"),
-        strategy_instructions=[
-            StrategyInstructionPlan(segment_id="s1", intent_summary=summary)
-        ],
+        strategy_instructions=[StrategyInstructionPlan(segment_id="s1", intent_summary=summary)],
         overall_confidence=0.95,
     )
 
@@ -198,4 +196,274 @@ def responses_body(text: str) -> dict[str, Any]:
     return {
         "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
         "usage": {"input_tokens": 20, "output_tokens": 8},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Compact transport adapters used by existing integration tests. Independent literal
+# golden fixtures, not this canonical-plan adapter, prove semantic equivalence.
+# ---------------------------------------------------------------------------
+
+
+_PRICE_OPERAND_FORMULAS = {
+    "previous_candle_reference",
+    "fixed_reference_level",
+    "lookback_reference_level",
+    "cross",
+}
+
+
+def condition_intent(
+    node: Any,
+    condition_refs: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """The trader-level meaning of one canonical condition node."""
+
+    if node.node_type.value in {"and", "or", "not"}:
+        return {
+            "boolean_relationship": node.node_type.value,
+            "child_intents": [condition_intent(child, condition_refs) for child in node.children],
+        }
+    stated: dict[str, Any] = {}
+    if condition_refs and node.node_id in condition_refs:
+        stated["target_reference"] = condition_refs[node.node_id]
+    if node.source_fragment:
+        stated["source_quote"] = node.source_fragment
+    if node.formula is not None:
+        stated["formula_key"] = node.formula.value
+    if node.movement_direction.value != "neutral":
+        stated["movement_direction"] = node.movement_direction.value
+    if node.strategy_bias.value != "neutral":
+        stated["strategy_bias"] = node.strategy_bias.value
+    if node.operator is not None:
+        stated["comparator"] = node.operator.value
+    if node.threshold is not None:
+        stated["threshold"] = node.threshold
+    if node.unit != "none":
+        stated["unit"] = node.unit
+    if node.trigger_timeframe:
+        stated["trigger_timeframe"] = node.trigger_timeframe
+    if node.context_timeframes:
+        stated["context_timeframes"] = list(node.context_timeframes)
+    if node.confirmation_timeframes:
+        stated["confirmation_timeframes"] = list(node.confirmation_timeframes)
+    if node.reference_timeframe:
+        stated["reference_timeframe"] = node.reference_timeframe
+    if node.reference_definition:
+        stated["reference_definition"] = node.reference_definition
+    if node.lookback is not None:
+        stated["lookback"] = node.lookback
+    if node.capability_key:
+        stated["capability_key"] = node.capability_key
+        stated["capability_parameters"] = [
+            _compact_capability_parameter(name, value)
+            for name, value in node.capability_parameters.items()
+        ]
+    if not node.required:
+        stated["required"] = False
+    if node.condition_symbols:
+        stated["condition_symbols"] = list(node.condition_symbols)
+    if node.formula is not None and node.formula.value in _PRICE_OPERAND_FORMULAS:
+        left = next((item for item in node.operands if item.kind == "price"), None)
+        stated["measured_price_field"] = (left.field if left else None) or "close"
+    return stated
+
+
+def _compact_capability_parameter(name: str, value: Any) -> dict[str, Any]:
+    """Render a canonical parameter through the compact typed planner boundary."""
+
+    item: dict[str, Any] = {"name": name}
+    if isinstance(value, bool):
+        item["boolean_value"] = value
+    elif isinstance(value, int | float):
+        item["number_value"] = value
+    elif isinstance(value, str):
+        item["string_value"] = value
+    elif isinstance(value, list):
+        if all(isinstance(entry, bool) for entry in value):
+            item["boolean_items"] = value
+        elif all(isinstance(entry, int | float) and not isinstance(entry, bool) for entry in value):
+            item["number_items"] = value
+        elif all(isinstance(entry, str) for entry in value):
+            item["string_items"] = value
+        else:
+            raise ValueError(f"unsupported compact parameter list: {name}")
+    elif isinstance(value, dict):
+        fields: list[dict[str, Any]] = []
+        for field_name, field_value in value.items():
+            field: dict[str, Any] = {"name": field_name}
+            if isinstance(field_value, bool):
+                field["boolean_value"] = field_value
+            elif isinstance(field_value, int | float):
+                field["number_value"] = field_value
+            elif isinstance(field_value, str):
+                field["string_value"] = field_value
+            else:
+                raise ValueError(f"unsupported compact object parameter value: {name}.{field_name}")
+            fields.append(field)
+        item["object_fields"] = fields
+    else:
+        raise ValueError(f"unsupported compact parameter value: {name}")
+    return item
+
+
+_SYMBOL_ACTION = {
+    "add_inclusion": "include_symbol",
+    "add_exclusion": "exclude_symbol",
+    "remove_inclusion": "remove_included_symbol",
+    "remove_exclusion": "remove_excluded_symbol",
+}
+
+
+def planner_envelope_json(envelope: Any) -> str:
+    """Serialise an old-style plan envelope as the compact contract on the wire.
+
+    Tests keep composing canonical plans, which reads clearly and exercises the same
+    canonical shapes; this converts one at the transport boundary, where the real model's
+    answer arrives. One conversion point, so a test cannot accidentally assert against a
+    contract the production path no longer speaks.
+    """
+
+    import json
+
+    if envelope.plan is None:
+        return json.dumps(
+            {
+                "segments": [
+                    {
+                        "segment_ref": "segment_1",
+                        "exact_source_text": (envelope.direct_reply or "ok")[:200],
+                        "segment_kind": SegmentKind.CONVERSATIONAL_CONTEXT.value,
+                    }
+                ],
+                "semantic_intents": [],
+                "clarification_answers": [],
+                "questions_to_answer": [],
+                "unsupported_intents": [],
+                "approval_intent": None,
+                "overall_confidence": 0.99,
+            }
+        )
+    return json.dumps(_compact_envelope_from_plan(envelope.plan))
+
+
+def _compact_envelope_from_plan(plan: SetupAgentTurnPlan) -> dict[str, Any]:
+    """Test adapter for the real compact wire contract.
+
+    This remains a transport convenience, not semantic-equivalence evidence. Independent
+    golden fixtures exercise production compilation without passing through this helper.
+    """
+
+    segment_refs = {
+        item.segment_id: f"segment_{index + 1}" for index, item in enumerate(plan.segments)
+    }
+    target_ids = list(
+        dict.fromkeys(
+            item.target_condition_id for item in plan.operations if item.target_condition_id
+        )
+    )
+    condition_refs = {
+        condition_id: f"condition_{index + 1}" for index, condition_id in enumerate(target_ids)
+    }
+    intents: list[dict[str, Any]] = []
+    unsupported: list[dict[str, Any]] = []
+    field_actions = {
+        "mode": "set_mode",
+        "name": "set_name",
+        "exchange": "set_exchange",
+        "quote_asset": "set_quote_asset",
+        "market_type": "set_market_type",
+    }
+    for operation in plan.operations:
+        segment_ref = segment_refs[operation.authorizing_segment_id]
+        payload: dict[str, Any] | None = None
+        if operation.kind in _SYMBOL_ACTION:
+            payload = {
+                "action": _SYMBOL_ACTION[operation.kind],
+                "symbol": operation.symbol,
+            }
+        elif operation.kind == "set_fields" and operation.fields is not None:
+            for name, value in operation.fields.model_dump(mode="json", exclude_none=True).items():
+                action = field_actions[name]
+                intents.append(
+                    {
+                        "segment_ref": segment_ref,
+                        "payload": {"action": action, name: value},
+                    }
+                )
+            continue
+        elif operation.kind == "add_condition" and operation.condition is not None:
+            payload = {
+                "action": "add_condition",
+                "condition": condition_intent(operation.condition, condition_refs),
+            }
+        elif operation.kind == "update_condition" and operation.condition is not None:
+            payload = {
+                "action": "update_condition",
+                "target_reference": condition_refs[operation.target_condition_id],
+                "condition": condition_intent(operation.condition),
+            }
+        elif operation.kind == "remove_condition":
+            payload = {
+                "action": "remove_condition",
+                "target_reference": condition_refs[operation.target_condition_id],
+            }
+        elif operation.kind == "replace_groups" and operation.condition is not None:
+            payload = {
+                "action": "replace_boolean_structure",
+                "condition": condition_intent(operation.condition, condition_refs),
+            }
+        elif operation.kind == "restore_snapshot":
+            payload = {
+                "action": "restore_owned_version",
+                "target_reference": "snapshot_1",
+            }
+        elif operation.kind == "add_unsupported":
+            unsupported.append(
+                {
+                    "segment_ref": segment_ref,
+                    "missing_contract": operation.missing_contract,
+                }
+            )
+        if payload is not None:
+            intents.append({"segment_ref": segment_ref, "payload": payload})
+
+    question_refs = [
+        segment_refs[item.segment_id]
+        for item in plan.segments
+        if item.kind
+        in {
+            SegmentKind.USER_QUESTION,
+            SegmentKind.EXPLANATION_REQUEST,
+            SegmentKind.PRODUCT_QUESTION,
+        }
+    ]
+    if plan.questions_to_answer and not question_refs and plan.segments:
+        question_refs = [segment_refs[plan.segments[0].segment_id]]
+    return {
+        "segments": [
+            {
+                "segment_ref": segment_refs[item.segment_id],
+                "exact_source_text": item.exact_source_text,
+                "segment_kind": item.kind.value,
+            }
+            for item in plan.segments
+        ],
+        "semantic_intents": intents,
+        "clarification_answers": [
+            {
+                "segment_ref": segment_refs[item.segment_id],
+                "clarification_ref": "clarification_1",
+                "answer_text": item.answer_text,
+            }
+            for item in plan.clarification_answers
+        ],
+        "questions_to_answer": question_refs,
+        "unsupported_intents": unsupported,
+        "approval_intent": (
+            {"segment_ref": segment_refs[plan.approval_intent.segment_id]}
+            if plan.approval_intent is not None
+            else None
+        ),
+        "overall_confidence": plan.overall_confidence,
     }

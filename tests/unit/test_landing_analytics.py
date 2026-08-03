@@ -1,5 +1,13 @@
 import re
+from datetime import timedelta
 from pathlib import Path
+
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
+    PUBLIC_PLAN_PRESENTATIONS,
+    plan_offer_payload,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "Hilal-Markets-Website" / "src"
@@ -253,18 +261,9 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
         "Explore",
         "Monitor",
         "Pro",
-        # The launch offer: the Monitor plan runs at $8 with $12 crossed out. The
-        # server sends these values too; the fallback exists for a page opened with no
-        # runtime config, so it has to say the same thing.
-        "monthlyPrice: 8",
-        "originalMonthlyPrice: 12",
-        "annualPrice: 120",
-        "monthlyPrice: 22",
-        "annualPrice: 220",
         # Annual is not open on any plan, and Pro is not open at all.
         "annualAvailable: false",
         "monthlyAvailable: false",
-        "Most Popular",
         "Try Monitor for 7 days",
         "No charge for seven days. Cancel before the first payment.",
         "2 active market monitors",
@@ -274,14 +273,34 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
         "WhatsApp delivery - coming soon",
     ):
         assert content in pricing
+
+    # The hardcoded list in the component is only a fallback, used when the page is
+    # opened with no runtime config. It must still say exactly what the server would
+    # have sent. Every number is derived from `core.plans` rather than typed out here,
+    # so a price changed in one place fails this test instead of quietly leaving the
+    # landing page quoting the old one.
+    inside_promotion = PROMOTION_ENDS_AT - timedelta(days=1)
+    trader = plan_offer_payload("trader", now=inside_promotion)
+    for expected in (
+        f"monthlyPrice: {int(trader['monthlyPrice'])}",  # type: ignore[arg-type]
+        f"originalMonthlyPrice: {int(trader['originalMonthlyPrice'])}",  # type: ignore[arg-type]
+        f"annualPrice: {int(PUBLIC_PLAN_PRESENTATIONS['trader'].annual_price)}",
+        # Pro shows no price on the page; the fallback still has to carry the real one
+        # so the card can quote it the day Pro opens.
+        f"monthlyPrice: {int(PLAN_DEFINITIONS['pro'].monthly_price)}",
+        f"annualPrice: {int(PUBLIC_PLAN_PRESENTATIONS['pro'].annual_price)}",
+    ):
+        assert expected in pricing
     for removed in (
-        "first Watch Plan",
-        "markets per Watch Plan",
+        "first Watchlist",
+        "markets per Watchlist",
         "90-day opportunity",
         "1-year opportunity",
         "Advanced Controls",
         "Visual Canvas",
         "Paid subscriptions are not available yet.",
+        # No plan is ranked for the buyer. The badge said one was.
+        "Most Popular",
     ):
         assert removed not in pricing
     assert "Discord" not in pricing
@@ -431,7 +450,7 @@ def test_legal_pages_use_the_landing_shell_and_cover_required_product_boundaries
         "AI-assisted features",
         "Cookies, analytics, and marketing",
         "Shariah screening and evidence",
-        "Watch Plans, Scanner, and AI",
+        "Watchlists, Scanner, and AI",
         "Risk and disclaimers",
     ):
         assert expected in legal

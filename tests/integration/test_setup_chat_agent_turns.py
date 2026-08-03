@@ -36,6 +36,11 @@ from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.engine.capability_shortlist import build_capability_shortlist
+from ai_market_monitor.engine.planner_references import (
+    MethodologyReference,
+    PlannerReferenceContext,
+    WatchlistReference,
+)
 from ai_market_monitor.engine.setup_turn_execution import (
     SetupTurnRejected,
     SetupTurnRequest,
@@ -73,11 +78,11 @@ from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
     SetupAgentTurnInput,
     SetupChatAgent,
-    _repair_eligible_validation_failure,
+    _repair_can_help,
     deterministic_summary,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
-from tests.support.setup_agent_plans import operations_from_patch
+from tests.support.setup_agent_plans import operations_from_patch, planner_envelope_json
 
 #: The sentence this rebuild exists to remove. No reply may contain it.
 BANNED_READINESS_PHRASE = "describe the market behavior you want to scan or monitor"
@@ -86,20 +91,12 @@ TURN_ID = "turn-00000001"
 
 
 def test_genuine_unsupported_or_unoffered_mechanics_never_enter_repair() -> None:
-    assert not _repair_eligible_validation_failure(
-        SetupTurnRejected(
-            "SEMANTIC_VALIDATION_FAILED",
-            "Unsupported mechanic.",
-            details=("condition:unsupported_mechanic",),
-        )
-    )
-    assert not _repair_eligible_validation_failure(
-        SetupTurnRejected(
-            "SEMANTIC_VALIDATION_FAILED",
-            "Capability was not offered.",
-            details=("condition:capability_not_offered",),
-        )
-    )
+    """A boundary is not a mistake, so asking the model again cannot change it."""
+
+    for detail in ("condition:unsupported_mechanic", "condition:capability_not_offered"):
+        assert not _repair_can_help("SEMANTIC_VALIDATION_FAILED", (detail,))
+    assert not _repair_can_help("INTENT_NOT_PERMITTED", ("i0:USER_QUESTION:cannot_authorize",))
+    assert _repair_can_help("VALUE_NOT_GROUNDED", ("op1:add_exclusion:ETH/USDT:not_grounded",))
 
 
 def _settings() -> Settings:
@@ -130,7 +127,13 @@ class Script:
     #: Raise this instead of answering the planner call.
     plan_failure: Exception | None = None
     plan_raw_text: str | None = None
-    repair_plan: SetupAgentPlanEnvelope | None = None
+    plan_second_raw_text: str | None = None
+    #: A second planner answer, for the one retry allowed when the first could not be
+    #: read at all. Repair by delta cannot help there: there is nothing parsed to name.
+    retry_plan: SetupAgentPlanEnvelope | None = None
+    #: Corrections the repair call returns, in the compact delta contract.
+    repair_deltas: list[dict[str, Any]] | None = None
+    repair_cannot_fix: bool = False
     repair_raw_text: str | None = None
     #: Raise this instead of answering the composing call.
     reply_failure: Exception | None = None
@@ -144,22 +147,31 @@ class Script:
             name = body["text"]["format"]["name"]
             self.schema_names.append(name)
             payload = json.loads(body["input"])
-            if name == "hilalmarkets_setup_turn_plan":
+            if name == "hilalmarkets_setup_turn_intent":
+                first = len(self.planner_payloads) == 0
                 self.planner_payloads.append(payload)
                 if self.plan_failure is not None:
                     raise self.plan_failure
-                if self.plan_raw_text is not None:
-                    return httpx.Response(200, json=_responses_body(self.plan_raw_text))
-                assert self.plan is not None, "the test did not script a plan"
-                return httpx.Response(200, json=_responses_body(self.plan.model_dump_json()))
-            if name == "hilalmarkets_setup_turn_plan_repair":
+                raw = self.plan_raw_text if first else self.plan_second_raw_text
+                if raw is not None:
+                    return httpx.Response(200, json=_responses_body(raw))
+                answer = self.plan if first else (self.retry_plan or self.plan)
+                assert answer is not None, "the test did not script a plan"
+                return httpx.Response(200, json=_responses_body(planner_envelope_json(answer)))
+            if name == "hilalmarkets_setup_intent_repair":
                 self.planner_payloads.append(payload)
                 if self.repair_raw_text is not None:
                     return httpx.Response(200, json=_responses_body(self.repair_raw_text))
-                assert self.repair_plan is not None, "the test did not script a repair plan"
                 return httpx.Response(
                     200,
-                    json=_responses_body(self.repair_plan.model_dump_json()),
+                    json=_responses_body(
+                        json.dumps(
+                            {
+                                "deltas": list(self.repair_deltas or []),
+                                "cannot_repair": self.repair_cannot_fix,
+                            }
+                        )
+                    ),
                 )
             self.composer_payloads.append(payload)
             if self.reply_failure is not None:
@@ -226,9 +238,7 @@ def _segment(
 
 
 def _patch_for(text: str, draft: StrategyDraftV2 | None = None) -> StrategyPatch:
-    patch = deterministic_strategy_patch(
-        draft or StrategyDraftV2(), text, source_turn_id=TURN_ID
-    )
+    patch = deterministic_strategy_patch(draft or StrategyDraftV2(), text, source_turn_id=TURN_ID)
     assert patch is not None, f"no deterministic patch for {text!r}"
     return patch
 
@@ -237,9 +247,7 @@ def _conditions(draft: StrategyDraftV2) -> list[Any]:
     if draft.condition_ast is None:
         return []
     return [
-        node
-        for node in draft.condition_ast.walk()
-        if node.node_type is ConditionNodeType.CONDITION
+        node for node in draft.condition_ast.walk() if node.node_type is ConditionNodeType.CONDITION
     ]
 
 
@@ -282,7 +290,7 @@ async def test_pure_conversation_changes_nothing_and_calls_no_tool(
     assert result.draft.version == draft.version
     assert result.draft.semantic_hash == draft.semantic_hash
     assert result.trace.tool_called is False
-    assert script.schema_names == ["hilalmarkets_setup_turn_plan"], "one call only"
+    assert script.schema_names == ["hilalmarkets_setup_turn_intent"], "one call only"
     assert BANNED_READINESS_PHRASE not in result.reply.message.casefold()
 
 
@@ -292,9 +300,7 @@ async def test_a_conversation_turn_with_no_model_words_still_reports_real_state(
         plan=SetupAgentPlanEnvelope(
             plan=SetupAgentTurnPlan(
                 source_turn_id=TURN_ID,
-                segments=[
-                    _segment("hello", "hello", SegmentKind.SOCIAL_REPLY, segment_id="s1")
-                ],
+                segments=[_segment("hello", "hello", SegmentKind.SOCIAL_REPLY, segment_id="s1")],
                 overall_confidence=0.9,
             ),
             direct_reply="   ",
@@ -467,9 +473,7 @@ async def test_an_instruction_and_a_question_are_both_handled() -> None:
 
 
 async def test_a_correction_updates_the_named_condition_without_adding_one() -> None:
-    base = _draft_with(
-        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-    )
+    base = _draft_with("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%")
     existing = _conditions(base)[0]
     message = "change that to at least 8% and explain why it matters"
     replacement = existing.model_copy(
@@ -726,18 +730,24 @@ def _single_exclusion_envelope(message: str, symbol: str) -> SetupAgentPlanEnvel
 
 
 async def test_schema_invalid_plan_gets_exactly_one_repair_before_one_execution() -> None:
+    """An unreadable answer buys exactly one more attempt, and then one execution.
+
+    A delta cannot correct an answer nobody could parse — there is no intent to name — so
+    the recovery here is one more planner attempt. It is still one recovery for the turn.
+    """
+
     message = "exclude LTC/USDT"
     before = StrategyDraftV2()
     script = Script(
         plan_raw_text="{}",
-        repair_plan=_single_exclusion_envelope(message, "LTC/USDT"),
+        retry_plan=_single_exclusion_envelope(message, "LTC/USDT"),
     )
 
     result = await _run(script, message, draft=before)
 
     assert script.schema_names == [
-        "hilalmarkets_setup_turn_plan",
-        "hilalmarkets_setup_turn_plan_repair",
+        "hilalmarkets_setup_turn_intent",
+        "hilalmarkets_setup_turn_intent",
     ]
     assert result.trace.model_calls == 2
     assert result.execution is not None
@@ -747,9 +757,11 @@ async def test_schema_invalid_plan_gets_exactly_one_repair_before_one_execution(
 
 
 async def test_failed_single_repair_leaves_the_authoritative_draft_unchanged() -> None:
+    """Two unreadable answers end the turn, and the saved setup is untouched."""
+
     message = "exclude LTC/USDT"
     before = StrategyDraftV2()
-    script = Script(plan_raw_text="{}", repair_raw_text="{}")
+    script = Script(plan_raw_text="{}", plan_second_raw_text="{}")
     agent = SetupChatAgent(_settings(), transport=script.transport())
 
     with pytest.raises(SetupAgentError) as error:
@@ -767,11 +779,681 @@ async def test_failed_single_repair_leaves_the_authoritative_draft_unchanged() -
     assert before.executable_version == 1
 
 
+async def test_ambiguous_governed_methodology_returns_one_typed_clarification() -> None:
+    message = "Use the standard-family Sharia methodology"
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {
+                    "action": "set_sharia_preferences",
+                    "methodology_family": "standard-family",
+                },
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.95,
+    }
+    script = Script(plan_raw_text=json.dumps(planner_answer))
+    references = PlannerReferenceContext(
+        methodologies=(
+            MethodologyReference(
+                reference="methodology_1",
+                public_identifier="Method A",
+                public_name="Method A",
+                family="standard-family",
+                aliases=(),
+                methodology_id="11111111-1111-4111-8111-111111111111",
+                methodology_version="1.0",
+            ),
+            MethodologyReference(
+                reference="methodology_2",
+                public_identifier="Method B",
+                public_name="Method B",
+                family="standard-family",
+                aliases=(),
+                methodology_id="22222222-2222-4222-8222-222222222222",
+                methodology_version="1.0",
+            ),
+        )
+    )
+    before = StrategyDraftV2()
+    result = await SetupChatAgent(_settings(), transport=script.transport()).run_turn(
+        SetupAgentTurnInput(
+            message=message,
+            source_turn_id=TURN_ID,
+            draft=before,
+            planner_references=references,
+        )
+    )
+
+    assert result.execution is None
+    assert result.draft == before
+    assert result.clarification is not None
+    assert result.clarification.target_type == "sharia_policy"
+    assert result.clarification.target_field == "methodology_id"
+    assert result.clarification.allowed_options == ["Method A", "Method B"]
+    assert result.conversation.active_question == result.clarification
+    assert result.message.count(result.clarification.question) == 1
+    assert script.schema_names == ["hilalmarkets_setup_turn_intent"]
+
+    answer_message = "Use Method A"
+    answer_script = Script(
+        plan_raw_text=json.dumps(
+            {
+                "segments": [
+                    {
+                        "segment_ref": "s1",
+                        "exact_source_text": answer_message,
+                        "segment_kind": "CLARIFICATION_ANSWER",
+                    }
+                ],
+                "semantic_intents": [
+                    {
+                        "segment_ref": "s1",
+                        "payload": {
+                            "action": "set_sharia_preferences",
+                            "methodology_identifier": "Method A",
+                        },
+                    }
+                ],
+                "clarification_answers": [
+                    {
+                        "segment_ref": "s1",
+                        "clarification_ref": "clarification_1",
+                        "answer_text": answer_message,
+                    }
+                ],
+                "questions_to_answer": [],
+                "unsupported_intents": [],
+                "approval_intent": None,
+                "overall_confidence": 0.99,
+            }
+        )
+    )
+    answered = await SetupChatAgent(_settings(), transport=answer_script.transport()).run_turn(
+        SetupAgentTurnInput(
+            message=answer_message,
+            source_turn_id="turn-00000002",
+            draft=result.draft,
+            conversation=result.conversation,
+            planner_references=references,
+        )
+    )
+    assert answered.execution is not None
+    assert answered.conversation.active_question is None
+    assert str(answered.draft.sharia_policy.methodology_id) == (
+        "11111111-1111-4111-8111-111111111111"
+    )
+    assert answered.execution.answered_questions == [result.clarification.question_id]
+
+
+@pytest.mark.parametrize(
+    ("message", "preference"),
+    (
+        ("Do not use screened assets only", {"screened_assets_only": False}),
+        ("Do not use an approved watchlist only", {"approved_watchlist_only": False}),
+        (
+            "Use neither screened assets nor an approved watchlist only",
+            {"screened_assets_only": False, "approved_watchlist_only": False},
+        ),
+        (
+            "Use screened assets only and my approved watchlist only",
+            {"screened_assets_only": True, "approved_watchlist_only": True},
+        ),
+    ),
+)
+async def test_sharia_universe_boolean_conflicts_clarify_without_mutation(
+    message: str,
+    preference: dict[str, bool],
+) -> None:
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {"action": "set_sharia_preferences", **preference},
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.99,
+    }
+    before = StrategyDraftV2()
+    result = await SetupChatAgent(
+        _settings(), transport=Script(plan_raw_text=json.dumps(planner_answer)).transport()
+    ).run_turn(
+        SetupAgentTurnInput(
+            message=message,
+            source_turn_id=TURN_ID,
+            draft=before,
+        )
+    )
+
+    assert result.execution is None
+    assert result.draft == before
+    assert result.clarification is not None
+    assert result.clarification.target_type == "sharia_policy"
+    assert result.draft.executable_hash == before.executable_hash
+
+
+@pytest.mark.parametrize(
+    ("message", "preference", "expected_mode"),
+    (
+        (
+            "Use screened assets only, not an approved watchlist",
+            {"screened_assets_only": True, "approved_watchlist_only": False},
+            "eligible_market",
+        ),
+        (
+            "Use my Core assets approved watchlist only, not screened assets only",
+            {"screened_assets_only": False, "approved_watchlist_only": True},
+            "approved_watchlist",
+        ),
+    ),
+)
+async def test_negative_sharia_boolean_executes_only_with_grounded_alternative(
+    message: str,
+    preference: dict[str, bool],
+    expected_mode: str,
+) -> None:
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {"action": "set_sharia_preferences", **preference},
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.99,
+    }
+    references = PlannerReferenceContext(
+        watchlists=(
+            WatchlistReference(
+                reference="watchlist_1",
+                public_name="Core assets",
+                aliases=(),
+                watchlist_id="22222222-2222-4222-8222-222222222222",
+                watchlist_version="wlv2:core",
+            ),
+        )
+    )
+    before = StrategyDraftV2(
+        sharia_policy={
+            "universe_mode": "explicit_assets",
+            "explicit_symbols": ["BTC/USDT"],
+        }
+    )
+    result = await SetupChatAgent(
+        _settings(), transport=Script(plan_raw_text=json.dumps(planner_answer)).transport()
+    ).run_turn(
+        SetupAgentTurnInput(
+            message=message,
+            source_turn_id=TURN_ID,
+            draft=before,
+            planner_references=references,
+        )
+    )
+
+    assert result.execution is not None
+    assert result.draft.sharia_policy.universe_mode.value == expected_mode
+    assert result.draft.executable_version == before.executable_version + 1
+    assert result.draft.executable_hash != before.executable_hash
+    if expected_mode == "approved_watchlist":
+        assert str(result.draft.sharia_policy.approved_watchlist_id) == (
+            "22222222-2222-4222-8222-222222222222"
+        )
+
+
+async def test_fail_open_sharia_preference_is_explicitly_unsupported_without_mutation() -> None:
+    message = "Use fail open Sharia handling"
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {
+                    "action": "set_sharia_preferences",
+                    "fail_closed_preference": False,
+                },
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.99,
+    }
+    before = StrategyDraftV2()
+    agent = SetupChatAgent(
+        _settings(), transport=Script(plan_raw_text=json.dumps(planner_answer)).transport()
+    )
+    with pytest.raises(SetupAgentError) as failure:
+        await agent.run_turn(
+            SetupAgentTurnInput(message=message, source_turn_id=TURN_ID, draft=before)
+        )
+
+    assert failure.value.code == "SHARIA_FAIL_OPEN_UNSUPPORTED"
+    assert agent.model_call_count == 1
+    assert before.executable_version == 1
+
+
+async def test_exact_current_sharia_preference_is_a_non_mutating_turn() -> None:
+    message = "Use screened assets only"
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {
+                    "action": "set_sharia_preferences",
+                    "screened_assets_only": True,
+                },
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.99,
+    }
+    before = StrategyDraftV2()
+    result = await SetupChatAgent(
+        _settings(), transport=Script(plan_raw_text=json.dumps(planner_answer)).transport()
+    ).run_turn(
+        SetupAgentTurnInput(message=message, source_turn_id=TURN_ID, draft=before)
+    )
+
+    assert result.execution is not None
+    assert result.execution.applied is False
+    assert result.execution.strategy_mutated is False
+    assert result.plan is not None
+    assert result.plan.operations == []
+    assert result.draft.executable_hash == before.executable_hash
+    assert result.draft.executable_version == before.executable_version
+
+
+async def test_shape_recovery_then_semantic_failure_stops_after_two_calls() -> None:
+    """Shape recovery consumes the turn's only repair allowance."""
+
+    message = "exclude LTC/USDT"
+    before = StrategyDraftV2()
+    script = Script(
+        plan_raw_text="{}",
+        retry_plan=_single_exclusion_envelope(message, "ETH/USDT"),
+    )
+    agent = SetupChatAgent(_settings(), transport=script.transport())
+
+    with pytest.raises(SetupAgentError) as error:
+        await agent.run_turn(
+            SetupAgentTurnInput(
+                message=message,
+                source_turn_id=TURN_ID,
+                draft=before,
+            )
+        )
+
+    assert error.value.code == "VALUE_NOT_GROUNDED"
+    assert agent.model_call_count == 2
+    assert script.schema_names == [
+        "hilalmarkets_setup_turn_intent",
+        "hilalmarkets_setup_turn_intent",
+    ]
+    assert before.universe.excluded_symbols == []
+
+
+async def test_one_omitted_explicit_timeframe_role_uses_the_single_repair() -> None:
+    message = (
+        "Use 15m as context and trigger on 5m when the candle rises "
+        "open-to-close by at least 5%"
+    )
+    patch = _patch_for(message)
+    condition = patch.add_conditions[0].model_copy(update={"context_timeframes": []})
+    patch = patch.model_copy(update={"add_conditions": [condition]})
+    script = Script(
+        plan=SetupAgentPlanEnvelope(
+            plan=SetupAgentTurnPlan(
+                source_turn_id=TURN_ID,
+                segments=[
+                    _segment(
+                        message,
+                        message,
+                        SegmentKind.STRATEGY_INSTRUCTION,
+                        segment_id="s1",
+                        action=True,
+                    )
+                ],
+                operations=operations_from_patch(patch, segment_id="s1"),
+                overall_confidence=0.97,
+            )
+        ),
+        repair_deltas=[
+            {
+                "intent_ref": "intent_1",
+                "target_path": "condition.context_timeframes",
+                "repair_kind": "replace_with_grounded_value",
+                "replacement_value": {
+                    "kind": "string_list",
+                    "string_items": ["15m"],
+                },
+                "source_segment_ref": "segment_1",
+                "validation_code": "INTENT_VALUE_UNREADABLE",
+            }
+        ],
+    )
+
+    result = await _run(script, message)
+
+    assert result.trace.model_calls == 2
+    assert result.execution is not None
+    assert result.execution.applied is True
+    assert result.draft.condition_ast is not None
+    assert result.draft.condition_ast.trigger_timeframe == "5m"
+    assert result.draft.condition_ast.context_timeframes == ["15m"]
+    assert script.schema_names == [
+        "hilalmarkets_setup_turn_intent",
+        "hilalmarkets_setup_intent_repair",
+    ]
+
+
+async def test_repaired_role_in_adjacent_noop_clause_keeps_one_grounded_evidence_span() -> None:
+    """A split model segment may be repaired; the server never invents the role."""
+
+    first = (
+        "By strong I mean a bearish close-to-close percentage move of at least 7.5% "
+        "on the 1h trigger timeframe."
+    )
+    second = "Keep 1m as context, BTCUSDT included, and LTCUSDT excluded."
+    message = f"{first} {second}"
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "condition_clause",
+                "exact_source_text": first,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            },
+            {
+                "segment_ref": "scope_clause",
+                "exact_source_text": second,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            },
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "condition_clause",
+                "payload": {
+                    "action": "add_condition",
+                    "condition": {
+                        "formula_key": "close_to_close_percentage",
+                        "movement_direction": "down",
+                        "strategy_bias": "neutral",
+                        "comparator": "gte",
+                        "threshold": 7.5,
+                        "unit": "percent",
+                        "trigger_timeframe": "1h",
+                    },
+                },
+            },
+            {
+                "segment_ref": "scope_clause",
+                "payload": {"action": "include_symbol", "symbol": "BTCUSDT"},
+            },
+            {
+                "segment_ref": "scope_clause",
+                "payload": {"action": "exclude_symbol", "symbol": "LTCUSDT"},
+            },
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.96,
+    }
+    script = Script(
+        plan_raw_text=json.dumps(planner_answer),
+        repair_deltas=[
+            {
+                "intent_ref": "intent_1",
+                "target_path": "condition.context_timeframes",
+                "repair_kind": "correct_semantic_role",
+                "replacement_value": {
+                    "kind": "timeframe",
+                    "string_value": "1m",
+                },
+                "source_segment_ref": "scope_clause",
+                "validation_code": "INTENT_VALUE_UNREADABLE",
+            }
+        ],
+    )
+
+    result = await _run(script, message)
+
+    assert result.trace.model_calls == 2
+    assert result.execution is not None and result.execution.applied is True
+    assert result.draft.condition_ast is not None
+    assert result.draft.condition_ast.trigger_timeframe == "1h"
+    assert result.draft.condition_ast.context_timeframes == ["1m"]
+    assert result.draft.universe.included_symbols == ["BTC/USDT"]
+    assert result.draft.universe.excluded_symbols == ["LTC/USDT"]
+    assert len(result.plan.segments) == 1
+    assert result.plan.segments[0].exact_source_text == message
+    assert {item.authorizing_segment_id for item in result.plan.operations} == {
+        result.plan.segments[0].segment_id
+    }
+
+
+async def test_one_explicitly_authored_formula_omission_uses_one_compact_repair() -> None:
+    message = (
+        "Bearish close-to-close percentage move of at least 7.5% on the 1h trigger "
+        "timeframe with 1m as context"
+    )
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {
+                    "action": "add_condition",
+                    "condition": {
+                        "movement_direction": "down",
+                        "comparator": "gte",
+                        "threshold": 7.5,
+                        "unit": "percent",
+                        "trigger_timeframe": "1h",
+                        "context_timeframes": ["1m"],
+                    },
+                },
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.96,
+    }
+    script = Script(
+        plan_raw_text=json.dumps(planner_answer),
+        repair_deltas=[
+            {
+                "intent_ref": "intent_1",
+                "target_path": "condition.formula_key",
+                "repair_kind": "replace_with_grounded_value",
+                "replacement_value": {
+                    "kind": "enum",
+                    "string_value": "close_to_close_percentage",
+                },
+                "source_segment_ref": "s1",
+                "validation_code": "INTENT_VALUE_UNREADABLE",
+            }
+        ],
+    )
+
+    result = await _run(script, message)
+
+    assert result.trace.model_calls == 2
+    assert result.execution is not None and result.execution.applied is True
+    assert result.draft.condition_ast is not None
+    assert result.draft.condition_ast.formula == FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE
+    assert result.draft.condition_ast.context_timeframes == ["1m"]
+
+
+async def test_narrow_source_quote_cannot_hide_formula_from_verified_condition_segment() -> None:
+    """A model-owned subquote cannot make an explicit formula look absent."""
+
+    message = (
+        "Bearish close-to-close percentage move of at least 7.5% on the 1h trigger "
+        "timeframe with 1m as context"
+    )
+    planner_answer = {
+        "segments": [
+            {
+                "segment_ref": "s1",
+                "exact_source_text": message,
+                "segment_kind": "STRATEGY_INSTRUCTION",
+            }
+        ],
+        "semantic_intents": [
+            {
+                "segment_ref": "s1",
+                "payload": {
+                    "action": "add_condition",
+                    "condition": {
+                        # The verified segment owns the complete action. This optional
+                        # narrower quote must not hide close-to-close from validation.
+                        "source_quote": "at least 7.5% on the 1h trigger timeframe",
+                        "movement_direction": "down",
+                        "comparator": "gte",
+                        "threshold": 7.5,
+                        "unit": "percent",
+                        "trigger_timeframe": "1h",
+                        "context_timeframes": ["1m"],
+                    },
+                },
+            }
+        ],
+        "clarification_answers": [],
+        "questions_to_answer": [],
+        "unsupported_intents": [],
+        "approval_intent": None,
+        "overall_confidence": 0.96,
+    }
+    script = Script(
+        plan_raw_text=json.dumps(planner_answer),
+        repair_deltas=[
+            {
+                "intent_ref": "intent_1",
+                "target_path": "condition.formula_key",
+                "repair_kind": "replace_with_grounded_value",
+                "replacement_value": {
+                    "kind": "enum",
+                    "string_value": "close_to_close_percentage",
+                },
+                "source_segment_ref": "s1",
+                "validation_code": "INTENT_VALUE_UNREADABLE",
+            }
+        ],
+    )
+
+    result = await _run(script, message)
+
+    assert result.trace.model_calls == 2
+    assert result.execution is not None and result.execution.applied is True
+    assert result.draft.condition_ast is not None
+    assert result.draft.condition_ast.formula == FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE
+
+
+async def test_compiler_invariant_violation_never_calls_repair(monkeypatch) -> None:
+    """An internal compiler defect is an engineering failure, not model-owned meaning."""
+
+    import ai_market_monitor.services.setup_chat_agent as agent_module
+    from ai_market_monitor.engine.planner_intent_compiler import IntentCompileError
+
+    message = "exclude LTC/USDT"
+    script = Script(plan=_single_exclusion_envelope(message, "LTC/USDT"))
+
+    def broken_compiler(*args, **kwargs):
+        raise IntentCompileError(
+            "COMPILER_INVARIANT_VIOLATION",
+            "internal compiler contract failed",
+        )
+
+    monkeypatch.setattr(agent_module, "compile_planner_intents", broken_compiler)
+    agent = SetupChatAgent(_settings(), transport=script.transport())
+    with pytest.raises(SetupAgentError) as error:
+        await agent.run_turn(
+            SetupAgentTurnInput(
+                message=message,
+                source_turn_id=TURN_ID,
+                draft=StrategyDraftV2(),
+            )
+        )
+    assert error.value.code == "COMPILER_INVARIANT_VIOLATION"
+    assert script.schema_names == ["hilalmarkets_setup_turn_intent"]
+    assert agent.model_call_count == 1
+
+
 async def test_dry_grounding_repair_cannot_keep_an_ungrounded_symbol() -> None:
+    """A correction has to quote the trader's own words, and then it lands."""
+
     message = "exclude LTC/USDT"
     script = Script(
         plan=_single_exclusion_envelope(message, "ETH/USDT"),
-        repair_plan=_single_exclusion_envelope(message, "LTC/USDT"),
+        repair_deltas=[
+            {
+                "intent_ref": "intent_1",
+                "target_path": "symbol",
+                "repair_kind": "replace_with_grounded_value",
+                "replacement_value": {"kind": "symbol", "string_value": "LTC/USDT"},
+                "source_segment_ref": "segment_1",
+                "validation_code": "VALUE_NOT_GROUNDED",
+            }
+        ],
     )
 
     result = await _run(script, message)
@@ -779,13 +1461,59 @@ async def test_dry_grounding_repair_cannot_keep_an_ungrounded_symbol() -> None:
     assert result.trace.model_calls == 2
     assert result.draft.universe.excluded_symbols == ["LTC/USDT"]
     assert "ETH/USDT" not in result.draft.universe.excluded_symbols
+    repair_payload = script.planner_payloads[1]
+    assert set(repair_payload) == {
+        "invalid_intent",
+        "verified_source_segment",
+        "relevant_existing_value",
+        "validation",
+        "allowed_repair_kinds",
+        "minimum_target_references",
+    }
+    serialized = json.dumps(repair_payload)
+    for canonical_name in (
+        "AuthorizedPatchOperation",
+        "ConditionNodeV2",
+        "OperandV2",
+        "UnresolvedFieldV2",
+        "ShariaPolicyV2",
+        "DraftFieldPatch",
+        "StrategyDraftV2",
+    ):
+        assert canonical_name not in serialized
+    assert "complete_intent_list" not in repair_payload
+    assert "canonical_operations" not in repair_payload
+    assert "full_draft" not in repair_payload
+
+
+async def test_a_correction_quoting_words_the_user_never_wrote_is_ignored() -> None:
+    """The repair call cannot smuggle in a value; it must cite the real message."""
+
+    message = "exclude LTC/USDT"
+    script = Script(
+        plan=_single_exclusion_envelope(message, "ETH/USDT"),
+        repair_deltas=[
+            {
+                "intent_ref": "intent_1",
+                "target_path": "symbol",
+                "repair_kind": "replace_with_grounded_value",
+                "replacement_value": {"kind": "symbol", "string_value": "DOGE/USDT"},
+                "source_segment_ref": "segment_1",
+                "validation_code": "VALUE_NOT_GROUNDED",
+            }
+        ],
+    )
+    agent = SetupChatAgent(_settings(), transport=script.transport())
+
+    with pytest.raises(SetupAgentError):
+        await agent.run_turn(
+            SetupAgentTurnInput(message=message, source_turn_id=TURN_ID, draft=StrategyDraftV2())
+        )
 
 
 async def test_a_reference_to_an_earlier_condition_reaches_the_planner() -> None:
     """The agent must be given enough context to resolve ordinary references."""
-    base = _draft_with(
-        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-    )
+    base = _draft_with("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%")
     existing = _conditions(base)[0]
     message = "remove the one we just added"
     script = Script(
@@ -834,7 +1562,24 @@ async def test_a_reference_to_an_earlier_condition_reaches_the_planner() -> None
 
     payload = script.planner_payloads[0]
     assert payload["draft"]["conditions"], "the planner must see the existing conditions"
-    assert payload["conversation_context"]["last_changed_condition_ids"] == [existing.node_id]
+    assert payload["draft"]["conditions"][0]["condition_ref"] == "condition_1"
+    assert existing.node_id not in json.dumps(payload)
+    for forbidden in (
+        "source_turn_id",
+        "source_segment_id",
+        "intent_id",
+        "operation_id",
+        "node_id",
+        "unresolved_id",
+        "snapshot_id",
+        "executable_version",
+        "workflow_revision",
+        "registry_version",
+        "capability_version",
+    ):
+        assert forbidden not in json.dumps(payload)
+    assert "registry_version" not in json.dumps(payload["capability_shortlist"])
+    assert "capability_version" not in json.dumps(payload["capability_shortlist"])
     assert payload["recent_dialogue"], "the planner must see recent dialogue"
     assert result.execution is not None
     assert _conditions(result.draft) == []
@@ -995,9 +1740,7 @@ async def test_an_out_of_scope_request_answers_a_boundary_and_touches_nothing(
     `UnsupportedRequirementV2` made a draft permanently unapprovable because the user
     once asked for advice.
     """
-    base = _draft_with(
-        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-    )
+    base = _draft_with("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%")
     script = Script(
         plan=SetupAgentPlanEnvelope(
             plan=SetupAgentTurnPlan(
@@ -1096,9 +1839,7 @@ async def test_a_capability_key_must_come_from_the_server_shortlist() -> None:
 
 async def test_inherited_capability_and_parameters_need_no_rediscovery() -> None:
     existing = _conditions(
-        _draft_with(
-            "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-        )
+        _draft_with("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%")
     )[0].model_copy(
         update={
             "formula": FormulaKind.CAPABILITY,
@@ -1328,9 +2069,7 @@ async def test_an_excluded_symbol_is_excluded_and_never_enters_a_condition() -> 
         ),
     ],
 )
-async def test_mixed_language_and_noisy_input_still_apply(
-    message: str, instruction: str
-) -> None:
+async def test_mixed_language_and_noisy_input_still_apply(message: str, instruction: str) -> None:
     script = Script(
         plan=SetupAgentPlanEnvelope(
             plan=SetupAgentTurnPlan(
@@ -1366,9 +2105,7 @@ async def test_mixed_language_and_noisy_input_still_apply(
 
 
 async def test_approval_wording_inside_a_material_edit_never_approves() -> None:
-    base = _draft_with(
-        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-    )
+    base = _draft_with("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%")
     existing = _conditions(base)[0]
     message = "I approve, but first change that to at least 8%"
     replacement = existing.model_copy(
@@ -1414,9 +2151,7 @@ async def test_approval_wording_inside_a_material_edit_never_approves() -> None:
                         target_condition_id=existing.node_id,
                     )
                 ],
-                approval_intent=ApprovalIntent(
-                    segment_id="s1", accompanied_by_material_edit=True
-                ),
+                approval_intent=ApprovalIntent(segment_id="s1", accompanied_by_material_edit=True),
                 overall_confidence=0.92,
             )
         ),
@@ -1449,9 +2184,7 @@ async def test_a_provider_failure_while_planning_preserves_the_draft(
     failure: Exception, code: str
 ) -> None:
     """INV: a failed turn is reported as a failure, never as conversation."""
-    base = _draft_with(
-        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%"
-    )
+    base = _draft_with("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 5%")
     script = Script(plan_failure=failure)
     with pytest.raises(SetupAgentError) as error:
         await _run(script, "add a 1h confirmation", draft=base)
@@ -1519,10 +2252,7 @@ async def test_success_is_composed_deterministically_without_a_second_ai_call() 
     assert len(script.planner_payloads) == 1
     assert script.composer_payloads == []
     assert "open to close percentage" in result.reply.message_without_question
-    assert (
-        BANNED_READINESS_PHRASE
-        not in result.reply.message_without_question.casefold()
-    )
+    assert BANNED_READINESS_PHRASE not in result.reply.message_without_question.casefold()
 
 
 async def test_redis_success_bookkeeping_failure_never_repeats_the_model_call() -> None:
@@ -2093,32 +2823,32 @@ def test_incomplete_condition_is_rejected_for_the_bounded_repair_stage() -> None
     with pytest.raises(ValidationError):
         SetupAgentTurnPlan.model_validate(
             {
-            "source_turn_id": TURN_ID,
-            "segments": [
-                {
-                    "segment_id": "s1",
-                    "exact_source_text": message,
-                    "start_offset": 0,
-                    "end_offset": len(message),
-                    "kind": "STRATEGY_INSTRUCTION",
-                    "action_required": True,
-                    "confidence": 0.9,
-                }
-            ],
-            "operations": [
-                {
-                    "operation_id": "incomplete-condition-1",
-                    "authorizing_segment_id": "s1",
-                    "kind": "add_condition",
-                    "condition": {
-                        "node_type": "condition",
-                        "formula": "capability",
-                        "capability_key": "liquidity_sweep",
-                        "operator": None,
-                    },
-                }
-            ],
-            "overall_confidence": 0.9,
+                "source_turn_id": TURN_ID,
+                "segments": [
+                    {
+                        "segment_id": "s1",
+                        "exact_source_text": message,
+                        "start_offset": 0,
+                        "end_offset": len(message),
+                        "kind": "STRATEGY_INSTRUCTION",
+                        "action_required": True,
+                        "confidence": 0.9,
+                    }
+                ],
+                "operations": [
+                    {
+                        "operation_id": "incomplete-condition-1",
+                        "authorizing_segment_id": "s1",
+                        "kind": "add_condition",
+                        "condition": {
+                            "node_type": "condition",
+                            "formula": "capability",
+                            "capability_key": "liquidity_sweep",
+                            "operator": None,
+                        },
+                    }
+                ],
+                "overall_confidence": 0.9,
             }
         )
 
@@ -2169,31 +2899,31 @@ def test_unknown_wrapped_formula_fails_closed_without_a_type_error() -> None:
     with pytest.raises(ValidationError):
         SetupAgentTurnPlan.model_validate(
             {
-            "source_turn_id": TURN_ID,
-            "segments": [
-                {
-                    "segment_id": "s1",
-                    "exact_source_text": message,
-                    "start_offset": 0,
-                    "end_offset": len(message),
-                    "kind": "STRATEGY_INSTRUCTION",
-                    "action_required": True,
-                    "confidence": 0.9,
-                }
-            ],
-            "operations": [
-                {
-                    "operation_id": "unknown-formula-1",
-                    "authorizing_segment_id": "s1",
-                    "kind": "add_condition",
-                    "condition": {
-                        "node_type": "condition",
-                        "formula": {"value": "private_signal"},
-                        "operator": "is_true",
-                    },
-                }
-            ],
-            "overall_confidence": 0.4,
+                "source_turn_id": TURN_ID,
+                "segments": [
+                    {
+                        "segment_id": "s1",
+                        "exact_source_text": message,
+                        "start_offset": 0,
+                        "end_offset": len(message),
+                        "kind": "STRATEGY_INSTRUCTION",
+                        "action_required": True,
+                        "confidence": 0.9,
+                    }
+                ],
+                "operations": [
+                    {
+                        "operation_id": "unknown-formula-1",
+                        "authorizing_segment_id": "s1",
+                        "kind": "add_condition",
+                        "condition": {
+                            "node_type": "condition",
+                            "formula": {"value": "private_signal"},
+                            "operator": "is_true",
+                        },
+                    }
+                ],
+                "overall_confidence": 0.4,
             }
         )
 
@@ -2203,45 +2933,45 @@ def test_incomplete_restore_proposal_requires_bounded_plan_repair() -> None:
     with pytest.raises(ValidationError):
         SetupAgentTurnPlan.model_validate(
             {
-            "source_turn_id": TURN_ID,
-            "segments": [
-                {
-                    "segment_id": "s1",
-                    "exact_source_text": "Use Scanner",
-                    "start_offset": 0,
-                    "end_offset": 11,
-                    "kind": "STRATEGY_INSTRUCTION",
-                    "action_required": True,
-                    "confidence": 0.9,
-                },
-                {
+                "source_turn_id": TURN_ID,
+                "segments": [
+                    {
+                        "segment_id": "s1",
+                        "exact_source_text": "Use Scanner",
+                        "start_offset": 0,
+                        "end_offset": 11,
+                        "kind": "STRATEGY_INSTRUCTION",
+                        "action_required": True,
+                        "confidence": 0.9,
+                    },
+                    {
+                        "segment_id": "s2",
+                        "exact_source_text": "keep approval explicit",
+                        "start_offset": 16,
+                        "end_offset": len(message) - 1,
+                        "kind": "APPROVAL_INTENT",
+                        "action_required": False,
+                        "confidence": 0.9,
+                    },
+                ],
+                "operations": [
+                    {
+                        "operation_id": "set-mode",
+                        "authorizing_segment_id": "s1",
+                        "kind": "set_fields",
+                        "fields": {"mode": "scanner"},
+                    },
+                    {
+                        "operation_id": "invalid-restore",
+                        "authorizing_segment_id": "s2",
+                        "kind": "restore_snapshot",
+                    },
+                ],
+                "approval_intent": {
                     "segment_id": "s2",
-                    "exact_source_text": "keep approval explicit",
-                    "start_offset": 16,
-                    "end_offset": len(message) - 1,
-                    "kind": "APPROVAL_INTENT",
-                    "action_required": False,
-                    "confidence": 0.9,
+                    "accompanied_by_material_edit": True,
                 },
-            ],
-            "operations": [
-                {
-                    "operation_id": "set-mode",
-                    "authorizing_segment_id": "s1",
-                    "kind": "set_fields",
-                    "fields": {"mode": "scanner"},
-                },
-                {
-                    "operation_id": "invalid-restore",
-                    "authorizing_segment_id": "s2",
-                    "kind": "restore_snapshot",
-                },
-            ],
-            "approval_intent": {
-                "segment_id": "s2",
-                "accompanied_by_material_edit": True,
-            },
-            "overall_confidence": 0.9,
+                "overall_confidence": 0.9,
             }
         )
 

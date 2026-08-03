@@ -1,7 +1,7 @@
 import html
 import re
 
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS
+from ai_market_monitor.core.plans import PLAN_DEFINITIONS, plan_offer_payload
 from ai_market_monitor.core.site_content import (
     DASHBOARD_NAVIGATION,
     FOOTER_NAVIGATION,
@@ -220,9 +220,16 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     assert pricing.status_code == 200
     assert PLAN_DEFINITIONS["demo"].name in pricing.text
     assert "$0" in pricing.text
-    # The launch offer: the Monitor plan runs at $8 with its usual $12 crossed out.
-    assert "$8" in pricing.text
-    assert "$12" in pricing.text
+    # The launch offer. Both numbers come from `core.plans`, not from this file: a price
+    # changed there must show up here, and the assertion still holds on the day the
+    # offer ends, when there is no crossed-out price left to show.
+    trader_offer = plan_offer_payload("trader")
+    assert f"${int(trader_offer['monthlyPrice'])}" in pricing.text  # type: ignore[arg-type]
+    original = trader_offer["originalMonthlyPrice"]
+    if original:
+        assert f"${int(original)}" in pricing.text  # type: ignore[arg-type]
+        assert 'class="price-original"' in pricing.text
+        assert "data-offer-countdown" in pricing.text
     # The Pro plan is not on sale yet, so it says "Soon" and carries no price at all.
     assert "$22" not in pricing.text
     assert "Pro is coming soon" in pricing.text

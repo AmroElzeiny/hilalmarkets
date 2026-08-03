@@ -289,6 +289,7 @@ class SetupChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     plan_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     execution_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     reply_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    telemetry_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     mutation_committed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     executable_version_before: Mapped[int | None] = mapped_column(Integer)
     executable_version_after: Mapped[int | None] = mapped_column(Integer)

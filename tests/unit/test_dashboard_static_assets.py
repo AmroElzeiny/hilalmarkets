@@ -288,23 +288,21 @@ def test_authenticated_surfaces_load_the_final_brand_layer_last():
     assert "brain-orbit" not in brain_auth
 
 
-def test_authenticated_assets_share_the_current_cache_busting_release_key():
-    """One key across every authenticated asset, whatever this release's key is.
+def test_every_page_shares_the_current_cache_busting_release_key():
+    """One key across every asset on every page, whatever this release's key is.
 
     The rule is that they all match, not that they equal one particular string. Spelling
     the string out here meant a released CSS change failed this test until somebody
     edited it, which taught the habit of editing the test instead of the templates.
+
+    Public and authenticated pages are checked together on purpose. They shared nine
+    different keys, and a stylesheet both of them load could be edited, bumped on one
+    page and left stale on the other, so half the site kept serving the old file.
     """
 
-    paths = [
-        Path("src/ai_market_monitor/templates/hilal/base_dashboard.html"),
-        *Path("src/ai_market_monitor/templates/hilal/dashboard").glob("*.html"),
-        Path("src/ai_market_monitor/templates/system_brain.html"),
-        Path("src/ai_market_monitor/templates/system_brain_auth.html"),
-    ]
     release_keys = {
         value
-        for path in paths
+        for path in Path("src/ai_market_monitor/templates").rglob("*.html")
         for value in re.findall(
             r"\?v=([a-zA-Z0-9-]+)", path.read_text(encoding="utf-8")
         )

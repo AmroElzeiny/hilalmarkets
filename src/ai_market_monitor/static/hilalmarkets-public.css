@@ -51,7 +51,7 @@
 .sticky-story{position:sticky;top:150px;align-self:start}
 .numbered-list{display:grid;gap:12px}
 .numbered-card{display:grid;grid-template-columns:54px 1fr;gap:16px;padding:20px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--shadow-sm)}
-.numbered-card-index{width:54px;height:54px;border-radius:16px;background:var(--emerald-900);color:#fff;display:grid;place-items:center;font-family:"Manrope",sans-serif;font-weight:800}
+.numbered-card-index{width:54px;height:54px;border-radius:16px;background:var(--emerald-900);color:#fff;display:grid;place-items:center;font-family:var(--hm-font-display);font-weight:800}
 .numbered-card h3{margin:2px 0 7px}
 .feature-section-card{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;padding:30px;border:1px solid var(--line);border-radius:28px;background:#fff;box-shadow:var(--shadow-sm)}
 .feature-section-card:nth-child(even) .feature-visual{order:-1}

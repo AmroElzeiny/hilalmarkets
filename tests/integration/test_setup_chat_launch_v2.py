@@ -11,6 +11,7 @@ from ai_market_monitor.api.routers.dashboard_api import get_ai_setup_chat_servic
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
+    AISetupChatSession,
     AIUsageEvent,
     SetupChatDraftSnapshot,
     SetupChatTurn,
@@ -43,7 +44,7 @@ from ai_market_monitor.services.setup_chat_launch import (
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
 from tests.integration.test_ai_setup_chat_api import _signup
-from tests.support.setup_agent_plans import operations_from_patch
+from tests.support.setup_agent_plans import operations_from_patch, planner_envelope_json
 
 
 class MarketProvider:
@@ -88,19 +89,13 @@ class StandInPlanner:
 
     def _body(self, text: str) -> dict:
         return {
-            "output": [
-                {"type": "message", "content": [{"type": "output_text", "text": text}]}
-            ],
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
             "usage": {"input_tokens": 12, "output_tokens": 6},
         }
 
     def _envelope(self, message: str, turn_id: str) -> SetupAgentPlanEnvelope:
-        patch = deterministic_strategy_patch(
-            StrategyDraftV2(), message, source_turn_id=turn_id
-        )
-        kind = (
-            SegmentKind.STRATEGY_INSTRUCTION if patch is not None else SegmentKind.SOCIAL_REPLY
-        )
+        patch = deterministic_strategy_patch(StrategyDraftV2(), message, source_turn_id=turn_id)
+        kind = SegmentKind.STRATEGY_INSTRUCTION if patch is not None else SegmentKind.SOCIAL_REPLY
         segment = TurnSegment(
             segment_id="s1",
             exact_source_text=message,
@@ -114,9 +109,7 @@ class StandInPlanner:
         plan = SetupAgentTurnPlan(
             source_turn_id=turn_id,
             segments=[segment],
-            operations=(
-                operations_from_patch(patch, segment_id="s1") if patch is not None else []
-            ),
+            operations=(operations_from_patch(patch, segment_id="s1") if patch is not None else []),
             strategy_instructions=(
                 [StrategyInstructionPlan(segment_id="s1", intent_summary=message[:200])]
                 if patch is not None
@@ -133,14 +126,12 @@ class StandInPlanner:
         def handler(request: httpx.Request) -> httpx.Response:
             body = json.loads(request.content)
             payload = json.loads(body["input"])
-            if body["text"]["format"]["name"] == "hilalmarkets_setup_turn_plan":
+            if body["text"]["format"]["name"] == "hilalmarkets_setup_turn_intent":
                 self.plan_calls += 1
                 if self.failure is not None:
                     raise self.failure
-                envelope = self._envelope(
-                    payload["current_user_turn"], payload["source_turn_id"]
-                )
-                return httpx.Response(200, json=self._body(envelope.model_dump_json()))
+                envelope = self._envelope(payload["current_user_turn"], "server-owned-turn")
+                return httpx.Response(200, json=self._body(planner_envelope_json(envelope)))
             self.reply_calls += 1
             return httpx.Response(
                 200,
@@ -160,7 +151,18 @@ class StandInPlanner:
 class PaidRejectedAgent:
     """Simulate a completed paid plan rejected by deterministic authorization."""
 
-    async def run_turn(self, _turn):
+    async def run_turn(self, turn):
+        turn.telemetry.record_model_call("planner_provider_wait")
+        turn.telemetry.record_provider_call()
+        turn.telemetry.notes.update(
+            {
+                "combined_estimated_cost_usd": 0.01,
+                "combined_actual_cost_usd": 0.01,
+                "planner_attempt_count": 1,
+                "planner_repair_attempt_count": 0,
+                "planner_repair_success_count": 0,
+            }
+        )
         raise SetupAgentError(
             "VALUE_NOT_GROUNDED",
             "The proposed threshold is not grounded in the user's wording.",
@@ -260,10 +262,7 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
         kwargs = {
-            "message": (
-                "Monitor BTC/USDT when the 15m candle rises open-to-close "
-                "by at least 3%"
-            ),
+            "message": ("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"),
             "client_message_id": "launch-v2-idempotent",
         }
         await service.handle_message(session, chat, **kwargs)
@@ -278,6 +277,9 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
         assert turn.status == "COMPLETED"
         assert turn.mutation_committed is True
         assert turn.reply_json and turn.reply_json["execution_result"]
+        assert turn.telemetry_json is not None
+        assert turn.telemetry_json["stage_counts"]["total_turn"] == 1
+        assert turn.telemetry_json["stage_counts"]["persistence"] >= 1
         assistant_count = await session.scalar(
             select(func.count(AISetupChatMessage.id)).where(
                 AISetupChatMessage.session_id == chat.id,
@@ -290,6 +292,7 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
                 SetupChatDraftSnapshot.user_id == user.id,
             )
         )
+        measured_before_replay = dict((chat.context_json or {})["turn_runtime"]["measured"])
         await service.handle_message(session, chat, **kwargs)
         second = load_strategy_draft_v2(chat)
 
@@ -299,12 +302,21 @@ async def test_launch_pipeline_idempotent_retry_uses_no_second_extraction(test_c
         assert replay["execution"] == turn.execution_result_json
         assert second.version == first.version
         assert second.semantic_hash == first.semantic_hash
-        assert await session.scalar(
-            select(func.count(AISetupChatMessage.id)).where(
-                AISetupChatMessage.session_id == chat.id,
-                AISetupChatMessage.role == "assistant",
+        assert (chat.context_json or {})["turn_runtime"]["measured"] == measured_before_replay
+        assert turn.telemetry_json == measured_before_replay
+        replay_runtime = (chat.context_json or {})["last_idempotent_replay"]
+        assert replay_runtime["client_message_id"] == "launch-v2-idempotent"
+        assert replay_runtime["cache_hit"] is True
+        assert replay_runtime["duration_ms"] >= 0
+        assert (
+            await session.scalar(
+                select(func.count(AISetupChatMessage.id)).where(
+                    AISetupChatMessage.session_id == chat.id,
+                    AISetupChatMessage.role == "assistant",
+                )
             )
-        ) == assistant_count
+            == assistant_count
+        )
         assert snapshot_count == 2, "both the before and public final version are restorable"
 
 
@@ -432,9 +444,7 @@ async def test_runtime_preflight_rejects_stale_candles(test_context):
         source_turn_id="turn-stale-preflight",
     )
     assert patch is not None
-    definition = compile_strategy_draft_v2(
-        apply_strategy_patch(StrategyDraftV2(), patch).draft
-    )
+    definition = compile_strategy_draft_v2(apply_strategy_patch(StrategyDraftV2(), patch).draft)
     launch = SetupChatLaunchService(
         _launch_settings(test_context["settings"]),
         owner,
@@ -487,12 +497,10 @@ async def test_runtime_preflight_checks_available_pairs_even_when_one_market_is_
 
     assert provider.fetches == [("BTC/USDT", "15m")]
     assert any(
-        item.capability == "market:ETH/USDT" and item.status == "unavailable"
-        for item in statuses
+        item.capability == "market:ETH/USDT" and item.status == "unavailable" for item in statuses
     )
     assert any(
-        item.capability == "market:BTC/USDT:15m" and item.status == "available"
-        for item in statuses
+        item.capability == "market:BTC/USDT:15m" and item.status == "available" for item in statuses
     )
 
 
@@ -526,9 +534,7 @@ async def test_approval_revalidation_rejects_stale_provider_evidence(test_contex
                     capability="market:BTC/USDT:15m",
                     status="available",
                     checked_at=datetime.now(UTC)
-                    - timedelta(
-                        seconds=settings.setup_provider_preflight_ttl_seconds + 1
-                    ),
+                    - timedelta(seconds=settings.setup_provider_preflight_ttl_seconds + 1),
                 )
             ]
 
@@ -672,10 +678,7 @@ async def test_committed_execution_recovers_without_reapplying_or_replanning(tes
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
         request = {
-            "message": (
-                "Monitor BTC/USDT when the 15m candle rises open-to-close "
-                "by at least 4%"
-            ),
+            "message": ("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 4%"),
             "client_message_id": "launch-v2-recover-committed",
         }
         await service.handle_message(session, chat, **request)
@@ -729,10 +732,7 @@ async def test_repeated_identical_text_is_understood_again_but_changes_nothing(
     )
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
-        message = (
-            "Monitor BTC/USDT when the 15m candle rises open-to-close "
-            "by at least 3%"
-        )
+        message = "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"
         await service.handle_message(
             session,
             chat,
@@ -768,17 +768,12 @@ async def test_launch_pipeline_approval_binds_exact_v2_and_retries_idempotently(
         await service.handle_message(
             session,
             chat,
-            message=(
-                "Monitor BTC/USDT when the 15m candle rises open-to-close "
-                "by at least 3%"
-            ),
+            message=("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"),
             client_message_id="launch-v2-before-approval",
         )
         draft = load_strategy_draft_v2(chat)
         assert chat.draft_schema_json is not None
-        schema_hash = StrategyDefinition.model_validate(
-            chat.draft_schema_json
-        ).canonical_hash()
+        schema_hash = StrategyDefinition.model_validate(chat.draft_schema_json).canonical_hash()
 
         await service.approve_draft(
             session,
@@ -825,10 +820,7 @@ async def test_launch_pipeline_approval_binds_exact_v2_and_retries_idempotently(
         await service.handle_message(
             session,
             chat,
-            message=(
-                "Also require the 1h candle to fall close-to-close "
-                "by at most -2%"
-            ),
+            message=("Also require the 1h candle to fall close-to-close by at most -2%"),
             client_message_id="launch-v2-material-edit",
         )
         changed = load_strategy_draft_v2(chat)
@@ -855,10 +847,7 @@ async def test_launch_pipeline_error_preserves_authoritative_draft(test_context)
         await working.handle_message(
             session,
             chat,
-            message=(
-                "Monitor BTC/USDT when the 15m candle rises open-to-close "
-                "by at least 3%"
-            ),
+            message=("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"),
             client_message_id="launch-v2-before-error",
         )
         authoritative = load_strategy_draft_v2(chat)
@@ -868,9 +857,9 @@ async def test_launch_pipeline_error_preserves_authoritative_draft(test_context)
             MarketProvider(),
             RuleBasedStrategyInterpreter(),
             launch_agent=_agent(
-            test_context["settings"],
-            StandInPlanner(failure=httpx.ReadTimeout("the provider timed out")),
-        ),
+                test_context["settings"],
+                StandInPlanner(failure=httpx.ReadTimeout("the provider timed out")),
+            ),
         )
         try:
             await failing.handle_message(
@@ -889,6 +878,18 @@ async def test_launch_pipeline_error_preserves_authoritative_draft(test_context)
         assert preserved.version == authoritative.version
         assert preserved.semantic_hash == authoritative.semantic_hash
         assert preserved.draft_id == authoritative.draft_id
+        failed_turn = await session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == "launch-v2-error",
+            )
+        )
+        assert failed_turn is not None
+        assert failed_turn.telemetry_json is not None
+        assert failed_turn.telemetry_json["model_calls"] == 1
+        assert failed_turn.telemetry_json["provider_calls"] == 1
+        assert failed_turn.telemetry_json["stage_counts"]["total_turn"] == 1
+        assert failed_turn.telemetry_json["stage_counts"]["persistence"] >= 1
 
 
 async def test_paid_planner_usage_is_recorded_when_grounding_rejects_turn(test_context):
@@ -922,6 +923,78 @@ async def test_paid_planner_usage_is_recorded_when_grounding_rejects_turn(test_c
         assert usage.pricing_source == "configured_from_openai_fast_pricing"
         assert usage.estimated_cost_usd > 0
         assert load_strategy_draft_v2(chat).executable_hash == authoritative.executable_hash
+        measured = (chat.context_json or {})["turn_runtime"]["measured"]
+        assert measured["stage_counts"]["total_turn"] == 1
+        assert measured["total_ms"] >= 0
+        assert (chat.context_json or {})["last_turn_failure"]["code"] == "VALUE_NOT_GROUNDED"
+        failed_turn = await session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat.id,
+                SetupChatTurn.client_message_id == "launch-v2-paid-grounding-rejection",
+            )
+        )
+        assert failed_turn is not None
+        assert failed_turn.telemetry_json == measured
+        assert failed_turn.telemetry_json["notes"]["combined_actual_cost_usd"] > 0
+        assert failed_turn.telemetry_json["stage_counts"]["persistence"] >= 1
+
+
+async def test_compiler_invariant_failure_persists_complete_turn_telemetry(
+    test_context, monkeypatch
+):
+    import ai_market_monitor.services.setup_chat_agent as agent_module
+    from ai_market_monitor.engine.planner_intent_compiler import IntentCompileError
+
+    def broken_compiler(*args, **kwargs):
+        raise IntentCompileError(
+            "COMPILER_INVARIANT_VIOLATION",
+            "internal compiler contract failed",
+        )
+
+    monkeypatch.setattr(agent_module, "compile_planner_intents", broken_compiler)
+    user = await _user(test_context)
+    planner = StandInPlanner()
+    service = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], planner),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        chat_id = chat.id
+        before = load_strategy_draft_v2(chat)
+        with pytest.raises(SetupChatError) as failure:
+            await service.handle_message(
+                session,
+                chat,
+                message="Exclude ETH/USDT",
+                client_message_id="launch-v2-compiler-invariant-telemetry",
+            )
+        assert failure.value.code == "COMPILER_INVARIANT_VIOLATION"
+        measured = (chat.context_json or {})["turn_runtime"]["measured"]
+        assert measured["notes"]["compiler_invariant_violation_count"] == 1
+        assert measured["notes"]["model_facing_schema_bytes"] > 0
+        assert measured["model_calls"] == 1
+        assert measured["stage_counts"]["total_turn"] == 1
+        assert load_strategy_draft_v2(chat).executable_hash == before.executable_hash
+    async with test_context["session_factory"]() as verification_session:
+        persisted = await verification_session.get(AISetupChatSession, chat_id)
+        assert persisted is not None
+        persisted_measurement = (persisted.context_json or {})["turn_runtime"]["measured"]
+        assert persisted_measurement["notes"]["compiler_invariant_violation_count"] == 1
+        assert persisted_measurement["model_calls"] == 1
+        assert persisted_measurement["stage_counts"]["total_turn"] == 1
+        persisted_turn = await verification_session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat_id,
+                SetupChatTurn.client_message_id
+                == "launch-v2-compiler-invariant-telemetry",
+            )
+        )
+        assert persisted_turn is not None
+        assert persisted_turn.telemetry_json == persisted_measurement
+        assert persisted_turn.telemetry_json["stage_counts"]["persistence"] >= 1
 
 
 async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_context):
@@ -936,15 +1009,13 @@ async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_contex
     )
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
+        chat_id = chat.id
         initial = load_strategy_draft_v2(chat)
 
         result = await service.handle_message(
             session,
             chat,
-            message=(
-                "Should the move use close-to-close or a swing high? "
-                "Choose one for me."
-            ),
+            message=("Should the move use close-to-close or a swing high? Choose one for me."),
             client_message_id="launch-v2-model-non-mutation",
         )
         current = load_strategy_draft_v2(result)
@@ -953,7 +1024,37 @@ async def test_a_question_the_agent_answers_in_words_is_not_an_error(test_contex
         assert current.version == initial.version
         # One turn is bounded at one planning call. Mutation wording is deterministic.
         assert (result.context_json or {})["turn_runtime"]["model_call_count"] <= 1
+        measured = (result.context_json or {})["turn_runtime"]["measured"]
+        assert measured["notes"]["model_facing_schema_bytes"] > 0
+        assert measured["notes"]["model_facing_schema_depth"] > 0
+        assert measured["notes"]["model_facing_definition_count"] > 0
+        assert measured["notes"]["canonical_models_exposed_to_model"] == []
+        assert measured["notes"]["semantic_intent_count"] == 0
+        assert measured["notes"]["compiled_operation_count"] == 0
+        assert measured["notes"]["semantic_to_operation_expansion_ratio"] == 0
+        assert measured["notes"]["compiler_invariant_violation_count"] == 0
+        assert measured["notes"]["combined_estimated_cost_usd"] > 0
+        assert measured["notes"]["combined_actual_cost_usd"] >= 0
+        assert measured["notes"]["planner_repair_attempt_count"] == 0
+        assert measured["stage_counts"]["total_turn"] == 1
         assert planner.plan_calls == 1, "exactly one planning call"
+    async with test_context["session_factory"]() as verification_session:
+        persisted = await verification_session.get(AISetupChatSession, chat_id)
+        assert persisted is not None
+        persisted_measurement = (persisted.context_json or {})["turn_runtime"]["measured"]
+        assert persisted_measurement["notes"]["model_facing_schema_bytes"] > 0
+        assert persisted_measurement["notes"]["semantic_intent_count"] == 0
+        assert persisted_measurement["notes"]["combined_estimated_cost_usd"] > 0
+        assert persisted_measurement["stage_counts"]["total_turn"] == 1
+        persisted_turn = await verification_session.scalar(
+            select(SetupChatTurn).where(
+                SetupChatTurn.chat_session_id == chat_id,
+                SetupChatTurn.client_message_id == "launch-v2-model-non-mutation",
+            )
+        )
+        assert persisted_turn is not None
+        assert persisted_turn.telemetry_json == persisted_measurement
+        assert persisted_turn.telemetry_json["stage_counts"]["persistence"] >= 1
 
 
 def test_patch_application_is_one_patch_per_turn():
@@ -981,9 +1082,7 @@ async def test_launch_v2_http_contract_compiles_and_approves_exact_draft(test_co
     )
     test_context["app"].dependency_overrides[get_ai_setup_chat_service] = lambda: service
 
-    created = await test_context["client"].post(
-        "/api/v1/dashboard/setup-chat/sessions"
-    )
+    created = await test_context["client"].post("/api/v1/dashboard/setup-chat/sessions")
     assert created.status_code == 201
     chat_id = created.json()["id"]
     assert created.json()["draft_v2"]["schema_version"] == "2.2"
@@ -991,10 +1090,7 @@ async def test_launch_v2_http_contract_compiles_and_approves_exact_draft(test_co
     response = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
         json={
-            "message": (
-                "Monitor BTC/USDT when the 15m candle rises open-to-close "
-                "by at least 3%"
-            ),
+            "message": ("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"),
             "client_message_id": "launch-v2-http-turn",
         },
     )
@@ -1025,8 +1121,9 @@ async def test_launch_v2_http_contract_compiles_and_approves_exact_draft(test_co
         json=approval_payload,
     )
     assert repeated.status_code == 200, repeated.text
-    assert repeated.json()["approved_strategy_version_id"] == (
-        approved_body["approved_strategy_version_id"]
+    assert (
+        repeated.json()["approved_strategy_version_id"]
+        == (approved_body["approved_strategy_version_id"])
     )
 
 
@@ -1039,17 +1136,12 @@ async def test_launch_v2_http_error_keeps_authoritative_draft_identity(test_cont
         launch_agent=_agent(test_context["settings"], StandInPlanner()),
     )
     test_context["app"].dependency_overrides[get_ai_setup_chat_service] = lambda: working
-    created = await test_context["client"].post(
-        "/api/v1/dashboard/setup-chat/sessions"
-    )
+    created = await test_context["client"].post("/api/v1/dashboard/setup-chat/sessions")
     chat_id = created.json()["id"]
     ready = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
         json={
-            "message": (
-                "Monitor BTC/USDT when the 15m candle rises open-to-close "
-                "by at least 3%"
-            ),
+            "message": ("Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"),
             "client_message_id": "launch-v2-http-ready",
         },
     )

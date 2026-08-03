@@ -29,7 +29,7 @@
         </div>
       </article>
 
-      <article class="setting-group">
+      <article class="setting-group" data-hm-guide-target="settings-notification-preferences">
         <div class="panel-head"><div><span class="kicker">Dashboard alerts</span><h2>On-screen notifications</h2><p>Confirmed matches appear in the lower-right corner for 10 seconds.</p></div><span class="icon-box is-gold"><span data-icon="activity" data-icon-class="icon"></span></span></div>
         <div class="settings-field-grid">
           <label class="field"><span>100% match notifications</span><span class="hm-select-control" data-hm-select><select class="select" name="dashboard_notifications_enabled"><option value="true" {{ 'selected' if prefs.get('dashboard_notifications_enabled', True) else '' }}>On</option><option value="false" {{ 'selected' if not prefs.get('dashboard_notifications_enabled', True) else '' }}>Off</option></select></span></label>
@@ -47,7 +47,7 @@
     </div>
 
     <div class="stack">
-      <article class="setting-group">
+      <article class="setting-group" data-hm-guide-target="settings-compliance-behaviour">
         <div class="panel-head"><div><span class="kicker">Screening updates</span><h2>Evidence-change delivery</h2><p>In-app evidence stays on so important screening changes cannot disappear silently.</p></div><span class="icon-box is-amber"><span data-icon="compliance" data-icon-class="icon"></span></span></div>
         <input type="hidden" name="compliance_alert_channels" value="web">
         <div class="setting-row"><div><strong>In-app record</strong><p>Required for under-review and exclusion events.</p></div><span class="badge badge-eligible">Always on</span></div>
@@ -71,4 +71,4 @@
   </section>
 </form>
 {% endblock %}
-{% block page_scripts %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260801-launch-offer"></script>{% endblock %}
+{% block page_scripts %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260802-launch-offer"></script>{% endblock %}

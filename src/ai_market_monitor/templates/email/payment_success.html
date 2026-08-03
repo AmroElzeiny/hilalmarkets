@@ -27,7 +27,7 @@
           {% if limits %}<h2 style="margin:26px 0 12px;font-size:18px">Main plan limits</h2>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0">{% for limit in limits %}<tr><td style="padding:8px 0;border-bottom:1px solid #e1e5ea;color:#50555e">{{ limit.label }}</td><td align="right" style="padding:8px 0;border-bottom:1px solid #e1e5ea;font-weight:700">{{ limit.value }}</td></tr>{% endfor %}</table>{% endif %}
           <p style="margin:28px 0 12px"><a href="{{ dashboard_url }}" style="display:inline-block;background:#cbfa4d;color:#2b2e35;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:999px">Open Hilal Markets</a></p>
-          <p style="margin:0;line-height:1.8"><a href="{{ create_watch_plan_url }}" style="color:#55712a">Create a Watch Plan</a> &nbsp; <a href="{{ billing_url }}" style="color:#55712a">Manage billing</a> &nbsp; <a href="{{ support_url }}" style="color:#55712a">Support</a></p>
+          <p style="margin:0;line-height:1.8"><a href="{{ create_watch_plan_url }}" style="color:#55712a">Create a Watchlist</a> &nbsp; <a href="{{ billing_url }}" style="color:#55712a">Manage billing</a> &nbsp; <a href="{{ support_url }}" style="color:#55712a">Support</a></p>
           {% if receipt_url %}<p style="margin:18px 0 0"><a href="{{ receipt_url }}" style="color:#55712a">Open receipt or invoice</a></p>{% endif %}
         </td></tr>
         <tr><td style="background:#fafbfc;padding:20px 32px;color:#7a8089;font-size:12px;line-height:1.6">

@@ -7,8 +7,18 @@ requirements from one already holding an inactive compiled draft.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from uuid import uuid4
+
 import pytest
 
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    ApprovalBindingV2,
+    DraftMode,
+    StrategyDraftV2,
+)
+from ai_market_monitor.services.ai_setup_chat import v2_scanner_approval_matches
 from ai_market_monitor.services.setup_chat_lifecycle import (
     AWAITING_USER_STATES,
     TERMINAL_STATES,
@@ -130,3 +140,36 @@ def test_every_synchronous_response_lifecycle_is_a_complete_assistant_turn() -> 
 def test_states_waiting_on_the_user_are_all_terminal() -> None:
     """Anything waiting on a person has finished producing assistant output."""
     assert AWAITING_USER_STATES <= TURN_COMPLETE_STATES
+
+
+def test_v2_scanner_requires_the_exact_authenticated_approval_binding() -> None:
+    user_id = uuid4()
+    schema_hash = "b" * 64
+    draft = StrategyDraftV2(mode=DraftMode.SCANNER)
+    draft = draft.model_copy(
+        update={
+            "approval": ApprovalBindingV2(
+                approved=True,
+                user_id=user_id,
+                executable_version=draft.executable_version,
+                executable_hash=draft.executable_hash,
+                schema_hash=schema_hash,
+                conversation_snapshot_hash="c" * 64,
+                approved_at=datetime.now(UTC),
+            )
+        }
+    )
+    chat = SimpleNamespace(
+        context_json={"strategy_state_authority": "v2"},
+        status="approved",
+        approved_strategy_id=uuid4(),
+        approved_strategy_version_id=uuid4(),
+    )
+    definition = SimpleNamespace(canonical_hash=lambda: schema_hash)
+
+    assert v2_scanner_approval_matches(chat, draft, definition, user_id=user_id)
+    chat.status = "ready_for_approval"
+    assert not v2_scanner_approval_matches(chat, draft, definition, user_id=user_id)
+    chat.status = "approved"
+    changed = draft.model_copy(update={"executable_hash": "d" * 64})
+    assert not v2_scanner_approval_matches(chat, changed, definition, user_id=user_id)

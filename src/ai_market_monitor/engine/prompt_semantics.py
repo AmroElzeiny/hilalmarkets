@@ -15,6 +15,7 @@ from ai_market_monitor.engine.lookback import read_lookback
 from ai_market_monitor.engine.price_movement import movement_direction as _movement_direction
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES, TIMEFRAME_MINUTES
 from ai_market_monitor.schemas.strategy import (
+    CapabilityParameterValue,
     Comparator,
     ConditionRule,
     InterpretationIssue,
@@ -28,7 +29,10 @@ __all__ = ["SUPPORTED_TIMEFRAMES", "TIMEFRAME_MINUTES"]
 
 SYNTHETIC_EVALUATOR_CAPABILITIES = {"candle_change_percent"}
 
-OperandParameterValue = int | float | str | bool | list[int | float | str | bool]
+#: The same type `Operand.parameters` holds, imported rather than restated. This used to
+#: be its own definition and drifted: `Operand` gained a mapping variant and this copy
+#: did not, so every builder here typed a value the model would accept.
+OperandParameterValue = CapabilityParameterValue
 
 
 @dataclass(frozen=True, slots=True)

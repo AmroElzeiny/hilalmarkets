@@ -124,6 +124,15 @@ def test_public_chat_uses_brand_surface_and_never_renders_site_links() -> None:
 
 
 def test_public_chat_assets_use_the_current_cache_key_in_both_page_shells() -> None:
+    """The chat files carry the same version stamp as everything else on the page.
+
+    The rule is that they match, not that they equal one particular string. Naming the
+    string here meant a released change to any other asset failed this test until
+    somebody edited it, which taught the habit of editing the test instead of the page.
+    """
+
+    import re
+
     root = Path(__file__).resolve().parents[2]
     shells = (
         root / "src/ai_market_monitor/templates/hilal/base_public.html",
@@ -132,5 +141,8 @@ def test_public_chat_assets_use_the_current_cache_key_in_both_page_shells() -> N
 
     for shell in shells:
         content = shell.read_text(encoding="utf-8")
-        assert content.count("20260720-brand4") == 2
-        assert "20260717-beta3" not in content
+        chat_keys = re.findall(
+            r"hilalmarkets-public-chat\.\w+'\) \}\}\?v=([a-zA-Z0-9-]+)", content
+        )
+        assert len(chat_keys) == 2, chat_keys
+        assert set(chat_keys) == set(re.findall(r"\?v=([a-zA-Z0-9-]+)", content))

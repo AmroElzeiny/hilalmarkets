@@ -1,6 +1,6 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block content %}
-<section class="plan-current billing-current-plan">
+<section class="plan-current billing-current-plan" data-hm-guide-target="billing-plan-limits">
   <div class="billing-current-main">
     <span class="icon-box billing-current-icon"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
     <div class="billing-current-copy">
@@ -23,18 +23,22 @@
       <h2>Choose the level of monitoring you need</h2>
     </div>
   </div>
+  {# Annual is selectable only while some plan can actually be bought annually. Today no
+     plan can, so the control is switched off from that same fact rather than from a
+     hardcoded flag: the day annual opens, it turns itself back on. #}
+  {%- set annual_purchasable = plan_offer_values.values() | selectattr('annualAvailable') | list | length > 0 -%}
   <fieldset class="billing-toggle dashboard-billing-toggle" aria-label="Billing interval" data-billing-page-interval>
     <legend class="sr-only">Choose monthly or annual billing</legend>
     <label>
-      <input type="radio" name="dashboard_billing_interval" value="monthly" {{ 'checked' if checkout_selected_interval != 'annual' else '' }}>
+      <input type="radio" name="dashboard_billing_interval" value="monthly" {{ 'checked' if checkout_selected_interval != 'annual' or not annual_purchasable else '' }}>
       <span>Monthly</span>
     </label>
-    <label>
-      <input type="radio" name="dashboard_billing_interval" value="annual" {{ 'checked' if checkout_selected_interval == 'annual' else '' }}>
+    <label class="{{ '' if annual_purchasable else 'is-unavailable' }}">
+      <input type="radio" name="dashboard_billing_interval" value="annual" {{ 'checked' if checkout_selected_interval == 'annual' and annual_purchasable else '' }} {{ '' if annual_purchasable else 'disabled aria-disabled=true' }}>
       <span>Annual</span>
-      {# "Save up to $44" beside an interval nobody can buy is an offer that does not
-         exist. The toggle still switches so the cards can say the same thing: soon. #}
-      <small>{{ 'Save up to $44' if plan_offer_values.values() | selectattr('annualAvailable') | list else promotion_coming_soon_label }}</small>
+      {# A saving beside an interval nobody can buy is an offer that does not exist. The
+         figure is computed from the prices themselves, never written out. #}
+      <small>{{ ('Save up to $' ~ maximum_annual_saving) if annual_purchasable else promotion_coming_soon_label }}</small>
     </label>
   </fieldset>
   <p class="sr-only" aria-live="polite" data-billing-page-interval-status>Prices are shown for monthly billing.</p>
@@ -192,7 +196,7 @@
       <fieldset class="billing-period-options" data-billing-period-options>
         <legend>Billing period</legend>
         <label><input type="radio" name="billing_period_choice" value="monthly" checked><span>Monthly</span></label>
-        <label><input type="radio" name="billing_period_choice" value="annual"><span>Annual</span></label>
+        <label class="{{ '' if annual_purchasable else 'is-unavailable' }}"><input type="radio" name="billing_period_choice" value="annual" {{ '' if annual_purchasable else 'disabled aria-disabled=true' }}><span>Annual</span></label>
       </fieldset>
 
       <div class="billing-profile-grid">
@@ -282,5 +286,5 @@
 </section>
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260801-launch-offer"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260802-launch-offer"></script>
 {% endblock %}

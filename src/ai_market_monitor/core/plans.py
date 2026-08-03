@@ -78,8 +78,8 @@ def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
 # The current offer: which plans can be bought, and at what price, right now.
 #
 # One definition, read by the landing page, the public pricing page and the dashboard.
-# Three surfaces showing prices is three chances to disagree, and a visitor who sees $12
-# on one page and $8 on another has no way to know which is real.
+# Three surfaces showing prices is three chances to disagree, and a visitor who sees one
+# price on the landing page and another in the dashboard has no way to know which is real.
 # --------------------------------------------------------------------------------
 
 #: When the launch price stops. After this instant the plan costs its normal price again,
@@ -108,7 +108,7 @@ PLAN_OFFERS: dict[str, PlanOffer] = {
     "trader": PlanOffer(
         monthly_available=True,
         annual_available=False,
-        promotional_monthly_price=Decimal("8.00"),
+        promotional_monthly_price=Decimal("7.00"),
     ),
     # Not open yet, on either interval.
     "pro": PlanOffer(monthly_available=False, annual_available=False),
@@ -148,6 +148,30 @@ def original_monthly_price(code: str, *, now: datetime | None = None) -> Decimal
     if effective_monthly_price(code, now=now) == PLAN_DEFINITIONS[code].monthly_price:
         return None
     return PLAN_DEFINITIONS[code].monthly_price
+
+
+def annual_saving(code: str, *, now: datetime | None = None) -> Decimal:
+    """What a year on this plan saves against paying month by month."""
+    presentation = PUBLIC_PLAN_PRESENTATIONS.get(code)
+    if presentation is None or presentation.annual_price <= 0:
+        return Decimal("0.00")
+    saving = (effective_monthly_price(code, now=now) * 12) - presentation.annual_price
+    return max(saving, Decimal("0.00"))
+
+
+def maximum_annual_saving(*, now: datetime | None = None) -> Decimal:
+    """The best annual saving a visitor can actually buy today.
+
+    Derived, never typed out. The toggle used to promise "Save up to $44" in fixed text,
+    which was the Pro figure; a changed monthly price left it advertising a saving that
+    no plan gave.
+    """
+    savings = [
+        annual_saving(code, now=now)
+        for code in PUBLIC_PLAN_CODES
+        if plan_offer(code).annual_available
+    ]
+    return max(savings, default=Decimal("0.00"))
 
 
 def plan_offer_payload(code: str, *, now: datetime | None = None) -> dict[str, object]:
@@ -237,7 +261,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     "trader": PlanDefinition(
         code="trader",
         name="Monitor",
-        monthly_price=Decimal("12.00"),
+        monthly_price=Decimal("20.00"),
         description="Continuous guided monitoring for active individual investors.",
         limits={
             "saved_strategies": 2,
@@ -490,7 +514,6 @@ PUBLIC_PLAN_PRESENTATIONS: dict[str, PublicPlanPresentation] = {
             "evidence behind every alert."
         ),
         cta_label="Try Monitor for 7 days",
-        badge="Most Popular",
         trial_note="No charge for seven days. Cancel before the first payment.",
         highlighted_feature="AI assistant for creating market monitors",
         visible_features=(

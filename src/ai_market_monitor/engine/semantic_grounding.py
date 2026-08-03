@@ -174,9 +174,7 @@ def grounds_timeframe_role(
     normalize through the shared timeframe reader before the role is checked.
     """
 
-    return grounds_timeframe(text, timeframe) and timeframe_role_is_explicit(
-        text, timeframe, role
-    )
+    return grounds_timeframe(text, timeframe) and timeframe_role_is_explicit(text, timeframe, role)
 
 
 def grounds_text_value(text: str, value: str) -> bool:
@@ -288,6 +286,13 @@ def grounds_strategy_bias(text: str, bias: StrategyBias) -> bool:
 #: Wording that names each formula, read through the canonical parser rather than a
 #: hand-written phrase list.
 _FORMULA_MARKERS: dict[FormulaKind, tuple[str, ...]] = {
+    FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: ("open to close", "open-to-close", "o2c"),
+    FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: ("close to close", "close-to-close", "c2c"),
+    FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: (
+        "reference to current",
+        "reference-to-current",
+    ),
+    FormulaKind.HIGH_TO_LOW_PERCENTAGE: ("high to low", "high-to-low"),
     FormulaKind.PREVIOUS_CANDLE_REFERENCE: ("previous candle", "prior candle", "last closed"),
     FormulaKind.FIXED_REFERENCE_LEVEL: (),
     FormulaKind.LOOKBACK_REFERENCE_LEVEL: ("highest high", "lowest low"),
@@ -357,7 +362,5 @@ def grounds_boolean_shape(text: str, shape: str) -> bool:
         return False
     return not (
         "not(" in shape
-        and not re.search(
-            r"\bnot\b|\bwithout\b|\bavoid\b|\bunless\b|\bexcept\b|\bno\b", lowered
-        )
+        and not re.search(r"\bnot\b|\bwithout\b|\bavoid\b|\bunless\b|\bexcept\b|\bno\b", lowered)
     )

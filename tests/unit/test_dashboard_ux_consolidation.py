@@ -18,8 +18,11 @@ def test_customer_navigation_uses_consolidated_information_architecture():
     assert '"Compliance Changes"' not in dashboard_navigation
     assert '"How We Screen"' not in dashboard_navigation
     assert '"Notifications"' in dashboard_navigation
-    assert '"Market Scanner"' in dashboard_navigation
+    assert '"Trading Assistant"' in dashboard_navigation
+    assert '"Market Scanner"' not in dashboard_navigation
     assert '"Watchlists"' in dashboard_navigation
+    assert '"Halal Assets"' in dashboard_navigation
+    assert '"Halal Market"' not in dashboard_navigation
 
 
 def test_screened_market_owns_staged_saved_asset_management():
@@ -91,7 +94,7 @@ def test_builder_uses_ai_sheet_and_minimizable_canvas_assistant():
     script = _read("static/ai-setup-chat.js")
 
     assert "AI Sheet" in builder
-    assert "Your Watch Plan sheet" not in builder
+    assert "Your Watchlist sheet" not in builder
     assert "Live translation" not in builder
     assert "Advanced Controls" not in builder
     assert "data-ai-minimize-chat" in builder

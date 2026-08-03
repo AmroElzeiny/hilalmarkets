@@ -299,6 +299,12 @@ class Settings(BaseSettings):
     # while recording the latency regression instead of returning a false outage.
     setup_agent_planner_timeout_seconds: int = Field(default=60, ge=5, le=60)
     setup_agent_composer_timeout_seconds: int = Field(default=10, ge=5, le=12)
+    #: The whole-turn budget, measured from the authenticated request boundary and
+    #: shared by every stage. Per-stage timeouts bound one call; this bounds the turn,
+    #: so a chain of individually-legal waits cannot add up past what the client will
+    #: wait for. Raising it is not a fix for slow processing — it only moves the
+    #: failure from the server to the browser.
+    setup_turn_deadline_seconds: float = Field(default=45.0, ge=10.0, le=120.0)
     #: Setup Chat pins both routes explicitly so project-level ``auto`` routing cannot
     #: silently change latency/cost behavior. Standard processing is the stable
     #: launch default; Fast remains an explicit opt-in after provider canary evidence.

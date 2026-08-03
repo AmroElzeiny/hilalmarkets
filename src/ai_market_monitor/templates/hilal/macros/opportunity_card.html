@@ -16,7 +16,7 @@
   <small class="muted">Evaluated {{ item.last_evaluated_at.strftime('%d %b %Y %H:%M UTC') }} · {{ item.data_freshness }}</small>
   {% else %}
   <p class="opportunity-summary">{{ item.summary }}</p>
-  <div class="notice notice-neutral"><span data-icon="radar" data-icon-class="icon"></span><div><strong>No public readiness claim</strong><p>Sign in and run Market Scanner to calculate current opportunity evidence from your approved rules.</p></div></div>
+  <div class="notice notice-neutral"><span data-icon="radar" data-icon-class="icon"></span><div><strong>No public readiness claim</strong><p>Sign in and run Trading Assistant to calculate current opportunity evidence from your approved rules.</p></div></div>
   {% endif %}
   {% if item.qualifications %}<div class="notice"><span data-icon="alert" data-icon-class="icon-sm"></span><div><strong>Qualification</strong><p>{{ item.qualifications[0] }}</p></div></div>{% endif %}
   <div class="opportunity-actions">

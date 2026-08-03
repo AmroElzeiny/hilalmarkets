@@ -52,7 +52,10 @@ const ICONS = Object.freeze({
   alert:'<path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17h.01"/>',
   copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   gift:'<rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12M3 13h18M7.5 9C5 9 4 7.8 4 6.5S5 4 6.5 4C9 4 12 9 12 9M16.5 9C19 9 20 7.8 20 6.5S19 4 17.5 4C15 4 12 9 12 9"/>',
-  shield:'<path d="M12 3 4.5 6v5.4c0 4.7 3.1 8.9 7.5 10.1 4.4-1.2 7.5-5.4 7.5-10.1V6L12 3Z"/>'
+  shield:'<path d="M12 3 4.5 6v5.4c0 4.7 3.1 8.9 7.5 10.1 4.4-1.2 7.5-5.4 7.5-10.1V6L12 3Z"/>',
+  // Compass. Used by the page-guide launcher; no existing icon reads as "show me
+  // around this page" — `info` and `support` already mean other things here.
+  guide:'<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/>'
 });
 window.icon = function(name, cls='icon'){
   const body = ICONS[name] || ICONS.info;

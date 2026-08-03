@@ -40,12 +40,12 @@
   <meta name="twitter:image:alt" content="{{ og_image_alt }}">
   <title>{{ title }} | {{ site_name }}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260801-launch-offer">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260715-expansion">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260720-brand4">{% endif %}
+  {# The brand faces are self-hosted, so the public site loads no third-party font
+     service and renders the same typefaces as the landing page and the dashboard. #}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260802-launch-offer">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260802-launch-offer">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260802-launch-offer">{% endif %}
   <script>
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
@@ -66,11 +66,11 @@
   {% include "hilal/partials/public_footer.html" %}
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260715"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260715-expansion"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260723-x-pixel"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260801-launch-offer" defer></script>
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260720-brand4"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260802-launch-offer"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260802-launch-offer" defer></script>
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260802-launch-offer"></script>{% endif %}
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

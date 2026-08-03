@@ -44,7 +44,7 @@
   color:var(--hm-chat-ink);box-shadow:var(--hm-chat-shadow);overflow:hidden;opacity:0;
   transform:translateY(18px) scale(.98);transform-origin:right bottom;
   transition:opacity 200ms ease,transform 220ms cubic-bezier(.22,.75,.25,1);
-  font-family:'Onest',sans-serif;
+  font-family:var(--hm-font-ui);
 }
 .public-chat-panel.is-open{opacity:1;transform:none}
 [data-public-chat-panel][hidden],[data-public-chat-backdrop][hidden],.public-chat-panel [hidden]{display:none!important}

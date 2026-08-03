@@ -7,19 +7,44 @@ from hm_chatbot_eval.targets.ui import UITarget
 
 
 class FakeLocator:
-    def __init__(self, count: int):
+    def __init__(self, count: int, *, visible: bool = False):
         self._count = count
+        self._visible = visible
+        self.evaluated = False
+        self.waited_for: str | None = None
+
+    @property
+    def first(self) -> "FakeLocator":
+        return self
 
     async def count(self) -> int:
         return self._count
+
+    async def is_visible(self) -> bool:
+        return self._visible
+
+    async def evaluate(self, expression: str) -> None:
+        assert expression == "element => element.click()"
+        self.evaluated = True
+
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        assert timeout > 0
+        self.waited_for = state
 
 
 class FakePage:
     def __init__(self, counts: dict[str, int]):
         self.counts = counts
+        self.locators: dict[str, FakeLocator] = {}
 
     def locator(self, selector: str) -> FakeLocator:
-        return FakeLocator(self.counts.get(selector, 0))
+        return self.locators.setdefault(
+            selector,
+            FakeLocator(
+                self.counts.get(selector, 0),
+                visible=selector == "[data-cookie-banner] [data-cookie-essential]",
+            ),
+        )
 
 
 class FakeResponse:
@@ -72,3 +97,19 @@ def test_ui_fault_route_pattern_matches_playwright_nested_urls() -> None:
     assert settings.target_ui_chat_api_pattern == (
         "**/api/v1/dashboard/setup-chat/sessions/*/messages"
     )
+
+
+async def test_cookie_dismissal_invokes_real_listener_without_actionability_probe(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(_env_file=None)
+    target = UITarget(settings, tmp_path)
+    page = FakePage({})
+    target.page = page  # type: ignore[assignment]
+
+    await target._dismiss_cookie_banner()
+
+    button = page.locators["[data-cookie-banner] [data-cookie-essential]"]
+    banner = page.locators["[data-cookie-banner]"]
+    assert button.evaluated is True
+    assert banner.waited_for == "hidden"

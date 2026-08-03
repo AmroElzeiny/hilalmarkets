@@ -16,8 +16,22 @@ from ai_market_monitor.db.models.enums import (
     ShariaUniverseMode,
     TriggerMode,
 )
+from ai_market_monitor.schemas.timeframes import ORDERED_TIMEFRAMES
 
-Timeframe = Annotated[str, Field(pattern=r"^(1|3|5|15|30)m$|^(1|2|4|6|8|12)h$|^1d$")]
+#: The same list the rest of the platform uses, compiled into a pattern rather than
+#: written out a second time. Two hand-written copies of one vocabulary is the recurring
+#: defect in this codebase; the regex used to allow exactly the same twelve values, but
+#: nothing made that true — it was true by hand.
+Timeframe = Annotated[
+    str,
+    Field(pattern="^(?:" + "|".join(ORDERED_TIMEFRAMES) + ")$"),
+]
+CapabilityParameterScalar = int | float | str | bool
+CapabilityParameterValue = (
+    CapabilityParameterScalar
+    | list[CapabilityParameterScalar]
+    | dict[str, CapabilityParameterScalar]
+)
 
 
 class Comparator(StrEnum):
@@ -54,10 +68,7 @@ class Operand(BaseModel):
 
     kind: OperandKind
     name: str | None = None
-    parameters: dict[
-        str,
-        int | float | str | bool | list[int | float | str | bool],
-    ] = Field(default_factory=dict)
+    parameters: dict[str, CapabilityParameterValue] = Field(default_factory=dict)
     field: str | None = None
     value: float | str | bool | None = None
 
@@ -95,10 +106,7 @@ class ConditionRule(BaseModel):
         max_length=64,
         pattern=r"^[a-f0-9]{64}$",
     )
-    resolved_parameters: dict[
-        str,
-        int | float | str | bool | list[int | float | str | bool],
-    ] = Field(default_factory=dict)
+    resolved_parameters: dict[str, CapabilityParameterValue] = Field(default_factory=dict)
     key: str = Field(min_length=1, max_length=100, pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1, max_length=240)
     condition_type: ConditionType

@@ -108,11 +108,7 @@ def sharia_evidence_from_proof(proof: object) -> dict[str, object]:
         "methodology_version": proof.get("sharia_methodology_version"),
         "asset": {key: value for key, value in legacy_asset.items() if value is not None},
     }
-    return {
-        key: value
-        for key, value in legacy.items()
-        if value is not None and value != {}
-    }
+    return {key: value for key, value in legacy.items() if value is not None and value != {}}
 
 
 class ShariaScreeningService:
@@ -170,7 +166,11 @@ class ShariaScreeningService:
 
     async def selectable_market_methodologies(self) -> list[ShariaMethodology]:
         """Return only executable, non-development methodologies."""
-        return await self.executable_methodologies()
+        return [
+            item
+            for item in await self.executable_methodologies()
+            if not methodology_is_development_only(item)
+        ]
 
     async def development_methodology(self) -> ShariaMethodology | None:
         return None
@@ -274,7 +274,7 @@ class ShariaScreeningService:
             or_(
                 AssetShariaAssessment.valid_until.is_(None),
                 AssetShariaAssessment.valid_until > as_of,
-            )
+            ),
         )
         normalized_assets = {canonical_asset(asset) for asset in assets or set()}
         if normalized_assets:
@@ -396,9 +396,8 @@ class ShariaScreeningService:
             for row in await self.methodologies(include_non_active=True)
             if row.id in {assessment.methodology_id for assessment in values}
         }
-        if (
-            methodology.code == AGGREGATE_METHODOLOGY_CODE
-            or (self.settings and self.settings.is_deployed)
+        if methodology.code == AGGREGATE_METHODOLOGY_CODE or (
+            self.settings and self.settings.is_deployed
         ):
             assessment_ids = [row.id for row in values]
             if assessment_ids:
@@ -419,7 +418,7 @@ class ShariaScreeningService:
         if not values:
             readiness_warning = (
                 f"{methodology.name}, version {methodology.version}, has no active published "
-                "Passports available for the Halal Market."
+                "Passports available for Halal Assets."
             )
         if asset_scope is not None:
             normalized_scope = {canonical_asset(asset) for asset in asset_scope}
@@ -525,9 +524,7 @@ class ShariaScreeningService:
             ).all()
         )
         snapshot = assessment.evidence_snapshot or {}
-        safety_hold = canonical_asset(asset) in await self.safety_hold_assets(
-            assets={asset}
-        )
+        safety_hold = canonical_asset(asset) in await self.safety_hold_assets(assets={asset})
         reviewed_dimensions = list(snapshot.get("reviewed_dimensions") or [])
         methodology_result = dict(snapshot.get("methodology_result") or {})
         official_reference = dict(
@@ -536,9 +533,7 @@ class ShariaScreeningService:
             or snapshot.get("official_fasset_reference")
             or {}
         )
-        factual_profile = dict(
-            snapshot.get("hilalmarkets_factual_information_profile") or {}
-        )
+        factual_profile = dict(snapshot.get("hilalmarkets_factual_information_profile") or {})
         separate_use_status = {
             str(key): value
             for key, value in dict(snapshot.get("separate_use_status") or {}).items()
@@ -565,9 +560,7 @@ class ShariaScreeningService:
             official_sc_malaysia_reference=dict(
                 snapshot.get("official_sc_malaysia_reference") or {}
             ),
-            official_fasset_reference=dict(
-                snapshot.get("official_fasset_reference") or {}
-            ),
+            official_fasset_reference=dict(snapshot.get("official_fasset_reference") or {}),
             hilalmarkets_factual_information_profile=factual_profile,
             separate_use_status=separate_use_status,
             reviewed_dimensions=reviewed_dimensions,
@@ -656,7 +649,7 @@ class ShariaScreeningService:
         if existing is not None:
             raise ShariaScreeningError(
                 "methodology_version_exists", "This methodology version already exists."
-        )
+            )
         if payload.status == ShariaMethodologyStatus.ACTIVE:
             self.validate_methodology_contract(payload.rules, payload.evidence_requirements)
         now = datetime.now(UTC)
@@ -822,9 +815,7 @@ class ShariaScreeningService:
     ) -> AssetAssessmentSummary:
         effective_status = status_override or assessment.status
         passport = dict(assessment.evidence_snapshot or {})
-        factual_profile = dict(
-            passport.get("hilalmarkets_factual_information_profile") or {}
-        )
+        factual_profile = dict(passport.get("hilalmarkets_factual_information_profile") or {})
         identity = dict(factual_profile.get("canonical_asset_identity") or {})
         provider_ids = dict(identity.get("provider_ids") or {})
         logo_url = str(provider_ids.get("logo_url") or "").strip() or None

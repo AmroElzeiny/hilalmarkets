@@ -4,7 +4,9 @@ import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
@@ -1017,7 +1019,7 @@ _TOOL_MODELS_AND_DESCRIPTIONS: dict[str, tuple[type[BaseModel], str]] = {
     ),
     "list_watch_plans": (
         ListWatchPlansArgs,
-        "List the authenticated user's persisted Watch Plans with a server-enforced status "
+        "List the authenticated user's persisted Watchlists with a server-enforced status "
         "filter. This tool is read-only and cannot activate, pause, edit, or delete a plan.",
     ),
     "inspect_screened_watchlist": (
@@ -1044,23 +1046,114 @@ _TOOL_MODELS_AND_DESCRIPTIONS: dict[str, tuple[type[BaseModel], str]] = {
 }
 
 
-def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+#: Keywords a strict wire schema does not need to carry, because the Pydantic model the
+#: answer is parsed into checks every one of them again. Stripping them is a size change,
+#: never a guarantee change: a value outside a bound is refused exactly as before.
+#:
+#: ``enum`` is deliberately absent. An enum tells the model which values exist, which is
+#: meaning rather than a bound.
+_REDUNDANT_WIRE_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "title",
+        "description",
+        "maxLength",
+        "minLength",
+        "maxItems",
+        "minItems",
+        "pattern",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minimum",
+        "maximum",
+    }
+)
+
+
+class StrictSchemaError(TypeError):
+    """A model that cannot be expressed as a strict provider schema.
+
+    The case this catches is an open map — ``dict[str, X]``. A strict schema requires
+    ``additionalProperties: false`` on every object, so an open map becomes an object
+    that accepts **nothing at all**. The model is asked for a value it has no legal way
+    to supply, and whatever it tries is dropped without a word.
+
+    ``ConditionNodeV2.capability_parameters`` was exactly this, and it means the previous
+    Setup Chat contract could never carry a capability's parameters. The fix is a list of
+    name/value pairs, which a strict schema can express; the compact planner contract uses
+    that shape.
+    """
+
+
+def strict_json_schema(
+    model: type[BaseModel],
+    *,
+    compact: bool | None = None,
+    allow_open_maps: bool = False,
+) -> dict[str, Any]:
+    """The provider-facing schema for one model.
+
+    ``compact`` strips the keywords above. It defaults to whatever the model class
+    declares in ``compact_wire_schema``, so the decision lives with the contract rather
+    than with each call site — two call sites disagreeing about the same model would send
+    one schema and price another.
+
+    ``allow_open_maps`` keeps the old, broken behaviour for one caller. See
+    :class:`StrictSchemaError` for what is broken about it.
+    """
+
+    if compact is None:
+        compact = bool(getattr(model, "compact_wire_schema", False))
+    return _built_schema(model, compact, allow_open_maps)
+
+
+@lru_cache(maxsize=64)
+def _built_schema(
+    model: type[BaseModel],
+    compact: bool,
+    allow_open_maps: bool,
+) -> dict[str, Any]:
+    """Build once per model. Rebuilding measured ~18 ms, three times a turn."""
+
+    return deepcopy(
+        _build_strict_schema(model, compact=compact, allow_open_maps=allow_open_maps)
+    )
+
+
+def _build_strict_schema(
+    model: type[BaseModel],
+    *,
+    compact: bool,
+    allow_open_maps: bool,
+) -> dict[str, Any]:
     schema = model.model_json_schema()
 
-    def visit(node: Any) -> None:
+    def visit(node: Any, path: str) -> None:
         if isinstance(node, dict):
             node.pop("default", None)
+            if compact:
+                for keyword in _REDUNDANT_WIRE_KEYWORDS:
+                    node.pop(keyword, None)
             if node.get("type") == "object" or "properties" in node:
+                open_map = node.get("additionalProperties")
+                if (
+                    isinstance(open_map, dict)
+                    and not node.get("properties")
+                    and not allow_open_maps
+                ):
+                    raise StrictSchemaError(
+                        f"{model.__name__}.{path or '<root>'} is an open map, which a "
+                        "strict schema cannot express; use a list of name/value pairs"
+                    )
                 properties = node.setdefault("properties", {})
                 node["additionalProperties"] = False
                 node["required"] = list(properties)
-            for value in node.values():
-                visit(value)
+            for key, value in node.items():
+                visit(value, f"{path}.{key}" if path else str(key))
         elif isinstance(node, list):
             for item in node:
-                visit(item)
+                visit(item, path)
 
-    visit(schema)
+    visit(schema, "")
     return schema
 
 

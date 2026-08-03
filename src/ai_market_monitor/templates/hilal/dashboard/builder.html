@@ -1,9 +1,9 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260801-launch-offer">
-<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260801-launch-offer">
-<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260801-launch-offer">
-<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260801-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260802-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260802-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260802-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260802-launch-offer">
 {% endblock %}
 {% block content %}
 <section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
@@ -11,13 +11,13 @@
     <h1>Market Assistant</h1>
   </div>
   <div class="guided-builder-heading-actions">
-    <button class="btn btn-secondary btn-sm" type="button" data-ai-open-canvas><span data-icon="chart" data-icon-class="icon"></span>Open Visual Canvas</button>
+    <button class="btn btn-secondary btn-sm" type="button" data-ai-open-canvas data-hm-guide-target="builder-open-canvas"><span data-icon="chart" data-icon-class="icon"></span>Open Visual Canvas</button>
   </div>
 </section>
 
 <section class="ai-setup-chat-shell" data-ai-setup-chat data-testid="ai-setup-chat" data-evaluator-target="authenticated-ai-setup-chat" {% if strategy %}hidden{% endif %}>
   <div class="ai-chat-layout">
-    <section class="ai-chat-panel" aria-label="Watchlist conversation">
+    <section class="ai-chat-panel" aria-label="Watchlist conversation" data-hm-guide-target="builder-setup-chat">
       <div class="ai-chat-panel-head">
         <div class="ai-chat-agent">
           <span><span data-icon="spark" data-icon-class="icon"></span></span>
@@ -42,17 +42,17 @@
       <div class="ai-chat-error" data-ai-chat-error data-testid="ai-setup-request-error" role="alert" hidden><span data-ai-chat-error-text></span><button type="button" data-ai-chat-retry>Retry</button></div>
       <form class="ai-chat-composer" data-ai-chat-form>
         <label class="sr-only" for="ai-setup-chat-input">Describe your setup</label>
-        <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Describe your setupвЂ¦"></textarea>
+        <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Describe your setup…"></textarea>
         <button type="submit" data-ai-chat-send disabled aria-label="Send message"><span data-icon="arrow" data-icon-class="icon"></span></button>
         <small>Enter to send | Shift+Enter for a new line</small>
       </form>
     </section>
 
-    <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live Watchlist translation">
+    <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live Watchlist translation" data-hm-guide-target="builder-canvas">
       <div class="ai-preview-head"><div class="ai-preview-title"><h2>AI Sheet</h2><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div></div>
       <div class="ai-preview-empty" data-ai-preview-empty><span class="icon-box"><span data-icon="scan" data-icon-class="icon-lg"></span></span><h3>Your reviewed rules will appear here</h3><p>Primary trigger, required filters, confirmations, screened universe, policy, assumptions, and alert behavior remain separate.</p></div>
       <div class="ai-preview-content" data-ai-preview-content data-testid="ai-setup-structured-preview" hidden></div>
-      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve data-testid="ai-setup-approval" disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan hidden>Run Market Scanner</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
+      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve data-testid="ai-setup-approval" disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan hidden>Run Trading Assistant</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
     </aside>
   </div>
 </section>
@@ -60,7 +60,7 @@
 {% include "hilal/dashboard/partials/builder_workspace.html" %}
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260801-launch-offer"></script>
-<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260801-launch-offer"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260801-launch-offer"></script>
+<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260802-launch-offer"></script>
+<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260802-launch-offer"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260802-launch-offer"></script>
 {% endblock %}

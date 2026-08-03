@@ -30,6 +30,7 @@ from ai_market_monitor.db.models import (
     SetupChatDraftSnapshot,
     SetupChatTurn,
     ShariaMethodology,
+    ShariaMethodologyFamily,
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
@@ -39,6 +40,11 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
+)
+from ai_market_monitor.engine.planner_references import (
+    MethodologyReference,
+    PlannerReferenceContext,
+    WatchlistReference,
 )
 from ai_market_monitor.engine.setup_turn_execution import (
     ProviderGate,
@@ -53,6 +59,7 @@ from ai_market_monitor.engine.strategy_compiler_v2 import (
 )
 from ai_market_monitor.engine.strategy_draft_migration import migrate_legacy_draft
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
+from ai_market_monitor.engine.turn_timing import TurnTelemetry
 from ai_market_monitor.schemas.preflight_cache import PreflightCacheEntry
 from ai_market_monitor.schemas.screening_execution import (
     PreflightContract,
@@ -198,7 +205,19 @@ class SetupChatLaunchService:
         if client_message_id:
             replay = await self._replayed_turn(session, chat, client_message_id)
             if replay is not None:
-                _set_runtime(chat, started, model_calls=0, cache_hits=1)
+                # The completed turn already owns exact measured telemetry.  A replay
+                # must not replace it with an empty zero-call record and make the paid
+                # original look unmeasured.  Record replay latency separately while
+                # preserving the authoritative turn_runtime.measured payload.
+                context = dict(chat.context_json or {})
+                context["last_idempotent_replay"] = {
+                    "client_message_id": client_message_id,
+                    "duration_ms": round((monotonic() - started) * 1000, 1),
+                    "cache_hit": True,
+                }
+                chat.context_json = context
+                await session.flush()
+                await session.commit()
                 return replay
             turn_record = await self._get_or_create_turn(
                 session,
@@ -283,12 +302,18 @@ class SetupChatLaunchService:
             "sharia_methodology",
         }
         if option_key not in allowed:
+            option_telemetry = TurnTelemetry.start(self.settings.setup_turn_deadline_seconds)
+            with option_telemetry.stage("request_acceptance"):
+                pass
             await self._fail_db_turn(
                 session,
+                chat,
                 turn_record,
                 code="UNKNOWN_SETUP_OPTION",
                 stage="intent",
                 retryable=False,
+                started=started,
+                telemetry=option_telemetry,
             )
             raise SetupLaunchError(
                 "UNKNOWN_SETUP_OPTION",
@@ -446,6 +471,8 @@ class SetupChatLaunchService:
             assistant_message_id=assistant.id,
         )
         _set_runtime(chat, started, model_calls=0, cache_hits=0)
+        await session.flush()
+        await session.commit()
         return chat
 
     async def _server_option_operations(
@@ -476,9 +503,7 @@ class SetupChatLaunchService:
                     "fields": DraftFieldPatch(
                         mode=mode,
                         name=(
-                            "Untitled Scanner"
-                            if mode == DraftMode.SCANNER
-                            else "Untitled Monitor"
+                            "Untitled Scanner" if mode == DraftMode.SCANNER else "Untitled Monitor"
                         ),
                     ),
                 }
@@ -510,8 +535,7 @@ class SetupChatLaunchService:
                         }
                     )
                 if not any(
-                    item.unresolved_id == "sharia.universe_mode"
-                    for item in draft.unresolved_fields
+                    item.unresolved_id == "sharia.universe_mode" for item in draft.unresolved_fields
                 ):
                     payloads.append(
                         {
@@ -552,9 +576,7 @@ class SetupChatLaunchService:
                     stage="intent",
                     status_code=422,
                 )
-            payloads.append(
-                {"kind": "set_fields", "fields": DraftFieldPatch(name=value)}
-            )
+            payloads.append({"kind": "set_fields", "fields": DraftFieldPatch(name=value)})
         elif option_key == "screened_universe_mode":
             aliases = {
                 "all_eligible_spot_assets": "eligible_market",
@@ -620,9 +642,7 @@ class SetupChatLaunchService:
                 "sharia.explicit_symbols",
             ):
                 if any(item.unresolved_id == target_key for item in draft.unresolved_fields):
-                    payloads.append(
-                        {"kind": "resolve_unresolved_key", "target_key": target_key}
-                    )
+                    payloads.append({"kind": "resolve_unresolved_key", "target_key": target_key})
             if (
                 universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
                 and updates["approved_watchlist_id"] is None
@@ -661,9 +681,7 @@ class SetupChatLaunchService:
                                 "items": {"type": "string"},
                                 "minItems": 1,
                             },
-                            question=(
-                                "Which eligible spot assets should HilalMarkets watch?"
-                            ),
+                            question=("Which eligible spot assets should HilalMarkets watch?"),
                             reason=(
                                 "Every explicitly bounded asset must be screened and "
                                 "runtime-verified before approval."
@@ -743,8 +761,7 @@ class SetupChatLaunchService:
                 }
             )
             if any(
-                item.unresolved_id == "sharia.explicit_symbols"
-                for item in draft.unresolved_fields
+                item.unresolved_id == "sharia.explicit_symbols" for item in draft.unresolved_fields
             ):
                 payloads.append(
                     {
@@ -763,10 +780,7 @@ class SetupChatLaunchService:
                     status_code=404,
                 ) from exc
             methodology = await session.get(ShariaMethodology, methodology_id)
-            if (
-                methodology is None
-                or methodology.status != ShariaMethodologyStatus.ACTIVE
-            ):
+            if methodology is None or methodology.status != ShariaMethodologyStatus.ACTIVE:
                 raise SetupLaunchError(
                     "METHODOLOGY_NOT_AVAILABLE",
                     "That methodology is not currently active.",
@@ -858,8 +872,7 @@ class SetupChatLaunchService:
             )
         if (
             option_key == "screened_universe_mode"
-            and draft.sharia_policy.universe_mode
-            == ShariaUniverseMode.APPROVED_WATCHLIST
+            and draft.sharia_policy.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
             and draft.sharia_policy.approved_watchlist_id is None
         ):
             rows = list(
@@ -899,8 +912,7 @@ class SetupChatLaunchService:
             )
         if (
             option_key == "screened_universe_mode"
-            and draft.sharia_policy.universe_mode
-            == ShariaUniverseMode.EXPLICIT_ASSETS
+            and draft.sharia_policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS
             and not draft.sharia_policy.explicit_symbols
         ):
             return (
@@ -1051,8 +1063,7 @@ class SetupChatLaunchService:
             except (KeyError, ValueError) as exc:
                 raise SetupLaunchError(
                     "SHARIA_SCREENING_EMPTY",
-                    str(exc)
-                    or "No selected asset is currently eligible under this policy.",
+                    str(exc) or "No selected asset is currently eligible under this policy.",
                     stage="compile",
                     status_code=409,
                 ) from exc
@@ -1063,9 +1074,7 @@ class SetupChatLaunchService:
             preflight_definition = screening.preflight_definition
 
         # 6. Every data capability the rules need is still available.
-        provider_requirements = await self._provider_gate()(
-            draft.static_provider_requirements
-        )
+        provider_requirements = await self._provider_gate()(draft.static_provider_requirements)
         if any(item.status != "available" for item in provider_requirements):
             raise SetupLaunchError(
                 "PROVIDER_UNAVAILABLE",
@@ -1182,8 +1191,7 @@ class SetupChatLaunchService:
                 authoritative = load_strategy_draft_v2(chat)
                 if (
                     authoritative.executable_hash != expected_executable_hash
-                    or authoritative.workflow_state_hash
-                    != expected_workflow_state_hash
+                    or authoritative.workflow_state_hash != expected_workflow_state_hash
                 ):
                     raise SetupLaunchError(
                         "SETUP_TURN_CONFLICT",
@@ -1213,9 +1221,7 @@ class SetupChatLaunchService:
                     else None
                 )
                 history_snapshot = payload.get("history_snapshot")
-                if bool(payload.get("material_change")) and isinstance(
-                    history_snapshot, dict
-                ):
+                if bool(payload.get("material_change")) and isinstance(history_snapshot, dict):
                     await self._store_snapshot(
                         session,
                         chat,
@@ -1229,9 +1235,7 @@ class SetupChatLaunchService:
                 context["strategy_draft_v2"] = draft.model_dump(mode="json")
                 context["strategy_state_authority"] = "v2"
                 context["launch_pipeline_version"] = "3.1"
-                context["setup_conversation_context"] = conversation.model_dump(
-                    mode="json"
-                )
+                context["setup_conversation_context"] = conversation.model_dump(mode="json")
                 context["last_semantic_diff"] = list(result.semantic_diff)
                 context["last_execution_result"] = result.model_dump(mode="json")
                 context["last_patch_source_turn_id"] = source_turn_id
@@ -1475,24 +1479,40 @@ class SetupChatLaunchService:
     async def _fail_db_turn(
         self,
         session: AsyncSession,
+        chat: AISetupChatSession,
         turn: SetupChatTurn | None,
         *,
         code: str,
         stage: str,
         retryable: bool,
         details: tuple[str, ...] = (),
+        started: float,
+        telemetry: TurnTelemetry,
     ) -> None:
-        if turn is None:
-            return
-        turn.status = (
-            TurnStatus.RETRYABLE_FAILURE.value
-            if retryable
-            else TurnStatus.PERMANENT_FAILURE.value
+        with telemetry.stage("persistence"):
+            if turn is not None:
+                turn.status = (
+                    TurnStatus.RETRYABLE_FAILURE.value
+                    if retryable
+                    else TurnStatus.PERMANENT_FAILURE.value
+                )
+                turn.failure_code = code
+                turn.failure_stage = stage
+                turn.failure_retryable = retryable
+                turn.failure_details_json = [str(item)[:300] for item in details[:12]]
+            await session.flush()
+        # The measurement belongs to this exact idempotency record. Keep the session's
+        # latest-turn compatibility view in sync, but never rely on that overwriteable
+        # view as the durable history.
+        _set_runtime(
+            chat,
+            started,
+            model_calls=telemetry.model_calls,
+            cache_hits=telemetry.cache_hits,
+            telemetry=telemetry,
         )
-        turn.failure_code = code
-        turn.failure_stage = stage
-        turn.failure_retryable = retryable
-        turn.failure_details_json = [str(item)[:300] for item in details[:12]]
+        if turn is not None:
+            turn.telemetry_json = telemetry.to_payload()
         await session.flush()
         await session.commit()
 
@@ -1543,39 +1563,28 @@ class SetupChatLaunchService:
             chat.__dict__["_setup_replayed_turn"] = {
                 "client_message_id": record.client_message_id,
                 "source_message_id": (
-                    str(record.source_message_id)
-                    if record.source_message_id
-                    else None
+                    str(record.source_message_id) if record.source_message_id else None
                 ),
                 "assistant_message_id": (
-                    str(record.assistant_message_id)
-                    if record.assistant_message_id
-                    else None
+                    str(record.assistant_message_id) if record.assistant_message_id else None
                 ),
                 "reply": dict(record.reply_json or {}),
                 "execution": dict(record.execution_result_json or {}),
             }
             return chat
-        if (
-            status
-            in {
-                TurnStatus.COMPOSING.value,
-                TurnStatus.RETRYABLE_FAILURE.value,
-            }
-            and isinstance(record.execution_result_json, dict)
-        ):
-            if record.assistant_message_id is not None and isinstance(
-                record.reply_json, dict
-            ):
+        if status in {
+            TurnStatus.COMPOSING.value,
+            TurnStatus.RETRYABLE_FAILURE.value,
+        } and isinstance(record.execution_result_json, dict):
+            if record.assistant_message_id is not None and isinstance(record.reply_json, dict):
                 record.status = TurnStatus.COMPLETED.value
                 record.completed_at = record.completed_at or datetime.now(UTC)
                 await session.flush()
+                await session.commit()
                 chat.__dict__["_setup_replayed_turn"] = {
                     "client_message_id": record.client_message_id,
                     "source_message_id": (
-                        str(record.source_message_id)
-                        if record.source_message_id
-                        else None
+                        str(record.source_message_id) if record.source_message_id else None
                     ),
                     "assistant_message_id": str(record.assistant_message_id),
                     "reply": dict(record.reply_json),
@@ -1610,17 +1619,14 @@ class SetupChatLaunchService:
                     reply={"message": message, "execution_result": stored},
                     assistant_message_id=assistant.id,
                 )
+                await session.commit()
                 chat.__dict__["_setup_replayed_turn"] = {
                     "client_message_id": record.client_message_id,
                     "source_message_id": (
-                        str(record.source_message_id)
-                        if record.source_message_id
-                        else None
+                        str(record.source_message_id) if record.source_message_id else None
                     ),
                     "assistant_message_id": (
-                        str(record.assistant_message_id)
-                        if record.assistant_message_id
-                        else None
+                        str(record.assistant_message_id) if record.assistant_message_id else None
                     ),
                     "reply": dict(record.reply_json or {}),
                     "execution": dict(record.execution_result_json),
@@ -1655,6 +1661,90 @@ class SetupChatLaunchService:
         # RECEIVED or retryable-without-mutation: reprocessing is safe.
         return None
 
+    async def _governed_planner_references(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        draft: StrategyDraftV2,
+    ) -> PlannerReferenceContext:
+        """Expose public choices while retaining governed identities server-side."""
+
+        methodologies = await ShariaScreeningService(
+            session, self.settings
+        ).selectable_market_methodologies()
+        family_ids = {item.family_id for item in methodologies if item.family_id}
+        families = {
+            item.id: item
+            for item in (
+                list(
+                    await session.scalars(
+                        select(ShariaMethodologyFamily).where(
+                            ShariaMethodologyFamily.id.in_(family_ids),
+                            ShariaMethodologyFamily.is_active.is_(True),
+                        )
+                    )
+                )
+                if family_ids
+                else []
+            )
+        }
+        methodology_refs = tuple(
+            MethodologyReference(
+                reference=f"methodology_{index + 1}",
+                public_identifier=item.code,
+                public_name=item.name,
+                family=(families[item.family_id].name if item.family_id in families else None),
+                aliases=tuple(
+                    value
+                    for value in (
+                        item.governing_body,
+                        families[item.family_id].code if item.family_id in families else None,
+                    )
+                    if value
+                ),
+                methodology_id=str(item.id),
+                methodology_version=item.version,
+            )
+            for index, item in enumerate(methodologies[:12])
+        )
+
+        watchlist_refs: list[WatchlistReference] = []
+        watchlists = list(
+            await session.scalars(
+                select(ApprovedWatchlist)
+                .where(ApprovedWatchlist.user_id == chat.user_id)
+                .order_by(
+                    ApprovedWatchlist.is_default.desc(),
+                    ApprovedWatchlist.name.asc(),
+                )
+                .limit(12)
+            )
+        )
+        for item in watchlists:
+            try:
+                content_identity = await watchlist_content_hash(
+                    session,
+                    item,
+                    scope=scope_from_draft(draft),
+                    require_resolved=True,
+                )
+            except WatchlistIdentityError:
+                # An unresolved membership is not an executable planner choice.
+                continue
+            watchlist_refs.append(
+                WatchlistReference(
+                    reference=f"watchlist_{len(watchlist_refs) + 1}",
+                    public_name=item.name,
+                    aliases=("favorites", "favourites") if item.is_default else (),
+                    watchlist_id=str(item.id),
+                    watchlist_version=content_identity,
+                )
+            )
+        return PlannerReferenceContext(
+            methodologies=methodology_refs,
+            watchlists=tuple(watchlist_refs),
+        )
+
     async def _run_agent_turn(
         self,
         session: AsyncSession,
@@ -1668,12 +1758,42 @@ class SetupChatLaunchService:
     ) -> AISetupChatSession:
         """One free-text turn: plan, execute once, then answer from what happened."""
 
-        draft = load_strategy_draft_v2(chat)
-        context = dict(chat.context_json or {})
-        conversation = _load_conversation_context(context)
-        history = await self._snapshot_history(session, chat)
-        context = dict(chat.context_json or {})
+        # One clock for the turn, created here because this is where the authenticated
+        # request begins. Every stage reads its remaining time from this object, so a
+        # slow provider cannot borrow the time persistence still needs.
+        telemetry = TurnTelemetry.start(self.settings.setup_turn_deadline_seconds)
+        with telemetry.stage("request_acceptance"):
+            # Authentication, ownership and request-shape checks have already run at
+            # the service boundary; this marks their hand-off to the bounded turn.
+            pass
+        with telemetry.stage("context_selection"):
+            draft = load_strategy_draft_v2(chat)
+            context = dict(chat.context_json or {})
+            conversation = _load_conversation_context(context)
+            history = await self._snapshot_history(session, chat)
+            planner_references = await self._governed_planner_references(session, chat, draft)
+            context = dict(chat.context_json or {})
+        stage_callback = None
+        if turn_record is not None:
+            canonical_stage_callback = self._turn_stage_callback(
+                session,
+                chat,
+                turn_record,
+                message=message,
+                source_turn_id=source_turn_id,
+                expected_executable_hash=draft.executable_hash,
+                expected_workflow_state_hash=draft.workflow_state_hash,
+            )
+
+            async def stage_callback(stage: str, payload: dict[str, Any]) -> None:
+                # The execution checkpoint is a real database write. Attribute its
+                # elapsed time to persistence even though it occurs inside the broader
+                # canonical-execution boundary.
+                with telemetry.stage("persistence"):
+                    await canonical_stage_callback(stage, payload)
+
         turn = SetupAgentTurnInput(
+            telemetry=telemetry,
             message=message,
             source_turn_id=source_turn_id,
             draft=draft,
@@ -1684,6 +1804,13 @@ class SetupChatLaunchService:
             history=tuple(history),
             setup_mode=draft.mode,
             previous_turn_failed=bool(context.get("last_turn_failed")),
+            # What has already failed in this chat, so a paid correction is not spent on
+            # a class that has already survived one. Two attempts is evidence; a third is
+            # a loop the user pays for in waiting.
+            repeated_failure_codes=tuple(
+                str(item) for item in (context.get("setup_failure_history") or [])[-6:]
+            ),
+            planner_references=planner_references,
             # Screening and provider availability are gates, so they run inside
             # execution and their outcome reaches the composer. Running them after the
             # reply let a message announce a draft the platform then blocked.
@@ -1691,19 +1818,7 @@ class SetupChatLaunchService:
             providers=self._provider_gate(),
             runtime_preflight=self._runtime_preflight(),
             preflight_manifest=self._read_preflight_manifest,
-            stage_callback=(
-                self._turn_stage_callback(
-                    session,
-                    chat,
-                    turn_record,
-                    message=message,
-                    source_turn_id=source_turn_id,
-                    expected_executable_hash=draft.executable_hash,
-                    expected_workflow_state_hash=draft.workflow_state_hash,
-                )
-                if turn_record is not None
-                else None
-            ),
+            stage_callback=stage_callback,
         )
         try:
             outcome = await self.agent.run_turn(turn)
@@ -1728,15 +1843,32 @@ class SetupChatLaunchService:
                 "retryable": exc.retryable,
                 "details": list(exc.details[:6]),
             }
+            context["setup_failure_history"] = [
+                *(context.get("setup_failure_history") or []),
+                exc.code,
+            ][-6:]
+            _record_funnel(
+                context,
+                outcome="refused",
+                telemetry=telemetry,
+                failure_code=exc.code,
+                model_calls=telemetry.model_calls,
+            )
+            chat.context_json = context
+            # Persist the failure record and the measured session telemetry in the
+            # same commit.  Committing the turn row first made the in-memory chat look
+            # measured while a fresh database session saw no failure telemetry.
             await self._fail_db_turn(
                 session,
+                chat,
                 turn_record,
                 code=exc.code,
                 stage=exc.stage,
                 retryable=exc.retryable,
                 details=exc.details,
+                started=started,
+                telemetry=telemetry,
             )
-            chat.context_json = context
             raise SetupLaunchError(
                 exc.code,
                 str(exc),
@@ -1756,38 +1888,50 @@ class SetupChatLaunchService:
             # Conversation, product questions and explanations are read-only turns.
             # They must not compile, screen, refresh providers, rewrite derived UI or
             # disturb an approval.
-            context["setup_conversation_context"] = outcome.conversation.model_dump(
-                mode="json"
-            )
+            context["setup_conversation_context"] = outcome.conversation.model_dump(mode="json")
             context["last_turn_trace"] = outcome.trace.to_dict()
             context["last_turn_failed"] = False
             context.pop("last_turn_failure", None)
-            chat.context_json = context
-            assistant = await self.owner._assistant(
-                session,
-                chat,
-                outcome.message,
-                message_type="conversation",
-                payload={
-                    "execution_result": None,
-                    "segments": list(outcome.trace.segments),
-                    "turn_trace": outcome.trace.to_dict(),
-                    "model_call_count": outcome.trace.model_calls,
-                },
+            context.pop("setup_failure_history", None)
+            _record_funnel(
+                context,
+                outcome="answered",
+                telemetry=telemetry,
+                failure_code=None,
+                model_calls=outcome.trace.model_calls,
             )
+            chat.context_json = context
+            with telemetry.stage("persistence"):
+                assistant = await self.owner._assistant(
+                    session,
+                    chat,
+                    outcome.message,
+                    message_type="conversation",
+                    payload={
+                        "execution_result": None,
+                        "segments": list(outcome.trace.segments),
+                        "turn_trace": outcome.trace.to_dict(),
+                        "model_call_count": outcome.trace.model_calls,
+                    },
+                )
+                await self._complete_db_turn(
+                    session,
+                    chat,
+                    turn_record,
+                    reply={"message": outcome.message, "execution_result": None},
+                    assistant_message_id=assistant.id,
+                )
             _set_runtime(
                 chat,
                 started,
                 model_calls=outcome.trace.model_calls,
                 cache_hits=0,
+                telemetry=telemetry,
             )
-            await self._complete_db_turn(
-                session,
-                chat,
-                turn_record,
-                reply={"message": outcome.message, "execution_result": None},
-                assistant_message_id=assistant.id,
-            )
+            if turn_record is not None:
+                turn_record.telemetry_json = telemetry.to_payload()
+            await session.flush()
+            await session.commit()
             return chat
 
         # A durable turn checkpoint already stored the canonical mutation and archived
@@ -1814,6 +1958,22 @@ class SetupChatLaunchService:
         context["last_turn_trace"] = outcome.trace.to_dict()
         context["last_turn_failed"] = False
         context.pop("last_turn_failure", None)
+        context.pop("setup_failure_history", None)
+        _record_funnel(
+            context,
+            outcome=(
+                "changed"
+                if outcome.execution is not None and outcome.execution.strategy_mutated
+                else "no_change"
+            ),
+            telemetry=telemetry,
+            failure_code=None,
+            model_calls=outcome.trace.model_calls,
+            asked_question=outcome.clarification is not None,
+            approval_eligible=bool(
+                outcome.execution is not None and outcome.execution.approval_eligible
+            ),
+        )
         if outcome.execution is not None:
             context["last_semantic_diff"] = list(outcome.execution.semantic_diff)
             context["last_execution_result"] = outcome.execution.model_dump(mode="json")
@@ -1832,52 +1992,63 @@ class SetupChatLaunchService:
         # The execution result already decided every gate, including the final status.
         # Persisting it rather than re-deriving one is what stops the session and the
         # reply the user just read from disagreeing.
-        state = await self._persist_draft_state(
-            session,
+        with telemetry.stage("persistence"):
+            state = await self._persist_draft_state(
+                session,
+                chat,
+                outcome.draft,
+                definition=outcome.definition,
+                execution=outcome.execution,
+            )
+            assistant = await self.owner._assistant(
+                session,
+                chat,
+                outcome.message,
+                message_type=_agent_message_type(outcome.execution),
+                payload={
+                    "draft_v2": outcome.draft.model_dump(mode="json"),
+                    "execution_result": (
+                        outcome.execution.model_dump(mode="json")
+                        if outcome.execution is not None
+                        else None
+                    ),
+                    "segments": list(outcome.trace.segments),
+                    "semantic_violations": list(state.violations),
+                    "clarifications": (
+                        [outcome.clarification.model_dump(mode="json")]
+                        if outcome.clarification is not None
+                        else []
+                    ),
+                    "can_approve": chat.status == "ready_for_approval",
+                    "turn_trace": outcome.trace.to_dict(),
+                    "model_call_count": outcome.trace.model_calls,
+                },
+            )
+            await self._complete_db_turn(
+                session,
+                chat,
+                turn_record,
+                reply={
+                    "message": outcome.message,
+                    "execution_result": (
+                        outcome.execution.model_dump(mode="json")
+                        if outcome.execution is not None
+                        else None
+                    ),
+                },
+                assistant_message_id=assistant.id,
+            )
+        _set_runtime(
             chat,
-            outcome.draft,
-            definition=outcome.definition,
-            execution=outcome.execution,
+            started,
+            model_calls=outcome.trace.model_calls,
+            cache_hits=0,
+            telemetry=telemetry,
         )
-        assistant = await self.owner._assistant(
-            session,
-            chat,
-            outcome.message,
-            message_type=_agent_message_type(outcome.execution),
-            payload={
-                "draft_v2": outcome.draft.model_dump(mode="json"),
-                "execution_result": (
-                    outcome.execution.model_dump(mode="json")
-                    if outcome.execution is not None
-                    else None
-                ),
-                "segments": list(outcome.trace.segments),
-                "semantic_violations": list(state.violations),
-                "clarifications": (
-                    [outcome.clarification.model_dump(mode="json")]
-                    if outcome.clarification is not None
-                    else []
-                ),
-                "can_approve": chat.status == "ready_for_approval",
-                "turn_trace": outcome.trace.to_dict(),
-                "model_call_count": outcome.trace.model_calls,
-            },
-        )
-        await self._complete_db_turn(
-            session,
-            chat,
-            turn_record,
-            reply={
-                "message": outcome.message,
-                "execution_result": (
-                    outcome.execution.model_dump(mode="json")
-                    if outcome.execution is not None
-                    else None
-                ),
-            },
-            assistant_message_id=assistant.id,
-        )
-        _set_runtime(chat, started, model_calls=outcome.trace.model_calls, cache_hits=0)
+        if turn_record is not None:
+            turn_record.telemetry_json = telemetry.to_payload()
+        await session.flush()
+        await session.commit()
         return chat
 
     def _screening_gate(
@@ -1896,7 +2067,7 @@ class SetupChatLaunchService:
             try:
                 return await self._apply_screening_policy(session, chat, definition), None
             except (KeyError, ValueError, ShariaUniverseError) as exc:
-                return None, str(exc) or "Choose and validate a Halal Market first."
+                return None, str(exc) or "Choose and validate Halal Assets first."
 
         return gate
 
@@ -1923,9 +2094,7 @@ class SetupChatLaunchService:
                     provider=item.provider,
                     capability=item.capability,
                     status=(
-                        "available"
-                        if self._provider_available(item.provider)
-                        else "unavailable"
+                        "available" if self._provider_available(item.provider) else "unavailable"
                     ),
                 )
                 for item in requirements
@@ -1940,9 +2109,7 @@ class SetupChatLaunchService:
         evaluated, and the alert would simply never fire with no explanation.
         """
         name = provider.strip().casefold()
-        return name in configured_runtime_provider_requirements(
-            self.settings.market_data_provider
-        )
+        return name in configured_runtime_provider_requirements(self.settings.market_data_provider)
 
     def _runtime_preflight(self) -> RuntimePreflight:
         """Verify the configured adapter for this exact exchange/symbol/timeframe set.
@@ -1998,12 +2165,9 @@ class SetupChatLaunchService:
                     ),
                     timeout=5,
                 )
-                normalized_listed = {
-                    _normalized_market_symbol(item) for item in listed
-                }
+                normalized_listed = {_normalized_market_symbol(item) for item in listed}
                 requested = [
-                    _normalized_market_symbol(item)
-                    for item in definition.universe.include_symbols
+                    _normalized_market_symbol(item) for item in definition.universe.include_symbols
                 ]
                 missing = [item for item in requested if item not in normalized_listed]
                 statuses = [
@@ -2077,9 +2241,7 @@ class SetupChatLaunchService:
                         checked_at=checked_at,
                     )
                 else:
-                    semaphore = asyncio.Semaphore(
-                        self.settings.setup_preflight_max_concurrency
-                    )
+                    semaphore = asyncio.Semaphore(self.settings.setup_preflight_max_concurrency)
                     timeframes = list(
                         dict.fromkeys(
                             [
@@ -2111,9 +2273,7 @@ class SetupChatLaunchService:
                                 capability=capability,
                                 status="unknown",
                                 checked_at=checked_at,
-                                safe_error=(
-                                    "Market-data runtime could not be verified."
-                                ),
+                                safe_error=("Market-data runtime could not be verified."),
                             )
                         except Exception:
                             return ProviderRuntimeStatusV2(
@@ -2121,9 +2281,7 @@ class SetupChatLaunchService:
                                 capability=capability,
                                 status="unknown",
                                 checked_at=checked_at,
-                                safe_error=(
-                                    "Market-data runtime verification failed safely."
-                                ),
+                                safe_error=("Market-data runtime verification failed safely."),
                             )
                         pair_definition = definition.model_copy(
                             update={
@@ -2142,9 +2300,8 @@ class SetupChatLaunchService:
                             # Validate its ordering/history/completeness at that frozen
                             # instant; production and every non-fixture adapter always
                             # use the real current time for freshness.
-                            quality_checked_at = (
-                                candles[-1].timestamp
-                                + timeframe_duration(timeframe)
+                            quality_checked_at = candles[-1].timestamp + timeframe_duration(
+                                timeframe
                             )
                         quality = assess_candle_data_quality(
                             pair_definition,
@@ -2160,10 +2317,7 @@ class SetupChatLaunchService:
                                 None
                                 if quality.usable
                                 else quality.safe_message
-                                or (
-                                    "Market data is stale or incomplete for a "
-                                    "required timeframe."
-                                )
+                                or ("Market data is stale or incomplete for a required timeframe.")
                             ),
                         )
 
@@ -2371,8 +2525,8 @@ class SetupChatLaunchService:
         service could discover a *later* blocker that contradicted the reply the user had
         just read.
         """
-        violations = list(execution.semantic_violations) if execution else (
-            validate_draft_semantics(draft)
+        violations = (
+            list(execution.semantic_violations) if execution else (validate_draft_semantics(draft))
         )
         compile_error: str | None = None
         screening_error: str | None = None
@@ -2405,7 +2559,7 @@ class SetupChatLaunchService:
                 try:
                     screened = await self._apply_screening_policy(session, chat, definition)
                 except (KeyError, ValueError, ShariaUniverseError) as exc:
-                    screening_error = str(exc) or "Choose and validate a Halal Market."
+                    screening_error = str(exc) or "Choose and validate Halal Assets."
                     definition = None
                     blocking = True
                 else:
@@ -2470,8 +2624,6 @@ class SetupChatLaunchService:
             chat.status = (
                 "needs_clarification"
                 if blocking
-                else "ready_to_scan"
-                if draft.mode == DraftMode.SCANNER
                 else "ready_for_approval"
             )
         # Every remaining field is exposed. Only the number of *questions* is capped:
@@ -2527,9 +2679,7 @@ class SetupChatLaunchService:
             persist_snapshot=persist_snapshot,
         )
         if not resolution.included_symbols:
-            raise ValueError(
-                "No asset currently meets both the screening policy and market scope."
-            )
+            raise ValueError("No asset currently meets both the screening policy and market scope.")
         watchlist_hash: str | None = None
         if policy.approved_watchlist_id is not None:
             watchlist = await session.get(ApprovedWatchlist, policy.approved_watchlist_id)
@@ -2583,9 +2733,7 @@ def load_strategy_draft_v2(chat: AISetupChatSession) -> StrategyDraftV2:
                     item.model_dump(mode="json")
                     for item in _migration_policy_unresolved(
                         policy,
-                        workflow_revision=int(
-                            migrated_payload.get("workflow_revision") or 1
-                        ),
+                        workflow_revision=int(migrated_payload.get("workflow_revision") or 1),
                         legacy_context=context,
                     )
                 ],
@@ -2649,8 +2797,7 @@ def _legacy_sharia_policy(context: dict[str, Any]) -> ShariaPolicyV2:
     """Move the legacy session policy into the one canonical executable owner."""
 
     mode_value = str(
-        context.get("screened_universe_mode")
-        or ShariaUniverseMode.ELIGIBLE_MARKET.value
+        context.get("screened_universe_mode") or ShariaUniverseMode.ELIGIBLE_MARKET.value
     )
     try:
         universe_mode = ShariaUniverseMode(mode_value)
@@ -2669,8 +2816,7 @@ def _legacy_sharia_policy(context: dict[str, Any]) -> ShariaPolicyV2:
         allowed = [ShariaAssetStatus.ELIGIBLE]
     try:
         compliance_behavior = ComplianceChangeBehavior(
-            context.get("compliance_change_behavior")
-            or ComplianceChangeBehavior.PAUSE_ASSET.value
+            context.get("compliance_change_behavior") or ComplianceChangeBehavior.PAUSE_ASSET.value
         )
     except ValueError:
         compliance_behavior = ComplianceChangeBehavior.PAUSE_ASSET
@@ -2679,8 +2825,7 @@ def _legacy_sharia_policy(context: dict[str, Any]) -> ShariaPolicyV2:
         methodology_id=context.get("sharia_methodology_id"),
         methodology_version=context.get("sharia_methodology_version"),
         allowed_statuses=allowed,
-        qualification_policy=context.get("qualification_policy")
-        or "include_with_warning",
+        qualification_policy=context.get("qualification_policy") or "include_with_warning",
         disputed_asset_policy=context.get("disputed_asset_policy") or "exclude",
         compliance_change_behavior=compliance_behavior,
         approved_watchlist_id=context.get("approved_watchlist_id"),
@@ -2711,16 +2856,12 @@ def _migration_policy_unresolved(
                 expected_answer_schema={"type": "string", "format": "uuid"},
                 question="Which current Favorites list should HilalMarkets use?",
                 reason=(
-                    "The legacy setup did not preserve a complete immutable watchlist "
-                    "identity."
+                    "The legacy setup did not preserve a complete immutable watchlist identity."
                 ),
                 created_workflow_revision=workflow_revision,
             )
         )
-    if (
-        policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS
-        and not policy.explicit_symbols
-    ):
+    if policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS and not policy.explicit_symbols:
         unresolved.append(
             UnresolvedFieldV2(
                 unresolved_id="sharia.explicit_symbols",
@@ -2784,9 +2925,7 @@ def _migration_policy_unresolved(
                         "minItems": 1,
                     },
                     question="Which governed Sharia statuses may this setup include?",
-                    reason=(
-                        "The legacy setup contained an unrecognized allowed status."
-                    ),
+                    reason=("The legacy setup contained an unrecognized allowed status."),
                     created_workflow_revision=workflow_revision,
                 )
             )
@@ -2805,17 +2944,11 @@ def _migration_policy_unresolved(
                         "type": "string",
                         "enum": [item.value for item in ComplianceChangeBehavior],
                     },
-                    allowed_options=[
-                        item.value for item in ComplianceChangeBehavior
-                    ],
+                    allowed_options=[item.value for item in ComplianceChangeBehavior],
                     question=(
-                        "What should happen if an included asset's compliance "
-                        "status changes?"
+                        "What should happen if an included asset's compliance status changes?"
                     ),
-                    reason=(
-                        "The legacy setup stored an unrecognized compliance-change "
-                        "behavior."
-                    ),
+                    reason=("The legacy setup stored an unrecognized compliance-change behavior."),
                     created_workflow_revision=workflow_revision,
                 )
             )
@@ -2907,6 +3040,7 @@ def store_preflight_manifest(
         payload["manifest_hash"] = manifest.manifest_hash
         context[REVIEWED_PREFLIGHT_MANIFEST_KEY] = payload
     chat.context_json = context
+
 
 #: Where the stored recovery reply lives inside a turn's committed execution payload.
 RECOVERY_REPLY_KEY = "recovery_reply"
@@ -3052,8 +3186,7 @@ def _no_change_summary(draft: StrategyDraftV2) -> str:
     if pending is not None:
         return f"That did not change the draft. Still needed: {pending.question}"
     return (
-        "That did not change the executable setup. It stays at version "
-        f"{draft.executable_version}."
+        f"That did not change the executable setup. It stays at version {draft.executable_version}."
     )
 
 
@@ -3091,9 +3224,7 @@ def _translation_sheet(draft: StrategyDraftV2) -> dict[str, Any]:
         "conditions": conditions,
         "timeframes": list(
             dict.fromkeys(
-                item["timeframe"]
-                for item in conditions
-                if item["timeframe"] != "Not provided"
+                item["timeframe"] for item in conditions if item["timeframe"] != "Not provided"
             )
         ),
         "fields": [
@@ -3103,16 +3234,14 @@ def _translation_sheet(draft: StrategyDraftV2) -> dict[str, Any]:
             {"label": "Quote asset", "value": draft.market_scope.quote_asset},
             {
                 "label": "Included assets",
-                "value": ", ".join(draft.universe.included_symbols) or "Selected Halal Market",
+                "value": ", ".join(draft.universe.included_symbols) or "Selected Halal Assets",
             },
             {
                 "label": "Excluded assets",
                 "value": ", ".join(draft.universe.excluded_symbols) or "None",
             },
         ],
-        "unresolved_fields": [
-            item.model_dump(mode="json") for item in draft.unresolved_fields
-        ],
+        "unresolved_fields": [item.model_dump(mode="json") for item in draft.unresolved_fields],
         "unsupported_requirements": [
             item.model_dump(mode="json") for item in draft.unsupported_requirements
         ],
@@ -3143,23 +3272,124 @@ def _title(text: str) -> str:
     return (text[:72].rstrip(" ,.;:") or "New monitor")[:160]
 
 
+#: What one turn did, from the user's point of view rather than the code's. These are the
+#: only outcomes a turn can have, so a funnel row can never be uncategorised.
+FUNNEL_OUTCOMES: tuple[str, ...] = ("changed", "no_change", "answered", "refused")
+
+#: How many turns of history the funnel keeps per chat. Enough to see a user give up;
+#: short enough that the session row stays small.
+_FUNNEL_WINDOW = 40
+
+
+def _record_funnel(
+    context: dict[str, Any],
+    *,
+    outcome: str,
+    telemetry: TurnTelemetry,
+    failure_code: str | None,
+    model_calls: int,
+    asked_question: bool = False,
+    approval_eligible: bool = False,
+) -> None:
+    """One row per turn: what the user got, how long they waited, what it cost.
+
+    Abandonment is not a thing you can see in an error log — a user who gives up leaves
+    no error. It is visible as a shape: turns that took too long, turns that asked a
+    question and were never answered, turns refused twice for the same reason. This
+    records the facts those questions need, per turn, on the session itself.
+
+    Every field is measured or counted. Nothing here is inferred from a plan.
+    """
+
+    if outcome not in FUNNEL_OUTCOMES:
+        raise ValueError(f"unknown turn outcome: {outcome}")
+    rows = list(context.get("setup_turn_funnel") or [])
+    previous = rows[-1] if rows else {}
+    rows.append(
+        {
+            "turn_index": len(rows) + 1,
+            "outcome": outcome,
+            "failure_code": failure_code,
+            "total_ms": round(telemetry.total_ms, 1),
+            "server_ms": round(telemetry.server_ms, 1),
+            "waiting_on_provider_ms": round(telemetry.external_wait_ms, 1),
+            "model_calls": model_calls,
+            "repaired": telemetry.stage_counts.get("repair_provider_wait", 0) > 0,
+            "asked_question": asked_question,
+            "approval_eligible": approval_eligible,
+            # True when the previous turn asked something and this one is the answer.
+            # A question that is never answered is the clearest signal of a user leaving.
+            "answered_previous_question": bool(previous.get("asked_question")),
+        }
+    )
+    context["setup_turn_funnel"] = rows[-_FUNNEL_WINDOW:]
+    context["setup_funnel_summary"] = _funnel_summary(context["setup_turn_funnel"])
+
+
+def _funnel_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """The gates the brief measures, computed from the rows above and nothing else."""
+
+    total = len(rows)
+    if not total:
+        return {}
+    completed = [item for item in rows if item["outcome"] != "refused"]
+    durations = sorted(float(item["total_ms"]) for item in rows)
+    unanswered = sum(
+        1
+        for index, item in enumerate(rows)
+        if item["asked_question"]
+        and (index + 1 >= total or not rows[index + 1]["answered_previous_question"])
+    )
+    return {
+        "turns": total,
+        "completed_turns": len(completed),
+        "refused_turns": total - len(completed),
+        "single_model_call_share": round(
+            sum(1 for item in rows if item["model_calls"] <= 1) / total, 4
+        ),
+        "repair_attempt_share": round(sum(1 for item in rows if item["repaired"]) / total, 4),
+        "clean_first_turn": bool(rows[0]["outcome"] != "refused" and not rows[0]["repaired"]),
+        "questions_asked": sum(1 for item in rows if item["asked_question"]),
+        "questions_left_unanswered": unanswered,
+        "reached_approval_eligible": any(item["approval_eligible"] for item in rows),
+        "total_ms_p50": durations[len(durations) // 2],
+        "total_ms_p95": durations[min(len(durations) - 1, int(len(durations) * 0.95))],
+    }
+
+
 def _set_runtime(
     chat: AISetupChatSession,
     started: float,
     *,
     model_calls: int,
     cache_hits: int,
+    telemetry: TurnTelemetry | None = None,
 ) -> None:
+    """Record what this turn actually spent, stage by stage.
+
+    The measured breakdown is the point. A single total tells you a turn was slow; it
+    never tells you which stage to fix, which is how a slow path acquires a larger
+    timeout instead of less work. When no telemetry was collected the total is still
+    written, so the shape of the record never changes.
+    """
+
     context = dict(chat.context_json or {})
+    measured = telemetry.to_payload() if telemetry is not None else {}
+    stages = [
+        {"stage": name, "duration_ms": value}
+        for name, value in (measured.get("stage_ms") or {}).items()
+    ]
+    stages.append(
+        {
+            "stage": "launch_pipeline_total",
+            "duration_ms": round((monotonic() - started) * 1000),
+        }
+    )
     context["turn_runtime"] = {
         "attach": True,
-        "cache_hits": cache_hits,
-        "model_call_count": model_calls,
-        "stages": [
-            {
-                "stage": "launch_pipeline_total",
-                "duration_ms": round((monotonic() - started) * 1000),
-            }
-        ],
+        "cache_hits": measured.get("cache_hits", cache_hits),
+        "model_call_count": measured.get("model_calls", model_calls),
+        "stages": stages,
+        **({"measured": measured} if measured else {}),
     }
     chat.context_json = context

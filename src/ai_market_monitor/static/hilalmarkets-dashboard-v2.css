@@ -17,7 +17,7 @@ body.dashboard-body.hilal-dashboard {
   margin: 0;
   background: var(--hm-canvas);
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
 }
 
 body.hilal-dashboard::before {
@@ -37,7 +37,7 @@ body.dashboard-body.hilal-dashboard h3,
 body.dashboard-body.hilal-dashboard h4,
 body.dashboard-body.hilal-dashboard .logo,
 body.dashboard-body.hilal-dashboard .value {
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-weight: 500;
 }
 
@@ -115,7 +115,7 @@ body.hilal-dashboard .logo img {
 body.hilal-dashboard .logo > span,
 body.hilal-dashboard .logo-wordmark {
   min-width: 0;
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-weight: 500;
   text-transform: lowercase;
 }
@@ -123,7 +123,7 @@ body.hilal-dashboard .logo-wordmark {
 body.hilal-dashboard .logo small {
   margin-top: 2px;
   color: var(--hm-muted);
-  font-family: "Onest", sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: .62rem;
   font-weight: 500;
   letter-spacing: .015em;
@@ -1436,7 +1436,7 @@ body.hilal-dashboard .grid > :nth-child(4) { animation-delay: 135ms; }
 /* Refined customer controls and page-specific composition */
 body.hilal-dashboard .opportunity-card :where(.readiness strong, .value, [data-count]),
 body.hilal-dashboard .price strong {
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2093,7 +2093,7 @@ body.hilal-dashboard .hm-select-control.is-open .hm-select-trigger::before {
 body.hilal-dashboard .hm-select-value {
   min-width: 0;
   overflow: hidden;
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: .91rem;
   font-weight: 700;
   line-height: 1.25;
@@ -2348,7 +2348,7 @@ body.hilal-dashboard .billing-current-meta strong {
   margin-top: 5px;
   overflow: hidden;
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: .88rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2453,7 +2453,7 @@ body.hilal-dashboard .dashboard-plan-title {
 body.hilal-dashboard .dashboard-plan-title h3 {
   margin: 0;
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: 1.55rem;
   font-weight: 700;
 }
@@ -2490,7 +2490,7 @@ body.hilal-dashboard .dashboard-plan-price {
 
 body.hilal-dashboard .dashboard-plan-price strong {
   color: var(--hm-ink);
-  font-family: "Geometria", "Onest", sans-serif;
+  font-family: var(--hm-font-display);
   font-size: clamp(38px, 4vw, 52px);
   font-weight: 500;
   font-feature-settings: "kern" 1, "tnum" 1;
@@ -2605,7 +2605,7 @@ body.hilal-dashboard .dashboard-plan-comparison td {
 body.hilal-dashboard .dashboard-plan-comparison thead th {
   color: var(--hm-ink);
   background: var(--hm-surface-soft);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-weight: 750;
 }
 
@@ -2674,7 +2674,7 @@ body.hilal-dashboard .billing-dialog-header {
 body.hilal-dashboard .billing-dialog-header h2 {
   margin: 3px 0 0;
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: clamp(1.35rem, 3vw, 1.8rem);
 }
 
@@ -2720,7 +2720,7 @@ body.hilal-dashboard .billing-dialog-order span {
 
 body.hilal-dashboard .billing-dialog-order strong {
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
 }
 
 body.hilal-dashboard :is(.billing-period-options, .billing-method-options) {
@@ -2873,6 +2873,15 @@ body.hilal-dashboard .billing-method-options .is-unavailable .billing-method-car
   background: var(--hm-surface-soft);
 }
 
+/* An interval nobody can buy yet stays visible and readable, but not selectable. */
+body.hilal-dashboard :is(.billing-toggle, .billing-period-options) label.is-unavailable {
+  cursor: not-allowed;
+  opacity: .55;
+}
+body.hilal-dashboard :is(.billing-toggle, .billing-period-options) label.is-unavailable span {
+  pointer-events: none;
+}
+
 body.hilal-dashboard :is(.billing-period-options, .billing-method-options) input:focus-visible + span,
 body.hilal-dashboard .billing-profile-grid input:focus-visible {
   outline: 3px solid rgba(85, 113, 42, .35);
@@ -2953,7 +2962,7 @@ body.hilal-dashboard .billing-result-hero h1 {
   max-width: 680px;
   margin: 9px auto 0;
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: clamp(2rem, 5vw, 3.35rem);
   line-height: 1.06;
   letter-spacing: -.04em;
@@ -2991,7 +3000,7 @@ body.hilal-dashboard .billing-result-summary {
 body.hilal-dashboard .billing-result-summary h2 {
   margin: 4px 0 0;
   color: var(--hm-ink);
-  font-family: "Onest", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--hm-font-ui);
   font-size: 1.4rem;
 }
 
@@ -3598,14 +3607,6 @@ html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
 
 /* Final workflow refinements: visible evidence, compact assistant, and
    consent controls remain inside the authenticated application shell. */
-body.hilal-dashboard .home-welcome { align-items: flex-start; }
-body.hilal-dashboard .home-welcome h1 {
-  margin: 0;
-  color: var(--hm-ink);
-  font-size: 21px !important;
-}
-body.hilal-dashboard .home-welcome .page-actions { margin-top: 13px; }
-
 body.hilal-dashboard .guided-builder-heading {
   align-items: start;
   justify-items: start;

@@ -11,7 +11,7 @@
   <div class="live-market-toolbar">
     <div class="live-market-title"><h1>Halal Assets</h1></div>
     <div class="live-market-toolbar-actions">
-      <button class="btn btn-secondary favorite-list-button" type="button" data-saved-assets-open>
+      <button class="btn btn-secondary favorite-list-button" type="button" data-saved-assets-open data-hm-guide-target="market-saved-assets">
         <img class="favorite-heart-icon favorite-heart-outline" src="{{ url_for('static', path='/ui-heart.svg') }}" alt="">
         <img class="favorite-heart-icon favorite-heart-solid" src="{{ url_for('static', path='/ui-heart-filled.svg') }}" alt="">
         Favorites<span class="nav-count" data-favorite-count {{ 'hidden' if not favorite_assets else '' }}>{{ favorite_assets|length }}</span>
@@ -28,7 +28,7 @@
       <span>Search assets</span>
       <input class="input" type="search" name="search" value="{{ market_search }}" placeholder="BTC, ETH, SOL..." data-live-market-search>
     </label>
-    <label class="field market-filter-control">
+    <label class="field market-filter-control" data-hm-guide-target="market-methodology-selector">
       <span>Methodology</span>
       <span class="hm-select-control" data-hm-select>
         <select class="select" name="methodology_id" data-live-market-methodology>
@@ -48,7 +48,7 @@
     <input type="hidden" name="quote_asset" value="{{ selected_quote_asset }}" data-live-market-quote>
   </form>
 
-  <div class="live-market-meta"><span class="live-dot"><i></i><b data-live-market-status>Connecting to provider...</b></span><span data-live-market-updated>Waiting for the first verified snapshot</span></div>
+  <div class="live-market-meta" data-hm-guide-target="market-live-status"><span class="live-dot"><i></i><b data-live-market-status>Connecting to provider...</b></span><span data-live-market-updated>Waiting for the first verified snapshot</span></div>
   <div class="live-market-error notice notice-error" data-live-market-error hidden><span data-icon="alert" data-icon-class="icon"></span><div><strong>Quotes unavailable</strong><p data-live-market-error-message>No market values were guessed.</p><button class="btn btn-secondary btn-sm" type="button" data-live-market-retry>Retry</button></div></div>
   <div class="live-market-scroll" role="region" aria-label="Live screened spot market quotes" tabindex="0">
     <div class="live-market-table" role="table" aria-rowcount="-1">
