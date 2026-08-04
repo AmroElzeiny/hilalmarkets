@@ -55,6 +55,7 @@ from ai_market_monitor.engine.planner_references import (
     PlannerReferenceContext,
 )
 from ai_market_monitor.engine.requirement_state import (
+    RequirementReconciliation,
     blocking_requirement_states,
     reconcile_requirement_state,
     unresolved_target_path,
@@ -69,6 +70,7 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_strategy_bias,
     grounds_symbol,
     grounds_text_value,
+    grounds_timeframe,
     grounds_timeframe_role,
     grounds_unit,
 )
@@ -110,8 +112,10 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionUpdateV2,
     DraftFieldPatch,
     FormulaKind,
+    MovementDirection,
     ProviderRequirementV2,
     ProviderRuntimeStatusV2,
+    RequirementAssessmentV2,
     ReversionV2,
     StrategyDraftV2,
     StrategyPatch,
@@ -131,6 +135,11 @@ ApprovalStatus = Literal["not_eligible", "eligible", "approved", "invalidated_by
 
 #: How many questions one draft may ask.
 MAX_CLARIFICATIONS_PER_DRAFT = 3
+
+# JSON-Schema extension written only by the server when a supported rule is being
+# completed across several turns.  It lives on the canonical unresolved record, so
+# earlier grounded values are never taken from mutable conversation prose.
+_SUPPORTED_REQUEST_SCHEMA_KEY = "x-hilal-supported-request"
 
 #: Segment kinds that can never author a change, however the plan labels them.
 #: A boundary refusal, an approval request or a question is answered in words only.
@@ -279,6 +288,7 @@ class SetupTurnDryValidation:
     draft: StrategyDraftV2
 
 
+
 _SIGNED_MAGNITUDE_COMPARATOR: dict[Comparator, Comparator] = {
     Comparator.LESS_THAN: Comparator.GREATER_THAN,
     Comparator.LESS_THAN_OR_EQUAL: Comparator.GREATER_THAN_OR_EQUAL,
@@ -405,6 +415,9 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         segments=segments,
         operation_results=operation_results,
         active_clarification=request.conversation.active_question,
+    )
+    requirement_reconciliation = _finalize_supported_completion_reconciliation(
+        request, plan, segments, requirement_reconciliation
     )
     draft = requirement_reconciliation.draft
     finalized = finalize_strategy_turn(before, draft)
@@ -785,6 +798,9 @@ def validate_setup_turn_plan(request: SetupTurnRequest) -> SetupTurnDryValidatio
         segments=segments,
         operation_results=operation_results,
         active_clarification=request.conversation.active_question,
+    )
+    reconciled = _finalize_supported_completion_reconciliation(
+        request, plan, segments, reconciled
     )
     semantic_errors = validate_draft_semantics(reconciled.draft)
     capability_errors, _ = _capability_gate(
@@ -1268,6 +1284,448 @@ def _ground_symbol_operation(
     )
 
 
+def _is_supported_unresolved(item: Any) -> bool:
+    return bool(
+        item is not None
+        and isinstance(
+            getattr(item, "expected_answer_schema", {}).get(
+                _SUPPORTED_REQUEST_SCHEMA_KEY
+            ),
+            dict,
+        )
+    )
+
+
+def _supported_completion_unresolved(
+    request: SetupTurnRequest,
+    unresolved: dict[str, Any],
+) -> Any | None:
+    active = request.conversation.active_question_id
+    if active and _is_supported_unresolved(unresolved.get(active)):
+        return unresolved[active]
+    candidates = [item for item in unresolved.values() if _is_supported_unresolved(item)]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _supported_metadata(item: Any) -> dict[str, Any]:
+    raw = item.expected_answer_schema.get(_SUPPORTED_REQUEST_SCHEMA_KEY)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _canonical_supported_slots(values: list[str]) -> list[str]:
+    """Translate user-facing choices to canonical condition field names."""
+
+    field_map = {
+        "reference_point": "formula",
+        "comparator": "operator",
+    }
+    return list(dict.fromkeys(field_map.get(item, item) for item in values))
+
+
+def _reference_choice(text: str) -> str | None:
+    lowered = " ".join(text.casefold().split())
+    if re.search(r"\b(?:previous|prior)\s+(?:candle\s+)?close\b", lowered) or any(
+        phrase in lowered
+        for phrase in (
+            "الإغلاق السابق",
+            "إغلاق الشمعة السابقة",
+            "clôture précédente",
+            "cierre anterior",
+            "предыдущее закрытие",
+        )
+    ):
+        return "previous_close"
+    if re.search(r"\b(?:candle\s+)?open(?:ing)?\b", lowered) or any(
+        phrase in lowered
+        for phrase in (
+            "افتتاح الشمعة",
+            "ouverture de la bougie",
+            "apertura de la vela",
+            "открытие свечи",
+        )
+    ):
+        return "candle_open"
+    return None
+
+
+def _metadata_answer_is_grounded(
+    field_name: str,
+    metadata: dict[str, Any],
+    text: str,
+) -> bool:
+    if field_name == "trigger_timeframe":
+        value = metadata.get("trigger_timeframe")
+        # The active clarification contract supplies the semantic role.  A compact
+        # answer such as `24h` must ground the value without repeating "trigger".
+        return isinstance(value, str) and grounds_timeframe(text, value)
+    if field_name == "reference_point":
+        return metadata.get("reference_point") == _reference_choice(text)
+    if field_name == "comparator":
+        try:
+            value = Comparator(str(metadata.get("comparator")))
+        except ValueError:
+            return False
+        if grounds_operator(text, value):
+            return True
+        lowered = " ".join(text.casefold().split())
+        inclusive = (
+            "at the threshold", "or beyond", "reaches", "عند الحد", "أو أكثر",
+            "au seuil", "ou au-delà", "en el umbral", "o más", "на пороге",
+            "или выше",
+        )
+        exclusive = (
+            "only beyond",
+            "only above",
+            "passes",
+            "فقط بعد تجاوز",
+            "seulement au-delà",
+            "solo por encima",
+            "только выше",
+        )
+        if value == Comparator.GREATER_THAN_OR_EQUAL:
+            return any(item in lowered for item in inclusive)
+        if value == Comparator.GREATER_THAN:
+            return any(item in lowered for item in exclusive)
+        return False
+    if field_name == "threshold":
+        value = metadata.get("threshold")
+        return isinstance(value, int | float) and grounds_number(
+            text,
+            float(value),
+            unit="percent",
+        )
+    return False
+
+
+def _ground_supported_unresolved_update(
+    operation: Any,
+    segment: TurnSegment,
+    existing_item: Any,
+) -> list[str]:
+    """Validate one canonical answer stored on a supported unresolved rule.
+
+    The source rule remains the original exact fragment.  The only permitted metadata
+    change is the currently requested field, the derived formula for a reference
+    choice, and the server-owned missing/next-field bookkeeping.
+    """
+
+    item = operation.unresolved
+    if item is None or segment.kind != SegmentKind.CLARIFICATION_ANSWER:
+        return [f"{operation.operation_id}:update_unresolved:not_clarification_answer"]
+    if (
+        item.unresolved_id != existing_item.unresolved_id
+        or item.source_turn_id != existing_item.source_turn_id
+        or item.source_fragment != existing_item.source_fragment
+        or item.semantic_object_id != existing_item.semantic_object_id
+        or item.target_type != "condition_creation"
+        or existing_item.target_type != "condition_creation"
+        or item.target_condition_id is not None
+        or item.target_field is not None
+        or item.blocking is not True
+        or item.created_workflow_revision != existing_item.created_workflow_revision
+    ):
+        return [f"{operation.operation_id}:update_unresolved:identity_changed"]
+    before = _supported_metadata(existing_item)
+    after = _supported_metadata(item)
+    if item.missing_slots != _canonical_supported_slots(
+        [str(value) for value in after.get("missing_slots") or []]
+    ):
+        return [f"{operation.operation_id}:update_unresolved:canonical_slots_changed"]
+    field_name = str(before.get("next_field") or "")
+    if not field_name or not _metadata_answer_is_grounded(field_name, after, segment.exact_source_text):
+        return [f"{operation.operation_id}:update_unresolved:answer_not_grounded"]
+    expected_missing = [
+        value for value in list(before.get("missing_slots") or []) if value != field_name
+    ]
+    if list(after.get("missing_slots") or []) != expected_missing:
+        return [f"{operation.operation_id}:update_unresolved:missing_slots_changed"]
+    before_fragments = [str(value) for value in before.get("evidence_fragments") or []]
+    after_fragments = [str(value) for value in after.get("evidence_fragments") or []]
+    if after_fragments != [*before_fragments, segment.exact_source_text]:
+        return [f"{operation.operation_id}:update_unresolved:evidence_changed"]
+    allowed_changes = {
+        field_name,
+        "missing_slots",
+        "next_field",
+        "evidence_fragments",
+    }
+    if field_name == "reference_point":
+        allowed_changes.add("formula")
+    for key in set(before) | set(after):
+        if key in allowed_changes:
+            continue
+        if before.get(key) != after.get(key):
+            return [f"{operation.operation_id}:update_unresolved:unexpected_change:{key}"]
+    return []
+
+
+def _ground_supported_condition_completion(
+    operation: Any,
+    segment: TurnSegment,
+    request: SetupTurnRequest,
+    open_item: Any,
+) -> list[str]:
+    """Authorize a completed core percentage rule from canonical prior evidence.
+
+    Only the one active ``condition_creation`` record can use this path.  Every earlier
+    value must equal the server-owned metadata on that record; the last missing value
+    must be grounded in the current clarification answer.  No other rule, capability,
+    group, or free-form prior message can use this exception.
+    """
+
+    node = operation.condition
+    if node is None or node.node_type != ConditionNodeType.CONDITION:
+        return [f"{operation.operation_id}:supported_completion:one_condition_required"]
+    metadata = _supported_metadata(open_item)
+    missing = list(metadata.get("missing_slots") or [])
+    if len(missing) != 1:
+        return [f"{operation.operation_id}:supported_completion:not_final_answer"]
+    field_name = str(missing[0])
+    expected = dict(metadata)
+    if field_name == "trigger_timeframe":
+        expected["trigger_timeframe"] = node.trigger_timeframe
+    elif field_name == "reference_point":
+        choice = _reference_choice(segment.exact_source_text)
+        expected["reference_point"] = choice
+        expected["formula"] = (
+            FormulaKind.OPEN_TO_CLOSE_PERCENTAGE.value
+            if choice == "candle_open"
+            else FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE.value
+            if choice == "previous_close"
+            else None
+        )
+    elif field_name == "comparator":
+        expected["comparator"] = node.operator.value if node.operator is not None else None
+    elif field_name == "threshold":
+        expected["threshold"] = node.threshold
+    if not _metadata_answer_is_grounded(field_name, expected, segment.exact_source_text):
+        return [f"{operation.operation_id}:supported_completion:final_answer_not_grounded"]
+
+    try:
+        formula = FormulaKind(str(expected.get("formula")))
+        direction = MovementDirection(str(expected.get("movement_direction")))
+        comparator = Comparator(str(expected.get("comparator")))
+        threshold = float(expected.get("threshold"))
+        timeframe = str(expected.get("trigger_timeframe"))
+    except (TypeError, ValueError):
+        return [f"{operation.operation_id}:supported_completion:metadata_incomplete"]
+    expected_symbols = [str(item) for item in expected.get("symbols") or []]
+    evidence_fragments = [
+        str(value) for value in metadata.get("evidence_fragments") or [] if str(value).strip()
+    ]
+    expected_source_fragment = "\n".join([*evidence_fragments, segment.exact_source_text])
+    checks = {
+        "source_turn": node.source_turn_id == request.source_turn_id,
+        "source_fragment": node.source_fragment == expected_source_fragment,
+        "formula": node.formula == formula,
+        "movement_direction": node.movement_direction == direction,
+        "operator": node.operator == comparator,
+        "threshold": node.threshold == threshold,
+        "unit": node.unit == "percent",
+        "trigger_timeframe": node.trigger_timeframe == timeframe,
+        "condition_symbols": node.condition_symbols == expected_symbols,
+        "capability": node.capability_key is None,
+        "required": node.required is True,
+    }
+    return [
+        f"{operation.operation_id}:supported_completion:{name}"
+        for name, passed in checks.items()
+        if not passed
+    ]
+
+
+def _supported_completion_context(
+    request: SetupTurnRequest,
+    plan: SetupAgentTurnPlan,
+    segments: dict[str, TurnSegment],
+) -> tuple[Any, AuthorizedPatchOperation, ConditionNodeV2, TurnSegment] | None:
+    """Return one already-authorized supported completion, or ``None``.
+
+    This helper never authorizes a mutation.  It re-runs the narrow completion gate
+    after canonical patch application so requirement reconciliation can consume the
+    exact same server-proved evidence without pretending the latest short answer
+    contained every earlier value.
+    """
+
+    unresolved = {item.key: item for item in request.draft.unresolved_fields}
+    open_item = _supported_completion_unresolved(request, unresolved)
+    if open_item is None:
+        return None
+    additions = [
+        operation
+        for operation in plan.operations
+        if operation.kind == "add_condition" and operation.condition is not None
+    ]
+    if len(additions) != 1:
+        return None
+    operation = additions[0]
+    segment = segments.get(operation.authorizing_segment_id)
+    if segment is None or segment.kind != SegmentKind.CLARIFICATION_ANSWER:
+        return None
+    if _ground_supported_condition_completion(
+        operation, segment, request, open_item
+    ):
+        return None
+    resolved = any(
+        candidate.kind == "resolve_unresolved_key"
+        and candidate.target_key == open_item.unresolved_id
+        and candidate.authorizing_segment_id == operation.authorizing_segment_id
+        for candidate in plan.operations
+    )
+    if not resolved:
+        return None
+    return open_item, operation, operation.condition, segment
+
+
+def _finalize_supported_completion_reconciliation(
+    request: SetupTurnRequest,
+    plan: SetupAgentTurnPlan,
+    segments: dict[str, TurnSegment],
+    reconciled: RequirementReconciliation,
+) -> RequirementReconciliation:
+    """Close one supported rule only after its dedicated authorization gate passed.
+
+    The generic reconciler intentionally grounds each field against one current-turn
+    segment.  A multi-turn rule is different: its threshold, direction, timeframe and
+    reference choice were each authorized on separate turns and preserved in a
+    server-owned unresolved record.  Once the narrow completion gate has verified that
+    complete chain, this function updates only the matching condition's read-model
+    records and removes only that exact unresolved item.  No other condition, blocker,
+    approval, or runtime state is touched.
+    """
+
+    context = _supported_completion_context(request, plan, segments)
+    if context is None:
+        return reconciled
+    open_item, operation, node, segment = context
+    evidence = node.source_fragment or ""
+    if not evidence:
+        raise SetupTurnRejected(
+            "SUPPORTED_COMPLETION_RECONCILIATION_FAILED",
+            "The completed rule did not retain its source evidence.",
+        )
+
+    semantic_fields = {
+        "formula",
+        "movement_direction",
+        "operator",
+        "threshold",
+        "unit",
+        "trigger_timeframe",
+    }
+    target_path = unresolved_target_path(open_item)
+    target_prefix = f"condition_ast.{node.node_id}."
+    states = []
+    grounded_fields: set[str] = set()
+    for state in reconciled.draft.requirement_states:
+        # The blocker is closed by the dedicated authorization proof below.  Keeping
+        # its stale requirement-state row would make downstream readers ask the same
+        # question even though the canonical unresolved item no longer exists.
+        if state.target_path == target_path:
+            continue
+        field_name = (
+            state.target_path.removeprefix(target_prefix)
+            if state.target_path.startswith(target_prefix)
+            else ""
+        )
+        if state.target_condition_id == node.node_id and field_name in semantic_fields:
+            grounded_fields.add(field_name)
+            state = state.model_copy(
+                update={
+                    "source_turn_id": request.source_turn_id,
+                    "source_segment_id": segment.segment_id,
+                    "exact_source_text": evidence,
+                    "provenance_kind": "user_confirmed",
+                    "explicit": True,
+                    "inherited": False,
+                    "platform_default": False,
+                    "supported": True,
+                    "grounded": True,
+                    "conflicting": False,
+                    "satisfied": True,
+                    "blocking": False,
+                    "reason": "",
+                }
+            )
+        states.append(state)
+    missing_states = sorted(semantic_fields - grounded_fields)
+    if missing_states:
+        raise SetupTurnRejected(
+            "SUPPORTED_COMPLETION_RECONCILIATION_FAILED",
+            "The completed rule could not be reconciled safely.",
+            details=tuple(f"missing_requirement_state:{item}" for item in missing_states),
+        )
+
+    roles = []
+    for role in reconciled.draft.semantic_role_assignments:
+        field_name = (
+            role.target_path.removeprefix(target_prefix)
+            if role.target_path.startswith(target_prefix)
+            else ""
+        )
+        if field_name in semantic_fields:
+            role = role.model_copy(
+                update={
+                    "source_turn_id": request.source_turn_id,
+                    "source_segment_id": segment.segment_id,
+                    "exact_source_text": evidence,
+                    "explicit": True,
+                    "inherited": False,
+                }
+            )
+        roles.append(role)
+
+    unresolved = [
+        item
+        for item in reconciled.draft.unresolved_fields
+        if item.unresolved_id != open_item.unresolved_id
+    ]
+    assessment = RequirementAssessmentV2(
+        requirement_id=f"supported_completion:{open_item.unresolved_id}"[:160],
+        target_path=target_path,
+        target_exists=True,
+        final_value=[node.node_id],
+        expected_or_authorized_value=[node.node_id],
+        satisfied=True,
+        changed_this_turn=True,
+        explicitly_confirmed_this_turn=True,
+        authorization_grounded=True,
+        satisfying_operation_ids=[operation.operation_id],
+        satisfying_segment_ids=[segment.segment_id],
+        unresolved_reason=None,
+    )
+    assessments = [
+        item
+        for item in reconciled.assessments
+        if item.target_path != target_path
+    ]
+    assessments.append(assessment)
+
+    payload = reconciled.draft.model_dump(mode="json")
+    payload.update(
+        {
+            "unresolved_fields": [item.model_dump(mode="json") for item in unresolved],
+            "requirement_states": [item.model_dump(mode="json") for item in states],
+            "semantic_role_assignments": [
+                item.model_dump(mode="json") for item in roles
+            ],
+            # Recompute both identities from the corrected canonical authoring state.
+            "executable_hash": "",
+            "workflow_state_hash": "",
+        }
+    )
+    fixed = StrategyDraftV2.model_validate(payload)
+    return RequirementReconciliation(
+        draft=fixed,
+        assessments=tuple(assessments),
+        answered_question_ids=tuple(
+            dict.fromkeys(
+                [*reconciled.answered_question_ids, open_item.unresolved_id]
+            )
+        ),
+    )
+
+
 def _ground_condition_operation(
     operation: Any,
     segment: TurnSegment,
@@ -1276,9 +1734,21 @@ def _ground_condition_operation(
     unresolved: dict[str, Any],
     unsupported: dict[str, Any],
 ) -> list[str]:
-    del unresolved, unsupported
+    del unsupported
     assert operation.condition is not None
     text = segment.exact_source_text
+    supported_open = _supported_completion_unresolved(request, unresolved)
+    if (
+        operation.kind == "add_condition"
+        and supported_open is not None
+        and segment.kind == SegmentKind.CLARIFICATION_ANSWER
+    ):
+        return _ground_supported_condition_completion(
+            operation,
+            segment,
+            request,
+            supported_open,
+        )
     if operation.kind == "update_condition":
         return _update_grounding(
             existing.get(operation.target_condition_id or ""),
@@ -1404,10 +1874,20 @@ def _ground_unresolved_operation(
     """
     del unsupported
     item = operation.unresolved
-    if item is None or not _quoted_in(item.source_fragment, segment.exact_source_text):
+    if item is None:
         return [f"{operation.operation_id}:{operation.kind}:source_not_grounded"]
     if operation.kind == "update_unresolved" and operation.target_key not in unresolved:
         return [f"{operation.operation_id}:update_unresolved:target_missing"]
+    if operation.kind == "update_unresolved":
+        existing_item = unresolved.get(operation.target_key or "")
+        if _is_supported_unresolved(existing_item):
+            return _ground_supported_unresolved_update(
+                operation,
+                segment,
+                existing_item,
+            )
+    if not _quoted_in(item.source_fragment, segment.exact_source_text):
+        return [f"{operation.operation_id}:{operation.kind}:source_not_grounded"]
 
     # (1) intent. A question can only come out of a segment that asked for something.
     if segment.kind not in ACTIONABLE_SEGMENT_KINDS:

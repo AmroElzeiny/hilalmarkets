@@ -473,6 +473,21 @@ class SupportedIncompleteIntent(PlannerModel):
         return self
 
 
+class ReadOnlyPercentageScanIntent(PlannerModel):
+    """A current-market percentage question that must not mutate Setup state.
+
+    This is a routing contract, not an execution result.  The planner may report only
+    values the trader stated in the current segment.  The server later checks the
+    selected screened universe, entitlement, quota, provider data and durable run
+    identity before any result is returned.
+    """
+
+    segment_ref: str = Field(min_length=1, max_length=40)
+    movement_direction: Literal["up", "down"]
+    threshold_percent: float = Field(gt=0, le=1000)
+    measurement_window: Literal["24h"] | None = None
+
+
 class ApprovalIntentSignal(PlannerModel):
     segment_ref: str = Field(min_length=1, max_length=40)
 
@@ -489,6 +504,9 @@ class PlannerIntentEnvelope(PlannerModel):
     supported_incomplete_intents: list[SupportedIncompleteIntent] = Field(
         default_factory=list, max_length=6
     )
+    read_only_percentage_scans: list[ReadOnlyPercentageScanIntent] = Field(
+        default_factory=list, max_length=1
+    )
     unsupported_intents: list[UnsupportedIntent] = Field(default_factory=list, max_length=6)
     approval_intent: ApprovalIntentSignal | None = None
     overall_confidence: float = Field(default=1.0, ge=0, le=1)
@@ -503,12 +521,24 @@ class PlannerIntentEnvelope(PlannerModel):
             *(item.segment_ref for item in self.semantic_intents),
             *(item.segment_ref for item in self.clarification_answers),
             *(item.segment_ref for item in self.supported_incomplete_intents),
+            *(item.segment_ref for item in self.read_only_percentage_scans),
             *(item.segment_ref for item in self.unsupported_intents),
             *(self.questions_to_answer),
             *([self.approval_intent.segment_ref] if self.approval_intent else []),
         ]
         if any(reference not in known for reference in used):
             raise ValueError("an envelope item names a segment outside this turn")
+        scan_refs = {item.segment_ref for item in self.read_only_percentage_scans}
+        conflicting_scan_refs = scan_refs & {
+            *(item.segment_ref for item in self.semantic_intents),
+            *(item.segment_ref for item in self.supported_incomplete_intents),
+            *(item.segment_ref for item in self.unsupported_intents),
+            *self.questions_to_answer,
+        }
+        if conflicting_scan_refs:
+            raise ValueError(
+                "a read-only Scanner segment cannot also author or classify setup state"
+            )
         return self
 
     @property
@@ -517,6 +547,7 @@ class PlannerIntentEnvelope(PlannerModel):
             self.semantic_intents
             or self.clarification_answers
             or self.supported_incomplete_intents
+            or self.read_only_percentage_scans
             or self.unsupported_intents
         )
 
@@ -790,7 +821,9 @@ def schema_complexity(schema: dict[str, Any]) -> dict[str, int]:
 # rather than restating its fields, so there is still exactly one rule definition on
 # the wire. Provider acceptance and the measured effect are recorded in
 # SETUP_CHAT_LATENCY_FINDINGS.md.
-PLANNER_SCHEMA_BYTE_BUDGET = 10500
+# Y5.2 adds one typed read-only current-market intent (about 524 compact bytes).
+# The cap remains deliberately tight and is asserted against the exact provider schema.
+PLANNER_SCHEMA_BYTE_BUDGET = 11200
 PLANNER_SCHEMA_DEPTH_BUDGET = 8
 
 FORBIDDEN_SCHEMA_MODELS: frozenset[str] = frozenset(

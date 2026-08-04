@@ -49,33 +49,31 @@
       ? `<section class="ai-snapshot-card"><strong>${clean(payload.provider_name)} · ${clean(payload.symbols_checked)} symbols</strong><span>BTC ${clean(payload.btc_status?.percentage_24h ?? "n/a")}% · ETH ${clean(payload.eth_status?.percentage_24h ?? "n/a")}%</span><span>${clean(payload.advancing)} advancing · ${clean(payload.declining)} declining · ${clean(payload.unchanged)} unchanged</span><span>${clean(payload.volatility_label)} dispersion · average ${clean(payload.average_change_24h)}%</span></section>`
       : "";
     const scannerResult = payload.scanner_result;
-    const standardScannerRows = Array.isArray(scannerResult?.results)
-      ? scannerResult.results.slice(0, 5)
+    const scannerUi = payload.scanner_ui || {};
+    const allScannerRows = Array.isArray(scannerResult?.results)
+      ? scannerResult.results
       : [];
-    const percentageSnapshot = Array.isArray(scannerResult?.matches)
-      && !Array.isArray(scannerResult?.results);
+    const scannerRows = allScannerRows.slice(0, 5);
+    const safeMatchPercentage = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+    };
     const confirmedCount = Number.isFinite(Number(scannerResult?.confirmed_count))
       ? Number(scannerResult.confirmed_count)
-      : standardScannerRows.filter((row) => row?.outcome === "confirmed").length;
+      : scannerRows.filter((row) => row?.category === "confirmed" || row?.outcome === "confirmed").length;
     const formingCount = Number.isFinite(Number(scannerResult?.forming_count))
       ? Number(scannerResult.forming_count)
-      : standardScannerRows.filter((row) => ["forming", "near_miss"].includes(row?.outcome)).length;
-    const standardScanner = !user
+      : scannerRows.filter((row) => ["forming", "near_miss"].includes(row?.outcome)).length;
+    const readOnlyScanner = payload.read_only === true
+      && scannerResult?.read_only === true
+      && scannerResult?.strategy_mutated === false;
+    const scanner = !user
       && item.message_type === "scanner_result"
       && scannerResult
-      && !percentageSnapshot
-      ? `<section class="ai-scanner-result-card"><strong>Scanner result</strong><span>${clean(scannerResult.symbols_scanned ?? 0)} symbols scanned · ${clean(confirmedCount)} confirmed · ${clean(formingCount)} forming</span>${standardScannerRows.length ? `<div class="ai-scanner-result-list">${standardScannerRows.map((row) => `<div><strong>${clean(row.symbol)}</strong><span>${clean(String(Math.round(Number(row.match_percentage || 0))))}% · ${clean(String(row.outcome || "evaluated").replaceAll("_", " "))}</span></div>`).join("")}</div>` : ""}${scannerResult.common_missing_reasons?.length ? `<small>Common misses: ${scannerResult.common_missing_reasons.map((entry) => `${clean(entry.condition)} (${clean(entry.count)})`).join(", ")}</small>` : ""}<small>${clean(scannerResult.disclaimer || "Research only. Not buy or sell advice.")}</small></section>`
+      ? readOnlyScanner
+        ? `<section class="ai-scanner-result-card"><strong>${clean(scannerUi.title || "Read-only Scanner")}</strong><span>${clean(scannerResult.symbols_scanned ?? 0)} ${clean(scannerUi.checked || "screened coins checked")} · ${clean(allScannerRows.length)} ${clean(scannerUi.matched || "matched")}</span><small>${clean(scannerUi.read_only || "Read-only")} · ${clean(scannerUi.no_changes || "no setup changes")}${scannerResult.evaluated_at ? ` · ${clean(scannerResult.evaluated_at)}` : ""}</small><small>${clean(scannerUi.research || "Research only. Not buy or sell advice.")}</small></section>`
+        : `<section class="ai-scanner-result-card"><strong>${clean(scannerUi.title || "Scanner result")}</strong><span>${clean(scannerResult.symbols_scanned ?? 0)} ${clean(scannerUi.checked || "symbols scanned")} · ${clean(confirmedCount)} ${clean(scannerUi.confirmed || "confirmed")} · ${clean(formingCount)} ${clean(scannerUi.forming || "forming")}</span>${scannerRows.length ? `<div class="ai-scanner-result-list">${scannerRows.map((row) => `<div><strong>${clean(row.symbol)}</strong><span>${clean(String(safeMatchPercentage(row.match_percentage)))}% · ${clean(String(row.outcome || "evaluated").replaceAll("_", " "))}</span></div>`).join("")}</div>` : ""}${scannerResult.common_missing_reasons?.length ? `<small>${clean(scannerUi.commonMisses || "Common misses")}: ${scannerResult.common_missing_reasons.map((entry) => `${clean(entry.condition)} (${clean(entry.count)})`).join(", ")}</small>` : ""}<small>${clean(scannerResult.disclaimer || scannerUi.research || "Research only. Not buy or sell advice.")}</small></section>`
       : "";
-    // The read-only percentage path already states the matching coins in the assistant
-    // message. Show only its audit summary here, so the same market facts are not
-    // repeated a second time in the bubble.
-    const percentageScanner = !user
-      && item.message_type === "scanner_result"
-      && percentageSnapshot
-      && scannerResult.status === "available"
-      ? `<section class="ai-scanner-result-card"><strong>Read-only Scanner · ${clean(scannerResult.timeframe || "24h")}</strong><span>${clean(scannerResult.symbols_checked ?? 0)} screened coins checked · ${clean(scannerResult.matches.length)} matched</span><small>${scannerResult.strategy_mutated === false ? "Read-only · no setup changes" : "Research only"}${scannerResult.captured_at ? ` · ${clean(scannerResult.captured_at)}` : ""}</small></section>`
-      : "";
-    const scanner = `${standardScanner}${percentageScanner}`;
     const delivery = item.failed
       ? '<small class="ai-chat-delivery failed">Not sent · Retry below</small>'
       : item.pending ? '<small class="ai-chat-delivery">Sending…</small>' : "";

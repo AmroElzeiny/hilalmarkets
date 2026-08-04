@@ -257,9 +257,22 @@
       return;
     }
     const clarifications = Array.isArray(payload.clarifications) ? payload.clarifications : [];
-    const clarificationOptions = clarifications.flatMap((item) =>
-      (item.options || []).map((option) => ({...option, key: option.key || item.key})),
-    );
+    const clarificationOptions = clarifications.flatMap((item) => {
+      const serverOptions = Array.isArray(item.options) ? item.options : [];
+      if (serverOptions.length) {
+        return serverOptions.map((option) => ({
+          ...option,
+          key: option.key || item.key,
+          chatReply: false,
+        }));
+      }
+      const replyOptions = Array.isArray(item.allowed_options) ? item.allowed_options : [];
+      return replyOptions.map((value) => ({
+        value,
+        label: value,
+        chatReply: true,
+      }));
+    });
     const actionLabels = {
       answer_clarification: "Answer in chat",
       review_draft: "Review draft",
@@ -306,6 +319,10 @@
           return;
         }
         const label = option.label || option.value;
+        if (option.chatReply) {
+          sendMessage({message: String(option.value || label)}, label);
+          return;
+        }
         sendMessage({
           message: option.key === "apply_suggestion" ? label : "",
           option_key: option.key,

@@ -65,6 +65,7 @@ from ai_market_monitor.engine.planner_references import (
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.repair_eligibility import RepairDecision, decide_repair
 from ai_market_monitor.engine.requirement_state import active_requirement_states
+from ai_market_monitor.engine.semantic_grounding import grounds_number
 from ai_market_monitor.engine.setup_failure_taxonomy import (
     SetupFailureClass,
     TurnFailureRecord,
@@ -106,6 +107,7 @@ from ai_market_monitor.schemas.planner_intent import (
     BooleanTopologyRepair,
     PlannerIntentEnvelope,
     PlannerRepairEnvelope,
+    ReadOnlyPercentageScanIntent,
     ReplaceBooleanPayload,
     SemanticIntent,
     SupportedIncompleteIntent,
@@ -113,6 +115,7 @@ from ai_market_monitor.schemas.planner_intent import (
     schema_complexity,
 )
 from ai_market_monitor.schemas.screening_execution import PreflightManifest
+from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
     SETUP_REPLY_MAX_LENGTH,
@@ -125,16 +128,24 @@ from ai_market_monitor.schemas.setup_agent import (
     SetupAgentTurnPlan,
     SetupConversationContext,
     SetupTurnExecutionResult,
+    StrategyInstructionPlan,
+    TurnSegment,
 )
 from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
     ClarificationContract,
     ClarificationTargetType,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
+    ConditionNodeV2,
     DraftMode,
+    FormulaKind,
+    MovementDirection,
+    OperandV2,
     StrategyDraftV2,
+    UnresolvedFieldV2,
 )
 from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.openai_structured_call import (
@@ -388,6 +399,10 @@ class SetupAgentTurnResult:
     usage: dict[str, Any] = field(default_factory=dict)
     #: What this turn established, kept whether it succeeded or not.
     snapshot: ValidatedIntentSnapshot | None = None
+    #: A planner-classified, server-validated current-market request.  The launch
+    #: service executes it through the durable governed Scanner after this result is
+    #: returned.  It is never a strategy mutation or approval instruction.
+    read_only_scan_request: dict[str, object] | None = None
 
     @property
     def message(self) -> str:
@@ -645,6 +660,7 @@ class SetupChatAgent:
             canonical_draft_hash=turn.draft.executable_hash or "",
             normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
         ).to_dict()
+
         with telemetry.stage("context_selection"):
             shortlist = build_capability_shortlist(
                 turn.normalized_message,
@@ -743,6 +759,28 @@ class SetupChatAgent:
             ),
         ).to_dict()
 
+        # These routes depend on the planner's typed envelope.  They must run only
+        # after planning, trace construction and grounded-snapshot capture; placing
+        # them earlier would reference undefined state and would also bypass AI-first
+        # classification.
+        read_only = await self._handle_read_only_scan_intent(
+            turn,
+            envelope,
+            trace=trace,
+            usage=plan_usage,
+        )
+        if read_only is not None:
+            return read_only
+
+        continued = await self._continue_supported_incomplete(
+            turn,
+            envelope,
+            trace=trace,
+            usage=plan_usage,
+        )
+        if continued is not None:
+            return continued
+
         # A registered/core mechanic with missing user-controlled values is not an
         # unsupported capability. Start one typed clarification and keep the grounded
         # parts in conversation context so a confusion signal can recover the real goal.
@@ -753,47 +791,11 @@ class SetupChatAgent:
                 incomplete_requests.append(promoted)
                 telemetry.notes["promoted_unsupported_to_supported_incomplete"] = True
         if incomplete_requests:
-            incomplete = incomplete_requests[0]
-            clarification = _clarification_for_supported_incomplete(
-                turn, incomplete, envelope
-            )
-            pending = _supported_request_context(turn, incomplete, envelope)
-            intro = _localized(
-                turn.active_language,
-                "clarification_intro",
-            )
-            fingerprint = _response_fingerprint(
-                f"{intro}\n\n{clarification.question}"
-            )
-            conversation = turn.conversation.model_copy(
-                update={
-                    "active_language": turn.active_language,
-                    "active_goal": "complete_supported_setup",
-                    "pending_supported_request": pending,
-                }
-            ).with_question(clarification)
-            conversation = conversation.model_copy(
-                update={"last_response_fingerprint": fingerprint}
-            )
-            reply = deterministic_reply(
-                intro,
-                selected_clarification_id=clarification.question_id,
-            )
-            trace = _with(
-                trace,
-                model_calls=self.model_call_count,
-                patch_validation="supported_incomplete",
-                response_model="deterministic_clarification",
-                response_fingerprint=fingerprint,
-            )
-            return SetupAgentTurnResult(
-                reply=reply,
-                execution=None,
-                draft=turn.draft,
-                conversation=conversation,
-                plan=None,
+            return await self._start_supported_incomplete(
+                turn,
+                incomplete_requests[0],
+                envelope,
                 trace=trace,
-                clarification=clarification,
                 usage=plan_usage,
             )
 
@@ -1023,6 +1025,689 @@ class SetupChatAgent:
             clarification=chosen,
             material_change=outcome.material_change,
             usage=self.last_usage,
+        )
+
+    async def _handle_read_only_scan_intent(
+        self,
+        turn: SetupAgentTurnInput,
+        envelope: PlannerIntentEnvelope,
+        *,
+        trace: SetupAgentTrace,
+        usage: dict[str, Any],
+    ) -> SetupAgentTurnResult | None:
+        """Route a planner-classified current-market question without mutating a draft.
+
+        Arbitrary text has already passed through the planner.  Deterministic code only
+        validates the typed intent, preserves an unfinished request, and decides whether
+        the governed Scanner has enough server-owned context to run.
+        """
+
+        pending = dict(turn.conversation.pending_read_only_scan or {})
+        if pending and _is_confusion_signal(turn.message):
+            question = _localized(turn.active_language, "scan_window_question")
+            content = _localized(
+                turn.active_language,
+                "confusion_scan",
+                threshold=f"{float(pending.get('threshold_percent') or 0):g}%",
+                direction=str(pending.get("movement_direction") or "up"),
+                question=question,
+            )
+            fingerprint = _response_fingerprint(content)
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "active_goal": "read_only_percentage_scan",
+                    "confusion_recovery_count": (
+                        turn.conversation.confusion_recovery_count + 1
+                    ),
+                    "last_response_fingerprint": fingerprint,
+                }
+            )
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(content),
+                execution=None,
+                draft=turn.draft,
+                conversation=conversation,
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="read_only_confusion_recovery",
+                    response_model="deterministic_read_only",
+                    response_fingerprint=fingerprint,
+                ),
+                usage=usage,
+            )
+
+        scan: ReadOnlyPercentageScanIntent | None = (
+            envelope.read_only_percentage_scans[0]
+            if envelope.read_only_percentage_scans
+            else None
+        )
+        continued_pending_window = False
+        if scan is None and pending and _planner_answered_active_question(turn, envelope):
+            window = _read_only_window_answer(turn.message)
+            if window is None:
+                question = _localized(turn.active_language, "scan_window_question")
+                fingerprint = _response_fingerprint(question)
+                conversation = turn.conversation.model_copy(
+                    update={
+                        "active_language": turn.active_language,
+                        "active_goal": "read_only_percentage_scan",
+                        "last_response_fingerprint": fingerprint,
+                    }
+                )
+                return SetupAgentTurnResult(
+                    reply=deterministic_reply(question),
+                    execution=None,
+                    draft=turn.draft,
+                    conversation=conversation,
+                    plan=None,
+                    trace=_with(
+                        trace,
+                        patch_validation="read_only_window_unresolved",
+                        response_model="deterministic_read_only",
+                        response_fingerprint=fingerprint,
+                    ),
+                    usage=usage,
+                )
+            continued_pending_window = True
+            scan = ReadOnlyPercentageScanIntent(
+                segment_ref=(
+                    envelope.clarification_answers[0].segment_ref
+                    if envelope.clarification_answers
+                    else envelope.segments[0].segment_ref
+                ),
+                movement_direction=cast(
+                    Any, str(pending.get("movement_direction") or "up")
+                ),
+                threshold_percent=float(pending.get("threshold_percent") or 0),
+                measurement_window=window,
+            )
+
+        if scan is None:
+            return None
+        source_segment = next(
+            (item for item in envelope.segments if item.segment_ref == scan.segment_ref),
+            None,
+        )
+        prior_source = str(pending.get("source_text") or "")
+        prior_scan = (
+            ReadOnlyPercentageScanIntent(
+                segment_ref=scan.segment_ref,
+                movement_direction=scan.movement_direction,
+                threshold_percent=scan.threshold_percent,
+                measurement_window=None,
+            )
+            if continued_pending_window
+            else None
+        )
+        values_grounded = bool(
+            source_segment is not None
+            and (
+                (
+                    continued_pending_window
+                    and prior_scan is not None
+                    and _read_only_scan_values_are_grounded(prior_scan, prior_source)
+                    and _read_only_window_answer(source_segment.exact_source_text)
+                    == scan.measurement_window
+                )
+                or (
+                    not continued_pending_window
+                    and _read_only_scan_values_are_grounded(
+                        scan, source_segment.exact_source_text
+                    )
+                )
+            )
+        )
+        if not values_grounded:
+            raise SetupAgentError(
+                "VALUE_NOT_GROUNDED",
+                "The current-market scan values did not match the user's exact words.",
+                stage="tool_validation",
+                details=("read_only_percentage_scan:source_mismatch",),
+                usage=usage,
+            )
+        if turn.setup_mode != DraftMode.SCANNER:
+            request = {
+                "movement_direction": scan.movement_direction,
+                "threshold_percent": scan.threshold_percent,
+                "measurement_window": scan.measurement_window,
+                "source_text": next(
+                    (
+                        item.exact_source_text
+                        for item in envelope.segments
+                        if item.segment_ref == scan.segment_ref
+                    ),
+                    turn.message,
+                )[:500],
+            }
+            content = _localized(turn.active_language, "scan_mode_required")
+            fingerprint = _response_fingerprint(content)
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(content),
+                execution=None,
+                draft=turn.draft,
+                conversation=turn.conversation.model_copy(
+                    update={
+                        "active_language": turn.active_language,
+                        "active_goal": "read_only_percentage_scan",
+                        "pending_read_only_scan": request,
+                        "last_response_fingerprint": fingerprint,
+                    }
+                ),
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="read_only_wrong_mode",
+                    response_model="deterministic_read_only",
+                    response_fingerprint=fingerprint,
+                ),
+                usage=usage,
+            )
+
+        request = {
+            "movement_direction": scan.movement_direction,
+            "threshold_percent": scan.threshold_percent,
+            "measurement_window": scan.measurement_window,
+            "source_text": next(
+                (
+                    item.exact_source_text
+                    for item in envelope.segments
+                    if item.segment_ref == scan.segment_ref
+                ),
+                turn.message,
+            )[:500],
+        }
+        if not _scan_universe_is_ready(turn.draft):
+            request["measurement_window"] = scan.measurement_window
+            content = _localized(turn.active_language, "scan_scope_required")
+            fingerprint = _response_fingerprint(content)
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "active_goal": "read_only_percentage_scan",
+                    "pending_read_only_scan": request,
+                    "last_response_fingerprint": fingerprint,
+                }
+            )
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(content),
+                execution=None,
+                draft=turn.draft,
+                conversation=conversation,
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="read_only_scope_required",
+                    response_model="deterministic_read_only",
+                    response_fingerprint=fingerprint,
+                ),
+                usage=usage,
+            )
+
+        if scan.measurement_window is None:
+            question = _localized(turn.active_language, "scan_window_question")
+            digest = hashlib.sha256(
+                f"{turn.source_turn_id}:read-only-window".encode()
+            ).hexdigest()[:20]
+            clarification = ClarificationContract(
+                question_id=f"scan_window_{digest}",
+                question=question,
+                reason="The provider's rolling percentage field needs an explicit window.",
+                target_type="conversational",
+                expected_answer_schema=json.dumps(
+                    {"type": "string", "enum": ["24h"]},
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                mutating=False,
+                allowed_options=["24h"],
+            )
+            request["measurement_window"] = None
+            fingerprint = _response_fingerprint(question)
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "active_goal": "read_only_percentage_scan",
+                    "pending_read_only_scan": request,
+                }
+            ).with_question(clarification)
+            conversation = conversation.model_copy(
+                update={"last_response_fingerprint": fingerprint}
+            )
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(
+                    _localized(turn.active_language, "scan_request_acknowledged"),
+                    selected_clarification_id=clarification.question_id,
+                ),
+                execution=None,
+                draft=turn.draft,
+                conversation=conversation,
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="read_only_window_required",
+                    response_model="deterministic_read_only",
+                    response_fingerprint=fingerprint,
+                ),
+                clarification=clarification,
+                usage=usage,
+            )
+
+        content = _localized(turn.active_language, "scan_running")
+        fingerprint = _response_fingerprint(content)
+        conversation = turn.conversation.model_copy(
+            update={
+                "active_language": turn.active_language,
+                "active_goal": "read_only_percentage_scan",
+                "pending_read_only_scan": request,
+                "last_response_fingerprint": fingerprint,
+            }
+        ).cleared_question()
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(content),
+            execution=None,
+            draft=turn.draft,
+            conversation=conversation,
+            plan=None,
+            trace=_with(
+                trace,
+                patch_validation="read_only_scan_authorized",
+                response_model="governed_scanner",
+                response_fingerprint=fingerprint,
+            ),
+            usage=usage,
+            read_only_scan_request=request,
+        )
+
+    async def _start_supported_incomplete(
+        self,
+        turn: SetupAgentTurnInput,
+        request: SupportedIncompleteIntent,
+        envelope: PlannerIntentEnvelope,
+        *,
+        trace: SetupAgentTrace,
+        usage: dict[str, Any],
+    ) -> SetupAgentTurnResult:
+        metadata = _supported_request_context(turn, request, envelope)
+        if not _is_canonical_percentage_request(metadata):
+            clarification = _clarification_for_supported_incomplete(turn, request, envelope)
+            intro = _localized(turn.active_language, "clarification_intro")
+            final = f"{intro}\n\n{clarification.question}"
+            fingerprint = _response_fingerprint(final)
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "active_goal": "complete_supported_setup",
+                    "pending_supported_request": metadata,
+                    "last_response_fingerprint": fingerprint,
+                }
+            ).with_question(clarification)
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(
+                    intro, selected_clarification_id=clarification.question_id
+                ),
+                execution=None,
+                draft=turn.draft,
+                conversation=conversation,
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="supported_incomplete_non_percentage",
+                    response_model="deterministic_clarification",
+                    response_fingerprint=fingerprint,
+                ),
+                clarification=clarification,
+                usage=usage,
+            )
+        missing = _supported_missing_slots(metadata, request.missing_fields)
+        if not missing:
+            raise SetupAgentError(
+                "INTENT_INCOMPLETE",
+                "That supported rule is missing a value I could not identify safely.",
+                stage="tool_validation",
+                usage=usage,
+            )
+        field_name = _next_supported_field(missing)
+        clarification = _supported_clarification(
+            turn,
+            field_name=field_name,
+            source_seed=request.segment_ref,
+        )
+        segment = next(
+            item for item in envelope.segments if item.segment_ref == request.segment_ref
+        )
+        unresolved_id = "supported_" + hashlib.sha256(
+            f"{turn.source_turn_id}:{request.segment_ref}".encode()
+        ).hexdigest()[:24]
+        clarification = clarification.model_copy(
+            update={"question_id": unresolved_id}
+        )
+        semantic_object_id = f"object_{unresolved_id.removeprefix('supported_')}"
+        metadata.update(
+            {
+                "schema_version": 1,
+                "source_turn_id": turn.source_turn_id,
+                "semantic_object_id": semantic_object_id,
+                "missing_slots": missing,
+                "next_field": field_name,
+                "evidence_fragments": [segment.exact_source_text],
+            }
+        )
+        unresolved = UnresolvedFieldV2(
+            unresolved_id=unresolved_id,
+            semantic_object_id=semantic_object_id,
+            source_turn_id=turn.source_turn_id,
+            source_fragment=segment.exact_source_text,
+            target_type="condition_creation",
+            expected_answer_schema=_supported_answer_schema(
+                clarification, metadata
+            ),
+            missing_slots=_canonical_supported_slots(missing),
+            allowed_options=list(clarification.allowed_options),
+            question=clarification.question,
+            reason=clarification.reason,
+            created_workflow_revision=turn.draft.workflow_revision,
+        )
+        plan = _supported_workflow_plan(
+            turn,
+            source_text=segment.exact_source_text,
+            segment_kind=SegmentKind.STRATEGY_INSTRUCTION,
+            operation=AuthorizedPatchOperation(
+                operation_id=f"add_{unresolved_id}"[:80],
+                authorizing_segment_id="supported_request",
+                kind="add_unresolved",
+                unresolved=unresolved,
+            ),
+            summary="Preserve a supported incomplete rule as canonical unresolved state.",
+        )
+        return await self._execute_supported_workflow_plan(
+            turn,
+            plan,
+            trace=trace,
+            usage=usage,
+            clarification=clarification,
+            intro=_localized(turn.active_language, "clarification_intro"),
+            include_gates=False,
+            pending_metadata=metadata,
+        )
+
+    async def _continue_supported_incomplete(
+        self,
+        turn: SetupAgentTurnInput,
+        envelope: PlannerIntentEnvelope,
+        *,
+        trace: SetupAgentTrace,
+        usage: dict[str, Any],
+    ) -> SetupAgentTurnResult | None:
+        unresolved = _active_supported_unresolved(turn.draft, turn.conversation)
+        if unresolved is None:
+            return None
+        if _is_confusion_signal(turn.message):
+            content = _localized(
+                turn.active_language,
+                "confusion_question",
+                question=unresolved.question,
+            )
+            fingerprint = _response_fingerprint(content)
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "active_goal": "complete_supported_setup",
+                    "confusion_recovery_count": (
+                        turn.conversation.confusion_recovery_count + 1
+                    ),
+                    "last_response_fingerprint": fingerprint,
+                }
+            )
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(content),
+                execution=None,
+                draft=turn.draft,
+                conversation=conversation,
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="supported_confusion_recovery",
+                    response_model="deterministic_clarification",
+                    response_fingerprint=fingerprint,
+                ),
+                usage=usage,
+            )
+        if not _planner_answered_active_question(turn, envelope):
+            return None
+
+        metadata = _supported_metadata(unresolved)
+        field_name = str(metadata.get("next_field") or "")
+        value = _supported_answer_value(field_name, turn.message)
+        if value is None:
+            content = _localized(
+                turn.active_language,
+                "clarification_invalid",
+                question=unresolved.question,
+            )
+            fingerprint = _response_fingerprint(content)
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(content),
+                execution=None,
+                draft=turn.draft,
+                conversation=turn.conversation.model_copy(
+                    update={
+                        "active_language": turn.active_language,
+                        "last_response_fingerprint": fingerprint,
+                    }
+                ),
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="supported_answer_invalid",
+                    response_model="deterministic_clarification",
+                    response_fingerprint=fingerprint,
+                ),
+                usage=usage,
+            )
+
+        _apply_supported_answer(metadata, field_name, value)
+        missing = [
+            item for item in list(metadata.get("missing_slots") or []) if item != field_name
+        ]
+        metadata["missing_slots"] = missing
+        answer = envelope.clarification_answers[0]
+        segment_text = next(
+            (
+                item.exact_source_text
+                for item in envelope.segments
+                if item.segment_ref == answer.segment_ref
+            ),
+            turn.message,
+        )
+        evidence_fragments = [
+            str(item) for item in metadata.get("evidence_fragments") or [] if str(item).strip()
+        ]
+        evidence_fragments.append(segment_text)
+        metadata["evidence_fragments"] = evidence_fragments
+        if missing:
+            next_field = _next_supported_field(missing)
+            metadata["next_field"] = next_field
+            clarification = _supported_clarification(
+                turn,
+                field_name=next_field,
+                source_seed=unresolved.semantic_object_id or unresolved.unresolved_id,
+            ).model_copy(update={"question_id": unresolved.unresolved_id})
+            updated = unresolved.model_copy(
+                update={
+                    "expected_answer_schema": _supported_answer_schema(
+                        clarification, metadata
+                    ),
+                    "missing_slots": _canonical_supported_slots(missing),
+                    "allowed_options": list(clarification.allowed_options),
+                    "question": clarification.question,
+                    "reason": clarification.reason,
+                }
+            )
+            operation = AuthorizedPatchOperation(
+                operation_id=f"update_{unresolved.unresolved_id}_{turn.source_turn_id}"[:80],
+                authorizing_segment_id="supported_answer",
+                kind="update_unresolved",
+                target_key=unresolved.unresolved_id,
+                unresolved=updated,
+            )
+            plan = _supported_workflow_plan(
+                turn,
+                source_text=segment_text,
+                segment_kind=SegmentKind.CLARIFICATION_ANSWER,
+                operation=operation,
+                summary="Store one grounded answer for the pending supported rule.",
+                question_id=unresolved.unresolved_id,
+            )
+            return await self._execute_supported_workflow_plan(
+                turn,
+                plan,
+                trace=trace,
+                usage=usage,
+                clarification=clarification,
+                intro=_localized(turn.active_language, "question_answered"),
+                include_gates=False,
+                pending_metadata=metadata,
+            )
+
+        node = _condition_from_supported_metadata(
+            metadata,
+            source_turn_id=turn.source_turn_id,
+            source_fragment="\n".join(
+                str(item) for item in metadata.get("evidence_fragments") or [segment_text]
+            ),
+        )
+        add_operation = AuthorizedPatchOperation(
+            operation_id=f"complete_{unresolved.unresolved_id}"[:80],
+            authorizing_segment_id="supported_answer",
+            kind="add_condition",
+            condition=node,
+        )
+        resolve_operation = AuthorizedPatchOperation(
+            operation_id=f"resolve_{unresolved.unresolved_id}"[:80],
+            authorizing_segment_id="supported_answer",
+            kind="resolve_unresolved_key",
+            target_key=unresolved.unresolved_id,
+        )
+        plan = _supported_workflow_plan(
+            turn,
+            source_text=segment_text,
+            segment_kind=SegmentKind.CLARIFICATION_ANSWER,
+            operation=[add_operation, resolve_operation],
+            summary="Complete the previously grounded supported rule.",
+            question_id=unresolved.unresolved_id,
+        )
+        return await self._execute_supported_workflow_plan(
+            turn,
+            plan,
+            trace=trace,
+            usage=usage,
+            clarification=None,
+            intro=_localized(turn.active_language, "supported_rule_completed"),
+            include_gates=True,
+            pending_metadata={},
+        )
+
+    async def _execute_supported_workflow_plan(
+        self,
+        turn: SetupAgentTurnInput,
+        plan: SetupAgentTurnPlan,
+        *,
+        trace: SetupAgentTrace,
+        usage: dict[str, Any],
+        clarification: ClarificationContract | None,
+        intro: str,
+        include_gates: bool,
+        pending_metadata: dict[str, object],
+    ) -> SetupAgentTurnResult:
+        if turn.stage_callback is not None:
+            await turn.stage_callback(
+                "EXECUTING",
+                {"planner_model": trace.planner_model, "plan": plan.model_dump(mode="json")},
+            )
+        try:
+            outcome = await apply_setup_turn(
+                _turn_request(
+                    turn,
+                    plan,
+                    frozenset(),
+                    include_gates=include_gates,
+                )
+            )
+        except SetupTurnRejected as exc:
+            raise SetupAgentError(
+                exc.code,
+                str(exc),
+                stage="tool_validation",
+                details=exc.details,
+                usage=usage,
+            ) from exc
+        if turn.stage_callback is not None:
+            await turn.stage_callback(
+                "COMPOSING",
+                {
+                    "planner_model": trace.planner_model,
+                    "plan": plan.model_dump(mode="json"),
+                    "execution_result": outcome.result.model_dump(mode="json"),
+                    "draft_after": outcome.draft.model_dump(mode="json"),
+                    "conversation_after": outcome.conversation.model_dump(mode="json"),
+                    "definition": (
+                        outcome.definition.model_dump(mode="json")
+                        if outcome.definition is not None
+                        else None
+                    ),
+                    "history_snapshot": outcome.history_snapshot,
+                    "material_change": outcome.material_change,
+                },
+            )
+        selected = clarification
+        if selected is None and outcome.result.allowed_clarifications:
+            selected = outcome.result.allowed_clarifications[0]
+        conversation = outcome.conversation.model_copy(
+            update={
+                "active_language": turn.active_language,
+                "active_goal": (
+                    "complete_supported_setup" if selected is not None else None
+                ),
+                "pending_supported_request": pending_metadata,
+            }
+        )
+        if selected is not None:
+            conversation = conversation.with_question(selected)
+        else:
+            conversation = conversation.cleared_question()
+        final = f"{intro}\n\n{selected.question}" if selected is not None else intro
+        fingerprint = _response_fingerprint(final)
+        conversation = conversation.model_copy(
+            update={
+                "last_assistant_summary": final[:1000],
+                "last_response_fingerprint": fingerprint,
+            }
+        )
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(
+                intro,
+                selected_clarification_id=(selected.question_id if selected else None),
+            ),
+            execution=outcome.result,
+            draft=outcome.draft,
+            conversation=conversation,
+            plan=plan,
+            trace=_with(
+                trace,
+                tool_called=True,
+                patch_validation="supported_incomplete_canonical",
+                semantic_diff=tuple(outcome.result.semantic_diff),
+                compile_status=outcome.result.compile_status,
+                response_model="deterministic_clarification",
+                response_fingerprint=fingerprint,
+            ),
+            definition=outcome.definition,
+            history_snapshot=outcome.history_snapshot,
+            clarification=selected,
+            material_change=outcome.material_change,
+            usage=usage,
         )
 
     async def _settled_plan(
@@ -2768,14 +3453,8 @@ def _localized(language: str, key: str, **values: object) -> str:
         "en": {
             "clarification_intro": "Got it. I only need one choice to continue.",
             "need_universe": "Should I use all screened coins or one specific coin or list?",
-            "need_timeframe": (
-                "Over what period should I measure the move: 1 hour, 4 hours, "
-                "24 hours, or since today's open?"
-            ),
-            "need_reference": (
-                "What should the percentage move be measured from: the previous close, "
-                "today's open, or another price?"
-            ),
+            "need_timeframe": "Which candle period should I use: 1h, 4h, or 1d?",
+            "need_reference": "Measure the move from that candle's open or the previous candle's close?",
             "need_comparator": (
                 "Should the alert trigger when the move reaches the value, or only after it passes it?"
             ),
@@ -2798,12 +3477,21 @@ def _localized(language: str, key: str, **values: object) -> str:
             ),
             "empty_draft": "Tell me the market behaviour you want to scan or monitor.",
             "draft_count": "The draft currently has {count} rule{suffix}. Tell me what to change.",
+            "confusion_question": "Sorry — my last reply was unclear. {question}",
+            "clarification_invalid": "I couldn't map that answer safely. {question}",
+            "supported_rule_completed": "Done — the inactive rule is complete and ready for review.",
+            "scan_request_acknowledged": "I can run that as a read-only Scanner check.",
+            "scan_window_question": "Should I use the provider's rolling 24-hour percentage change?",
+            "scan_scope_required": "First choose the screened scope: all eligible coins, a Favorites list, or specific eligible coins.",
+            "scan_mode_required": "Choose Scanner first. I’ll keep this current-market request and continue when the screened scope is ready.",
+            "scan_running": "Running the governed read-only Scanner now.",
+            "confusion_scan": "Sorry — I didn't answer the scan clearly. You want screened coins {direction} at least {threshold}. {question}",
         },
         "ar": {
             "clarification_intro": "تمام. محتاج اختيار واحد فقط علشان أكمل.",
             "need_universe": "أستخدم كل العملات المفحوصة شرعيًا ولا عملة أو قائمة محددة؟",
-            "need_timeframe": "أقيس الحركة خلال ساعة، 4 ساعات، 24 ساعة، ولا من افتتاح اليوم؟",
-            "need_reference": "أقيس نسبة الحركة من إغلاق الفترة السابقة، افتتاح اليوم، ولا سعر آخر؟",
+            "need_timeframe": "أستخدم شمعة ساعة، 4 ساعات، ولا يوم؟",
+            "need_reference": "أقيس الحركة من افتتاح الشمعة ولا من إغلاق الشمعة السابقة؟",
             "need_comparator": "التنبيه يشتغل عند الوصول للقيمة ولا بعد تجاوزها فقط؟",
             "need_threshold": "إيه النسبة أو المستوى الرقمي المطلوب للتنبيه؟",
             "need_rule": "إيه حركة السوق أو المؤشر المطلوب قياسه بالضبط؟",
@@ -2818,12 +3506,21 @@ def _localized(language: str, key: str, **values: object) -> str:
             "question_fallback": "لم أقدر أجاوب بأمان من المسودة الحالية. اكتب نتيجة الفحص المطلوبة وسأسأل عن التفصيلة الناقصة فقط.",
             "empty_draft": "اكتب سلوك السوق الذي تريد فحصه أو مراقبته.",
             "draft_count": "المسودة تحتوي حاليًا على {count} قاعدة. اكتب التعديل المطلوب.",
+            "confusion_question": "آسف — ردي السابق لم يكن واضحًا. {question}",
+            "clarification_invalid": "لم أقدر أربط الإجابة بأمان. {question}",
+            "supported_rule_completed": "تم — القاعدة غير المفعلة اكتملت وأصبحت جاهزة للمراجعة.",
+            "scan_request_acknowledged": "أقدر أنفذ هذا كفحص Scanner للقراءة فقط.",
+            "scan_window_question": "أستخدم نسبة التغير المتحركة خلال آخر 24 ساعة من مزود البيانات؟",
+            "scan_scope_required": "اختر أولًا نطاق الفحص: كل العملات المؤهلة، قائمة المفضلة، أو عملات مؤهلة محددة.",
+            "scan_mode_required": "اختر Scanner أولًا. سأحتفظ بطلب السوق الحالي وأكمل بمجرد تجهيز نطاق الفحص.",
+            "scan_running": "أشغّل الآن فحص Scanner المقيّد للقراءة فقط.",
+            "confusion_scan": "آسف — لم أوضح إجابة الفحص. أنت تريد العملات المفحوصة التي تحركت {direction} بنسبة {threshold} على الأقل. {question}",
         },
         "fr": {
             "clarification_intro": "D’accord. Il me faut un seul choix pour continuer.",
             "need_universe": "Dois-je utiliser toutes les cryptos filtrées ou une crypto/liste précise ?",
-            "need_timeframe": "Sur quelle période mesurer le mouvement : 1 h, 4 h, 24 h ou depuis l’ouverture du jour ?",
-            "need_reference": "Depuis quel prix faut-il mesurer le pourcentage : clôture précédente, ouverture du jour ou autre prix ?",
+            "need_timeframe": "Quelle période de bougie dois-je utiliser : 1 h, 4 h ou 1 j ?",
+            "need_reference": "Mesurer le mouvement depuis l’ouverture de la bougie ou la clôture de la bougie précédente ?",
             "need_comparator": "L’alerte doit-elle se déclencher dès que la valeur est atteinte ou seulement après son dépassement ?",
             "need_threshold": "Quel pourcentage ou niveau numérique doit déclencher l’alerte ?",
             "need_rule": "Quel mouvement de marché ou indicateur cette règle doit-elle mesurer ?",
@@ -2838,12 +3535,21 @@ def _localized(language: str, key: str, **values: object) -> str:
             "question_fallback": "Je ne peux pas répondre en toute sécurité à partir du brouillon actuel. Décrivez le résultat à scanner et je demanderai uniquement le détail manquant.",
             "empty_draft": "Décrivez le comportement du marché à scanner ou à surveiller.",
             "draft_count": "Le brouillon contient actuellement {count} règle{suffix}. Indiquez la modification souhaitée.",
+            "confusion_question": "Désolé — ma réponse précédente n’était pas claire. {question}",
+            "clarification_invalid": "Je n’ai pas pu associer cette réponse en toute sécurité. {question}",
+            "supported_rule_completed": "Terminé — la règle inactive est complète et prête à être vérifiée.",
+            "scan_request_acknowledged": "Je peux exécuter cette demande comme un scan en lecture seule.",
+            "scan_window_question": "Dois-je utiliser la variation glissante sur 24 heures du fournisseur ?",
+            "scan_scope_required": "Choisissez d’abord la portée filtrée : toutes les cryptos éligibles, une liste de favoris ou des cryptos précises.",
+            "scan_mode_required": "Choisissez d’abord Scanner. Je conserve cette demande et je continuerai dès que la portée filtrée sera prête.",
+            "scan_running": "Exécution du Scanner gouverné en lecture seule.",
+            "confusion_scan": "Désolé — ma réponse au scan n’était pas claire. Vous cherchez les cryptos filtrées {direction} d’au moins {threshold}. {question}",
         },
         "es": {
             "clarification_intro": "Entendido. Solo necesito una elección para continuar.",
             "need_universe": "¿Debo usar todas las monedas filtradas o una moneda/lista específica?",
-            "need_timeframe": "¿En qué periodo mido el movimiento: 1 hora, 4 horas, 24 horas o desde la apertura de hoy?",
-            "need_reference": "¿Desde qué precio mido el porcentaje: cierre anterior, apertura de hoy u otro precio?",
+            "need_timeframe": "¿Qué periodo de vela uso: 1 h, 4 h o 1 día?",
+            "need_reference": "¿Mido el movimiento desde la apertura de la vela o desde el cierre de la vela anterior?",
             "need_comparator": "¿La alerta se activa al alcanzar el valor o solo después de superarlo?",
             "need_threshold": "¿Qué porcentaje o nivel numérico debe activar la alerta?",
             "need_rule": "¿Qué movimiento de mercado o indicador debe medir esta regla?",
@@ -2858,12 +3564,21 @@ def _localized(language: str, key: str, **values: object) -> str:
             "question_fallback": "No pude responder con seguridad desde el borrador actual. Describe el resultado que quieres escanear y preguntaré solo el dato que falta.",
             "empty_draft": "Describe el comportamiento del mercado que quieres escanear o monitorizar.",
             "draft_count": "El borrador tiene actualmente {count} regla{suffix}. Indica qué quieres cambiar.",
+            "confusion_question": "Perdón, mi respuesta anterior no fue clara. {question}",
+            "clarification_invalid": "No pude asociar esa respuesta de forma segura. {question}",
+            "supported_rule_completed": "Listo: la regla inactiva está completa y lista para revisión.",
+            "scan_request_acknowledged": "Puedo ejecutar esto como un escaneo de solo lectura.",
+            "scan_window_question": "¿Uso el cambio porcentual móvil de 24 horas del proveedor?",
+            "scan_scope_required": "Primero elige el alcance filtrado: todas las monedas elegibles, una lista de favoritos o monedas específicas.",
+            "scan_mode_required": "Primero elige Scanner. Conservaré esta solicitud y continuaré cuando el alcance filtrado esté listo.",
+            "scan_running": "Ejecutando ahora el Scanner gobernado de solo lectura.",
+            "confusion_scan": "Perdón, no respondí claramente al escaneo. Buscas monedas filtradas que {direction} al menos {threshold}. {question}",
         },
         "ru": {
             "clarification_intro": "Понял. Нужен только один выбор, чтобы продолжить.",
             "need_universe": "Использовать все проверенные монеты или одну монету/список?",
-            "need_timeframe": "За какой период измерять движение: 1 час, 4 часа, 24 часа или с открытия дня?",
-            "need_reference": "От какой цены измерять процент: предыдущее закрытие, открытие дня или другая цена?",
+            "need_timeframe": "Какой период свечи использовать: 1 час, 4 часа или 1 день?",
+            "need_reference": "Измерять движение от открытия свечи или от закрытия предыдущей свечи?",
             "need_comparator": "Сигнал должен сработать при достижении значения или только после его превышения?",
             "need_threshold": "Какой процент или числовой уровень должен запускать сигнал?",
             "need_rule": "Какое движение рынка или индикатор должна измерять эта логика?",
@@ -2878,6 +3593,15 @@ def _localized(language: str, key: str, **values: object) -> str:
             "question_fallback": "Я не могу безопасно ответить по текущему черновику. Опишите результат сканирования, и я спрошу только недостающую деталь.",
             "empty_draft": "Опишите поведение рынка, которое нужно сканировать или отслеживать.",
             "draft_count": "Сейчас в черновике {count} правил. Укажите, что изменить.",
+            "confusion_question": "Извините, предыдущий ответ был неясным. {question}",
+            "clarification_invalid": "Я не смог безопасно сопоставить этот ответ. {question}",
+            "supported_rule_completed": "Готово — неактивное правило завершено и готово к проверке.",
+            "scan_request_acknowledged": "Я могу выполнить это как Scanner только для чтения.",
+            "scan_window_question": "Использовать скользящее 24-часовое процентное изменение провайдера?",
+            "scan_scope_required": "Сначала выберите проверяемый охват: все подходящие монеты, список избранного или конкретные монеты.",
+            "scan_mode_required": "Сначала выберите Scanner. Я сохраню запрос и продолжу, когда проверяемый охват будет готов.",
+            "scan_running": "Запускаю управляемый Scanner только для чтения.",
+            "confusion_scan": "Извините, ответ на запрос сканирования был неясным. Нужны проверенные монеты, которые {direction} минимум на {threshold}. {question}",
         },
     }
     template = catalog.get(code, catalog["en"]).get(key) or catalog["en"].get(key) or key
@@ -2914,7 +3638,489 @@ def _reply_matches_language(message: str, language: str) -> bool:
     spanish = {"hola", "usted", "tu", "para", "con", "debe", "elegir", "regla", "alerta", "monedas"}
     if code == "en":
         return len(words & french) < 2 and len(words & spanish) < 2
+    if code == "fr":
+        french_hits = words & french
+        spanish_hits = words & spanish
+        return bool(french_hits) and len(french_hits) > len(spanish_hits)
+    if code == "es":
+        spanish_hits = words & spanish
+        french_hits = words & french
+        return bool(spanish_hits) and len(spanish_hits) > len(french_hits)
+    return False
+
+
+_SUPPORTED_REQUEST_SCHEMA_KEY = "x-hilal-supported-request"
+
+
+def _planner_answered_active_question(
+    turn: SetupAgentTurnInput,
+    envelope: PlannerIntentEnvelope,
+) -> bool:
+    """Whether the AI-first reading classified this turn as the open answer.
+
+    The model receives a turn-local clarification reference rather than the canonical
+    question id.  The compiler resolves that alias later; here the presence of one
+    answer is enough to enter the deterministic value validator because only one
+    question can be active at a time.
+    """
+
+    return bool(turn.conversation.active_question and envelope.clarification_answers)
+
+
+def _is_confusion_signal(message: str) -> bool:
+    text = " ".join((message or "").casefold().split())
+    return bool(
+        re.fullmatch(r"[?؟!\s]{1,8}", text)
+        or text
+        in {
+            "what",
+            "what?",
+            "i don't understand",
+            "i dont understand",
+            "that didn't answer me",
+            "that did not answer me",
+            "مش فاهم",
+            "مش فاهمة",
+            "ايه؟",
+            "ماذا؟",
+            "quoi ?",
+            "quoi?",
+            "je ne comprends pas",
+            "qué?",
+            "que?",
+            "no entiendo",
+            "что?",
+            "не понимаю",
+        }
+    )
+
+
+def _read_only_window_answer(message: str) -> Literal["24h"] | None:
+    text = " ".join((message or "").casefold().split())
+    if text in {
+        "yes", "yeah", "yep", "ok", "okay", "sure",
+        "نعم", "اه", "أيوه",
+        "oui", "d’accord", "d'accord", "accord",
+        "sí", "si", "claro",
+        "да", "хорошо",
+    }:
+        return "24h"
+    if re.search(
+        r"(?:\b(?:24\s*h|24\s*hours?|one\s*day|last\s*day|1d|"
+        r"24\s*heures?|une\s+journ[ée]e|24\s*horas?|un\s+d[ií]a)\b"
+        r"|24\s*(?:часа|часов)|\bсутки\b)",
+        text,
+    ):
+        return "24h"
+    return None
+
+
+def _read_only_window_is_explicit(message: str) -> bool:
+    text = " ".join((message or "").casefold().split())
+    return bool(
+        re.search(
+            r"(?:\b(?:24\s*h|24\s*hours?|one\s*day|last\s*day|1d|"
+            r"24\s*heures?|une\s+journ[ée]e|24\s*horas?|un\s*d[ií]a)\b"
+            r"|24\s*(?:часа|часов)|\bсутки\b|(?:24\s*ساعة|يوم\s*كامل))",
+            text,
+        )
+    )
+
+
+def _read_only_scan_values_are_grounded(
+    scan: ReadOnlyPercentageScanIntent,
+    source_text: str,
+) -> bool:
+    if _supported_direction(source_text) != scan.movement_direction:
+        return False
+    if not grounds_number(source_text, float(scan.threshold_percent), unit="percent"):
+        return False
+    if scan.measurement_window is not None and not _read_only_window_is_explicit(source_text):
+        return False
     return True
+
+
+def _scan_universe_is_ready(draft: StrategyDraftV2) -> bool:
+    open_scope_ids = {
+        "sharia.universe_mode",
+        "sharia.approved_watchlist",
+        "sharia.explicit_symbols",
+    }
+    if any(item.unresolved_id in open_scope_ids for item in draft.unresolved_fields):
+        return False
+    policy = draft.sharia_policy
+    if policy.methodology_id is None or not policy.methodology_version:
+        return False
+    if policy.universe_mode.value == "approved_watchlist":
+        return bool(policy.approved_watchlist_id and policy.approved_watchlist_version)
+    if policy.universe_mode.value == "explicit_assets":
+        return bool(policy.explicit_symbols or draft.universe.included_symbols)
+    return True
+
+
+def _supported_direction(text: str) -> str | None:
+    direction = movement_direction(text)
+    if direction in {"up", "down"}:
+        return direction
+    lowered = " ".join((text or "").casefold().split())
+    up_markers = (
+        "ترتفع", "ارتفعت", "صعود", "hausse", "augmente", "monte",
+        "suba", "sube", "aumente", "вырос", "растет", "повыс",
+    )
+    down_markers = (
+        "تنخفض", "انخفضت", "هبوط", "baisse", "diminue", "baja",
+        "cae", "disminuya", "сниз", "падает",
+    )
+    if any(item in lowered for item in up_markers):
+        return "up"
+    if any(item in lowered for item in down_markers):
+        return "down"
+    return None
+
+
+def _is_canonical_percentage_request(metadata: dict[str, object]) -> bool:
+    return bool(
+        metadata.get("movement_direction") in {"up", "down"}
+        and isinstance(metadata.get("threshold"), int | float)
+        and metadata.get("unit") == "percent"
+        and not metadata.get("capability_key")
+    )
+
+
+def _supported_missing_slots(
+    metadata: dict[str, object],
+    declared: list[Any],
+) -> list[str]:
+    """Canonical missing choices for one supported percentage rule.
+
+    ``formula`` is intentionally represented by the human reference choice rather
+    than a second implementation question.  Choosing candle-open versus previous-close
+    deterministically selects the registered core formula.
+    """
+
+    # Universe selection is already a separate governed Sharia-policy workflow.
+    # Mixing it into condition creation duplicates the question and lets one answer
+    # ambiguously target two different canonical objects.
+    missing = [
+        str(item)
+        for item in declared
+        if str(item) not in {"universe", "formula"}
+    ]
+    if metadata.get("threshold") is not None:
+        missing = [item for item in missing if item != "threshold"]
+    if metadata.get("comparator") is not None:
+        missing = [item for item in missing if item != "comparator"]
+    elif "comparator" not in missing:
+        missing.append("comparator")
+    if metadata.get("trigger_timeframe"):
+        missing = [item for item in missing if item != "trigger_timeframe"]
+    if metadata.get("threshold") is None and "threshold" not in missing:
+        missing.append("threshold")
+    if metadata.get("movement_direction") not in {"up", "down"}:
+        # This specialised workflow must never guess the direction.  The caller falls
+        # back to the ordinary supported-incomplete path when this invariant is false.
+        return []
+    if not metadata.get("trigger_timeframe") and "trigger_timeframe" not in missing:
+        missing.append("trigger_timeframe")
+    missing = ["reference_point" if item == "formula" else item for item in missing]
+    # Reference point determines the exact core percentage formula; keep only one slot.
+    if metadata.get("reference_point"):
+        missing = [item for item in missing if item != "reference_point"]
+    elif "reference_point" not in missing:
+        missing.append("reference_point")
+    return list(dict.fromkeys(missing))
+
+
+def _canonical_supported_slots(missing: list[str]) -> list[str]:
+    """Map conversational choices to canonical condition fields.
+
+    The unresolved record is consumed by the generic requirement reconciler, which
+    understands canonical fields rather than UI wording.  Keeping this mapping at the
+    server boundary prevents ``reference_point`` and ``comparator`` from becoming
+    imaginary condition attributes.
+    """
+
+    field_map = {
+        "reference_point": "formula",
+        "comparator": "operator",
+    }
+    return list(dict.fromkeys(field_map.get(item, item) for item in missing))
+
+
+def _next_supported_field(missing: list[str]) -> str:
+    priority = (
+        "trigger_timeframe",
+        "reference_point",
+        "comparator",
+        "threshold",
+        "capability_parameter",
+        "universe",
+    )
+    return next((item for item in priority if item in missing), missing[0])
+
+
+def _supported_options(language: str, field_name: str) -> list[str]:
+    code = _language_code(language)
+    values = {
+        "trigger_timeframe": ["1h", "4h", "1d"],
+        "reference_point": {
+            "en": ["Candle open", "Previous candle close"],
+            "ar": ["افتتاح الشمعة", "إغلاق الشمعة السابقة"],
+            "fr": ["Ouverture de la bougie", "Clôture de la bougie précédente"],
+            "es": ["Apertura de la vela", "Cierre de la vela anterior"],
+            "ru": ["Открытие свечи", "Закрытие предыдущей свечи"],
+        }.get(code, ["Candle open", "Previous candle close"]),
+        "comparator": {
+            "en": ["At the threshold or beyond", "Only beyond the threshold"],
+            "ar": ["عند الحد أو أكثر", "فقط بعد تجاوز الحد"],
+            "fr": ["Au seuil ou au-delà", "Seulement au-delà du seuil"],
+            "es": ["En el umbral o más", "Solo por encima del umbral"],
+            "ru": ["На пороге или выше", "Только выше порога"],
+        }.get(code, ["At the threshold or beyond", "Only beyond the threshold"]),
+    }
+    selected = values.get(field_name, [])
+    return list(selected) if isinstance(selected, list) else []
+
+
+def _supported_clarification(
+    turn: SetupAgentTurnInput,
+    *,
+    field_name: str,
+    source_seed: str,
+) -> ClarificationContract:
+    key_by_field = {
+        "trigger_timeframe": "need_timeframe",
+        "reference_point": "need_reference",
+        "comparator": "need_comparator",
+        "threshold": "need_threshold",
+        "universe": "need_universe",
+        "capability_parameter": "need_rule",
+    }
+    question = _localized(turn.active_language, key_by_field.get(field_name, "need_rule"))
+    options = _supported_options(turn.active_language, field_name)
+    schema_type = "number" if field_name == "threshold" else "string"
+    expected: dict[str, object] = {"type": schema_type}
+    if options:
+        expected["enum"] = options
+    digest = hashlib.sha256(
+        f"{turn.source_turn_id}:{source_seed}:{field_name}".encode()
+    ).hexdigest()[:20]
+    return ClarificationContract(
+        question_id=f"clarification_{digest}",
+        question=question,
+        reason="One user-controlled choice is still required for this supported rule.",
+        target_type="condition_creation",
+        target_field=field_name,
+        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
+        mutating=True,
+        allowed_options=options,
+    )
+
+
+def _supported_answer_schema(
+    clarification: ClarificationContract,
+    metadata: dict[str, object],
+) -> dict[str, object]:
+    try:
+        schema = json.loads(clarification.expected_answer_schema)
+    except (TypeError, ValueError):
+        schema = {"type": "string"}
+    if not isinstance(schema, dict):
+        schema = {"type": "string"}
+    schema[_SUPPORTED_REQUEST_SCHEMA_KEY] = metadata
+    return schema
+
+
+def _active_supported_unresolved(
+    draft: StrategyDraftV2,
+    conversation: SetupConversationContext,
+) -> UnresolvedFieldV2 | None:
+    active_id = conversation.active_question_id
+    candidates = [
+        item
+        for item in draft.unresolved_fields
+        if isinstance(item.expected_answer_schema.get(_SUPPORTED_REQUEST_SCHEMA_KEY), dict)
+    ]
+    return next((item for item in candidates if item.unresolved_id == active_id), None) or (
+        candidates[0] if len(candidates) == 1 else None
+    )
+
+
+def _supported_metadata(item: UnresolvedFieldV2) -> dict[str, object]:
+    raw = item.expected_answer_schema.get(_SUPPORTED_REQUEST_SCHEMA_KEY)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _supported_answer_value(field_name: str, message: str) -> object | None:
+    text = " ".join((message or "").strip().split())
+    lowered = text.casefold()
+    if field_name == "trigger_timeframe":
+        values = extract_timeframes(text)
+        return values[0] if len(values) == 1 and values[0] in {"1h", "4h", "1d"} else None
+    if field_name == "reference_point":
+        if re.search(r"\b(?:previous|prior)\s+(?:candle\s+)?close\b", lowered) or any(
+            phrase in lowered
+            for phrase in (
+                "الإغلاق السابق",
+                "إغلاق الشمعة السابقة",
+                "clôture précédente",
+                "clôture de la bougie précédente",
+                "cierre anterior",
+                "cierre de la vela anterior",
+                "предыдущее закрытие",
+                "закрытие предыдущей свечи",
+            )
+        ):
+            return "previous_close"
+        if re.search(r"\b(?:candle\s+)?open(?:ing)?\b", lowered) or any(
+            phrase in lowered
+            for phrase in (
+                "افتتاح الشمعة",
+                "ouverture de la bougie",
+                "apertura de la vela",
+                "открытие свечи",
+            )
+        ):
+            return "candle_open"
+        return None
+    if field_name == "comparator":
+        comparator = detect_comparator(text)
+        if comparator is not None:
+            return comparator.value
+        if any(phrase in lowered for phrase in (
+            "reaches", "at the threshold", "or beyond", "عند الحد", "أو أكثر",
+            "au seuil", "ou au-delà", "en el umbral", "o más", "на пороге",
+            "или выше",
+        )):
+            return Comparator.GREATER_THAN_OR_EQUAL.value
+        if any(phrase in lowered for phrase in (
+            "passes", "only beyond", "above", "تجاوز", "au-delà",
+            "por encima", "только выше",
+        )):
+            return Comparator.GREATER_THAN.value
+        return None
+    if field_name == "threshold":
+        values = re.findall(
+            r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)",
+            text,
+            re.I,
+        )
+        return abs(float(values[0])) if len(values) == 1 else None
+    return text or None
+
+
+def _apply_supported_answer(
+    metadata: dict[str, object],
+    field_name: str,
+    value: object,
+) -> None:
+    if field_name == "trigger_timeframe":
+        metadata["trigger_timeframe"] = value
+    elif field_name == "reference_point":
+        metadata["reference_point"] = value
+        metadata["formula"] = (
+            FormulaKind.OPEN_TO_CLOSE_PERCENTAGE.value
+            if value == "candle_open"
+            else FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE.value
+        )
+    elif field_name == "comparator":
+        metadata["comparator"] = value
+    elif field_name == "threshold":
+        metadata["threshold"] = value
+    else:
+        metadata[field_name] = value
+
+
+def _condition_from_supported_metadata(
+    metadata: dict[str, object],
+    *,
+    source_turn_id: str,
+    source_fragment: str,
+) -> ConditionNodeV2:
+    formula = FormulaKind(str(metadata["formula"]))
+    direction = MovementDirection(str(metadata["movement_direction"]))
+    comparator = Comparator(str(metadata["comparator"]))
+    threshold = float(metadata["threshold"])
+    timeframe = str(metadata["trigger_timeframe"])
+    parameters = {
+        "formula": (
+            "open_to_close"
+            if formula == FormulaKind.OPEN_TO_CLOSE_PERCENTAGE
+            else "close_to_close"
+        ),
+        "reference_field": (
+            "open" if formula == FormulaKind.OPEN_TO_CLOSE_PERCENTAGE else "close"
+        ),
+        "current_field": "close",
+        "lookback": 1,
+        "scale": "percent",
+        "closed_only": True,
+    }
+    return ConditionNodeV2(
+        node_type="condition",
+        source_turn_id=source_turn_id,
+        source_fragment=source_fragment,
+        movement_direction=direction,
+        formula=formula,
+        operands=[
+            OperandV2(
+                role="measured_value",
+                kind="market_metric",
+                name="percentage_change",
+                unit="percent",
+                parameters=parameters,
+            )
+        ],
+        operator=comparator,
+        threshold=threshold,
+        unit="percent",
+        trigger_timeframe=cast(Any, timeframe),
+        condition_symbols=[str(item) for item in metadata.get("symbols") or []],
+    )
+
+
+def _supported_workflow_plan(
+    turn: SetupAgentTurnInput,
+    *,
+    source_text: str,
+    segment_kind: SegmentKind,
+    operation: AuthorizedPatchOperation | list[AuthorizedPatchOperation],
+    summary: str,
+    question_id: str | None = None,
+) -> SetupAgentTurnPlan:
+    operations = operation if isinstance(operation, list) else [operation]
+    segment_id = operations[0].authorizing_segment_id
+    clarification_answers = []
+    if question_id is not None:
+        from ai_market_monitor.schemas.setup_agent import ClarificationAnswer
+
+        clarification_answers = [
+            ClarificationAnswer(
+                segment_id=segment_id,
+                question_id=question_id,
+                answer_text=source_text,
+            )
+        ]
+    return SetupAgentTurnPlan(
+        source_turn_id=turn.source_turn_id,
+        segments=[
+            TurnSegment(
+                segment_id=segment_id,
+                exact_source_text=source_text,
+                start_offset=0,
+                end_offset=len(source_text),
+                kind=segment_kind,
+                action_required=True,
+                confidence=1.0,
+            )
+        ],
+        operations=operations,
+        strategy_instructions=[
+            StrategyInstructionPlan(segment_id=segment_id, intent_summary=summary)
+        ],
+        clarification_answers=clarification_answers,
+        overall_confidence=1.0,
+    )
 
 
 def _promote_known_incomplete_request(
@@ -2942,7 +4148,7 @@ def _promote_known_incomplete_request(
             source,
             re.I,
         )
-        direction = movement_direction(source)
+        direction = _supported_direction(source)
         if not has_percent or len(thresholds) != 1 or direction not in {"up", "down"}:
             continue
         missing: list[str] = []
@@ -2975,14 +4181,42 @@ def _supported_request_context(
         r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)", source, re.I
     )
     comparator = detect_comparator(source)
+    timeframes = extract_timeframes(source)
+    explicit_trigger = [
+        item for item in timeframes if timeframe_role_is_explicit(source, item, "trigger")
+    ]
+    explicit_other_role = any(
+        timeframe_role_is_explicit(source, item, role)
+        for item in timeframes
+        for role in ("context", "confirmation", "reference")
+    )
+    trigger_timeframe = (
+        explicit_trigger[0]
+        if len(explicit_trigger) == 1
+        else timeframes[0]
+        if len(timeframes) == 1 and not explicit_other_role
+        else None
+    )
+    reference_point = _supported_answer_value("reference_point", source)
+    formula = (
+        FormulaKind.OPEN_TO_CLOSE_PERCENTAGE.value
+        if reference_point == "candle_open"
+        else FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE.value
+        if reference_point == "previous_close"
+        else None
+    )
     return {
         "source_text": source[:500],
         "missing_fields": list(request.missing_fields),
         "capability_key": request.capability_key,
-        "movement_direction": movement_direction(source),
+        "movement_direction": _supported_direction(source),
         "threshold": float(threshold_matches[0]) if len(threshold_matches) == 1 else None,
+        "unit": "percent" if len(threshold_matches) == 1 else None,
         "comparator": comparator.value if comparator is not None else None,
-        "timeframes": extract_timeframes(source),
+        "timeframes": timeframes,
+        "trigger_timeframe": trigger_timeframe,
+        "formula": formula,
+        "reference_point": reference_point,
         "symbols": extract_symbols(source),
     }
 
@@ -3026,7 +4260,10 @@ def _clarification_for_supported_incomplete(
         options = ["All screened coins", "One coin", "One approved list"]
         expected = {"type": "string", "enum": options}
     elif selected == "trigger_timeframe":
-        options = ["1h", "4h", "24h", "daily_open"]
+        options = ["1h", "4h", "1d"]
+        expected = {"type": "string", "enum": options}
+    elif selected == "reference_point":
+        options = _supported_options(turn.active_language, "reference_point")
         expected = {"type": "string", "enum": options}
     elif selected == "comparator":
         options = ["reaches", "passes"]
@@ -3474,6 +4711,20 @@ fields. This starts a clarification flow; it is NOT unsupported. Preserve every 
 the user supplied and never list it as missing. Reserve `unsupported_intents` only for
 a mechanic the supplied capability shortlist and core primitives cannot express at all.
 Still return every independent, complete intent in the same turn.
+
+CURRENT-MARKET SCANNER QUESTIONS
+When the user asks which coins currently moved up or down by an explicitly stated
+percentage, put that segment in `read_only_percentage_scans` regardless of the current
+setup mode. The server may ask the user to select Scanner before execution. This is a
+read-only on-demand request, not a strategy
+instruction, product explanation, or unsupported mechanic. Copy only the stated
+movement_direction and positive threshold_percent. Set measurement_window to `24h`
+only when the same segment explicitly says 24 hours, one day, 1d, or rolling 24h.
+Words such as "now", "currently", or "today" do not choose a measurement window.
+Never put the same segment in semantic_intents, supported_incomplete_intents,
+questions_to_answer, or unsupported_intents. The server resolves the selected screened
+universe, methodology, entitlement, quota, and provider before execution; never guess
+those values.
 
 For a registered mechanic, choose a capability_key from capability_shortlist and nothing
 else. If no candidate expresses the request exactly, add an entry to
@@ -3958,7 +5209,11 @@ def compose_final_reply(
     accepted_open_items = {
         item.subject_id for item in accepted if str(item.subject_id).startswith(("unsupported:", "unresolved:"))
     }
-    if refused or (owes_a_fact and not accepted):
+    # A refused duplicate or malformed claim is diagnostic only.  Falling back merely
+    # because *one* claim was refused can restate an already accepted proposition in
+    # different words.  Deterministic facts are added only when the turn owes a fact and
+    # no validated factual proposition survived.
+    if owes_a_fact and not accepted:
         for line in deterministic_claim_text(ledger):
             # Do not render an unsupported/unresolved fact a second time when a validated
             # claim already represented that authoritative evidence item.

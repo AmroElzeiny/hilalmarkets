@@ -47,6 +47,17 @@ CONVERSATION_REGRESSION_TOPICS = frozenset(
     }
 )
 
+#: The mandatory Y5.2 release-gate scenarios. Evaluator runners may still choose other
+#: topics, but a release validation that omits any of these is incomplete.
+Y5_2_RELEASE_GATE_TOPICS: tuple[str, ...] = (
+    "supported_incomplete_clarification",
+    "scanner_percentage_flow",
+    "confusion_recovery",
+    "response_language_consistency",
+    "response_deduplication",
+)
+
+
 
 def _conversation_regression_goal(
     topic_id: str,
@@ -57,6 +68,7 @@ def _conversation_regression_goal(
         ("Arabic", "نبهني عندما ترتفع عملة 5%", "ar"),
         ("French", "Crée une alerte quand une pièce augmente de 5%", "fr"),
         ("Spanish", "Avísame cuando una moneda suba un 5%", "es"),
+        ("Russian", "Сообщи мне, когда монета вырастет на 5%", "ru"),
     )
     if topic_id == "scanner_percentage_flow":
         return (

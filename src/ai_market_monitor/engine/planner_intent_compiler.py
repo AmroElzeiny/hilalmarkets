@@ -339,7 +339,19 @@ def normalize_planner_envelope(envelope: PlannerIntentEnvelope) -> PlannerIntent
             "capability_key": item.capability_key,
         },
     )
-    incomplete_segments = {item.segment_ref for item in supported_incomplete}
+    read_only_scans = unique(
+        envelope.read_only_percentage_scans,
+        lambda item: {
+            "segment_kind": segment_kind[item.segment_ref],
+            "movement_direction": item.movement_direction,
+            "threshold_percent": item.threshold_percent,
+            "measurement_window": item.measurement_window,
+        },
+    )
+    non_unsupported_segments = {
+        *(item.segment_ref for item in supported_incomplete),
+        *(item.segment_ref for item in read_only_scans),
+    }
     # A known supported mechanic that needs a user choice must never also become a
     # permanent unsupported blocker. Structured models can occasionally populate both
     # slots for the same span; the safer, more specific classification wins.
@@ -347,7 +359,7 @@ def normalize_planner_envelope(envelope: PlannerIntentEnvelope) -> PlannerIntent
         [
             item
             for item in envelope.unsupported_intents
-            if item.segment_ref not in incomplete_segments
+            if item.segment_ref not in non_unsupported_segments
         ],
         lambda item: {
             "segment_kind": segment_kind[item.segment_ref],
@@ -369,6 +381,7 @@ def normalize_planner_envelope(envelope: PlannerIntentEnvelope) -> PlannerIntent
             "clarification_answers": answers,
             "questions_to_answer": questions,
             "supported_incomplete_intents": supported_incomplete,
+            "read_only_percentage_scans": read_only_scans,
             "unsupported_intents": unsupported,
         }
     )

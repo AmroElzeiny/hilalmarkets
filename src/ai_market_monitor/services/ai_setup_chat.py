@@ -2826,40 +2826,43 @@ class AISetupChatService:
         session: AsyncSession,
         chat: AISetupChatSession,
         *,
+        draft: StrategyDraftV2,
         direction: Literal["up", "down"],
         threshold: float,
         timeframe: str = "24h",
-        quote_currency: str = "USDT",
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """Run the governed, quota-controlled read-only percentage Scanner path."""
+        """Run one durable, policy-bound read-only percentage Scanner request.
 
-        try:
-            return await OnDemandScanService(
-                session,
-                self.market_provider,
-                settings=self.settings,
-            ).run_percentage_snapshot(
-                chat.user_id,
-                direction=direction,
-                threshold=threshold,
-                timeframe=timeframe,
-                quote_currency=quote_currency,
-                idempotency_key=(
-                    idempotency_key
-                    or f"setup-chat-percentage:{chat.id}:{uuid4().hex}"
-                ),
-            )
-        except OnDemandScanError as exc:
-            return {
-                "status": "unavailable",
-                "reason": str(exc),
-                "error_code": exc.code,
-                "captured_at": datetime.now(UTC).isoformat(),
-                "matches": [],
-                "read_only": True,
-                "strategy_mutated": False,
-            }
+        Typed Scanner failures intentionally cross this boundary.  The launch service
+        localises them while preserving their safe error codes; swallowing them here
+        would make quota, policy and programming failures look like the same data miss.
+        """
+
+        response = await OnDemandScanService(
+            session,
+            self.market_provider,
+            settings=self.settings,
+        ).run_percentage_snapshot(
+            chat.user_id,
+            draft=draft,
+            direction=direction,
+            threshold=threshold,
+            timeframe=timeframe,
+            idempotency_key=(
+                idempotency_key or f"setup-chat-percentage:{chat.id}:{uuid4().hex}"
+            ),
+        )
+        return {
+            **response.model_dump(mode="json"),
+            "read_only": True,
+            "strategy_mutated": False,
+            "query": {
+                "movement_direction": direction,
+                "threshold_percent": threshold,
+                "measurement_window": timeframe,
+            },
+        }
 
     async def market_snapshot(
         self,
