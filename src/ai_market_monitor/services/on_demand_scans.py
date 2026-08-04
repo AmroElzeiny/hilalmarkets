@@ -3,6 +3,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from math import isfinite
 from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -48,6 +49,11 @@ from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.market_preview import (
     assess_candle_data_quality,
     market_snapshot_from_candles,
+)
+from ai_market_monitor.services.sharia_screening import (
+    DEFAULT_ALLOWED_STATUSES,
+    ShariaScreeningService,
+    canonical_asset,
 )
 from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
@@ -185,6 +191,230 @@ class OnDemandScanService:
                 "Scanner is unavailable. Start a new run to retry.",
             ) from exc
         return await self._complete_run(run, response)
+
+    async def run_percentage_snapshot(
+        self,
+        user_id: UUID,
+        *,
+        direction: Literal["up", "down"],
+        threshold: float,
+        timeframe: str = "24h",
+        quote_currency: str = "USDT",
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        """Run the narrow read-only percentage Scanner shortcut with normal gates.
+
+        The chat shortcut uses the provider's native rolling 24-hour percentage field;
+        it is not converted into a daily candle rule. It still passes through Scanner
+        entitlement, quota, governed screening, usage accounting and audit. No Strategy,
+        StrategyVersion, approval or monitor state is created or mutated.
+        """
+
+        captured_at = datetime.now(UTC)
+        if timeframe != "24h":
+            return {
+                "status": "needs_supported_window",
+                "timeframe": timeframe,
+                "supported_timeframes": ["24h"],
+                "captured_at": captured_at.isoformat(),
+                "matches": [],
+                "read_only": True,
+                "strategy_mutated": False,
+            }
+        if threshold <= 0:
+            raise OnDemandScanError(
+                "invalid_percentage_threshold",
+                "Enter a percentage greater than zero.",
+            )
+
+        await self.session.scalar(
+            select(User.id).where(User.id == user_id).with_for_update()
+        )
+        entitlement = await EntitlementService(self.session).current(user_id)
+        metric = "light_prompt_scans"
+        usage_metric = (
+            "basic_user_initiated_scans"
+            if entitlement.plan.code == "demo"
+            else metric
+        )
+        quota_limit, quota_used, period_start, period_end = await self._quota(
+            entitlement,
+            user_id,
+            metric=metric,
+            usage_metric=usage_metric,
+        )
+        if not entitlement.feature_enabled("light_prompt_scan") or quota_limit <= 0:
+            raise OnDemandScanError(
+                "light_prompt_scan_not_available",
+                "Your current plan does not include Scanner.",
+            )
+        if quota_used >= quota_limit:
+            raise OnDemandScanError(
+                "light_prompt_scans_quota_exceeded",
+                f"Your plan allows {quota_limit} Scanner request(s) for this period.",
+            )
+
+        request_key = idempotency_key or f"percentage-snapshot-{uuid4()}"
+        usage = await UsageService(self.session).record(
+            user_id,
+            usage_metric,
+            period_start=period_start,
+            period_end=period_end,
+            idempotency_key=f"screened-percentage-snapshot:{request_key}",
+            subject_type="screened_percentage_snapshot",
+            subject_id=request_key,
+            metadata={
+                "status": "reserved",
+                "scan_mode": "chat_percentage_snapshot",
+                "direction": direction,
+                "threshold": threshold,
+                "timeframe": timeframe,
+            },
+        )
+        await self.session.commit()
+
+        async def release_usage() -> None:
+            await self.session.execute(
+                delete(UsageRecord).where(UsageRecord.id == usage.id)
+            )
+            await self.session.commit()
+
+        try:
+            screening = ShariaScreeningService(self.session, self.settings)
+            methodology = await screening.default_methodology()
+            if methodology is None:
+                await release_usage()
+                raise OnDemandScanError(
+                    "screening_methodology_unavailable",
+                    "No approved screening methodology is active.",
+                )
+            assessments = await screening.effective_assessments(methodology.id)
+            safety_holds = await screening.safety_hold_assets(assets=set(assessments))
+            eligible_assets = {
+                asset
+                for asset, assessment in assessments.items()
+                if assessment.status in DEFAULT_ALLOWED_STATUSES
+                and asset not in safety_holds
+            }
+            if not eligible_assets:
+                await release_usage()
+                raise OnDemandScanError(
+                    "empty_screened_universe",
+                    "No assets currently meet the screened-market policy.",
+                )
+
+            exchange = (self.settings.market_data_exchange or "binance").lower()
+            symbols = await self.provider.list_symbols(exchange, [quote_currency])
+            plan_limit = int(entitlement.limit("light_prompt_symbols") or 0)
+            maximum_symbols = min(
+                plan_limit,
+                int(self.settings.market_breadth_max_symbols),
+            )
+            screened_symbols = [
+                symbol
+                for symbol in sorted(set(symbols))
+                if canonical_asset(symbol) in eligible_assets
+            ][:maximum_symbols]
+            if not screened_symbols:
+                await release_usage()
+                raise OnDemandScanError(
+                    "empty_screened_universe",
+                    "No tradable symbols currently meet the screened-market policy.",
+                )
+            metadata = await self.provider.fetch_universe_metadata(
+                exchange,
+                screened_symbols,
+                include_listing_dates=False,
+            )
+        except OnDemandScanError:
+            raise
+        except Exception as exc:
+            await release_usage()
+            raise OnDemandScanError(
+                "market_provider_unavailable",
+                "The screened market data could not be loaded.",
+            ) from exc
+
+        rows: list[dict[str, object]] = []
+        symbols_with_data = 0
+        for symbol in screened_symbols:
+            values = metadata.get(symbol) or {}
+            raw_change = values.get("percentage_24h")
+            if raw_change is None:
+                continue
+            symbols_with_data += 1
+            try:
+                change = float(raw_change)
+            except (TypeError, ValueError):
+                continue
+            if not isfinite(change):
+                continue
+            matched = change >= threshold if direction == "up" else change <= -threshold
+            if matched:
+                rows.append(
+                    {
+                        "symbol": symbol,
+                        "percentage_change": round(change, 2),
+                    }
+                )
+        if symbols_with_data == 0:
+            await release_usage()
+            raise OnDemandScanError(
+                "percentage_data_unavailable",
+                "Rolling 24-hour percentage data is unavailable.",
+            )
+        rows.sort(
+            key=lambda item: float(item["percentage_change"]),
+            reverse=direction == "up",
+        )
+        usage.metadata_json = {
+            **dict(usage.metadata_json or {}),
+            "status": "succeeded",
+            "symbols_requested": len(screened_symbols),
+            "symbols_scanned": symbols_with_data,
+            "matches": len(rows),
+            "methodology_id": str(methodology.id),
+            "methodology_version": methodology.version,
+        }
+        self.session.add(
+            AuditEvent(
+                actor_user_id=user_id,
+                actor_type="user",
+                action="on_demand_scan.percentage_snapshot",
+                target_type="screened_percentage_snapshot",
+                target_id=request_key,
+                metadata_redacted={
+                    "direction": direction,
+                    "threshold": threshold,
+                    "timeframe": timeframe,
+                    "symbols_scanned": symbols_with_data,
+                    "matches": len(rows),
+                    "strategy_mutated": False,
+                },
+                created_at=captured_at,
+            )
+        )
+        await self.session.commit()
+        return {
+            "status": "available",
+            "exchange": exchange,
+            "quote_currency": quote_currency,
+            "direction": direction,
+            "threshold": threshold,
+            "timeframe": "24h",
+            "captured_at": captured_at.isoformat(),
+            "provider": type(self.provider).__name__,
+            "methodology": str(getattr(methodology, "name", "Screened methodology")),
+            "methodology_version": methodology.version,
+            "symbols_checked": symbols_with_data,
+            "matches": rows[:50],
+            "quota_limit": quota_limit,
+            "quota_used": quota_used + 1,
+            "quota_remaining": max(0, quota_limit - quota_used - 1),
+            "usage_record_id": str(usage.id),
+            "read_only": True,
+            "strategy_mutated": False,
+        }
 
     async def _run_once(
         self,

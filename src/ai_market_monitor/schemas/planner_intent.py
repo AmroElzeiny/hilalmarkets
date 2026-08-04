@@ -441,12 +441,44 @@ class UnsupportedIntent(PlannerModel):
     missing_contract: str = Field(min_length=1, max_length=400)
 
 
+SupportedMissingField = Literal[
+    "universe",
+    "formula",
+    "comparator",
+    "threshold",
+    "trigger_timeframe",
+    "reference_point",
+    "capability_parameter",
+]
+
+
+class SupportedIncompleteIntent(PlannerModel):
+    """A known supported request that needs one or more user choices.
+
+    This is intentionally separate from ``UnsupportedIntent``. Missing values in a
+    registered/core mechanic should start a clarification flow, not become a permanent
+    unsupported requirement on the draft.
+    """
+
+    segment_ref: str = Field(min_length=1, max_length=40)
+    missing_fields: list[SupportedMissingField] = Field(min_length=1, max_length=6)
+    capability_key: str | None = Field(
+        default=None, min_length=1, max_length=120, pattern=r"^[a-z][a-z0-9_]*$"
+    )
+
+    @model_validator(mode="after")
+    def unique_missing_fields(self) -> "SupportedIncompleteIntent":
+        if len(self.missing_fields) != len(set(self.missing_fields)):
+            raise ValueError("missing fields must be unique")
+        return self
+
+
 class ApprovalIntentSignal(PlannerModel):
     segment_ref: str = Field(min_length=1, max_length=40)
 
 
 class PlannerIntentEnvelope(PlannerModel):
-    """The complete model response; exactly seven semantic fields."""
+    """The complete model response with supported-incomplete kept distinct."""
 
     segments: list[PlannerSegment] = Field(min_length=1, max_length=12)
     semantic_intents: list[SemanticIntent] = Field(default_factory=list, max_length=12)
@@ -454,6 +486,9 @@ class PlannerIntentEnvelope(PlannerModel):
         default_factory=list, max_length=6
     )
     questions_to_answer: list[str] = Field(default_factory=list, max_length=6)
+    supported_incomplete_intents: list[SupportedIncompleteIntent] = Field(
+        default_factory=list, max_length=6
+    )
     unsupported_intents: list[UnsupportedIntent] = Field(default_factory=list, max_length=6)
     approval_intent: ApprovalIntentSignal | None = None
     overall_confidence: float = Field(default=1.0, ge=0, le=1)
@@ -467,6 +502,7 @@ class PlannerIntentEnvelope(PlannerModel):
         used = [
             *(item.segment_ref for item in self.semantic_intents),
             *(item.segment_ref for item in self.clarification_answers),
+            *(item.segment_ref for item in self.supported_incomplete_intents),
             *(item.segment_ref for item in self.unsupported_intents),
             *(self.questions_to_answer),
             *([self.approval_intent.segment_ref] if self.approval_intent else []),
@@ -477,7 +513,12 @@ class PlannerIntentEnvelope(PlannerModel):
 
     @property
     def requires_tool(self) -> bool:
-        return bool(self.semantic_intents or self.clarification_answers or self.unsupported_intents)
+        return bool(
+            self.semantic_intents
+            or self.clarification_answers
+            or self.supported_incomplete_intents
+            or self.unsupported_intents
+        )
 
 
 RepairKind = Literal[

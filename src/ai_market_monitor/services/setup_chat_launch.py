@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from time import monotonic
 from typing import Any, Literal, cast, get_args
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 from redis.asyncio import Redis
@@ -1962,6 +1962,271 @@ return tostring(next_value)
             watchlists=tuple(watchlist_refs),
         )
 
+    async def _finish_read_only_chat_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        content: str,
+        message_type: str,
+        payload: dict[str, Any],
+        context: dict[str, Any],
+        conversation: SetupConversationContext,
+        started: float,
+        telemetry: TurnTelemetry,
+        turn_record: SetupChatTurn | None,
+    ) -> AISetupChatSession:
+        fingerprint = _chat_response_fingerprint(content)
+        conversation = conversation.model_copy(
+            update={
+                "last_assistant_summary": content[:1000],
+                "last_response_fingerprint": fingerprint,
+            }
+        )
+        context["setup_conversation_context"] = conversation.model_dump(mode="json")
+        context["last_turn_failed"] = False
+        context["last_read_only_route"] = message_type
+        context["last_response_fingerprint"] = fingerprint
+        chat.context_json = context
+        with telemetry.stage("persistence"):
+            assistant = await self.owner._assistant(
+                session,
+                chat,
+                content,
+                message_type=message_type,
+                payload={
+                    **payload,
+                    "read_only": True,
+                    "strategy_mutated": False,
+                    "response_fingerprint": fingerprint,
+                    "active_language": conversation.active_language,
+                    "model_call_count": 0,
+                },
+            )
+            await self._complete_db_turn(
+                session,
+                chat,
+                turn_record,
+                reply={"message": content, "execution_result": None},
+                assistant_message_id=assistant.id,
+            )
+        _set_runtime(chat, started, model_calls=0, cache_hits=0, telemetry=telemetry)
+        if turn_record is not None:
+            turn_record.telemetry_json = telemetry.to_payload()
+        await session.flush()
+        await session.commit()
+        return chat
+
+    @staticmethod
+    def _read_only_scan_idempotency_key(
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn | None,
+        message: str,
+    ) -> str:
+        """One quota identity per accepted chat turn, stable across an HTTP replay."""
+
+        if turn_record is not None:
+            return f"setup-chat-percentage-turn:{turn_record.id}"
+        nonce = uuid4().hex
+        message_hash = _chat_response_fingerprint(message)
+        return f"setup-chat-percentage:{chat.id}:{message_hash}:{nonce}"
+
+    async def _maybe_handle_read_only_chat_command(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        message: str,
+        draft: StrategyDraftV2,
+        context: dict[str, Any],
+        conversation: SetupConversationContext,
+        started: float,
+        telemetry: TurnTelemetry,
+        turn_record: SetupChatTurn | None,
+    ) -> AISetupChatSession | None:
+        language = _detect_chat_language(message, conversation.active_language)
+        conversation = conversation.model_copy(update={"active_language": language})
+        context["active_language"] = language
+        pending = dict(conversation.pending_read_only_scan or {})
+
+        if _is_confusion_signal(message):
+            if pending:
+                content = _chat_text(
+                    language,
+                    "confusion_scan",
+                    threshold=_format_threshold(float(pending.get("threshold") or 0)),
+                    direction=str(pending.get("direction") or "up"),
+                )
+                conversation = conversation.model_copy(
+                    update={
+                        "confusion_recovery_count": conversation.confusion_recovery_count + 1,
+                        "active_goal": "read_only_percentage_scan",
+                    }
+                )
+                return await self._finish_read_only_chat_turn(
+                    session,
+                    chat,
+                    content=content,
+                    message_type="confusion_recovery",
+                    payload={"pending_read_only_scan": pending},
+                    context=context,
+                    conversation=conversation,
+                    started=started,
+                    telemetry=telemetry,
+                    turn_record=turn_record,
+                )
+            if conversation.question_text:
+                content = _chat_text(
+                    language,
+                    "confusion_question",
+                    question=conversation.question_text,
+                )
+                conversation = conversation.model_copy(
+                    update={
+                        "confusion_recovery_count": conversation.confusion_recovery_count + 1
+                    }
+                )
+                return await self._finish_read_only_chat_turn(
+                    session,
+                    chat,
+                    content=content,
+                    message_type="confusion_recovery",
+                    payload={},
+                    context=context,
+                    conversation=conversation,
+                    started=started,
+                    telemetry=telemetry,
+                    turn_record=turn_record,
+                )
+
+        timeframe_answer = _scan_timeframe_answer(message) if pending else None
+        if pending and timeframe_answer:
+            if timeframe_answer != "24h":
+                content = _chat_text(language, "scan_window_unavailable")
+                return await self._finish_read_only_chat_turn(
+                    session,
+                    chat,
+                    content=content,
+                    message_type="scanner_window_required",
+                    payload={"pending_read_only_scan": pending},
+                    context=context,
+                    conversation=conversation,
+                    started=started,
+                    telemetry=telemetry,
+                    turn_record=turn_record,
+                )
+            try:
+                result = await self.owner.screened_percentage_snapshot(
+                    session,
+                    chat,
+                    direction=cast(Literal["up", "down"], pending.get("direction") or "up"),
+                    threshold=float(pending.get("threshold") or 0),
+                    timeframe="24h",
+                    idempotency_key=self._read_only_scan_idempotency_key(
+                        chat, turn_record, message
+                    ),
+                )
+            except Exception:
+                result = {
+                    "status": "unavailable",
+                    "reason": "The screened market data could not be loaded.",
+                    "matches": [],
+                }
+            content = _screened_scan_message(result, language)
+            context["scanner_result"] = result
+            conversation = conversation.model_copy(
+                update={
+                    "pending_read_only_scan": {},
+                    "active_goal": None,
+                    "active_question_id": None,
+                    "question_text": None,
+                    "question_target": None,
+                    "valid_answer_shape": None,
+                    "active_question": None,
+                }
+            )
+            return await self._finish_read_only_chat_turn(
+                session,
+                chat,
+                content=content,
+                message_type="scanner_result",
+                payload={"scanner_result": result},
+                context=context,
+                conversation=conversation,
+                started=started,
+                telemetry=telemetry,
+                turn_record=turn_record,
+            )
+
+        request = _percentage_scan_request(message) if draft.mode == DraftMode.SCANNER else None
+        if request is None:
+            return None
+        if request.get("timeframe") == "24h":
+            try:
+                result = await self.owner.screened_percentage_snapshot(
+                    session,
+                    chat,
+                    direction=cast(Literal["up", "down"], request["direction"]),
+                    threshold=float(request["threshold"]),
+                    timeframe="24h",
+                    idempotency_key=self._read_only_scan_idempotency_key(
+                        chat, turn_record, message
+                    ),
+                )
+            except Exception:
+                result = {
+                    "status": "unavailable",
+                    "reason": "The screened market data could not be loaded.",
+                    "matches": [],
+                }
+            content = _screened_scan_message(result, language)
+            context["scanner_result"] = result
+            conversation = conversation.model_copy(
+                update={"active_goal": None, "pending_read_only_scan": {}}
+            )
+            return await self._finish_read_only_chat_turn(
+                session,
+                chat,
+                content=content,
+                message_type="scanner_result",
+                payload={"scanner_result": result},
+                context=context,
+                conversation=conversation,
+                started=started,
+                telemetry=telemetry,
+                turn_record=turn_record,
+            )
+
+        pending = {
+            **request,
+            "scope": "screened_market",
+            "requested_at": datetime.now(UTC).isoformat(),
+        }
+        content = _chat_text(
+            language,
+            "scan_window_question",
+            threshold=_format_threshold(float(request["threshold"])),
+            direction=str(request["direction"]),
+        )
+        conversation = conversation.model_copy(
+            update={
+                "active_goal": "read_only_percentage_scan",
+                "pending_read_only_scan": pending,
+            }
+        )
+        return await self._finish_read_only_chat_turn(
+            session,
+            chat,
+            content=content,
+            message_type="scanner_window_required",
+            payload={"pending_read_only_scan": pending},
+            context=context,
+            conversation=conversation,
+            started=started,
+            telemetry=telemetry,
+            turn_record=turn_record,
+        )
+
     async def _run_agent_turn(
         self,
         session: AsyncSession,
@@ -2009,6 +2274,23 @@ return tostring(next_value)
                 with telemetry.stage("persistence"):
                     await canonical_stage_callback(stage, payload)
 
+        active_language = _detect_chat_language(message, conversation.active_language)
+        conversation = conversation.model_copy(update={"active_language": active_language})
+        context["active_language"] = active_language
+        handled = await self._maybe_handle_read_only_chat_command(
+            session,
+            chat,
+            message=message,
+            draft=draft,
+            context=context,
+            conversation=conversation,
+            started=started,
+            telemetry=telemetry,
+            turn_record=turn_record,
+        )
+        if handled is not None:
+            return handled
+
         turn = SetupAgentTurnInput(
             telemetry=telemetry,
             message=message,
@@ -2021,6 +2303,7 @@ return tostring(next_value)
             conversation=conversation,
             history=tuple(history),
             setup_mode=draft.mode,
+            active_language=active_language,
             previous_turn_failed=bool(context.get("last_turn_failed")),
             # What has already failed in this chat, so a paid correction is not spent on
             # a class that has already survived one. Two attempts is evidence; a third is
@@ -3423,16 +3706,221 @@ def _load_reviewed_screening_evidence(
         return None
 
 
+def _detect_chat_language(message: str, fallback: str = "en") -> str:
+    text = (message or "").strip()
+    if not text:
+        return (fallback or "en").split("-", 1)[0].casefold()
+    # Punctuation-only confusion signals and compact option answers such as `24h` do
+    # not carry a language of their own; keep the established conversation language.
+    if re.fullmatch(r"[?؟!\s]{1,8}", text) or re.fullmatch(
+        r"(?:\d+\s*(?:m|h|d)|yes|no|ok|okay|sure|نعم|لا|اه|أيوه)",
+        text.casefold(),
+    ):
+        return (fallback or "en").split("-", 1)[0].casefold()
+    if re.search(r"[\u0600-\u06ff]", text):
+        return "ar"
+    if re.search(r"[\u0400-\u04ff]", text):
+        return "ru"
+    lowered = text.casefold()
+    french_markers = {"bonjour", "merci", "pourquoi", "avec", "choisir", "alerte", "pièces"}
+    spanish_markers = {"hola", "gracias", "por qué", "con", "elegir", "alerta", "monedas"}
+    words = set(re.findall(r"[a-zà-ÿ']+", lowered))
+    if len(words & french_markers) >= 2 or re.search(r"[àâçéèêëîïôûùüÿœ]", lowered):
+        return "fr"
+    if len(words & spanish_markers) >= 2 or re.search(r"[¿¡ñáéíóú]", lowered):
+        return "es"
+    return "en"
+
+
+def _chat_response_fingerprint(message: str) -> str:
+    normalized = " ".join((message or "").casefold().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+
+
+def _is_confusion_signal(message: str) -> bool:
+    text = " ".join((message or "").casefold().split())
+    return bool(
+        re.fullmatch(r"[?؟!\s]{1,8}", text)
+        or text in {
+            "what?",
+            "what",
+            "i don't understand",
+            "i dont understand",
+            "that didn't answer me",
+            "that did not answer me",
+            "مش فاهم",
+            "مش فاهمة",
+            "ايه؟",
+            "ماذا؟",
+            "quoi ?",
+            "qué?",
+        }
+    )
+
+
+def _percentage_scan_request(message: str) -> dict[str, object] | None:
+    text = " ".join((message or "").split())
+    lowered = text.casefold()
+    asks_for_coins = bool(
+        re.search(r"\b(?:what|which|show|find|scan|list)\b", lowered)
+        and re.search(r"\b(?:coin|coins|crypto|cryptos|assets?|pairs?)\b", lowered)
+    )
+    direction: Literal["up", "down"] | None = None
+    if re.search(r"\b(?:up|rise|rising|gain|gaining|increase|increasing)\b", lowered):
+        direction = "up"
+    elif re.search(r"\b(?:down|fall|falling|drop|dropping|decrease|decreasing)\b", lowered):
+        direction = "down"
+    thresholds = re.findall(
+        r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)",
+        text,
+        re.I,
+    )
+    if not asks_for_coins or direction is None or len(thresholds) != 1:
+        return None
+    threshold = abs(float(thresholds[0]))
+    if not 0 < threshold <= 1000:
+        return None
+    return {
+        "direction": direction,
+        "threshold": threshold,
+        "timeframe": _scan_timeframe_answer(text),
+        "source_text": text[:500],
+    }
+
+
+def _scan_timeframe_answer(message: str) -> str | None:
+    text = " ".join((message or "").casefold().split())
+    if text in {"yes", "yeah", "yep", "ok", "okay", "sure", "نعم", "اه", "أيوه"}:
+        return "24h"
+    if re.search(r"\b(?:24\s*h|24\s*hours?|one\s*day|last\s*day|daily|1d)\b", text):
+        return "24h"
+    if re.search(r"\b(?:4\s*h|4\s*hours?)\b", text):
+        return "4h"
+    if re.search(r"\b(?:1\s*h|1\s*hour|one\s*hour)\b", text):
+        return "1h"
+    if "daily open" in text or "today's open" in text or "today open" in text:
+        return "daily_open"
+    return None
+
+
+def _format_threshold(value: float) -> str:
+    return f"{value:g}%"
+
+
+def _chat_text(language: str, key: str, **values: object) -> str:
+    code = (language or "en").split("-", 1)[0].casefold()
+    catalogs: dict[str, dict[str, str]] = {
+        "en": {
+            "scan_window_question": (
+                "Sure — I can scan all screened coins that are {direction} at least "
+                "{threshold}. Should I measure the move over the last 24 hours?"
+            ),
+            "confusion_scan": (
+                "Sorry — my last reply didn't answer your scan request. You want screened "
+                "coins that are {direction} at least {threshold}. Should I use the last 24 hours?"
+            ),
+            "confusion_question": "Sorry — that wasn't clear. {question}",
+            "scan_window_unavailable": (
+                "The read-only chat scan currently has a verified 24-hour percentage feed. "
+                "Should I use the last 24 hours?"
+            ),
+        },
+        "ar": {
+            "scan_window_question": "تمام — أقدر أفحص كل العملات المفحوصة التي تحركت {direction} بنسبة {threshold} على الأقل. أستخدم آخر 24 ساعة؟",
+            "confusion_scan": "آسف — ردي السابق لم يجب عن طلب الفحص. أنت تريد العملات المفحوصة التي تحركت {direction} بنسبة {threshold} على الأقل. أستخدم آخر 24 ساعة؟",
+            "confusion_question": "آسف — ردي لم يكن واضحًا. {question}",
+            "scan_window_unavailable": "الفحص المباشر الموثق في الشات يدعم حاليًا نسبة آخر 24 ساعة. أستخدم آخر 24 ساعة؟",
+        },
+        "fr": {
+            "scan_window_question": "D’accord — je peux analyser toutes les cryptos filtrées {direction} d’au moins {threshold}. Dois-je utiliser les dernières 24 heures ?",
+            "confusion_scan": "Désolé — ma réponse précédente n’a pas répondu à votre demande. Dois-je mesurer la variation sur les dernières 24 heures ?",
+            "confusion_question": "Désolé — ce n’était pas clair. {question}",
+            "scan_window_unavailable": "Le scan vérifié dans le chat prend actuellement en charge la variation sur 24 heures. Dois-je utiliser 24 heures ?",
+        },
+        "es": {
+            "scan_window_question": "Entendido: puedo analizar todas las monedas filtradas que {direction} al menos {threshold}. ¿Uso las últimas 24 horas?",
+            "confusion_scan": "Perdón, mi respuesta anterior no respondió a tu solicitud. ¿Mido el movimiento durante las últimas 24 horas?",
+            "confusion_question": "Perdón, no fue claro. {question}",
+            "scan_window_unavailable": "El escaneo verificado del chat admite actualmente el cambio de 24 horas. ¿Uso 24 horas?",
+        },
+        "ru": {
+            "scan_window_question": "Понял — я могу проверить все отфильтрованные монеты, которые {direction} минимум на {threshold}. Использовать последние 24 часа?",
+            "confusion_scan": "Извините, предыдущий ответ не ответил на запрос сканирования. Использовать последние 24 часа?",
+            "confusion_question": "Извините, ответ был неясным. {question}",
+            "scan_window_unavailable": "Проверенный чат-скан сейчас поддерживает изменение за 24 часа. Использовать 24 часа?",
+        },
+    }
+    direction = str(values.get("direction") or "up")
+    direction_words = {
+        "ar": {"up": "لأعلى", "down": "لأسفل"},
+        "fr": {"up": "en hausse", "down": "en baisse"},
+        "es": {"up": "subieron", "down": "bajaron"},
+        "ru": {"up": "выросли", "down": "снизились"},
+    }
+    if code in direction_words:
+        values["direction"] = direction_words[code].get(direction, direction)
+    template = catalogs.get(code, catalogs["en"]).get(key) or catalogs["en"][key]
+    return template.format(**values)
+
+
+def _screened_scan_message(result: dict[str, Any], language: str) -> str:
+    code = (language or "en").split("-", 1)[0].casefold()
+    status = str(result.get("status") or "unavailable")
+    if status != "available":
+        if code == "ar":
+            return "تعذر تحميل بيانات السوق المفحوصة الآن، ولم يتم اختراع أي نتائج. حاول مرة أخرى لاحقًا."
+        if code == "fr":
+            return "Les données du marché filtré sont indisponibles. Aucun résultat n’a été inventé. Réessayez plus tard."
+        if code == "es":
+            return "No se pudieron cargar los datos del mercado filtrado. No se inventaron resultados. Inténtalo de nuevo más tarde."
+        if code == "ru":
+            return "Не удалось загрузить данные отфильтрованного рынка. Результаты не выдумывались. Повторите позже."
+        reason = str(result.get("reason") or "The screened market data is unavailable.")
+        return f"I couldn't load the screened market data, so I returned no invented results. {reason}"
+    matches = [item for item in result.get("matches") or [] if isinstance(item, dict)]
+    checked = int(result.get("symbols_checked") or 0)
+    captured = str(result.get("captured_at") or "")
+    if not matches:
+        if code == "ar":
+            return f"لم أجد عملات مطابقة بين {checked} عملة مفحوصة خلال آخر 24 ساعة. وقت البيانات: {captured}."
+        if code == "fr":
+            return f"Aucune crypto filtrée correspondante parmi {checked} vérifiées sur les dernières 24 heures. Heure des données : {captured}."
+        if code == "es":
+            return f"Ninguna moneda filtrada coincidió entre {checked} revisadas durante las últimas 24 horas. Hora de los datos: {captured}."
+        if code == "ru":
+            return f"За последние 24 часа совпадений среди {checked} проверенных монет нет. Время данных: {captured}."
+        return f"No screened coins matched among {checked} checked over the last 24 hours. Data time: {captured}."
+    rendered = ", ".join(
+        f"{item.get('symbol')} {float(item.get('percentage_change') or 0):+.2f}%"
+        for item in matches[:10]
+    )
+    extra = len(matches) - min(len(matches), 10)
+    suffix = f" (+{extra} more)" if extra > 0 else ""
+    if code == "ar":
+        return f"العملات المطابقة خلال آخر 24 ساعة: {rendered}{suffix}. تم فحص {checked} عملة. وقت البيانات: {captured}."
+    if code == "fr":
+        return f"Correspondances sur les dernières 24 heures : {rendered}{suffix}. {checked} cryptos filtrées vérifiées. Heure des données : {captured}."
+    if code == "es":
+        return f"Coincidencias durante las últimas 24 horas: {rendered}{suffix}. Se revisaron {checked} monedas filtradas. Hora de los datos: {captured}."
+    if code == "ru":
+        return f"Совпадения за последние 24 часа: {rendered}{suffix}. Проверено монет: {checked}. Время данных: {captured}."
+    return f"Matches over the last 24 hours: {rendered}{suffix}. Checked {checked} screened coins. Data time: {captured}."
+
+
 def _load_conversation_context(context: dict[str, Any]) -> SetupConversationContext:
     payload = context.get("setup_conversation_context")
     if isinstance(payload, dict):
         try:
             return SetupConversationContext.model_validate(payload)
         except ValidationError:
-            # Language context is a convenience, never executable state. A stale shape
-            # must not fail a turn; it starts empty instead.
-            return SetupConversationContext()
-    return SetupConversationContext()
+            # Conversation metadata is non-executable. A stale shape must not fail a
+            # turn, but the server-owned language survives when available.
+            return SetupConversationContext(
+                active_language=str(context.get("active_language") or "en")
+            )
+    return SetupConversationContext(
+        active_language=str(context.get("active_language") or "en")
+    )
 
 
 def _agent_message_type(execution: SetupTurnExecutionResult | None) -> str:

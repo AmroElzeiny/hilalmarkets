@@ -888,6 +888,21 @@ class SetupConversationContext(BaseModel):
     answered_question_ids: list[str] = Field(default_factory=list, max_length=24)
     #: How many questions this draft has asked, against the per-draft limit.
     clarifications_asked: int = Field(default=0, ge=0)
+    #: Server-owned language for all user-facing wording in this conversation. The
+    #: model may suggest prose, but it may not silently switch this value.
+    active_language: str = Field(default="en", min_length=2, max_length=12)
+    #: The user goal currently being completed, for confusion recovery and routing.
+    active_goal: str | None = Field(default=None, max_length=120)
+    #: Read-only scan request awaiting one missing choice. This never authorises a
+    #: strategy mutation or approval; it only preserves the user's scan goal.
+    pending_read_only_scan: dict[str, object] = Field(default_factory=dict)
+    #: A supported rule request whose user-controlled fields are not complete yet.
+    #: Stored as language/context evidence only; executable state remains in the draft.
+    pending_supported_request: dict[str, object] = Field(default_factory=dict)
+    #: Fingerprint of the last rendered assistant response. Used to prevent a confusion
+    #: signal from producing the same boilerplate again.
+    last_response_fingerprint: str | None = Field(default=None, max_length=64)
+    confusion_recovery_count: int = Field(default=0, ge=0)
 
     def with_question(self, contract: ClarificationContract) -> SetupConversationContext:
         return self.model_copy(

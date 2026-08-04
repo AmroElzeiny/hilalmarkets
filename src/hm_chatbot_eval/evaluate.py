@@ -161,6 +161,173 @@ def _semantic_role_values(value: Any, role: str) -> list[Any]:
     return found
 
 
+_INTERNAL_SETUP_JARGON = (
+    "comparison operator",
+    "formula key",
+    "supported percentage formula",
+    "executable contract",
+    "canonical requirement",
+    "compiler failure",
+    "unsupported intent",
+)
+_SUPPORTED_PERCENTAGE_QUERY = re.compile(
+    r"\b(?:coin|coins|crypto|cryptos|assets?|pairs?)\b.*"
+    r"\b(?:up|rise|rising|increase|increasing|gain|gaining|down|fall|falling|drop|decrease)\b.*"
+    r"\d+(?:\.\d+)?\s*(?:%|percent\b|pct\b)",
+    re.IGNORECASE,
+)
+_CONFUSION_SIGNAL = re.compile(
+    r"^(?:[?؟!\s]{1,8}|what\??|i don'?t understand|that did(?:n'?t| not) answer me|"
+    r"مش فاهم(?:ة)?|ايه؟|ماذا؟|quoi\s*\?|qué\?)$",
+    re.IGNORECASE,
+)
+
+
+def _normalised_reply(text: str) -> str:
+    return " ".join((text or "").casefold().split())
+
+
+def _detected_conversation_language(text: str, fallback: str | None = None) -> str | None:
+    value = (text or "").strip()
+    if not value or re.fullmatch(r"[?؟!\s\d.%]+", value):
+        return fallback
+    if re.search(r"[\u0600-\u06ff]", value):
+        return "ar"
+    if re.search(r"[\u0400-\u04ff]", value):
+        return "ru"
+    lowered = value.casefold()
+    if re.search(r"[àâçéèêëîïôûùüÿœ]", lowered) or len(
+        set(re.findall(r"[a-zà-ÿ']+", lowered))
+        & {"bonjour", "merci", "pourquoi", "avec", "choisir", "alerte", "pièces"}
+    ) >= 2:
+        return "fr"
+    if re.search(r"[¿¡ñáéíóú]", lowered) or len(
+        set(re.findall(r"[a-záéíóúñ']+", lowered))
+        & {"hola", "gracias", "moneda", "suba", "alerta", "elegir"}
+    ) >= 2:
+        return "es"
+    if re.search(r"[a-z]", lowered):
+        return "en"
+    return fallback
+
+
+def _find_nested_mapping(value: Any, key: str) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        candidate = value.get(key)
+        if isinstance(candidate, dict):
+            return candidate
+        for nested in value.values():
+            found = _find_nested_mapping(nested, key)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _find_nested_mapping(nested, key)
+            if found is not None:
+                return found
+    return None
+
+
+def conversation_quality_metrics(turns: list[Any]) -> dict[str, float]:
+    """Deterministic transcript checks for concise, coherent Setup Chat behavior.
+
+    Metrics are emitted only when their behavior was actually exercised, so an ordinary
+    strategy scenario cannot look like a perfect language/Scanner test it never ran.
+    """
+
+    metrics: dict[str, float] = {}
+    active_language: str | None = None
+    language_checked = 0
+    language_matched = 0
+    assistant_texts = [
+        _normalised_reply(turn.text)
+        for turn in turns
+        if getattr(turn, "role", "") == "assistant" and str(getattr(turn, "text", "")).strip()
+    ]
+    if len(assistant_texts) >= 2:
+        adjacent_duplicates = sum(
+            left == right for left, right in zip(assistant_texts, assistant_texts[1:], strict=False)
+        )
+        metrics["duplicate_assistant_response_rate"] = adjacent_duplicates / max(
+            1, len(assistant_texts) - 1
+        )
+
+    confusion_cases = 0
+    confusion_repeats = 0
+    supported_cases = 0
+    supported_rejections = 0
+    simple_jargon_cases = 0
+    simple_jargon_hits = 0
+    simple_overlong_hits = 0
+    previous_assistant = ""
+    pending_user = ""
+    scanner_checks = 0
+    scanner_safe = 0
+
+    for turn in turns:
+        role = str(getattr(turn, "role", "") or "")
+        text = str(getattr(turn, "text", "") or "")
+        if role == "user":
+            active_language = _detected_conversation_language(text, active_language)
+            pending_user = text
+            if _CONFUSION_SIGNAL.fullmatch(" ".join(text.casefold().split())):
+                confusion_cases += 1
+            continue
+        if role != "assistant":
+            continue
+
+        assistant_language = _detected_conversation_language(text)
+        if active_language and assistant_language:
+            language_checked += 1
+            language_matched += int(active_language == assistant_language)
+
+        normalized = _normalised_reply(text)
+        if pending_user and _CONFUSION_SIGNAL.fullmatch(
+            " ".join(pending_user.casefold().split())
+        ):
+            confusion_repeats += int(bool(previous_assistant) and normalized == previous_assistant)
+
+        if pending_user and _SUPPORTED_PERCENTAGE_QUERY.search(pending_user):
+            supported_cases += 1
+            rejection = bool(
+                re.search(
+                    r"not expressible|could not express|cannot express|unsupported requirement|"
+                    r"could not turn that into an exact change",
+                    text,
+                    re.IGNORECASE,
+                )
+            )
+            supported_rejections += int(rejection)
+            simple_jargon_cases += 1
+            simple_jargon_hits += int(any(item in normalized for item in _INTERNAL_SETUP_JARGON))
+            simple_overlong_hits += int(len(text) > 500)
+
+        scanner = _find_nested_mapping(getattr(turn, "structured", None), "scanner_result")
+        if scanner is not None:
+            scanner_checks += 1
+            scanner_safe += int(
+                scanner.get("read_only") is True
+                and scanner.get("strategy_mutated") is False
+            )
+
+        previous_assistant = normalized
+        pending_user = ""
+
+    if language_checked:
+        metrics["response_language_match_rate"] = language_matched / language_checked
+        metrics["response_language_checked_turns"] = float(language_checked)
+    if confusion_cases:
+        metrics["confusion_repeat_rate"] = confusion_repeats / confusion_cases
+        metrics["confusion_recovery_rate"] = 1.0 - metrics["confusion_repeat_rate"]
+    if supported_cases:
+        metrics["supported_request_rejection_rate"] = supported_rejections / supported_cases
+        metrics["simple_turn_internal_jargon_rate"] = simple_jargon_hits / simple_jargon_cases
+        metrics["simple_turn_overlong_rate"] = simple_overlong_hits / simple_jargon_cases
+    if scanner_checks:
+        metrics["scanner_read_only_integrity"] = scanner_safe / scanner_checks
+        metrics["scanner_result_checked_turns"] = float(scanner_checks)
+    return metrics
+
 def deterministic_metrics(
     scenario: ScenarioSpec,
     turns: list[TurnRecord],
@@ -338,6 +505,7 @@ def deterministic_metrics(
     else:
         metrics["structured_capture_rate"] = 1.0
     metrics.update(transport_parity_metrics(turns))
+    metrics.update(conversation_quality_metrics(turns))
     metrics["semantic_contract_pass"] = float(
         metrics["schema_valid"] == 1.0
         and semantic_accuracy == 1.0
@@ -564,7 +732,7 @@ def _approval_metrics(
     authenticated_approvals: list[int] = []
     assistant_states: list[tuple[int, dict[str, Any]]] = []
     contradictions = 0
-    for index, turn in enumerate(turns):
+    for turn in turns:
         if turn.role == "user" and turn.text == "[authenticated Review and approve control]":
             authenticated_approvals.append(index)
             continue

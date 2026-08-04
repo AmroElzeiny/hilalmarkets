@@ -203,6 +203,24 @@ def _provider_status(
     return "available"
 
 
+def _unique_user_facing_rows(
+    rows: list[dict[str, str]],
+    *,
+    fields: tuple[str, ...],
+) -> list[dict[str, str]]:
+    """Deduplicate open-item read models without changing canonical draft state."""
+
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for row in rows:
+        key = tuple(" ".join(str(row.get(field) or "").casefold().split()) for field in fields)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
 @dataclass(frozen=True, slots=True)
 class SetupTurnRequest:
     """Everything the tool needs, and nothing it could be talked out of."""
@@ -652,26 +670,36 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         answered_questions=answered,
         requirement_states=list(draft.requirement_states),
         requirement_assessments=list(requirement_reconciliation.assessments),
-        unresolved_fields=[
-            {"key": item.key, "question": item.question, "source_fragment": item.source_fragment}
-            for item in draft.unresolved_fields
-        ],
-        unsupported_requirements=[
-            {
-                "key": item.key,
-                "missing_contract": item.missing_contract,
-                "source_fragment": item.source_fragment,
-            }
-            for item in draft.unsupported_requirements
-        ],
-        semantic_violations=violations,
+        unresolved_fields=_unique_user_facing_rows(
+            [
+                {
+                    "key": item.key,
+                    "question": item.question,
+                    "source_fragment": item.source_fragment,
+                }
+                for item in draft.unresolved_fields
+            ],
+            fields=("key", "question"),
+        ),
+        unsupported_requirements=_unique_user_facing_rows(
+            [
+                {
+                    "key": item.key,
+                    "missing_contract": item.missing_contract,
+                    "source_fragment": item.source_fragment,
+                }
+                for item in draft.unsupported_requirements
+            ],
+            fields=("key", "missing_contract"),
+        ),
+        semantic_violations=list(dict.fromkeys(violations)),
         compile_status=compile_status,
         screening_status=screening_status,
         provider_status=provider_status,
         final_chat_status=final_chat_status,
         approval_eligible=approval_eligible,
         approval_status=approval_status,
-        safe_errors=safe_errors,
+        safe_errors=list(dict.fromkeys(safe_errors)),
         suggested_next_actions=_next_actions(
             draft,
             compile_status=compile_status,
@@ -2573,7 +2601,19 @@ def _allowed_clarifications(
             )
         )
     remaining = MAX_CLARIFICATIONS_PER_DRAFT - conversation.clarifications_asked
-    return allowed[: max(0, min(remaining, 6))]
+    deduplicated: list[ClarificationContract] = []
+    seen_targets: set[tuple[str, str, str]] = set()
+    for contract in allowed:
+        target = (
+            contract.target_type,
+            contract.target_field or "",
+            contract.target_condition_id or contract.question_id,
+        )
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
+        deduplicated.append(contract)
+    return deduplicated[: max(0, min(remaining, 6))]
 
 
 def validated_clarification(

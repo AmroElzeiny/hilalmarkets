@@ -2821,6 +2821,46 @@ class AISetupChatService:
             },
         )
 
+    async def screened_percentage_snapshot(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        direction: Literal["up", "down"],
+        threshold: float,
+        timeframe: str = "24h",
+        quote_currency: str = "USDT",
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Run the governed, quota-controlled read-only percentage Scanner path."""
+
+        try:
+            return await OnDemandScanService(
+                session,
+                self.market_provider,
+                settings=self.settings,
+            ).run_percentage_snapshot(
+                chat.user_id,
+                direction=direction,
+                threshold=threshold,
+                timeframe=timeframe,
+                quote_currency=quote_currency,
+                idempotency_key=(
+                    idempotency_key
+                    or f"setup-chat-percentage:{chat.id}:{uuid4().hex}"
+                ),
+            )
+        except OnDemandScanError as exc:
+            return {
+                "status": "unavailable",
+                "reason": str(exc),
+                "error_code": exc.code,
+                "captured_at": datetime.now(UTC).isoformat(),
+                "matches": [],
+                "read_only": True,
+                "strategy_mutated": False,
+            }
+
     async def market_snapshot(
         self,
         *,

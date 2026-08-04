@@ -31,6 +31,39 @@
   let pendingScanRequestId = null;
   const optimisticMessages = new Map();
 
+  const normalizedMessageText = (value) => String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+  function dedupeVisibleMessages(items) {
+    const deduped = [];
+    const seenMessageIds = new Set();
+    for (const item of items) {
+      const messageId = item.id || item.message_id || null;
+      if (messageId && seenMessageIds.has(messageId)) continue;
+
+      const previous = deduped[deduped.length - 1];
+      const assistantPair = previous?.role === "assistant" && item.role === "assistant";
+      if (assistantPair) {
+        const previousFingerprint = previous.payload?.response_fingerprint || "";
+        const currentFingerprint = item.payload?.response_fingerprint || "";
+        const sameFingerprint = Boolean(
+          previousFingerprint && currentFingerprint
+          && previousFingerprint === currentFingerprint,
+        );
+        const sameFallback = !previousFingerprint && !currentFingerprint
+          && previous.message_type === item.message_type
+          && normalizedMessageText(previous.content) === normalizedMessageText(item.content);
+        if (sameFingerprint || sameFallback) continue;
+      }
+
+      if (messageId) seenMessageIds.add(messageId);
+      deduped.push(item);
+    }
+    return deduped;
+  }
+
   const newClientMessageId = () => globalThis.crypto?.randomUUID?.()
     || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -318,7 +351,10 @@
       (chat?.messages || []).map((item) => item.client_message_id).filter(Boolean),
     );
     canonicalIds.forEach((id) => optimisticMessages.delete(id));
-    const visible = [...(chat?.messages || []), ...optimisticMessages.values()];
+    const visible = dedupeVisibleMessages([
+      ...(chat?.messages || []),
+      ...optimisticMessages.values(),
+    ]);
     visible.forEach((item) => messagesTarget.append(renderMessage(item)));
     if (loading) {
       const typing = document.createElement("div");
@@ -622,6 +658,9 @@
     setLoading(true, "Starting a new setup");
     try {
       chat = await request("/sessions", {method: "POST", body: "{}"});
+      pendingScanRequestId = null;
+      lastAction = null;
+      optimisticMessages.clear();
       render();
       input.focus();
     } catch (error) { showError(error); }
@@ -728,6 +767,9 @@
       && chat.setup_mode !== requestedMode
     ) {
       chat = await request("/sessions", {method: "POST", body: "{}"});
+      pendingScanRequestId = null;
+      lastAction = null;
+      optimisticMessages.clear();
       render();
     }
     if (chat?.setup_mode !== requestedMode && ["scanner", "monitor"].includes(requestedMode || "")) {
