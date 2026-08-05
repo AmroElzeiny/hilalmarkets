@@ -3,6 +3,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from math import isfinite
 from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -22,7 +23,14 @@ from ai_market_monitor.db.models import (
     UsageRecord,
     User,
 )
-from ai_market_monitor.db.models.enums import ScanOutcome, StrategyVersionStatus
+from ai_market_monitor.db.models.enums import (
+    ConditionType,
+    LogicalOperator,
+    MarketType,
+    ScanOutcome,
+    StrategyVersionStatus,
+    TriggerMode,
+)
 from ai_market_monitor.engine.dedup import stable_event_hash
 from ai_market_monitor.engine.evaluator import (
     StrategyRuleEngine,
@@ -38,7 +46,19 @@ from ai_market_monitor.schemas.on_demand import (
     OnDemandScanRequest,
     OnDemandScanResponse,
 )
-from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.schemas.strategy import (
+    AlertPolicy,
+    ConditionGroup,
+    ConditionRule,
+    Operand,
+    OperandKind,
+    ShariaPolicyDefinition,
+    StrategyDefinition,
+    StrategyDirection,
+    UniverseDefinition,
+)
+from ai_market_monitor.schemas.strategy import Comparator
+from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.services.entitlements import (
     EntitlementContext,
     EntitlementService,
@@ -185,6 +205,528 @@ class OnDemandScanService:
                 "Scanner is unavailable. Start a new run to retry.",
             ) from exc
         return await self._complete_run(run, response)
+
+    async def run_percentage_snapshot(
+        self,
+        user_id: UUID,
+        *,
+        draft: StrategyDraftV2,
+        direction: Literal["up", "down"],
+        threshold: float,
+        timeframe: str = "24h",
+        idempotency_key: str | None = None,
+    ) -> OnDemandScanResponse:
+        """Run a durable, policy-bound rolling-percentage Scanner request.
+
+        This path shares the canonical Scanner run, quota, screening-resolution, market
+        record and replay contracts.  The only specialised part is evaluation of the
+        provider's native rolling 24-hour percentage field; the selected draft policy
+        still owns the methodology and universe.  No Strategy, StrategyVersion, approval
+        or Monitor state is created or changed.
+        """
+
+        if timeframe != "24h":
+            raise OnDemandScanError(
+                "percentage_window_not_supported",
+                "This verified Scanner query currently supports the rolling 24-hour window.",
+            )
+        if not isfinite(float(threshold)) or not 0 < float(threshold) <= 1000:
+            raise OnDemandScanError(
+                "invalid_percentage_threshold",
+                "Enter a percentage greater than zero.",
+            )
+        definition = self._percentage_definition(
+            draft,
+            direction=direction,
+            threshold=float(threshold),
+        )
+        request_key = idempotency_key or f"percentage-scan-{uuid4()}"
+        request = OnDemandScanRequest(
+            strategy=definition,
+            source_draft_id=draft.draft_id,
+            source_draft_version=draft.executable_version,
+            source_draft_hash=draft.executable_hash,
+            max_symbols=max(1, int(self.settings.market_breadth_max_symbols)),
+            idempotency_key=request_key,
+            light_scan=True,
+            include_non_confirmed=True,
+        )
+        request_hash = stable_event_hash(
+            {
+                "request_kind": "rolling_percentage_24h",
+                "request": request.model_dump(mode="json"),
+                "direction": direction,
+                "threshold": float(threshold),
+                "definition_hash": definition.canonical_hash(),
+            }
+        )
+        existing = await self.session.scalar(
+            select(OnDemandScanRun).where(
+                OnDemandScanRun.user_id == user_id,
+                OnDemandScanRun.idempotency_key == request_key,
+            )
+        )
+        if existing is not None:
+            return await self._existing_run_response(existing, request_hash)
+
+        now = datetime.now(UTC)
+        definition_hash = definition.canonical_hash()
+        run = OnDemandScanRun(
+            user_id=user_id,
+            strategy_version_id=None,
+            idempotency_key=request_key,
+            request_hash=request_hash,
+            draft_id=draft.draft_id,
+            draft_version=draft.executable_version,
+            draft_hash=draft.executable_hash,
+            definition_hash=definition_hash,
+            provider=type(self.provider).__name__,
+            status="running",
+            quota_metric="light_prompt_scans",
+            quota_reserved=False,
+            candle_snapshot_manifest={},
+            created_at=now,
+            started_at=now,
+        )
+        self.session.add(run)
+        try:
+            await self.session.flush()
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.session.scalar(
+                select(OnDemandScanRun).where(
+                    OnDemandScanRun.user_id == user_id,
+                    OnDemandScanRun.idempotency_key == request_key,
+                )
+            )
+            if existing is None:
+                raise
+            return await self._existing_run_response(existing, request_hash)
+
+        try:
+            response = await self._run_percentage_once(
+                user_id,
+                request,
+                run=run,
+                direction=direction,
+                threshold=float(threshold),
+            )
+        except OnDemandScanError as exc:
+            await self._fail_run(run, exc.code, str(exc))
+            raise
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            await self._fail_run(
+                run,
+                "market_provider_unavailable",
+                "The screened market data could not be loaded.",
+            )
+            raise OnDemandScanError(
+                "market_provider_unavailable",
+                "The screened market data could not be loaded.",
+            ) from exc
+        except Exception as exc:
+            # A durable run must never remain `running` after an unexpected service
+            # defect. Preserve the safe public boundary while recording a failed run
+            # that operators and idempotent retries can inspect.
+            await self._fail_run(run, "scanner_runtime_failure", "Scanner is unavailable.")
+            raise OnDemandScanError(
+                "scanner_runtime_failure",
+                "Scanner is unavailable. Start a new run to retry.",
+            ) from exc
+        return await self._complete_run(run, response)
+
+    @staticmethod
+    def _percentage_definition(
+        draft: StrategyDraftV2,
+        *,
+        direction: Literal["up", "down"],
+        threshold: float,
+    ) -> StrategyDefinition:
+        """Build the inline Scanner definition from the exact selected draft policy."""
+
+        policy = draft.sharia_policy
+        if policy.methodology_id is None or not policy.methodology_version:
+            raise OnDemandScanError(
+                "screening_methodology_required",
+                "Choose an active screening methodology before running Scanner.",
+            )
+        if draft.authoring_blocking:
+            scope_blockers = [
+                item
+                for item in draft.unresolved_fields
+                if item.target_type in {"universe", "sharia_policy"} and item.blocking
+            ]
+            if scope_blockers:
+                raise OnDemandScanError(
+                    "screened_universe_required",
+                    "Choose the screened assets before running Scanner.",
+                )
+        sharia = ShariaPolicyDefinition(
+            universe_mode=policy.universe_mode,
+            methodology_id=policy.methodology_id,
+            methodology_version=policy.methodology_version,
+            allowed_statuses=list(policy.allowed_statuses),
+            qualification_policy=policy.qualification_policy,
+            disputed_asset_policy=policy.disputed_asset_policy,
+            compliance_change_behavior=policy.compliance_change_behavior,
+            approved_watchlist_id=policy.approved_watchlist_id,
+            approved_watchlist_version=policy.approved_watchlist_version,
+        )
+        # Explicit assets are authored on the draft policy.  They become technical
+        # inclusions only for this inline definition; the resolver still validates each
+        # one against the selected methodology and safety holds.
+        include_symbols = (
+            list(policy.explicit_symbols)
+            if policy.universe_mode.value == "explicit_assets"
+            else list(draft.universe.included_symbols)
+        )
+        comparator = (
+            Comparator.GREATER_THAN_OR_EQUAL
+            if direction == "up"
+            else Comparator.LESS_THAN_OR_EQUAL
+        )
+        condition = ConditionRule(
+            key="rolling_24h_percentage",
+            label=(
+                f"Rolling 24-hour move is {'at least' if direction == 'up' else 'at most'} "
+                f"{threshold:g}%"
+            ),
+            condition_type=ConditionType.MARKET_FILTER,
+            timeframe="1d",
+            left=Operand(
+                kind=OperandKind.MARKET_METRIC,
+                name="rolling_24h_percentage",
+                field="percentage_24h",
+            ),
+            comparator=comparator,
+            right=Operand(kind=OperandKind.CONSTANT, value=threshold if direction == "up" else -threshold),
+            required=True,
+            required_data=["universe_metadata.percentage_24h"],
+            source_turn_id=str(draft.draft_id),
+            source_fragment="Server-built read-only rolling 24-hour Scanner condition.",
+        )
+        return StrategyDefinition(
+            name="Read-only rolling 24-hour Scanner",
+            description="Temporary inline Scanner definition; never approved or activated.",
+            direction=(StrategyDirection.LONG if direction == "up" else StrategyDirection.SHORT),
+            base_timeframe="1d",
+            trigger_mode=TriggerMode.CANDLE_CLOSE,
+            universe=UniverseDefinition(
+                exchange=draft.market_scope.exchange,
+                market_type=MarketType.SPOT,
+                quote_currencies=[draft.market_scope.quote_asset],
+                include_symbols=include_symbols,
+                exclude_symbols=list(draft.universe.excluded_symbols),
+                max_symbols=None,
+                sharia_policy=sharia,
+            ),
+            conditions=ConditionGroup(
+                key="rolling_24h_scan",
+                operator=LogicalOperator.AND,
+                children=[condition],
+            ),
+            alerts=AlertPolicy(channels=["web"], forming_alerts=False),
+        )
+
+    async def _run_percentage_once(
+        self,
+        user_id: UUID,
+        request: OnDemandScanRequest,
+        *,
+        run: OnDemandScanRun,
+        direction: Literal["up", "down"],
+        threshold: float,
+    ) -> OnDemandScanResponse:
+        definition, _strategy, _version = await self._load_definition(user_id, request)
+        await self.session.scalar(select(User.id).where(User.id == user_id).with_for_update())
+        context = await EntitlementService(self.session).current(user_id)
+        usage_metric = (
+            "basic_user_initiated_scans"
+            if context.plan.code == "demo"
+            else "light_prompt_scans"
+        )
+        quota_limit, quota_used, period_start, period_end = await self._quota(
+            context,
+            user_id,
+            metric="light_prompt_scans",
+            usage_metric=usage_metric,
+        )
+        if not context.feature_enabled("light_prompt_scan") or quota_limit <= 0:
+            raise OnDemandScanError(
+                "light_prompt_scan_not_available",
+                "Your current plan does not include Scanner.",
+            )
+        if quota_used >= quota_limit:
+            raise OnDemandScanError(
+                "light_prompt_scans_quota_exceeded",
+                f"Your plan allows {quota_limit} Scanner request(s) for this period.",
+            )
+        self._enforce_scan_limits(context.plan, definition, request)
+        usage = await UsageService(self.session).record(
+            user_id,
+            usage_metric,
+            period_start=period_start,
+            period_end=period_end,
+            idempotency_key=f"on-demand-scan-run:{run.id}",
+            subject_type="inline_strategy",
+            subject_id=definition.canonical_hash(),
+            metadata={
+                "run_id": str(run.id),
+                "status": "reserved",
+                "scan_mode": "chat_percentage_24h",
+                "direction": direction,
+                "threshold": threshold,
+            },
+        )
+        run.usage_record_id = usage.id
+        run.quota_reserved = True
+        maximum_symbols = min(
+            int(context.limit("light_prompt_symbols") or 0),
+            int(request.max_symbols),
+        )
+        await self.session.commit()
+        try:
+            screening = await ShariaUniverseResolver(
+                self.session, self.provider, self.settings
+            ).resolve(
+                definition,
+                user_id=user_id,
+                maximum_symbols=maximum_symbols,
+            )
+        except ShariaUniverseError as exc:
+            raise OnDemandScanError(exc.code, str(exc)) from exc
+        if screening.monitor_paused_for_compliance:
+            raise OnDemandScanError(
+                "monitor_paused_for_compliance",
+                "The selected screened scope is paused because an asset left its policy.",
+            )
+        symbols = list(screening.included_symbols)
+        if not symbols:
+            raise OnDemandScanError(
+                "empty_screened_universe",
+                "No assets currently meet this scan's screened-market policy.",
+            )
+
+        evaluated_at = datetime.now(UTC)
+        try:
+            metadata = await self.provider.fetch_universe_metadata(
+                definition.universe.exchange,
+                symbols,
+                include_listing_dates=False,
+            )
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            raise OnDemandScanError(
+                "market_provider_unavailable",
+                "The screened market data could not be loaded.",
+            ) from exc
+
+        results: list[OnDemandScanMarketResult] = []
+        market_statuses: list[OnDemandMarketStatus] = [
+            OnDemandMarketStatus(
+                exchange=definition.universe.exchange,
+                symbol=item.symbol,
+                timeframe="24h",
+                direction=direction,
+                category=(
+                    "market_unavailable"
+                    if "market_unavailable" in item.reason_code
+                    else "policy_exclusion"
+                ),
+                error_code=item.reason_code,
+                safe_message=item.reason,
+            )
+            for item in screening.excluded
+        ]
+        valid_changes: dict[str, float] = {}
+        warnings: list[str] = []
+        for symbol in symbols:
+            raw_change = (metadata.get(symbol) or {}).get("percentage_24h")
+            try:
+                change = float(raw_change)
+            except (TypeError, ValueError):
+                market_statuses.append(
+                    OnDemandMarketStatus(
+                        exchange=definition.universe.exchange,
+                        symbol=symbol,
+                        timeframe="24h",
+                        direction=direction,
+                        category="stale_incomplete_data",
+                        error_code="percentage_data_unavailable",
+                        safe_message="Rolling 24-hour percentage data is unavailable.",
+                    )
+                )
+                continue
+            if not isfinite(change):
+                market_statuses.append(
+                    OnDemandMarketStatus(
+                        exchange=definition.universe.exchange,
+                        symbol=symbol,
+                        timeframe="24h",
+                        direction=direction,
+                        category="stale_incomplete_data",
+                        error_code="percentage_data_invalid",
+                        safe_message="Rolling 24-hour percentage data is invalid.",
+                    )
+                )
+                continue
+            valid_changes[symbol] = change
+            matched = change >= threshold if direction == "up" else change <= -threshold
+            required = threshold if direction == "up" else -threshold
+            summary = OnDemandConditionSummary(
+                condition_id="rolling_24h_percentage",
+                name="Rolling 24-hour percentage move",
+                state="passed" if matched else "failed",
+                required_value=required,
+                actual_value=round(change, 6),
+                proximity_score=(
+                    100.0
+                    if matched
+                    else max(0.0, min(99.99, abs(change) / threshold * 100.0))
+                ),
+            )
+            category: OnDemandResultCategory = (
+                "confirmed" if matched else "technical_non_match"
+            )
+            market_statuses.append(
+                OnDemandMarketStatus(
+                    exchange=definition.universe.exchange,
+                    symbol=symbol,
+                    timeframe="24h",
+                    direction=direction,
+                    category=category,
+                )
+            )
+            if matched:
+                results.append(
+                    OnDemandScanMarketResult(
+                        category="confirmed",
+                        exchange=definition.universe.exchange,
+                        symbol=symbol,
+                        timeframe="24h",
+                        direction=direction,
+                        outcome="confirmed",
+                        completion_score=100.0,
+                        match_percentage=100.0,
+                        trend=direction,
+                        passed_conditions=[summary],
+                        missing_conditions=[],
+                        closest_missing_condition=None,
+                        proof_receipt={
+                            "evaluation_kind": "rolling_percentage_24h",
+                            "captured_at": evaluated_at.isoformat(),
+                            "percentage_change": round(change, 6),
+                            "threshold": threshold,
+                            "movement_direction": direction,
+                            "provider": type(self.provider).__name__,
+                            "screening_methodology_id": (
+                                str(screening.methodology_id)
+                                if screening.methodology_id
+                                else None
+                            ),
+                            "screening_methodology_version": screening.methodology_version,
+                            "sharia_universe_snapshot_id": (
+                                str(screening.snapshot_id) if screening.snapshot_id else None
+                            ),
+                            "sharia_universe_snapshot_hash": screening.snapshot_hash,
+                            "read_only": True,
+                            "strategy_mutated": False,
+                        },
+                    )
+                )
+
+        if not valid_changes:
+            raise OnDemandScanError(
+                "percentage_data_unavailable",
+                "Rolling 24-hour percentage data is unavailable for the screened scope.",
+            )
+        if screening.excluded_by_policy_count:
+            warnings.append(
+                f"{screening.excluded_by_policy_count} asset(s) were excluded by the "
+                "selected Sharia policy before technical evaluation."
+            )
+        unavailable_count = len(symbols) - len(valid_changes)
+        status: Literal["succeeded", "partial", "failed"] = (
+            "partial" if unavailable_count else "succeeded"
+        )
+        usage.metadata_json = {
+            **dict(usage.metadata_json or {}),
+            "status": status,
+            "symbols_requested": len(symbols),
+            "symbols_scanned": len(valid_changes),
+            "matches": len(results),
+            "sharia_universe_snapshot_id": (
+                str(screening.snapshot_id) if screening.snapshot_id else None
+            ),
+            "methodology_id": (
+                str(screening.methodology_id) if screening.methodology_id else None
+            ),
+            "methodology_version": screening.methodology_version,
+        }
+        self.session.add(
+            AuditEvent(
+                actor_user_id=user_id,
+                actor_type="user",
+                action="on_demand_scan.percentage_24h_executed",
+                target_type="on_demand_scan_run",
+                target_id=str(run.id),
+                metadata_redacted={
+                    "status": status,
+                    "direction": direction,
+                    "threshold": threshold,
+                    "symbols_requested": len(symbols),
+                    "symbols_scanned": len(valid_changes),
+                    "matches": len(results),
+                    "quota_limit": quota_limit,
+                    "quota_used_before": quota_used,
+                    "screened_assets_considered": screening.considered_count,
+                    "assets_excluded_by_sharia_policy": screening.excluded_by_policy_count,
+                    "strategy_mutated": False,
+                },
+                created_at=evaluated_at,
+            )
+        )
+        await self.session.flush()
+        results.sort(
+            key=lambda item: float(item.proof_receipt.get("percentage_change") or 0),
+            reverse=direction == "up",
+        )
+        percentage_manifest = {
+            symbol: {"percentage_24h": round(change, 6)}
+            for symbol, change in sorted(valid_changes.items())
+        }
+        manifest_hash = hashlib.sha256(
+            json.dumps(percentage_manifest, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        run.sharia_universe_snapshot_id = screening.snapshot_id
+        run.sharia_universe_snapshot_hash = screening.snapshot_hash
+        run.candle_snapshot_manifest = percentage_manifest
+        run.candle_snapshot_hash = manifest_hash
+        return OnDemandScanResponse(
+            run_id=run.id,
+            status=status,
+            plan_code=context.plan.code,
+            quota_limit=quota_limit,
+            quota_used=quota_used + 1,
+            quota_remaining=max(0, quota_limit - quota_used - 1),
+            symbols_requested=len(symbols),
+            symbols_scanned=len(valid_changes),
+            results=results,
+            market_statuses=market_statuses,
+            warnings=warnings,
+            evaluated_at=evaluated_at,
+            usage_record_id=usage.id,
+            screened_assets_considered=screening.considered_count,
+            assets_excluded_by_sharia_policy=screening.excluded_by_policy_count,
+            assets_with_insufficient_screening_data=screening.insufficient_information_count,
+            eligible_assets_scanned=len(valid_changes),
+            sharia_methodology_id=screening.methodology_id,
+            sharia_methodology_code=screening.methodology_code,
+            sharia_methodology_version=screening.methodology_version,
+            sharia_universe_snapshot_id=screening.snapshot_id,
+            sharia_universe_snapshot_hash=screening.snapshot_hash,
+            candle_snapshot_hash=manifest_hash,
+        )
 
     async def _run_once(
         self,

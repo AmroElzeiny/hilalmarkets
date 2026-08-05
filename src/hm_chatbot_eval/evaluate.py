@@ -161,6 +161,263 @@ def _semantic_role_values(value: Any, role: str) -> list[Any]:
     return found
 
 
+_INTERNAL_SETUP_JARGON = (
+    "comparison operator",
+    "formula key",
+    "supported percentage formula",
+    "executable contract",
+    "canonical requirement",
+    "compiler failure",
+    "unsupported intent",
+)
+_PERCENT_VALUE = re.compile(
+    r"(?<![\w.])[-+]?\d+(?:\.\d+)?\s*(?:%|percent\b|pct\b)",
+    re.IGNORECASE,
+)
+_CONFUSION_SIGNAL = re.compile(
+    r"^(?:[?؟!\s]{1,8}|what\??|i don'?t understand|that did(?:n'?t| not) answer me|"
+    r"مش فاهم(?:ة)?|ايه؟|ماذا؟|quoi\s*\?|qué\?)$",
+    re.IGNORECASE,
+)
+
+
+def _normalised_reply(text: str) -> str:
+    return " ".join((text or "").casefold().split())
+
+
+def _detected_conversation_language(text: str, fallback: str | None = None) -> str | None:
+    value = (text or "").strip()
+    if not value or re.fullmatch(r"[?؟!\s\d.%]+", value):
+        return fallback
+    if re.search(r"[\u0600-\u06ff]", value):
+        return "ar"
+    if re.search(r"[\u0400-\u04ff]", value):
+        return "ru"
+    lowered = value.casefold()
+    compact = " ".join(lowered.split())
+    if compact in {"oui", "d’accord", "d'accord", "accord"}:
+        return "fr"
+    if compact in {"sí", "si", "claro"}:
+        return "es"
+    if compact in {"да", "хорошо"}:
+        return "ru"
+    words = set(re.findall(r"[a-zà-ÿ']+", lowered))
+    french = {
+        "bonjour", "merci", "pourquoi", "avec", "choisir", "alerte", "pièces",
+        "monnaie", "cryptos", "dois", "utiliser", "fenêtre", "aucun", "règle",
+        "brouillon", "mouvement", "précédente", "seuil", "seulement",
+    }
+    spanish = {
+        "hola", "gracias", "moneda", "monedas", "suba", "alerta", "elegir",
+        "usar", "ventana", "ninguna", "regla", "borrador", "movimiento",
+        "anterior", "umbral", "solo", "alcance",
+    }
+    french_hits = len(words & french)
+    spanish_hits = len(words & spanish)
+    if re.search(r"[àâçèêëîïôûùüÿœ]", lowered) or french_hits >= 2:
+        return "fr"
+    if re.search(r"[¿¡ñáíóú]", lowered) or spanish_hits >= 2:
+        return "es"
+    # `é` belongs to both languages.  Resolve it with vocabulary instead of treating
+    # every accented Latin reply as French.
+    if "é" in lowered:
+        if spanish_hits > french_hits:
+            return "es"
+        if french_hits:
+            return "fr"
+    if re.search(r"[a-z]", lowered):
+        return "en"
+    return fallback
+
+
+def _is_supported_percentage_query(text: str) -> bool:
+    lowered = " ".join((text or "").casefold().split())
+    if not _PERCENT_VALUE.search(lowered):
+        return False
+    assets = (
+        "coin", "coins", "crypto", "cryptos", "asset", "assets", "pair", "pairs",
+        "عملة", "عملات", "pièce", "pièces", "monnaie", "monedas", "moneda",
+        "монета", "монеты",
+    )
+    directions = (
+        " up", "rise", "increase", "gain", "down", "fall", "drop", "decrease",
+        "ترتفع", "تنخفض", "صعود", "هبوط", "hausse", "augmente", "baisse",
+        "suba", "sube", "baja", "cae", "вырос", "сниз", "падает",
+    )
+    return any(item in lowered for item in assets) and any(
+        item in lowered for item in directions
+    )
+
+
+def _is_current_market_percentage_query(text: str) -> bool:
+    lowered = " ".join((text or "").casefold().split())
+    markers = (
+        "what coins", "which coins", "show me", "find coins", "right now", " now",
+        "ما العملات", "دلوقتي", "الآن",
+        "quelles cryptos", "maintenant",
+        "qué monedas", "ahora",
+        "какие монеты", "сейчас",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _find_nested_mapping(value: Any, key: str) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        candidate = value.get(key)
+        if isinstance(candidate, dict):
+            return candidate
+        for nested in value.values():
+            found = _find_nested_mapping(nested, key)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _find_nested_mapping(nested, key)
+            if found is not None:
+                return found
+    return None
+
+
+def conversation_quality_metrics(turns: list[Any]) -> dict[str, float]:
+    """Deterministic quality gates for conversation, state and governed Scanner output."""
+
+    metrics: dict[str, float] = {}
+    active_language: str | None = None
+    language_checked = 0
+    language_matched = 0
+
+    adjacent_pairs = [
+        (left, right)
+        for left, right in zip(turns, turns[1:], strict=False)
+        if getattr(left, "role", "") == "assistant"
+        and getattr(right, "role", "") == "assistant"
+    ]
+    if adjacent_pairs:
+        duplicate_count = sum(
+            _normalised_reply(str(getattr(left, "text", "")))
+            == _normalised_reply(str(getattr(right, "text", "")))
+            for left, right in adjacent_pairs
+        )
+        metrics["duplicate_assistant_response_rate"] = duplicate_count / len(adjacent_pairs)
+
+    confusion_cases = 0
+    confusion_repeats = 0
+    supported_cases = 0
+    supported_rejections = 0
+    supported_canonical_cases = 0
+    supported_canonical = 0
+    simple_jargon_hits = 0
+    simple_overlong_hits = 0
+    simple_multi_question_hits = 0
+    previous_assistant = ""
+    pending_user = ""
+    scanner_checks = 0
+    scanner_safe = 0
+    scanner_success_checks = 0
+    scanner_durable = 0
+    scanner_policy_bound = 0
+
+    for turn in turns:
+        role = str(getattr(turn, "role", "") or "")
+        text = str(getattr(turn, "text", "") or "")
+        if role == "user":
+            active_language = _detected_conversation_language(text, active_language)
+            pending_user = text
+            if _CONFUSION_SIGNAL.fullmatch(" ".join(text.casefold().split())):
+                confusion_cases += 1
+            continue
+        if role != "assistant":
+            continue
+
+        assistant_language = _detected_conversation_language(text)
+        if active_language and assistant_language:
+            language_checked += 1
+            language_matched += int(active_language == assistant_language)
+
+        normalized = _normalised_reply(text)
+        if pending_user and _CONFUSION_SIGNAL.fullmatch(
+            " ".join(pending_user.casefold().split())
+        ):
+            confusion_repeats += int(bool(previous_assistant) and normalized == previous_assistant)
+
+        structured = getattr(turn, "structured", None)
+        if pending_user and _is_supported_percentage_query(pending_user):
+            supported_cases += 1
+            rejection = bool(
+                re.search(
+                    r"not expressible|could not express|cannot express|unsupported requirement|"
+                    r"could not turn that into an exact change",
+                    text,
+                    re.IGNORECASE,
+                )
+            )
+            supported_rejections += int(rejection)
+            simple_jargon_hits += int(any(item in normalized for item in _INTERNAL_SETUP_JARGON))
+            simple_overlong_hits += int(len(text) > 500)
+            simple_multi_question_hits += int(text.count("?") + text.count("؟") > 1)
+            if not _is_current_market_percentage_query(pending_user):
+                supported_canonical_cases += 1
+                draft = _find_nested_mapping(structured, "draft_v2")
+                if draft is not None:
+                    unresolved = draft.get("unresolved_fields") or []
+                    canonical_pending = any(
+                        isinstance(item, dict)
+                        and isinstance(
+                            (item.get("expected_answer_schema") or {}).get(
+                                "x-hilal-supported-request"
+                            ),
+                            dict,
+                        )
+                        for item in unresolved
+                    )
+                    condition_exists = isinstance(draft.get("condition_ast"), dict)
+                    supported_canonical += int(canonical_pending or condition_exists)
+
+        scanner = _find_nested_mapping(structured, "scanner_result")
+        if scanner is not None:
+            scanner_checks += 1
+            scanner_safe += int(
+                scanner.get("read_only") is True
+                and scanner.get("strategy_mutated") is False
+            )
+            if scanner.get("status") in {"succeeded", "partial"}:
+                scanner_success_checks += 1
+                scanner_durable += int(
+                    bool(scanner.get("run_id")) and bool(scanner.get("usage_record_id"))
+                )
+                scanner_policy_bound += int(
+                    bool(scanner.get("sharia_methodology_id"))
+                    and bool(scanner.get("sharia_methodology_version"))
+                    and bool(scanner.get("sharia_universe_snapshot_hash"))
+                )
+
+        previous_assistant = normalized
+        pending_user = ""
+
+    if language_checked:
+        metrics["response_language_match_rate"] = language_matched / language_checked
+        metrics["response_language_checked_turns"] = float(language_checked)
+    if confusion_cases:
+        metrics["confusion_repeat_rate"] = confusion_repeats / confusion_cases
+        metrics["confusion_recovery_rate"] = 1.0 - metrics["confusion_repeat_rate"]
+    if supported_cases:
+        metrics["supported_request_rejection_rate"] = supported_rejections / supported_cases
+        if supported_canonical_cases:
+            metrics["supported_request_canonical_state_rate"] = (
+                supported_canonical / supported_canonical_cases
+            )
+        metrics["simple_turn_internal_jargon_rate"] = simple_jargon_hits / supported_cases
+        metrics["simple_turn_overlong_rate"] = simple_overlong_hits / supported_cases
+        metrics["simple_turn_multi_question_rate"] = simple_multi_question_hits / supported_cases
+    if scanner_checks:
+        metrics["scanner_read_only_integrity"] = scanner_safe / scanner_checks
+        metrics["scanner_result_checked_turns"] = float(scanner_checks)
+    if scanner_success_checks:
+        metrics["scanner_durable_run_rate"] = scanner_durable / scanner_success_checks
+        metrics["scanner_policy_binding_rate"] = scanner_policy_bound / scanner_success_checks
+    return metrics
+
+
 def deterministic_metrics(
     scenario: ScenarioSpec,
     turns: list[TurnRecord],
@@ -338,6 +595,7 @@ def deterministic_metrics(
     else:
         metrics["structured_capture_rate"] = 1.0
     metrics.update(transport_parity_metrics(turns))
+    metrics.update(conversation_quality_metrics(turns))
     metrics["semantic_contract_pass"] = float(
         metrics["schema_valid"] == 1.0
         and semantic_accuracy == 1.0

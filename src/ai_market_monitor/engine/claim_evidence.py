@@ -415,6 +415,8 @@ def validate_claims(
 
     final_names = _final_state_names(ledger)
     validated: list[ValidatedClaim] = []
+    accepted_propositions: set[tuple[str, str, str, str]] = set()
+    accepted_text: set[str] = set()
     for claim in claims:
         claim_type = str(getattr(claim, "claim_type", "") or "")
         text = str(getattr(claim, "text", "") or "").strip()
@@ -434,6 +436,23 @@ def validate_claims(
             ledger=ledger,
             final_names=final_names,
         )
+        proposition = (
+            claim_type,
+            subject_id,
+            predicate,
+            _normalise(asserted),
+        )
+        text_key = " ".join(text.casefold().split())
+        # One authoritative proposition is rendered once. This sits below every
+        # composer, so repeated claims cannot survive by using slightly different
+        # wording or by citing the same evidence twice.
+        if reason is None and (
+            proposition in accepted_propositions or text_key in accepted_text
+        ):
+            reason = "duplicate proposition"
+        if reason is None:
+            accepted_propositions.add(proposition)
+            accepted_text.add(text_key)
         validated.append(
             ValidatedClaim(
                 claim_type,
@@ -479,22 +498,34 @@ def deterministic_claim_text(ledger: EvidenceLedger) -> list[str]:
     """
 
     lines: list[str] = []
+    seen_lines: set[str] = set()
+
+    def append_once(value: str) -> None:
+        rendered = " ".join(str(value).split()).strip()
+        key = rendered.casefold()
+        if rendered and key not in seen_lines:
+            seen_lines.add(key)
+            lines.append(rendered)
+
     for evidence_id in ledger.ids():
         if not evidence_id.startswith("operation:"):
             continue
         item = ledger.get(evidence_id)
         summary = (item or {}).get("summary")
         if summary:
-            lines.append(str(summary))
+            append_once(str(summary))
     status = ledger.get("status:final_chat_status")
     if status == "approved":
-        lines.append("This setup stays approved.")
+        append_once("This setup stays approved.")
     elif ledger.get("status:approval_eligible"):
-        lines.append("The inactive preview is ready to review and approve.")
+        append_once("The inactive preview is ready to review and approve.")
+    unsupported_contracts: set[str] = set()
     for evidence_id in ledger.ids():
         if evidence_id.startswith("unsupported:"):
             item = ledger.get(evidence_id) or {}
-            contract = item.get("missing_contract")
-            if contract:
-                lines.append(f"Not expressible exactly: {contract}")
+            contract = " ".join(str(item.get("missing_contract") or "").split()).strip()
+            contract_key = contract.casefold()
+            if contract and contract_key not in unsupported_contracts:
+                unsupported_contracts.add(contract_key)
+                append_once(f"Not expressible exactly: {contract}")
     return lines[:8]

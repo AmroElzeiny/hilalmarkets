@@ -24,6 +24,12 @@
     if (item.client_message_id) wrapper.dataset.clientMessageId = item.client_message_id;
 
     const payload = item.payload || {};
+    if (!user && payload.response_fingerprint) {
+      wrapper.dataset.responseFingerprint = String(payload.response_fingerprint);
+    }
+    if (!user && payload.active_language) {
+      wrapper.lang = String(payload.active_language);
+    }
     const text = clean(user ? item.content : transformAssistant(item.content));
     const timestamp = item.created_at
       ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(item.created_at))
@@ -43,9 +49,30 @@
       ? `<section class="ai-snapshot-card"><strong>${clean(payload.provider_name)} · ${clean(payload.symbols_checked)} symbols</strong><span>BTC ${clean(payload.btc_status?.percentage_24h ?? "n/a")}% · ETH ${clean(payload.eth_status?.percentage_24h ?? "n/a")}%</span><span>${clean(payload.advancing)} advancing · ${clean(payload.declining)} declining · ${clean(payload.unchanged)} unchanged</span><span>${clean(payload.volatility_label)} dispersion · average ${clean(payload.average_change_24h)}%</span></section>`
       : "";
     const scannerResult = payload.scanner_result;
-    const scannerRows = Array.isArray(scannerResult?.results) ? scannerResult.results.slice(0, 5) : [];
-    const scanner = !user && item.message_type === "scanner_result" && scannerResult
-      ? `<section class="ai-scanner-result-card"><strong>Scanner result</strong><span>${clean(scannerResult.symbols_scanned)} symbols scanned · ${clean(scannerResult.confirmed_count)} confirmed · ${clean(scannerResult.forming_count)} forming</span>${scannerRows.length ? `<div class="ai-scanner-result-list">${scannerRows.map((row) => `<div><strong>${clean(row.symbol)}</strong><span>${clean(String(Math.round(Number(row.match_percentage || 0))))}% · ${clean(String(row.outcome || "evaluated").replaceAll("_", " "))}</span></div>`).join("")}</div>` : ""}${scannerResult.common_missing_reasons?.length ? `<small>Common misses: ${scannerResult.common_missing_reasons.map((entry) => `${clean(entry.condition)} (${clean(entry.count)})`).join(", ")}</small>` : ""}<small>${clean(scannerResult.disclaimer || "Research only. Not buy or sell advice.")}</small></section>`
+    const scannerUi = payload.scanner_ui || {};
+    const allScannerRows = Array.isArray(scannerResult?.results)
+      ? scannerResult.results
+      : [];
+    const scannerRows = allScannerRows.slice(0, 5);
+    const safeMatchPercentage = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+    };
+    const confirmedCount = Number.isFinite(Number(scannerResult?.confirmed_count))
+      ? Number(scannerResult.confirmed_count)
+      : scannerRows.filter((row) => row?.category === "confirmed" || row?.outcome === "confirmed").length;
+    const formingCount = Number.isFinite(Number(scannerResult?.forming_count))
+      ? Number(scannerResult.forming_count)
+      : scannerRows.filter((row) => ["forming", "near_miss"].includes(row?.outcome)).length;
+    const readOnlyScanner = payload.read_only === true
+      && scannerResult?.read_only === true
+      && scannerResult?.strategy_mutated === false;
+    const scanner = !user
+      && item.message_type === "scanner_result"
+      && scannerResult
+      ? readOnlyScanner
+        ? `<section class="ai-scanner-result-card"><strong>${clean(scannerUi.title || "Read-only Scanner")}</strong><span>${clean(scannerResult.symbols_scanned ?? 0)} ${clean(scannerUi.checked || "screened coins checked")} · ${clean(allScannerRows.length)} ${clean(scannerUi.matched || "matched")}</span><small>${clean(scannerUi.read_only || "Read-only")} · ${clean(scannerUi.no_changes || "no setup changes")}${scannerResult.evaluated_at ? ` · ${clean(scannerResult.evaluated_at)}` : ""}</small><small>${clean(scannerUi.research || "Research only. Not buy or sell advice.")}</small></section>`
+        : `<section class="ai-scanner-result-card"><strong>${clean(scannerUi.title || "Scanner result")}</strong><span>${clean(scannerResult.symbols_scanned ?? 0)} ${clean(scannerUi.checked || "symbols scanned")} · ${clean(confirmedCount)} ${clean(scannerUi.confirmed || "confirmed")} · ${clean(formingCount)} ${clean(scannerUi.forming || "forming")}</span>${scannerRows.length ? `<div class="ai-scanner-result-list">${scannerRows.map((row) => `<div><strong>${clean(row.symbol)}</strong><span>${clean(String(safeMatchPercentage(row.match_percentage)))}% · ${clean(String(row.outcome || "evaluated").replaceAll("_", " "))}</span></div>`).join("")}</div>` : ""}${scannerResult.common_missing_reasons?.length ? `<small>${clean(scannerUi.commonMisses || "Common misses")}: ${scannerResult.common_missing_reasons.map((entry) => `${clean(entry.condition)} (${clean(entry.count)})`).join(", ")}</small>` : ""}<small>${clean(scannerResult.disclaimer || scannerUi.research || "Research only. Not buy or sell advice.")}</small></section>`
       : "";
     const delivery = item.failed
       ? '<small class="ai-chat-delivery failed">Not sent · Retry below</small>'

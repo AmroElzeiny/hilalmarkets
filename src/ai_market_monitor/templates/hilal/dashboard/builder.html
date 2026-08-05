@@ -52,7 +52,7 @@
       <div class="ai-preview-head"><div class="ai-preview-title"><h2>AI Sheet</h2><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div></div>
       <div class="ai-preview-empty" data-ai-preview-empty><span class="icon-box"><span data-icon="scan" data-icon-class="icon-lg"></span></span><h3>Your reviewed rules will appear here</h3><p>Primary trigger, required filters, confirmations, screened universe, policy, assumptions, and alert behavior remain separate.</p></div>
       <div class="ai-preview-content" data-ai-preview-content data-testid="ai-setup-structured-preview" hidden></div>
-      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve data-testid="ai-setup-approval" disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan hidden>Run Trading Assistant</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
+      <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve data-testid="ai-setup-approval" disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan data-testid="ai-setup-run-scanner" hidden>Run Scanner</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
     </aside>
   </div>
 </section>
@@ -61,7 +61,7 @@
 {% endblock %}
 {% block page_scripts %}
 <script src="{{ url_for('static', path='/dashboard.js') }}?v=20260802-launch-offer"></script>
-<script src="{{ url_for('static', path='/chat-message-renderer.js') }}?v=20260802-launch-offer"></script>
-<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260802-launch-offer"></script>
+<script src="{{ url_for('static', path='/chat-message-renderer.js') }}?v=20260804-y5-2"></script>
+<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260804-y5-2"></script>
 <script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260802-launch-offer"></script>
 {% endblock %}

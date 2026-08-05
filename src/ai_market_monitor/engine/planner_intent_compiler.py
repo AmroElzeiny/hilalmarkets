@@ -331,8 +331,36 @@ def normalize_planner_envelope(envelope: PlannerIntentEnvelope) -> PlannerIntent
             "answer_text": item.answer_text,
         },
     )
+    supported_incomplete = unique(
+        envelope.supported_incomplete_intents,
+        lambda item: {
+            "segment_kind": segment_kind[item.segment_ref],
+            "missing_fields": sorted(item.missing_fields),
+            "capability_key": item.capability_key,
+        },
+    )
+    read_only_scans = unique(
+        envelope.read_only_percentage_scans,
+        lambda item: {
+            "segment_kind": segment_kind[item.segment_ref],
+            "movement_direction": item.movement_direction,
+            "threshold_percent": item.threshold_percent,
+            "measurement_window": item.measurement_window,
+        },
+    )
+    non_unsupported_segments = {
+        *(item.segment_ref for item in supported_incomplete),
+        *(item.segment_ref for item in read_only_scans),
+    }
+    # A known supported mechanic that needs a user choice must never also become a
+    # permanent unsupported blocker. Structured models can occasionally populate both
+    # slots for the same span; the safer, more specific classification wins.
     unsupported = unique(
-        envelope.unsupported_intents,
+        [
+            item
+            for item in envelope.unsupported_intents
+            if item.segment_ref not in non_unsupported_segments
+        ],
         lambda item: {
             "segment_kind": segment_kind[item.segment_ref],
             "missing_contract": item.missing_contract,
@@ -352,6 +380,8 @@ def normalize_planner_envelope(envelope: PlannerIntentEnvelope) -> PlannerIntent
             "semantic_intents": intents,
             "clarification_answers": answers,
             "questions_to_answer": questions,
+            "supported_incomplete_intents": supported_incomplete,
+            "read_only_percentage_scans": read_only_scans,
             "unsupported_intents": unsupported,
         }
     )
@@ -420,6 +450,20 @@ def _duplicated_boundary_connector(text: str) -> bool:
     }
 
 
+def _supported_incomplete_target_path(field_name: str) -> str:
+    """Map a public missing choice to the semantic field used by clarification logic."""
+
+    return {
+        "universe": "universe",
+        "formula": "condition.formula_key",
+        "comparator": "condition.comparator",
+        "threshold": "condition.threshold",
+        "trigger_timeframe": "condition.trigger_timeframe",
+        "reference_point": "condition.reference_definition",
+        "capability_parameter": "condition.capability_parameters",
+    }.get(field_name, f"condition.{field_name}")
+
+
 def compile_planner_intents(
     envelope: PlannerIntentEnvelope,
     *,
@@ -444,6 +488,26 @@ def compile_planner_intents(
         normalize_planner_envelope(envelope),
         message,
     )
+    # The production agent normally turns these into one typed clarification before
+    # calling the compiler. Keep the compiler boundary defensive for direct callers:
+    # incomplete supported intent is user information required, never unsupported and
+    # never an empty plan that disagrees with ``requires_tool``.
+    if envelope.supported_incomplete_intents:
+        incomplete = envelope.supported_incomplete_intents[0]
+        field_paths = tuple(
+            _supported_incomplete_target_path(item)
+            for item in incomplete.missing_fields
+        )
+        raise IntentCompileError(
+            "INTENT_INCOMPLETE",
+            "That supported rule needs one more choice before it can be executed.",
+            details=tuple(
+                f"supported_incomplete:{item}"
+                for item in incomplete.missing_fields
+            ),
+            target_paths=field_paths,
+            segment_ref=incomplete.segment_ref,
+        )
     derivations: list[str] = []
     envelope = assemble_stated_boolean_structure(envelope, message, derivations)
     segments = _compiled_segments(envelope, message, source_turn_id=source_turn_id)

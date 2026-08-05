@@ -33,6 +33,111 @@ PERSONAS = [
 #: failures against goals that never asked for a group.
 BOOLEAN_TOPICS = frozenset({"nested_boolean_logic", "precedence_grouping", "canvas_grouping_fidelity"})
 
+
+#: Opt-in conversation topics for the private-beta regressions. Merely defining these
+#: branches does not add cases or change existing evaluator runs; a topic catalog must
+#: explicitly request one of these ids.
+CONVERSATION_REGRESSION_TOPICS = frozenset(
+    {
+        "supported_incomplete_clarification",
+        "scanner_percentage_flow",
+        "confusion_recovery",
+        "response_language_consistency",
+        "response_deduplication",
+    }
+)
+
+#: The mandatory Y5.2 release-gate scenarios. Evaluator runners may still choose other
+#: topics, but a release validation that omits any of these is incomplete.
+Y5_2_RELEASE_GATE_TOPICS: tuple[str, ...] = (
+    "supported_incomplete_clarification",
+    "scanner_percentage_flow",
+    "confusion_recovery",
+    "response_language_consistency",
+    "response_deduplication",
+)
+
+
+
+def _conversation_regression_goal(
+    topic_id: str,
+    index: int,
+) -> tuple[str, dict[str, object]]:
+    language_rows = (
+        ("English", "create me an alert to alert me when a coin increases 5%", "en"),
+        ("Arabic", "نبهني عندما ترتفع عملة 5%", "ar"),
+        ("French", "Crée une alerte quand une pièce augmente de 5%", "fr"),
+        ("Spanish", "Avísame cuando una moneda suba un 5%", "es"),
+        ("Russian", "Сообщи мне, когда монета вырастет на 5%", "ru"),
+    )
+    if topic_id == "scanner_percentage_flow":
+        return (
+            "Choose Scanner. Ask: ‘what coins are up at least 5% now?’. When asked for "
+            "the measurement period, answer ‘24h’. Expect provider-backed screened-market "
+            "results or a clear no-match result, and do not create or edit a strategy.",
+            {
+                "conversation_quality": {
+                    "supported_request": True,
+                    "scanner_read_only": True,
+                    "maximum_questions_per_turn": 1,
+                    "maximum_simple_reply_characters": 500,
+                }
+            },
+        )
+    if topic_id == "confusion_recovery":
+        return (
+            "Choose Scanner, ask ‘what coins are up at least 5% now?’, then reply ‘??’ to "
+            "the first assistant answer. The assistant must not repeat its previous reply; "
+            "it should restate the scan goal and ask only for the missing period.",
+            {
+                "conversation_quality": {
+                    "confusion_recovery": True,
+                    "must_not_repeat_previous_assistant_reply": True,
+                    "maximum_questions_per_turn": 1,
+                }
+            },
+        )
+    if topic_id == "response_language_consistency":
+        language_name, request, code = language_rows[(index - 1) % len(language_rows)]
+        return (
+            f"Use {language_name} throughout. Send exactly: ‘{request}’. Continue answering "
+            "the assistant in the same language. The assistant may change language only if "
+            "the user does so explicitly.",
+            {
+                "conversation_quality": {
+                    "response_language": code,
+                    "supported_request": True,
+                    "maximum_questions_per_turn": 1,
+                }
+            },
+        )
+    if topic_id == "response_deduplication":
+        return (
+            "Send ‘create me an alert to alert me when a coin increases 5%’. Verify the "
+            "assistant asks one concise clarification and does not repeat the same missing "
+            "requirement in different boilerplate sentences.",
+            {
+                "conversation_quality": {
+                    "supported_request": True,
+                    "duplicate_user_facing_propositions": 0,
+                    "maximum_simple_reply_characters": 500,
+                }
+            },
+        )
+    return (
+        "Send ‘create me an alert to alert me when a coin increases 5%’. Treat this as a "
+        "supported request with missing choices. Preserve 5% and the upward direction, ask "
+        "one plain-language clarification, and do not classify it as unsupported.",
+        {
+            "conversation_quality": {
+                "supported_request": True,
+                "unsupported_classification": False,
+                "maximum_questions_per_turn": 1,
+                "maximum_simple_reply_characters": 500,
+            }
+        },
+    )
+
 #: Expression shapes, written the way a person writes them. Each is a template over
 #: three independent leaves; the leaves themselves are ordinary percentage rules so the
 #: topic measures *structure* and nothing else.
@@ -142,6 +247,19 @@ def build_scenario(
         "requires_explicit_approval": True,
         "must_not_assign_sharia_status": True,
     }
+    if topic.id in CONVERSATION_REGRESSION_TOPICS:
+        goal, conversation_contract = _conversation_regression_goal(topic.id, index)
+        return ScenarioSpec(
+            id=f"{topic.id}-{index:03d}-{seed}",
+            topic_id=topic.id,
+            seed=seed,
+            persona=rng.choice(PERSONAS),
+            hidden_goal=goal,
+            expected_contract=conversation_contract,
+            success_criteria=[asdict(c) for c in topic.criteria],
+            max_turns=max_turns or topic.max_turns,
+            fault=topic.fault,
+        )
     if topic.id in BOOLEAN_TOPICS:
         # A structure topic gets a structure goal. The universe and role fields are
         # dropped from the contract because they are not what this topic measures, and

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from time import monotonic
 from typing import Any, Literal, cast, get_args
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 from redis.asyncio import Redis
@@ -85,7 +85,10 @@ from ai_market_monitor.schemas.setup_agent import (
     SetupTurnExecutionResult,
     TurnSegment,
 )
-from ai_market_monitor.schemas.setup_authorization import AuthorizedPatchOperation
+from ai_market_monitor.schemas.setup_authorization import (
+    AuthorizedPatchOperation,
+    ClarificationContract,
+)
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ApprovalBindingV2,
@@ -97,6 +100,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     UnresolvedFieldV2,
 )
+from ai_market_monitor.services.on_demand_scans import OnDemandScanError
 from ai_market_monitor.services.market_preview import (
     assess_candle_data_quality,
     timeframe_duration,
@@ -658,6 +662,46 @@ return tostring(next_value)
                 execution=outcome.result,
             )
 
+        # Continue a fully specified current-market query immediately after the
+        # server-owned mode/scope choice closes its last governed dependency.
+        context = dict(chat.context_json or {})
+        conversation = _load_conversation_context(context)
+        pending_scan = dict(conversation.pending_read_only_scan or {})
+        scan_scope_option = option_key in {
+            "setup_mode",
+            "screened_universe_mode",
+            "screened_watchlist",
+            "screened_explicit_assets",
+            "sharia_methodology",
+        }
+        if (
+            pending_scan
+            and scan_scope_option
+            and pending_scan.get("measurement_window") == "24h"
+            and _scan_draft_scope_ready(outcome.draft)
+            and outcome.draft.mode == DraftMode.SCANNER
+        ):
+            return await self._finish_governed_percentage_scan_turn(
+                session,
+                chat,
+                draft=outcome.draft,
+                conversation=conversation,
+                request=pending_scan,
+                trace_payload={
+                    "source_turn_id": str(user_message.id),
+                    "planner_model": "server_owned_option",
+                    "model_call_count": 0,
+                    "patch_validation": "pending_read_only_scan_continued",
+                    "active_language": conversation.active_language,
+                },
+                model_calls=0,
+                context=context,
+                started=started,
+                telemetry=TurnTelemetry.start(self.settings.setup_turn_deadline_seconds),
+                turn_record=turn_record,
+                execution_result=outcome.result.model_dump(mode="json"),
+            )
+
         content, message_type, payload = await self._server_option_reply(
             session,
             chat,
@@ -665,6 +709,21 @@ return tostring(next_value)
             draft=outcome.draft,
             execution=outcome.result,
         )
+        active_question_payload = payload.pop("_active_question", None)
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        if isinstance(active_question_payload, dict):
+            active_question = ClarificationContract.model_validate(active_question_payload)
+            conversation = conversation.with_question(active_question)
+        fingerprint = _chat_response_fingerprint(content)
+        conversation = conversation.model_copy(
+            update={
+                "last_assistant_summary": content[:1000],
+                "last_response_fingerprint": fingerprint,
+            }
+        )
+        context = dict(chat.context_json or {})
+        context["setup_conversation_context"] = conversation.model_dump(mode="json")
+        chat.context_json = context
         assistant = await self.owner._assistant(
             session,
             chat,
@@ -674,6 +733,8 @@ return tostring(next_value)
                 **payload,
                 "draft_v2": outcome.draft.model_dump(mode="json"),
                 "execution_result": outcome.result.model_dump(mode="json"),
+                "active_language": conversation.active_language,
+                "response_fingerprint": fingerprint,
                 "model_call_count": 0,
             },
         )
@@ -1058,32 +1119,35 @@ return tostring(next_value)
         draft: StrategyDraftV2,
         execution: SetupTurnExecutionResult,
     ) -> tuple[str, str, dict[str, Any]]:
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        language = conversation.active_language
         if option_key == "setup_mode" and self.settings.sharia_screening_enforced:
             if draft.sharia_policy.methodology_id is None:
                 return (
-                    "Screened monitoring is unavailable because no approved methodology is active.",
+                    _server_option_text(language, "methodology_unavailable"),
                     "screening_unavailable",
                     {"can_approve": False, "can_scan": False},
                 )
+            labels = _server_option_labels(language)
             options = [
                 {
                     "key": "screened_universe_mode",
-                    "label": "All eligible spot assets",
+                    "label": labels["eligible_market"],
                     "value": ShariaUniverseMode.ELIGIBLE_MARKET.value,
                 },
                 {
                     "key": "screened_universe_mode",
-                    "label": "My Favorites",
+                    "label": labels["approved_watchlist"],
                     "value": ShariaUniverseMode.APPROVED_WATCHLIST.value,
                 },
                 {
                     "key": "screened_universe_mode",
-                    "label": "Specific eligible assets",
+                    "label": labels["explicit_assets"],
                     "value": ShariaUniverseMode.EXPLICIT_ASSETS.value,
                 },
             ]
             return (
-                "Which screened assets should HilalMarkets watch?",
+                _server_option_text(language, "universe_question"),
                 "screened_universe_required",
                 {"clarifications": [{"key": "screened_universe_mode", "options": options}]},
             )
@@ -1104,12 +1168,12 @@ return tostring(next_value)
             )
             if not rows:
                 return (
-                    "You do not have a Favorites list yet. Choose another screened scope.",
+                    _server_option_text(language, "watchlist_missing"),
                     "screened_watchlist_missing",
                     {"can_approve": False, "can_scan": False},
                 )
             return (
-                "Which Favorites list should HilalMarkets use?",
+                _server_option_text(language, "watchlist_question"),
                 "screened_watchlist_required",
                 {
                     "clarifications": [
@@ -1133,12 +1197,53 @@ return tostring(next_value)
             and not draft.sharia_policy.explicit_symbols
         ):
             return (
-                "Which eligible spot assets should HilalMarkets watch?",
+                _server_option_text(language, "assets_question"),
                 "screened_assets_required",
                 {"awaiting_answer": True, "can_approve": False},
             )
+
+        pending_scan = dict(conversation.pending_read_only_scan or {})
+        scope_option = option_key in {
+            "setup_mode",
+            "screened_universe_mode",
+            "screened_watchlist",
+            "screened_explicit_assets",
+            "sharia_methodology",
+        }
+        if (
+            pending_scan
+            and scope_option
+            and _scan_draft_scope_ready(draft)
+            and not pending_scan.get("measurement_window")
+        ):
+            question = _server_option_text(language, "scan_window_question")
+            digest = hashlib.sha256(
+                f"{chat.id}:pending-scan-window".encode()
+            ).hexdigest()[:20]
+            clarification = ClarificationContract(
+                question_id=f"scan_window_{digest}",
+                question=question,
+                reason="The verified rolling percentage query needs an explicit window.",
+                target_type="conversational",
+                expected_answer_schema=json.dumps(
+                    {"type": "string", "enum": ["24h"]},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                mutating=False,
+                allowed_options=["24h"],
+            )
+            return (
+                _server_option_text(language, "scope_selected"),
+                "scanner_window_required",
+                {
+                    "clarifications": [clarification.model_dump(mode="json")],
+                    "_active_question": clarification.model_dump(mode="json"),
+                    "can_scan": False,
+                },
+            )
         return (
-            deterministic_summary(execution),
+            deterministic_summary(execution, language=language),
             _agent_message_type(execution),
             {"can_approve": execution.approval_eligible},
         )
@@ -1491,7 +1596,9 @@ return tostring(next_value)
                     # Two retries arriving together each generated their own, and the
                     # answer a user got depended on when they pressed the button rather
                     # than on what the server did. Storing it here makes recovery a read.
-                    RECOVERY_REPLY_KEY: deterministic_summary(result),
+                    RECOVERY_REPLY_KEY: deterministic_summary(
+                        result, language=conversation.active_language
+                    ),
                 }
                 turn.mutation_committed = (
                     draft.executable_version != turn.executable_version_before
@@ -1962,6 +2069,146 @@ return tostring(next_value)
             watchlists=tuple(watchlist_refs),
         )
 
+    async def _finish_governed_percentage_scan_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        draft: StrategyDraftV2,
+        conversation: SetupConversationContext,
+        request: dict[str, object],
+        trace_payload: dict[str, Any],
+        model_calls: int,
+        context: dict[str, Any],
+        started: float,
+        telemetry: TurnTelemetry,
+        turn_record: SetupChatTurn | None,
+        execution_result: dict[str, Any] | None = None,
+    ) -> AISetupChatSession:
+        """Execute a durable scan after either an agent or server-owned option turn."""
+
+        request = dict(request)
+        direction = str(request.get("movement_direction") or "up")
+        threshold = float(request.get("threshold_percent") or 0)
+        window = str(request.get("measurement_window") or "")
+        language = conversation.active_language
+        try:
+            result = await self.owner.screened_percentage_snapshot(
+                session,
+                chat,
+                draft=draft,
+                direction=cast(Literal["up", "down"], direction),
+                threshold=threshold,
+                timeframe=window,
+                idempotency_key=self._read_only_scan_idempotency_key(
+                    chat, turn_record, str(request.get("source_text") or "")
+                ),
+            )
+            content = _governed_scan_message(result, language)
+            message_type = "scanner_result"
+        except OnDemandScanError as exc:
+            result = {
+                "status": "failed",
+                "error_code": exc.code,
+                "safe_message": str(exc),
+                "results": [],
+                "market_statuses": [],
+                "read_only": True,
+                "strategy_mutated": False,
+                "query": {
+                    "movement_direction": direction,
+                    "threshold_percent": threshold,
+                    "measurement_window": window,
+                },
+            }
+            content = _governed_scan_error(exc.code, str(exc), language)
+            message_type = "scanner_error"
+
+        fingerprint = _chat_response_fingerprint(content)
+        conversation = conversation.model_copy(
+            update={
+                "active_goal": None,
+                "pending_read_only_scan": {},
+                "last_assistant_summary": content[:1000],
+                "last_response_fingerprint": fingerprint,
+            }
+        ).cleared_question()
+        context["setup_conversation_context"] = conversation.model_dump(mode="json")
+        context["last_turn_trace"] = trace_payload
+        context["last_turn_failed"] = False
+        context.pop("last_turn_failure", None)
+        context.pop("setup_failure_history", None)
+        context["last_read_only_route"] = "governed_percentage_scan"
+        context["last_response_fingerprint"] = fingerprint
+        context["scanner_result"] = result
+        _record_funnel(
+            context,
+            outcome=("scan_completed" if result.get("status") != "failed" else "scan_refused"),
+            telemetry=telemetry,
+            failure_code=(
+                str(result.get("error_code") or "") or None
+                if result.get("status") == "failed"
+                else None
+            ),
+            model_calls=model_calls,
+        )
+        chat.context_json = context
+        payload = {
+            "scanner_result": result,
+            "read_only": True,
+            "strategy_mutated": False,
+            "response_fingerprint": fingerprint,
+            "active_language": language,
+            "scanner_ui": _scanner_ui_labels(language),
+            "turn_trace": trace_payload,
+            "model_call_count": model_calls,
+        }
+        with telemetry.stage("persistence"):
+            assistant = await self.owner._assistant(
+                session,
+                chat,
+                content,
+                message_type=message_type,
+                payload=payload,
+            )
+            await self._complete_db_turn(
+                session,
+                chat,
+                turn_record,
+                reply={
+                    "message": content,
+                    "execution_result": execution_result,
+                    "scanner_result": result,
+                },
+                assistant_message_id=assistant.id,
+            )
+        _set_runtime(
+            chat,
+            started,
+            model_calls=model_calls,
+            cache_hits=0,
+            telemetry=telemetry,
+        )
+        if turn_record is not None:
+            turn_record.telemetry_json = telemetry.to_payload()
+        await session.flush()
+        await session.commit()
+        return chat
+
+    @staticmethod
+    def _read_only_scan_idempotency_key(
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn | None,
+        message: str,
+    ) -> str:
+        """One quota identity per accepted chat turn, stable across an HTTP replay."""
+
+        if turn_record is not None:
+            return f"setup-chat-percentage-turn:{turn_record.id}"
+        nonce = uuid4().hex
+        message_hash = _chat_response_fingerprint(message)
+        return f"setup-chat-percentage:{chat.id}:{message_hash}:{nonce}"
+
     async def _run_agent_turn(
         self,
         session: AsyncSession,
@@ -2009,6 +2256,9 @@ return tostring(next_value)
                 with telemetry.stage("persistence"):
                     await canonical_stage_callback(stage, payload)
 
+        active_language = _detect_chat_language(message, conversation.active_language)
+        conversation = conversation.model_copy(update={"active_language": active_language})
+        context["active_language"] = active_language
         turn = SetupAgentTurnInput(
             telemetry=telemetry,
             message=message,
@@ -2021,6 +2271,7 @@ return tostring(next_value)
             conversation=conversation,
             history=tuple(history),
             setup_mode=draft.mode,
+<<<<<<< HEAD
             # The conversation's own memory. Without it every turn starts from nothing:
             # the Scanner the trader chose is forgotten, the language resets on any
             # turn with no language signal, and a confusion signal cannot tell whether
@@ -2042,6 +2293,9 @@ return tostring(next_value)
             pending_goal_question=str(
                 (context.get("conversation_pending_goal") or {}).get("question") or ""
             ),
+=======
+            active_language=active_language,
+>>>>>>> 463b04abd9fe695d0aabf281fb82e560176cf563
             previous_turn_failed=bool(context.get("last_turn_failed")),
             # What has already failed in this chat, so a paid correction is not spent on
             # a class that has already survived one. Two attempts is evidence; a third is
@@ -2173,6 +2427,21 @@ return tostring(next_value)
             usage=outcome.usage or None,
         )
 
+        if outcome.read_only_scan_request is not None:
+            return await self._finish_governed_percentage_scan_turn(
+                session,
+                chat,
+                draft=outcome.draft,
+                conversation=outcome.conversation,
+                request=dict(outcome.read_only_scan_request),
+                trace_payload=outcome.trace.to_dict(),
+                model_calls=outcome.trace.model_calls,
+                context=context,
+                started=started,
+                telemetry=telemetry,
+                turn_record=turn_record,
+            )
+
         if outcome.execution is None:
             # Conversation, product questions and explanations are read-only turns.
             # They must not compile, screen, refresh providers, rewrite derived UI or
@@ -2190,15 +2459,27 @@ return tostring(next_value)
                 model_calls=outcome.trace.model_calls,
             )
             chat.context_json = context
+            clarification_payloads = (
+                [outcome.clarification.model_dump(mode="json")]
+                if outcome.clarification is not None
+                else _pending_scope_clarifications(
+                    outcome.draft, outcome.conversation.active_language
+                )
+                if outcome.conversation.pending_read_only_scan
+                else []
+            )
             with telemetry.stage("persistence"):
                 assistant = await self.owner._assistant(
                     session,
                     chat,
                     outcome.message,
-                    message_type="conversation",
+                    message_type=("clarification" if clarification_payloads else "conversation"),
                     payload={
                         "execution_result": None,
                         "segments": list(outcome.trace.segments),
+                        "clarifications": clarification_payloads,
+                        "response_fingerprint": outcome.trace.response_fingerprint,
+                        "active_language": outcome.conversation.active_language,
                         "turn_trace": outcome.trace.to_dict(),
                         "model_call_count": outcome.trace.model_calls,
                     },
@@ -3349,7 +3630,13 @@ def _recovery_reply(record: SetupChatTurn, result: SetupTurnExecutionResult) -> 
     stored = payload.get(RECOVERY_REPLY_KEY)
     if isinstance(stored, str) and stored.strip():
         return stored
-    message = deterministic_summary(result)
+    conversation = payload.get("conversation_after")
+    language = (
+        str(conversation.get("active_language") or "en")
+        if isinstance(conversation, dict)
+        else "en"
+    )
+    message = deterministic_summary(result, language=language)
     payload[RECOVERY_REPLY_KEY] = message
     record.execution_result_json = payload
     return message
@@ -3446,16 +3733,366 @@ def _load_reviewed_screening_evidence(
         return None
 
 
+def _detect_chat_language(message: str, fallback: str = "en") -> str:
+    text = (message or "").strip()
+    if not text:
+        return (fallback or "en").split("-", 1)[0].casefold()
+    # Punctuation-only confusion signals and compact option answers such as `24h` do
+    # not carry a language of their own; keep the established conversation language.
+    compact = " ".join(text.casefold().split())
+    if re.fullmatch(r"[?؟!\s]{1,8}", text) or re.fullmatch(
+        r"(?:\d+\s*(?:m|h|d)|yes|no|ok|okay|sure|نعم|لا|اه|أيوه)",
+        compact,
+    ):
+        return (fallback or "en").split("-", 1)[0].casefold()
+    if compact in {"oui", "d’accord", "d'accord", "accord"}:
+        return "fr"
+    if compact in {"sí", "si", "claro"}:
+        return "es"
+    if compact in {"да", "хорошо"}:
+        return "ru"
+    if re.search(r"[\u0600-\u06ff]", text):
+        return "ar"
+    if re.search(r"[\u0400-\u04ff]", text):
+        return "ru"
+    lowered = text.casefold()
+    french_markers = {
+        "bonjour", "merci", "pourquoi", "avec", "choisir", "alerte", "pièces",
+        "monnaie", "fenêtre", "précédente", "seuil", "seulement",
+    }
+    spanish_markers = {
+        "hola", "gracias", "por", "qué", "con", "elegir", "alerta", "monedas",
+        "moneda", "ventana", "anterior", "umbral", "solo",
+    }
+    words = set(re.findall(r"[a-zà-ÿ']+", lowered))
+    french_hits = len(words & french_markers)
+    spanish_hits = len(words & spanish_markers)
+    if re.search(r"[àâçèêëîïôûùüÿœ]", lowered) or french_hits >= 2:
+        return "fr"
+    if re.search(r"[¿¡ñáíóú]", lowered) or spanish_hits >= 2:
+        return "es"
+    # `é` occurs in both languages. Resolve it through vocabulary instead of making
+    # every Spanish question containing `qué` look French.
+    if "é" in lowered:
+        if spanish_hits > french_hits:
+            return "es"
+        if french_hits:
+            return "fr"
+    return "en"
+
+
+def _chat_response_fingerprint(message: str) -> str:
+    normalized = " ".join((message or "").casefold().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+
+
+def _pending_scope_clarifications(
+    draft: StrategyDraftV2,
+    language: str,
+) -> list[dict[str, Any]]:
+    """Re-present the server-owned scope choices after an intervening scan question."""
+
+    if not _scan_draft_scope_ready(draft):
+        labels = _server_option_labels(language)
+        return [
+            {
+                "key": "screened_universe_mode",
+                "options": [
+                    {
+                        "key": "screened_universe_mode",
+                        "label": labels["eligible_market"],
+                        "value": ShariaUniverseMode.ELIGIBLE_MARKET.value,
+                    },
+                    {
+                        "key": "screened_universe_mode",
+                        "label": labels["approved_watchlist"],
+                        "value": ShariaUniverseMode.APPROVED_WATCHLIST.value,
+                    },
+                    {
+                        "key": "screened_universe_mode",
+                        "label": labels["explicit_assets"],
+                        "value": ShariaUniverseMode.EXPLICIT_ASSETS.value,
+                    },
+                ],
+            }
+        ]
+    return []
+
+
+def _scan_draft_scope_ready(draft: StrategyDraftV2) -> bool:
+    policy = draft.sharia_policy
+    if policy.methodology_id is None or not policy.methodology_version:
+        return False
+    if any(
+        item.blocking and item.target_type in {"universe", "sharia_policy"}
+        for item in draft.unresolved_fields
+    ):
+        return False
+    if (
+        policy.universe_mode == ShariaUniverseMode.APPROVED_WATCHLIST
+        and (policy.approved_watchlist_id is None or not policy.approved_watchlist_version)
+    ):
+        return False
+    if (
+        policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS
+        and not policy.explicit_symbols
+    ):
+        return False
+    return True
+
+
+def _server_option_labels(language: str) -> dict[str, str]:
+    code = (language or "en").split("-", 1)[0].casefold()
+    labels = {
+        "en": {
+            "eligible_market": "All eligible spot assets",
+            "approved_watchlist": "My Favorites",
+            "explicit_assets": "Specific eligible assets",
+        },
+        "ar": {
+            "eligible_market": "كل أصول السبوت المؤهلة",
+            "approved_watchlist": "قائمة المفضلة",
+            "explicit_assets": "أصول مؤهلة محددة",
+        },
+        "fr": {
+            "eligible_market": "Tous les actifs spot éligibles",
+            "approved_watchlist": "Mes favoris",
+            "explicit_assets": "Actifs éligibles précis",
+        },
+        "es": {
+            "eligible_market": "Todos los activos spot elegibles",
+            "approved_watchlist": "Mis favoritos",
+            "explicit_assets": "Activos elegibles específicos",
+        },
+        "ru": {
+            "eligible_market": "Все допустимые спотовые активы",
+            "approved_watchlist": "Мои избранные",
+            "explicit_assets": "Выбранные допустимые активы",
+        },
+    }
+    return dict(labels.get(code, labels["en"]))
+
+
+def _server_option_text(language: str, key: str) -> str:
+    code = (language or "en").split("-", 1)[0].casefold()
+    catalog = {
+        "en": {
+            "methodology_unavailable": "Screened monitoring is unavailable because no approved methodology is active.",
+            "universe_question": "Which screened assets should HilalMarkets watch?",
+            "watchlist_missing": "You do not have a Favorites list yet. Choose another screened scope.",
+            "watchlist_question": "Which Favorites list should HilalMarkets use?",
+            "assets_question": "Which eligible spot assets should HilalMarkets watch?",
+            "scan_window_question": "Should I measure the move over the rolling 24-hour window?",
+            "scope_selected": "The screened scope is selected. I only need the measurement window.",
+        },
+        "ar": {
+            "methodology_unavailable": "المراقبة المفحوصة غير متاحة لعدم وجود منهجية معتمدة ونشطة.",
+            "universe_question": "أي أصول مفحوصة تريد من HilalMarkets مراقبتها؟",
+            "watchlist_missing": "لا توجد لديك قائمة مفضلة بعد. اختر نطاقًا مفحوصًا آخر.",
+            "watchlist_question": "أي قائمة مفضلة تريد أن يستخدمها HilalMarkets؟",
+            "assets_question": "ما أصول السبوت المؤهلة التي تريد مراقبتها؟",
+            "scan_window_question": "هل أقيس الحركة خلال نافذة آخر 24 ساعة؟",
+            "scope_selected": "تم اختيار النطاق المفحوص. أحتاج فقط إلى نافذة القياس.",
+        },
+        "fr": {
+            "methodology_unavailable": "La surveillance filtrée est indisponible car aucune méthodologie approuvée n’est active.",
+            "universe_question": "Quels actifs filtrés HilalMarkets doit-il surveiller ?",
+            "watchlist_missing": "Vous n’avez pas encore de liste de favoris. Choisissez un autre périmètre filtré.",
+            "watchlist_question": "Quelle liste de favoris HilalMarkets doit-il utiliser ?",
+            "assets_question": "Quels actifs spot éligibles HilalMarkets doit-il surveiller ?",
+            "scan_window_question": "Dois-je mesurer le mouvement sur la fenêtre glissante de 24 heures ?",
+            "scope_selected": "Le périmètre filtré est sélectionné. Il ne manque que la fenêtre de mesure.",
+        },
+        "es": {
+            "methodology_unavailable": "La monitorización filtrada no está disponible porque no hay una metodología aprobada activa.",
+            "universe_question": "¿Qué activos filtrados debe vigilar HilalMarkets?",
+            "watchlist_missing": "Todavía no tienes una lista de favoritos. Elige otro alcance filtrado.",
+            "watchlist_question": "¿Qué lista de favoritos debe usar HilalMarkets?",
+            "assets_question": "¿Qué activos spot elegibles debe vigilar HilalMarkets?",
+            "scan_window_question": "¿Mido el movimiento en la ventana móvil de 24 horas?",
+            "scope_selected": "El alcance filtrado está seleccionado. Solo falta la ventana de medición.",
+        },
+        "ru": {
+            "methodology_unavailable": "Проверенный мониторинг недоступен: нет активной утверждённой методологии.",
+            "universe_question": "Какие проверенные активы должен отслеживать HilalMarkets?",
+            "watchlist_missing": "У вас пока нет списка избранного. Выберите другую проверенную область.",
+            "watchlist_question": "Какой список избранного должен использовать HilalMarkets?",
+            "assets_question": "Какие допустимые спотовые активы нужно отслеживать?",
+            "scan_window_question": "Измерить движение в скользящем окне 24 часа?",
+            "scope_selected": "Проверенная область выбрана. Осталось указать окно измерения.",
+        },
+    }
+    return catalog.get(code, catalog["en"]).get(key, catalog["en"][key])
+
+
+def _scanner_ui_labels(language: str) -> dict[str, str]:
+    code = (language or "en").split("-", 1)[0].casefold()
+    rows = {
+        "en": {
+            "title": "Read-only Scanner",
+            "checked": "screened coins checked",
+            "matched": "matched",
+            "read_only": "Read-only",
+            "no_changes": "no setup changes",
+            "research": "Research only. Not buy or sell advice.",
+        },
+        "ar": {
+            "title": "الفاحص للقراءة فقط",
+            "checked": "عملة مفحوصة تم التحقق منها",
+            "matched": "مطابقة",
+            "read_only": "للقراءة فقط",
+            "no_changes": "لا تغييرات على الإعداد",
+            "research": "للبحث فقط، وليست توصية شراء أو بيع.",
+        },
+        "fr": {
+            "title": "Scanner en lecture seule",
+            "checked": "cryptos filtrées vérifiées",
+            "matched": "correspondances",
+            "read_only": "Lecture seule",
+            "no_changes": "aucune modification de la configuration",
+            "research": "Recherche uniquement, sans conseil d’achat ou de vente.",
+        },
+        "es": {
+            "title": "Escáner de solo lectura",
+            "checked": "monedas filtradas revisadas",
+            "matched": "coincidencias",
+            "read_only": "Solo lectura",
+            "no_changes": "sin cambios en la configuración",
+            "research": "Solo investigación; no es consejo de compra o venta.",
+        },
+        "ru": {
+            "title": "Сканер только для чтения",
+            "checked": "проверенных отфильтрованных монет",
+            "matched": "совпадений",
+            "read_only": "Только чтение",
+            "no_changes": "настройки не изменены",
+            "research": "Только исследование, не рекомендация покупать или продавать.",
+        },
+    }
+    return dict(rows.get(code, rows["en"]))
+
+
+def _governed_scan_error(code: str, safe_message: str, language: str) -> str:
+    language_code = (language or "en").split("-", 1)[0].casefold()
+    family = (
+        "scope"
+        if code in {
+            "screening_methodology_required",
+            "screened_universe_required",
+            "screening_methodology_unavailable",
+            "empty_screened_universe",
+            "approved_watchlist_required",
+        }
+        else "quota"
+        if code in {
+            "light_prompt_scan_not_available",
+            "light_prompt_scans_quota_exceeded",
+        }
+        else "provider"
+        if code in {
+            "market_provider_unavailable",
+            "percentage_data_unavailable",
+            "scanner_runtime_failure",
+        }
+        else "window"
+        if code == "percentage_window_not_supported"
+        else "generic"
+    )
+    catalog = {
+        "en": {
+            "scope": "I couldn’t run the scan because its screened scope is not ready. Choose the methodology and assets, then run it again.",
+            "quota": "Scanner is not available under the current plan or its scan allowance has been used.",
+            "provider": "I couldn’t load verified data for this screened scan, so I returned no invented results.",
+            "window": "This verified scan currently supports the rolling 24-hour window only.",
+            "generic": "I couldn’t complete this read-only scan. No setup was changed.",
+        },
+        "ar": {
+            "scope": "لم أتمكن من تشغيل الفحص لأن نطاق العملات المفحوصة غير مكتمل. اختر المنهجية والعملات ثم أعد المحاولة.",
+            "quota": "الفاحص غير متاح في الخطة الحالية أو تم استخدام حد الفحوصات المتاح.",
+            "provider": "تعذر تحميل بيانات موثقة لهذا الفحص، لذلك لم أعرض أي نتائج مخترعة.",
+            "window": "الفحص الموثق يدعم حاليًا نافذة آخر 24 ساعة فقط.",
+            "generic": "تعذر إكمال هذا الفحص للقراءة فقط، ولم يتغير أي إعداد.",
+        },
+        "fr": {
+            "scope": "Le scan n’a pas pu démarrer car son périmètre filtré n’est pas prêt. Choisissez la méthodologie et les actifs, puis réessayez.",
+            "quota": "Le Scanner n’est pas disponible avec l’offre actuelle ou le quota de scans est épuisé.",
+            "provider": "Les données vérifiées n’ont pas pu être chargées; aucun résultat n’a été inventé.",
+            "window": "Ce scan vérifié prend actuellement en charge uniquement la fenêtre glissante de 24 heures.",
+            "generic": "Ce scan en lecture seule n’a pas pu être terminé. La configuration n’a pas été modifiée.",
+        },
+        "es": {
+            "scope": "No pude ejecutar el escaneo porque su alcance filtrado no está listo. Elige la metodología y los activos e inténtalo de nuevo.",
+            "quota": "El Escáner no está disponible en el plan actual o se agotó su cuota.",
+            "provider": "No pude cargar datos verificados para este escaneo; no se inventaron resultados.",
+            "window": "Este escaneo verificado solo admite actualmente la ventana móvil de 24 horas.",
+            "generic": "No pude completar este escaneo de solo lectura. La configuración no cambió.",
+        },
+        "ru": {
+            "scope": "Сканирование не запущено: выбранная проверенная область ещё не готова. Выберите методологию и активы и повторите попытку.",
+            "quota": "Сканер недоступен на текущем плане или лимит сканирований исчерпан.",
+            "provider": "Проверенные данные для сканирования не загрузились; вымышленные результаты не возвращались.",
+            "window": "Проверенный сканер сейчас поддерживает только скользящее окно 24 часа.",
+            "generic": "Не удалось завершить сканирование только для чтения. Настройки не изменены.",
+        },
+    }
+    message = catalog.get(language_code, catalog["en"])[family]
+    if language_code == "en" and family == "generic" and safe_message.strip():
+        return f"{message} {safe_message.strip()}"[:500]
+    return message
+
+
+def _governed_scan_message(result: dict[str, Any], language: str) -> str:
+    code = (language or "en").split("-", 1)[0].casefold()
+    matches = [
+        item
+        for item in result.get("results") or []
+        if isinstance(item, dict) and item.get("category") == "confirmed"
+    ]
+    checked = int(result.get("symbols_scanned") or 0)
+    evaluated = str(result.get("evaluated_at") or "")
+    rendered_rows: list[str] = []
+    for item in matches[:10]:
+        receipt = item.get("proof_receipt") if isinstance(item.get("proof_receipt"), dict) else {}
+        change = float(receipt.get("percentage_change") or 0)
+        rendered_rows.append(f"{item.get('symbol')} {change:+.2f}%")
+    rendered = ", ".join(rendered_rows)
+    extra = max(0, len(matches) - len(rendered_rows))
+    extra_text = f" (+{extra})" if extra else ""
+    if not matches:
+        templates = {
+            "en": "No screened coins matched among {checked} checked over the rolling 24-hour window. Data time: {time}.",
+            "ar": "لم أجد عملات مطابقة بين {checked} عملة مفحوصة خلال نافذة آخر 24 ساعة. وقت البيانات: {time}.",
+            "fr": "Aucune crypto filtrée ne correspond parmi les {checked} vérifiées sur la fenêtre glissante de 24 heures. Heure des données : {time}.",
+            "es": "Ninguna moneda filtrada coincidió entre las {checked} revisadas en la ventana móvil de 24 horas. Hora de los datos: {time}.",
+            "ru": "В скользящем окне 24 часа совпадений среди {checked} проверенных монет нет. Время данных: {time}.",
+        }
+        return templates.get(code, templates["en"]).format(checked=checked, time=evaluated)
+    templates = {
+        "en": "Matches over the rolling 24-hour window: {rows}{extra}. Checked {checked} screened coins. Data time: {time}.",
+        "ar": "العملات المطابقة خلال نافذة آخر 24 ساعة: {rows}{extra}. تم فحص {checked} عملة. وقت البيانات: {time}.",
+        "fr": "Correspondances sur la fenêtre glissante de 24 heures : {rows}{extra}. {checked} cryptos filtrées vérifiées. Heure des données : {time}.",
+        "es": "Coincidencias en la ventana móvil de 24 horas: {rows}{extra}. Se revisaron {checked} monedas filtradas. Hora de los datos: {time}.",
+        "ru": "Совпадения в скользящем окне 24 часа: {rows}{extra}. Проверено монет: {checked}. Время данных: {time}.",
+    }
+    return templates.get(code, templates["en"]).format(
+        rows=rendered, extra=extra_text, checked=checked, time=evaluated
+    )
+
+
 def _load_conversation_context(context: dict[str, Any]) -> SetupConversationContext:
     payload = context.get("setup_conversation_context")
     if isinstance(payload, dict):
         try:
             return SetupConversationContext.model_validate(payload)
         except ValidationError:
-            # Language context is a convenience, never executable state. A stale shape
-            # must not fail a turn; it starts empty instead.
-            return SetupConversationContext()
-    return SetupConversationContext()
+            # Conversation metadata is non-executable. A stale shape must not fail a
+            # turn, but the server-owned language survives when available.
+            return SetupConversationContext(
+                active_language=str(context.get("active_language") or "en")
+            )
+    return SetupConversationContext(
+        active_language=str(context.get("active_language") or "en")
+    )
 
 
 def _agent_message_type(execution: SetupTurnExecutionResult | None) -> str:
