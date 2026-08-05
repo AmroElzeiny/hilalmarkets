@@ -92,11 +92,18 @@ def test_exact_wire_schema_stays_bounded_and_contains_no_canonical_models() -> N
     assert measured["minified_schema_bytes"] <= PLANNER_SCHEMA_BYTE_BUDGET
     assert measured["maximum_nesting_depth"] <= PLANNER_SCHEMA_DEPTH_BUDGET
     assert not (set(schema.get("$defs") or {}) & FORBIDDEN_SCHEMA_MODELS)
+    # Pinned exactly, in order. A supported-but-incomplete request and a read-only
+    # percentage scan are their own fields precisely so neither can be smuggled in as
+    # an unsupported intent — the defect that made a missing timeframe read as an
+    # unbuildable rule. Growing this list is a wire-contract change, so it is stated
+    # here rather than asserted loosely.
     assert list(PlannerIntentEnvelope.model_fields) == [
         "segments",
         "semantic_intents",
         "clarification_answers",
         "questions_to_answer",
+        "supported_incomplete_intents",
+        "read_only_percentage_scans",
         "unsupported_intents",
         "approval_intent",
         "overall_confidence",

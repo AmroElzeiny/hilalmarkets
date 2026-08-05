@@ -48,6 +48,7 @@ from ai_market_monitor.schemas.on_demand import (
 )
 from ai_market_monitor.schemas.strategy import (
     AlertPolicy,
+    Comparator,
     ConditionGroup,
     ConditionRule,
     Operand,
@@ -57,7 +58,6 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDirection,
     UniverseDefinition,
 )
-from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.services.entitlements import (
     EntitlementContext,
@@ -400,7 +400,10 @@ class OnDemandScanService:
                 field="percentage_24h",
             ),
             comparator=comparator,
-            right=Operand(kind=OperandKind.CONSTANT, value=threshold if direction == "up" else -threshold),
+            right=Operand(
+                kind=OperandKind.CONSTANT,
+                value=threshold if direction == "up" else -threshold,
+            ),
             required=True,
             required_data=["universe_metadata.percentage_24h"],
             source_turn_id=str(draft.draft_id),
@@ -543,7 +546,10 @@ class OnDemandScanService:
         for symbol in symbols:
             raw_change = (metadata.get(symbol) or {}).get("percentage_24h")
             try:
-                change = float(raw_change)
+                # A missing value becomes the string "None" and fails the conversion,
+                # which is the same refusal a bad value already got. The provider not
+                # returning a number is never treated as the number zero.
+                change = float(str(raw_change))
             except (TypeError, ValueError):
                 market_statuses.append(
                     OnDemandMarketStatus(

@@ -341,8 +341,16 @@ def test_the_same_fact_from_four_renderers_becomes_one_sentence() -> None:
     fact = Proposition("requirement", "unsupported", "needs a timeframe", "req-1")
     parts = [
         RenderedPart("HilalMarkets cannot follow that yet.", RenderSource.COMPOSER_CLAIM, fact),
-        RenderedPart("Not expressible exactly: needs a timeframe.", RenderSource.DETERMINISTIC_CLAIM, fact),
-        RenderedPart("I could not express this exactly: needs a timeframe.", RenderSource.DETERMINISTIC_SUMMARY, fact),
+        RenderedPart(
+            "Not expressible exactly: needs a timeframe.",
+            RenderSource.DETERMINISTIC_CLAIM,
+            fact,
+        ),
+        RenderedPart(
+            "I could not express this exactly: needs a timeframe.",
+            RenderSource.DETERMINISTIC_SUMMARY,
+            fact,
+        ),
         RenderedPart("The request could not be expressed.", RenderSource.SAFE_ERROR, fact),
     ]
     reconciled = reconcile_reply(parts)
@@ -353,7 +361,13 @@ def test_the_same_fact_from_four_renderers_becomes_one_sentence() -> None:
 def test_the_clarification_is_appended_exactly_once() -> None:
     question = "Should I watch all screened coins or one specific coin?"
     reconciled = reconcile_reply(
-        [RenderedPart("Saved so far: a 5% rise.", RenderSource.COMPOSER_CLAIM, Proposition("draft", "holds", "5%"))],
+        [
+            RenderedPart(
+                "Saved so far: a 5% rise.",
+                RenderSource.COMPOSER_CLAIM,
+                Proposition("draft", "holds", "5%"),
+            )
+        ],
         clarification=question,
     )
     assert reconciled.message.count(question) == 1
@@ -361,7 +375,13 @@ def test_the_clarification_is_appended_exactly_once() -> None:
 
 def test_a_turn_never_asks_two_questions() -> None:
     reconciled = reconcile_reply(
-        [RenderedPart("Which coin did you mean?", RenderSource.DETERMINISTIC_SUMMARY, Proposition("a", "b"))],
+        [
+            RenderedPart(
+                "Which coin did you mean?",
+                RenderSource.DETERMINISTIC_SUMMARY,
+                Proposition("a", "b"),
+            )
+        ],
         clarification="Over what period should the 5% rise be measured?",
     )
     assert reconciled.message.count("?") == 1

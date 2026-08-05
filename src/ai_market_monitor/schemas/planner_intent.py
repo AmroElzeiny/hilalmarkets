@@ -467,7 +467,7 @@ class SupportedIncompleteIntent(PlannerModel):
     )
 
     @model_validator(mode="after")
-    def unique_missing_fields(self) -> "SupportedIncompleteIntent":
+    def unique_missing_fields(self) -> SupportedIncompleteIntent:
         if len(self.missing_fields) != len(set(self.missing_fields)):
             raise ValueError("missing fields must be unique")
         return self

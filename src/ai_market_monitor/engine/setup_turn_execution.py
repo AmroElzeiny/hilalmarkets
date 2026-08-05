@@ -1432,7 +1432,9 @@ def _ground_supported_unresolved_update(
     ):
         return [f"{operation.operation_id}:update_unresolved:canonical_slots_changed"]
     field_name = str(before.get("next_field") or "")
-    if not field_name or not _metadata_answer_is_grounded(field_name, after, segment.exact_source_text):
+    if not field_name or not _metadata_answer_is_grounded(
+        field_name, after, segment.exact_source_text
+    ):
         return [f"{operation.operation_id}:update_unresolved:answer_not_grounded"]
     expected_missing = [
         value for value in list(before.get("missing_slots") or []) if value != field_name
@@ -1505,7 +1507,7 @@ def _ground_supported_condition_completion(
         formula = FormulaKind(str(expected.get("formula")))
         direction = MovementDirection(str(expected.get("movement_direction")))
         comparator = Comparator(str(expected.get("comparator")))
-        threshold = float(expected.get("threshold"))
+        threshold = float(str(expected["threshold"]))
         timeframe = str(expected.get("trigger_timeframe"))
     except (TypeError, ValueError):
         return [f"{operation.operation_id}:supported_completion:metadata_incomplete"]
@@ -1574,7 +1576,10 @@ def _supported_completion_context(
     )
     if not resolved:
         return None
-    return open_item, operation, operation.condition, segment
+    condition = operation.condition
+    if condition is None:  # pragma: no cover - the shortlist above already required one
+        return None
+    return open_item, operation, condition, segment
 
 
 def _finalize_supported_completion_reconciliation(

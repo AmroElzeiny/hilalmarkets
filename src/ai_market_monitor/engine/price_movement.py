@@ -101,6 +101,42 @@ UP_TERMS: tuple[str, ...] = (
     "sa3ed",
     "sa3da",
     "bullish",
+    # More Arabic forms of "rises".
+    "ترتفع",
+    "يرتفع",
+    "ارتفاع",
+    "صعود",
+    "صعدت",
+    "يصعد",
+    # French.
+    "hausse",
+    "monte",
+    "montent",
+    "monter",
+    "augmente",
+    "augmentent",
+    "augmenter",
+    "grimpe",
+    "grimpent",
+    # Spanish.
+    "sube",
+    "suben",
+    "suba",
+    "subida",
+    "aumenta",
+    "aumente",
+    "aumentan",
+    # Russian.
+    "вырос",
+    "выросла",
+    "выросли",
+    "растет",
+    "растёт",
+    "рост",
+    "поднялся",
+    "поднялась",
+    "повысился",
+    "повысилась",
 )
 
 #: Words that state a downward move, with their inflections.
@@ -190,6 +226,41 @@ DOWN_TERMS: tuple[str, ...] = (
     "ta7et",
     "enkhafad",
     "bearish",
+    # More Arabic forms of "falls".
+    "تنخفض",
+    "هبوط",
+    "هبطت",
+    "يهبط",
+    # French.
+    "baisse",
+    "baissent",
+    "baisser",
+    "diminue",
+    "diminuent",
+    "diminuer",
+    "chute",
+    "chutent",
+    "chuter",
+    # Spanish.
+    "baja",
+    "bajan",
+    "baje",
+    "bajada",
+    "cae",
+    "caen",
+    "caiga",
+    "caída",
+    "disminuye",
+    "disminuya",
+    # Russian.
+    "снизился",
+    "снизилась",
+    "снижается",
+    "падает",
+    "падение",
+    "упал",
+    "упала",
+    "упали",
 )
 
 _MOVEMENT_BY_TERM: dict[str, Movement] = {
@@ -197,11 +268,12 @@ _MOVEMENT_BY_TERM: dict[str, Movement] = {
     **{term: "down" for term in DOWN_TERMS},
 }
 
-#: A word boundary that holds for Arabic script as well as Latin. `[a-z]` alone does
-#: not bound an Arabic term, so `نزل` would have matched inside longer words that
-#: merely contain those letters.
-_WORD_LEFT = r"(?<![a-z؀-ۿ])"
-_WORD_RIGHT = r"(?![a-z؀-ۿ])"
+#: A word boundary that holds for every script this vocabulary covers, not just Latin.
+#: `[a-z]` alone does not bound an Arabic term, so `نزل` would have matched inside
+#: longer words that merely contain those letters — and the same is true of Cyrillic
+#: (`упал` inside `упало`) and of accented Latin (`caída`, `chuté`).
+_WORD_LEFT = r"(?<![a-z؀-ۿЀ-ӿà-ÿ])"
+_WORD_RIGHT = r"(?![a-z؀-ۿЀ-ӿà-ÿ])"
 
 #: Verbs that make ``up`` or ``down`` part of a phrasal verb rather than a direction.
 #: ``set up a scanner`` states no market move, and reading the ``up`` inside it as one

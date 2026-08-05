@@ -31,9 +31,15 @@ __all__ = [
     "ConversationLanguage",
     "LanguageDecision",
     "detect_language",
+    "language_of",
     "localized",
+    "localized_options",
+    "governed_scan_error",
     "resolve_conversation_language",
     "response_matches_language",
+    "scanner_labels",
+    "scope_labels",
+    "translation_coverage",
 ]
 
 
@@ -44,6 +50,7 @@ class ConversationLanguage(StrEnum):
     ARABIC = "ar"
     FRENCH = "fr"
     SPANISH = "es"
+    RUSSIAN = "ru"
 
     @classmethod
     def parse(cls, value: str | None) -> ConversationLanguage | None:
@@ -58,6 +65,9 @@ class ConversationLanguage(StrEnum):
 
 #: Arabic script. One character is enough: nobody writes Arabic letters by accident.
 _ARABIC_SCRIPT = re.compile(r"[؀-ۿݐ-ݿ]")
+
+#: Cyrillic script. Same reasoning as Arabic: its own alphabet, never typed by accident.
+_CYRILLIC_SCRIPT = re.compile(r"[Ѐ-ӿ]")
 
 #: Arabizi spells Arabic sounds Latin has no letter for with digits: ``3`` for ع,
 #: ``7`` for ح, ``2`` for ء. A digit *inside or opening* a Latin word is that
@@ -165,6 +175,8 @@ def detect_language(text: str) -> ConversationLanguage | None:
         return None
     if _ARABIC_SCRIPT.search(text):
         return ConversationLanguage.ARABIC
+    if _CYRILLIC_SCRIPT.search(text):
+        return ConversationLanguage.RUSSIAN
     words = [word.casefold() for word in _WORD_RE.findall(text)]
     if not words:
         return None
@@ -243,6 +255,9 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "De acuerdo. ¿Vigilo todas las monedas filtradas o una moneda concreta?"
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Хорошо. Следить за всеми проверенными монетами или за одной конкретной?"
+        ),
     },
     "ask.measurement_window": {
         ConversationLanguage.ENGLISH: (
@@ -260,6 +275,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "¿En qué periodo mido el movimiento de {threshold}: "
             "1 hora, 4 horas, 24 horas, o desde la apertura del día?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "За какой период измерять движение {threshold}: "
+            "1 час, 4 часа, 24 часа или с открытия дня?"
         ),
     },
     "ask.scan_window": {
@@ -279,18 +298,24 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "¿En qué periodo mido la subida de {threshold}: "
             "1 hora, 4 horas, 24 horas, o desde la apertura de hoy?"
         ),
+        ConversationLanguage.RUSSIAN: (
+            "За какой период измерять рост {threshold}: "
+            "1 час, 4 часа, 24 часа или с открытия сегодняшнего дня?"
+        ),
     },
     "ask.movement_size": {
         ConversationLanguage.ENGLISH: "How big should the move be, in percent?",
         ConversationLanguage.ARABIC: "قد إيه تكون الحركة، بالنسبة المئوية؟",
         ConversationLanguage.FRENCH: "De quelle taille doit être la variation, en pourcentage ?",
         ConversationLanguage.SPANISH: "¿De qué tamaño debe ser el movimiento, en porcentaje?",
+        ConversationLanguage.RUSSIAN: "Каким должно быть движение в процентах?",
     },
     "ask.movement_kind": {
         ConversationLanguage.ENGLISH: "Should I watch for a rise, a fall, or both?",
         ConversationLanguage.ARABIC: "أراقب صعود، هبوط، ولا الاتنين؟",
         ConversationLanguage.FRENCH: "Dois-je surveiller une hausse, une baisse, ou les deux ?",
         ConversationLanguage.SPANISH: "¿Vigilo una subida, una bajada, o ambas?",
+        ConversationLanguage.RUSSIAN: "Следить за ростом, падением или за обоими?",
     },
     # -- scan results ------------------------------------------------------------
     "scan.no_matches": {
@@ -310,6 +335,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "Ninguna moneda filtrada sube {threshold} o más en {window} "
             "(a fecha de {timestamp})."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Нет проверенных монет с ростом {threshold} или больше за {window} "
+            "(на {timestamp})."
+        ),
     },
     "scan.matches": {
         ConversationLanguage.ENGLISH: (
@@ -326,6 +355,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "Monedas filtradas que suben {threshold} o más en {window} "
             "(a fecha de {timestamp}):"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Проверенные монеты с ростом {threshold} или больше за {window} "
+            "(на {timestamp}):"
         ),
     },
     "scan.unavailable": {
@@ -344,6 +377,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "No he podido ejecutar ese escaneo porque los datos de mercado no están "
             "disponibles. No se ha cambiado nada."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Я не смог выполнить это сканирование, потому что рыночные данные "
+            "недоступны. Ничего не изменилось."
+        ),
     },
     # -- confusion recovery ------------------------------------------------------
     "confusion.acknowledge": {
@@ -351,6 +388,7 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.ARABIC: "آسف — الرد ده مجاوبش على سؤالك.",
         ConversationLanguage.FRENCH: "Désolé — cela ne répondait pas à votre question.",
         ConversationLanguage.SPANISH: "Perdona — eso no respondía a tu pregunta.",
+        ConversationLanguage.RUSSIAN: "Извините — это не ответило на ваш вопрос.",
     },
     "confusion.restate_scan": {
         ConversationLanguage.ENGLISH: (
@@ -365,6 +403,9 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "Quieres escanear monedas filtradas que suban al menos {threshold}."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Вы хотите просканировать проверенные монеты с ростом не менее {threshold}."
+        ),
     },
     "confusion.restate_alert": {
         ConversationLanguage.ENGLISH: (
@@ -377,12 +418,51 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "Quieres una alerta cuando una moneda se mueva un {threshold}."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Вы хотите сигнал, когда монета изменится на {threshold}."
+        ),
     },
     "confusion.restate_generic": {
         ConversationLanguage.ENGLISH: "Let me get back to what you asked.",
         ConversationLanguage.ARABIC: "خليني أرجع لطلبك.",
         ConversationLanguage.FRENCH: "Revenons à votre demande.",
         ConversationLanguage.SPANISH: "Volvamos a lo que pediste.",
+        ConversationLanguage.RUSSIAN: "Вернёмся к вашему вопросу.",
+    },
+    "confusion.unclear_retry": {
+        ConversationLanguage.ENGLISH: "Sorry — my last reply was unclear. {question}",
+        ConversationLanguage.ARABIC: "آسف — ردي السابق لم يكن واضحًا. {question}",
+        ConversationLanguage.FRENCH: (
+            "Désolé — ma réponse précédente n'était pas claire. {question}"
+        ),
+        ConversationLanguage.SPANISH: (
+            "Perdón, mi respuesta anterior no fue clara. {question}"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Извините, предыдущий ответ был неясным. {question}"
+        ),
+    },
+    "confusion.scan_retry": {
+        ConversationLanguage.ENGLISH: (
+            "Sorry — I didn't answer the scan clearly. You want screened coins "
+            "{direction} at least {threshold}. {question}"
+        ),
+        ConversationLanguage.ARABIC: (
+            "آسف — لم أوضح إجابة الفحص. أنت تريد العملات المفحوصة التي تحركت "
+            "{direction} بنسبة {threshold} على الأقل. {question}"
+        ),
+        ConversationLanguage.FRENCH: (
+            "Désolé — ma réponse au scan n'était pas claire. Vous cherchez les cryptos "
+            "filtrées {direction} d'au moins {threshold}. {question}"
+        ),
+        ConversationLanguage.SPANISH: (
+            "Perdón, no respondí claramente al escaneo. Buscas monedas filtradas que "
+            "{direction} al menos {threshold}. {question}"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Извините, ответ на запрос сканирования был неясным. Нужны проверенные "
+            "монеты, которые {direction} минимум на {threshold}. {question}"
+        ),
     },
     # -- ordinary status ---------------------------------------------------------
     "status.nothing_set_up": {
@@ -395,6 +475,9 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ),
         ConversationLanguage.SPANISH: (
             "Todavía no hay nada configurado. Dime qué movimiento quieres seguir."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Пока ничего не настроено. Скажите, какое движение рынка нужно отслеживать."
         ),
     },
     "status.preview_ready": {
@@ -410,12 +493,33 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "La vista previa inactiva está lista. Usa Revisar y aprobar cuando encaje."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Неактивный предпросмотр готов. Нажмите «Проверить и одобрить», когда всё верно."
+        ),
+    },
+    "status.reapprove": {
+        ConversationLanguage.ENGLISH: (
+            "That edit made a new version, so it needs approving again."
+        ),
+        ConversationLanguage.ARABIC: (
+            "التعديل ده عمل نسخة جديدة، فمحتاجة موافقة تاني."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Cette modification a créé une nouvelle version : il faut la réapprouver."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Ese cambio creó una versión nueva, así que hay que aprobarla otra vez."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Изменение создало новую версию, которую нужно одобрить снова."
+        ),
     },
     "status.no_change": {
         ConversationLanguage.ENGLISH: "Nothing in the draft needed to change for that.",
         ConversationLanguage.ARABIC: "مفيش حاجة في المسودة محتاجة تتغير عشان ده.",
         ConversationLanguage.FRENCH: "Rien dans le brouillon n'avait besoin de changer.",
         ConversationLanguage.SPANISH: "No hacía falta cambiar nada en el borrador.",
+        ConversationLanguage.RUSSIAN: "Для этого в черновике ничего менять не пришлось.",
     },
     "status.chat_cannot_approve": {
         ConversationLanguage.ENGLISH: (
@@ -433,6 +537,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "He anotado que quieres aprobarlo, pero el chat no aprueba nada. "
             "Usa Revisar y aprobar en la vista previa."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я записал, что вы хотите одобрить, но чат ничего не одобряет. "
+            "Используйте «Проверить и одобрить» в предпросмотре."
         ),
     },
     # -- product knowledge -------------------------------------------------------
@@ -457,6 +565,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "Un Escáner revisa el mercado una vez, ahora. Un Monitor sigue vigilando y "
             "te avisa cuando tus reglas coinciden. Ninguno de los dos opera."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Scanner проверяет рынок один раз, прямо сейчас. Monitor продолжает следить "
+            "и сообщает, когда ваши правила совпадают. Ни один из них не торгует."
+        ),
     },
     # -- refusals ----------------------------------------------------------------
     "refuse.generic": {
@@ -469,6 +581,9 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ),
         ConversationLanguage.SPANISH: (
             "No he podido convertir eso en un cambio exacto. No se ha cambiado nada."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я не смог превратить это в точное изменение. Ничего не изменилось."
         ),
     },
     "refuse.support_reference": {
@@ -488,6 +603,10 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "Algo de mi lado no aceptó ese cambio, así que no cambié nada. "
             "No es un problema de cómo lo escribiste."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "Что-то на моей стороне не приняло это изменение, поэтому я ничего не менял. "
+            "Дело не в том, как вы написали."
+        ),
     },
     "refuse.unsupported": {
         ConversationLanguage.ENGLISH: (
@@ -500,18 +619,688 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: (
             "HilalMarkets todavía no puede seguir ese tipo de comportamiento de mercado."
         ),
+        ConversationLanguage.RUSSIAN: (
+            "HilalMarkets пока не может отслеживать такое поведение рынка."
+        ),
+    },
+    "refuse.unsupported_reason": {
+        ConversationLanguage.ENGLISH: "I can't build that exact rule yet: {reason}",
+        ConversationLanguage.ARABIC: "لا أقدر أبني القاعدة دي بدقة حاليًا: {reason}",
+        ConversationLanguage.FRENCH: (
+            "Je ne peux pas encore construire exactement cette règle : {reason}"
+        ),
+        ConversationLanguage.SPANISH: (
+            "Todavía no puedo construir esa regla exactamente: {reason}"
+        ),
+        ConversationLanguage.RUSSIAN: "Пока невозможно точно построить это правило: {reason}",
+    },
+    # -- clarification wording carried over from the planner-side catalogue --------
+    "ask.intro": {
+        ConversationLanguage.ENGLISH: "Got it. I only need one choice to continue.",
+        ConversationLanguage.ARABIC: "تمام. محتاج اختيار واحد بس عشان أكمل.",
+        ConversationLanguage.FRENCH: "D'accord. Il me faut un seul choix pour continuer.",
+        ConversationLanguage.SPANISH: "Entendido. Solo necesito una elección para continuar.",
+        ConversationLanguage.RUSSIAN: "Понял. Нужен только один выбор, чтобы продолжить.",
+    },
+    "ask.candle_period": {
+        ConversationLanguage.ENGLISH: "Which candle period should I use: 1h, 4h, or 1d?",
+        ConversationLanguage.ARABIC: "أستخدم أي فترة شمعة: ساعة، 4 ساعات، ولا يوم؟",
+        ConversationLanguage.FRENCH: (
+            "Quelle période de bougie dois-je utiliser : 1 h, 4 h ou 1 j ?"
+        ),
+        ConversationLanguage.SPANISH: "¿Qué periodo de vela uso: 1 h, 4 h o 1 día?",
+        ConversationLanguage.RUSSIAN: (
+            "Какой период свечи использовать: 1 час, 4 часа или 1 день?"
+        ),
+    },
+    "ask.move_reference": {
+        ConversationLanguage.ENGLISH: (
+            "Measure the move from that candle's open or the previous candle's close?"
+        ),
+        ConversationLanguage.ARABIC: "أقيس الحركة من افتتاح الشمعة ولا من إغلاق الشمعة السابقة؟",
+        ConversationLanguage.FRENCH: (
+            "Mesurer le mouvement depuis l'ouverture de la bougie ou la clôture de la "
+            "bougie précédente ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "¿Mido el movimiento desde la apertura de la vela o desde el cierre de la "
+            "vela anterior?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Измерять движение от открытия свечи или от закрытия предыдущей свечи?"
+        ),
+    },
+    "ask.comparator": {
+        ConversationLanguage.ENGLISH: (
+            "Should the alert trigger when the move reaches the value, or only after "
+            "it passes it?"
+        ),
+        ConversationLanguage.ARABIC: "التنبيه يشتغل عند الوصول للقيمة ولا بعد تجاوزها فقط؟",
+        ConversationLanguage.FRENCH: (
+            "L'alerte doit-elle se déclencher dès que la valeur est atteinte ou "
+            "seulement après son dépassement ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "¿La alerta se activa al alcanzar el valor o solo después de superarlo?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Сигнал должен сработать при достижении значения или только после его "
+            "превышения?"
+        ),
+    },
+    "ask.threshold": {
+        ConversationLanguage.ENGLISH: "What percentage or numeric level should trigger it?",
+        ConversationLanguage.ARABIC: "إيه النسبة أو المستوى الرقمي المطلوب للتنبيه؟",
+        ConversationLanguage.FRENCH: (
+            "Quel pourcentage ou niveau numérique doit déclencher l'alerte ?"
+        ),
+        ConversationLanguage.SPANISH: "¿Qué porcentaje o nivel numérico debe activar la alerta?",
+        ConversationLanguage.RUSSIAN: (
+            "Какой процент или числовой уровень должен запускать сигнал?"
+        ),
+    },
+    "ask.rule_mechanic": {
+        ConversationLanguage.ENGLISH: (
+            "What exact market move or indicator should this rule measure?"
+        ),
+        ConversationLanguage.ARABIC: "إيه حركة السوق أو المؤشر المطلوب قياسه بالضبط؟",
+        ConversationLanguage.FRENCH: (
+            "Quel mouvement de marché ou indicateur cette règle doit-elle mesurer ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "¿Qué movimiento de mercado o indicador debe medir esta regla?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Какое движение рынка или индикатор должна измерять эта логика?"
+        ),
+    },
+    "ask.retry_invalid": {
+        ConversationLanguage.ENGLISH: "I couldn't map that answer safely. {question}",
+        ConversationLanguage.ARABIC: "لم أقدر أربط الإجابة بأمان. {question}",
+        ConversationLanguage.FRENCH: (
+            "Je n'ai pas pu associer cette réponse en toute sécurité. {question}"
+        ),
+        ConversationLanguage.SPANISH: (
+            "No pude asociar esa respuesta de forma segura. {question}"
+        ),
+        ConversationLanguage.RUSSIAN: "Я не смог безопасно сопоставить этот ответ. {question}",
+    },
+    "ask.scan_window_24h": {
+        ConversationLanguage.ENGLISH: (
+            "Should I use the provider's rolling 24-hour percentage change?"
+        ),
+        ConversationLanguage.ARABIC: (
+            "أستخدم نسبة التغير المتحركة خلال آخر 24 ساعة من مزود البيانات؟"
+        ),
+        ConversationLanguage.FRENCH: (
+            "Dois-je utiliser la variation glissante sur 24 heures du fournisseur ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "¿Uso el cambio porcentual móvil de 24 horas del proveedor?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Использовать скользящее 24-часовое процентное изменение провайдера?"
+        ),
+    },
+    # -- turn outcome ------------------------------------------------------------
+    "status.question_answered": {
+        ConversationLanguage.ENGLISH: "That answered the open question.",
+        ConversationLanguage.ARABIC: "كده تمت الإجابة عن السؤال المفتوح.",
+        ConversationLanguage.FRENCH: "La question ouverte a été traitée.",
+        ConversationLanguage.SPANISH: "La pregunta pendiente quedó respondida.",
+        ConversationLanguage.RUSSIAN: "Открытый вопрос закрыт.",
+    },
+    "status.draft_version": {
+        ConversationLanguage.ENGLISH: "The inactive draft is now version {version}.",
+        ConversationLanguage.ARABIC: "المسودة غير المفعلة أصبحت الإصدار {version}.",
+        ConversationLanguage.FRENCH: (
+            "Le brouillon inactif est maintenant à la version {version}."
+        ),
+        ConversationLanguage.SPANISH: "El borrador inactivo ahora es la versión {version}.",
+        ConversationLanguage.RUSSIAN: "Неактивный черновик теперь версии {version}.",
+    },
+    "status.draft_count": {
+        ConversationLanguage.ENGLISH: (
+            "The draft currently has {count} rule{suffix}. Tell me what to change."
+        ),
+        ConversationLanguage.ARABIC: (
+            "المسودة تحتوي حاليًا على {count} قاعدة. اكتب التعديل المطلوب."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Le brouillon contient actuellement {count} règle{suffix}. Indiquez la "
+            "modification souhaitée."
+        ),
+        ConversationLanguage.SPANISH: (
+            "El borrador tiene actualmente {count} regla{suffix}. Indica qué quieres cambiar."
+        ),
+        ConversationLanguage.RUSSIAN: "Сейчас в черновике {count} правил. Укажите, что изменить.",
+    },
+    "status.no_action": {
+        ConversationLanguage.ENGLISH: "Nothing changed on this turn.",
+        ConversationLanguage.ARABIC: "لم يتغير شيء في هذه الرسالة.",
+        ConversationLanguage.FRENCH: "Aucun changement pendant ce tour.",
+        ConversationLanguage.SPANISH: "No cambió nada en este turno.",
+        ConversationLanguage.RUSSIAN: "В этом сообщении ничего не изменилось.",
+    },
+    "status.rule_completed": {
+        ConversationLanguage.ENGLISH: (
+            "Done — the inactive rule is complete and ready for review."
+        ),
+        ConversationLanguage.ARABIC: "تم — القاعدة غير المفعلة اكتملت وأصبحت جاهزة للمراجعة.",
+        ConversationLanguage.FRENCH: (
+            "Terminé — la règle inactive est complète et prête à être vérifiée."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Listo: la regla inactiva está completa y lista para revisión."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Готово — неактивное правило завершено и готово к проверке."
+        ),
+    },
+    "status.question_fallback": {
+        ConversationLanguage.ENGLISH: (
+            "I couldn't answer that safely from the current draft. Tell me the result "
+            "you want to scan for, and I'll ask only for the missing detail."
+        ),
+        ConversationLanguage.ARABIC: (
+            "لم أقدر أجاوب بأمان من المسودة الحالية. اكتب نتيجة الفحص المطلوبة "
+            "وسأسأل عن التفصيلة الناقصة فقط."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Je ne peux pas répondre en toute sécurité à partir du brouillon actuel. "
+            "Décrivez le résultat à scanner et je demanderai uniquement le détail manquant."
+        ),
+        ConversationLanguage.SPANISH: (
+            "No pude responder con seguridad desde el borrador actual. Describe el "
+            "resultado que quieres escanear y preguntaré solo el dato que falta."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я не могу безопасно ответить по текущему черновику. Опишите результат "
+            "сканирования, и я спрошу только недостающую деталь."
+        ),
+    },
+    # -- on-demand scan ----------------------------------------------------------
+    "scan.acknowledged": {
+        ConversationLanguage.ENGLISH: "I can run that as a read-only Scanner check.",
+        ConversationLanguage.ARABIC: "أقدر أنفذ هذا كفحص Scanner للقراءة فقط.",
+        ConversationLanguage.FRENCH: (
+            "Je peux exécuter cette demande comme un scan en lecture seule."
+        ),
+        ConversationLanguage.SPANISH: "Puedo ejecutar esto como un escaneo de solo lectura.",
+        ConversationLanguage.RUSSIAN: "Я могу выполнить это как Scanner только для чтения.",
+    },
+    "scan.scope_required": {
+        ConversationLanguage.ENGLISH: (
+            "First choose the screened scope: all eligible coins, a Favorites list, or "
+            "specific eligible coins."
+        ),
+        ConversationLanguage.ARABIC: (
+            "اختر أولًا نطاق الفحص: كل العملات المؤهلة، قائمة المفضلة، أو عملات مؤهلة محددة."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Choisissez d'abord la portée filtrée : toutes les cryptos éligibles, une "
+            "liste de favoris ou des cryptos précises."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Primero elige el alcance filtrado: todas las monedas elegibles, una lista "
+            "de favoritos o monedas específicas."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Сначала выберите проверяемый охват: все подходящие монеты, список "
+            "избранного или конкретные монеты."
+        ),
+    },
+    "scan.mode_required": {
+        ConversationLanguage.ENGLISH: (
+            "Choose Scanner first. I'll keep this current-market request and continue "
+            "when the screened scope is ready."
+        ),
+        ConversationLanguage.ARABIC: (
+            "اختر Scanner أولًا. سأحتفظ بطلب السوق الحالي وأكمل بمجرد تجهيز نطاق الفحص."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Choisissez d'abord Scanner. Je conserve cette demande et je continuerai "
+            "dès que la portée filtrée sera prête."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Primero elige Scanner. Conservaré esta solicitud y continuaré cuando el "
+            "alcance filtrado esté listo."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Сначала выберите Scanner. Я сохраню запрос и продолжу, когда проверяемый "
+            "охват будет готов."
+        ),
+    },
+    "scan.running": {
+        ConversationLanguage.ENGLISH: "Running the governed read-only Scanner now.",
+        ConversationLanguage.ARABIC: "أشغّل الآن فحص Scanner المقيّد للقراءة فقط.",
+        ConversationLanguage.FRENCH: "Exécution du Scanner gouverné en lecture seule.",
+        ConversationLanguage.SPANISH: "Ejecutando ahora el Scanner gobernado de solo lectura.",
+        ConversationLanguage.RUSSIAN: "Запускаю управляемый Scanner только для чтения.",
+    },
+    # -- governed screened scope --------------------------------------------------
+    "scope.methodology_unavailable": {
+        ConversationLanguage.ENGLISH: (
+            "Screened monitoring is unavailable because no approved methodology is active."
+        ),
+        ConversationLanguage.ARABIC: (
+            "المراقبة المفحوصة غير متاحة لعدم وجود منهجية معتمدة ونشطة."
+        ),
+        ConversationLanguage.FRENCH: (
+            "La surveillance filtrée est indisponible car aucune méthodologie approuvée "
+            "n'est active."
+        ),
+        ConversationLanguage.SPANISH: (
+            "La monitorización filtrada no está disponible porque no hay una metodología "
+            "aprobada activa."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Проверенный мониторинг недоступен: нет активной утверждённой методологии."
+        ),
+    },
+    "scope.watchlist_missing": {
+        ConversationLanguage.ENGLISH: (
+            "You do not have a Favorites list yet. Choose another screened scope."
+        ),
+        ConversationLanguage.ARABIC: (
+            "لا توجد لديك قائمة مفضلة بعد. اختر نطاقًا مفحوصًا آخر."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Vous n'avez pas encore de liste de favoris. Choisissez un autre périmètre "
+            "filtré."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Todavía no tienes una lista de favoritos. Elige otro alcance filtrado."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "У вас пока нет списка избранного. Выберите другую проверенную область."
+        ),
+    },
+    "scope.selected": {
+        ConversationLanguage.ENGLISH: (
+            "The screened scope is selected. I only need the measurement window."
+        ),
+        ConversationLanguage.ARABIC: (
+            "تم اختيار النطاق المفحوص. أحتاج فقط إلى نافذة القياس."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Le périmètre filtré est sélectionné. Il ne manque que la fenêtre de mesure."
+        ),
+        ConversationLanguage.SPANISH: (
+            "El alcance filtrado está seleccionado. Solo falta la ventana de medición."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Проверенная область выбрана. Осталось указать окно измерения."
+        ),
+    },
+    "ask.universe": {
+        ConversationLanguage.ENGLISH: "Which screened assets should HilalMarkets watch?",
+        ConversationLanguage.ARABIC: "أي أصول مفحوصة تريد من HilalMarkets مراقبتها؟",
+        ConversationLanguage.FRENCH: (
+            "Quels actifs filtrés HilalMarkets doit-il surveiller ?"
+        ),
+        ConversationLanguage.SPANISH: "¿Qué activos filtrados debe vigilar HilalMarkets?",
+        ConversationLanguage.RUSSIAN: (
+            "Какие проверенные активы должен отслеживать HilalMarkets?"
+        ),
+    },
+    "ask.watchlist": {
+        ConversationLanguage.ENGLISH: "Which Favorites list should HilalMarkets use?",
+        ConversationLanguage.ARABIC: "أي قائمة مفضلة تريد أن يستخدمها HilalMarkets؟",
+        ConversationLanguage.FRENCH: (
+            "Quelle liste de favoris HilalMarkets doit-il utiliser ?"
+        ),
+        ConversationLanguage.SPANISH: "¿Qué lista de favoritos debe usar HilalMarkets?",
+        ConversationLanguage.RUSSIAN: (
+            "Какой список избранного должен использовать HilalMarkets?"
+        ),
+    },
+    "ask.explicit_assets": {
+        ConversationLanguage.ENGLISH: (
+            "Which eligible spot assets should HilalMarkets watch?"
+        ),
+        ConversationLanguage.ARABIC: "ما أصول السبوت المؤهلة التي تريد مراقبتها؟",
+        ConversationLanguage.FRENCH: (
+            "Quels actifs spot éligibles HilalMarkets doit-il surveiller ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "¿Qué activos spot elegibles debe vigilar HilalMarkets?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Какие допустимые спотовые активы нужно отслеживать?"
+        ),
+    },
+    # -- read-only Scanner presentation -------------------------------------------
+    "scanner.title": {
+        ConversationLanguage.ENGLISH: "Read-only Scanner",
+        ConversationLanguage.ARABIC: "الفاحص للقراءة فقط",
+        ConversationLanguage.FRENCH: "Scanner en lecture seule",
+        ConversationLanguage.SPANISH: "Escáner de solo lectura",
+        ConversationLanguage.RUSSIAN: "Сканер только для чтения",
+    },
+    "scanner.checked": {
+        ConversationLanguage.ENGLISH: "screened coins checked",
+        ConversationLanguage.ARABIC: "عملة مفحوصة تم التحقق منها",
+        ConversationLanguage.FRENCH: "cryptos filtrées vérifiées",
+        ConversationLanguage.SPANISH: "monedas filtradas revisadas",
+        ConversationLanguage.RUSSIAN: "проверенных отфильтрованных монет",
+    },
+    "scanner.matched": {
+        ConversationLanguage.ENGLISH: "matched",
+        ConversationLanguage.ARABIC: "مطابقة",
+        ConversationLanguage.FRENCH: "correspondances",
+        ConversationLanguage.SPANISH: "coincidencias",
+        ConversationLanguage.RUSSIAN: "совпадений",
+    },
+    "scanner.read_only": {
+        ConversationLanguage.ENGLISH: "Read-only",
+        ConversationLanguage.ARABIC: "للقراءة فقط",
+        ConversationLanguage.FRENCH: "Lecture seule",
+        ConversationLanguage.SPANISH: "Solo lectura",
+        ConversationLanguage.RUSSIAN: "Только чтение",
+    },
+    "scanner.no_changes": {
+        ConversationLanguage.ENGLISH: "no setup changes",
+        ConversationLanguage.ARABIC: "لا تغييرات على الإعداد",
+        ConversationLanguage.FRENCH: "aucune modification de la configuration",
+        ConversationLanguage.SPANISH: "sin cambios en la configuración",
+        ConversationLanguage.RUSSIAN: "настройки не изменены",
+    },
+    #: Never softened and never dropped: a scan result is research, not advice.
+    "scanner.research": {
+        ConversationLanguage.ENGLISH: "Research only. Not buy or sell advice.",
+        ConversationLanguage.ARABIC: "للبحث فقط، وليست توصية شراء أو بيع.",
+        ConversationLanguage.FRENCH: "Recherche uniquement, sans conseil d'achat ou de vente.",
+        ConversationLanguage.SPANISH: "Solo investigación; no es consejo de compra o venta.",
+        ConversationLanguage.RUSSIAN: (
+            "Только исследование, не рекомендация покупать или продавать."
+        ),
+    },
+    "scan_result.none": {
+        ConversationLanguage.ENGLISH: (
+            "No screened coins matched among {checked} checked over the rolling "
+            "24-hour window. Data time: {time}."
+        ),
+        ConversationLanguage.ARABIC: (
+            "لم أجد عملات مطابقة بين {checked} عملة مفحوصة خلال نافذة آخر 24 ساعة. "
+            "وقت البيانات: {time}."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Aucune crypto filtrée ne correspond parmi les {checked} vérifiées sur la "
+            "fenêtre glissante de 24 heures. Heure des données : {time}."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Ninguna moneda filtrada coincidió entre las {checked} revisadas en la "
+            "ventana móvil de 24 horas. Hora de los datos: {time}."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "В скользящем окне 24 часа совпадений среди {checked} проверенных монет "
+            "нет. Время данных: {time}."
+        ),
+    },
+    "scan_result.some": {
+        ConversationLanguage.ENGLISH: (
+            "Matches over the rolling 24-hour window: {rows}{extra}. Checked {checked} "
+            "screened coins. Data time: {time}."
+        ),
+        ConversationLanguage.ARABIC: (
+            "العملات المطابقة خلال نافذة آخر 24 ساعة: {rows}{extra}. تم فحص {checked} "
+            "عملة. وقت البيانات: {time}."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Correspondances sur la fenêtre glissante de 24 heures : {rows}{extra}. "
+            "{checked} cryptos filtrées vérifiées. Heure des données : {time}."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Coincidencias en la ventana móvil de 24 horas: {rows}{extra}. Se revisaron "
+            "{checked} monedas filtradas. Hora de los datos: {time}."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Совпадения в скользящем окне 24 часа: {rows}{extra}. Проверено монет: "
+            "{checked}. Время данных: {time}."
+        ),
+    },
+    # -- refused scans -------------------------------------------------------------
+    "scan_error.scope": {
+        ConversationLanguage.ENGLISH: (
+            "I couldn't run the scan because its screened scope is not ready. Choose the "
+            "methodology and assets, then run it again."
+        ),
+        ConversationLanguage.ARABIC: (
+            "لم أتمكن من تشغيل الفحص لأن نطاق العملات المفحوصة غير مكتمل. "
+            "اختر المنهجية والعملات ثم أعد المحاولة."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Le scan n'a pas pu démarrer car son périmètre filtré n'est pas prêt. "
+            "Choisissez la méthodologie et les actifs, puis réessayez."
+        ),
+        ConversationLanguage.SPANISH: (
+            "No pude ejecutar el escaneo porque su alcance filtrado no está listo. "
+            "Elige la metodología y los activos e inténtalo de nuevo."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Сканирование не запущено: выбранная проверенная область ещё не готова. "
+            "Выберите методологию и активы и повторите попытку."
+        ),
+    },
+    "scan_error.quota": {
+        ConversationLanguage.ENGLISH: (
+            "Scanner is not available under the current plan or its scan allowance has "
+            "been used."
+        ),
+        ConversationLanguage.ARABIC: (
+            "الفاحص غير متاح في الخطة الحالية أو تم استخدام حد الفحوصات المتاح."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Le Scanner n'est pas disponible avec l'offre actuelle ou le quota de scans "
+            "est épuisé."
+        ),
+        ConversationLanguage.SPANISH: (
+            "El Escáner no está disponible en el plan actual o se agotó su cuota."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Сканер недоступен на текущем плане или лимит сканирований исчерпан."
+        ),
+    },
+    "scan_error.provider": {
+        ConversationLanguage.ENGLISH: (
+            "I couldn't load verified data for this screened scan, so I returned no "
+            "invented results."
+        ),
+        ConversationLanguage.ARABIC: (
+            "تعذر تحميل بيانات موثقة لهذا الفحص، لذلك لم أعرض أي نتائج مخترعة."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Les données vérifiées n'ont pas pu être chargées; aucun résultat n'a été "
+            "inventé."
+        ),
+        ConversationLanguage.SPANISH: (
+            "No pude cargar datos verificados para este escaneo; no se inventaron "
+            "resultados."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Проверенные данные для сканирования не загрузились; вымышленные результаты "
+            "не возвращались."
+        ),
+    },
+    "scan_error.window": {
+        ConversationLanguage.ENGLISH: (
+            "This verified scan currently supports the rolling 24-hour window only."
+        ),
+        ConversationLanguage.ARABIC: "الفحص الموثق يدعم حاليًا نافذة آخر 24 ساعة فقط.",
+        ConversationLanguage.FRENCH: (
+            "Ce scan vérifié prend actuellement en charge uniquement la fenêtre "
+            "glissante de 24 heures."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Este escaneo verificado solo admite actualmente la ventana móvil de 24 horas."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Проверенный сканер сейчас поддерживает только скользящее окно 24 часа."
+        ),
+    },
+    "scan_error.generic": {
+        ConversationLanguage.ENGLISH: (
+            "I couldn't complete this read-only scan. No setup was changed."
+        ),
+        ConversationLanguage.ARABIC: "تعذر إكمال هذا الفحص للقراءة فقط، ولم يتغير أي إعداد.",
+        ConversationLanguage.FRENCH: (
+            "Ce scan en lecture seule n'a pas pu être terminé. La configuration n'a pas "
+            "été modifiée."
+        ),
+        ConversationLanguage.SPANISH: (
+            "No pude completar este escaneo de solo lectura. La configuración no cambió."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Не удалось завершить сканирование только для чтения. Настройки не изменены."
+        ),
     },
 }
 
-#: Script ranges that prove a reply is *not* in the expected language. Used only to
-#: catch a reply written in the wrong script, which is the failure a user notices
-#: instantly; word-level style is left to the model.
-_SCRIPT_EXPECTATION: Final[dict[ConversationLanguage, bool]] = {
-    ConversationLanguage.ARABIC: True,
-    ConversationLanguage.ENGLISH: False,
-    ConversationLanguage.FRENCH: False,
-    ConversationLanguage.SPANISH: False,
+def _distinctive_words(language: ConversationLanguage) -> frozenset[str]:
+    """A language's marker words, minus the ones it shares with its Latin-script peer.
+
+    Detection and the reply check must agree on what counts as evidence for a language.
+    Two separate word lists were the original defect here — one module thought
+    ``para`` was Spanish, another had never heard of it — so both read this.
+    """
+
+    return frozenset(_WORD_MARKERS.get(language, ())) - _AMBIGUOUS
+
+
+#: The choices a clarification offers, per field. Answer options are wording the server
+#: writes, so they belong beside every other sentence it writes — a private copy in the
+#: agent meant an Arabic question arrived with English buttons under it.
+#: ``trigger_timeframe`` is deliberately untranslated: ``1h``/``4h``/``1d`` are codes the
+#: product shows identically in every language.
+_OPTION_LABELS: Final[dict[str, dict[ConversationLanguage, tuple[str, ...]]]] = {
+    "reference_point": {
+        ConversationLanguage.ENGLISH: ("Candle open", "Previous candle close"),
+        ConversationLanguage.ARABIC: ("افتتاح الشمعة", "إغلاق الشمعة السابقة"),
+        ConversationLanguage.FRENCH: (
+            "Ouverture de la bougie",
+            "Clôture de la bougie précédente",
+        ),
+        ConversationLanguage.SPANISH: ("Apertura de la vela", "Cierre de la vela anterior"),
+        ConversationLanguage.RUSSIAN: ("Открытие свечи", "Закрытие предыдущей свечи"),
+    },
+    "comparator": {
+        ConversationLanguage.ENGLISH: (
+            "At the threshold or beyond",
+            "Only beyond the threshold",
+        ),
+        ConversationLanguage.ARABIC: ("عند الحد أو أكثر", "فقط بعد تجاوز الحد"),
+        ConversationLanguage.FRENCH: ("Au seuil ou au-delà", "Seulement au-delà du seuil"),
+        ConversationLanguage.SPANISH: ("En el umbral o más", "Solo por encima del umbral"),
+        ConversationLanguage.RUSSIAN: ("На пороге или выше", "Только выше порога"),
+    },
 }
+
+#: Codes shown the same way in every language.
+_UNTRANSLATED_OPTIONS: Final[dict[str, tuple[str, ...]]] = {
+    "trigger_timeframe": ("1h", "4h", "1d"),
+}
+
+#: The names of the governed screened scopes, as a trader reads them. These label
+#: buttons, so they are wording the server writes and belong here with the rest of it.
+_SCOPE_LABELS: Final[dict[ConversationLanguage, dict[str, str]]] = {
+    ConversationLanguage.ENGLISH: {
+        "eligible_market": "All eligible spot assets",
+        "approved_watchlist": "My Favorites",
+        "explicit_assets": "Specific eligible assets",
+    },
+    ConversationLanguage.ARABIC: {
+        "eligible_market": "كل أصول السبوت المؤهلة",
+        "approved_watchlist": "قائمة المفضلة",
+        "explicit_assets": "أصول مؤهلة محددة",
+    },
+    ConversationLanguage.FRENCH: {
+        "eligible_market": "Tous les actifs spot éligibles",
+        "approved_watchlist": "Mes favoris",
+        "explicit_assets": "Actifs éligibles précis",
+    },
+    ConversationLanguage.SPANISH: {
+        "eligible_market": "Todos los activos spot elegibles",
+        "approved_watchlist": "Mis favoritos",
+        "explicit_assets": "Activos elegibles específicos",
+    },
+    ConversationLanguage.RUSSIAN: {
+        "eligible_market": "Все допустимые спотовые активы",
+        "approved_watchlist": "Мои избранные",
+        "explicit_assets": "Выбранные допустимые активы",
+    },
+}
+
+
+def scope_labels(language: ConversationLanguage) -> dict[str, str]:
+    """The screened-scope button labels, in ``language``."""
+
+    return dict(_SCOPE_LABELS.get(language) or _SCOPE_LABELS[ConversationLanguage.ENGLISH])
+
+
+def scanner_labels(language: ConversationLanguage) -> dict[str, str]:
+    """The words the read-only Scanner result card is built from."""
+
+    return {
+        name: localized(f"scanner.{name}", language)
+        for name in ("title", "checked", "matched", "read_only", "no_changes", "research")
+    }
+
+
+#: Which refusal a governed scan error belongs to. The trader is told what to do next,
+#: which depends on the family, never on the internal code.
+_SCAN_ERROR_FAMILY: Final[dict[str, str]] = {
+    "screening_methodology_required": "scope",
+    "screened_universe_required": "scope",
+    "screening_methodology_unavailable": "scope",
+    "empty_screened_universe": "scope",
+    "approved_watchlist_required": "scope",
+    "light_prompt_scan_not_available": "quota",
+    "light_prompt_scans_quota_exceeded": "quota",
+    "market_provider_unavailable": "provider",
+    "percentage_data_unavailable": "provider",
+    "scanner_runtime_failure": "provider",
+    "percentage_window_not_supported": "window",
+}
+
+
+def governed_scan_error(code: str, safe_message: str, language: ConversationLanguage) -> str:
+    """Why a governed scan did not run, in the trader's language.
+
+    The internal code never reaches the reader. Only the English generic case appends
+    the safe message, because that message is not translated and appending it to a
+    Russian sentence would be the language switch this module exists to prevent.
+    """
+
+    family = _SCAN_ERROR_FAMILY.get(code, "generic")
+    message = localized(f"scan_error.{family}", language)
+    tail = (safe_message or "").strip()
+    if language is ConversationLanguage.ENGLISH and family == "generic" and tail:
+        return f"{message} {tail}"[:500]
+    return message
+
+
+def localized_options(field: str, language: ConversationLanguage) -> list[str]:
+    """The answer choices for ``field``, in ``language``. Empty when the field has none."""
+
+    fixed = _UNTRANSLATED_OPTIONS.get(field)
+    if fixed is not None:
+        return list(fixed)
+    entry = _OPTION_LABELS.get(field, {})
+    return list(entry.get(language) or entry.get(ConversationLanguage.ENGLISH) or ())
+
+
+def language_of(value: str | ConversationLanguage | None) -> ConversationLanguage:
+    """The conversation language for a stored code, never failing.
+
+    Callers hold the language as a plain string on a turn, a chat row or a context
+    blob. Each one used to coerce it with its own private helper, and the helpers
+    disagreed about ``"ar-EG"`` and about the empty string. This is the single coercion.
+    """
+
+    return ConversationLanguage.parse(
+        value if value is None else str(value)
+    ) or ConversationLanguage.ENGLISH
 
 
 def localized(
@@ -548,14 +1337,30 @@ def response_matches_language(text: str, language: ConversationLanguage) -> bool
     body = (text or "").strip()
     if not body:
         return False
-    has_arabic = bool(_ARABIC_SCRIPT.search(body))
-    expects_arabic = _SCRIPT_EXPECTATION.get(language, False)
-    if expects_arabic:
-        return has_arabic
-    # A Latin-script conversation may legitimately quote an Arabic name, but a reply
-    # that is *mostly* Arabic script is a language switch, not a quotation.
-    arabic_characters = len(_ARABIC_SCRIPT.findall(body))
-    return arabic_characters * 2 <= len(body)
+    if language is ConversationLanguage.ARABIC:
+        return bool(_ARABIC_SCRIPT.search(body))
+    if language is ConversationLanguage.RUSSIAN:
+        return bool(_CYRILLIC_SCRIPT.search(body))
+    # A Latin-script conversation may legitimately quote an Arabic or Russian name, but
+    # a reply that is *mostly* another script is a language switch, not a quotation.
+    foreign = len(_ARABIC_SCRIPT.findall(body)) + len(_CYRILLIC_SCRIPT.findall(body))
+    if foreign * 2 > len(body):
+        return False
+    # French and Spanish share an alphabet, so script alone cannot separate them. Their
+    # own marker words can: a French reply to a Spanish conversation is a switch a
+    # script check would wave through.
+    words = {word.casefold() for word in _WORD_RE.findall(body)}
+    if language not in {ConversationLanguage.FRENCH, ConversationLanguage.SPANISH}:
+        return True
+    mine = _distinctive_words(language)
+    other = _distinctive_words(
+        ConversationLanguage.SPANISH
+        if language is ConversationLanguage.FRENCH
+        else ConversationLanguage.FRENCH
+    )
+    # Silence is not a mismatch. A short reply carrying neither language's marker words
+    # is accepted rather than rejected on no evidence.
+    return len(words & other) <= len(words & mine)
 
 
 def translation_coverage() -> dict[str, list[str]]:

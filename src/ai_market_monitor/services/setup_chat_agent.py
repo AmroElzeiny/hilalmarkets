@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from time import monotonic
-from typing import Any, cast
+from typing import Any, Final, Literal, cast
 
 import httpx
 from redis.asyncio import Redis
@@ -49,12 +49,16 @@ from ai_market_monitor.engine.conversation_intent import (
     ConversationIntent,
     IntentReading,
     classify_turn,
+    is_confusion_signal,
 )
 from ai_market_monitor.engine.conversation_language import (
     ConversationLanguage,
     LanguageDecision,
+    language_of,
     localized,
+    localized_options,
     resolve_conversation_language,
+    response_matches_language,
 )
 from ai_market_monitor.engine.planner_intent_compiler import (
     SANITATION_CLASSES,
@@ -76,7 +80,6 @@ from ai_market_monitor.engine.planner_references import (
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.repair_eligibility import RepairDecision, decide_repair
 from ai_market_monitor.engine.requirement_state import active_requirement_states
-<<<<<<< HEAD
 from ai_market_monitor.engine.response_reconciliation import (
     ConversationalGoal,
     Proposition,
@@ -87,9 +90,7 @@ from ai_market_monitor.engine.response_reconciliation import (
     reconcile_reply,
     response_fingerprint,
 )
-=======
 from ai_market_monitor.engine.semantic_grounding import grounds_number
->>>>>>> 463b04abd9fe695d0aabf281fb82e560176cf563
 from ai_market_monitor.engine.setup_failure_taxonomy import (
     SetupFailureClass,
     TurnFailureRecord,
@@ -145,7 +146,6 @@ from ai_market_monitor.schemas.planner_intent import (
     schema_complexity,
 )
 from ai_market_monitor.schemas.screening_execution import PreflightManifest
-from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.setup_agent import (
     DIALOGUE_WINDOW_MAX,
     SETUP_REPLY_MAX_LENGTH,
@@ -166,6 +166,7 @@ from ai_market_monitor.schemas.setup_authorization import (
     ClarificationContract,
     ClarificationTargetType,
 )
+from ai_market_monitor.schemas.strategy import CapabilityParameterValue, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ConditionNodeType,
@@ -922,14 +923,14 @@ class SetupChatAgent:
             normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
         ).to_dict()
 
-<<<<<<< HEAD
         # Where is this turn going? Decided before anything is planned, because the
         # answer changes whether a planner call happens at all. A confusion signal, a
         # live market question and a request that is simply missing one choice are
         # each answered without asking a model to re-read a sentence the server has
         # already understood.
         language = resolve_conversation_language(
-            turn.message, session_language=turn.session_language
+            turn.message,
+            session_language=turn.session_language or turn.active_language,
         )
         reading = classify_turn(
             turn.message,
@@ -945,8 +946,6 @@ class SetupChatAgent:
         if conversational is not None:
             return conversational
 
-=======
->>>>>>> 463b04abd9fe695d0aabf281fb82e560176cf563
         with telemetry.stage("context_selection"):
             shortlist = build_capability_shortlist(
                 turn.normalized_message,
@@ -1099,7 +1098,7 @@ class SetupChatAgent:
         )
         if isinstance(settled, _ServerClarification):
             clarification = settled.contract
-            intro = _localized(turn.active_language, "clarification_intro")
+            intro = localized("ask.intro", language_of(turn.active_language))
             reply = deterministic_reply(
                 intro,
                 selected_clarification_id=clarification.question_id,
@@ -1110,7 +1109,7 @@ class SetupChatAgent:
                 patch_validation="user_information_required",
                 response_model="deterministic_clarification",
             )
-            fingerprint = _response_fingerprint(
+            fingerprint = response_fingerprint(
                 f"{intro}\n\n{clarification.question}"
             )
             conversation = turn.conversation.model_copy(
@@ -1174,11 +1173,11 @@ class SetupChatAgent:
             ).model_copy(
                 update={
                     "active_language": turn.active_language,
-                    "last_response_fingerprint": _response_fingerprint(reply.message),
+                    "last_response_fingerprint": response_fingerprint(reply.message),
                 }
             )
             trace = _with(
-                trace, response_fingerprint=_response_fingerprint(reply.message)
+                trace, response_fingerprint=response_fingerprint(reply.message)
             )
             return SetupAgentTurnResult(
                 reply=reply,
@@ -1265,19 +1264,22 @@ class SetupChatAgent:
             else:
                 self.last_usage = _merged_usage(self.last_usage, composer_usage)
                 response_model = route.model
-        if not _reply_matches_language(reply.message_without_question, turn.active_language):
+        speaks_the_conversation = response_matches_language(
+            reply.message_without_question, language_of(turn.active_language)
+        )
+        if not speaks_the_conversation:
             reply = deterministic_reply(
                 deterministic_summary(outcome.result, language=turn.active_language),
                 selected_clarification_id=reply.selected_clarification_id,
             )
             response_model = "deterministic_language_fallback"
-        response_fingerprint = _response_fingerprint(reply.message_without_question)
+        fingerprint = response_fingerprint(reply.message_without_question)
         trace = _with(
             trace,
             response_model=response_model,
             response_latency_ms=(monotonic() - composed_started) * 1000,
             model_calls=self.model_call_count,
-            response_fingerprint=response_fingerprint,
+            response_fingerprint=fingerprint,
         )
         conversation = outcome.conversation
         # The composer may only ask a question the server put on the list. An id it
@@ -1296,7 +1298,7 @@ class SetupChatAgent:
             update={
                 "last_assistant_summary": final_message[:1000],
                 "active_language": turn.active_language,
-                "last_response_fingerprint": _response_fingerprint(final_message),
+                "last_response_fingerprint": response_fingerprint(final_message),
             }
         )
         return SetupAgentTurnResult(
@@ -1329,16 +1331,14 @@ class SetupChatAgent:
         """
 
         pending = dict(turn.conversation.pending_read_only_scan or {})
-        if pending and _is_confusion_signal(turn.message):
-            question = _localized(turn.active_language, "scan_window_question")
-            content = _localized(
-                turn.active_language,
-                "confusion_scan",
-                threshold=f"{float(pending.get('threshold_percent') or 0):g}%",
+        if pending and is_confusion_signal(turn.message):
+            question = localized("ask.scan_window_24h", language_of(turn.active_language))
+            content = localized("confusion.scan_retry", language_of(turn.active_language),
+                threshold=f"{float(str(pending.get('threshold_percent') or 0)):g}%",
                 direction=str(pending.get("movement_direction") or "up"),
                 question=question,
             )
-            fingerprint = _response_fingerprint(content)
+            fingerprint = response_fingerprint(content)
             conversation = turn.conversation.model_copy(
                 update={
                     "active_language": turn.active_language,
@@ -1373,8 +1373,8 @@ class SetupChatAgent:
         if scan is None and pending and _planner_answered_active_question(turn, envelope):
             window = _read_only_window_answer(turn.message)
             if window is None:
-                question = _localized(turn.active_language, "scan_window_question")
-                fingerprint = _response_fingerprint(question)
+                question = localized("ask.scan_window_24h", language_of(turn.active_language))
+                fingerprint = response_fingerprint(question)
                 conversation = turn.conversation.model_copy(
                     update={
                         "active_language": turn.active_language,
@@ -1406,7 +1406,7 @@ class SetupChatAgent:
                 movement_direction=cast(
                     Any, str(pending.get("movement_direction") or "up")
                 ),
-                threshold_percent=float(pending.get("threshold_percent") or 0),
+                threshold_percent=float(str(pending.get("threshold_percent") or 0)),
                 measurement_window=window,
             )
 
@@ -1454,7 +1454,7 @@ class SetupChatAgent:
                 usage=usage,
             )
         if turn.setup_mode != DraftMode.SCANNER:
-            request = {
+            request: dict[str, object] = {
                 "movement_direction": scan.movement_direction,
                 "threshold_percent": scan.threshold_percent,
                 "measurement_window": scan.measurement_window,
@@ -1467,8 +1467,8 @@ class SetupChatAgent:
                     turn.message,
                 )[:500],
             }
-            content = _localized(turn.active_language, "scan_mode_required")
-            fingerprint = _response_fingerprint(content)
+            content = localized("scan.mode_required", language_of(turn.active_language))
+            fingerprint = response_fingerprint(content)
             return SetupAgentTurnResult(
                 reply=deterministic_reply(content),
                 execution=None,
@@ -1506,8 +1506,8 @@ class SetupChatAgent:
         }
         if not _scan_universe_is_ready(turn.draft):
             request["measurement_window"] = scan.measurement_window
-            content = _localized(turn.active_language, "scan_scope_required")
-            fingerprint = _response_fingerprint(content)
+            content = localized("scan.scope_required", language_of(turn.active_language))
+            fingerprint = response_fingerprint(content)
             conversation = turn.conversation.model_copy(
                 update={
                     "active_language": turn.active_language,
@@ -1532,7 +1532,7 @@ class SetupChatAgent:
             )
 
         if scan.measurement_window is None:
-            question = _localized(turn.active_language, "scan_window_question")
+            question = localized("ask.scan_window_24h", language_of(turn.active_language))
             digest = hashlib.sha256(
                 f"{turn.source_turn_id}:read-only-window".encode()
             ).hexdigest()[:20]
@@ -1550,7 +1550,7 @@ class SetupChatAgent:
                 allowed_options=["24h"],
             )
             request["measurement_window"] = None
-            fingerprint = _response_fingerprint(question)
+            fingerprint = response_fingerprint(question)
             conversation = turn.conversation.model_copy(
                 update={
                     "active_language": turn.active_language,
@@ -1563,7 +1563,7 @@ class SetupChatAgent:
             )
             return SetupAgentTurnResult(
                 reply=deterministic_reply(
-                    _localized(turn.active_language, "scan_request_acknowledged"),
+                    localized("scan.acknowledged", language_of(turn.active_language)),
                     selected_clarification_id=clarification.question_id,
                 ),
                 execution=None,
@@ -1580,8 +1580,8 @@ class SetupChatAgent:
                 usage=usage,
             )
 
-        content = _localized(turn.active_language, "scan_running")
-        fingerprint = _response_fingerprint(content)
+        content = localized("scan.running", language_of(turn.active_language))
+        fingerprint = response_fingerprint(content)
         conversation = turn.conversation.model_copy(
             update={
                 "active_language": turn.active_language,
@@ -1618,9 +1618,9 @@ class SetupChatAgent:
         metadata = _supported_request_context(turn, request, envelope)
         if not _is_canonical_percentage_request(metadata):
             clarification = _clarification_for_supported_incomplete(turn, request, envelope)
-            intro = _localized(turn.active_language, "clarification_intro")
+            intro = localized("ask.intro", language_of(turn.active_language))
             final = f"{intro}\n\n{clarification.question}"
-            fingerprint = _response_fingerprint(final)
+            fingerprint = response_fingerprint(final)
             conversation = turn.conversation.model_copy(
                 update={
                     "active_language": turn.active_language,
@@ -1713,7 +1713,7 @@ class SetupChatAgent:
             trace=trace,
             usage=usage,
             clarification=clarification,
-            intro=_localized(turn.active_language, "clarification_intro"),
+            intro=localized("ask.intro", language_of(turn.active_language)),
             include_gates=False,
             pending_metadata=metadata,
         )
@@ -1729,13 +1729,11 @@ class SetupChatAgent:
         unresolved = _active_supported_unresolved(turn.draft, turn.conversation)
         if unresolved is None:
             return None
-        if _is_confusion_signal(turn.message):
-            content = _localized(
-                turn.active_language,
-                "confusion_question",
+        if is_confusion_signal(turn.message):
+            content = localized("confusion.unclear_retry", language_of(turn.active_language),
                 question=unresolved.question,
             )
-            fingerprint = _response_fingerprint(content)
+            fingerprint = response_fingerprint(content)
             conversation = turn.conversation.model_copy(
                 update={
                     "active_language": turn.active_language,
@@ -1767,12 +1765,10 @@ class SetupChatAgent:
         field_name = str(metadata.get("next_field") or "")
         value = _supported_answer_value(field_name, turn.message)
         if value is None:
-            content = _localized(
-                turn.active_language,
-                "clarification_invalid",
+            content = localized("ask.retry_invalid", language_of(turn.active_language),
                 question=unresolved.question,
             )
-            fingerprint = _response_fingerprint(content)
+            fingerprint = response_fingerprint(content)
             return SetupAgentTurnResult(
                 reply=deterministic_reply(content),
                 execution=None,
@@ -1795,7 +1791,9 @@ class SetupChatAgent:
 
         _apply_supported_answer(metadata, field_name, value)
         missing = [
-            item for item in list(metadata.get("missing_slots") or []) if item != field_name
+            item
+            for item in cast(list[str], metadata.get("missing_slots") or [])
+            if item != field_name
         ]
         metadata["missing_slots"] = missing
         answer = envelope.clarification_answers[0]
@@ -1808,7 +1806,9 @@ class SetupChatAgent:
             turn.message,
         )
         evidence_fragments = [
-            str(item) for item in metadata.get("evidence_fragments") or [] if str(item).strip()
+            str(item)
+            for item in cast(list[object], metadata.get("evidence_fragments") or [])
+            if str(item).strip()
         ]
         evidence_fragments.append(segment_text)
         metadata["evidence_fragments"] = evidence_fragments
@@ -1852,7 +1852,7 @@ class SetupChatAgent:
                 trace=trace,
                 usage=usage,
                 clarification=clarification,
-                intro=_localized(turn.active_language, "question_answered"),
+                intro=localized("status.question_answered", language_of(turn.active_language)),
                 include_gates=False,
                 pending_metadata=metadata,
             )
@@ -1861,7 +1861,10 @@ class SetupChatAgent:
             metadata,
             source_turn_id=turn.source_turn_id,
             source_fragment="\n".join(
-                str(item) for item in metadata.get("evidence_fragments") or [segment_text]
+                str(item)
+                for item in cast(
+                    list[object], metadata.get("evidence_fragments") or [segment_text]
+                )
             ),
         )
         add_operation = AuthorizedPatchOperation(
@@ -1890,7 +1893,7 @@ class SetupChatAgent:
             trace=trace,
             usage=usage,
             clarification=None,
-            intro=_localized(turn.active_language, "supported_rule_completed"),
+            intro=localized("status.rule_completed", language_of(turn.active_language)),
             include_gates=True,
             pending_metadata={},
         )
@@ -1964,7 +1967,7 @@ class SetupChatAgent:
         else:
             conversation = conversation.cleared_question()
         final = f"{intro}\n\n{selected.question}" if selected is not None else intro
-        fingerprint = _response_fingerprint(final)
+        fingerprint = response_fingerprint(final)
         conversation = conversation.model_copy(
             update={
                 "last_assistant_summary": final[:1000],
@@ -3726,215 +3729,6 @@ def _loop_aware_refusal(code: str, repeats: RepeatState, failure: _PlanFailure) 
     else:
         lines.append(base)
     return " ".join(lines)
-
-
-def _language_code(value: str | None) -> str:
-    code = (value or "en").strip().casefold().replace("_", "-")
-    return code.split("-", 1)[0] or "en"
-
-
-def _localized(language: str, key: str, **values: object) -> str:
-    code = _language_code(language)
-    catalog: dict[str, dict[str, str]] = {
-        "en": {
-            "clarification_intro": "Got it. I only need one choice to continue.",
-            "need_universe": "Should I use all screened coins or one specific coin or list?",
-            "need_timeframe": "Which candle period should I use: 1h, 4h, or 1d?",
-            "need_reference": "Measure the move from that candle's open or the previous candle's close?",
-            "need_comparator": (
-                "Should the alert trigger when the move reaches the value, or only after it passes it?"
-            ),
-            "need_threshold": "What percentage or numeric level should trigger it?",
-            "need_rule": "What exact market move or indicator should this rule measure?",
-            "nothing_changed": "Nothing changed in the draft.",
-            "question_answered": "That answered the open question.",
-            "draft_version": "The inactive draft is now version {version}.",
-            "unsupported": "I can't build that exact rule yet: {reason}",
-            "ready": "The inactive preview is ready to review and approve.",
-            "reapprove": "That edit created a new version, so it needs approval again.",
-            "no_action": "Nothing changed on this turn.",
-            "approval_intent": (
-                "Chat cannot approve or activate a setup. Review the inactive preview and use "
-                "Review and approve when it matches."
-            ),
-            "question_fallback": (
-                "I couldn't answer that safely from the current draft. Tell me the result you "
-                "want to scan for, and I’ll ask only for the missing detail."
-            ),
-            "empty_draft": "Tell me the market behaviour you want to scan or monitor.",
-            "draft_count": "The draft currently has {count} rule{suffix}. Tell me what to change.",
-            "confusion_question": "Sorry — my last reply was unclear. {question}",
-            "clarification_invalid": "I couldn't map that answer safely. {question}",
-            "supported_rule_completed": "Done — the inactive rule is complete and ready for review.",
-            "scan_request_acknowledged": "I can run that as a read-only Scanner check.",
-            "scan_window_question": "Should I use the provider's rolling 24-hour percentage change?",
-            "scan_scope_required": "First choose the screened scope: all eligible coins, a Favorites list, or specific eligible coins.",
-            "scan_mode_required": "Choose Scanner first. I’ll keep this current-market request and continue when the screened scope is ready.",
-            "scan_running": "Running the governed read-only Scanner now.",
-            "confusion_scan": "Sorry — I didn't answer the scan clearly. You want screened coins {direction} at least {threshold}. {question}",
-        },
-        "ar": {
-            "clarification_intro": "تمام. محتاج اختيار واحد فقط علشان أكمل.",
-            "need_universe": "أستخدم كل العملات المفحوصة شرعيًا ولا عملة أو قائمة محددة؟",
-            "need_timeframe": "أستخدم شمعة ساعة، 4 ساعات، ولا يوم؟",
-            "need_reference": "أقيس الحركة من افتتاح الشمعة ولا من إغلاق الشمعة السابقة؟",
-            "need_comparator": "التنبيه يشتغل عند الوصول للقيمة ولا بعد تجاوزها فقط؟",
-            "need_threshold": "إيه النسبة أو المستوى الرقمي المطلوب للتنبيه؟",
-            "need_rule": "إيه حركة السوق أو المؤشر المطلوب قياسه بالضبط؟",
-            "nothing_changed": "لم يتغير شيء في المسودة.",
-            "question_answered": "كده تمت الإجابة عن السؤال المفتوح.",
-            "draft_version": "المسودة غير المفعلة أصبحت الإصدار {version}.",
-            "unsupported": "لا أقدر أبني القاعدة دي بدقة حاليًا: {reason}",
-            "ready": "المعاينة غير المفعلة جاهزة للمراجعة والموافقة.",
-            "reapprove": "التعديل أنشأ إصدارًا جديدًا ويحتاج موافقة مرة أخرى.",
-            "no_action": "لم يتغير شيء في هذه الرسالة.",
-            "approval_intent": "لا يمكن الموافقة أو التفعيل من نص الشات. راجع المعاينة ثم استخدم زر المراجعة والموافقة.",
-            "question_fallback": "لم أقدر أجاوب بأمان من المسودة الحالية. اكتب نتيجة الفحص المطلوبة وسأسأل عن التفصيلة الناقصة فقط.",
-            "empty_draft": "اكتب سلوك السوق الذي تريد فحصه أو مراقبته.",
-            "draft_count": "المسودة تحتوي حاليًا على {count} قاعدة. اكتب التعديل المطلوب.",
-            "confusion_question": "آسف — ردي السابق لم يكن واضحًا. {question}",
-            "clarification_invalid": "لم أقدر أربط الإجابة بأمان. {question}",
-            "supported_rule_completed": "تم — القاعدة غير المفعلة اكتملت وأصبحت جاهزة للمراجعة.",
-            "scan_request_acknowledged": "أقدر أنفذ هذا كفحص Scanner للقراءة فقط.",
-            "scan_window_question": "أستخدم نسبة التغير المتحركة خلال آخر 24 ساعة من مزود البيانات؟",
-            "scan_scope_required": "اختر أولًا نطاق الفحص: كل العملات المؤهلة، قائمة المفضلة، أو عملات مؤهلة محددة.",
-            "scan_mode_required": "اختر Scanner أولًا. سأحتفظ بطلب السوق الحالي وأكمل بمجرد تجهيز نطاق الفحص.",
-            "scan_running": "أشغّل الآن فحص Scanner المقيّد للقراءة فقط.",
-            "confusion_scan": "آسف — لم أوضح إجابة الفحص. أنت تريد العملات المفحوصة التي تحركت {direction} بنسبة {threshold} على الأقل. {question}",
-        },
-        "fr": {
-            "clarification_intro": "D’accord. Il me faut un seul choix pour continuer.",
-            "need_universe": "Dois-je utiliser toutes les cryptos filtrées ou une crypto/liste précise ?",
-            "need_timeframe": "Quelle période de bougie dois-je utiliser : 1 h, 4 h ou 1 j ?",
-            "need_reference": "Mesurer le mouvement depuis l’ouverture de la bougie ou la clôture de la bougie précédente ?",
-            "need_comparator": "L’alerte doit-elle se déclencher dès que la valeur est atteinte ou seulement après son dépassement ?",
-            "need_threshold": "Quel pourcentage ou niveau numérique doit déclencher l’alerte ?",
-            "need_rule": "Quel mouvement de marché ou indicateur cette règle doit-elle mesurer ?",
-            "nothing_changed": "Aucun élément du brouillon n’a changé.",
-            "question_answered": "La question ouverte a été traitée.",
-            "draft_version": "Le brouillon inactif est maintenant à la version {version}.",
-            "unsupported": "Je ne peux pas encore construire exactement cette règle : {reason}",
-            "ready": "L’aperçu inactif est prêt à être vérifié et approuvé.",
-            "reapprove": "Cette modification a créé une nouvelle version qui doit être approuvée à nouveau.",
-            "no_action": "Aucun changement pendant ce tour.",
-            "approval_intent": "Le chat ne peut ni approuver ni activer un setup. Vérifiez l’aperçu inactif puis utilisez Réviser et approuver.",
-            "question_fallback": "Je ne peux pas répondre en toute sécurité à partir du brouillon actuel. Décrivez le résultat à scanner et je demanderai uniquement le détail manquant.",
-            "empty_draft": "Décrivez le comportement du marché à scanner ou à surveiller.",
-            "draft_count": "Le brouillon contient actuellement {count} règle{suffix}. Indiquez la modification souhaitée.",
-            "confusion_question": "Désolé — ma réponse précédente n’était pas claire. {question}",
-            "clarification_invalid": "Je n’ai pas pu associer cette réponse en toute sécurité. {question}",
-            "supported_rule_completed": "Terminé — la règle inactive est complète et prête à être vérifiée.",
-            "scan_request_acknowledged": "Je peux exécuter cette demande comme un scan en lecture seule.",
-            "scan_window_question": "Dois-je utiliser la variation glissante sur 24 heures du fournisseur ?",
-            "scan_scope_required": "Choisissez d’abord la portée filtrée : toutes les cryptos éligibles, une liste de favoris ou des cryptos précises.",
-            "scan_mode_required": "Choisissez d’abord Scanner. Je conserve cette demande et je continuerai dès que la portée filtrée sera prête.",
-            "scan_running": "Exécution du Scanner gouverné en lecture seule.",
-            "confusion_scan": "Désolé — ma réponse au scan n’était pas claire. Vous cherchez les cryptos filtrées {direction} d’au moins {threshold}. {question}",
-        },
-        "es": {
-            "clarification_intro": "Entendido. Solo necesito una elección para continuar.",
-            "need_universe": "¿Debo usar todas las monedas filtradas o una moneda/lista específica?",
-            "need_timeframe": "¿Qué periodo de vela uso: 1 h, 4 h o 1 día?",
-            "need_reference": "¿Mido el movimiento desde la apertura de la vela o desde el cierre de la vela anterior?",
-            "need_comparator": "¿La alerta se activa al alcanzar el valor o solo después de superarlo?",
-            "need_threshold": "¿Qué porcentaje o nivel numérico debe activar la alerta?",
-            "need_rule": "¿Qué movimiento de mercado o indicador debe medir esta regla?",
-            "nothing_changed": "No cambió nada en el borrador.",
-            "question_answered": "La pregunta pendiente quedó respondida.",
-            "draft_version": "El borrador inactivo ahora es la versión {version}.",
-            "unsupported": "Todavía no puedo construir esa regla exactamente: {reason}",
-            "ready": "La vista previa inactiva está lista para revisar y aprobar.",
-            "reapprove": "Ese cambio creó una versión nueva que necesita aprobación otra vez.",
-            "no_action": "No cambió nada en este turno.",
-            "approval_intent": "El chat no puede aprobar ni activar una configuración. Revisa la vista previa inactiva y usa Revisar y aprobar.",
-            "question_fallback": "No pude responder con seguridad desde el borrador actual. Describe el resultado que quieres escanear y preguntaré solo el dato que falta.",
-            "empty_draft": "Describe el comportamiento del mercado que quieres escanear o monitorizar.",
-            "draft_count": "El borrador tiene actualmente {count} regla{suffix}. Indica qué quieres cambiar.",
-            "confusion_question": "Perdón, mi respuesta anterior no fue clara. {question}",
-            "clarification_invalid": "No pude asociar esa respuesta de forma segura. {question}",
-            "supported_rule_completed": "Listo: la regla inactiva está completa y lista para revisión.",
-            "scan_request_acknowledged": "Puedo ejecutar esto como un escaneo de solo lectura.",
-            "scan_window_question": "¿Uso el cambio porcentual móvil de 24 horas del proveedor?",
-            "scan_scope_required": "Primero elige el alcance filtrado: todas las monedas elegibles, una lista de favoritos o monedas específicas.",
-            "scan_mode_required": "Primero elige Scanner. Conservaré esta solicitud y continuaré cuando el alcance filtrado esté listo.",
-            "scan_running": "Ejecutando ahora el Scanner gobernado de solo lectura.",
-            "confusion_scan": "Perdón, no respondí claramente al escaneo. Buscas monedas filtradas que {direction} al menos {threshold}. {question}",
-        },
-        "ru": {
-            "clarification_intro": "Понял. Нужен только один выбор, чтобы продолжить.",
-            "need_universe": "Использовать все проверенные монеты или одну монету/список?",
-            "need_timeframe": "Какой период свечи использовать: 1 час, 4 часа или 1 день?",
-            "need_reference": "Измерять движение от открытия свечи или от закрытия предыдущей свечи?",
-            "need_comparator": "Сигнал должен сработать при достижении значения или только после его превышения?",
-            "need_threshold": "Какой процент или числовой уровень должен запускать сигнал?",
-            "need_rule": "Какое движение рынка или индикатор должна измерять эта логика?",
-            "nothing_changed": "Черновик не изменился.",
-            "question_answered": "Открытый вопрос закрыт.",
-            "draft_version": "Неактивный черновик теперь версии {version}.",
-            "unsupported": "Пока невозможно точно построить это правило: {reason}",
-            "ready": "Неактивный предпросмотр готов к проверке и одобрению.",
-            "reapprove": "Изменение создало новую версию, которую нужно одобрить снова.",
-            "no_action": "В этом сообщении ничего не изменилось.",
-            "approval_intent": "Чат не может одобрять или активировать настройки. Проверьте предпросмотр и используйте кнопку проверки и одобрения.",
-            "question_fallback": "Я не могу безопасно ответить по текущему черновику. Опишите результат сканирования, и я спрошу только недостающую деталь.",
-            "empty_draft": "Опишите поведение рынка, которое нужно сканировать или отслеживать.",
-            "draft_count": "Сейчас в черновике {count} правил. Укажите, что изменить.",
-            "confusion_question": "Извините, предыдущий ответ был неясным. {question}",
-            "clarification_invalid": "Я не смог безопасно сопоставить этот ответ. {question}",
-            "supported_rule_completed": "Готово — неактивное правило завершено и готово к проверке.",
-            "scan_request_acknowledged": "Я могу выполнить это как Scanner только для чтения.",
-            "scan_window_question": "Использовать скользящее 24-часовое процентное изменение провайдера?",
-            "scan_scope_required": "Сначала выберите проверяемый охват: все подходящие монеты, список избранного или конкретные монеты.",
-            "scan_mode_required": "Сначала выберите Scanner. Я сохраню запрос и продолжу, когда проверяемый охват будет готов.",
-            "scan_running": "Запускаю управляемый Scanner только для чтения.",
-            "confusion_scan": "Извините, ответ на запрос сканирования был неясным. Нужны проверенные монеты, которые {direction} минимум на {threshold}. {question}",
-        },
-    }
-    template = catalog.get(code, catalog["en"]).get(key) or catalog["en"].get(key) or key
-    return template.format(**values)
-
-
-def _response_fingerprint(message: str) -> str:
-    normalized = " ".join((message or "").casefold().split())
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
-
-
-def _reply_matches_language(message: str, language: str) -> bool:
-    """Conservative final guard against a silent language switch.
-
-    The proposition validator is deliberately language-independent. This separate guard
-    checks presentation only and falls back to server-authored wording when the generated
-    prose clearly belongs to a different language.
-    """
-
-    text = " ".join((message or "").casefold().split())
-    if not text:
-        return False
-    code = _language_code(language)
-    has_arabic = bool(re.search(r"[\u0600-\u06ff]", text))
-    has_cyrillic = bool(re.search(r"[\u0400-\u04ff]", text))
-    if code == "ar":
-        return has_arabic
-    if code == "ru":
-        return has_cyrillic
-    if has_arabic or has_cyrillic:
-        return False
-    words = set(re.findall(r"[a-zà-ÿ']+", text))
-    french = {"bonjour", "vous", "votre", "avec", "pour", "choisir", "dois", "aucun", "règle", "alerte"}
-    spanish = {"hola", "usted", "tu", "para", "con", "debe", "elegir", "regla", "alerta", "monedas"}
-    if code == "en":
-        return len(words & french) < 2 and len(words & spanish) < 2
-    if code == "fr":
-        french_hits = words & french
-        spanish_hits = words & spanish
-        return bool(french_hits) and len(french_hits) > len(spanish_hits)
-    if code == "es":
-        spanish_hits = words & spanish
-        french_hits = words & french
-        return bool(spanish_hits) and len(spanish_hits) > len(french_hits)
-    return False
-
-
 _SUPPORTED_REQUEST_SCHEMA_KEY = "x-hilal-supported-request"
 
 
@@ -3951,36 +3745,6 @@ def _planner_answered_active_question(
     """
 
     return bool(turn.conversation.active_question and envelope.clarification_answers)
-
-
-def _is_confusion_signal(message: str) -> bool:
-    text = " ".join((message or "").casefold().split())
-    return bool(
-        re.fullmatch(r"[?؟!\s]{1,8}", text)
-        or text
-        in {
-            "what",
-            "what?",
-            "i don't understand",
-            "i dont understand",
-            "that didn't answer me",
-            "that did not answer me",
-            "مش فاهم",
-            "مش فاهمة",
-            "ايه؟",
-            "ماذا؟",
-            "quoi ?",
-            "quoi?",
-            "je ne comprends pas",
-            "qué?",
-            "que?",
-            "no entiendo",
-            "что?",
-            "не понимаю",
-        }
-    )
-
-
 def _read_only_window_answer(message: str) -> Literal["24h"] | None:
     text = " ".join((message or "").casefold().split())
     if text in {
@@ -4021,9 +3785,7 @@ def _read_only_scan_values_are_grounded(
         return False
     if not grounds_number(source_text, float(scan.threshold_percent), unit="percent"):
         return False
-    if scan.measurement_window is not None and not _read_only_window_is_explicit(source_text):
-        return False
-    return True
+    return scan.measurement_window is None or _read_only_window_is_explicit(source_text)
 
 
 def _scan_universe_is_ready(draft: StrategyDraftV2) -> bool:
@@ -4045,23 +3807,17 @@ def _scan_universe_is_ready(draft: StrategyDraftV2) -> bool:
 
 
 def _supported_direction(text: str) -> str | None:
+    """Up or down, decided only by the direction reader.
+
+    This used to keep a second word list beside ``movement_direction`` for Arabic,
+    French, Spanish and Russian. Two lists is how the two disagreed: the reader knew
+    ``ارتفعت`` and this one knew ``ترتفع``, so the same sentence read as a rise in one
+    place and as no direction in the other. Those words now live in the reader and
+    every caller gets all of them.
+    """
+
     direction = movement_direction(text)
-    if direction in {"up", "down"}:
-        return direction
-    lowered = " ".join((text or "").casefold().split())
-    up_markers = (
-        "ترتفع", "ارتفعت", "صعود", "hausse", "augmente", "monte",
-        "suba", "sube", "aumente", "вырос", "растет", "повыс",
-    )
-    down_markers = (
-        "تنخفض", "انخفضت", "هبوط", "baisse", "diminue", "baja",
-        "cae", "disminuya", "сниз", "падает",
-    )
-    if any(item in lowered for item in up_markers):
-        return "up"
-    if any(item in lowered for item in down_markers):
-        return "down"
-    return None
+    return direction if direction in {"up", "down"} else None
 
 
 def _is_canonical_percentage_request(metadata: dict[str, object]) -> bool:
@@ -4143,29 +3899,18 @@ def _next_supported_field(missing: list[str]) -> str:
         "universe",
     )
     return next((item for item in priority if item in missing), missing[0])
-
-
-def _supported_options(language: str, field_name: str) -> list[str]:
-    code = _language_code(language)
-    values = {
-        "trigger_timeframe": ["1h", "4h", "1d"],
-        "reference_point": {
-            "en": ["Candle open", "Previous candle close"],
-            "ar": ["افتتاح الشمعة", "إغلاق الشمعة السابقة"],
-            "fr": ["Ouverture de la bougie", "Clôture de la bougie précédente"],
-            "es": ["Apertura de la vela", "Cierre de la vela anterior"],
-            "ru": ["Открытие свечи", "Закрытие предыдущей свечи"],
-        }.get(code, ["Candle open", "Previous candle close"]),
-        "comparator": {
-            "en": ["At the threshold or beyond", "Only beyond the threshold"],
-            "ar": ["عند الحد أو أكثر", "فقط بعد تجاوز الحد"],
-            "fr": ["Au seuil ou au-delà", "Seulement au-delà du seuil"],
-            "es": ["En el umbral o más", "Solo por encima del umbral"],
-            "ru": ["На пороге или выше", "Только выше порога"],
-        }.get(code, ["At the threshold or beyond", "Only beyond the threshold"]),
-    }
-    selected = values.get(field_name, [])
-    return list(selected) if isinstance(selected, list) else []
+#: Which question a missing field asks. One map, read by both clarification builders:
+#: they held separate copies, so a wording fixed in one still asked the old question
+#: from the other.
+_CLARIFICATION_KEY_BY_FIELD: Final[dict[str, str]] = {
+    "trigger_timeframe": "ask.candle_period",
+    "reference_point": "ask.move_reference",
+    "comparator": "ask.comparator",
+    "threshold": "ask.threshold",
+    "universe": "ask.symbol_scope",
+    "formula": "ask.rule_mechanic",
+    "capability_parameter": "ask.rule_mechanic",
+}
 
 
 def _supported_clarification(
@@ -4174,16 +3919,11 @@ def _supported_clarification(
     field_name: str,
     source_seed: str,
 ) -> ClarificationContract:
-    key_by_field = {
-        "trigger_timeframe": "need_timeframe",
-        "reference_point": "need_reference",
-        "comparator": "need_comparator",
-        "threshold": "need_threshold",
-        "universe": "need_universe",
-        "capability_parameter": "need_rule",
-    }
-    question = _localized(turn.active_language, key_by_field.get(field_name, "need_rule"))
-    options = _supported_options(turn.active_language, field_name)
+    question = localized(
+        _CLARIFICATION_KEY_BY_FIELD.get(field_name, "ask.rule_mechanic"),
+        language_of(turn.active_language),
+    )
+    options = localized_options(field_name, language_of(turn.active_language))
     schema_type = "number" if field_name == "threshold" else "string"
     expected: dict[str, object] = {"type": schema_type}
     if options:
@@ -4286,12 +4026,15 @@ def _supported_answer_value(field_name: str, message: str) -> object | None:
             return Comparator.GREATER_THAN.value
         return None
     if field_name == "threshold":
-        values = re.findall(
+        # Exactly one percentage, or nothing. Two numbers in one answer means the
+        # trader said something this reader cannot resolve, and picking the first is
+        # how a stated value gets replaced by an invented one.
+        percent_values = re.findall(
             r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)",
             text,
             re.I,
         )
-        return abs(float(values[0])) if len(values) == 1 else None
+        return abs(float(percent_values[0])) if len(percent_values) == 1 else None
     return text or None
 
 
@@ -4326,9 +4069,11 @@ def _condition_from_supported_metadata(
     formula = FormulaKind(str(metadata["formula"]))
     direction = MovementDirection(str(metadata["movement_direction"]))
     comparator = Comparator(str(metadata["comparator"]))
-    threshold = float(metadata["threshold"])
+    threshold = float(str(metadata["threshold"]))
     timeframe = str(metadata["trigger_timeframe"])
-    parameters = {
+    # The capability-parameter type has one owner. Writing the union out here is how the
+    # two copies in this repo already drifted apart once.
+    parameters: dict[str, CapabilityParameterValue] = {
         "formula": (
             "open_to_close"
             if formula == FormulaKind.OPEN_TO_CLOSE_PERCENTAGE
@@ -4343,7 +4088,7 @@ def _condition_from_supported_metadata(
         "closed_only": True,
     }
     return ConditionNodeV2(
-        node_type="condition",
+        node_type=cast(Any, "condition"),
         source_turn_id=source_turn_id,
         source_fragment=source_fragment,
         movement_direction=direction,
@@ -4361,7 +4106,9 @@ def _condition_from_supported_metadata(
         threshold=threshold,
         unit="percent",
         trigger_timeframe=cast(Any, timeframe),
-        condition_symbols=[str(item) for item in metadata.get("symbols") or []],
+        condition_symbols=[
+            str(item) for item in cast(list[object], metadata.get("symbols") or [])
+        ],
     )
 
 
@@ -4471,10 +4218,15 @@ def _supported_request_context(
     explicit_trigger = [
         item for item in timeframes if timeframe_role_is_explicit(source, item, "trigger")
     ]
+    other_roles: tuple[Literal["context", "confirmation", "reference"], ...] = (
+        "context",
+        "confirmation",
+        "reference",
+    )
     explicit_other_role = any(
         timeframe_role_is_explicit(source, item, role)
         for item in timeframes
-        for role in ("context", "confirmation", "reference")
+        for role in other_roles
     )
     trigger_timeframe = (
         explicit_trigger[0]
@@ -4518,25 +4270,30 @@ def _clarification_for_supported_incomplete(
     # Ask for the human decision that materially changes its meaning before exposing
     # implementation terms such as formula keys.
     source = str(pending.get("source_text") or "")
+    # The direction reader owns the up/down vocabulary. A hand-written list here knew
+    # only fifteen English words, so the same sentence in Arabic, French or Spanish was
+    # not recognised as a percentage move and got asked a different question.
     percent_movement = bool(
         re.search(r"%|\bpercent(?:age)?\b|\bpct\b", source, re.I)
-        and re.search(r"\b(?:rise|rises|rose|up|increase|increases|gain|gains|fall|falls|down|drop|drops|decrease|decreases)\b", source, re.I)
+        and movement_direction(source) in {"up", "down"}
     )
-    priority = ["universe", "trigger_timeframe", "reference_point", "comparator", "threshold", "formula", "capability_parameter"]
+    priority = [
+        "universe",
+        "trigger_timeframe",
+        "reference_point",
+        "comparator",
+        "threshold",
+        "formula",
+        "capability_parameter",
+    ]
     if percent_movement and "trigger_timeframe" in fields:
         selected = "trigger_timeframe"
     else:
         selected = next((item for item in priority if item in fields), "formula")
-    key_by_field = {
-        "universe": "need_universe",
-        "trigger_timeframe": "need_timeframe",
-        "reference_point": "need_reference",
-        "formula": "need_rule",
-        "comparator": "need_comparator",
-        "threshold": "need_threshold",
-        "capability_parameter": "need_rule",
-    }
-    question = _localized(turn.active_language, key_by_field[selected])
+    question = localized(
+        _CLARIFICATION_KEY_BY_FIELD.get(selected, "ask.rule_mechanic"),
+        language_of(turn.active_language),
+    )
     options: list[str] = []
     expected: dict[str, object] = {"type": "string"}
     target_type: ClarificationTargetType = "condition_creation"
@@ -4549,7 +4306,7 @@ def _clarification_for_supported_incomplete(
         options = ["1h", "4h", "1d"]
         expected = {"type": "string", "enum": options}
     elif selected == "reference_point":
-        options = _supported_options(turn.active_language, "reference_point")
+        options = localized_options("reference_point", language_of(turn.active_language))
         expected = {"type": "string", "enum": options}
     elif selected == "comparator":
         options = ["reaches", "passes"]
@@ -4613,11 +4370,11 @@ def _clarification_for_failure(
     else:
         field = path.removeprefix("condition.") or "rule"
         question = {
-            "formula_key": _localized(turn.active_language, "need_rule"),
-            "comparator": _localized(turn.active_language, "need_comparator"),
-            "threshold": _localized(turn.active_language, "need_threshold"),
-            "trigger_timeframe": _localized(turn.active_language, "need_timeframe"),
-        }.get(field, _localized(turn.active_language, "need_rule"))
+            "formula_key": localized("ask.rule_mechanic", language_of(turn.active_language)),
+            "comparator": localized("ask.comparator", language_of(turn.active_language)),
+            "threshold": localized("ask.threshold", language_of(turn.active_language)),
+            "trigger_timeframe": localized("ask.candle_period", language_of(turn.active_language)),
+        }.get(field, localized("ask.rule_mechanic", language_of(turn.active_language)))
         reason = "That value is required to compile the rule without guessing."
         target_type = "condition_creation"
         target_field = None
@@ -4674,8 +4431,7 @@ def _requires_contextual_composer(
 def deterministic_summary(
     result: SetupTurnExecutionResult,
     *,
-<<<<<<< HEAD
-    language: ConversationLanguage = ConversationLanguage.ENGLISH,
+    language: ConversationLanguage | str = ConversationLanguage.ENGLISH,
 ) -> str:
     """A factual reply built only from what the server did.
 
@@ -4687,22 +4443,22 @@ def deterministic_summary(
     something had already gone wrong. And every sentence carries the proposition it
     asserts, so the same fact rendered by another part of the pipeline collapses into
     one instead of stacking up.
-    """
-=======
-    language: str = "en",
-) -> str:
-    """A concise factual reply built only from authoritative execution state."""
->>>>>>> 463b04abd9fe695d0aabf281fb82e560176cf563
 
-    parts = list(deterministic_summary_parts(result, language=language))
+    ``language`` accepts a raw code as well as the enum. Callers hold the conversation
+    language as a plain string on the turn, and a summary is the last thing that should
+    fail because a caller passed ``"ar"`` instead of the enum member for it.
+    """
+
+    tongue = ConversationLanguage.parse(str(language)) or ConversationLanguage.ENGLISH
+    parts = list(deterministic_summary_parts(result, language=tongue))
     reconciled = reconcile_reply(parts)
-    return reconciled.message or localized("status.no_change", language)
+    return reconciled.message or localized("status.no_change", tongue)
 
 
 def deterministic_summary_parts(
     result: SetupTurnExecutionResult,
     *,
-    language: ConversationLanguage = ConversationLanguage.ENGLISH,
+    language: ConversationLanguage | str = ConversationLanguage.ENGLISH,
 ) -> list[RenderedPart]:
     """The server's own sentences about this turn, each tagged with what it asserts.
 
@@ -4713,9 +4469,9 @@ def deterministic_summary_parts(
     authoritative wording survives.
     """
 
+    tongue = ConversationLanguage.parse(str(language)) or ConversationLanguage.ENGLISH
     parts: list[RenderedPart] = []
     if result.applied_instructions:
-<<<<<<< HEAD
         for item in result.applied_instructions[:6]:
             parts.append(
                 RenderedPart(
@@ -4731,7 +4487,7 @@ def deterministic_summary_parts(
     elif result.status == "no_change":
         parts.append(
             RenderedPart(
-                text=localized("status.no_change", language),
+                text=localized("status.no_change", tongue),
                 source=RenderSource.DETERMINISTIC_SUMMARY,
                 proposition=Proposition("turn", "no_change"),
             )
@@ -4749,7 +4505,9 @@ def deterministic_summary_parts(
         # version exists, because approval is bound to it.
         parts.append(
             RenderedPart(
-                text=f"The draft is now version {result.current_version}.",
+                text=localized(
+                    "status.draft_version", tongue, version=result.current_version
+                ),
                 source=RenderSource.DETERMINISTIC_SUMMARY,
                 proposition=Proposition(
                     "draft", "version", str(result.current_version)
@@ -4762,7 +4520,7 @@ def deterministic_summary_parts(
             RenderedPart(
                 # One plain sentence. The internal contract text names schema fields a
                 # beginner has never heard of, so it goes to the operator trace only.
-                text=localized("refuse.unsupported", language),
+                text=localized("refuse.unsupported", tongue),
                 source=RenderSource.DETERMINISTIC_SUMMARY,
                 proposition=Proposition(
                     subject="requirement",
@@ -4783,42 +4541,22 @@ def deterministic_summary_parts(
     if result.approval_eligible:
         parts.append(
             RenderedPart(
-                text=localized("status.preview_ready", language),
+                text=localized("status.preview_ready", tongue),
                 source=RenderSource.DETERMINISTIC_SUMMARY,
                 proposition=Proposition("draft", "approval_eligible", "true"),
             )
         )
-    return parts
-=======
-        lines.extend(item.summary for item in result.applied_instructions[:4])
-    elif result.status == "no_change":
-        lines.append(_localized(language, "nothing_changed"))
-    if result.answered_questions:
-        lines.append(_localized(language, "question_answered"))
-    if result.strategy_mutated:
-        lines.append(_localized(language, "draft_version", version=result.current_version))
-    # Genuinely unsupported mechanics are shown once. Supported-but-incomplete requests
-    # are intercepted before they can enter this collection.
-    if result.unsupported_requirements:
-        reason = str(result.unsupported_requirements[0].get("missing_contract") or "").strip()
-        if reason:
-            lines.append(_localized(language, "unsupported", reason=reason))
-    for error in result.safe_errors[:1]:
-        if error and not any(" ".join(error.casefold().split()) == " ".join(item.casefold().split()) for item in lines):
-            lines.append(error)
-    if result.approval_eligible:
-        lines.append(_localized(language, "ready"))
     elif result.approval_status == "invalidated_by_edit":
-        lines.append(_localized(language, "reapprove"))
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for line in lines:
-        normalized = " ".join(line.casefold().split())
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            deduped.append(line.strip())
-    return "\n".join(deduped[:4]) or _localized(language, "no_action")
->>>>>>> 463b04abd9fe695d0aabf281fb82e560176cf563
+        # An edit after approval is its own fact, not a version fact. The trader has to
+        # know the old approval no longer covers what the draft now says.
+        parts.append(
+            RenderedPart(
+                text=localized("status.reapprove", tongue),
+                source=RenderSource.DETERMINISTIC_SUMMARY,
+                proposition=Proposition("draft", "approval_status", "invalidated_by_edit"),
+            )
+        )
+    return parts
 
 
 def _deterministic_conversation_reply(
@@ -4831,15 +4569,13 @@ def _deterministic_conversation_reply(
 
     kinds = {item.segment_kind for item in envelope.segments}
     if SegmentKind.APPROVAL_INTENT in kinds:
-        return _localized(language, "approval_intent")
+        return localized("status.chat_cannot_approve", language_of(language))
     if envelope.questions_to_answer:
-        return _localized(language, "question_fallback")
+        return localized("status.question_fallback", language_of(language))
     count = _condition_count(draft)
     if count == 0:
-        return _localized(language, "empty_draft")
-    return _localized(
-        language,
-        "draft_count",
+        return localized("status.nothing_set_up", language_of(language))
+    return localized("status.draft_count", language_of(language),
         count=count,
         suffix="s" if count != 1 else "",
     )
@@ -5655,7 +5391,9 @@ def compose_final_reply(
     parts.extend(item.text for item in accepted)
 
     accepted_open_items = {
-        item.subject_id for item in accepted if str(item.subject_id).startswith(("unsupported:", "unresolved:"))
+        item.subject_id
+        for item in accepted
+        if str(item.subject_id).startswith(("unsupported:", "unresolved:"))
     }
     # A refused duplicate or malformed claim is diagnostic only.  Falling back merely
     # because *one* claim was refused can restate an already accepted proposition in
@@ -5666,7 +5404,10 @@ def compose_final_reply(
             # Do not render an unsupported/unresolved fact a second time when a validated
             # claim already represented that authoritative evidence item.
             lowered = " ".join(line.casefold().split())
-            if accepted_open_items and ("not expressible exactly" in lowered or "could not express" in lowered):
+            says_inexpressible = (
+                "not expressible exactly" in lowered or "could not express" in lowered
+            )
+            if accepted_open_items and says_inexpressible:
                 continue
             parts.append(line)
 
@@ -5684,7 +5425,7 @@ def compose_final_reply(
         factual_claims=[
             FactualClaim(
                 claim_id=item.claim_id,
-                claim_type=item.claim_type,  # type: ignore[arg-type]
+                claim_type=item.claim_type,
                 subject_id=item.subject_id,
                 predicate=item.predicate,
                 asserted_value=item.asserted_value,

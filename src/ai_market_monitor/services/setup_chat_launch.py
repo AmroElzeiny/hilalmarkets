@@ -43,6 +43,14 @@ from ai_market_monitor.db.models.enums import (
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
 )
+from ai_market_monitor.engine.conversation_language import (
+    governed_scan_error,
+    language_of,
+    localized,
+    resolve_conversation_language,
+    scanner_labels,
+    scope_labels,
+)
 from ai_market_monitor.engine.planner_references import (
     MethodologyReference,
     PlannerReferenceContext,
@@ -100,11 +108,11 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     UnresolvedFieldV2,
 )
-from ai_market_monitor.services.on_demand_scans import OnDemandScanError
 from ai_market_monitor.services.market_preview import (
     assess_candle_data_quality,
     timeframe_duration,
 )
+from ai_market_monitor.services.on_demand_scans import OnDemandScanError
 from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentError,
     SetupAgentTurnInput,
@@ -1124,11 +1132,11 @@ return tostring(next_value)
         if option_key == "setup_mode" and self.settings.sharia_screening_enforced:
             if draft.sharia_policy.methodology_id is None:
                 return (
-                    _server_option_text(language, "methodology_unavailable"),
+                    localized("scope.methodology_unavailable", language_of(language)),
                     "screening_unavailable",
                     {"can_approve": False, "can_scan": False},
                 )
-            labels = _server_option_labels(language)
+            labels = scope_labels(language_of(language))
             options = [
                 {
                     "key": "screened_universe_mode",
@@ -1147,7 +1155,7 @@ return tostring(next_value)
                 },
             ]
             return (
-                _server_option_text(language, "universe_question"),
+                localized("ask.universe", language_of(language)),
                 "screened_universe_required",
                 {"clarifications": [{"key": "screened_universe_mode", "options": options}]},
             )
@@ -1168,12 +1176,12 @@ return tostring(next_value)
             )
             if not rows:
                 return (
-                    _server_option_text(language, "watchlist_missing"),
+                    localized("scope.watchlist_missing", language_of(language)),
                     "screened_watchlist_missing",
                     {"can_approve": False, "can_scan": False},
                 )
             return (
-                _server_option_text(language, "watchlist_question"),
+                localized("ask.watchlist", language_of(language)),
                 "screened_watchlist_required",
                 {
                     "clarifications": [
@@ -1197,7 +1205,7 @@ return tostring(next_value)
             and not draft.sharia_policy.explicit_symbols
         ):
             return (
-                _server_option_text(language, "assets_question"),
+                localized("ask.explicit_assets", language_of(language)),
                 "screened_assets_required",
                 {"awaiting_answer": True, "can_approve": False},
             )
@@ -1216,7 +1224,7 @@ return tostring(next_value)
             and _scan_draft_scope_ready(draft)
             and not pending_scan.get("measurement_window")
         ):
-            question = _server_option_text(language, "scan_window_question")
+            question = localized("ask.scan_window_24h", language_of(language))
             digest = hashlib.sha256(
                 f"{chat.id}:pending-scan-window".encode()
             ).hexdigest()[:20]
@@ -1234,7 +1242,7 @@ return tostring(next_value)
                 allowed_options=["24h"],
             )
             return (
-                _server_option_text(language, "scope_selected"),
+                localized("scope.selected", language_of(language)),
                 "scanner_window_required",
                 {
                     "clarifications": [clarification.model_dump(mode="json")],
@@ -2089,7 +2097,7 @@ return tostring(next_value)
 
         request = dict(request)
         direction = str(request.get("movement_direction") or "up")
-        threshold = float(request.get("threshold_percent") or 0)
+        threshold = float(str(request.get("threshold_percent") or 0))
         window = str(request.get("measurement_window") or "")
         language = conversation.active_language
         try:
@@ -2121,7 +2129,7 @@ return tostring(next_value)
                     "measurement_window": window,
                 },
             }
-            content = _governed_scan_error(exc.code, str(exc), language)
+            content = governed_scan_error(exc.code, str(exc), language_of(language))
             message_type = "scanner_error"
 
         fingerprint = _chat_response_fingerprint(content)
@@ -2159,7 +2167,7 @@ return tostring(next_value)
             "strategy_mutated": False,
             "response_fingerprint": fingerprint,
             "active_language": language,
-            "scanner_ui": _scanner_ui_labels(language),
+            "scanner_ui": scanner_labels(language_of(language)),
             "turn_trace": trace_payload,
             "model_call_count": model_calls,
         }
@@ -2256,7 +2264,12 @@ return tostring(next_value)
                 with telemetry.stage("persistence"):
                     await canonical_stage_callback(stage, payload)
 
-        active_language = _detect_chat_language(message, conversation.active_language)
+        # One decision, made by the language owner. The private copy here read a
+        # different set of "no language signal" answers than the agent's, so a chat
+        # could change language on a turn the agent had judged silent.
+        active_language = resolve_conversation_language(
+            message, session_language=conversation.active_language
+        ).language.value
         conversation = conversation.model_copy(update={"active_language": active_language})
         context["active_language"] = active_language
         turn = SetupAgentTurnInput(
@@ -2271,7 +2284,7 @@ return tostring(next_value)
             conversation=conversation,
             history=tuple(history),
             setup_mode=draft.mode,
-<<<<<<< HEAD
+            active_language=active_language,
             # The conversation's own memory. Without it every turn starts from nothing:
             # the Scanner the trader chose is forgotten, the language resets on any
             # turn with no language signal, and a confusion signal cannot tell whether
@@ -2293,9 +2306,6 @@ return tostring(next_value)
             pending_goal_question=str(
                 (context.get("conversation_pending_goal") or {}).get("question") or ""
             ),
-=======
-            active_language=active_language,
->>>>>>> 463b04abd9fe695d0aabf281fb82e560176cf563
             previous_turn_failed=bool(context.get("last_turn_failed")),
             # What has already failed in this chat, so a paid correction is not spent on
             # a class that has already survived one. Two attempts is evidence; a third is
@@ -3731,56 +3741,6 @@ def _load_reviewed_screening_evidence(
         return ReviewedScreeningEvidence.model_validate(payload)
     except ValidationError:
         return None
-
-
-def _detect_chat_language(message: str, fallback: str = "en") -> str:
-    text = (message or "").strip()
-    if not text:
-        return (fallback or "en").split("-", 1)[0].casefold()
-    # Punctuation-only confusion signals and compact option answers such as `24h` do
-    # not carry a language of their own; keep the established conversation language.
-    compact = " ".join(text.casefold().split())
-    if re.fullmatch(r"[?؟!\s]{1,8}", text) or re.fullmatch(
-        r"(?:\d+\s*(?:m|h|d)|yes|no|ok|okay|sure|نعم|لا|اه|أيوه)",
-        compact,
-    ):
-        return (fallback or "en").split("-", 1)[0].casefold()
-    if compact in {"oui", "d’accord", "d'accord", "accord"}:
-        return "fr"
-    if compact in {"sí", "si", "claro"}:
-        return "es"
-    if compact in {"да", "хорошо"}:
-        return "ru"
-    if re.search(r"[\u0600-\u06ff]", text):
-        return "ar"
-    if re.search(r"[\u0400-\u04ff]", text):
-        return "ru"
-    lowered = text.casefold()
-    french_markers = {
-        "bonjour", "merci", "pourquoi", "avec", "choisir", "alerte", "pièces",
-        "monnaie", "fenêtre", "précédente", "seuil", "seulement",
-    }
-    spanish_markers = {
-        "hola", "gracias", "por", "qué", "con", "elegir", "alerta", "monedas",
-        "moneda", "ventana", "anterior", "umbral", "solo",
-    }
-    words = set(re.findall(r"[a-zà-ÿ']+", lowered))
-    french_hits = len(words & french_markers)
-    spanish_hits = len(words & spanish_markers)
-    if re.search(r"[àâçèêëîïôûùüÿœ]", lowered) or french_hits >= 2:
-        return "fr"
-    if re.search(r"[¿¡ñáíóú]", lowered) or spanish_hits >= 2:
-        return "es"
-    # `é` occurs in both languages. Resolve it through vocabulary instead of making
-    # every Spanish question containing `qué` look French.
-    if "é" in lowered:
-        if spanish_hits > french_hits:
-            return "es"
-        if french_hits:
-            return "fr"
-    return "en"
-
-
 def _chat_response_fingerprint(message: str) -> str:
     normalized = " ".join((message or "").casefold().split())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
@@ -3793,7 +3753,7 @@ def _pending_scope_clarifications(
     """Re-present the server-owned scope choices after an intervening scan question."""
 
     if not _scan_draft_scope_ready(draft):
-        labels = _server_option_labels(language)
+        labels = scope_labels(language_of(language))
         return [
             {
                 "key": "screened_universe_mode",
@@ -3833,216 +3793,12 @@ def _scan_draft_scope_ready(draft: StrategyDraftV2) -> bool:
         and (policy.approved_watchlist_id is None or not policy.approved_watchlist_version)
     ):
         return False
-    if (
+    return not (
         policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS
         and not policy.explicit_symbols
-    ):
-        return False
-    return True
-
-
-def _server_option_labels(language: str) -> dict[str, str]:
-    code = (language or "en").split("-", 1)[0].casefold()
-    labels = {
-        "en": {
-            "eligible_market": "All eligible spot assets",
-            "approved_watchlist": "My Favorites",
-            "explicit_assets": "Specific eligible assets",
-        },
-        "ar": {
-            "eligible_market": "كل أصول السبوت المؤهلة",
-            "approved_watchlist": "قائمة المفضلة",
-            "explicit_assets": "أصول مؤهلة محددة",
-        },
-        "fr": {
-            "eligible_market": "Tous les actifs spot éligibles",
-            "approved_watchlist": "Mes favoris",
-            "explicit_assets": "Actifs éligibles précis",
-        },
-        "es": {
-            "eligible_market": "Todos los activos spot elegibles",
-            "approved_watchlist": "Mis favoritos",
-            "explicit_assets": "Activos elegibles específicos",
-        },
-        "ru": {
-            "eligible_market": "Все допустимые спотовые активы",
-            "approved_watchlist": "Мои избранные",
-            "explicit_assets": "Выбранные допустимые активы",
-        },
-    }
-    return dict(labels.get(code, labels["en"]))
-
-
-def _server_option_text(language: str, key: str) -> str:
-    code = (language or "en").split("-", 1)[0].casefold()
-    catalog = {
-        "en": {
-            "methodology_unavailable": "Screened monitoring is unavailable because no approved methodology is active.",
-            "universe_question": "Which screened assets should HilalMarkets watch?",
-            "watchlist_missing": "You do not have a Favorites list yet. Choose another screened scope.",
-            "watchlist_question": "Which Favorites list should HilalMarkets use?",
-            "assets_question": "Which eligible spot assets should HilalMarkets watch?",
-            "scan_window_question": "Should I measure the move over the rolling 24-hour window?",
-            "scope_selected": "The screened scope is selected. I only need the measurement window.",
-        },
-        "ar": {
-            "methodology_unavailable": "المراقبة المفحوصة غير متاحة لعدم وجود منهجية معتمدة ونشطة.",
-            "universe_question": "أي أصول مفحوصة تريد من HilalMarkets مراقبتها؟",
-            "watchlist_missing": "لا توجد لديك قائمة مفضلة بعد. اختر نطاقًا مفحوصًا آخر.",
-            "watchlist_question": "أي قائمة مفضلة تريد أن يستخدمها HilalMarkets؟",
-            "assets_question": "ما أصول السبوت المؤهلة التي تريد مراقبتها؟",
-            "scan_window_question": "هل أقيس الحركة خلال نافذة آخر 24 ساعة؟",
-            "scope_selected": "تم اختيار النطاق المفحوص. أحتاج فقط إلى نافذة القياس.",
-        },
-        "fr": {
-            "methodology_unavailable": "La surveillance filtrée est indisponible car aucune méthodologie approuvée n’est active.",
-            "universe_question": "Quels actifs filtrés HilalMarkets doit-il surveiller ?",
-            "watchlist_missing": "Vous n’avez pas encore de liste de favoris. Choisissez un autre périmètre filtré.",
-            "watchlist_question": "Quelle liste de favoris HilalMarkets doit-il utiliser ?",
-            "assets_question": "Quels actifs spot éligibles HilalMarkets doit-il surveiller ?",
-            "scan_window_question": "Dois-je mesurer le mouvement sur la fenêtre glissante de 24 heures ?",
-            "scope_selected": "Le périmètre filtré est sélectionné. Il ne manque que la fenêtre de mesure.",
-        },
-        "es": {
-            "methodology_unavailable": "La monitorización filtrada no está disponible porque no hay una metodología aprobada activa.",
-            "universe_question": "¿Qué activos filtrados debe vigilar HilalMarkets?",
-            "watchlist_missing": "Todavía no tienes una lista de favoritos. Elige otro alcance filtrado.",
-            "watchlist_question": "¿Qué lista de favoritos debe usar HilalMarkets?",
-            "assets_question": "¿Qué activos spot elegibles debe vigilar HilalMarkets?",
-            "scan_window_question": "¿Mido el movimiento en la ventana móvil de 24 horas?",
-            "scope_selected": "El alcance filtrado está seleccionado. Solo falta la ventana de medición.",
-        },
-        "ru": {
-            "methodology_unavailable": "Проверенный мониторинг недоступен: нет активной утверждённой методологии.",
-            "universe_question": "Какие проверенные активы должен отслеживать HilalMarkets?",
-            "watchlist_missing": "У вас пока нет списка избранного. Выберите другую проверенную область.",
-            "watchlist_question": "Какой список избранного должен использовать HilalMarkets?",
-            "assets_question": "Какие допустимые спотовые активы нужно отслеживать?",
-            "scan_window_question": "Измерить движение в скользящем окне 24 часа?",
-            "scope_selected": "Проверенная область выбрана. Осталось указать окно измерения.",
-        },
-    }
-    return catalog.get(code, catalog["en"]).get(key, catalog["en"][key])
-
-
-def _scanner_ui_labels(language: str) -> dict[str, str]:
-    code = (language or "en").split("-", 1)[0].casefold()
-    rows = {
-        "en": {
-            "title": "Read-only Scanner",
-            "checked": "screened coins checked",
-            "matched": "matched",
-            "read_only": "Read-only",
-            "no_changes": "no setup changes",
-            "research": "Research only. Not buy or sell advice.",
-        },
-        "ar": {
-            "title": "الفاحص للقراءة فقط",
-            "checked": "عملة مفحوصة تم التحقق منها",
-            "matched": "مطابقة",
-            "read_only": "للقراءة فقط",
-            "no_changes": "لا تغييرات على الإعداد",
-            "research": "للبحث فقط، وليست توصية شراء أو بيع.",
-        },
-        "fr": {
-            "title": "Scanner en lecture seule",
-            "checked": "cryptos filtrées vérifiées",
-            "matched": "correspondances",
-            "read_only": "Lecture seule",
-            "no_changes": "aucune modification de la configuration",
-            "research": "Recherche uniquement, sans conseil d’achat ou de vente.",
-        },
-        "es": {
-            "title": "Escáner de solo lectura",
-            "checked": "monedas filtradas revisadas",
-            "matched": "coincidencias",
-            "read_only": "Solo lectura",
-            "no_changes": "sin cambios en la configuración",
-            "research": "Solo investigación; no es consejo de compra o venta.",
-        },
-        "ru": {
-            "title": "Сканер только для чтения",
-            "checked": "проверенных отфильтрованных монет",
-            "matched": "совпадений",
-            "read_only": "Только чтение",
-            "no_changes": "настройки не изменены",
-            "research": "Только исследование, не рекомендация покупать или продавать.",
-        },
-    }
-    return dict(rows.get(code, rows["en"]))
-
-
-def _governed_scan_error(code: str, safe_message: str, language: str) -> str:
-    language_code = (language or "en").split("-", 1)[0].casefold()
-    family = (
-        "scope"
-        if code in {
-            "screening_methodology_required",
-            "screened_universe_required",
-            "screening_methodology_unavailable",
-            "empty_screened_universe",
-            "approved_watchlist_required",
-        }
-        else "quota"
-        if code in {
-            "light_prompt_scan_not_available",
-            "light_prompt_scans_quota_exceeded",
-        }
-        else "provider"
-        if code in {
-            "market_provider_unavailable",
-            "percentage_data_unavailable",
-            "scanner_runtime_failure",
-        }
-        else "window"
-        if code == "percentage_window_not_supported"
-        else "generic"
     )
-    catalog = {
-        "en": {
-            "scope": "I couldn’t run the scan because its screened scope is not ready. Choose the methodology and assets, then run it again.",
-            "quota": "Scanner is not available under the current plan or its scan allowance has been used.",
-            "provider": "I couldn’t load verified data for this screened scan, so I returned no invented results.",
-            "window": "This verified scan currently supports the rolling 24-hour window only.",
-            "generic": "I couldn’t complete this read-only scan. No setup was changed.",
-        },
-        "ar": {
-            "scope": "لم أتمكن من تشغيل الفحص لأن نطاق العملات المفحوصة غير مكتمل. اختر المنهجية والعملات ثم أعد المحاولة.",
-            "quota": "الفاحص غير متاح في الخطة الحالية أو تم استخدام حد الفحوصات المتاح.",
-            "provider": "تعذر تحميل بيانات موثقة لهذا الفحص، لذلك لم أعرض أي نتائج مخترعة.",
-            "window": "الفحص الموثق يدعم حاليًا نافذة آخر 24 ساعة فقط.",
-            "generic": "تعذر إكمال هذا الفحص للقراءة فقط، ولم يتغير أي إعداد.",
-        },
-        "fr": {
-            "scope": "Le scan n’a pas pu démarrer car son périmètre filtré n’est pas prêt. Choisissez la méthodologie et les actifs, puis réessayez.",
-            "quota": "Le Scanner n’est pas disponible avec l’offre actuelle ou le quota de scans est épuisé.",
-            "provider": "Les données vérifiées n’ont pas pu être chargées; aucun résultat n’a été inventé.",
-            "window": "Ce scan vérifié prend actuellement en charge uniquement la fenêtre glissante de 24 heures.",
-            "generic": "Ce scan en lecture seule n’a pas pu être terminé. La configuration n’a pas été modifiée.",
-        },
-        "es": {
-            "scope": "No pude ejecutar el escaneo porque su alcance filtrado no está listo. Elige la metodología y los activos e inténtalo de nuevo.",
-            "quota": "El Escáner no está disponible en el plan actual o se agotó su cuota.",
-            "provider": "No pude cargar datos verificados para este escaneo; no se inventaron resultados.",
-            "window": "Este escaneo verificado solo admite actualmente la ventana móvil de 24 horas.",
-            "generic": "No pude completar este escaneo de solo lectura. La configuración no cambió.",
-        },
-        "ru": {
-            "scope": "Сканирование не запущено: выбранная проверенная область ещё не готова. Выберите методологию и активы и повторите попытку.",
-            "quota": "Сканер недоступен на текущем плане или лимит сканирований исчерпан.",
-            "provider": "Проверенные данные для сканирования не загрузились; вымышленные результаты не возвращались.",
-            "window": "Проверенный сканер сейчас поддерживает только скользящее окно 24 часа.",
-            "generic": "Не удалось завершить сканирование только для чтения. Настройки не изменены.",
-        },
-    }
-    message = catalog.get(language_code, catalog["en"])[family]
-    if language_code == "en" and family == "generic" and safe_message.strip():
-        return f"{message} {safe_message.strip()}"[:500]
-    return message
-
-
 def _governed_scan_message(result: dict[str, Any], language: str) -> str:
-    code = (language or "en").split("-", 1)[0].casefold()
+    tongue = language_of(language)
     matches = [
         item
         for item in result.get("results") or []
@@ -4052,30 +3808,22 @@ def _governed_scan_message(result: dict[str, Any], language: str) -> str:
     evaluated = str(result.get("evaluated_at") or "")
     rendered_rows: list[str] = []
     for item in matches[:10]:
-        receipt = item.get("proof_receipt") if isinstance(item.get("proof_receipt"), dict) else {}
-        change = float(receipt.get("percentage_change") or 0)
+        raw_receipt = item.get("proof_receipt")
+        receipt: dict[str, Any] = raw_receipt if isinstance(raw_receipt, dict) else {}
+        change = float(str(receipt.get("percentage_change") or 0))
         rendered_rows.append(f"{item.get('symbol')} {change:+.2f}%")
     rendered = ", ".join(rendered_rows)
     extra = max(0, len(matches) - len(rendered_rows))
     extra_text = f" (+{extra})" if extra else ""
     if not matches:
-        templates = {
-            "en": "No screened coins matched among {checked} checked over the rolling 24-hour window. Data time: {time}.",
-            "ar": "لم أجد عملات مطابقة بين {checked} عملة مفحوصة خلال نافذة آخر 24 ساعة. وقت البيانات: {time}.",
-            "fr": "Aucune crypto filtrée ne correspond parmi les {checked} vérifiées sur la fenêtre glissante de 24 heures. Heure des données : {time}.",
-            "es": "Ninguna moneda filtrada coincidió entre las {checked} revisadas en la ventana móvil de 24 horas. Hora de los datos: {time}.",
-            "ru": "В скользящем окне 24 часа совпадений среди {checked} проверенных монет нет. Время данных: {time}.",
-        }
-        return templates.get(code, templates["en"]).format(checked=checked, time=evaluated)
-    templates = {
-        "en": "Matches over the rolling 24-hour window: {rows}{extra}. Checked {checked} screened coins. Data time: {time}.",
-        "ar": "العملات المطابقة خلال نافذة آخر 24 ساعة: {rows}{extra}. تم فحص {checked} عملة. وقت البيانات: {time}.",
-        "fr": "Correspondances sur la fenêtre glissante de 24 heures : {rows}{extra}. {checked} cryptos filtrées vérifiées. Heure des données : {time}.",
-        "es": "Coincidencias en la ventana móvil de 24 horas: {rows}{extra}. Se revisaron {checked} monedas filtradas. Hora de los datos: {time}.",
-        "ru": "Совпадения в скользящем окне 24 часа: {rows}{extra}. Проверено монет: {checked}. Время данных: {time}.",
-    }
-    return templates.get(code, templates["en"]).format(
-        rows=rendered, extra=extra_text, checked=checked, time=evaluated
+        return localized("scan_result.none", tongue, checked=checked, time=evaluated)
+    return localized(
+        "scan_result.some",
+        tongue,
+        rows=rendered,
+        extra=extra_text,
+        checked=checked,
+        time=evaluated,
     )
 
 

@@ -115,7 +115,6 @@ async def test_case_a_asks_one_natural_question_and_changes_nothing() -> None:
 async def test_case_a_is_never_recorded_as_unsupported() -> None:
     result = await _turn(CASE_A)
     assert result.draft.unsupported_requirements == []
-    notes = result  # telemetry is carried on the turn, checked below
 
 
 async def test_case_a_carries_no_internal_wording_and_no_repetition() -> None:

@@ -1,9 +1,9 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260802-launch-offer">
-<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260802-launch-offer">
-<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260802-launch-offer">
-<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260802-launch-offer">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260805-y5-5">
+<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260805-y5-5">
+<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260805-y5-5">
+<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260805-y5-5">
 {% endblock %}
 {% block content %}
 <section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
@@ -60,8 +60,8 @@
 {% include "hilal/dashboard/partials/builder_workspace.html" %}
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260802-launch-offer"></script>
-<script src="{{ url_for('static', path='/chat-message-renderer.js') }}?v=20260804-y5-2"></script>
-<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260804-y5-2"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260802-launch-offer"></script>
+<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260805-y5-5"></script>
+<script src="{{ url_for('static', path='/chat-message-renderer.js') }}?v=20260805-y5-5"></script>
+<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260805-y5-5"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260805-y5-5"></script>
 {% endblock %}
