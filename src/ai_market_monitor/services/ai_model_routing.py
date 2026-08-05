@@ -4,7 +4,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Literal
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.schemas.setup_agent import (
@@ -57,7 +57,11 @@ _ROUTING_TECHNICAL_TERMS = frozenset(
 # Responses API schema. Luna rejects ``minimal``; ``low`` is its first supported
 # reasoning level after ``none``. Keep this guard at the routing boundary so a stale
 # deployment override cannot turn an ordinary chat message into an HTTP 400.
-_MODEL_REASONING_EFFORT_OVERRIDES = {
+#: Typed with the same Literal the settings use, so a normalized value stays a legal
+#: reasoning effort rather than widening to ``str`` at the assignment below.
+_MODEL_REASONING_EFFORT_OVERRIDES: dict[
+    tuple[str, str], Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+] = {
     ("gpt-5.6-luna", "minimal"): "low",
 }
 

@@ -2532,7 +2532,9 @@ body.hilal-dashboard .dashboard-money-back {
   display: grid;
   gap: 3px;
   color: var(--hm-ink);
-  background: #f4f8eb;
+  /* The approved olive wash. This panel previously used a near-identical off-palette
+     tint behind the same olive border, which the brand-colour check refused. */
+  background: #f1fadf;
   border: 1px solid rgba(85, 113, 42, .42);
   border-radius: 16px;
 }

@@ -45,6 +45,17 @@ from ai_market_monitor.engine.claim_evidence import (
     validate_claims,
 )
 from ai_market_monitor.engine.comparators import detect_comparator
+from ai_market_monitor.engine.conversation_intent import (
+    ConversationIntent,
+    IntentReading,
+    classify_turn,
+)
+from ai_market_monitor.engine.conversation_language import (
+    ConversationLanguage,
+    LanguageDecision,
+    localized,
+    resolve_conversation_language,
+)
 from ai_market_monitor.engine.planner_intent_compiler import (
     SANITATION_CLASSES,
     IntentCompileError,
@@ -65,6 +76,16 @@ from ai_market_monitor.engine.planner_references import (
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.repair_eligibility import RepairDecision, decide_repair
 from ai_market_monitor.engine.requirement_state import active_requirement_states
+from ai_market_monitor.engine.response_reconciliation import (
+    ConversationalGoal,
+    Proposition,
+    RenderedPart,
+    RenderSource,
+    confusion_recovery_reply,
+    enforce_language,
+    reconcile_reply,
+    response_fingerprint,
+)
 from ai_market_monitor.engine.setup_failure_taxonomy import (
     SetupFailureClass,
     TurnFailureRecord,
@@ -84,6 +105,12 @@ from ai_market_monitor.engine.setup_turn_execution import (
     validated_clarification,
 )
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
+from ai_market_monitor.engine.supported_incomplete import (
+    MissingChoice,
+    RequestAssessment,
+    assess_request,
+    clarification_for_choice,
+)
 from ai_market_monitor.engine.timeframes import SUPPORTED_TIMEFRAMES
 from ai_market_monitor.engine.turn_fragments import (
     extract_symbols,
@@ -298,6 +325,21 @@ class SetupAgentTurnInput:
     #: Governed identities hidden behind public, turn-local aliases. Conditions,
     #: clarifications and snapshots are added from the authoritative draft/history.
     planner_references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES
+    #: The destination the trader already chose — ``scanner`` or ``monitor``. Without
+    #: it, a market question inside Scanner was answered as a product explanation.
+    active_mode: str | None = None
+    #: Where the previous turn went, so a follow-up stays on the same road.
+    previous_intent: str | None = None
+    #: The conversation's language as last persisted. The latest user turn wins over
+    #: it; this is what stops ``??`` or ``ok`` from resetting the language.
+    session_language: str | None = None
+    #: Fingerprints of replies already sent in this chat. A confusion signal must not
+    #: be answered with something the trader has already read.
+    previous_response_fingerprints: tuple[str, ...] = ()
+    #: What the trader is still trying to do, carried across a reply that missed.
+    pending_goal_kind: str | None = None
+    pending_goal_threshold: str | None = None
+    pending_goal_question: str = ""
 
     @property
     def deadline(self) -> TurnDeadline:
@@ -621,6 +663,222 @@ class SetupChatAgent:
             )
         )
 
+    def _conversational_route(
+        self,
+        turn: SetupAgentTurnInput,
+        reading: IntentReading,
+        language: LanguageDecision,
+    ) -> SetupAgentTurnResult | None:
+        """Answer the turns that never needed a planner call, or return ``None``.
+
+        Three destinations are settled here, each of which used to be handled by
+        planning the sentence as a strategy edit and then explaining why that failed:
+
+        * a confusion signal — answered by recovery, never by repeating;
+        * a live market question with a missing choice — answered by asking for that
+          one choice, with Scanner context intact;
+        * a supported request missing a trader's choice — answered by asking for it,
+          instead of recording it as an unsupported requirement.
+
+        Nothing here mutates the draft, approves anything, or invents a value. Every
+        one of these paths returns ``execution=None``, which is the existing contract
+        for a read-only turn.
+        """
+
+        telemetry = turn.telemetry
+
+        if reading.selected_mode is not None and reading.intent is ConversationIntent.SOCIAL:
+            # A bare mode word is the product's own start button, not a sentence to
+            # plan. Answering it deterministically also records the destination, which
+            # is what keeps the next market question inside Scanner.
+            question = localized("ask.symbol_scope", language.language)
+            reconciled = reconcile_reply((), clarification=question)
+            telemetry.notes["selected_mode"] = reading.selected_mode
+            telemetry.notes.update(reconciled.to_dict())
+            return self._read_only_result(
+                turn, reconciled.message, language, reading, route="mode_selection"
+            )
+
+        if reading.intent is ConversationIntent.PRODUCT_EXPLANATION and _asks_scanner_vs_monitor(
+            turn.message
+        ):
+            # The one product question this chat gets constantly, answered from
+            # server-owned product fact. This is the *right* place for the
+            # Scanner-versus-Monitor sentence — it was only ever wrong as the answer to
+            # a live market question.
+            answer = localized("product.scanner_vs_monitor", language.language)
+            telemetry.notes.update(reconcile_reply(()).to_dict())
+            return self._read_only_result(
+                turn, answer, language, reading, route="product_explanation"
+            )
+
+        if reading.intent is ConversationIntent.CONFUSION_SIGNAL:
+            goal = ConversationalGoal(
+                kind=turn.pending_goal_kind or "unknown",
+                threshold_percent=turn.pending_goal_threshold,
+                pending_question=turn.pending_goal_question,
+            )
+            recovered = confusion_recovery_reply(
+                goal,
+                language=language.language,
+                previous_fingerprints=turn.previous_response_fingerprints,
+            )
+            telemetry.notes["confusion_recovery"] = True
+            telemetry.notes.update(recovered.to_dict())
+            return self._read_only_result(
+                turn, recovered.message, language, reading, route="confusion_recovery"
+            )
+
+        if reading.intent is ConversationIntent.ON_DEMAND_SCAN:
+            missing = reading.slots.missing
+            if missing:
+                # Ask for the one genuinely missing choice. The trader already told us
+                # the size and the direction; asking again would be the product not
+                # listening, which is what the generic Scanner/Monitor sentence was.
+                threshold = (
+                    f"{reading.slots.threshold_percent:g}%"
+                    if reading.slots.threshold_percent is not None
+                    else "the"
+                )
+                question = localized(
+                    "ask.scan_window" if "window" in missing else "ask.movement_size",
+                    language.language,
+                    threshold=threshold,
+                )
+                reconciled = reconcile_reply((), clarification=question)
+                telemetry.notes["scan_execution"] = "awaiting_user_choice"
+                telemetry.notes.update(reconciled.to_dict())
+                return self._read_only_result(
+                    turn,
+                    reconciled.message,
+                    language,
+                    reading,
+                    route="on_demand_scan_clarification",
+                    goal_kind="scan",
+                    goal_threshold=(
+                        f"{reading.slots.threshold_percent:g}"
+                        if reading.slots.threshold_percent is not None
+                        else None
+                    ),
+                    goal_question=question,
+                )
+            # Everything needed is present. The scan itself is executed by the service
+            # that owns the authenticated session and the screened universe; this
+            # agent has neither, so it hands the request over rather than inventing a
+            # result. `scan_request` is the contract the launch service reads.
+            telemetry.notes["scan_execution"] = "requested"
+            telemetry.notes["scan_request"] = reading.slots.to_dict()
+            return None
+
+        if reading.intent in {
+            ConversationIntent.STRATEGY_EDIT,
+            ConversationIntent.CONTINUOUS_MONITOR,
+        }:
+            assessment = assess_request(
+                turn.message,
+                offered_capability_keys=None,
+                known_symbols=turn.draft.universe.included_symbols,
+                known_window=_draft_trigger_timeframe(turn.draft),
+            )
+            telemetry.notes.update(assessment.to_dict())
+            if not assessment.is_supported_incomplete:
+                # Complete, or genuinely outside what the registry can express. Both
+                # belong to the planner and the canonical path exactly as before.
+                return None
+            if not _too_bare_to_plan(turn, assessment):
+                # The planner can still read something useful out of this turn, so it
+                # gets to. Pre-empting a turn the model would have compiled correctly
+                # would trade one product defect for another: an assistant that asks
+                # questions instead of doing the work.
+                return None
+            choice = assessment.next_question
+            if choice is None:  # pragma: no cover - `missing` is non-empty here
+                return None
+            clarification = clarification_for_choice(
+                choice,
+                language=language.language,
+                source_turn_id=turn.source_turn_id,
+                threshold_percent=assessment.supplied.get("threshold_percent"),
+            )
+            reconciled = reconcile_reply((), clarification=clarification.question)
+            telemetry.notes.update(reconciled.to_dict())
+            telemetry.notes["supported_incomplete"] = True
+            conversation = turn.conversation.model_copy(
+                update={"last_assistant_summary": reconciled.message[:1000]}
+            ).with_question(clarification)
+            # The question is the whole reply, so it is the body. The contract is
+            # carried on the conversation — where the next turn verifies that an
+            # answer really resolved it — and deliberately *not* on the result, because
+            # ``SetupAgentTurnResult.message`` appends a result-level clarification and
+            # would print the same question a second time.
+            result = self._read_only_result(
+                turn,
+                reconciled.message,
+                language,
+                reading,
+                route="supported_incomplete_clarification",
+                goal_kind="alert",
+                goal_threshold=assessment.supplied.get("threshold_percent"),
+                goal_question=clarification.question,
+            )
+            return replace(result, conversation=conversation)
+
+        return None
+
+    def _read_only_result(
+        self,
+        turn: SetupAgentTurnInput,
+        message: str,
+        language: LanguageDecision,
+        reading: IntentReading,
+        *,
+        route: str,
+        goal_kind: str | None = None,
+        goal_threshold: str | None = None,
+        goal_question: str = "",
+        clarification: ClarificationContract | None = None,
+    ) -> SetupAgentTurnResult:
+        """One read-only turn: words back, and no change to any persisted state.
+
+        When a clarification is attached, ``message`` must be the body *without* it:
+        ``SetupAgentTurnResult.message`` appends the question itself, and passing a
+        body that already contains it prints the same question twice — the very
+        duplication this work exists to remove.
+        """
+
+        safe = enforce_language(message, language.language) if message else ""
+        telemetry = turn.telemetry
+        telemetry.notes["conversation_route"] = route
+        telemetry.notes["final_mutation_status"] = "no_mutation"
+        telemetry.notes["response_fingerprint"] = response_fingerprint(
+            f"{safe} {clarification.question}".strip() if clarification else safe
+        )
+        telemetry.notes["pending_goal"] = {
+            "kind": goal_kind or turn.pending_goal_kind,
+            "threshold": goal_threshold or turn.pending_goal_threshold,
+            "question": goal_question or turn.pending_goal_question,
+        }
+        conversation = turn.conversation.model_copy(
+            update={"last_assistant_summary": safe[:1000]}
+        )
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(safe),
+            execution=None,
+            draft=turn.draft,
+            conversation=conversation,
+            plan=None,
+            trace=SetupAgentTrace(
+                source_turn_id=turn.source_turn_id,
+                planner_model="deterministic_router",
+                patch_validation="not_attempted",
+                compile_status="not_attempted",
+                response_model=route,
+                model_calls=0,
+            ),
+            clarification=clarification,
+            usage={},
+        )
+
     async def run_turn(self, turn: SetupAgentTurnInput) -> SetupAgentTurnResult:
         self.model_call_count = 0
         self.last_usage = {}
@@ -638,6 +896,29 @@ class SetupChatAgent:
             canonical_draft_hash=turn.draft.executable_hash or "",
             normalized_user_intent_hash=_normalized_intent_hash(turn.normalized_message),
         ).to_dict()
+
+        # Where is this turn going? Decided before anything is planned, because the
+        # answer changes whether a planner call happens at all. A confusion signal, a
+        # live market question and a request that is simply missing one choice are
+        # each answered without asking a model to re-read a sentence the server has
+        # already understood.
+        language = resolve_conversation_language(
+            turn.message, session_language=turn.session_language
+        )
+        reading = classify_turn(
+            turn.message,
+            active_mode=turn.active_mode,
+            previous_intent=(
+                ConversationIntent(turn.previous_intent) if turn.previous_intent else None
+            ),
+            has_open_question=bool(turn.conversation.active_question_id),
+        )
+        telemetry.notes.update(language.to_dict())
+        telemetry.notes.update(reading.to_dict())
+        conversational = self._conversational_route(turn, reading, language)
+        if conversational is not None:
+            return conversational
+
         with telemetry.stage("context_selection"):
             shortlist = build_capability_shortlist(
                 turn.normalized_message,
@@ -2759,35 +3040,117 @@ def _requires_contextual_composer(
     )
 
 
-def deterministic_summary(result: SetupTurnExecutionResult) -> str:
+def deterministic_summary(
+    result: SetupTurnExecutionResult,
+    *,
+    language: ConversationLanguage = ConversationLanguage.ENGLISH,
+) -> str:
     """A factual reply built only from what the server did.
 
     Used when composing fails after a successful execution. Plain, not templated
     small talk, and never a claim the result does not support.
+
+    Two things changed here. Every sentence is now localized, because a deterministic
+    fallback used to switch an Arabic conversation to English at exactly the moment
+    something had already gone wrong. And every sentence carries the proposition it
+    asserts, so the same fact rendered by another part of the pipeline collapses into
+    one instead of stacking up.
     """
 
-    lines: list[str] = []
+    parts = list(deterministic_summary_parts(result, language=language))
+    reconciled = reconcile_reply(parts)
+    return reconciled.message or localized("status.no_change", language)
+
+
+def deterministic_summary_parts(
+    result: SetupTurnExecutionResult,
+    *,
+    language: ConversationLanguage = ConversationLanguage.ENGLISH,
+) -> list[RenderedPart]:
+    """The server's own sentences about this turn, each tagged with what it asserts.
+
+    Tagging is what makes duplication visible. The same unsupported requirement used
+    to be rendered here, again by ``deterministic_claim_text``, again by a validated
+    composer claim, and again as a safe error — four sentences for one fact, because
+    nothing compared them. Now they share a :class:`Proposition` and only the most
+    authoritative wording survives.
+    """
+
+    parts: list[RenderedPart] = []
     if result.applied_instructions:
-        lines.append("I applied this:")
-        lines.extend(f"- {item.summary}" for item in result.applied_instructions[:6])
+        for item in result.applied_instructions[:6]:
+            parts.append(
+                RenderedPart(
+                    text=str(item.summary),
+                    source=RenderSource.DETERMINISTIC_SUMMARY,
+                    proposition=Proposition(
+                        subject=str(item.operation_id),
+                        predicate="applied",
+                        value=str(item.summary),
+                    ),
+                )
+            )
     elif result.status == "no_change":
-        lines.append("Nothing in the draft needed to change for that.")
-    if result.answered_questions:
-        lines.append("That answered the open question.")
-    if result.strategy_mutated:
-        lines.append(f"The draft is now version {result.current_version}.")
-    for item in result.unsupported_requirements[:3]:
-        lines.append(f"I could not express this exactly: {item.get('missing_contract', '')}")
-    # The selected canonical clarification is appended exactly once by ``run_turn``.
-    # Repeating it here produced both a status line and the same question.
-    lines.extend(result.safe_errors[:2])
-    if result.approval_eligible:
-        lines.append("The inactive preview is ready. Use Review and approve when it matches.")
-    elif result.approval_status == "invalidated_by_edit":
-        lines.append(
-            "That edit created a new version, so it needs approving again before it can run."
+        parts.append(
+            RenderedPart(
+                text=localized("status.no_change", language),
+                source=RenderSource.DETERMINISTIC_SUMMARY,
+                proposition=Proposition("turn", "no_change"),
+            )
         )
-    return "\n".join(lines) or "Nothing changed on this turn."
+    if result.answered_questions:
+        parts.append(
+            RenderedPart(
+                text="That answered the open question.",
+                source=RenderSource.DETERMINISTIC_SUMMARY,
+                proposition=Proposition("question", "answered", "true"),
+            )
+        )
+    if result.strategy_mutated:
+        # A distinct fact, not a duplicate of anything: the trader needs to know a new
+        # version exists, because approval is bound to it.
+        parts.append(
+            RenderedPart(
+                text=f"The draft is now version {result.current_version}.",
+                source=RenderSource.DETERMINISTIC_SUMMARY,
+                proposition=Proposition(
+                    "draft", "version", str(result.current_version)
+                ),
+            )
+        )
+    for requirement in result.unsupported_requirements[:3]:
+        contract = str(requirement.get("missing_contract", ""))
+        parts.append(
+            RenderedPart(
+                # One plain sentence. The internal contract text names schema fields a
+                # beginner has never heard of, so it goes to the operator trace only.
+                text=localized("refuse.unsupported", language),
+                source=RenderSource.DETERMINISTIC_SUMMARY,
+                proposition=Proposition(
+                    subject="requirement",
+                    predicate="unsupported",
+                    value=contract,
+                    requirement_id=str(requirement.get("key", "")),
+                ),
+            )
+        )
+    for message in result.safe_errors[:2]:
+        parts.append(
+            RenderedPart(
+                text=str(message),
+                source=RenderSource.SAFE_ERROR,
+                proposition=Proposition("turn", "safe_error", str(message)),
+            )
+        )
+    if result.approval_eligible:
+        parts.append(
+            RenderedPart(
+                text=localized("status.preview_ready", language),
+                source=RenderSource.DETERMINISTIC_SUMMARY,
+                proposition=Proposition("draft", "approval_eligible", "true"),
+            )
+        )
+    return parts
 
 
 def _deterministic_conversation_reply(
@@ -2821,6 +3184,57 @@ def _deterministic_conversation_reply(
         f"The draft currently holds {count} rule{'s' if count != 1 else ''} "
         f"at version {draft.version}. Tell me what to change, or ask about any of them."
     )
+
+
+#: Asking what Scanner or Monitor *is*, or how they differ. Deliberately narrow: any
+#: other product question still goes to the model, which answers it from the same
+#: server-owned product knowledge.
+_SCANNER_VS_MONITOR = re.compile(
+    r"\b(?:scanner|monitor|monitoring)\b"
+    r"|(?:سكانر|مراقبة)"
+    r"|\b(?:escáner|moniteur)\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_scanner_vs_monitor(message: str) -> bool:
+    return bool(_SCANNER_VS_MONITOR.search(message or ""))
+
+
+def _too_bare_to_plan(turn: SetupAgentTurnInput, assessment: RequestAssessment) -> bool:
+    """Whether planning this turn could not produce a rule, however well it went.
+
+    Deliberately narrow. The deterministic router exists to stop a beginner's first
+    sentence from being answered with a refusal, not to take work away from the
+    planner. It steps in only when the turn names *no* market to watch and *no* period
+    to measure over, and there is nothing on the draft to inherit either — the shape of
+    ``create me an alert to alert me when a coin increases 5%``. Anything richer than
+    that is a turn the compact planner can read, and it is left alone.
+    """
+
+    if turn.draft.condition_ast is not None:
+        return False
+    if turn.conversation.active_question_id:
+        # An answer to our own question belongs to the flow that asked it.
+        return False
+    return (
+        MissingChoice.SYMBOL_SCOPE in assessment.missing
+        and MissingChoice.MEASUREMENT_WINDOW in assessment.missing
+    )
+
+
+def _draft_trigger_timeframe(draft: StrategyDraftV2) -> str | None:
+    """A measurement period the draft has already settled, if any.
+
+    Read so a follow-up turn is never asked for a period the trader supplied earlier.
+    """
+
+    if draft.condition_ast is None:
+        return None
+    for node in draft.condition_ast.walk():
+        if node.node_type is ConditionNodeType.CONDITION and node.trigger_timeframe:
+            return str(node.trigger_timeframe)
+    return None
 
 
 def _condition_count(draft: StrategyDraftV2) -> int:

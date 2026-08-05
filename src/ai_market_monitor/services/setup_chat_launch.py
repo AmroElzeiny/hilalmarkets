@@ -2021,6 +2021,27 @@ return tostring(next_value)
             conversation=conversation,
             history=tuple(history),
             setup_mode=draft.mode,
+            # The conversation's own memory. Without it every turn starts from nothing:
+            # the Scanner the trader chose is forgotten, the language resets on any
+            # turn with no language signal, and a confusion signal cannot tell whether
+            # the reply it is about to send has already been sent once.
+            active_mode=str(context.get("conversation_active_mode") or "") or None,
+            previous_intent=str(context.get("conversation_previous_intent") or "") or None,
+            session_language=str(context.get("conversation_language") or "") or None,
+            previous_response_fingerprints=tuple(
+                str(item) for item in (context.get("conversation_response_fingerprints") or [])[-8:]
+            ),
+            pending_goal_kind=str(
+                (context.get("conversation_pending_goal") or {}).get("kind") or ""
+            )
+            or None,
+            pending_goal_threshold=str(
+                (context.get("conversation_pending_goal") or {}).get("threshold") or ""
+            )
+            or None,
+            pending_goal_question=str(
+                (context.get("conversation_pending_goal") or {}).get("question") or ""
+            ),
             previous_turn_failed=bool(context.get("last_turn_failed")),
             # What has already failed in this chat, so a paid correction is not spent on
             # a class that has already survived one. Two attempts is evidence; a third is
@@ -2114,6 +2135,7 @@ return tostring(next_value)
             # A failed turn still established most of what the trader wrote. Keeping it
             # is what lets the next turn answer without asking for everything again.
             _record_intent_snapshot(context, telemetry)
+            _record_conversation_memory(context, telemetry)
             _record_funnel(
                 context,
                 outcome="refused",
@@ -2227,6 +2249,7 @@ return tostring(next_value)
         context.pop("last_turn_failure", None)
         context.pop("setup_failure_history", None)
         _record_intent_snapshot(context, telemetry)
+        _record_conversation_memory(context, telemetry)
         _record_funnel(
             context,
             outcome=(
@@ -3547,6 +3570,38 @@ FUNNEL_OUTCOMES: tuple[str, ...] = ("changed", "no_change", "answered", "refused
 #: How many turns of history the funnel keeps per chat. Enough to see a user give up;
 #: short enough that the session row stays small.
 _FUNNEL_WINDOW = 40
+
+
+def _record_conversation_memory(context: dict[str, Any], telemetry: TurnTelemetry) -> None:
+    """Carry this turn's routing decision, language and wording into the next turn.
+
+    Every field here is something the old pipeline recomputed from nothing each time,
+    which is why a Scanner selection was forgotten one turn later and why an identical
+    reply could be sent twice without anything noticing.
+    """
+
+    notes = telemetry.notes
+    mode = notes.get("conversation_selected_mode") or notes.get("selected_mode")
+    if mode:
+        context["conversation_active_mode"] = str(mode)
+    intent = notes.get("conversation_intent")
+    if intent and intent != "CONFUSION_SIGNAL":
+        # A confusion signal is *about* the previous intent, so it must not replace it.
+        context["conversation_previous_intent"] = str(intent)
+    language = notes.get("conversation_language")
+    if language:
+        context["conversation_language"] = str(language)
+    fingerprint = notes.get("response_fingerprint")
+    if fingerprint:
+        context["conversation_response_fingerprints"] = [
+            *(context.get("conversation_response_fingerprints") or []),
+            str(fingerprint),
+        ][-8:]
+    goal = notes.get("pending_goal")
+    if isinstance(goal, dict) and any(goal.values()):
+        context["conversation_pending_goal"] = {
+            key: (str(value) if value is not None else None) for key, value in goal.items()
+        }
 
 
 def _record_intent_snapshot(context: dict[str, Any], telemetry: TurnTelemetry) -> None:
