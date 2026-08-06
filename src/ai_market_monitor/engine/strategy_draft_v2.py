@@ -177,16 +177,28 @@ def apply_strategy_patch(
     unresolved: dict[str, UnresolvedFieldV2] = {
         unresolved_item.key: unresolved_item for unresolved_item in draft.unresolved_fields
     }
-    for unresolved_item in patch.unresolved_references:
-        unresolved[unresolved_item.key] = unresolved_item
-        changed.append(f"unresolved.added:{unresolved_item.key}")
-    # Typed, explicitly named targets are the only clarification authority. Legacy
-    # correction prose is still readable but cannot clear V2 state.
-    resolved_keys = set(patch.remove_unresolved_keys)
+    # Advancing a multi-step question is one authorized transition, expressed as
+    # "close this key and write this new content for it". Closing ran last, so the new
+    # step was deleted the instant it was written and the trader was shown a question
+    # the stored contract knew nothing about. A key that is being rewritten in the same
+    # patch is a *replacement*, and replacement is what has to happen.
+    replaced = {
+        unresolved_item.key for unresolved_item in patch.unresolved_references
+    } & set(patch.remove_unresolved_keys)
+    resolved_keys = set(patch.remove_unresolved_keys) - replaced
     for key in resolved_keys:
         if key in unresolved:
             unresolved.pop(key)
             changed.append(f"unresolved.resolved:{key}")
+    # Typed, explicitly named targets are the only clarification authority. Legacy
+    # correction prose is still readable but cannot clear V2 state.
+    for unresolved_item in patch.unresolved_references:
+        previous = unresolved.get(unresolved_item.key)
+        unresolved[unresolved_item.key] = unresolved_item
+        changed.append(
+            f"unresolved.{'advanced' if previous is not None else 'added'}"
+            f":{unresolved_item.key}"
+        )
 
     unsupported: dict[str, UnsupportedRequirementV2] = {
         unsupported_item.key: unsupported_item

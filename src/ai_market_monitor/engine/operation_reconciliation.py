@@ -153,7 +153,9 @@ _OWNED_CHANGES: dict[str, frozenset[str]] = {
     "set_sharia_policy": frozenset({"sharia_policy_changed", "market_scope_changed"}),
     "add_unsupported": frozenset({"unsupported_added"}),
     "add_unresolved": frozenset({"unresolved_added"}),
-    "update_unresolved": frozenset({"unresolved_added", "unresolved_resolved"}),
+    "update_unresolved": frozenset(
+        {"unresolved_added", "unresolved_advanced", "unresolved_resolved"}
+    ),
     "resolve_unresolved_key": frozenset({"unresolved_resolved"}),
     "remove_unsupported_key": frozenset({"unsupported_resolved"}),
     "restore_snapshot": frozenset(),

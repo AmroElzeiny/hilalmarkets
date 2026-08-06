@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from ai_market_monitor.schemas.timeframes import COMMON_TIMEFRAMES
+
 __all__ = [
     "ConversationLanguage",
     "LanguageDecision",
@@ -34,6 +36,7 @@ __all__ = [
     "language_of",
     "localized",
     "localized_options",
+    "option_label_map",
     "governed_scan_error",
     "resolve_conversation_language",
     "scan_error_is_resolvable",
@@ -695,6 +698,45 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "Какое движение рынка или индикатор должна измерять эта логика?"
         ),
     },
+    "ask.confirm_candidate": {
+        ConversationLanguage.ENGLISH: "Did you mean {candidate}?",
+        ConversationLanguage.ARABIC: "تقصد {candidate}؟",
+        ConversationLanguage.FRENCH: "Vouliez-vous dire {candidate} ?",
+        ConversationLanguage.SPANISH: "¿Querías decir {candidate}?",
+        ConversationLanguage.RUSSIAN: "Вы имели в виду {candidate}?",
+    },
+    # These two are followed by the open question itself, which the turn result appends
+    # from the live contract. Repeating the question inside the sentence printed it
+    # twice — one question asked once is the whole point of this flow.
+    "ask.repeat_options": {
+        ConversationLanguage.ENGLISH: "I did not catch that. You can pick: {options}.",
+        ConversationLanguage.ARABIC: "ما فهمتش الإجابة. تقدر تختار: {options}.",
+        ConversationLanguage.FRENCH: "Je n'ai pas compris. Vous pouvez choisir : {options}.",
+        ConversationLanguage.SPANISH: "No lo entendí. Puedes elegir: {options}.",
+        ConversationLanguage.RUSSIAN: "Я не понял. Можно выбрать: {options}.",
+    },
+    "ask.unsupported_value": {
+        ConversationLanguage.ENGLISH: (
+            "I cannot use that value here. You can pick: {options}."
+        ),
+        ConversationLanguage.ARABIC: "مش قادر أستخدم القيمة دي هنا. تقدر تختار: {options}.",
+        ConversationLanguage.FRENCH: (
+            "Je ne peux pas utiliser cette valeur ici. Vous pouvez choisir : {options}."
+        ),
+        ConversationLanguage.SPANISH: (
+            "No puedo usar ese valor aquí. Puedes elegir: {options}."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я не могу использовать это значение здесь. Можно выбрать: {options}."
+        ),
+    },
+    "status.question_cancelled": {
+        ConversationLanguage.ENGLISH: "Alright, I stopped that question. Nothing was saved.",
+        ConversationLanguage.ARABIC: "تمام، وقفت السؤال ده. مفيش حاجة اتحفظت.",
+        ConversationLanguage.FRENCH: "D'accord, j'arrête cette question. Rien n'a été enregistré.",
+        ConversationLanguage.SPANISH: "De acuerdo, dejo esa pregunta. No se guardó nada.",
+        ConversationLanguage.RUSSIAN: "Хорошо, я закрыл этот вопрос. Ничего не сохранено.",
+    },
     "ask.retry_invalid": {
         ConversationLanguage.ENGLISH: "I couldn't map that answer safely. {question}",
         ConversationLanguage.ARABIC: "لم أقدر أربط الإجابة بأمان. {question}",
@@ -1162,32 +1204,60 @@ def _distinctive_words(language: ConversationLanguage) -> frozenset[str]:
 #: agent meant an Arabic question arrived with English buttons under it.
 #: ``trigger_timeframe`` is deliberately untranslated: ``1h``/``4h``/``1d`` are codes the
 #: product shows identically in every language.
-_OPTION_LABELS: Final[dict[str, dict[ConversationLanguage, tuple[str, ...]]]] = {
+#: Button wording, keyed by the canonical value it stands for. Pairing by key rather
+#: than by list position is deliberate: a positional table silently mislabels every
+#: option the moment one language orders them differently or omits one.
+_OPTION_LABELS: Final[dict[str, dict[ConversationLanguage, dict[str, str]]]] = {
     "reference_point": {
-        ConversationLanguage.ENGLISH: ("Candle open", "Previous candle close"),
-        ConversationLanguage.ARABIC: ("افتتاح الشمعة", "إغلاق الشمعة السابقة"),
-        ConversationLanguage.FRENCH: (
-            "Ouverture de la bougie",
-            "Clôture de la bougie précédente",
-        ),
-        ConversationLanguage.SPANISH: ("Apertura de la vela", "Cierre de la vela anterior"),
-        ConversationLanguage.RUSSIAN: ("Открытие свечи", "Закрытие предыдущей свечи"),
+        ConversationLanguage.ENGLISH: {
+            "candle_open": "Candle open",
+            "previous_close": "Previous candle close",
+        },
+        ConversationLanguage.ARABIC: {
+            "candle_open": "افتتاح الشمعة",
+            "previous_close": "إغلاق الشمعة السابقة",
+        },
+        ConversationLanguage.FRENCH: {
+            "candle_open": "Ouverture de la bougie",
+            "previous_close": "Clôture de la bougie précédente",
+        },
+        ConversationLanguage.SPANISH: {
+            "candle_open": "Apertura de la vela",
+            "previous_close": "Cierre de la vela anterior",
+        },
+        ConversationLanguage.RUSSIAN: {
+            "candle_open": "Открытие свечи",
+            "previous_close": "Закрытие предыдущей свечи",
+        },
     },
     "comparator": {
-        ConversationLanguage.ENGLISH: (
-            "At the threshold or beyond",
-            "Only beyond the threshold",
-        ),
-        ConversationLanguage.ARABIC: ("عند الحد أو أكثر", "فقط بعد تجاوز الحد"),
-        ConversationLanguage.FRENCH: ("Au seuil ou au-delà", "Seulement au-delà du seuil"),
-        ConversationLanguage.SPANISH: ("En el umbral o más", "Solo por encima del umbral"),
-        ConversationLanguage.RUSSIAN: ("На пороге или выше", "Только выше порога"),
+        ConversationLanguage.ENGLISH: {
+            "gte": "At the threshold or beyond",
+            "gt": "Only beyond the threshold",
+        },
+        ConversationLanguage.ARABIC: {
+            "gte": "عند الحد أو أكثر",
+            "gt": "فقط بعد تجاوز الحد",
+        },
+        ConversationLanguage.FRENCH: {
+            "gte": "Au seuil ou au-delà",
+            "gt": "Seulement au-delà du seuil",
+        },
+        ConversationLanguage.SPANISH: {
+            "gte": "En el umbral o más",
+            "gt": "Solo por encima del umbral",
+        },
+        ConversationLanguage.RUSSIAN: {
+            "gte": "На пороге или выше",
+            "gt": "Только выше порога",
+        },
     },
 }
 
-#: Codes shown the same way in every language.
+#: Codes shown the same way in every language. The timeframe shortlist comes from the
+#: canonical registry, so it can never offer a period the compiler cannot execute.
 _UNTRANSLATED_OPTIONS: Final[dict[str, tuple[str, ...]]] = {
-    "trigger_timeframe": ("1h", "4h", "1d"),
+    "trigger_timeframe": COMMON_TIMEFRAMES,
 }
 
 #: The names of the governed screened scopes, as a trader reads them. These label
@@ -1281,14 +1351,25 @@ def governed_scan_error(code: str, safe_message: str, language: ConversationLang
     return message
 
 
-def localized_options(field: str, language: ConversationLanguage) -> list[str]:
-    """The answer choices for ``field``, in ``language``. Empty when the field has none."""
+def option_label_map(field: str, language: ConversationLanguage) -> dict[str, str]:
+    """Canonical value → the words its button shows, in ``language``.
+
+    The map is the authority; the ordered list below is a view of it. Callers that
+    need to know *which* option a label stands for must use this, never the position.
+    """
 
     fixed = _UNTRANSLATED_OPTIONS.get(field)
     if fixed is not None:
-        return list(fixed)
+        return {item: item for item in fixed}
     entry = _OPTION_LABELS.get(field, {})
-    return list(entry.get(language) or entry.get(ConversationLanguage.ENGLISH) or ())
+    chosen = entry.get(language) or entry.get(ConversationLanguage.ENGLISH) or {}
+    return dict(chosen)
+
+
+def localized_options(field: str, language: ConversationLanguage) -> list[str]:
+    """The answer choices for ``field``, in ``language``. Empty when the field has none."""
+
+    return list(option_label_map(field, language).values())
 
 
 def language_of(value: str | ConversationLanguage | None) -> ConversationLanguage:

@@ -161,6 +161,36 @@ def universe_mode_is_user_selected(
     )
 
 
+def universe_scope_is_settled(
+    draft: StrategyDraftV2,
+    *,
+    assignments: Iterable[_Assignment] = (),
+) -> bool:
+    """Is "which markets do we watch" answered?
+
+    Three different answers settle it, and only these three:
+
+    * a bounded symbol list — included, excluded or screened explicit symbols;
+    * an approved watchlist;
+    * an explicit choice of the whole screened market.
+
+    The third one stores no symbols at all, so it can only be proved by provenance.
+    Every other caller asks this question through here so the rule cannot drift.
+    """
+
+    policy = draft.sharia_policy
+    if (
+        draft.universe.included_symbols
+        or draft.universe.excluded_symbols
+        or policy.explicit_symbols
+        or policy.approved_watchlist_id
+    ):
+        return True
+    return policy.universe_mode is ShariaUniverseMode.ELIGIBLE_MARKET and (
+        universe_mode_is_user_selected(draft, assignments=assignments)
+    )
+
+
 def reconcile_requirement_state(
     *,
     before: StrategyDraftV2,
@@ -193,12 +223,22 @@ def reconcile_requirement_state(
         working,
         assignments=assignments,
     )
-    unresolved_values = [*before.unresolved_fields, *working.unresolved_fields]
+    unresolved_values = list(working.unresolved_fields)
+    known_ids = {
+        item.unresolved_id for item in (*before.unresolved_fields, *unresolved_values)
+    }
+    # A step's question id is unique to that step, while the blocker it belongs to
+    # keeps one stable identity for the whole workflow. Matching the workflow id as
+    # well is what stops step two synthesising a second, duplicate blocker for the
+    # same semantic object.
+    already_open = active_clarification is not None and (
+        active_clarification.question_id in known_ids
+        or (active_clarification.workflow_id or "\x00") in known_ids
+    )
     if (
         active_clarification is not None
         and active_clarification.mutating
-        and active_clarification.question_id
-        not in {item.unresolved_id for item in unresolved_values}
+        and not already_open
         and active_clarification.target_type
         in {
             "draft_field",
@@ -239,7 +279,7 @@ def reconcile_requirement_state(
                 reason=active_clarification.reason,
             )
         )
-    pending = _coalesced_unresolved(unresolved_values)
+    pending = _coalesced_unresolved(before.unresolved_fields, unresolved_values)
     assessments: list[RequirementAssessmentV2] = list(supported_assessments)
     retained: list[UnresolvedFieldV2] = []
     answered: list[str] = []
@@ -948,7 +988,7 @@ def _assess_unresolved(
             unresolved_reason=None if satisfied else item.reason,
         )
 
-    exists, value = _target_value(item, working)
+    exists, value = _target_value(item, working, assignments=assignments)
     relevant = [
         assignment
         for assignment in assignments
@@ -1384,7 +1424,12 @@ def _assignment_satisfies_final(
     return _equal(assignment.value, final_value)
 
 
-def _target_value(item: UnresolvedFieldV2, draft: StrategyDraftV2) -> tuple[bool, Any]:
+def _target_value(
+    item: UnresolvedFieldV2,
+    draft: StrategyDraftV2,
+    *,
+    assignments: Iterable[_Assignment] = (),
+) -> tuple[bool, Any]:
     target_type = item.target_type
     field = item.target_field or ""
     if target_type in {"condition_field", "reference_definition", "capability_parameter"}:
@@ -1411,13 +1456,7 @@ def _target_value(item: UnresolvedFieldV2, draft: StrategyDraftV2) -> tuple[bool
             "excluded": list(draft.universe.excluded_symbols),
             "mode": draft.sharia_policy.universe_mode.value,
         }
-        explicit = bool(
-            draft.universe.included_symbols
-            or draft.universe.excluded_symbols
-            or draft.sharia_policy.explicit_symbols
-            or draft.sharia_policy.approved_watchlist_id
-        )
-        return explicit, universe_value
+        return universe_scope_is_settled(draft, assignments=assignments), universe_value
     if target_type == "boolean_structure":
         value = _boolean_shape(draft.condition_ast)
         return bool(draft.condition_ast and draft.condition_ast.children), value
@@ -1547,27 +1586,59 @@ def _condition_satisfies_slots(
 
 
 def _coalesced_unresolved(
-    values: Iterable[UnresolvedFieldV2],
+    before_values: Iterable[UnresolvedFieldV2],
+    working_values: Iterable[UnresolvedFieldV2],
 ) -> list[tuple[UnresolvedFieldV2, list[UnresolvedFieldV2]]]:
-    groups: dict[str, list[UnresolvedFieldV2]] = {}
-    for item in values:
-        identity = unresolved_target_path(item)
-        bucket = groups.setdefault(identity, [])
-        if item.unresolved_id not in {candidate.unresolved_id for candidate in bucket}:
-            bucket.append(item)
-    return [(items[0], items) for _, items in sorted(groups.items())]
+    """Group open items by what they are about, newest canonical record winning.
+
+    Both the pre-turn and the post-turn records are considered, because an item this
+    turn deleted must come back unless it was really answered.  But when the *same*
+    item exists on both sides, the post-turn one is the truth: an authorized
+    ``update_unresolved`` is a workflow step forward, and reviving the pre-turn copy
+    silently rewound the question, the answer shape and the offered options.
+
+    That rewind is how the assistant ended up displaying step two while the stored
+    contract it would validate against was still step one.
+    """
+
+    newest: dict[str, dict[str, UnresolvedFieldV2]] = {}
+    for values in (before_values, working_values):
+        for item in values:
+            identity = unresolved_target_path(item)
+            # Same path and same id: later assignment overwrites, so `working` wins.
+            newest.setdefault(identity, {})[item.unresolved_id] = item
+    return [
+        (next(iter(bucket.values())), list(bucket.values()))
+        for _, bucket in sorted(newest.items())
+    ]
 
 
 def _merge_unresolved(
     representative: UnresolvedFieldV2,
     aliases: list[UnresolvedFieldV2],
 ) -> UnresolvedFieldV2:
-    slots: list[str] = []
-    for item in aliases:
-        for slot in [*item.missing_slots, *([item.target_field] if item.target_field else [])]:
-            if slot and slot not in slots:
-                slots.append(slot)
-    return representative.model_copy(update={"missing_slots": slots})
+    """Keep the newest step's wording and shape; union only the evidence.
+
+    ``missing_slots`` is deliberately *not* unioned across a stale copy of the same
+    item — that is what restored slots the trader had already answered.  Distinct
+    items that genuinely share one target still contribute theirs.
+    """
+
+    # The representative is the newest record, so its own remaining work leads. Other
+    # distinct items sharing this target may add to it, never resurrect what it dropped.
+    others = [item for item in aliases if item.unresolved_id != representative.unresolved_id]
+    slots = [
+        *representative.missing_slots,
+        *(
+            slot
+            for item in others
+            for slot in [*item.missing_slots, *([item.target_field] if item.target_field else [])]
+            if slot
+        ),
+    ]
+    if not representative.missing_slots and representative.target_field:
+        slots.insert(0, representative.target_field)
+    return representative.model_copy(update={"missing_slots": list(dict.fromkeys(slots))})
 
 
 def _condition_requirement_key(item: UnresolvedFieldV2) -> str:

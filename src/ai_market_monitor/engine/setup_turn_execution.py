@@ -255,6 +255,11 @@ class SetupTurnRequest:
     #: True only for an allowlisted server-rendered UI control. It bypasses language
     #: grounding, never operation validation, lifecycle gates, or canonical mutation.
     server_owned_option: bool = False
+    #: Canonical requirement paths the person selected through that control. Server
+    #: built and never model authored: a rendered control knows exactly what was
+    #: clicked, so re-picking a value that already equals the platform default is
+    #: still recorded as a choice instead of being lost as "nothing changed".
+    server_option_confirmed_paths: frozenset[str] = frozenset()
     #: The turn's clock. Execution runs the three slowest remaining stages — compiling,
     #: screening and the market-data check — and none of them were being timed, so the
     #: ranking could not see them at all.
@@ -415,6 +420,7 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         segments=segments,
         operation_results=operation_results,
         active_clarification=request.conversation.active_question,
+        confirmed_paths=request.server_option_confirmed_paths,
     )
     requirement_reconciliation = _finalize_supported_completion_reconciliation(
         request, plan, segments, requirement_reconciliation
@@ -798,6 +804,7 @@ def validate_setup_turn_plan(request: SetupTurnRequest) -> SetupTurnDryValidatio
         segments=segments,
         operation_results=operation_results,
         active_clarification=request.conversation.active_question,
+        confirmed_paths=request.server_option_confirmed_paths,
     )
     reconciled = _finalize_supported_completion_reconciliation(
         request, plan, segments, reconciled

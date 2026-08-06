@@ -860,6 +860,110 @@ class SetupTurnExecutionResult(BaseModel):
         return self.current_executable_hash
 
 
+class PendingClarificationWorkflow(BaseModel):
+    """The one server-owned record of a multi-step question in progress.
+
+    Progress used to live in two places that were written at different moments: the
+    reply was composed from a freshly built next step, while the durable copy sat
+    inside an unresolved field's answer schema and could be rewound by reconciliation.
+    The assistant could therefore *show* step two while the state it would validate the
+    next answer against was still step one.
+
+    So: one record. It says which workflow this is, which step is current, what has
+    already been accepted, what is still missing, and which exact question the trader
+    is looking at. ``SetupConversationContext.active_question`` must always name this
+    record's current step; nothing may display a question this record does not hold.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Stable for the life of the workflow. Matches the draft-side blocker's id, so the
+    #: conversational record and the executable one are provably about one thing.
+    workflow_id: str = Field(min_length=1, max_length=120)
+    #: What kind of thing is being completed, for routing and telemetry only.
+    workflow_kind: str = Field(min_length=1, max_length=60)
+    #: Bumped on every accepted step. Part of the current question's identity.
+    step_revision: int = Field(default=0, ge=0)
+    #: The exact question id now on screen. Never reused by a later step.
+    question_id: str = Field(min_length=1, max_length=120)
+    #: The canonical field this step is waiting for.
+    current_field: str = Field(min_length=1, max_length=120)
+    #: Fields still to ask about after this one, in the order they will be asked.
+    remaining_fields: list[str] = Field(default_factory=list, max_length=24)
+    #: What the trader has already settled. Never re-asked, never overwritten by an
+    #: invalid answer.
+    accepted_values: dict[str, str | int | float | bool | None] = Field(
+        default_factory=dict
+    )
+    #: Every canonical value this step may resolve to.
+    canonical_values: list[str] = Field(default_factory=list, max_length=64)
+    #: The shortlist actually displayed. Always a subset of ``canonical_values``.
+    offered_values: list[str] = Field(default_factory=list, max_length=8)
+    #: The trader's own words that started and advanced this workflow, oldest first.
+    source_evidence: list[str] = Field(default_factory=list, max_length=24)
+    #: A near miss waiting on a yes/no. Never counted as accepted until confirmed.
+    proposed_value: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_step(self) -> PendingClarificationWorkflow:
+        if self.offered_values and self.canonical_values:
+            unknown = [
+                item for item in self.offered_values if item not in set(self.canonical_values)
+            ]
+            if unknown:
+                # A displayed option the step cannot execute is a promise the platform
+                # would have to break, so it is refused here rather than rendered.
+                raise ValueError(f"displayed options are not executable: {unknown}")
+        if self.current_field in self.remaining_fields:
+            raise ValueError("the current field cannot also be waiting in the queue")
+        return self
+
+    def step_question_id(self, field_name: str, revision: int) -> str:
+        digest = hashlib.sha256(
+            f"{self.workflow_id}:{revision}:{field_name}".encode()
+        ).hexdigest()[:20]
+        return f"q_{digest}"
+
+    def matches(self, contract: ClarificationContract) -> bool:
+        """Is this contract exactly the step this record says is current?"""
+
+        return (
+            contract.question_id == self.question_id
+            and (contract.workflow_id or self.workflow_id) == self.workflow_id
+            and contract.step_revision == self.step_revision
+        )
+
+    def accepting(
+        self,
+        value: str | int | float | bool | None,
+        *,
+        evidence: str,
+    ) -> PendingClarificationWorkflow:
+        """Store this step's answer and move to the next field, in one step."""
+
+        accepted = {**self.accepted_values, self.current_field: value}
+        remaining = [item for item in self.remaining_fields if item != self.current_field]
+        revision = self.step_revision + 1
+        next_field = remaining[0] if remaining else ""
+        return self.model_copy(
+            update={
+                "accepted_values": accepted,
+                "remaining_fields": remaining[1:],
+                "current_field": next_field or self.current_field,
+                "step_revision": revision,
+                "question_id": self.step_question_id(next_field or self.current_field, revision),
+                "source_evidence": [*self.source_evidence, evidence][-24:],
+                "proposed_value": None,
+                "offered_values": [],
+                "canonical_values": [],
+            }
+        )
+
+    @property
+    def is_complete(self) -> bool:
+        return not self.remaining_fields and self.current_field in self.accepted_values
+
+
 class SetupConversationContext(BaseModel):
     """What the last few turns were about, for language only.
 
@@ -899,12 +1003,58 @@ class SetupConversationContext(BaseModel):
     #: A supported rule request whose user-controlled fields are not complete yet.
     #: Stored as language/context evidence only; executable state remains in the draft.
     pending_supported_request: dict[str, object] = Field(default_factory=dict)
+    #: The canonical multi-step question in progress. When this is set it and
+    #: ``active_question`` name the same step, always — see ``validate_one_step``.
+    pending_workflow: PendingClarificationWorkflow | None = None
     #: Fingerprint of the last rendered assistant response. Used to prevent a confusion
     #: signal from producing the same boilerplate again.
     last_response_fingerprint: str | None = Field(default=None, max_length=64)
     confusion_recovery_count: int = Field(default=0, ge=0)
 
-    def with_question(self, contract: ClarificationContract) -> SetupConversationContext:
+    @staticmethod
+    def _check_one_step(
+        contract: ClarificationContract | None,
+        workflow: PendingClarificationWorkflow | None,
+    ) -> None:
+        """The question on screen and the stored workflow are the same step. Always.
+
+        This is the invariant the whole clarification flow rests on. Without it the
+        reply could describe step two while the record that validates the next answer
+        still held step one, and the trader's correct answer was then rejected.
+
+        It is checked both on construction and at every write, because ``model_copy``
+        does not re-run validators — and a write is exactly where the two could part.
+        """
+
+        if workflow is None:
+            return
+        if contract is None:
+            raise ValueError("a pending workflow must have its current question on screen")
+        if not workflow.matches(contract):
+            raise ValueError(
+                "the displayed question is not the pending workflow's current step: "
+                f"shown {contract.question_id!r} rev {contract.step_revision}, "
+                f"stored {workflow.question_id!r} rev {workflow.step_revision}"
+            )
+
+    @model_validator(mode="after")
+    def validate_one_step(self) -> SetupConversationContext:
+        self._check_one_step(self.active_question, self.pending_workflow)
+        return self
+
+    def with_question(
+        self,
+        contract: ClarificationContract,
+        *,
+        workflow: PendingClarificationWorkflow | None = None,
+    ) -> SetupConversationContext:
+        """Show one question, and commit the state that will validate its answer.
+
+        Both halves move together on purpose. Setting them separately is what let the
+        two disagree.
+        """
+
+        self._check_one_step(contract, workflow)
         return self.model_copy(
             update={
                 "active_question_id": contract.question_id,
@@ -912,6 +1062,7 @@ class SetupConversationContext(BaseModel):
                 "question_target": contract.target_field or contract.question_id,
                 "valid_answer_shape": contract.expected_answer_schema,
                 "active_question": contract,
+                "pending_workflow": workflow,
                 "clarifications_asked": self.clarifications_asked + 1,
             }
         )
@@ -931,6 +1082,7 @@ class SetupConversationContext(BaseModel):
                 "question_target": None,
                 "valid_answer_shape": None,
                 "active_question": None,
+                "pending_workflow": None,
                 "answered_question_ids": answered[-24:],
             }
         )

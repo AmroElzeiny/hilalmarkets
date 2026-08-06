@@ -43,6 +43,7 @@ ChangeKind = Literal[
     "unsupported_added",
     "unsupported_resolved",
     "unresolved_added",
+    "unresolved_advanced",
     "unresolved_resolved",
 ]
 
@@ -136,6 +137,8 @@ class DraftChange:
             return f"resolved the unsupported item {self.detail}"
         if self.kind == "unresolved_added":
             return f"still needs {self.detail}"
+        if self.kind == "unresolved_advanced":
+            return f"moved on to {self.detail}"
         if self.kind == "unresolved_resolved":
             return f"answered {self.detail}"
         if self.before is not None and self.after is not None:
@@ -338,10 +341,11 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
             DraftChange(kind="unsupported_resolved", detail=key, target=key)
         )
 
-    old_unresolved = {item.key for item in before.unresolved_fields}
+    old_unresolved = {item.key: item for item in before.unresolved_fields}
     new_unresolved = {item.key: item for item in after.unresolved_fields}
     for key, unresolved in new_unresolved.items():
-        if key not in old_unresolved:
+        prior_unresolved = old_unresolved.get(key)
+        if prior_unresolved is None:
             changes.append(
                 DraftChange(
                     kind="unresolved_added",
@@ -349,7 +353,23 @@ def diff_drafts(before: StrategyDraftV2, after: StrategyDraftV2) -> list[DraftCh
                     target=key,
                 )
             )
-    for key in old_unresolved - set(new_unresolved):
+        elif prior_unresolved.question != unresolved.question or (
+            prior_unresolved.missing_slots != unresolved.missing_slots
+        ):
+            # A multi-step question that moved on is a real change. Comparing keys
+            # alone made an advance look like nothing had happened, so the operation
+            # that advanced it was recorded as a no-op and the reply described a step
+            # the draft had never stored.
+            changes.append(
+                DraftChange(
+                    kind="unresolved_advanced",
+                    detail=unresolved.question,
+                    target=key,
+                    before=prior_unresolved.question,
+                    after=unresolved.question,
+                )
+            )
+    for key in set(old_unresolved) - set(new_unresolved):
         changes.append(DraftChange(kind="unresolved_resolved", detail=key, target=key))
 
     if before.approval.approved and not after.approval.approved:
@@ -368,6 +388,7 @@ def is_material(changes: list[DraftChange]) -> bool:
         change.kind
         not in {
             "unresolved_added",
+            "unresolved_advanced",
             "unresolved_resolved",
             "unsupported_resolved",
             "approval_invalidated",

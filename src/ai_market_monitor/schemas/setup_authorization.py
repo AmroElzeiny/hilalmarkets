@@ -242,6 +242,9 @@ class ClarificationContract(StrictModel):
     disappeared while the draft stayed blocked for the same reason.
     """
 
+    #: Unique to **this step**. A multi-step workflow that reused one id across steps
+    #: could not tell "answered step one" from "answered step two", so a late or
+    #: repeated reply landed on the wrong field.
     question_id: str = Field(min_length=1, max_length=120)
     question: str = Field(min_length=1, max_length=500)
     reason: str = Field(min_length=1, max_length=400)
@@ -255,6 +258,16 @@ class ClarificationContract(StrictModel):
     #: be closed by words alone.
     mutating: bool = True
     allowed_options: list[str] = Field(default_factory=list, max_length=6)
+    #: The multi-step question this step belongs to, stable for the whole workflow.
+    #: Separate from ``question_id`` on purpose: the workflow names the thing being
+    #: built, the question names one step of building it.
+    workflow_id: str | None = Field(default=None, max_length=120)
+    #: Bumped on every step. An answer carrying an older revision is stale — it was
+    #: written against a question that is no longer the one on screen.
+    step_revision: int = Field(default=0, ge=0)
+    #: The canonical values an answer may resolve to. Wider than what is displayed:
+    #: buttons are a shortlist, this is everything the step can actually execute.
+    canonical_values: list[str] = Field(default_factory=list, max_length=64)
 
     @model_validator(mode="after")
     def validate_target(self) -> ClarificationContract:

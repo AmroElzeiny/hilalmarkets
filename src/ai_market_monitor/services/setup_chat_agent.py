@@ -21,7 +21,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from time import monotonic
@@ -32,6 +32,16 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.engine.active_question import (
+    AnswerDomain,
+    AnswerOutcome,
+    AnswerResolution,
+    canonical_values,
+    display_options,
+    domain_for_field,
+    labels_for,
+    resolve_active_answer,
+)
 from ai_market_monitor.engine.capability_shortlist import (
     CapabilityShortlist,
     build_capability_shortlist,
@@ -82,7 +92,9 @@ from ai_market_monitor.engine.planner_references import (
 )
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.repair_eligibility import RepairDecision, decide_repair
-from ai_market_monitor.engine.requirement_state import active_requirement_states
+from ai_market_monitor.engine.requirement_state import (
+    active_requirement_states,
+)
 from ai_market_monitor.engine.response_reconciliation import (
     ConversationalGoal,
     Proposition,
@@ -116,6 +128,7 @@ from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.engine.supported_incomplete import (
     MissingChoice,
     RequestAssessment,
+    RequestCompleteness,
     assess_request,
     clarification_for_choice,
 )
@@ -156,6 +169,7 @@ from ai_market_monitor.schemas.setup_agent import (
     CapabilityRoutingContext,
     ComposedReply,
     FactualClaim,
+    PendingClarificationWorkflow,
     SegmentKind,
     SetupAgentReply,
     SetupAgentTurnPlan,
@@ -902,8 +916,12 @@ class SetupChatAgent:
             return replace(result, conversation=conversation)
 
         if not _scan_universe_is_ready(turn.draft):
-            content = localized("scan.scope_required", language.language)
+            scope = scan_scope_clarification(language.language)
+            content = f"{localized('scan.scope_required', language.language)}\n\n{scope.question}"
             telemetry.notes["scan_execution"] = "scope_required"
+            # The half-collected scan is kept, and the scope becomes a question the next
+            # message can answer. Attempting execution and then dropping the goal is
+            # what made a recoverable gap look like a dead end.
             conversation = turn.conversation.model_copy(
                 update={
                     "active_language": language.language.value,
@@ -911,11 +929,11 @@ class SetupChatAgent:
                     "pending_read_only_scan": merged,
                     "last_assistant_summary": content[:1000],
                 }
-            )
+            ).with_question(scope)
             result = self._read_only_result(
                 turn, content, language, reading, route="on_demand_scan_scope_required"
             )
-            return replace(result, conversation=conversation)
+            return replace(result, conversation=conversation, clarification=scope)
 
         # Complete and inside Scanner. The scan itself runs in the service that owns the
         # authenticated session, the screened universe and the provider quota; this agent
@@ -1032,6 +1050,23 @@ class SetupChatAgent:
         )
         telemetry.notes.update(language.to_dict())
         telemetry.notes.update(reading.to_dict())
+
+        # An open question owns the next message. This runs before classification,
+        # planning and extraction on purpose: a short, misspelled or simply unexpected
+        # answer used to be re-read as a brand new request and answered with "Nothing
+        # is set up yet", while the question it was answering stayed open.
+        early_trace = SetupAgentTrace(
+            source_turn_id=turn.source_turn_id,
+            planner_model="deterministic_active_question",
+            plan_confidence=1.0,
+            active_language=turn.active_language,
+        )
+        answered = await self._answer_active_question(
+            turn, reading, language, trace=early_trace
+        )
+        if answered is not None:
+            return answered
+
         conversational = self._conversational_route(turn, reading, language)
         if conversational is not None:
             return conversational
@@ -1598,7 +1633,11 @@ class SetupChatAgent:
         }
         if not _scan_universe_is_ready(turn.draft):
             request["measurement_window"] = scan.measurement_window
-            content = localized("scan.scope_required", language_of(turn.active_language))
+            scope = scan_scope_clarification(language_of(turn.active_language))
+            content = (
+                f"{localized('scan.scope_required', language_of(turn.active_language))}"
+                f"\n\n{scope.question}"
+            )
             fingerprint = response_fingerprint(content)
             conversation = turn.conversation.model_copy(
                 update={
@@ -1607,9 +1646,11 @@ class SetupChatAgent:
                     "pending_read_only_scan": request,
                     "last_response_fingerprint": fingerprint,
                 }
-            )
+            ).with_question(scope)
             return SetupAgentTurnResult(
-                reply=deterministic_reply(content),
+                reply=deterministic_reply(
+                    content, selected_clarification_id=scope.question_id
+                ),
                 execution=None,
                 draft=turn.draft,
                 conversation=conversation,
@@ -1620,6 +1661,7 @@ class SetupChatAgent:
                     response_model="deterministic_read_only",
                     response_fingerprint=fingerprint,
                 ),
+                clarification=scope,
                 usage=usage,
             )
 
@@ -1747,19 +1789,20 @@ class SetupChatAgent:
                 usage=usage,
             )
         field_name = _next_supported_field(missing)
-        clarification = _supported_clarification(
-            turn,
-            field_name=field_name,
-            source_seed=request.segment_ref,
-        )
         segment = next(
             item for item in envelope.segments if item.segment_ref == request.segment_ref
         )
         unresolved_id = "supported_" + hashlib.sha256(
             f"{turn.source_turn_id}:{request.segment_ref}".encode()
         ).hexdigest()[:24]
-        clarification = clarification.model_copy(
-            update={"question_id": unresolved_id}
+        # The workflow and its first question are built together, and the workflow's id
+        # is the blocker's id — so the conversational record and the executable one are
+        # provably about the same thing, while each *step* keeps its own question id.
+        workflow, clarification = _new_supported_workflow(
+            workflow_id=unresolved_id,
+            fields=[field_name, *(item for item in missing if item != field_name)],
+            evidence=segment.exact_source_text,
+            language=language_of(turn.active_language),
         )
         semantic_object_id = f"object_{unresolved_id.removeprefix('supported_')}"
         metadata.update(
@@ -1808,16 +1851,205 @@ class SetupChatAgent:
             intro=localized("ask.intro", language_of(turn.active_language)),
             include_gates=False,
             pending_metadata=metadata,
+            workflow=workflow,
+        )
+
+    async def _answer_active_question(
+        self,
+        turn: SetupAgentTurnInput,
+        reading: IntentReading,
+        language: LanguageDecision,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult | None:
+        """Let the open question have the turn, before anything else reads the message.
+
+        This is the architectural fix. An open question used to be checked *after* the
+        planner had already classified the message as something else, so a short,
+        misspelled or simply unexpected answer became a fresh general request and got
+        "Nothing is set up yet" — while the question it was answering was still open.
+
+        Only three things may take the turn away from an open question, and each is
+        explicit: the trader cancels, the trader presses a mode button, or the trader
+        types a different complete request. Everything else is an attempt to answer,
+        and an attempt the reader cannot use keeps every accepted value exactly as it
+        was and asks again.
+        """
+
+        contract = turn.conversation.active_question
+        unresolved = _active_supported_unresolved(turn.draft, turn.conversation)
+        if contract is None or unresolved is None:
+            return None
+        # A mode button is the product's own control and always wins.
+        if "mode_selection" in reading.reasons:
+            return None
+        # A confusion signal is handled by recovery, which repeats this same question.
+        if is_confusion_signal(turn.message):
+            return None
+
+        workflow = turn.conversation.pending_workflow
+        field_name = (
+            workflow.current_field
+            if workflow is not None
+            else str(_supported_metadata(unresolved).get("next_field") or "")
+        )
+        # A whole new instruction, complete enough to build on its own, is allowed to
+        # take the turn. Anything less is an attempt to answer, however badly typed —
+        # that is the line between "changed the subject" and "did not understand".
+        fresh = assess_request(
+            turn.message,
+            offered_capability_keys=None,
+            known_symbols=turn.draft.universe.included_symbols,
+            known_window=_draft_trigger_timeframe(turn.draft),
+        )
+        resolution = _read_answer(
+            field_name,
+            turn.message,
+            language=language.language,
+            allowed=list(contract.canonical_values),
+            offered=list(workflow.offered_values) if workflow is not None else [],
+            new_request=fresh.completeness is RequestCompleteness.COMPLETE,
+        )
+        turn.telemetry.notes["active_question_outcome"] = resolution.outcome.value
+        turn.telemetry.notes["active_question_field"] = field_name
+        if resolution.outcome is AnswerOutcome.NEW_REQUEST:
+            return None
+        if resolution.outcome is AnswerOutcome.CANCELLED:
+            return self._cancel_active_question(turn, language, trace=trace)
+        if resolution.keeps_the_question:
+            return self._repeat_active_question(
+                turn, language, contract, resolution, trace=trace
+            )
+        # A value this reader could use. Fold it in now: an answer to our own question
+        # never needs a model to notice that it is one.
+        return await self._continue_supported_incomplete(
+            turn, None, trace=trace, usage={}
+        )
+
+    def _cancel_active_question(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult:
+        """Stop asking, and keep nothing. Only an explicit cancellation reaches here."""
+
+        content = localized("status.question_cancelled", language.language)
+        fingerprint = response_fingerprint(content)
+        conversation = (
+            turn.conversation.cleared_question()
+            .model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "active_goal": None,
+                    "pending_supported_request": {},
+                    "last_response_fingerprint": fingerprint,
+                    "last_assistant_summary": content[:1000],
+                }
+            )
+        )
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(content),
+            execution=None,
+            draft=turn.draft,
+            conversation=conversation,
+            plan=None,
+            trace=_with(
+                trace,
+                patch_validation="active_question_cancelled",
+                response_model="deterministic_clarification",
+                response_fingerprint=fingerprint,
+            ),
+            usage={},
+        )
+
+    def _repeat_active_question(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        contract: ClarificationContract,
+        resolution: AnswerResolution,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult:
+        """Say precisely what went wrong, then ask the very same question again.
+
+        Nothing is cleared and nothing is reset. The workflow, the accepted values and
+        the question all survive an answer this reader could not use — that is the
+        whole difference between "I did not understand" and "let us start again".
+        """
+
+        labels = list(contract.allowed_options)
+        if resolution.outcome is AnswerOutcome.CONFIRM_CANDIDATE:
+            content = localized(
+                "ask.confirm_candidate",
+                language.language,
+                candidate=str(resolution.canonical_value),
+            )
+        elif resolution.outcome is AnswerOutcome.UNSUPPORTED:
+            content = localized(
+                "ask.unsupported_value",
+                language.language,
+                options=", ".join(labels) if labels else contract.expected_answer_schema,
+            )
+        else:
+            content = localized(
+                "ask.repeat_options",
+                language.language,
+                options=", ".join(labels) if labels else contract.expected_answer_schema,
+            )
+        fingerprint = response_fingerprint(content)
+        proposed = (
+            str(resolution.canonical_value)
+            if resolution.outcome is AnswerOutcome.CONFIRM_CANDIDATE
+            else None
+        )
+        workflow = turn.conversation.pending_workflow
+        conversation = turn.conversation.model_copy(
+            update={
+                "active_language": turn.active_language,
+                "active_goal": turn.conversation.active_goal or "complete_supported_setup",
+                "pending_workflow": (
+                    workflow.model_copy(update={"proposed_value": proposed})
+                    if workflow is not None
+                    else None
+                ),
+                "last_response_fingerprint": fingerprint,
+                "last_assistant_summary": content[:1000],
+            }
+        )
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(content, selected_clarification_id=contract.question_id),
+            execution=None,
+            draft=turn.draft,
+            conversation=conversation,
+            plan=None,
+            trace=_with(
+                trace,
+                patch_validation=f"active_question_{resolution.outcome.value.casefold()}",
+                response_model="deterministic_clarification",
+                response_fingerprint=fingerprint,
+            ),
+            clarification=contract,
+            usage={},
         )
 
     async def _continue_supported_incomplete(
         self,
         turn: SetupAgentTurnInput,
-        envelope: PlannerIntentEnvelope,
+        envelope: PlannerIntentEnvelope | None,
         *,
         trace: SetupAgentTrace,
         usage: dict[str, Any],
     ) -> SetupAgentTurnResult | None:
+        """Fold one answer into the rule being built.
+
+        ``envelope`` is ``None`` when this runs before the planner, which is the normal
+        case: an open question owns its turn and does not need a model to notice that
+        the message answers it.
+        """
+
         unresolved = _active_supported_unresolved(turn.draft, turn.conversation)
         if unresolved is None:
             return None
@@ -1850,14 +2082,30 @@ class SetupChatAgent:
                 ),
                 usage=usage,
             )
-        if not _planner_answered_active_question(turn, envelope):
-            return None
-
         metadata = _supported_metadata(unresolved)
-        field_name = str(metadata.get("next_field") or "")
-        value = _supported_answer_value(field_name, turn.message)
-        if value is None:
-            content = localized("ask.retry_invalid", language_of(turn.active_language),
+        stored = turn.conversation.pending_workflow
+        field_name = (
+            stored.current_field
+            if stored is not None
+            else str(metadata.get("next_field") or "")
+        )
+        contract = turn.conversation.active_question
+        resolution = _read_answer(
+            field_name,
+            turn.message,
+            language=language_of(turn.active_language),
+            allowed=list(contract.canonical_values) if contract is not None else [],
+            offered=list(stored.offered_values) if stored is not None else [],
+        )
+        if not resolution.stores_a_value:
+            # Every other outcome was already answered before the planner ran. Reaching
+            # here means the planner claimed an answer the resolver cannot use, and the
+            # resolver is the authority — the question simply stays open.
+            if envelope is not None and not _planner_answered_active_question(turn, envelope):
+                return None
+            content = localized(
+                "ask.retry_invalid",
+                language_of(turn.active_language),
                 question=unresolved.question,
             )
             fingerprint = response_fingerprint(content)
@@ -1880,6 +2128,7 @@ class SetupChatAgent:
                 ),
                 usage=usage,
             )
+        value = cast(object, resolution.canonical_value)
 
         _apply_supported_answer(metadata, field_name, value)
         missing = [
@@ -1888,15 +2137,7 @@ class SetupChatAgent:
             if item != field_name
         ]
         metadata["missing_slots"] = missing
-        answer = envelope.clarification_answers[0]
-        segment_text = next(
-            (
-                item.exact_source_text
-                for item in envelope.segments
-                if item.segment_ref == answer.segment_ref
-            ),
-            turn.message,
-        )
+        segment_text = _answer_segment_text(turn, envelope)
         evidence_fragments = [
             str(item)
             for item in cast(list[object], metadata.get("evidence_fragments") or [])
@@ -1907,11 +2148,19 @@ class SetupChatAgent:
         if missing:
             next_field = _next_supported_field(missing)
             metadata["next_field"] = next_field
-            clarification = _supported_clarification(
-                turn,
-                field_name=next_field,
-                source_seed=unresolved.semantic_object_id or unresolved.unresolved_id,
-            ).model_copy(update={"question_id": unresolved.unresolved_id})
+            # One atomic step: accept this answer, advance the record, and derive the
+            # next question *from the advanced record*. The question the trader is about
+            # to see and the state that will validate their reply are now the same
+            # object, with a question id unique to this step.
+            advanced = (stored or _workflow_from_metadata(unresolved, metadata)).model_copy(
+                update={"current_field": field_name, "remaining_fields": missing}
+            )
+            advanced, clarification = _workflow_step(
+                advanced.accepting(
+                    cast(str | int | float | bool | None, value), evidence=segment_text
+                ).model_copy(update={"current_field": next_field}),
+                language=language_of(turn.active_language),
+            )
             updated = unresolved.model_copy(
                 update={
                     "expected_answer_schema": _supported_answer_schema(
@@ -1947,6 +2196,7 @@ class SetupChatAgent:
                 intro=localized("status.question_answered", language_of(turn.active_language)),
                 include_gates=False,
                 pending_metadata=metadata,
+                workflow=advanced,
             )
 
         node = _condition_from_supported_metadata(
@@ -2001,6 +2251,7 @@ class SetupChatAgent:
         intro: str,
         include_gates: bool,
         pending_metadata: dict[str, object],
+        workflow: PendingClarificationWorkflow | None = None,
     ) -> SetupAgentTurnResult:
         if turn.stage_callback is not None:
             await turn.stage_callback(
@@ -2055,7 +2306,11 @@ class SetupChatAgent:
             }
         )
         if selected is not None:
-            conversation = conversation.with_question(selected)
+            # The workflow is attached only when it really describes this question.
+            # Attaching a mismatched one would trip the conversation's own invariant,
+            # which is exactly what it is there to catch.
+            paired = workflow if workflow is not None and workflow.matches(selected) else None
+            conversation = conversation.with_question(selected, workflow=paired)
         else:
             conversation = conversation.cleared_question()
         final = f"{intro}\n\n{selected.question}" if selected is not None else intro
@@ -3865,7 +4120,45 @@ def _scan_universe_is_ready(draft: StrategyDraftV2) -> bool:
         return bool(policy.approved_watchlist_id and policy.approved_watchlist_version)
     if policy.universe_mode.value == "explicit_assets":
         return bool(policy.explicit_symbols or draft.universe.included_symbols)
+    # A read-only look at the whole screened market needs no extra confirmation. The
+    # open blocker above is the gate: where the product governs the choice it adds one,
+    # and that blocker only closes on a real selection. Demanding a fresh confirmation
+    # here as well would ask for scope in setups that never govern it.
     return True
+
+
+#: The one identity of the "which markets?" question inside a live scan. Stable so a
+#: late or repeated answer is recognised, and so the launch service knows which
+#: governed control a typed answer belongs to.
+SCAN_SCOPE_QUESTION: Final[str] = "scan_screened_scope"
+
+
+def scan_scope_clarification(language: ConversationLanguage) -> ClarificationContract:
+    """Ask which screened markets to look at — as a real, answerable question.
+
+    This used to be a sentence. A sentence cannot be answered: the next message had no
+    open question to land on, so "all" was re-read as a brand new request and the scan
+    the trader had already half-described was quietly dropped.
+
+    It is deliberately **not** mutating. Choosing a screened universe changes governed
+    Sharia policy, and only the application's own allowlisted control may do that. This
+    question collects the choice; the governed route applies it.
+    """
+
+    values = list(display_options(AnswerDomain.UNIVERSE_MODE))
+    labels = labels_for(AnswerDomain.UNIVERSE_MODE, values, language)
+    return ClarificationContract(
+        question_id=SCAN_SCOPE_QUESTION,
+        question=localized("ask.universe", language),
+        reason="A live scan runs over a screened universe the trader has chosen.",
+        target_type="conversational",
+        expected_answer_schema=json.dumps(
+            {"type": "string", "enum": values}, sort_keys=True, separators=(",", ":")
+        ),
+        mutating=False,
+        allowed_options=list(labels.values())[:6],
+        canonical_values=values,
+    )
 
 
 def _supported_direction(text: str) -> str | None:
@@ -3961,6 +4254,8 @@ def _next_supported_field(missing: list[str]) -> str:
         "universe",
     )
     return next((item for item in priority if item in missing), missing[0])
+
+
 #: The name of the goal a half-collected live scan is working towards. One constant,
 #: because the launch service, the option-button path and the agent all test for it.
 READ_ONLY_SCAN_GOAL: Final[str] = "read_only_percentage_scan"
@@ -4093,6 +4388,81 @@ def _supported_clarification(
     )
 
 
+def _workflow_step(
+    workflow: PendingClarificationWorkflow,
+    *,
+    language: ConversationLanguage,
+    mutating: bool = True,
+) -> tuple[PendingClarificationWorkflow, ClarificationContract]:
+    """The question for a workflow's current step, and the record that validates it.
+
+    Both are produced by one call, deliberately. Building them apart is exactly how the
+    assistant came to display step two while still validating against step one: the
+    reply was composed from a freshly derived question, and the durable copy was
+    written by a different code path that could be rewound.
+
+    The offered options come from what the domain can execute, so a displayed choice is
+    always answerable and always compilable.
+    """
+
+    field_name = workflow.current_field
+    domain = domain_for_field(field_name)
+    values = list(canonical_values(domain))
+    shown = list(display_options(domain, values))
+    labels = labels_for(domain, shown, language)
+    question = localized(
+        _CLARIFICATION_KEY_BY_FIELD.get(field_name, "ask.rule_mechanic"), language
+    )
+    expected: dict[str, object] = {
+        "type": "number" if domain is AnswerDomain.PERCENT else "string"
+    }
+    if labels:
+        expected["enum"] = list(labels.values())
+    committed = workflow.model_copy(
+        update={"canonical_values": values[:64], "offered_values": shown[:8]}
+    )
+    contract = ClarificationContract(
+        question_id=committed.question_id,
+        question=question,
+        reason="One user-controlled choice is still required for this supported rule.",
+        target_type="condition_creation",
+        target_field=field_name,
+        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
+        mutating=mutating,
+        allowed_options=list(labels.values())[:6],
+        workflow_id=committed.workflow_id,
+        step_revision=committed.step_revision,
+        canonical_values=values[:64],
+    )
+    return committed, contract
+
+
+def _new_supported_workflow(
+    *,
+    workflow_id: str,
+    fields: Sequence[str],
+    evidence: str,
+    language: ConversationLanguage,
+) -> tuple[PendingClarificationWorkflow, ClarificationContract]:
+    """Open a multi-step question at its first field."""
+
+    ordered = list(dict.fromkeys(fields))
+    first = ordered[0]
+    skeleton = PendingClarificationWorkflow(
+        workflow_id=workflow_id,
+        workflow_kind="supported_rule",
+        step_revision=0,
+        question_id="pending",
+        current_field=first,
+        remaining_fields=ordered[1:],
+        source_evidence=[evidence][:24],
+    )
+    skeleton = skeleton.model_copy(
+        update={"question_id": skeleton.step_question_id(first, 0)}
+    )
+    return _workflow_step(skeleton, language=language)
+
+
 def _supported_answer_schema(
     clarification: ClarificationContract,
     metadata: dict[str, object],
@@ -4127,65 +4497,106 @@ def _supported_metadata(item: UnresolvedFieldV2) -> dict[str, object]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
-def _supported_answer_value(field_name: str, message: str) -> object | None:
-    text = " ".join((message or "").strip().split())
-    lowered = text.casefold()
-    if field_name == "trigger_timeframe":
-        values = extract_timeframes(text)
-        return values[0] if len(values) == 1 and values[0] in {"1h", "4h", "1d"} else None
-    if field_name == "reference_point":
-        if re.search(r"\b(?:previous|prior)\s+(?:candle\s+)?close\b", lowered) or any(
-            phrase in lowered
-            for phrase in (
-                "الإغلاق السابق",
-                "إغلاق الشمعة السابقة",
-                "clôture précédente",
-                "clôture de la bougie précédente",
-                "cierre anterior",
-                "cierre de la vela anterior",
-                "предыдущее закрытие",
-                "закрытие предыдущей свечи",
-            )
-        ):
-            return "previous_close"
-        if re.search(r"\b(?:candle\s+)?open(?:ing)?\b", lowered) or any(
-            phrase in lowered
-            for phrase in (
-                "افتتاح الشمعة",
-                "ouverture de la bougie",
-                "apertura de la vela",
-                "открытие свечи",
-            )
-        ):
-            return "candle_open"
-        return None
-    if field_name == "comparator":
-        comparator = detect_comparator(text)
-        if comparator is not None:
-            return comparator.value
-        if any(phrase in lowered for phrase in (
-            "reaches", "at the threshold", "or beyond", "عند الحد", "أو أكثر",
-            "au seuil", "ou au-delà", "en el umbral", "o más", "на пороге",
-            "или выше",
-        )):
-            return Comparator.GREATER_THAN_OR_EQUAL.value
-        if any(phrase in lowered for phrase in (
-            "passes", "only beyond", "above", "تجاوز", "au-delà",
-            "por encima", "только выше",
-        )):
-            return Comparator.GREATER_THAN.value
-        return None
-    if field_name == "threshold":
-        # Exactly one percentage, or nothing. Two numbers in one answer means the
-        # trader said something this reader cannot resolve, and picking the first is
-        # how a stated value gets replaced by an invented one.
-        percent_values = re.findall(
-            r"(?<![\w.])([-+]?\d+(?:\.\d+)?)\s*(?:%|percent\b|pct\b)",
-            text,
-            re.I,
+def _workflow_from_metadata(
+    unresolved: UnresolvedFieldV2,
+    metadata: Mapping[str, object],
+) -> PendingClarificationWorkflow:
+    """Rebuild a canonical workflow record for a draft written before it existed.
+
+    Old sessions kept their progress inside the unresolved field's answer schema. They
+    are read once, here, and from then on the canonical record is what advances.
+    """
+
+    missing = [str(item) for item in cast(list[object], metadata.get("missing_slots") or [])]
+    current = str(metadata.get("next_field") or (missing[0] if missing else "trigger_timeframe"))
+    remaining = [item for item in missing if item != current]
+    accepted: dict[str, str | int | float | bool | None] = {
+        key: cast(str | int | float | bool | None, metadata[key])
+        for key in ("trigger_timeframe", "reference_point", "comparator", "threshold")
+        if isinstance(metadata.get(key), str | int | float | bool)
+    }
+    skeleton = PendingClarificationWorkflow(
+        workflow_id=unresolved.unresolved_id,
+        workflow_kind="supported_rule",
+        step_revision=0,
+        question_id="pending",
+        current_field=current,
+        remaining_fields=remaining,
+        accepted_values=accepted,
+        source_evidence=[
+            str(item)
+            for item in cast(list[object], metadata.get("evidence_fragments") or [])
+        ][:24],
+    )
+    return skeleton.model_copy(
+        update={"question_id": skeleton.step_question_id(current, 0)}
+    )
+
+
+def _answer_segment_text(
+    turn: SetupAgentTurnInput,
+    envelope: PlannerIntentEnvelope | None,
+) -> str:
+    """The exact words that answered the question, preferring the planner's span."""
+
+    if envelope is not None and envelope.clarification_answers:
+        answer = envelope.clarification_answers[0]
+        return next(
+            (
+                item.exact_source_text
+                for item in envelope.segments
+                if item.segment_ref == answer.segment_ref
+            ),
+            turn.message,
         )
-        return abs(float(percent_values[0])) if len(percent_values) == 1 else None
-    return text or None
+    return turn.message
+
+
+def _read_answer(
+    field_name: str,
+    message: str,
+    *,
+    language: ConversationLanguage,
+    allowed: Sequence[str] = (),
+    offered: Sequence[str] = (),
+    new_request: bool = False,
+) -> AnswerResolution:
+    """Read one answer through the single resolver.
+
+    Every clarification in the product — Scanner scope, alert setup, methodology,
+    watchlists, symbols, timeframes, reference points, comparators — arrives here.
+    Four private readers used to do this, each knowing a different, smaller set of
+    words, so the same answer was accepted in one flow and thrown away in another.
+    """
+
+    domain = domain_for_field(field_name)
+    values = allowed or canonical_values(domain)
+    shown = offered or display_options(domain, values)
+    return resolve_active_answer(
+        message,
+        domain=domain,
+        allowed_options=values,
+        offered_values=shown,
+        display_labels=labels_for(domain, values, language),
+        looks_like_new_request=new_request,
+    )
+
+
+def _supported_answer_value(
+    field_name: str,
+    message: str,
+    *,
+    language: ConversationLanguage = ConversationLanguage.ENGLISH,
+) -> object | None:
+    """Backwards-compatible reader: a stored value, or nothing at all.
+
+    Only a fully resolved answer becomes a value. A near miss, an ambiguity or an
+    unsupported value all return ``None`` here, and the caller keeps the question —
+    which is why the richer typed result is what new callers should use.
+    """
+
+    resolution = _read_answer(field_name, message, language=language)
+    return resolution.canonical_value if resolution.stores_a_value else None
 
 
 def _apply_supported_answer(
@@ -4452,14 +4863,13 @@ def _clarification_for_supported_incomplete(
         target_type = "universe"
         options = ["All screened coins", "One coin", "One approved list"]
         expected = {"type": "string", "enum": options}
-    elif selected == "trigger_timeframe":
-        options = ["1h", "4h", "1d"]
-        expected = {"type": "string", "enum": options}
-    elif selected == "reference_point":
-        options = localized_options("reference_point", language_of(turn.active_language))
-        expected = {"type": "string", "enum": options}
-    elif selected == "comparator":
-        options = ["reaches", "passes"]
+    elif selected in {"trigger_timeframe", "reference_point", "comparator"}:
+        # One authority for every option-based question: what the domain can execute,
+        # narrowed to what is worth showing, then worded. Three separate lists lived
+        # here before, and the timeframe one disagreed with the compiler's registry.
+        domain = domain_for_field(selected)
+        shown = display_options(domain)
+        options = list(labels_for(domain, shown, language_of(turn.active_language)).values())
         expected = {"type": "string", "enum": options}
     elif selected == "threshold":
         expected = {"type": "number"}

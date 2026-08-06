@@ -30,9 +30,16 @@ from ai_market_monitor.db.models import (
     ShariaMethodology,
     User,
 )
-from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
+from ai_market_monitor.db.models.enums import (
+    ShariaAssetStatus,
+    ShariaMethodologyStatus,
+    ShariaUniverseMode,
+)
+from ai_market_monitor.engine.requirement_state import universe_mode_is_user_selected
+from ai_market_monitor.schemas.strategy_draft_v2 import DraftMode
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
+from ai_market_monitor.services.setup_chat_agent import SCAN_SCOPE_QUESTION
 from ai_market_monitor.services.setup_chat_launch import load_strategy_draft_v2
 from tests.factories import methodology_evidence_requirements, methodology_rules
 from tests.integration.test_setup_chat_launch_v2 import (
@@ -299,6 +306,124 @@ async def test_the_three_turn_scanner_flow_reaches_governed_execution(test_conte
         after = load_strategy_draft_v2(chat)
         assert after.condition_ast is None
         assert not after.approval.approved
+
+
+async def _scope_answer_journey(test_context, *, answer: str, prefix: str):
+    """Scanner -> query -> window -> a typed scope answer -> governed execution."""
+
+    user = await _scanner_user(test_context)
+    provider = ScannerMarketProvider()
+    service = AISetupChatService(
+        _scanner_settings(test_context["settings"]),
+        provider,
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        for index, message in enumerate(
+            ("Scanner", "what coins are up at least 5% now?", "24 hours", answer),
+            start=1,
+        ):
+            await service.handle_message(
+                session,
+                chat,
+                message=message,
+                client_message_id=f"{prefix}-{index}",
+            )
+        run = await session.scalar(
+            select(OnDemandScanRun).where(OnDemandScanRun.user_id == user.id)
+        )
+        messages = (
+            await session.scalars(
+                select(AISetupChatMessage)
+                .where(AISetupChatMessage.session_id == chat.id)
+                .order_by(AISetupChatMessage.sequence)
+            )
+        ).all()
+        return chat, run, messages, provider
+
+
+async def test_typing_all_answers_the_scope_question_and_runs_the_scan(test_context):
+    """The reported dead end: "all" used to be read as a brand new request."""
+
+    chat, run, messages, provider = await _scope_answer_journey(
+        test_context, answer="all", prefix="scope-all"
+    )
+
+    assert run is not None, "a typed scope answer must reach a durable governed run"
+    assert provider.metadata_calls >= 1
+    result = next(item for item in reversed(messages) if item.message_type == "scanner_result")
+    assert "BTC/USDT" in result.content
+    assert "+7.25%" in result.content
+    assert "ETH/USDT" not in result.content
+
+    # The values from the earlier turns were never asked for a second time.
+    asked = [item.content for item in messages if item.role == "assistant"]
+    assert sum("rolling 24-hour percentage change" in item for item in asked) == 1
+    assert not any("5%" in item and "?" in item for item in asked[3:])
+
+
+async def test_choosing_the_whole_market_records_that_a_person_chose_it(test_context):
+    """The default value alone proves nothing; the selection is what proves it."""
+
+    chat, run, _messages, _provider = await _scope_answer_journey(
+        test_context, answer="All eligible spot assets", prefix="scope-label"
+    )
+
+    assert run is not None
+    draft = load_strategy_draft_v2(chat)
+    assert draft.sharia_policy.universe_mode is ShariaUniverseMode.ELIGIBLE_MARKET
+    assert universe_mode_is_user_selected(draft), (
+        "choosing the whole screened market must be recorded as a choice, "
+        "even though the stored value never changed"
+    )
+    assert not any(
+        item.unresolved_id == "sharia.universe_mode" for item in draft.unresolved_fields
+    )
+
+
+async def test_a_scope_answer_never_mutates_or_approves_a_strategy(test_context):
+    chat, run, _messages, _provider = await _scope_answer_journey(
+        test_context, answer="all coins", prefix="scope-safety"
+    )
+
+    assert run is not None
+    draft = load_strategy_draft_v2(chat)
+    assert draft.condition_ast is None
+    assert not draft.approval.approved
+    assert draft.mode is DraftMode.SCANNER
+
+
+async def test_an_unreadable_scope_answer_keeps_the_question_and_the_scan(test_context):
+    """Nothing is lost when the answer cannot be read — the scan is still waiting."""
+
+    user = await _scanner_user(test_context)
+    service = AISetupChatService(
+        _scanner_settings(test_context["settings"]),
+        ScannerMarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], StandInPlanner()),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        for index, message in enumerate(
+            ("Scanner", "what coins are up at least 5% now?", "24 hours"), start=1
+        ):
+            await service.handle_message(
+                session, chat, message=message, client_message_id=f"scope-bad-{index}"
+            )
+        conversation = _conversation_of(chat)
+        assert conversation.get("active_question_id") == SCAN_SCOPE_QUESTION
+
+        run = await session.scalar(
+            select(OnDemandScanRun).where(OnDemandScanRun.user_id == user.id)
+        )
+        assert run is None, "no scan may run before its scope is chosen"
+        pending = dict(conversation.get("pending_read_only_scan") or {})
+        assert pending.get("threshold_percent") == 5
+        assert pending.get("movement_direction") == "up"
+        assert pending.get("measurement_window") == "24h"
 
 
 def test_recording_a_turn_can_never_be_the_thing_that_fails_it() -> None:

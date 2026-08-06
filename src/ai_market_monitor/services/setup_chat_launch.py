@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from time import monotonic
-from typing import Any, Literal, cast, get_args
+from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
@@ -39,6 +39,13 @@ from ai_market_monitor.db.models.enums import (
     ShariaAssetStatus,
     ShariaMethodologyStatus,
     ShariaUniverseMode,
+)
+from ai_market_monitor.engine.active_question import (
+    AnswerDomain,
+    AnswerOutcome,
+    display_options,
+    labels_for,
+    resolve_active_answer,
 )
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
@@ -116,6 +123,7 @@ from ai_market_monitor.services.market_preview import (
 )
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError
 from ai_market_monitor.services.setup_chat_agent import (
+    SCAN_SCOPE_QUESTION,
     SetupAgentError,
     SetupAgentTurnInput,
     SetupChatAgent,
@@ -161,6 +169,23 @@ _LAUNCH_STAGE_BY_AGENT_STAGE: dict[str, LaunchStage] = {
 #: usable candles. Part of the cache identity, so old entries are never reinterpreted
 #: under new rules; they simply stop matching and the check is redone.
 _PREFLIGHT_CONTRACT_VERSION = 2
+
+#: Which canonical requirement each server-rendered control authorises. A control is
+#: the only place where "the person chose this" is known for certain, so it says so
+#: explicitly rather than leaving reconciliation to infer choice from a changed value.
+#: Re-selecting the value that is already stored is a choice too — "all eligible spot
+#: assets" is also the platform default, and inferring from change alone left it
+#: permanently unanswerable.
+SERVER_OPTION_CONFIRMED_PATHS: Final[dict[str, frozenset[str]]] = {
+    "screened_universe_mode": frozenset({"sharia_policy.universe_mode"}),
+    "screened_watchlist": frozenset(
+        {"sharia_policy.universe_mode", "sharia_policy.approved_watchlist_id"}
+    ),
+    "screened_explicit_assets": frozenset(
+        {"sharia_policy.universe_mode", "sharia_policy.explicit_symbols"}
+    ),
+    "sharia_methodology": frozenset({"sharia_policy.methodology_id"}),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +312,13 @@ class SetupChatLaunchService:
             typed_mode = selected_mode_word(cleaned)
             if typed_mode is not None:
                 option_key, option_value = "setup_mode", typed_mode
+        if not option_key:
+            # Typing "all" while the scope question is open is the same choice as
+            # pressing "All eligible spot assets", so it takes the same governed route.
+            # One path, one recorded provenance, whichever way the trader answered.
+            typed_scope = _typed_scope_answer(chat, cleaned)
+            if typed_scope is not None:
+                option_key, option_value = "screened_universe_mode", typed_scope
         if option_key:
             if client_message_id:
                 turn_record = await self._get_or_create_turn(
@@ -647,6 +679,9 @@ return tostring(next_value)
                 runtime_preflight=self._runtime_preflight(),
                 preflight_manifest=self._read_preflight_manifest,
                 server_owned_option=True,
+                server_option_confirmed_paths=SERVER_OPTION_CONFIRMED_PATHS.get(
+                    option_key, frozenset()
+                ),
             )
         )
         if callback is not None:
@@ -3784,6 +3819,35 @@ def _pending_scope_clarifications(
     return []
 
 
+def _typed_scope_answer(chat: AISetupChatSession, message: str) -> str | None:
+    """A written answer to the open screened-scope question, as a canonical value.
+
+    Returns ``None`` unless that exact question is the one on screen — so an ordinary
+    message containing the word "all" is never mistaken for a governed scope choice.
+    Only a fully resolved reading is accepted; a near miss or an ambiguity is left to
+    the conversational path, which keeps the question and explains.
+    """
+
+    conversation = _load_conversation_context(dict(chat.context_json or {}))
+    question = conversation.active_question
+    if question is None or question.question_id != SCAN_SCOPE_QUESTION:
+        return None
+    language = language_of(conversation.active_language)
+    values = list(question.canonical_values) or list(
+        display_options(AnswerDomain.UNIVERSE_MODE)
+    )
+    resolution = resolve_active_answer(
+        message,
+        domain=AnswerDomain.UNIVERSE_MODE,
+        allowed_options=values,
+        offered_values=values,
+        display_labels=labels_for(AnswerDomain.UNIVERSE_MODE, values, language),
+    )
+    if resolution.outcome is not AnswerOutcome.RESOLVED:
+        return None
+    return str(resolution.canonical_value)
+
+
 def _scan_draft_scope_ready(draft: StrategyDraftV2) -> bool:
     policy = draft.sharia_policy
     if policy.methodology_id is None or not policy.methodology_version:
@@ -3802,6 +3866,8 @@ def _scan_draft_scope_ready(draft: StrategyDraftV2) -> bool:
         policy.universe_mode == ShariaUniverseMode.EXPLICIT_ASSETS
         and not policy.explicit_symbols
     )
+
+
 def _governed_scan_message(result: dict[str, Any], language: str) -> str:
     tongue = language_of(language)
     matches = [

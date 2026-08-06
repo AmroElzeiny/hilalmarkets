@@ -43,6 +43,7 @@ from ai_market_monitor.engine.conversation_language import (
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.turn_fragments import extract_symbols, extract_timeframes
 from ai_market_monitor.schemas.setup_authorization import ClarificationContract
+from ai_market_monitor.schemas.timeframes import COMMON_TIMEFRAMES
 
 __all__ = [
     "MissingChoice",
@@ -132,10 +133,11 @@ _OPTIONS: Final[dict[MissingChoice, dict[ConversationLanguage, tuple[str, ...]]]
     },
 }
 
-#: Which real timeframe each offered label means. Every option a clarification shows
-#: must appear here, and every value here must be in ``SUPPORTED_TIMEFRAMES``.
+#: Which real timeframe each offered label means. Derived from the canonical registry
+#: rather than written out again: this list existed by hand in three modules, and one
+#: copy offered a period the compiler could not run.
 OFFERED_WINDOW_TIMEFRAMES: Final[dict[MissingChoice, tuple[str, ...]]] = {
-    MissingChoice.MEASUREMENT_WINDOW: ("1h", "4h", "1d"),
+    MissingChoice.MEASUREMENT_WINDOW: COMMON_TIMEFRAMES,
 }
 
 
