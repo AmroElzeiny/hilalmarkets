@@ -105,6 +105,13 @@ class SetupChatMessageRequest(BaseModel):
     option_value: str | None = Field(default=None, max_length=500)
     option_label: str | None = Field(default=None, max_length=120)
     client_message_id: str | None = Field(default=None, min_length=8, max_length=80)
+    #: The question this answer was written under, as the client saw it. Optional, and
+    #: checked only when sent: a typed answer carries no such identity and must stay
+    #: possible. When it *is* sent and the workflow has since advanced, the answer is
+    #: refused rather than landing on whatever field is current now — a button clicked
+    #: on a stale screen is an answer to a question the trader can no longer see.
+    question_id: str | None = Field(default=None, max_length=120)
+    step_revision: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def require_message_or_option(self) -> "SetupChatMessageRequest":

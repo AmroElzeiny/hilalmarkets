@@ -56,15 +56,22 @@ from ai_market_monitor.schemas.timeframes import (
 )
 
 __all__ = [
+    "AFFIRMATIVE_ANSWERS",
+    "NEGATIVE_ANSWERS",
+    "RESUME_REQUESTS",
     "AnswerDomain",
     "AnswerOutcome",
     "AnswerResolution",
+    "AnswerStage",
+    "ConfirmationReply",
     "canonical_values",
     "display_options",
     "domain_for_field",
+    "is_resume_request",
     "labels_for",
     "normalize_answer_text",
     "resolve_active_answer",
+    "resolve_confirmation",
 ]
 
 
@@ -102,6 +109,31 @@ class AnswerDomain(StrEnum):
     FREE_TEXT = "free_text"
 
 
+class AnswerStage(StrEnum):
+    """Which of the two questions a message was read against.
+
+    A near miss turns one question into two. ``qh`` does not answer *which period?*, so
+    the assistant asks a second, narrower question — *did you mean 1h?* — and the next
+    message belongs to **that** one. Reading it against the period question again is how
+    a plain ``yes`` used to be thrown away: it is not a period, so it looked like
+    nonsense, and the trader was shown the same list a third time.
+    """
+
+    #: Waiting for a value from the question's own domain.
+    ANSWER = "answer"
+    #: Waiting for yes or no about one exact proposed value.
+    CONFIRMATION = "confirmation"
+
+
+class ConfirmationReply(StrEnum):
+    """What one message said about a yes/no question."""
+
+    AFFIRMATIVE = "AFFIRMATIVE"
+    NEGATIVE = "NEGATIVE"
+    #: Neither. Never guessed either way — a wrong guess stores a value nobody chose.
+    UNCLEAR = "UNCLEAR"
+
+
 @dataclass(frozen=True, slots=True)
 class AnswerResolution:
     """One typed outcome, and the evidence for it."""
@@ -112,6 +144,20 @@ class AnswerResolution:
     candidates: tuple[str, ...] = field(default_factory=tuple)
     #: Operator-facing, never rendered raw to a beginner.
     reason: str = ""
+    #: Which question this message was read against.
+    stage: AnswerStage = AnswerStage.ANSWER
+    #: The near miss the caller must still hold, or ``None`` to drop it. This is the
+    #: whole confirmation sub-state: one field, written by the resolver, stored by the
+    #: caller. Nothing else may set it, so a proposal can never outlive its question.
+    proposed_value: str | None = None
+    #: True when the message *did* look like an answer and the trouble was choosing
+    #: between readings. False when nothing in it answers the question at all.
+    #:
+    #: The two need different words. "I found two things this could mean" invites the
+    #: trader to pick; "I could not read that" invites them to try again. Both used to
+    #: come back as the same shrug, so a trader one keystroke from success was told the
+    #: same thing as one who typed nonsense.
+    plausible_readings: bool = False
 
     @property
     def stores_a_value(self) -> bool:
@@ -126,6 +172,16 @@ class AnswerResolution:
             AnswerOutcome.AMBIGUOUS,
             AnswerOutcome.UNSUPPORTED,
         }
+
+    @property
+    def rejected_candidate(self) -> bool:
+        """True when the trader said "no, that is not what I meant"."""
+
+        return (
+            self.stage is AnswerStage.CONFIRMATION
+            and self.outcome is AnswerOutcome.AMBIGUOUS
+            and self.proposed_value is None
+        )
 
 
 # --------------------------------------------------------------------------------
@@ -319,6 +375,118 @@ def domain_for_field(field_name: str | None) -> AnswerDomain:
     return _DOMAIN_BY_FIELD.get(str(field_name or ""), AnswerDomain.FREE_TEXT)
 
 
+#: "Yes." Every wording of it, in every language the product answers in.
+#:
+#: This is the *only* list of these words. There were three: this module's scan-window
+#: aliases, ``conversation_intent._WINDOW_24H`` and the social-turn vocabulary, and each
+#: knew a different subset — ``تمام`` agreed to a scan window but not to a spelling
+#: correction, ``correct`` agreed to neither. Every caller now imports this one.
+AFFIRMATIVE_ANSWERS: Final[frozenset[str]] = frozenset(
+    {
+        "yes", "yeah", "yep", "yup", "ya", "yeh", "aye", "ok", "okay", "k",
+        "sure", "correct", "right", "exactly", "true", "confirm", "confirmed",
+        "use it", "that one", "thats it", "that is it", "go ahead", "do it",
+        "please do", "of course", "definitely", "indeed", "affirmative",
+        "sounds good", "that works", "fine", "good", "perfect", "agreed",
+        "نعم", "أيوه", "ايوه", "اه", "آه", "تمام", "ماشي", "حاضر", "موافق",
+        "صح", "بالظبط", "أكيد", "اكيد", "ايوا", "أيوا", "زي ما قلت", "هو ده",
+        "oui", "ouais", "d'accord", "exactement", "c'est ça", "bien sûr",
+        "parfait", "vas y", "allez y",
+        "sí", "si", "claro", "vale", "exacto", "correcto", "por supuesto",
+        "de acuerdo", "eso es", "perfecto",
+        "да", "ага", "хорошо", "ладно", "конечно", "верно", "точно",
+        "именно", "согласен", "давай",
+    }
+)
+
+#: "No." The mirror of the list above, and read by the same resolver.
+NEGATIVE_ANSWERS: Final[frozenset[str]] = frozenset(
+    {
+        "no", "nope", "nah", "naw", "not that", "not this", "not it",
+        "wrong", "incorrect", "thats wrong", "that is wrong", "negative",
+        "not what i meant", "not what i said", "something else", "another one",
+        "different", "neither", "false",
+        "لا", "لأ", "مش ده", "مش دي", "مش كده", "غلط", "خطأ", "مش صح",
+        "مش اللي قصدته", "حاجة تانية", "لا مش ده",
+        "non", "pas ça", "pas celui là", "faux", "autre chose",
+        "ce n'est pas ça",
+        "eso no", "incorrecto", "falso", "otra cosa", "no es eso",
+        "нет", "не то", "неверно", "неправильно", "другое", "не это",
+    }
+)
+
+
+#: The shortest word a spelling guess may be made about. Below this, one edit is the
+#: whole word: ``x`` sits one edit from ``k``, and ``no`` from ``ok``. A confirmation
+#: *stores* a value the moment it reads a yes, so it cannot afford that — unlike the
+#: option matching further down, which only ever asks.
+_MINIMUM_TOLERANT_LENGTH: Final[int] = 3
+
+
+def _confirmation_forms(words: Iterable[str]) -> tuple[frozenset[str], frozenset[str]]:
+    """The forms of one yes/no vocabulary that may be matched exactly, and loosely.
+
+    Every wording can be matched exactly, in both its filler-stripped and its plain
+    collapsed spelling — ``yes please`` and ``yes`` are the same answer.
+
+    Only a *single word* long enough to be worth guessing about may be matched loosely.
+    Filler-stripping turns ``that one`` into ``that`` and ``use it`` into ``it``, and a
+    one-edit guess against those stems read ``what`` as a yes.
+    """
+
+    exact: set[str] = set()
+    tolerant: set[str] = set()
+    for word in words:
+        stripped = normalize_answer_text(word)
+        plain = " ".join(
+            unicodedata.normalize("NFKC", word).casefold().translate(_ARABIC_FOLD).split()
+        )
+        exact.update(item for item in (stripped, plain) if item)
+        if (
+            len(word.split()) == 1
+            and len(stripped) >= _MINIMUM_TOLERANT_LENGTH
+            and " " not in stripped
+        ):
+            tolerant.add(stripped)
+    return frozenset(exact), frozenset(tolerant)
+
+
+_AFFIRMATIVE_EXACT, _AFFIRMATIVE_TOLERANT = _confirmation_forms(AFFIRMATIVE_ANSWERS)
+_NEGATIVE_EXACT, _NEGATIVE_TOLERANT = _confirmation_forms(NEGATIVE_ANSWERS)
+
+
+def resolve_confirmation(message: str) -> ConfirmationReply:
+    """Read one message as yes, no, or neither. The single boolean resolver.
+
+    Tolerant in exactly the way the rest of this module is — the same normalisation, at
+    most one typing mistake — and stricter in one way, on purpose. A yes here *stores* a
+    value, so a guess is only made about a single word of three letters or more.
+    ``yse`` is yes. ``x`` is not, and neither is ``what``: both sit one edit from
+    something, and neither is a trader agreeing to anything.
+    """
+
+    normalized = normalize_answer_text(message)
+    if not normalized:
+        return ConfirmationReply.UNCLEAR
+    if normalized in _AFFIRMATIVE_EXACT:
+        # An exact match wins outright. Some words sit one edit from a word in the
+        # other list, and a spelling guess must never flip yes into no.
+        return ConfirmationReply.AFFIRMATIVE
+    if normalized in _NEGATIVE_EXACT:
+        return ConfirmationReply.NEGATIVE
+    if " " in normalized or len(normalized) < _MINIMUM_TOLERANT_LENGTH:
+        # A whole sentence is not a misspelled "yes", and a one- or two-letter answer
+        # carries no spare information to correct against.
+        return ConfirmationReply.UNCLEAR
+    near_yes = any(_within_one_edit(normalized, word) for word in _AFFIRMATIVE_TOLERANT)
+    near_no = any(_within_one_edit(normalized, word) for word in _NEGATIVE_TOLERANT)
+    if near_yes and not near_no:
+        return ConfirmationReply.AFFIRMATIVE
+    if near_no and not near_yes:
+        return ConfirmationReply.NEGATIVE
+    return ConfirmationReply.UNCLEAR
+
+
 #: What each canonical value is called, in every language the product answers in. The
 #: labels a button shows come from here too, so a typed answer and a click cannot
 #: disagree about what the option means.
@@ -423,14 +591,17 @@ _ALIASES: Final[dict[AnswerDomain, dict[str, tuple[str, ...]]]] = {
         ),
     },
     AnswerDomain.SCAN_WINDOW: {
+        # The provider exposes one window, so agreeing to the question *is* choosing it.
+        # The agreement words come from the shared list rather than a private copy —
+        # that copy is what made ``correct`` an answer here and nowhere else.
         "24h": (
             "24h", "24 hours", "24 hour", "last 24 hours", "past 24 hours",
-            "rolling 24 hours", "a day", "one day", "today", "yes", "yeah", "yep",
-            "ok", "okay", "sure", "go ahead", "that works", "fine",
-            "24 ساعة", "اخر 24 ساعة", "يوم", "نعم", "أيوه", "تمام", "ماشي", "موافق",
-            "24 heures", "dernières 24 heures", "un jour", "oui", "d'accord",
-            "24 horas", "últimas 24 horas", "un día", "sí", "si", "vale",
-            "24 часа", "последние 24 часа", "сутки", "да", "хорошо", "ладно",
+            "rolling 24 hours", "a day", "one day", "today",
+            "24 ساعة", "اخر 24 ساعة", "يوم",
+            "24 heures", "dernières 24 heures", "un jour",
+            "24 horas", "últimas 24 horas", "un día",
+            "24 часа", "последние 24 часа", "сутки",
+            *sorted(AFFIRMATIVE_ANSWERS),
         ),
     },
 }
@@ -446,6 +617,33 @@ _CANCEL: Final[frozenset[str]] = frozenset(
         "отмена", "отменить", "стоп", "забудь",
     }
 )
+
+#: Asking to pick up a question that was put down. A paused platform requirement is
+#: still required, so there has to be a way back to it that a beginner would guess.
+RESUME_REQUESTS: Final[frozenset[str]] = frozenset(
+    {
+        "continue", "resume", "carry on", "go on", "keep going", "finish it",
+        "finish setup", "lets continue", "back to it", "where were we",
+        "كمل", "أكمل", "نكمل", "استمر", "رجعنا", "نرجع",
+        "continuer", "reprendre", "on continue",
+        "continuar", "seguir", "sigamos", "retomar",
+        "продолжить", "продолжим", "дальше",
+    }
+)
+
+
+def is_resume_request(message: str) -> bool:
+    """Whether this turn asks to pick a paused question back up.
+
+    Whole-message only. "Continue" on its own is a request to resume; the same word
+    inside a sentence that also states a rule is part of that rule, and reading it as a
+    resume would throw the rule away.
+    """
+
+    normalized = normalize_answer_text(message)
+    if not normalized:
+        return False
+    return normalized in {normalize_answer_text(word) for word in RESUME_REQUESTS}
 
 
 def _canonical_values(domain: AnswerDomain, allowed: Sequence[str]) -> tuple[str, ...]:
@@ -589,6 +787,7 @@ def resolve_active_answer(
     offered_values: Sequence[str] = (),
     display_labels: Mapping[str, str] | None = None,
     looks_like_new_request: bool = False,
+    proposed_value: str | None = None,
 ) -> AnswerResolution:
     """Read one message as an answer to the one question that is open.
 
@@ -602,10 +801,122 @@ def resolve_active_answer(
     because a trader looking at three buttons who mistypes almost certainly meant one
     of the three.
 
+    ``proposed_value`` is a near miss already put to the trader as *did you mean X?*.
+    While it is set the question on screen is a yes/no, and that is what this message is
+    read against first.  The value is still never stored without a yes.
+
     The result is always typed.  A caller that receives anything other than
     ``RESOLVED`` must leave the question, the accepted values and the workflow exactly
-    as they were.
+    as they were, and must store ``proposed_value`` from the result — including when it
+    comes back ``None``, which is how a rejected or superseded proposal is cleared.
     """
+
+    if proposed_value is not None:
+        return _resolve_confirmation_turn(
+            message,
+            domain=domain,
+            allowed_options=allowed_options,
+            offered_values=offered_values,
+            display_labels=display_labels,
+            looks_like_new_request=looks_like_new_request,
+            proposed_value=proposed_value,
+        )
+    return _resolve_domain_answer(
+        message,
+        domain=domain,
+        allowed_options=allowed_options,
+        offered_values=offered_values,
+        display_labels=display_labels,
+        looks_like_new_request=looks_like_new_request,
+    )
+
+
+def _resolve_confirmation_turn(
+    message: str,
+    *,
+    domain: AnswerDomain,
+    allowed_options: Sequence[str],
+    offered_values: Sequence[str],
+    display_labels: Mapping[str, str] | None,
+    looks_like_new_request: bool,
+    proposed_value: str,
+) -> AnswerResolution:
+    """Read one message against an open *did you mean X?*.
+
+    Three readings, in this order, and the order is the whole design:
+
+    1. a stop word ends the question, as it does anywhere else;
+    2. yes or no decides the proposal;
+    3. anything else is tried as a fresh answer to the original question, because a
+       trader who typed ``qh`` and then ``4h`` has corrected themselves and should not
+       have to say "no" first.
+
+    A message none of those can read keeps the proposal and asks for yes or no again.
+    It is never handed to the planner: a reply to our own yes/no question is not a new
+    request, however oddly it is worded.
+    """
+
+    raw = " ".join((message or "").split())
+    normalized = normalize_answer_text(raw)
+    if normalized and normalized in {normalize_answer_text(word) for word in _CANCEL}:
+        return AnswerResolution(
+            AnswerOutcome.CANCELLED,
+            reason="explicit cancellation",
+            stage=AnswerStage.CONFIRMATION,
+        )
+    confirmation = resolve_confirmation(raw)
+    if confirmation is ConfirmationReply.AFFIRMATIVE:
+        return AnswerResolution(
+            AnswerOutcome.RESOLVED,
+            canonical_value=proposed_value,
+            reason="the trader confirmed the proposed value",
+            stage=AnswerStage.CONFIRMATION,
+        )
+    if confirmation is ConfirmationReply.NEGATIVE:
+        # Rejected, not restarted. The proposal goes; every value already accepted, the
+        # workflow and this same question all stay exactly as they were.
+        return AnswerResolution(
+            AnswerOutcome.AMBIGUOUS,
+            candidates=tuple(offered_values) or tuple(allowed_options),
+            reason="the trader rejected the proposed value",
+            stage=AnswerStage.CONFIRMATION,
+        )
+    fresh = _resolve_domain_answer(
+        raw,
+        domain=domain,
+        allowed_options=allowed_options,
+        offered_values=offered_values,
+        display_labels=display_labels,
+        looks_like_new_request=looks_like_new_request,
+    )
+    if fresh.outcome in {
+        AnswerOutcome.RESOLVED,
+        AnswerOutcome.CONFIRM_CANDIDATE,
+        AnswerOutcome.CANCELLED,
+        AnswerOutcome.NEW_REQUEST,
+    }:
+        # A real reading supersedes the proposal, so the old one is dropped rather than
+        # left behind to be confirmed by a later, unrelated "yes".
+        return fresh
+    return AnswerResolution(
+        AnswerOutcome.CONFIRM_CANDIDATE,
+        canonical_value=proposed_value,
+        reason="neither yes nor no, and no other reading; ask the same yes/no again",
+        stage=AnswerStage.CONFIRMATION,
+        proposed_value=proposed_value,
+    )
+
+
+def _resolve_domain_answer(
+    message: str,
+    *,
+    domain: AnswerDomain,
+    allowed_options: Sequence[str] = (),
+    offered_values: Sequence[str] = (),
+    display_labels: Mapping[str, str] | None = None,
+    looks_like_new_request: bool = False,
+) -> AnswerResolution:
+    """Read one message as a value from ``domain``. No confirmation state involved."""
 
     raw = " ".join((message or "").split())
     if not raw:
@@ -626,6 +937,7 @@ def resolve_active_answer(
             AnswerOutcome.AMBIGUOUS,
             candidates=tuple(sorted(exact)),
             reason="one written form, several canonical meanings",
+            plausible_readings=True,
         )
 
     read = _domain_reader(domain, raw)
@@ -660,10 +972,12 @@ def resolve_active_answer(
     )
     for label, matches in tiers:
         if len(matches) == 1:
+            candidate = next(iter(matches))
             return AnswerResolution(
                 AnswerOutcome.CONFIRM_CANDIDATE,
-                canonical_value=next(iter(matches)),
+                canonical_value=candidate,
                 reason=f"one {label} match; confirm before storing",
+                proposed_value=candidate,
             )
     for label, matches in tiers:
         if matches:
@@ -671,6 +985,7 @@ def resolve_active_answer(
                 AnswerOutcome.AMBIGUOUS,
                 candidates=tuple(sorted(matches)),
                 reason=f"several {label} matches",
+                plausible_readings=True,
             )
 
     if looks_like_new_request:

@@ -715,6 +715,64 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: "No lo entendí. Puedes elegir: {options}.",
         ConversationLanguage.RUSSIAN: "Я не понял. Можно выбрать: {options}.",
     },
+    #: Several readings were equally good. Different from "I did not understand": the
+    #: trader nearly hit one of these, so the reply invites them to pick rather than
+    #: implying they typed nonsense.
+    "ask.pick_one_reading": {
+        ConversationLanguage.ENGLISH: (
+            "That could mean more than one thing. Which did you want: {options}?"
+        ),
+        ConversationLanguage.ARABIC: "ده ممكن يبقى أكتر من حاجة. تقصد أنهي: {options}؟",
+        ConversationLanguage.FRENCH: (
+            "Cela peut vouloir dire plusieurs choses. Laquelle vouliez-vous : {options} ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "Eso puede significar varias cosas. ¿Cuál querías: {options}?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Это можно понять по-разному. Что вы имели в виду: {options}?"
+        ),
+    },
+    #: An answer written against a question that has since moved on — a button clicked
+    #: on a stale screen. It is refused, and the question really on screen is repeated.
+    "ask.stale_answer": {
+        ConversationLanguage.ENGLISH: (
+            "That answer was for an earlier question, so I did not use it. Here is where "
+            "we are now."
+        ),
+        ConversationLanguage.ARABIC: (
+            "الإجابة دي كانت لسؤال قديم، فما استخدمتهاش. إحنا واقفين هنا دلوقتي."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Cette réponse concernait une question précédente, je ne l'ai donc pas "
+            "utilisée. Voici où nous en sommes."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Esa respuesta era para una pregunta anterior, así que no la usé. Esto es lo "
+            "que falta ahora."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Этот ответ относился к предыдущему вопросу, поэтому я его не применил. Вот "
+            "текущий шаг."
+        ),
+    },
+    #: Coming back to a question the trader put down. It names nothing as new: every
+    #: value they already chose is still there.
+    "status.setup_resumed": {
+        ConversationLanguage.ENGLISH: (
+            "Picking up where we left off. Everything you already chose is still saved."
+        ),
+        ConversationLanguage.ARABIC: "نكمل من حيث وقفنا. كل اللي اخترته قبل كده لسه محفوظ.",
+        ConversationLanguage.FRENCH: (
+            "Reprenons où nous en étions. Tout ce que vous aviez choisi est conservé."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Seguimos donde lo dejamos. Todo lo que ya elegiste sigue guardado."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Продолжаем с того же места. Всё, что вы уже выбрали, сохранено."
+        ),
+    },
     "ask.unsupported_value": {
         ConversationLanguage.ENGLISH: (
             "I cannot use that value here. You can pick: {options}."
@@ -730,12 +788,103 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "Я не могу использовать это значение здесь. Можно выбрать: {options}."
         ),
     },
+    #: Asked again, on its own, when a reply to `ask.confirm_candidate` was neither yes
+    #: nor no. It repeats the proposal so the trader is never asked "yes or no?" about
+    #: something they have to scroll up to find.
+    "ask.confirm_yes_no": {
+        ConversationLanguage.ENGLISH: (
+            "Sorry, I still need a yes or a no. Did you mean {candidate}?"
+        ),
+        ConversationLanguage.ARABIC: "آسف، محتاج نعم أو لا. تقصد {candidate}؟",
+        ConversationLanguage.FRENCH: (
+            "Désolé, il me faut un oui ou un non. Vouliez-vous dire {candidate} ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "Perdona, necesito un sí o un no. ¿Querías decir {candidate}?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Извините, нужно да или нет. Вы имели в виду {candidate}?"
+        ),
+    },
+    #: The trader said "no, that is not what I meant". Nothing they already chose is
+    #: lost, and the same question comes back with its choices.
+    "ask.confirm_rejected": {
+        ConversationLanguage.ENGLISH: "No problem. You can pick: {options}.",
+        ConversationLanguage.ARABIC: "ولا يهمك. تقدر تختار: {options}.",
+        ConversationLanguage.FRENCH: "Pas de souci. Vous pouvez choisir : {options}.",
+        ConversationLanguage.SPANISH: "Sin problema. Puedes elegir: {options}.",
+        ConversationLanguage.RUSSIAN: "Ничего страшного. Можно выбрать: {options}.",
+    },
     "status.question_cancelled": {
         ConversationLanguage.ENGLISH: "Alright, I stopped that question. Nothing was saved.",
         ConversationLanguage.ARABIC: "تمام، وقفت السؤال ده. مفيش حاجة اتحفظت.",
         ConversationLanguage.FRENCH: "D'accord, j'arrête cette question. Rien n'a été enregistré.",
         ConversationLanguage.SPANISH: "De acuerdo, dejo esa pregunta. No se guardó nada.",
         ConversationLanguage.RUSSIAN: "Хорошо, я закрыл этот вопрос. Ничего не сохранено.",
+    },
+    #: A rule the trader started and then dropped. Saying what was removed matters: the
+    #: half-built rule is gone, and nothing was created in its place.
+    "status.rule_cancelled": {
+        ConversationLanguage.ENGLISH: (
+            "Alright, I dropped that unfinished rule. Nothing was created and the rest "
+            "of your setup is untouched."
+        ),
+        ConversationLanguage.ARABIC: (
+            "تمام، شلت القاعدة اللي مكملناهاش. مفيش حاجة اتعملت وباقي إعدادك زي ما هو."
+        ),
+        ConversationLanguage.FRENCH: (
+            "D'accord, j'ai supprimé cette règle inachevée. Rien n'a été créé et le "
+            "reste de votre configuration est intact."
+        ),
+        ConversationLanguage.SPANISH: (
+            "De acuerdo, quité esa regla sin terminar. No se creó nada y el resto de tu "
+            "configuración sigue igual."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Хорошо, я убрал это незаконченное правило. Ничего не создано, остальная "
+            "настройка не изменилась."
+        ),
+    },
+    #: The platform itself needs this answer. It is put down, never thrown away, and the
+    #: reply says so — a cancellation that hid a live blocker is the defect this fixes.
+    "status.setup_paused": {
+        ConversationLanguage.ENGLISH: (
+            "Alright, I paused that question. Your setup is still incomplete until it is "
+            "answered — say \"continue\" whenever you want to come back to it."
+        ),
+        ConversationLanguage.ARABIC: (
+            "تمام، وقفت السؤال ده مؤقتًا. إعدادك لسه ناقص لحد ما تجاوب عليه — "
+            "اكتب \"كمل\" وقت ما تحب نرجع له."
+        ),
+        ConversationLanguage.FRENCH: (
+            "D'accord, j'ai mis cette question en pause. Votre configuration reste "
+            "incomplète tant qu'elle n'a pas de réponse — dites « continuer » quand vous "
+            "voulez y revenir."
+        ),
+        ConversationLanguage.SPANISH: (
+            "De acuerdo, pausé esa pregunta. Tu configuración sigue incompleta hasta que "
+            "la respondas: di «continuar» cuando quieras volver a ella."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Хорошо, я поставил этот вопрос на паузу. Настройка остаётся незавершённой, "
+            "пока на него нет ответа — напишите «продолжить», когда захотите вернуться."
+        ),
+    },
+    "status.scan_cancelled": {
+        ConversationLanguage.ENGLISH: (
+            "Alright, I dropped that market check. Nothing in your setup changed."
+        ),
+        ConversationLanguage.ARABIC: "تمام، سيبت فحص السوق ده. مفيش حاجة اتغيرت في إعدادك.",
+        ConversationLanguage.FRENCH: (
+            "D'accord, j'abandonne cette vérification du marché. Votre configuration n'a "
+            "pas changé."
+        ),
+        ConversationLanguage.SPANISH: (
+            "De acuerdo, dejo esa consulta de mercado. Tu configuración no cambió."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Хорошо, я отменил эту проверку рынка. Ваши настройки не изменились."
+        ),
     },
     "ask.retry_invalid": {
         ConversationLanguage.ENGLISH: "I couldn't map that answer safely. {question}",
@@ -848,6 +997,134 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.RUSSIAN: (
             "Я не могу безопасно ответить по текущему черновику. Опишите результат "
             "сканирования, и я спрошу только недостающую деталь."
+        ),
+    },
+    # -- choosing a mode ----------------------------------------------------------
+    #: The moment a beginner picks a side of the product. It used to be answered with
+    #: the scope question alone — a form field, with no sign that anything had been
+    #: understood. These say what the trader just chose, in their words, and *then* ask.
+    "mode.monitor_welcome": {
+        ConversationLanguage.ENGLISH: (
+            "Great choice. Monitor watches the market for you around the clock and tells "
+            "you the moment your rule happens, so you do not have to sit and stare at "
+            "charts. Let's set up your first alert together."
+        ),
+        ConversationLanguage.ARABIC: (
+            "اختيار ممتاز. Monitor بيراقب السوق بدالك على مدار اليوم ويبلغك أول ما القاعدة "
+            "بتاعتك تحصل، فمش هتحتاج تفضل قاعد تبص على الشارت. يلا نظبط أول تنبيه ليك."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Très bon choix. Monitor surveille le marché pour vous en continu et vous "
+            "prévient dès que votre règle se produit : plus besoin de rester devant les "
+            "graphiques. Configurons ensemble votre première alerte."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Buena elección. Monitor vigila el mercado por ti a todas horas y te avisa en "
+            "cuanto ocurre tu regla, así no tienes que mirar gráficos todo el día. "
+            "Vamos a preparar tu primera alerta."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Отличный выбор. Monitor следит за рынком за вас круглосуточно и сообщает, "
+            "как только сработает ваше правило, — не нужно сидеть у графиков. Давайте "
+            "настроим ваше первое оповещение."
+        ),
+    },
+    "mode.scanner_welcome": {
+        ConversationLanguage.ENGLISH: (
+            "Good pick. Scanner looks at the screened market right now and shows you what "
+            "is moving today — one look, no setup left running. Tell me what you want to "
+            "look for."
+        ),
+        ConversationLanguage.ARABIC: (
+            "اختيار حلو. Scanner بيبص على السوق المفحوص دلوقتي ويوريك اللي بيتحرك النهاردة "
+            "— نظرة واحدة من غير ما يفضل شغال. قولي بتدور على إيه."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Bon choix. Scanner regarde le marché filtré maintenant et vous montre ce qui "
+            "bouge aujourd'hui : un coup d'œil, rien qui tourne en continu. Dites-moi ce "
+            "que vous cherchez."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Buena elección. Scanner mira el mercado filtrado ahora mismo y te enseña qué "
+            "se está moviendo hoy: un vistazo, sin dejar nada funcionando. Dime qué "
+            "quieres buscar."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Хороший выбор. Scanner смотрит на проверенный рынок прямо сейчас и "
+            "показывает, что движется сегодня, — один взгляд, ничего не остаётся "
+            "работать. Скажите, что вы ищете."
+        ),
+    },
+    # -- ordinary conversation ----------------------------------------------------
+    #: A greeting, a thank-you, a "how are you". There is nothing to compile and nothing
+    #: to refuse, so the assistant simply talks back. It used to answer these with
+    #: "Nothing is set up yet", which reads as a complaint about the trader.
+    "chat.greeting": {
+        ConversationLanguage.ENGLISH: (
+            "Hey! Good to see you. I can watch the market for you and tell you when "
+            "something you care about happens. What would you like to keep an eye on?"
+        ),
+        ConversationLanguage.ARABIC: (
+            "أهلاً! نورت. أقدر أراقب السوق بدالك وأقولك أول ما يحصل حاجة تهمك. "
+            "حابب تتابع إيه؟"
+        ),
+        ConversationLanguage.FRENCH: (
+            "Bonjour ! Content de vous voir. Je peux surveiller le marché pour vous et "
+            "vous prévenir quand quelque chose d'important se produit. Que voulez-vous "
+            "suivre ?"
+        ),
+        ConversationLanguage.SPANISH: (
+            "¡Hola! Me alegra verte. Puedo vigilar el mercado por ti y avisarte cuando "
+            "pase algo que te importe. ¿Qué te gustaría seguir?"
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Здравствуйте! Рад вас видеть. Я могу следить за рынком и сообщать, когда "
+            "произойдёт что-то важное для вас. За чем хотите наблюдать?"
+        ),
+    },
+    "chat.acknowledged": {
+        ConversationLanguage.ENGLISH: (
+            "Any time. Tell me whenever you want to change something or check the market."
+        ),
+        ConversationLanguage.ARABIC: "دايمًا. قولي في أي وقت لو عايز تغير حاجة أو تشوف السوق.",
+        ConversationLanguage.FRENCH: (
+            "Avec plaisir. Dites-moi dès que vous voulez changer quelque chose ou "
+            "regarder le marché."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Cuando quieras. Dime si necesitas cambiar algo o mirar el mercado."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Всегда пожалуйста. Скажите, когда захотите что-то изменить или посмотреть "
+            "рынок."
+        ),
+    },
+    #: The same friendly turn, when the trader already has rules. It names what they
+    #: have, because "what would you like to watch?" is a strange thing to ask someone
+    #: who has already told you — and it names the version, because approval is bound to
+    #: a version and a reply that omits it leaves nobody able to tell what is approved.
+    "chat.greeting_with_setup": {
+        ConversationLanguage.ENGLISH: (
+            "Hey! Your setup has {count} rule{suffix} at version {version}, ready to "
+            "review. Tell me what you would like to change, or ask me anything about it."
+        ),
+        ConversationLanguage.ARABIC: (
+            "أهلاً! إعدادك فيه {count} قاعدة في الإصدار {version} وجاهزة للمراجعة. "
+            "قولي عايز تغير إيه، أو اسألني أي حاجة عنها."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Bonjour ! Votre configuration contient {count} règle{suffix} en version "
+            "{version}, prête à être vérifiée. Dites-moi ce que vous voulez changer, ou "
+            "posez-moi une question."
+        ),
+        ConversationLanguage.SPANISH: (
+            "¡Hola! Tu configuración tiene {count} regla{suffix} en la versión "
+            "{version}, lista para revisar. Dime qué quieres cambiar o pregúntame lo "
+            "que necesites."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Здравствуйте! В вашей настройке {count} правил, версия {version}, готовых "
+            "к проверке. Скажите, что изменить, или спросите о них что угодно."
         ),
     },
     # -- on-demand scan ----------------------------------------------------------

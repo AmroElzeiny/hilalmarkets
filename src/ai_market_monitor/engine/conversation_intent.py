@@ -43,6 +43,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
+from ai_market_monitor.engine.active_question import (
+    AFFIRMATIVE_ANSWERS,
+    normalize_answer_text,
+)
 from ai_market_monitor.engine.comparators import find_comparator_for_value
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.turn_fragments import extract_symbols, extract_timeframes
@@ -258,20 +262,27 @@ def selected_mode_word(message: str) -> str | None:
     return _MODE_WORDS.get(collapsed)
 
 
-#: Answers that mean "yes, the rolling 24-hour window". The backend supports no other
-#: window, so this is the whole accepted vocabulary for that question — including a bare
-#: yes, because a one-option question is answered that way more often than not.
+#: The period itself, written out. Agreement words are **not** here: they live in
+#: :data:`~ai_market_monitor.engine.active_question.AFFIRMATIVE_ANSWERS` with every
+#: other "yes" the product understands, and are checked separately below. Keeping a
+#: private copy is how ``تمام`` answered this question and no other.
 _WINDOW_24H: Final[re.Pattern[str]] = re.compile(
     r"^(?:"
     r"24\s*h(?:ours?|rs?)?|1\s*d|one\s+day|last\s+day|last\s+24\s*h(?:ours?)?|"
     r"rolling\s+24\s*h(?:ours?)?|today|"
-    r"yes|yeah|yep|yup|ok|okay|sure|please|do it|go ahead|"
-    r"24\s*heures?|une\s+journ[ée]e|derni[èe]res?\s+24\s*heures?|oui|d.accord|"
-    r"24\s*horas?|un\s+d[ií]a|[úu]ltimas?\s+24\s*horas?|s[ií]|claro|vale|"
-    r"24\s*(?:часа|часов)|сутки|последние\s+24\s*часа|да|хорошо|конечно|"
-    r"نعم|أيوه|ايوه|اه|آه|تمام|ماشي|حاضر|24\s*ساعة|24\s*ساعه|يوم\s*كامل|آخر\s*24\s*ساعة"
+    r"24\s*heures?|une\s+journ[ée]e|derni[èe]res?\s+24\s*heures?|"
+    r"24\s*horas?|un\s+d[ií]a|[úu]ltimas?\s+24\s*horas?|"
+    r"24\s*(?:часа|часов)|сутки|последние\s+24\s*часа|"
+    r"24\s*ساعة|24\s*ساعه|يوم\s*كامل|آخر\s*24\s*ساعة"
     r")$",
     re.IGNORECASE,
+)
+
+#: Every "yes", normalised once. The provider exposes a single window, so agreeing to
+#: the question is the same act as naming the period — but the words that mean "yes"
+#: are owned by one module, not restated here.
+_AFFIRMATIVE_FORMS: Final[frozenset[str]] = frozenset(
+    normalize_answer_text(word) for word in AFFIRMATIVE_ANSWERS
 )
 
 #: The same window stated inside a longer sentence, for the first turn rather than a
@@ -298,6 +309,8 @@ def scan_window_answer(message: str) -> str | None:
     if not collapsed:
         return None
     if _WINDOW_24H.match(collapsed) or _WINDOW_24H_INLINE.search(collapsed):
+        return "24h"
+    if normalize_answer_text(collapsed) in _AFFIRMATIVE_FORMS:
         return "24h"
     return None
 

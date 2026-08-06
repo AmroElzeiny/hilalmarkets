@@ -2204,7 +2204,10 @@ async def test_missing_ai_provider_credentials_are_retryable_and_do_not_mutate()
     with pytest.raises(SetupAgentError) as error:
         await agent.run_turn(
             SetupAgentTurnInput(
-                message="hello",
+                # A turn that really needs the planner. "hello" no longer does: a
+                # greeting is answered from server-owned wording without any provider
+                # call, so it could not prove anything about missing credentials.
+                message="add a 1h confirmation to the first rule",
                 source_turn_id=TURN_ID,
                 draft=draft,
             )

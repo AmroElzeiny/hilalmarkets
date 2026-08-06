@@ -32,13 +32,20 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.engine.active_clarification import (
+    ApplyRoute,
+    ClarificationTurn,
+    TransitionOutcome,
+    resolve_active_clarification_turn,
+)
 from ai_market_monitor.engine.active_question import (
     AnswerDomain,
-    AnswerOutcome,
     AnswerResolution,
+    AnswerStage,
     canonical_values,
     display_options,
     domain_for_field,
+    is_resume_request,
     labels_for,
     resolve_active_answer,
 )
@@ -114,6 +121,7 @@ from ai_market_monitor.engine.setup_failure_taxonomy import (
     owner_for,
 )
 from ai_market_monitor.engine.setup_turn_execution import (
+    ConfirmedAnswer,
     ProviderGate,
     RuntimePreflight,
     ScreeningGate,
@@ -180,6 +188,7 @@ from ai_market_monitor.schemas.setup_agent import (
 )
 from ai_market_monitor.schemas.setup_authorization import (
     AuthorizedPatchOperation,
+    CancellationPolicy,
     ClarificationContract,
     ClarificationTargetType,
 )
@@ -497,6 +506,8 @@ def _turn_request(
     allowed_capability_keys: frozenset[str],
     *,
     include_gates: bool,
+    cancelled_requirement_keys: frozenset[str] = frozenset(),
+    confirmed_answer: ConfirmedAnswer | None = None,
 ) -> SetupTurnRequest:
     return SetupTurnRequest(
         plan=plan,
@@ -510,6 +521,8 @@ def _turn_request(
         providers=turn.providers if include_gates else None,
         runtime_preflight=turn.runtime_preflight if include_gates else None,
         preflight_manifest=turn.preflight_manifest if include_gates else None,
+        cancelled_requirement_keys=cancelled_requirement_keys,
+        confirmed_answer=confirmed_answer,
         telemetry=turn.telemetry,
         planner_references=_planner_references(turn),
     )
@@ -752,12 +765,47 @@ class SetupChatAgent:
             # plan. This must test what *this turn* chose, never merely which mode is
             # active: every conversation has an active mode, so reading that as a
             # selection answered "yes" and "hello" with the Scanner start question.
-            question = localized("ask.symbol_scope", language.language)
+            #
+            # It is also the first thing a beginner does, and it used to be answered
+            # with a bare form question. Saying what they just chose, and why it is a
+            # good thing to have chosen, costs one sentence and is the difference
+            # between a product and a form.
+            welcome = localized(
+                f"mode.{reading.selected_mode or 'monitor'}_welcome", language.language
+            )
+            question = localized(
+                "ask.symbol_scope"
+                if reading.selected_mode != "scanner"
+                else "ask.movement_kind",
+                language.language,
+            )
             reconciled = reconcile_reply((), clarification=question)
             telemetry.notes["selected_mode"] = reading.selected_mode
             telemetry.notes.update(reconciled.to_dict())
             return self._read_only_result(
-                turn, reconciled.message, language, reading, route="mode_selection"
+                turn,
+                f"{welcome}\n\n{reconciled.message}",
+                language,
+                reading,
+                route="mode_selection",
+            )
+
+        if (
+            reading.intent is ConversationIntent.SOCIAL
+            and turn.conversation.active_question is None
+        ):
+            # Just talking. There is nothing to compile and nothing to refuse, so the
+            # assistant talks back. This used to fall through to the planner and come
+            # out as "Nothing is set up yet", which answers a greeting with a complaint.
+            #
+            # Only while no question is open. A bare "yes" or "ok" is small talk on its
+            # own and an *answer* the moment something asked — treating it as small talk
+            # then is the exact defect this whole change removes, wearing a friendlier
+            # face.
+            content = _social_reply(turn.message, turn.draft, language.language)
+            telemetry.notes.update(reconcile_reply(()).to_dict())
+            return self._read_only_result(
+                turn, content, language, reading, route="social_chat"
             )
 
         if reading.intent is ConversationIntent.PRODUCT_EXPLANATION and _asks_scanner_vs_monitor(
@@ -917,7 +965,10 @@ class SetupChatAgent:
 
         if not _scan_universe_is_ready(turn.draft):
             scope = scan_scope_clarification(language.language)
-            content = f"{localized('scan.scope_required', language.language)}\n\n{scope.question}"
+            # The body is the reason, and only the reason. `SetupAgentTurnResult.message`
+            # appends the attached question itself, so putting it here as well printed
+            # "Which screened assets should HilalMarkets watch?" twice in one reply.
+            content = localized("scan.scope_required", language.language)
             telemetry.notes["scan_execution"] = "scope_required"
             # The half-collected scan is kept, and the scope becomes a question the next
             # message can answer. Attempting execution and then dropping the goal is
@@ -927,13 +978,18 @@ class SetupChatAgent:
                     "active_language": language.language.value,
                     "active_goal": READ_ONLY_SCAN_GOAL,
                     "pending_read_only_scan": merged,
-                    "last_assistant_summary": content[:1000],
+                    "last_assistant_summary": f"{content}\n\n{scope.question}"[:1000],
                 }
             ).with_question(scope)
             result = self._read_only_result(
-                turn, content, language, reading, route="on_demand_scan_scope_required"
+                turn,
+                content,
+                language,
+                reading,
+                route="on_demand_scan_scope_required",
+                clarification=scope,
             )
-            return replace(result, conversation=conversation, clarification=scope)
+            return replace(result, conversation=conversation)
 
         # Complete and inside Scanner. The scan itself runs in the service that owns the
         # authenticated session, the screened universe and the provider quota; this agent
@@ -1288,7 +1344,10 @@ class SetupChatAgent:
             # against. The planner's own wording is the reply.
             reply = deterministic_reply(
                 _deterministic_conversation_reply(
-                    turn.draft, envelope=envelope, language=turn.active_language
+                    turn.draft,
+                    envelope=envelope,
+                    language=turn.active_language,
+                    message=turn.message,
                 )
             )
             conversation = conversation_from_segments(
@@ -1876,23 +1935,13 @@ class SetupChatAgent:
         was and asks again.
         """
 
-        contract = turn.conversation.active_question
-        unresolved = _active_supported_unresolved(turn.draft, turn.conversation)
-        if contract is None or unresolved is None:
-            return None
-        # A mode button is the product's own control and always wins.
-        if "mode_selection" in reading.reasons:
-            return None
+        if turn.conversation.active_question is None:
+            # Nothing on screen — but something may be waiting to be picked back up.
+            return self._resume_paused_question(turn, language, trace=trace)
         # A confusion signal is handled by recovery, which repeats this same question.
         if is_confusion_signal(turn.message):
             return None
 
-        workflow = turn.conversation.pending_workflow
-        field_name = (
-            workflow.current_field
-            if workflow is not None
-            else str(_supported_metadata(unresolved).get("next_field") or "")
-        )
         # A whole new instruction, complete enough to build on its own, is allowed to
         # take the turn. Anything less is an attempt to answer, however badly typed —
         # that is the line between "changed the subject" and "did not understand".
@@ -1902,62 +1951,273 @@ class SetupChatAgent:
             known_symbols=turn.draft.universe.included_symbols,
             known_window=_draft_trigger_timeframe(turn.draft),
         )
-        resolution = _read_answer(
-            field_name,
-            turn.message,
+        decision = resolve_active_clarification_turn(
+            message=turn.message,
+            conversation=turn.conversation,
+            draft=turn.draft,
             language=language.language,
-            allowed=list(contract.canonical_values),
-            offered=list(workflow.offered_values) if workflow is not None else [],
-            new_request=fresh.completeness is RequestCompleteness.COMPLETE,
+            # A mode button is the product's own control and always wins.
+            mode_selected="mode_selection" in reading.reasons,
+            looks_like_new_request=fresh.completeness is RequestCompleteness.COMPLETE,
         )
-        turn.telemetry.notes["active_question_outcome"] = resolution.outcome.value
-        turn.telemetry.notes["active_question_field"] = field_name
-        if resolution.outcome is AnswerOutcome.NEW_REQUEST:
+        if decision is None:
             return None
-        if resolution.outcome is AnswerOutcome.CANCELLED:
-            return self._cancel_active_question(turn, language, trace=trace)
-        if resolution.keeps_the_question:
-            return self._repeat_active_question(
-                turn, language, contract, resolution, trace=trace
-            )
-        # A value this reader could use. Fold it in now: an answer to our own question
-        # never needs a model to notice that it is one.
-        return await self._continue_supported_incomplete(
-            turn, None, trace=trace, usage={}
+        effects = decision.effects
+        turn.telemetry.notes["active_question_transition"] = decision.transition.value
+        turn.telemetry.notes["active_question_outcome"] = decision.outcome.value
+        turn.telemetry.notes["active_question_field"] = decision.field_name
+        turn.telemetry.notes["active_question_target"] = decision.contract.target_type
+        turn.telemetry.notes["active_question_route"] = decision.handler.apply_route.value
+        turn.telemetry.notes["active_question_stage"] = decision.stage.value
+        if decision.transition is TransitionOutcome.NEW_REQUEST:
+            return None
+        if decision.ends_the_question:
+            return await self._end_active_question(turn, language, decision, trace=trace)
+        if effects.question_stays_active:
+            return self._repeat_active_question(turn, language, decision, trace=trace)
+        return await self._apply_clarification_answer(
+            turn, reading, language, decision, trace=trace
         )
 
-    def _cancel_active_question(
+    def _resume_paused_question(
         self,
         turn: SetupAgentTurnInput,
         language: LanguageDecision,
         *,
         trace: SetupAgentTrace,
-    ) -> SetupAgentTurnResult:
-        """Stop asking, and keep nothing. Only an explicit cancellation reaches here."""
+    ) -> SetupAgentTurnResult | None:
+        """Put a paused requirement back on screen when the trader asks to continue.
 
-        content = localized("status.question_cancelled", language.language)
-        fingerprint = response_fingerprint(content)
-        conversation = (
-            turn.conversation.cleared_question()
-            .model_copy(
-                update={
-                    "active_language": turn.active_language,
-                    "active_goal": None,
-                    "pending_supported_request": {},
-                    "last_response_fingerprint": fingerprint,
-                    "last_assistant_summary": content[:1000],
-                }
-            )
+        Pausing keeps the blocker canonical and the question retrievable. Without a way
+        back, "paused" would be indistinguishable from "silently dropped" — which is the
+        state this whole policy exists to make impossible.
+        """
+
+        paused = turn.conversation.paused_question
+        if paused is None or not is_resume_request(turn.message):
+            return None
+        content = localized("status.setup_resumed", language.language)
+        conversation = turn.conversation.resumed().model_copy(
+            update={
+                "active_language": turn.active_language,
+                "last_assistant_summary": f"{content}\n\n{paused.question}"[:1000],
+                "last_response_fingerprint": response_fingerprint(
+                    f"{content}\n\n{paused.question}"
+                ),
+            }
         )
+        turn.telemetry.notes["active_question_transition"] = "RESUMED"
         return SetupAgentTurnResult(
-            reply=deterministic_reply(content),
+            reply=deterministic_reply(
+                content, selected_clarification_id=paused.question_id
+            ),
             execution=None,
             draft=turn.draft,
             conversation=conversation,
             plan=None,
             trace=_with(
                 trace,
-                patch_validation="active_question_cancelled",
+                patch_validation="active_question_resumed",
+                response_model="deterministic_clarification",
+                response_fingerprint=response_fingerprint(content),
+            ),
+            clarification=paused,
+            usage={},
+        )
+
+    async def _apply_clarification_answer(
+        self,
+        turn: SetupAgentTurnInput,
+        reading: IntentReading,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult | None:
+        """Turn one resolved answer into canonical state, through its own authority.
+
+        Reading the answer was the same job for every question. Applying it is not, and
+        each route below names who is allowed to do it. ``None`` means "this authority
+        is not in this process" — never "nobody understood the message".
+        """
+
+        route = decision.handler.apply_route
+        if route is ApplyRoute.SUPPORTED_RULE_WORKFLOW:
+            if _active_supported_unresolved(turn.draft, turn.conversation) is not None:
+                # An answer to our own question never needs a model to notice it is one.
+                # The value goes with it: re-reading the message here is what let a
+                # confirmed ``yes`` be read a second time as a candle period and thrown
+                # away, because the second reader had never heard of the proposal.
+                return await self._continue_supported_incomplete(
+                    turn, None, trace=trace, usage={}, decision=decision
+                )
+            # The question was asked before any canonical blocker existed — the first
+            # "what should I watch?" of a brand new conversation. The planner builds the
+            # rule; it is told below that this turn is the answer, so it cannot read the
+            # bare value as a fresh instruction with nothing in it.
+            turn.telemetry.notes["active_question_handoff"] = "planner_no_blocker"
+            return None
+        if route is ApplyRoute.PENDING_SCAN:
+            return self._resume_pending_scan(turn, reading, language, decision)
+        if route is ApplyRoute.GOVERNED_OPTION:
+            # A screened universe or an approved methodology is governed Sharia policy.
+            # Only the application's own allowlisted option route may set one, so a
+            # *resolved* choice is handed straight to it — chat text never applies it.
+            # Everything else about this question was already answered above.
+            turn.telemetry.notes["active_question_handoff"] = "governed_option_route"
+            return None
+        turn.telemetry.notes["active_question_handoff"] = "planner_operation"
+        turn.telemetry.notes["active_question_decided_answer"] = {
+            "question_id": decision.contract.question_id,
+            "target_field": decision.field_name,
+            "canonical_value": decision.canonical_value,
+        }
+        return None
+
+    def _resume_pending_scan(
+        self,
+        turn: SetupAgentTurnInput,
+        reading: IntentReading,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+    ) -> SetupAgentTurnResult | None:
+        """Fold one answer into the live scan that asked for it, and carry on.
+
+        The scan collector reads its values out of ``pending_read_only_scan``, so the
+        answer is written there and the same collector continues. It is the one place
+        that knows what a scan still needs; re-deciding that here would be the second
+        implementation this codebase keeps having to remove.
+        """
+
+        merged = dict(turn.pending_scan)
+        # Only the fields a scan actually has. Writing whatever the question named would
+        # let one clarification put a key into the scan request that the governed
+        # Scanner has no argument for.
+        scan_field = _SCAN_FIELD_BY_DOMAIN.get(decision.domain)
+        if scan_field is not None:
+            merged[scan_field] = decision.canonical_value
+        if not merged:
+            return None
+        return self._route_read_only_scan(
+            turn,
+            replace(reading, slots=ScanSlots()),
+            language,
+            merged,
+        )
+
+    async def _end_active_question(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult:
+        """Stop asking — and do to the canonical state exactly what the policy says.
+
+        Clearing the question alone used to be the whole of cancellation. The blocker
+        that caused it stayed in the draft, so the setup was still blocked for a reason
+        nothing on screen mentioned any more, and the trader had no way to see it or
+        clear it. Each of the three outcomes below leaves a state a trader can act on:
+
+        * the requirement is really gone, removed by an authorized operation;
+        * it is put down and says so, and can be picked up again;
+        * there was nothing canonical behind it, and nothing pretends otherwise.
+        """
+
+        turn.telemetry.notes["cancellation_policy"] = decision.cancellation.value
+        blocker = decision.blocker
+        if decision.transition is TransitionOutcome.PAUSED and blocker is not None:
+            # Put down, never thrown away. The blocker stays canonical, the reply says
+            # so, and the question is stored whole so "continue" brings it back with
+            # every earlier choice intact.
+            content = localized("status.setup_paused", language.language)
+            return self._closed_question_result(
+                turn,
+                content,
+                trace=trace,
+                patch_validation="active_question_paused",
+                pause=True,
+            )
+        if (
+            decision.transition is TransitionOutcome.CANCELLED
+            and decision.cancellation is CancellationPolicy.REMOVE_PENDING_REQUIREMENT
+            and blocker is not None
+        ):
+            plan = _supported_workflow_plan(
+                turn,
+                source_text=turn.message,
+                segment_kind=SegmentKind.CLARIFICATION_ANSWER,
+                operation=AuthorizedPatchOperation(
+                    operation_id=f"cancel_{blocker.key}"[:80],
+                    authorizing_segment_id="cancel_request",
+                    kind=cast(Any, blocker.operation_kind),
+                    target_key=blocker.key,
+                ),
+                summary="Remove the unfinished requirement the trader cancelled.",
+            )
+            return await self._execute_supported_workflow_plan(
+                turn,
+                plan,
+                trace=_with(trace, patch_validation="active_question_cancelled"),
+                usage={},
+                clarification=None,
+                intro=localized("status.rule_cancelled", language.language),
+                include_gates=False,
+                pending_metadata={},
+                attach_next_question=False,
+                cancelled_requirement_keys=frozenset({blocker.key}),
+            )
+        # Nothing canonical behind it. A read-only Scanner ask, or a question raised
+        # before any blocker was written — dropping it changes no draft.
+        content = localized(
+            "status.scan_cancelled"
+            if decision.handler.apply_route is ApplyRoute.PENDING_SCAN
+            else "status.question_cancelled",
+            language.language,
+        )
+        return self._closed_question_result(
+            turn,
+            content,
+            trace=trace,
+            patch_validation="active_question_cancelled",
+            clear_pending_scan=True,
+        )
+
+    def _closed_question_result(
+        self,
+        turn: SetupAgentTurnInput,
+        content: str,
+        *,
+        trace: SetupAgentTrace,
+        patch_validation: str,
+        clear_pending_scan: bool = False,
+        pause: bool = False,
+    ) -> SetupAgentTurnResult:
+        """One question taken off screen, and nothing canonical left inconsistent."""
+
+        fingerprint = response_fingerprint(content)
+        updates: dict[str, object] = {
+            "active_language": turn.active_language,
+            "active_goal": None,
+            "last_response_fingerprint": fingerprint,
+            "last_assistant_summary": content[:1000],
+        }
+        if not pause:
+            # A paused workflow keeps its collected values; a cancelled one does not.
+            updates["pending_supported_request"] = {}
+        if clear_pending_scan:
+            updates["pending_read_only_scan"] = {}
+        closed = turn.conversation.paused() if pause else turn.conversation.cleared_question()
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(content),
+            execution=None,
+            draft=turn.draft,
+            conversation=closed.model_copy(update=updates),
+            plan=None,
+            trace=_with(
+                trace,
+                patch_validation=patch_validation,
                 response_model="deterministic_clarification",
                 response_fingerprint=fingerprint,
             ),
@@ -1968,55 +2228,69 @@ class SetupChatAgent:
         self,
         turn: SetupAgentTurnInput,
         language: LanguageDecision,
-        contract: ClarificationContract,
-        resolution: AnswerResolution,
+        decision: ClarificationTurn,
         *,
         trace: SetupAgentTrace,
     ) -> SetupAgentTurnResult:
-        """Say precisely what went wrong, then ask the very same question again.
+        """Say precisely what went wrong, then ask the right question again.
 
         Nothing is cleared and nothing is reset. The workflow, the accepted values and
         the question all survive an answer this reader could not use — that is the
         whole difference between "I did not understand" and "let us start again".
+
+        "The right question" is not always the original one. After a near miss the
+        trader is looking at *did you mean 1h?*, so an unclear reply gets that same
+        yes/no back rather than the list of periods they already failed to hit.
         """
 
-        labels = list(contract.allowed_options)
-        if resolution.outcome is AnswerOutcome.CONFIRM_CANDIDATE:
+        contract = decision.contract
+        labels = list(decision.display_labels) or list(contract.allowed_options)
+        options = ", ".join(labels) if labels else contract.expected_answer_schema
+        confirming = decision.is_confirmation
+        # The wording comes from the transition's own row in the effects table, so a
+        # reply can never describe a different state change from the one that happened.
+        key = decision.effects.response_key
+        if confirming and decision.stage is AnswerStage.CONFIRMATION:
+            # Already asked once and still not a yes or a no. Ask it more plainly.
+            key = "ask.confirm_yes_no"
+        if confirming:
             content = localized(
-                "ask.confirm_candidate",
-                language.language,
-                candidate=str(resolution.canonical_value),
-            )
-        elif resolution.outcome is AnswerOutcome.UNSUPPORTED:
-            content = localized(
-                "ask.unsupported_value",
-                language.language,
-                options=", ".join(labels) if labels else contract.expected_answer_schema,
+                key, language.language, candidate=str(decision.canonical_value)
             )
         else:
-            content = localized(
-                "ask.repeat_options",
-                language.language,
-                options=", ".join(labels) if labels else contract.expected_answer_schema,
-            )
-        fingerprint = response_fingerprint(content)
-        proposed = (
-            str(resolution.canonical_value)
-            if resolution.outcome is AnswerOutcome.CONFIRM_CANDIDATE
-            else None
-        )
+            content = localized(key, language.language, options=options)
+        # A yes/no is a whole question on its own. Appending the original list under it
+        # asks two different things at once, which is what a beginner answers wrongly.
+        attached = None if confirming else contract
+        final = f"{content}\n\n{contract.question}" if attached is not None else content
+        fingerprint = response_fingerprint(final)
         workflow = turn.conversation.pending_workflow
+        # The words that produced the proposal are kept with it. They are the evidence
+        # for the value: a later "yes" contains no period, and a rule may not hold a
+        # value that appears in no message the trader wrote.
+        evidence = (
+            turn.message
+            if decision.stage is AnswerStage.ANSWER
+            else (workflow.proposed_evidence if workflow is not None else "")
+        )
         conversation = turn.conversation.model_copy(
             update={
                 "active_language": turn.active_language,
                 "active_goal": turn.conversation.active_goal or "complete_supported_setup",
                 "pending_workflow": (
-                    workflow.model_copy(update={"proposed_value": proposed})
+                    workflow.model_copy(
+                        update={
+                            "proposed_value": decision.proposed_value,
+                            "proposed_evidence": (
+                                evidence[:500] if decision.proposed_value else ""
+                            ),
+                        }
+                    )
                     if workflow is not None
                     else None
                 ),
                 "last_response_fingerprint": fingerprint,
-                "last_assistant_summary": content[:1000],
+                "last_assistant_summary": final[:1000],
             }
         )
         return SetupAgentTurnResult(
@@ -2027,11 +2301,11 @@ class SetupChatAgent:
             plan=None,
             trace=_with(
                 trace,
-                patch_validation=f"active_question_{resolution.outcome.value.casefold()}",
+                patch_validation=f"active_question_{decision.transition.value.casefold()}",
                 response_model="deterministic_clarification",
                 response_fingerprint=fingerprint,
             ),
-            clarification=contract,
+            clarification=attached,
             usage={},
         )
 
@@ -2042,12 +2316,19 @@ class SetupChatAgent:
         *,
         trace: SetupAgentTrace,
         usage: dict[str, Any],
+        decision: ClarificationTurn | None = None,
     ) -> SetupAgentTurnResult | None:
         """Fold one answer into the rule being built.
 
         ``envelope`` is ``None`` when this runs before the planner, which is the normal
         case: an open question owns its turn and does not need a model to notice that
         the message answers it.
+
+        ``decision`` is the reading the dispatcher already made. It is passed in rather
+        than re-derived because a second reading of the same message is how this
+        codebase's oldest defect keeps coming back: the dispatcher knew ``yes`` meant
+        *the 1h you proposed*, and a reader here that had never heard of the proposal
+        read the same word as a candle period, found none, and dropped the answer.
         """
 
         unresolved = _active_supported_unresolved(turn.draft, turn.conversation)
@@ -2084,19 +2365,30 @@ class SetupChatAgent:
             )
         metadata = _supported_metadata(unresolved)
         stored = turn.conversation.pending_workflow
-        field_name = (
-            stored.current_field
-            if stored is not None
-            else str(metadata.get("next_field") or "")
-        )
         contract = turn.conversation.active_question
-        resolution = _read_answer(
-            field_name,
-            turn.message,
-            language=language_of(turn.active_language),
-            allowed=list(contract.canonical_values) if contract is not None else [],
-            offered=list(stored.offered_values) if stored is not None else [],
-        )
+        if decision is not None:
+            field_name = decision.field_name
+            resolution = AnswerResolution(
+                decision.outcome,
+                canonical_value=decision.canonical_value,
+                candidates=decision.candidates,
+                reason=decision.reason,
+                stage=decision.stage,
+            )
+        else:
+            field_name = (
+                stored.current_field
+                if stored is not None
+                else str(metadata.get("next_field") or "")
+            )
+            resolution = _read_answer(
+                field_name,
+                turn.message,
+                language=language_of(turn.active_language),
+                allowed=list(contract.canonical_values) if contract is not None else [],
+                offered=list(stored.offered_values) if stored is not None else [],
+                proposed=stored.proposed_value if stored is not None else None,
+            )
         if not resolution.stores_a_value:
             # Every other outcome was already answered before the planner ran. Reaching
             # here means the planner claimed an answer the resolver cannot use, and the
@@ -2138,11 +2430,27 @@ class SetupChatAgent:
         ]
         metadata["missing_slots"] = missing
         segment_text = _answer_segment_text(turn, envelope)
+        # A confirmed near miss was written across two turns: the words the value was
+        # read from, and the yes. Both are recorded, so the rule's evidence really
+        # contains the value it holds — "yes" on its own names no candle period.
+        confirmed = (
+            ConfirmedAnswer(
+                field_name=field_name,
+                canonical_value=str(value),
+                proposal_evidence=stored.proposed_evidence,
+            )
+            if resolution.stage is AnswerStage.CONFIRMATION
+            and stored is not None
+            and stored.proposed_evidence
+            else None
+        )
         evidence_fragments = [
             str(item)
             for item in cast(list[object], metadata.get("evidence_fragments") or [])
             if str(item).strip()
         ]
+        if confirmed is not None:
+            evidence_fragments.append(confirmed.proposal_evidence)
         evidence_fragments.append(segment_text)
         metadata["evidence_fragments"] = evidence_fragments
         if missing:
@@ -2197,6 +2505,7 @@ class SetupChatAgent:
                 include_gates=False,
                 pending_metadata=metadata,
                 workflow=advanced,
+                confirmed_answer=confirmed,
             )
 
         node = _condition_from_supported_metadata(
@@ -2238,6 +2547,7 @@ class SetupChatAgent:
             intro=localized("status.rule_completed", language_of(turn.active_language)),
             include_gates=True,
             pending_metadata={},
+            confirmed_answer=confirmed,
         )
 
     async def _execute_supported_workflow_plan(
@@ -2252,6 +2562,9 @@ class SetupChatAgent:
         include_gates: bool,
         pending_metadata: dict[str, object],
         workflow: PendingClarificationWorkflow | None = None,
+        attach_next_question: bool = True,
+        cancelled_requirement_keys: frozenset[str] = frozenset(),
+        confirmed_answer: ConfirmedAnswer | None = None,
     ) -> SetupAgentTurnResult:
         if turn.stage_callback is not None:
             await turn.stage_callback(
@@ -2265,6 +2578,8 @@ class SetupChatAgent:
                     plan,
                     frozenset(),
                     include_gates=include_gates,
+                    cancelled_requirement_keys=cancelled_requirement_keys,
+                    confirmed_answer=confirmed_answer,
                 )
             )
         except SetupTurnRejected as exc:
@@ -2294,7 +2609,10 @@ class SetupChatAgent:
                 },
             )
         selected = clarification
-        if selected is None and outcome.result.allowed_clarifications:
+        if selected is None and attach_next_question and outcome.result.allowed_clarifications:
+            # A cancellation must not answer itself with the next open item. The trader
+            # asked to stop; opening a different question in the same breath is how one
+            # cancelled workflow started another one nobody chose.
             selected = outcome.result.allowed_clarifications[0]
         conversation = outcome.conversation.model_copy(
             update={
@@ -3251,7 +3569,11 @@ class SetupChatAgent:
             "available_snapshots": [
                 {"snapshot_ref": item.reference} for item in references.snapshots
             ],
-            "conversation_context": _conversation_context(turn.conversation, references),
+            "conversation_context": _conversation_context(
+                turn.conversation,
+                references,
+                decided_answer=turn.telemetry.notes.get("active_question_decided_answer"),
+            ),
             "governed_sharia_choices": {
                 "methodologies": [item.prompt_dict() for item in references.methodologies],
                 "approved_watchlists": [item.prompt_dict() for item in references.watchlists],
@@ -3365,10 +3687,20 @@ def _model_capability_shortlist(shortlist: CapabilityShortlist) -> dict[str, Any
 def _conversation_context(
     conversation: SetupConversationContext,
     references: PlannerReferenceContext,
+    *,
+    decided_answer: Any = None,
 ) -> dict[str, Any]:
-    """What the last few turns were about. Language only, never executable."""
+    """What the last few turns were about. Language only, never executable.
+
+    ``decided_answer`` is the server's own reading of this turn: the open question, and
+    the canonical value the deterministic resolver got from the trader's words. It is
+    stated rather than asked about on purpose — whether a message answered a
+    server-owned question is not the planner's decision to make, and letting it decide
+    is how a valid answer came back classified as a brand new request.
+    """
 
     return {
+        "server_decided_answer": decided_answer,
         "active_clarification_ref": next(
             (
                 reference
@@ -4152,6 +4484,10 @@ def scan_scope_clarification(language: ConversationLanguage) -> ClarificationCon
         question=localized("ask.universe", language),
         reason="A live scan runs over a screened universe the trader has chosen.",
         target_type="conversational",
+        #: Names the governed control this question collects for, so the one answer
+        #: resolver reads it with the screened-scope vocabulary rather than as a
+        #: three-item list of button labels.
+        target_field="sharia_policy.universe_mode",
         expected_answer_schema=json.dumps(
             {"type": "string", "enum": values}, sort_keys=True, separators=(",", ":")
         ),
@@ -4256,6 +4592,16 @@ def _next_supported_field(missing: list[str]) -> str:
     return next((item for item in priority if item in missing), missing[0])
 
 
+#: Which value a live scan is waiting for, per answer domain. The governed Scanner has
+#: exactly these arguments, so an answer to any other kind of question cannot put a key
+#: into a scan request.
+_SCAN_FIELD_BY_DOMAIN: Final[dict[AnswerDomain, str]] = {
+    AnswerDomain.SCAN_WINDOW: "measurement_window",
+    AnswerDomain.PERCENT: "threshold_percent",
+    AnswerDomain.MOVEMENT_DIRECTION: "movement_direction",
+}
+
+
 #: The name of the goal a half-collected live scan is working towards. One constant,
 #: because the launch service, the option-button path and the agent all test for it.
 READ_ONLY_SCAN_GOAL: Final[str] = "read_only_percentage_scan"
@@ -4310,6 +4656,10 @@ def _scan_window_contract(question: str, source_turn_id: str) -> ClarificationCo
         question=question,
         reason="The provider's rolling percentage field needs an explicit window.",
         target_type="conversational",
+        # Naming the field is what tells the one answer resolver which vocabulary this
+        # question speaks. Without it the question carried a bare option list, so only
+        # the literal string `24h` answered it and "24 hours" did not.
+        target_field="scan_window",
         expected_answer_schema=json.dumps(
             {"type": "string", "enum": list(SUPPORTED_SCAN_WINDOWS)},
             separators=(",", ":"),
@@ -4317,6 +4667,7 @@ def _scan_window_contract(question: str, source_turn_id: str) -> ClarificationCo
         ),
         mutating=False,
         allowed_options=list(SUPPORTED_SCAN_WINDOWS),
+        canonical_values=list(SUPPORTED_SCAN_WINDOWS),
     )
 
 
@@ -4560,6 +4911,7 @@ def _read_answer(
     allowed: Sequence[str] = (),
     offered: Sequence[str] = (),
     new_request: bool = False,
+    proposed: str | None = None,
 ) -> AnswerResolution:
     """Read one answer through the single resolver.
 
@@ -4579,6 +4931,7 @@ def _read_answer(
         offered_values=shown,
         display_labels=labels_for(domain, values, language),
         looks_like_new_request=new_request,
+        proposed_value=proposed,
     )
 
 
@@ -5119,13 +5472,30 @@ def deterministic_summary_parts(
     return parts
 
 
+#: Segment kinds that ask for nothing and change nothing. A turn made only of these is
+#: conversation, and conversation is answered by talking back.
+_SMALL_TALK_KINDS: Final[frozenset[SegmentKind]] = frozenset(
+    {
+        SegmentKind.SOCIAL_REPLY,
+        SegmentKind.ACKNOWLEDGEMENT_NO_ACTION,
+        SegmentKind.CONVERSATIONAL_CONTEXT,
+    }
+)
+
+
 def _deterministic_conversation_reply(
     draft: StrategyDraftV2,
     *,
     envelope: PlannerIntentEnvelope,
     language: str = "en",
+    message: str = "",
 ) -> str:
-    """Last-resort words for a read-only turn, without unrelated product boilerplate."""
+    """Last-resort words for a read-only turn, without unrelated product boilerplate.
+
+    A turn that only chats is answered as chat. It used to fall through to the draft
+    status line, so "hope you're well" came back as *Nothing is set up yet* — a status
+    report nobody asked for, which reads as a complaint about the person typing.
+    """
 
     kinds = {item.segment_kind for item in envelope.segments}
     if SegmentKind.APPROVAL_INTENT in kinds:
@@ -5133,6 +5503,8 @@ def _deterministic_conversation_reply(
     if envelope.questions_to_answer:
         return localized("status.question_fallback", language_of(language))
     count = _condition_count(draft)
+    if kinds and kinds <= _SMALL_TALK_KINDS:
+        return _social_reply(message, draft, language_of(language))
     if count == 0:
         return localized("status.nothing_set_up", language_of(language))
     return localized(
@@ -5142,6 +5514,46 @@ def _deterministic_conversation_reply(
         suffix="s" if count != 1 else "",
         version=draft.version,
     )
+
+
+#: Turns that are thanks or agreement rather than a first hello. Answering "thanks"
+#: with "Hey! Good to see you" reads as if the assistant was not listening.
+_ACKNOWLEDGEMENTS: Final[frozenset[str]] = frozenset(
+    {
+        "thanks", "thank you", "ok", "okay", "k", "cool", "great", "nice",
+        "got it", "sure", "yes", "no", "bye",
+        "شكرا", "تمام", "ماشي", "اوك",
+        "merci", "d'accord", "gracias", "vale",
+    }
+)
+
+
+def _social_reply(
+    message: str,
+    draft: StrategyDraftV2,
+    language: ConversationLanguage,
+) -> str:
+    """Words for a turn that asks for nothing.
+
+    A greeting, a thank-you, an "ok". None of them assert anything about the platform
+    and none of them can change it, so there is no evidence to check and no reason to
+    spend a model call. What matters is that the reply sounds like a person answering,
+    and that it never tells someone with three working rules that nothing is set up.
+    """
+
+    collapsed = " ".join((message or "").split()).casefold().strip(" .!?،؟")
+    if collapsed in _ACKNOWLEDGEMENTS:
+        return localized("chat.acknowledged", language)
+    count = _condition_count(draft)
+    if count:
+        return localized(
+            "chat.greeting_with_setup",
+            language,
+            count=count,
+            suffix="s" if count != 1 else "",
+            version=draft.version,
+        )
+    return localized("chat.greeting", language)
 
 
 #: Asking what Scanner or Monitor *is*, or how they differ. Deliberately narrow: any

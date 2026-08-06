@@ -1286,6 +1286,8 @@ async def send_ai_setup_chat_message(
                     option_value=payload.option_value,
                     option_label=payload.option_label,
                     client_message_id=payload.client_message_id,
+                    answered_question_id=payload.question_id,
+                    answered_step_revision=payload.step_revision,
                 )
                 await service.finalize_agent_shadow_comparison(session, chat)
             finally:

@@ -40,6 +40,7 @@ from ai_market_monitor.db.models.enums import (
     ShariaMethodologyStatus,
     ShariaUniverseMode,
 )
+from ai_market_monitor.engine.active_clarification import stale_step
 from ai_market_monitor.engine.active_question import (
     AnswerDomain,
     AnswerOutcome,
@@ -256,6 +257,8 @@ class SetupChatLaunchService:
         option_value: str | None,
         option_label: str | None,
         client_message_id: str | None,
+        answered_question_id: str | None = None,
+        answered_step_revision: int | None = None,
     ) -> AISetupChatSession:
         started = monotonic()
         turn_record: SetupChatTurn | None = None
@@ -304,6 +307,18 @@ class SetupChatLaunchService:
         # sentence, and made the stored provenance disagree with what the user wrote.
         raw = message or option_label or option_value or ""
         cleaned = " ".join(raw.split())
+        # A client that says which question it was answering is held to it. The check
+        # runs here, before any routing decision, because a stale answer must not reach
+        # the governed option route *or* the agent — either one would apply yesterday's
+        # choice to today's field. A client that sends no identity is unaffected, so
+        # typing an answer stays possible exactly as before.
+        stale = _answer_is_stale(
+            chat,
+            question_id=answered_question_id,
+            step_revision=answered_step_revision,
+        )
+        if stale:
+            return await self._refuse_stale_answer(session, chat, client_message_id)
         # Typing "Scanner" is the same choice as pressing the Scanner button, so it takes
         # the same governed route. It used to be answered conversationally instead, which
         # left `draft.mode` on Monitor — and the governed scan reads `draft.mode`, so the
@@ -384,6 +399,44 @@ class SetupChatLaunchService:
             )
         finally:
             await self._release_user_cost_reservation(reservation)
+
+    async def _refuse_stale_answer(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        client_message_id: str | None,
+    ) -> AISetupChatSession:
+        """Say the answer was for an earlier question, and show the current one.
+
+        Nothing canonical moves: no draft change, no workflow advance, no model call.
+        The trader sees where the setup actually is rather than a value silently landing
+        on a field they were never asked about.
+        """
+
+        del client_message_id
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        language = language_of(conversation.active_language)
+        content = localized("ask.stale_answer", language)
+        contract = conversation.active_question
+        rendered = f"{content}\n\n{contract.question}" if contract is not None else content
+        context = dict(chat.context_json or {})
+        context["last_stale_answer_refused"] = True
+        chat.context_json = context
+        await self.owner._assistant(
+            session,
+            chat,
+            rendered,
+            message_type="clarification" if contract is not None else "text",
+            payload={
+                "clarification": (
+                    contract.model_dump(mode="json") if contract is not None else None
+                ),
+                "stale_answer_refused": True,
+            },
+        )
+        await session.flush()
+        await session.commit()
+        return chat
 
     async def _reserve_user_cost_budget(
         self,
@@ -3819,6 +3872,33 @@ def _pending_scope_clarifications(
     return []
 
 
+def _answer_is_stale(
+    chat: AISetupChatSession,
+    *,
+    question_id: str | None,
+    step_revision: int | None,
+) -> bool:
+    """Whether a client-supplied answer identity names a question that has moved on.
+
+    Only checked when the client sends one. A typed answer carries no identity and must
+    keep working; a rendered button knows exactly which question it was drawn under, and
+    holding it to that is what stops a click on a stale screen filling the current field
+    with the previous step's choice.
+    """
+
+    if question_id is None and step_revision is None:
+        return False
+    conversation = _load_conversation_context(dict(chat.context_json or {}))
+    contract = conversation.active_question
+    if contract is None:
+        # There is no question at all now. An answer written for one is out of date by
+        # definition, and applying it would be applying it to nothing.
+        return True
+    return stale_step(
+        contract, question_id=question_id, step_revision=step_revision
+    )
+
+
 def _typed_scope_answer(chat: AISetupChatSession, message: str) -> str | None:
     """A written answer to the open screened-scope question, as a canonical value.
 
@@ -3899,19 +3979,66 @@ def _governed_scan_message(result: dict[str, Any], language: str) -> str:
 
 
 def _load_conversation_context(context: dict[str, Any]) -> SetupConversationContext:
+    """Read a stored conversation, rebuilding as much of it as is safe.
+
+    A stale shape must not fail a turn — conversation metadata is not executable. But
+    the previous behaviour, throwing the whole record away on any validation error, was
+    worse than the problem it avoided: the open question went with it while the blocker
+    that caused the question stayed in the draft. The trader was then blocked for a
+    reason nothing on screen mentioned, with nothing to answer.
+
+    So the record is rebuilt in three widening steps, each keeping strictly less:
+
+    1. as stored;
+    2. with keys this version does not know dropped — which is what a rollback to an
+       older build sees, and what an unrecognised future field looks like;
+    3. field by field, keeping every field that still validates on its own.
+
+    Step three deliberately tries ``active_question`` before ``pending_workflow``: if
+    the pair can no longer be reconciled, the *question* is what must survive, because a
+    visible question is what makes a live blocker answerable. The workflow behind it is
+    rebuilt from the draft's own metadata the next time the trader answers.
+    """
+
+    language = str(context.get("active_language") or "en")
     payload = context.get("setup_conversation_context")
-    if isinstance(payload, dict):
-        try:
-            return SetupConversationContext.model_validate(payload)
-        except ValidationError:
-            # Conversation metadata is non-executable. A stale shape must not fail a
-            # turn, but the server-owned language survives when available.
-            return SetupConversationContext(
-                active_language=str(context.get("active_language") or "en")
-            )
-    return SetupConversationContext(
-        active_language=str(context.get("active_language") or "en")
+    if not isinstance(payload, dict):
+        return SetupConversationContext(active_language=language)
+    try:
+        return SetupConversationContext.model_validate(payload)
+    except ValidationError:
+        pass
+    known = set(SetupConversationContext.model_fields)
+    trimmed = {key: value for key, value in payload.items() if key in known}
+    try:
+        return SetupConversationContext.model_validate(trimmed)
+    except ValidationError:
+        pass
+    # Field by field. The order is the recovery policy: language first so every later
+    # message is in the right one, then the open question, then everything that depends
+    # on it.
+    priority = (
+        "active_language",
+        "active_question",
+        "active_question_id",
+        "question_text",
+        "question_target",
+        "valid_answer_shape",
+        "pending_workflow",
+        "paused_question",
+        "paused_workflow",
     )
+    ordered = [key for key in priority if key in trimmed]
+    ordered += [key for key in trimmed if key not in priority]
+    rebuilt: dict[str, Any] = {"active_language": language}
+    for key in ordered:
+        candidate = {**rebuilt, key: trimmed[key]}
+        try:
+            SetupConversationContext.model_validate(candidate)
+        except ValidationError:
+            continue
+        rebuilt = candidate
+    return SetupConversationContext.model_validate(rebuilt)
 
 
 def _agent_message_type(execution: SetupTurnExecutionResult | None) -> str:

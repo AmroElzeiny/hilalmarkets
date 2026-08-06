@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -234,6 +235,50 @@ ClarificationTargetType = Literal[
 ]
 
 
+class CancellationPolicy(StrEnum):
+    """What ``cancel`` must do to the canonical state behind one question.
+
+    Cancelling used to mean only "stop showing the question". The blocker that caused
+    it stayed in the draft, so the setup was still blocked for a reason nothing on
+    screen mentioned any more — hidden blocked state a trader could not see or clear.
+
+    So every question now says, when it is created, what cancelling it means. There are
+    exactly three honest answers and none of them is "clear the question and say
+    nothing about the blocker".
+    """
+
+    #: The trader is abandoning a rule they themselves started. The canonical blocker
+    #: goes with it, and no half-built condition is created in its place.
+    REMOVE_PENDING_REQUIREMENT = "remove_pending_requirement"
+    #: The platform requires this before the setup can run — a screened universe, an
+    #: approved methodology. It is put down, not thrown away: the blocker stays, and the
+    #: reply says plainly that the setup is still incomplete and how to come back to it.
+    PAUSE_PENDING_REQUIREMENT = "pause_pending_requirement"
+    #: Nothing canonical is behind it. A read-only Scanner question is the whole family:
+    #: dropping it changes no draft, no rule and no governed policy.
+    CANCEL_CONVERSATION_ONLY = "cancel_conversation_only"
+
+
+#: What cancelling means for a question that did not say. Chosen per target type and
+#: deliberately fail-closed: anything the platform itself requires is *paused*, so a
+#: cancellation can never quietly claim to have removed a requirement that is still
+#: blocking the draft. Only questions whose blocker the trader authored are removable.
+DEFAULT_CANCELLATION_POLICY: dict[str, CancellationPolicy] = {
+    "conversational": CancellationPolicy.CANCEL_CONVERSATION_ONLY,
+    "condition_creation": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "condition_field": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "boolean_structure": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "capability_parameter": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "reference_definition": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "unsupported_requirement": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "unsupported_resolution": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    "draft_field": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    "universe": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    "market_scope": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    "sharia_policy": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+}
+
+
 class ClarificationContract(StrictModel):
     """A question the server authorised, and what would count as answering it.
 
@@ -268,6 +313,29 @@ class ClarificationContract(StrictModel):
     #: The canonical values an answer may resolve to. Wider than what is displayed:
     #: buttons are a shortlist, this is everything the step can actually execute.
     canonical_values: list[str] = Field(default_factory=list, max_length=64)
+    #: What ``cancel`` must do to the canonical state behind this question. Decided when
+    #: the question is created, never guessed at cancellation time — by then the code
+    #: that knew whether the blocker was the trader's or the platform's is long gone.
+    cancellation_policy: CancellationPolicy = CancellationPolicy.CANCEL_CONVERSATION_ONLY
+
+    @model_validator(mode="before")
+    @classmethod
+    def derive_cancellation_policy(cls, data: object) -> object:
+        """Give a question written before this field existed the right policy.
+
+        Reconstructed from ``target_type``, which is the same fact the policy is chosen
+        from in the first place. A stored session therefore keeps working, and it keeps
+        working *correctly* rather than defaulting every old question to "drop it".
+        """
+
+        if not isinstance(data, dict) or data.get("cancellation_policy"):
+            return data
+        migrated = dict(data)
+        migrated["cancellation_policy"] = DEFAULT_CANCELLATION_POLICY.get(
+            str(migrated.get("target_type") or ""),
+            CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        )
+        return migrated
 
     @model_validator(mode="after")
     def validate_target(self) -> ClarificationContract:

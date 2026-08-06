@@ -525,7 +525,13 @@ async def test_a_typo_keeps_the_workflow_alive_and_never_says_nothing_is_set_up(
 
 @pytest.mark.parametrize("answer", ["qh", "purple bananas", "2 minutes"])
 async def test_the_question_is_asked_once_however_the_answer_failed(answer: str) -> None:
-    """One question, asked once. The retry sentence must not restate it."""
+    """One question in the reply, and only one. The retry sentence must not restate it.
+
+    Which question depends on how the answer failed. A near miss puts a narrower one on
+    screen — *did you mean 1h?* — and the list of periods must not come with it: two
+    questions in one reply is what a beginner answers wrongly. Either way the stored
+    question is unchanged, so the next answer still lands on the same field.
+    """
 
     session = _Session()
     await session.say(ALERT_REQUEST)
@@ -533,8 +539,9 @@ async def test_the_question_is_asked_once_however_the_answer_failed(answer: str)
 
     result = await session.say(answer)
 
-    assert result.message.count(question) == 1, result.message
-    assert session.question == question
+    assert result.message.count(question) <= 1, result.message
+    assert result.message.count("?") == 1, result.message
+    assert session.question == question, "the stored question never changed"
 
 
 async def test_a_typo_is_answered_without_calling_a_model() -> None:

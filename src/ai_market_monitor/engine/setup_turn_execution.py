@@ -36,6 +36,7 @@ from pydantic_core import PydanticUndefined
 
 from ai_market_monitor.db.models.enums import ShariaUniverseMode
 from ai_market_monitor.engine.action_grounding import SemanticAction, action_is_grounded
+from ai_market_monitor.engine.active_clarification import has_registered_handler
 from ai_market_monitor.engine.capability_contract import (
     capability_condition_errors,
     grounded_operator_and_timeframe,
@@ -231,6 +232,28 @@ def _unique_user_facing_rows(
 
 
 @dataclass(frozen=True, slots=True)
+class ConfirmedAnswer:
+    """A near miss the server proposed, and the trader agreed to in one word.
+
+    This is **not** a relaxation of grounding. The value was read out of words the
+    trader really typed — ``qh`` — by the one answer resolver; the server then asked
+    *did you mean 1h?* and they said yes. Both halves are carried here and both are
+    written into the stored evidence, so the provenance shows exactly what was agreed
+    rather than a value that appears in no message.
+
+    Server built and never model authored: only the agent's deterministic confirmation
+    path can produce one, and a plan has no field through which to name it.
+    """
+
+    #: The canonical field this answers.
+    field_name: str
+    #: The value being confirmed.
+    canonical_value: str
+    #: The trader's own near-miss words, from the turn that produced the proposal.
+    proposal_evidence: str
+
+
+@dataclass(frozen=True, slots=True)
 class SetupTurnRequest:
     """Everything the tool needs, and nothing it could be talked out of."""
 
@@ -260,6 +283,19 @@ class SetupTurnRequest:
     #: clicked, so re-picking a value that already equals the platform default is
     #: still recorded as a choice instead of being lost as "nothing changed".
     server_option_confirmed_paths: frozenset[str] = frozenset()
+    #: Open items the person explicitly abandoned this turn. Server built and never
+    #: model authored — the only writer is the agent's deterministic cancellation path,
+    #: which reaches it after the single answer resolver read the word "cancel".
+    #:
+    #: Reconciliation restores any row a turn removes without satisfying it, which is
+    #: exactly right against a *model* claiming an unmet requirement is met. A
+    #: cancellation claims nothing of the sort: the trader dropped the rule, so the
+    #: requirement has no subject left. Without this channel the question disappeared
+    #: and its blocker stayed — hidden blocked state with nothing on screen about it.
+    cancelled_requirement_keys: frozenset[str] = frozenset()
+    #: The one near miss this turn confirms, when it confirms one. See
+    #: :class:`ConfirmedAnswer` for why this grounds a value that "yes" does not contain.
+    confirmed_answer: ConfirmedAnswer | None = None
     #: The turn's clock. Execution runs the three slowest remaining stages — compiling,
     #: screening and the market-data check — and none of them were being timed, so the
     #: ranking could not see them at all.
@@ -421,6 +457,7 @@ async def apply_setup_turn(request: SetupTurnRequest) -> SetupTurnOutcome:
         operation_results=operation_results,
         active_clarification=request.conversation.active_question,
         confirmed_paths=request.server_option_confirmed_paths,
+        cancelled_keys=request.cancelled_requirement_keys,
     )
     requirement_reconciliation = _finalize_supported_completion_reconciliation(
         request, plan, segments, requirement_reconciliation
@@ -805,6 +842,7 @@ def validate_setup_turn_plan(request: SetupTurnRequest) -> SetupTurnDryValidatio
         operation_results=operation_results,
         active_clarification=request.conversation.active_question,
         confirmed_paths=request.server_option_confirmed_paths,
+        cancelled_keys=request.cancelled_requirement_keys,
     )
     reconciled = _finalize_supported_completion_reconciliation(
         request, plan, segments, reconciled
@@ -1404,10 +1442,44 @@ def _metadata_answer_is_grounded(
     return False
 
 
+def _confirmation_grounds(
+    request: SetupTurnRequest,
+    field_name: str,
+    value: Any,
+) -> bool:
+    """Whether this exact value is the near miss the trader confirmed this turn.
+
+    Both halves must line up: the confirmation names this field, and the value being
+    stored is the one that was put to the trader. A confirmation of the period does not
+    ground a reference point, and it does not ground a period other than the one shown.
+    """
+
+    confirmed = request.confirmed_answer
+    if confirmed is None or confirmed.field_name != field_name:
+        return False
+    return value is not None and str(value) == confirmed.canonical_value
+
+
+def _expected_evidence_tail(request: SetupTurnRequest, segment: TurnSegment) -> list[str]:
+    """The words a turn is allowed to add to a rule's stored evidence.
+
+    Normally one span: what the trader said this turn. A confirmed near miss adds two,
+    because two turns produced the answer — the words the value was read from, and the
+    agreement. Recording only "yes" would leave a rule whose evidence does not contain
+    the value it holds.
+    """
+
+    confirmed = request.confirmed_answer
+    if confirmed is not None and confirmed.proposal_evidence:
+        return [confirmed.proposal_evidence, segment.exact_source_text]
+    return [segment.exact_source_text]
+
+
 def _ground_supported_unresolved_update(
     operation: Any,
     segment: TurnSegment,
     existing_item: Any,
+    request: SetupTurnRequest,
 ) -> list[str]:
     """Validate one canonical answer stored on a supported unresolved rule.
 
@@ -1439,8 +1511,9 @@ def _ground_supported_unresolved_update(
     ):
         return [f"{operation.operation_id}:update_unresolved:canonical_slots_changed"]
     field_name = str(before.get("next_field") or "")
-    if not field_name or not _metadata_answer_is_grounded(
-        field_name, after, segment.exact_source_text
+    if not field_name or not (
+        _metadata_answer_is_grounded(field_name, after, segment.exact_source_text)
+        or _confirmation_grounds(request, field_name, after.get(field_name))
     ):
         return [f"{operation.operation_id}:update_unresolved:answer_not_grounded"]
     expected_missing = [
@@ -1450,7 +1523,7 @@ def _ground_supported_unresolved_update(
         return [f"{operation.operation_id}:update_unresolved:missing_slots_changed"]
     before_fragments = [str(value) for value in before.get("evidence_fragments") or []]
     after_fragments = [str(value) for value in after.get("evidence_fragments") or []]
-    if after_fragments != [*before_fragments, segment.exact_source_text]:
+    if after_fragments != [*before_fragments, *_expected_evidence_tail(request, segment)]:
         return [f"{operation.operation_id}:update_unresolved:evidence_changed"]
     allowed_changes = {
         field_name,
@@ -1507,7 +1580,10 @@ def _ground_supported_condition_completion(
         expected["comparator"] = node.operator.value if node.operator is not None else None
     elif field_name == "threshold":
         expected["threshold"] = node.threshold
-    if not _metadata_answer_is_grounded(field_name, expected, segment.exact_source_text):
+    if not (
+        _metadata_answer_is_grounded(field_name, expected, segment.exact_source_text)
+        or _confirmation_grounds(request, field_name, expected.get(field_name))
+    ):
         return [f"{operation.operation_id}:supported_completion:final_answer_not_grounded"]
 
     try:
@@ -1522,7 +1598,9 @@ def _ground_supported_condition_completion(
     evidence_fragments = [
         str(value) for value in metadata.get("evidence_fragments") or [] if str(value).strip()
     ]
-    expected_source_fragment = "\n".join([*evidence_fragments, segment.exact_source_text])
+    expected_source_fragment = "\n".join(
+        [*evidence_fragments, *_expected_evidence_tail(request, segment)]
+    )
     checks = {
         "source_turn": node.source_turn_id == request.source_turn_id,
         "source_fragment": node.source_fragment == expected_source_fragment,
@@ -1897,6 +1975,7 @@ def _ground_unresolved_operation(
                 operation,
                 segment,
                 existing_item,
+                request,
             )
     if not _quoted_in(item.source_fragment, segment.exact_source_text):
         return [f"{operation.operation_id}:{operation.kind}:source_not_grounded"]
@@ -3096,6 +3175,11 @@ def _allowed_clarifications(
     deduplicated: list[ClarificationContract] = []
     seen_targets: set[tuple[str, str, str]] = set()
     for contract in allowed:
+        if not has_registered_handler(contract):
+            # Fail closed. A question nobody can answer is worse than a blocker with no
+            # question: the trader would type a correct reply and be told it was not
+            # understood, every time, with no way forward. The blocker itself stays.
+            continue
         target = (
             contract.target_type,
             contract.target_field or "",

@@ -1188,6 +1188,8 @@ class AISetupChatService:
         option_value: str | None = None,
         option_label: str | None = None,
         client_message_id: str | None = None,
+        answered_question_id: str | None = None,
+        answered_step_revision: int | None = None,
     ) -> AISetupChatSession:
         if not self.settings.setup_chat_legacy_test_compat_enabled:
             try:
@@ -1203,6 +1205,8 @@ class AISetupChatService:
                     option_value=option_value,
                     option_label=option_label,
                     client_message_id=client_message_id,
+                    answered_question_id=answered_question_id,
+                    answered_step_revision=answered_step_revision,
                 )
             except SetupLaunchError as exc:
                 raise SetupChatError(

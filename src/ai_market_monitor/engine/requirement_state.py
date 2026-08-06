@@ -200,12 +200,20 @@ def reconcile_requirement_state(
     operation_results: list[OperationExecutionResult],
     active_clarification: ClarificationContract | None = None,
     confirmed_paths: frozenset[str] = frozenset(),
+    cancelled_keys: frozenset[str] = frozenset(),
 ) -> RequirementReconciliation:
     """Reconcile every open target against the completed, authorized working turn.
 
     This runs before public version finalization.  A model-authored resolution operation
     can therefore remove a row temporarily, but the row is restored unless its final
     canonical value is both satisfied and grounded by this turn.
+
+    ``cancelled_keys`` is the one exception, and it is not a hole in that rule.  The
+    rule refuses a *claim that an unmet requirement is met*.  A cancellation makes no
+    such claim: the trader abandoned the rule the requirement belonged to, so there is
+    nothing left for it to be about.  Restoring it produced a blocker with no question
+    on screen and no way for anyone to clear it.  Only server-built cancellation
+    reaches this argument; a plan can neither set it nor name a key through it.
     """
 
     applied = {
@@ -285,6 +293,12 @@ def reconcile_requirement_state(
     answered: list[str] = []
 
     for representative, aliases in pending:
+        identities = {representative.unresolved_id} | {item.unresolved_id for item in aliases}
+        if identities & cancelled_keys:
+            # Abandoned, not answered. It leaves the draft and is recorded as closed so
+            # nothing re-asks it, and no assessment is written claiming it was met.
+            answered.extend(sorted(identities))
+            continue
         assessment = _assess_unresolved(
             representative,
             aliases,

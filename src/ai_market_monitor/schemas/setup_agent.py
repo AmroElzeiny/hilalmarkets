@@ -903,6 +903,13 @@ class PendingClarificationWorkflow(BaseModel):
     source_evidence: list[str] = Field(default_factory=list, max_length=24)
     #: A near miss waiting on a yes/no. Never counted as accepted until confirmed.
     proposed_value: str | None = Field(default=None, max_length=120)
+    #: The trader's own words that produced that near miss — ``qh``, not ``yes``.
+    #:
+    #: Kept because it is the *evidence* for the value. A confirmed answer is stored
+    #: from a turn whose text is only "yes", and a value has to be findable in words the
+    #: trader really typed. Without this the grounding gate refused every confirmation,
+    #: correctly: nothing in "yes" says 1h.
+    proposed_evidence: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")
     def validate_step(self) -> PendingClarificationWorkflow:
@@ -954,6 +961,7 @@ class PendingClarificationWorkflow(BaseModel):
                 "question_id": self.step_question_id(next_field or self.current_field, revision),
                 "source_evidence": [*self.source_evidence, evidence][-24:],
                 "proposed_value": None,
+                "proposed_evidence": "",
                 "offered_values": [],
                 "canonical_values": [],
             }
@@ -1006,6 +1014,13 @@ class SetupConversationContext(BaseModel):
     #: The canonical multi-step question in progress. When this is set it and
     #: ``active_question`` name the same step, always — see ``validate_one_step``.
     pending_workflow: PendingClarificationWorkflow | None = None
+    #: A question the trader put down that the platform still needs answered, and the
+    #: workflow it belongs to. Its canonical blocker is deliberately still in the draft:
+    #: pausing is not removing, and the reply says so. Kept here so "continue" can put
+    #: the same question back with every earlier choice intact, instead of the trader
+    #: having to remember what was being asked.
+    paused_question: ClarificationContract | None = None
+    paused_workflow: PendingClarificationWorkflow | None = None
     #: Fingerprint of the last rendered assistant response. Used to prevent a confusion
     #: signal from producing the same boilerplate again.
     last_response_fingerprint: str | None = Field(default=None, max_length=64)
@@ -1086,6 +1101,44 @@ class SetupConversationContext(BaseModel):
                 "answered_question_ids": answered[-24:],
             }
         )
+
+    def paused(self) -> SetupConversationContext:
+        """Put the open question down without answering it, and keep it retrievable.
+
+        Deliberately not ``cleared_question``: that records the id as *answered*, which
+        would stop it ever being asked again. A paused requirement is still required, so
+        it is stored whole — question, step and accepted values — and comes back exactly
+        as it was when the trader asks to continue.
+        """
+
+        contract = self.active_question
+        workflow = self.pending_workflow
+        return self.model_copy(
+            update={
+                "active_question_id": None,
+                "question_text": None,
+                "question_target": None,
+                "valid_answer_shape": None,
+                "active_question": None,
+                "pending_workflow": None,
+                "paused_question": contract,
+                "paused_workflow": workflow,
+            }
+        )
+
+    def resumed(self) -> SetupConversationContext:
+        """Put a paused question back on screen, exactly as it was.
+
+        The stored step and its accepted values come back together, so resuming is not
+        a restart: nothing the trader already chose is asked for a second time.
+        """
+
+        contract = self.paused_question
+        if contract is None:
+            return self
+        return self.model_copy(
+            update={"paused_question": None, "paused_workflow": None}
+        ).with_question(contract, workflow=self.paused_workflow)
 
 
 #: What kind of thing a claim is about. Paired with a predicate and a value, this turns
