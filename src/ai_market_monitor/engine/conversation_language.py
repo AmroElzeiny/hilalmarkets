@@ -36,6 +36,7 @@ __all__ = [
     "localized_options",
     "governed_scan_error",
     "resolve_conversation_language",
+    "scan_error_is_resolvable",
     "response_matches_language",
     "scanner_labels",
     "scope_labels",
@@ -259,48 +260,28 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "Хорошо. Следить за всеми проверенными монетами или за одной конкретной?"
         ),
     },
+    #: Candle periods the compiler can actually build. This offered "since the daily
+    #: open" as a fourth choice, which is not a candle period — a trader who picked it
+    #: was picking something no rule could be made from.
     "ask.measurement_window": {
         ConversationLanguage.ENGLISH: (
             "Over what period should the {threshold} move be measured: "
-            "1 hour, 4 hours, 24 hours, or since the daily open?"
+            "1 hour, 4 hours, or 1 day?"
         ),
         ConversationLanguage.ARABIC: (
-            "على أي مدة أقيس حركة {threshold}: ساعة، 4 ساعات، 24 ساعة، "
-            "ولا من افتتاح اليوم؟"
+            "على أي مدة أقيس حركة {threshold}: ساعة، 4 ساعات، ولا يوم؟"
         ),
         ConversationLanguage.FRENCH: (
             "Sur quelle période dois-je mesurer la variation de {threshold} : "
-            "1 heure, 4 heures, 24 heures, ou depuis l'ouverture du jour ?"
+            "1 heure, 4 heures, ou 1 jour ?"
         ),
         ConversationLanguage.SPANISH: (
             "¿En qué periodo mido el movimiento de {threshold}: "
-            "1 hora, 4 horas, 24 horas, o desde la apertura del día?"
+            "1 hora, 4 horas, o 1 día?"
         ),
         ConversationLanguage.RUSSIAN: (
             "За какой период измерять движение {threshold}: "
-            "1 час, 4 часа, 24 часа или с открытия дня?"
-        ),
-    },
-    "ask.scan_window": {
-        ConversationLanguage.ENGLISH: (
-            "Over what period should I measure the {threshold} rise: "
-            "1 hour, 4 hours, 24 hours, or since today's open?"
-        ),
-        ConversationLanguage.ARABIC: (
-            "على أي مدة أقيس الصعود {threshold}: ساعة، 4 ساعات، 24 ساعة، "
-            "ولا من افتتاح النهارده؟"
-        ),
-        ConversationLanguage.FRENCH: (
-            "Sur quelle période dois-je mesurer la hausse de {threshold} : "
-            "1 heure, 4 heures, 24 heures, ou depuis l'ouverture du jour ?"
-        ),
-        ConversationLanguage.SPANISH: (
-            "¿En qué periodo mido la subida de {threshold}: "
-            "1 hora, 4 horas, 24 horas, o desde la apertura de hoy?"
-        ),
-        ConversationLanguage.RUSSIAN: (
-            "За какой период измерять рост {threshold}: "
-            "1 час, 4 часа, 24 часа или с открытия сегодняшнего дня?"
+            "1 час, 4 часа или 1 день?"
         ),
     },
     "ask.movement_size": {
@@ -759,21 +740,29 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ConversationLanguage.SPANISH: "El borrador inactivo ahora es la versión {version}.",
         ConversationLanguage.RUSSIAN: "Неактивный черновик теперь версии {version}.",
     },
+    #: Names the version as well as the count. Approval is bound to a version, so a
+    #: reply that states what the draft holds without saying which version it is leaves
+    #: the trader unable to tell whether their approval still covers it.
     "status.draft_count": {
         ConversationLanguage.ENGLISH: (
-            "The draft currently has {count} rule{suffix}. Tell me what to change."
+            "The draft currently has {count} rule{suffix} at version {version}. "
+            "Tell me what to change."
         ),
         ConversationLanguage.ARABIC: (
-            "المسودة تحتوي حاليًا على {count} قاعدة. اكتب التعديل المطلوب."
+            "المسودة تحتوي حاليًا على {count} قاعدة في الإصدار {version}. "
+            "اكتب التعديل المطلوب."
         ),
         ConversationLanguage.FRENCH: (
-            "Le brouillon contient actuellement {count} règle{suffix}. Indiquez la "
-            "modification souhaitée."
+            "Le brouillon contient actuellement {count} règle{suffix} en version "
+            "{version}. Indiquez la modification souhaitée."
         ),
         ConversationLanguage.SPANISH: (
-            "El borrador tiene actualmente {count} regla{suffix}. Indica qué quieres cambiar."
+            "El borrador tiene actualmente {count} regla{suffix} en la versión "
+            "{version}. Indica qué quieres cambiar."
         ),
-        ConversationLanguage.RUSSIAN: "Сейчас в черновике {count} правил. Укажите, что изменить.",
+        ConversationLanguage.RUSSIAN: (
+            "Сейчас в черновике {count} правил, версия {version}. Укажите, что изменить."
+        ),
     },
     "status.no_action": {
         ConversationLanguage.ENGLISH: "Nothing changed on this turn.",
@@ -1262,6 +1251,18 @@ _SCAN_ERROR_FAMILY: Final[dict[str, str]] = {
     "scanner_runtime_failure": "provider",
     "percentage_window_not_supported": "window",
 }
+
+
+#: Refusals the trader or the platform can still clear — a missing screened scope, a
+#: provider that is down. The scan itself is still what they asked for, so its values
+#: are kept. Everything else (quota spent, window unavailable) ends the attempt.
+_RESOLVABLE_SCAN_ERROR_FAMILIES: Final[frozenset[str]] = frozenset({"scope", "provider"})
+
+
+def scan_error_is_resolvable(code: str) -> bool:
+    """Whether a refused scan is worth keeping the collected values for."""
+
+    return _SCAN_ERROR_FAMILY.get(code, "generic") in _RESOLVABLE_SCAN_ERROR_FAMILIES
 
 
 def governed_scan_error(code: str, safe_message: str, language: ConversationLanguage) -> str:

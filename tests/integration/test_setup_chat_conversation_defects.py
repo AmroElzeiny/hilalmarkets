@@ -27,13 +27,18 @@ After
 
     assistant Sure. Should I watch all screened coins or one specific coin?
 
-    assistant Over what period should I measure the 5% rise: 1 hour, 4 hours,
-              24 hours, or since today's open?
+    assistant Should I use the provider's rolling 24-hour percentage change?
     assistant Sorry — that didn't answer your question. You want to scan screened
               coins that are up at least 5%. [and the same one question]
+
+The window question offers one choice because the provider exposes one window. The
+three-turn continuation that follows it is covered in
+``test_setup_chat_scanner_flow.py``.
 """
 
 from __future__ import annotations
+
+from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
@@ -43,11 +48,25 @@ from ai_market_monitor.engine.conversation_language import (
     ConversationLanguage,
     response_matches_language,
 )
-from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
+from ai_market_monitor.schemas.strategy_draft_v2 import DraftMode, StrategyDraftV2
 from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentTurnInput,
     SetupChatAgent,
 )
+
+
+def scanner_draft() -> StrategyDraftV2:
+    """A Scanner draft whose screened scope is already governed and ready."""
+
+    base = StrategyDraftV2()
+    return base.model_copy(
+        update={
+            "mode": DraftMode.SCANNER,
+            "sharia_policy": base.sharia_policy.model_copy(
+                update={"methodology_id": uuid4(), "methodology_version": "2026.1"}
+            ),
+        }
+    )
 
 #: The generic answer that used to be returned for a live market question.
 BROCHURE = "Scanner checks a strategy on demand"
@@ -167,22 +186,12 @@ async def test_case_a_answers_in_the_language_it_was_asked_in(
 CASE_B_SCAN = "what coins are up at least 5% now?"
 
 
-async def test_case_b_scanner_selection_needs_no_model_call() -> None:
-    turn_input = SetupAgentTurnInput(
-        message="Scanner", source_turn_id="turn-mode", draft=StrategyDraftV2()
-    )
-    result = await SetupChatAgent(_settings()).run_turn(turn_input)
-    assert turn_input.telemetry.notes["conversation_route"] == "mode_selection"
-    assert turn_input.telemetry.notes["selected_mode"] == "scanner"
-    assert result.execution is None
-
-
 async def test_case_b_live_question_never_returns_the_brochure() -> None:
     turn_input = SetupAgentTurnInput(
         message=CASE_B_SCAN,
         source_turn_id="turn-scan",
-        draft=StrategyDraftV2(),
-        active_mode="scanner",
+        draft=scanner_draft(),
+        setup_mode=DraftMode.SCANNER,
     )
     result = await SetupChatAgent(_settings()).run_turn(turn_input)
     notes = turn_input.telemetry.notes
@@ -194,8 +203,14 @@ async def test_case_b_live_question_never_returns_the_brochure() -> None:
     assert notes["scan_missing_slots"] == ["window"]
     assert notes["scan_threshold_percent"] == 5.0
     assert notes["scan_direction"] == "up"
-    assert "5%" in result.message
     assert result.message.count("?") == 1
+    # The size and the side are kept where the next turn will look for them.
+    pending = result.conversation.pending_read_only_scan
+    assert pending["threshold_percent"] == 5.0
+    assert pending["movement_direction"] == "up"
+    assert pending["measurement_window"] is None
+    assert result.conversation.active_goal == "read_only_percentage_scan"
+    assert result.conversation.active_question_id
     # A read-only question mutates nothing.
     assert result.execution is None
     assert notes["final_mutation_status"] == "no_mutation"
@@ -203,11 +218,12 @@ async def test_case_b_live_question_never_returns_the_brochure() -> None:
 
 async def test_case_b_confusion_does_not_repeat_the_previous_answer() -> None:
     agent = SetupChatAgent(_settings())
+    draft = scanner_draft()
     scan_turn = SetupAgentTurnInput(
         message=CASE_B_SCAN,
         source_turn_id="turn-scan",
-        draft=StrategyDraftV2(),
-        active_mode="scanner",
+        draft=draft,
+        setup_mode=DraftMode.SCANNER,
     )
     first = await agent.run_turn(scan_turn)
     fingerprint = scan_turn.telemetry.notes["response_fingerprint"]
@@ -215,13 +231,11 @@ async def test_case_b_confusion_does_not_repeat_the_previous_answer() -> None:
     confused = SetupAgentTurnInput(
         message="??",
         source_turn_id="turn-confused",
-        draft=StrategyDraftV2(),
-        active_mode="scanner",
+        draft=draft,
+        setup_mode=DraftMode.SCANNER,
+        conversation=first.conversation,
         previous_intent="ON_DEMAND_SCAN",
         previous_response_fingerprints=(fingerprint,),
-        pending_goal_kind="scan",
-        pending_goal_threshold="5",
-        pending_goal_question=first.message,
     )
     recovered = await agent.run_turn(confused)
     notes = confused.telemetry.notes
@@ -235,6 +249,9 @@ async def test_case_b_confusion_does_not_repeat_the_previous_answer() -> None:
     assert "scan" in recovered.message.casefold()
     assert BROCHURE not in recovered.message
     assert recovered.execution is None
+    # And the goal it was confused about is still waiting.
+    assert recovered.conversation.pending_read_only_scan["threshold_percent"] == 5.0
+    assert recovered.conversation.active_question_id == first.conversation.active_question_id
 
 
 async def test_a_confusion_signal_is_never_planned_as_a_strategy_edit() -> None:
@@ -257,12 +274,12 @@ async def test_a_confusion_signal_is_never_planned_as_a_strategy_edit() -> None:
     (CASE_A, CASE_B_SCAN, "??", "Scanner", "what is Scanner?"),
 )
 async def test_no_conversational_turn_ever_mutates_or_approves(message: str) -> None:
-    before = StrategyDraftV2()
+    before = scanner_draft()
     turn_input = SetupAgentTurnInput(
         message=message,
         source_turn_id="turn-safety",
         draft=before,
-        active_mode="scanner",
+        setup_mode=DraftMode.SCANNER,
     )
     result = await SetupChatAgent(_settings()).run_turn(turn_input)
     assert result.draft.executable_hash == before.executable_hash
@@ -273,7 +290,7 @@ async def test_no_conversational_turn_ever_mutates_or_approves(message: str) -> 
 
 @pytest.mark.parametrize("message", (CASE_A, CASE_B_SCAN))
 async def test_no_conversational_turn_invents_a_sharia_status(message: str) -> None:
-    result = await _turn(message, active_mode="scanner")
+    result = await _turn(message, draft=scanner_draft(), setup_mode=DraftMode.SCANNER)
     lowered = result.message.casefold()
     assert "halal" not in lowered
     assert "haram" not in lowered
@@ -285,7 +302,7 @@ async def test_no_conversational_turn_invents_a_sharia_status(message: str) -> N
 async def test_no_conversational_turn_fabricates_a_market_result(message: str) -> None:
     """A question about the market is never answered with invented prices."""
 
-    result = await _turn(message, active_mode="scanner")
+    result = await _turn(message, draft=scanner_draft(), setup_mode=DraftMode.SCANNER)
     # No coin is named as matching, because no scan has run yet.
     assert "BTC" not in result.message
     assert "ETH" not in result.message

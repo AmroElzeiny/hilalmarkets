@@ -233,7 +233,7 @@ def test_a_market_instruction_is_never_mistaken_for_confusion() -> None:
 def test_recovery_admits_the_miss_restates_the_goal_and_asks_once(
     language: ConversationLanguage,
 ) -> None:
-    question = localized("ask.scan_window", language, threshold="5%")
+    question = localized("ask.scan_window_24h", language)
     goal = ConversationalGoal(kind="scan", threshold_percent="5", pending_question=question)
     recovered = confusion_recovery_reply(goal, language=language)
     assert localized("confusion.acknowledge", language) in recovered.message
@@ -248,7 +248,7 @@ def test_the_same_answer_is_never_sent_twice_to_a_confused_user() -> None:
     goal = ConversationalGoal(
         kind="scan",
         threshold_percent="5",
-        pending_question=localized("ask.scan_window", ConversationLanguage.ENGLISH, threshold="5%"),
+        pending_question=localized("ask.scan_window_24h", ConversationLanguage.ENGLISH),
     )
     first = confusion_recovery_reply(goal, language=ConversationLanguage.ENGLISH)
     second = confusion_recovery_reply(

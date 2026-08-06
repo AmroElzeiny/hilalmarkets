@@ -13,10 +13,11 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic_core import PydanticUndefined
 
+from ai_market_monitor.db.models.enums import ShariaUniverseMode
 from ai_market_monitor.engine.action_grounding import action_is_grounded
 from ai_market_monitor.engine.capability_contract import (
     capability_parameter_metadata,
@@ -122,6 +123,43 @@ _ROLE_BY_FIELD: dict[str, str] = {
 
 _REGISTRY_FIELDS = frozenset({"capability_version", "operands"})
 
+#: The canonical requirement path that carries "which screened universe is this".
+UNIVERSE_MODE_PATH: Final[str] = "sharia_policy.universe_mode"
+
+#: Provenance kinds that mean a person chose the value, not the platform.
+USER_OWNED_PROVENANCE: Final[frozenset[str]] = frozenset({"user_explicit", "user_confirmed"})
+
+
+def universe_mode_is_user_selected(
+    draft: StrategyDraftV2,
+    *,
+    assignments: Iterable[_Assignment] = (),
+) -> bool:
+    """Did a person choose this screened universe, or is it only the safe default?
+
+    ``ELIGIBLE_MARKET`` is both a legitimate answer and the platform default, so the
+    stored value proves nothing on its own.  Provenance does: either an explicit
+    selection inside this turn, or a user-owned requirement state written by an earlier
+    one.  Reading the value alone would auto-satisfy every new draft.
+    """
+
+    mode = draft.sharia_policy.universe_mode.value
+    for assignment in assignments:
+        if (
+            assignment.target_path == UNIVERSE_MODE_PATH
+            and assignment.grounded
+            and not assignment.registry_owned
+            and not assignment.inherited_existing
+            and _json_value(assignment.value) == mode
+        ):
+            return True
+    return any(
+        state.target_path == UNIVERSE_MODE_PATH
+        and state.provenance_kind in USER_OWNED_PROVENANCE
+        and state.normalized_value == mode
+        for state in draft.requirement_states
+    )
+
 
 def reconcile_requirement_state(
     *,
@@ -131,6 +169,7 @@ def reconcile_requirement_state(
     segments: dict[str, TurnSegment],
     operation_results: list[OperationExecutionResult],
     active_clarification: ClarificationContract | None = None,
+    confirmed_paths: frozenset[str] = frozenset(),
 ) -> RequirementReconciliation:
     """Reconcile every open target against the completed, authorized working turn.
 
@@ -142,7 +181,14 @@ def reconcile_requirement_state(
     applied = {
         item.operation_id: item for item in operation_results if item.applied and not item.rejected
     }
-    assignments = _operation_assignments(before, working, plan, segments, applied)
+    assignments = _operation_assignments(
+        before,
+        working,
+        plan,
+        segments,
+        applied,
+        confirmed_paths=confirmed_paths,
+    )
     working, supported_assessments = _reconcile_supported_requirements(
         working,
         assignments=assignments,
@@ -954,6 +1000,8 @@ def _operation_assignments(
     plan: SetupAgentTurnPlan,
     segments: dict[str, TurnSegment],
     applied: dict[str, OperationExecutionResult],
+    *,
+    confirmed_paths: frozenset[str] = frozenset(),
 ) -> list[_Assignment]:
     assignments: list[_Assignment] = []
     before_conditions = _conditions(before)
@@ -1025,8 +1073,13 @@ def _operation_assignments(
             for field in operation.sharia_policy.model_dump(mode="python"):
                 final_value = getattr(working.sharia_policy, field)
                 old_value = getattr(before.sharia_policy, field)
-                if final_value != old_value or _grounds_target_value(
-                    source, final_value, field=field
+                # A server-owned control names the exact paths the person picked. Re-
+                # picking the value that was already there is still a choice, and it is
+                # the only evidence that separates a chosen default from a defaulted one.
+                if (
+                    final_value != old_value
+                    or f"sharia_policy.{field}" in confirmed_paths
+                    or _grounds_target_value(source, final_value, field=field)
                 ):
                     record(
                         f"sharia_policy.{field}",

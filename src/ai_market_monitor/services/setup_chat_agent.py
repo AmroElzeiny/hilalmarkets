@@ -21,7 +21,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from time import monotonic
@@ -48,8 +48,11 @@ from ai_market_monitor.engine.comparators import detect_comparator
 from ai_market_monitor.engine.conversation_intent import (
     ConversationIntent,
     IntentReading,
+    ScanSlots,
     classify_turn,
     is_confusion_signal,
+    scan_window_answer,
+    scan_window_is_explicit,
 )
 from ai_market_monitor.engine.conversation_language import (
     ConversationLanguage,
@@ -343,9 +346,6 @@ class SetupAgentTurnInput:
     #: Governed identities hidden behind public, turn-local aliases. Conditions,
     #: clarifications and snapshots are added from the authoritative draft/history.
     planner_references: PlannerReferenceContext = EMPTY_PLANNER_REFERENCES
-    #: The destination the trader already chose — ``scanner`` or ``monitor``. Without
-    #: it, a market question inside Scanner was answered as a product explanation.
-    active_mode: str | None = None
     #: Where the previous turn went, so a follow-up stays on the same road.
     previous_intent: str | None = None
     #: The conversation's language as last persisted. The latest user turn wins over
@@ -354,14 +354,34 @@ class SetupAgentTurnInput:
     #: Fingerprints of replies already sent in this chat. A confusion signal must not
     #: be answered with something the trader has already read.
     previous_response_fingerprints: tuple[str, ...] = ()
-    #: What the trader is still trying to do, carried across a reply that missed.
-    pending_goal_kind: str | None = None
-    pending_goal_threshold: str | None = None
-    pending_goal_question: str = ""
 
     @property
     def deadline(self) -> TurnDeadline:
         return self.telemetry.deadline
+
+    @property
+    def active_mode(self) -> str:
+        """Scanner or Monitor, read from the draft that governed execution also reads.
+
+        This used to be a separate field carried beside ``setup_mode``. Two values for
+        one fact is two answers: the router believed Scanner was active while the
+        governed scan checked ``draft.mode`` and found Monitor, so a scan the trader had
+        set up refused itself.
+        """
+
+        return str(self.setup_mode.value if self.setup_mode else DraftMode.MONITOR.value)
+
+    @property
+    def pending_scan(self) -> dict[str, object]:
+        """The half-collected live scan, or an empty mapping.
+
+        The one place this is kept is ``conversation.pending_read_only_scan``. Telemetry
+        notes and a per-turn ``pending_goal`` field held copies of it before, and the
+        copies were what the next turn read — so the direction and size the trader had
+        already given were asked for a second time.
+        """
+
+        return dict(self.conversation.pending_read_only_scan or {})
 
     @property
     def normalized_message(self) -> str:
@@ -713,10 +733,11 @@ class SetupChatAgent:
 
         telemetry = turn.telemetry
 
-        if reading.selected_mode is not None and reading.intent is ConversationIntent.SOCIAL:
+        if "mode_selection" in reading.reasons:
             # A bare mode word is the product's own start button, not a sentence to
-            # plan. Answering it deterministically also records the destination, which
-            # is what keeps the next market question inside Scanner.
+            # plan. This must test what *this turn* chose, never merely which mode is
+            # active: every conversation has an active mode, so reading that as a
+            # selection answered "yes" and "hello" with the Scanner start question.
             question = localized("ask.symbol_scope", language.language)
             reconciled = reconcile_reply((), clarification=question)
             telemetry.notes["selected_mode"] = reading.selected_mode
@@ -738,12 +759,10 @@ class SetupChatAgent:
                 turn, answer, language, reading, route="product_explanation"
             )
 
+        pending = turn.pending_scan
+
         if reading.intent is ConversationIntent.CONFUSION_SIGNAL:
-            goal = ConversationalGoal(
-                kind=turn.pending_goal_kind or "unknown",
-                threshold_percent=turn.pending_goal_threshold,
-                pending_question=turn.pending_goal_question,
-            )
+            goal = _goal_from_pending(pending, turn.conversation)
             recovered = confusion_recovery_reply(
                 goal,
                 language=language.language,
@@ -751,50 +770,14 @@ class SetupChatAgent:
             )
             telemetry.notes["confusion_recovery"] = True
             telemetry.notes.update(recovered.to_dict())
+            # A miss does not lose the goal. The pending scan and its open question are
+            # carried through untouched, so the next answer still lands on them.
             return self._read_only_result(
                 turn, recovered.message, language, reading, route="confusion_recovery"
             )
 
         if reading.intent is ConversationIntent.ON_DEMAND_SCAN:
-            missing = reading.slots.missing
-            if missing:
-                # Ask for the one genuinely missing choice. The trader already told us
-                # the size and the direction; asking again would be the product not
-                # listening, which is what the generic Scanner/Monitor sentence was.
-                threshold = (
-                    f"{reading.slots.threshold_percent:g}%"
-                    if reading.slots.threshold_percent is not None
-                    else "the"
-                )
-                question = localized(
-                    "ask.scan_window" if "window" in missing else "ask.movement_size",
-                    language.language,
-                    threshold=threshold,
-                )
-                reconciled = reconcile_reply((), clarification=question)
-                telemetry.notes["scan_execution"] = "awaiting_user_choice"
-                telemetry.notes.update(reconciled.to_dict())
-                return self._read_only_result(
-                    turn,
-                    reconciled.message,
-                    language,
-                    reading,
-                    route="on_demand_scan_clarification",
-                    goal_kind="scan",
-                    goal_threshold=(
-                        f"{reading.slots.threshold_percent:g}"
-                        if reading.slots.threshold_percent is not None
-                        else None
-                    ),
-                    goal_question=question,
-                )
-            # Everything needed is present. The scan itself is executed by the service
-            # that owns the authenticated session and the screened universe; this
-            # agent has neither, so it hands the request over rather than inventing a
-            # result. `scan_request` is the contract the launch service reads.
-            telemetry.notes["scan_execution"] = "requested"
-            telemetry.notes["scan_request"] = reading.slots.to_dict()
-            return None
+            return self._route_read_only_scan(turn, reading, language, pending)
 
         if reading.intent in {
             ConversationIntent.STRATEGY_EDIT,
@@ -843,13 +826,122 @@ class SetupChatAgent:
                 language,
                 reading,
                 route="supported_incomplete_clarification",
-                goal_kind="alert",
-                goal_threshold=assessment.supplied.get("threshold_percent"),
-                goal_question=clarification.question,
             )
             return replace(result, conversation=conversation)
 
         return None
+
+    def _route_read_only_scan(
+        self,
+        turn: SetupAgentTurnInput,
+        reading: IntentReading,
+        language: LanguageDecision,
+        pending: dict[str, object],
+    ) -> SetupAgentTurnResult | None:
+        """Collect a live scan, one missing choice at a time, then hand it to execution.
+
+        Everything this collects is written to ``conversation.pending_read_only_scan``
+        and the question is a real :class:`ClarificationContract` attached with
+        ``with_question``. That is the state the continuation turn, the governed
+        execution path and the option-button path all already read. Keeping it in
+        telemetry instead was why answering "24 hours" started a new conversation
+        rather than finishing the scan that had asked.
+        """
+
+        telemetry = turn.telemetry
+        merged = _merge_scan_request(pending, reading.slots, turn.message)
+        threshold = merged.get("threshold_percent")
+        direction = merged.get("movement_direction")
+
+        if threshold is None or direction is None:
+            # Nothing usable to hold on to. The planner still gets this turn, because a
+            # sentence this reader could not resolve is exactly what a model is for.
+            telemetry.notes["scan_execution"] = "not_enough_to_hold"
+            return None
+
+        if merged.get("measurement_window") is None:
+            question = localized("ask.scan_window_24h", language.language)
+            clarification = _scan_window_contract(question, turn.source_turn_id)
+            reconciled = reconcile_reply((), clarification=question)
+            telemetry.notes["scan_execution"] = "awaiting_user_choice"
+            telemetry.notes["scan_pending_request"] = dict(merged)
+            telemetry.notes.update(reconciled.to_dict())
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": language.language.value,
+                    "active_goal": READ_ONLY_SCAN_GOAL,
+                    "pending_read_only_scan": merged,
+                    "last_assistant_summary": reconciled.message[:1000],
+                }
+            ).with_question(clarification)
+            result = self._read_only_result(
+                turn,
+                reconciled.message,
+                language,
+                reading,
+                route="on_demand_scan_clarification",
+            )
+            return replace(result, conversation=conversation)
+
+        if turn.setup_mode != DraftMode.SCANNER:
+            # The values are kept, so choosing Scanner next finishes the same scan
+            # rather than asking for all of it again.
+            content = localized("scan.mode_required", language.language)
+            telemetry.notes["scan_execution"] = "mode_required"
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": language.language.value,
+                    "active_goal": READ_ONLY_SCAN_GOAL,
+                    "pending_read_only_scan": merged,
+                    "last_assistant_summary": content[:1000],
+                }
+            )
+            result = self._read_only_result(
+                turn, content, language, reading, route="on_demand_scan_mode_required"
+            )
+            return replace(result, conversation=conversation)
+
+        if not _scan_universe_is_ready(turn.draft):
+            content = localized("scan.scope_required", language.language)
+            telemetry.notes["scan_execution"] = "scope_required"
+            conversation = turn.conversation.model_copy(
+                update={
+                    "active_language": language.language.value,
+                    "active_goal": READ_ONLY_SCAN_GOAL,
+                    "pending_read_only_scan": merged,
+                    "last_assistant_summary": content[:1000],
+                }
+            )
+            result = self._read_only_result(
+                turn, content, language, reading, route="on_demand_scan_scope_required"
+            )
+            return replace(result, conversation=conversation)
+
+        # Complete and inside Scanner. The scan itself runs in the service that owns the
+        # authenticated session, the screened universe and the provider quota; this agent
+        # has none of those, so it hands over a request rather than inventing a result.
+        content = localized("scan.running", language.language)
+        telemetry.notes["scan_execution"] = "requested"
+        telemetry.notes["scan_request"] = dict(merged)
+        # Collecting is finished, so the goal is released here and the values are left
+        # for the service that runs the scan. It clears them on success or on a refusal
+        # the trader cannot act on, and keeps them when choosing a screened scope would
+        # let the same scan finish. Holding the goal open past hand-over would make
+        # every later message re-enter the scan and run it again.
+        conversation = turn.conversation.model_copy(
+            update={
+                "active_language": language.language.value,
+                "active_goal": None,
+                "pending_read_only_scan": merged,
+                "last_assistant_summary": content[:1000],
+            }
+        ).cleared_question()
+        result = self._read_only_result(
+            turn, content, language, reading, route="on_demand_scan_authorized"
+        )
+        return replace(
+            result, conversation=conversation, read_only_scan_request=dict(merged)
+        )
 
     def _read_only_result(
         self,
@@ -859,9 +951,6 @@ class SetupChatAgent:
         reading: IntentReading,
         *,
         route: str,
-        goal_kind: str | None = None,
-        goal_threshold: str | None = None,
-        goal_question: str = "",
         clarification: ClarificationContract | None = None,
     ) -> SetupAgentTurnResult:
         """One read-only turn: words back, and no change to any persisted state.
@@ -879,11 +968,6 @@ class SetupChatAgent:
         telemetry.notes["response_fingerprint"] = response_fingerprint(
             f"{safe} {clarification.question}".strip() if clarification else safe
         )
-        telemetry.notes["pending_goal"] = {
-            "kind": goal_kind or turn.pending_goal_kind,
-            "threshold": goal_threshold or turn.pending_goal_threshold,
-            "question": goal_question or turn.pending_goal_question,
-        }
         conversation = turn.conversation.model_copy(
             update={"last_assistant_summary": safe[:1000]}
         )
@@ -939,6 +1023,12 @@ class SetupChatAgent:
                 ConversationIntent(turn.previous_intent) if turn.previous_intent else None
             ),
             has_open_question=bool(turn.conversation.active_question_id),
+            # A scan is only "pending" while its own question is still open. Without
+            # that second half, a finished scan kept swallowing the next turn.
+            pending_scan=bool(
+                turn.conversation.pending_read_only_scan
+                and turn.conversation.active_goal == READ_ONLY_SCAN_GOAL
+            ),
         )
         telemetry.notes.update(language.to_dict())
         telemetry.notes.update(reading.to_dict())
@@ -1371,7 +1461,7 @@ class SetupChatAgent:
         )
         continued_pending_window = False
         if scan is None and pending and _planner_answered_active_question(turn, envelope):
-            window = _read_only_window_answer(turn.message)
+            window = scan_window_answer(turn.message)
             if window is None:
                 question = localized("ask.scan_window_24h", language_of(turn.active_language))
                 fingerprint = response_fingerprint(question)
@@ -1407,7 +1497,9 @@ class SetupChatAgent:
                     Any, str(pending.get("movement_direction") or "up")
                 ),
                 threshold_percent=float(str(pending.get("threshold_percent") or 0)),
-                measurement_window=window,
+                # `scan_window_answer` returns the one supported window or nothing, and
+                # `window` is not None here, so this is that window.
+                measurement_window=cast(Literal["24h"], window),
             )
 
         if scan is None:
@@ -1434,7 +1526,7 @@ class SetupChatAgent:
                     continued_pending_window
                     and prior_scan is not None
                     and _read_only_scan_values_are_grounded(prior_scan, prior_source)
-                    and _read_only_window_answer(source_segment.exact_source_text)
+                    and scan_window_answer(source_segment.exact_source_text)
                     == scan.measurement_window
                 )
                 or (
@@ -3745,36 +3837,6 @@ def _planner_answered_active_question(
     """
 
     return bool(turn.conversation.active_question and envelope.clarification_answers)
-def _read_only_window_answer(message: str) -> Literal["24h"] | None:
-    text = " ".join((message or "").casefold().split())
-    if text in {
-        "yes", "yeah", "yep", "ok", "okay", "sure",
-        "نعم", "اه", "أيوه",
-        "oui", "d’accord", "d'accord", "accord",
-        "sí", "si", "claro",
-        "да", "хорошо",
-    }:
-        return "24h"
-    if re.search(
-        r"(?:\b(?:24\s*h|24\s*hours?|one\s*day|last\s*day|1d|"
-        r"24\s*heures?|une\s+journ[ée]e|24\s*horas?|un\s+d[ií]a)\b"
-        r"|24\s*(?:часа|часов)|\bсутки\b)",
-        text,
-    ):
-        return "24h"
-    return None
-
-
-def _read_only_window_is_explicit(message: str) -> bool:
-    text = " ".join((message or "").casefold().split())
-    return bool(
-        re.search(
-            r"(?:\b(?:24\s*h|24\s*hours?|one\s*day|last\s*day|1d|"
-            r"24\s*heures?|une\s+journ[ée]e|24\s*horas?|un\s*d[ií]a)\b"
-            r"|24\s*(?:часа|часов)|\bсутки\b|(?:24\s*ساعة|يوم\s*كامل))",
-            text,
-        )
-    )
 
 
 def _read_only_scan_values_are_grounded(
@@ -3785,7 +3847,7 @@ def _read_only_scan_values_are_grounded(
         return False
     if not grounds_number(source_text, float(scan.threshold_percent), unit="percent"):
         return False
-    return scan.measurement_window is None or _read_only_window_is_explicit(source_text)
+    return scan.measurement_window is None or scan_window_is_explicit(source_text)
 
 
 def _scan_universe_is_ready(draft: StrategyDraftV2) -> bool:
@@ -3899,6 +3961,94 @@ def _next_supported_field(missing: list[str]) -> str:
         "universe",
     )
     return next((item for item in priority if item in missing), missing[0])
+#: The name of the goal a half-collected live scan is working towards. One constant,
+#: because the launch service, the option-button path and the agent all test for it.
+READ_ONLY_SCAN_GOAL: Final[str] = "read_only_percentage_scan"
+
+#: The only measurement window the provider exposes. Offering a period the backend
+#: cannot measure is a promise the scan then breaks, so the question offers this and
+#: nothing else until another window is actually implemented.
+SUPPORTED_SCAN_WINDOWS: Final[tuple[str, ...]] = ("24h",)
+
+
+def _merge_scan_request(
+    pending: Mapping[str, object],
+    slots: ScanSlots,
+    message: str,
+) -> dict[str, object]:
+    """Fold this turn's answer into the scan already being collected.
+
+    Only fields this turn actually supplied are written. A stored direction, threshold
+    or symbol list is never overwritten with ``None`` — that is how answering the window
+    question used to erase the 5% the trader had given one message earlier.
+    """
+
+    merged: dict[str, object] = dict(pending)
+    if slots.threshold_percent is not None:
+        merged["threshold_percent"] = float(slots.threshold_percent)
+    if slots.direction is not None:
+        merged["movement_direction"] = str(slots.direction)
+    if slots.window is not None:
+        merged["measurement_window"] = str(slots.window)
+    merged.setdefault("measurement_window", None)
+    # Kept as evidence of what the trader asked for, never as a filter: the governed
+    # scan has no symbol argument and runs over the draft's screened universe. Storing
+    # them so the reply could claim a per-symbol scan would be describing something the
+    # platform does not do.
+    if slots.symbols:
+        merged["symbols"] = list(slots.symbols)
+    if slots.screened_universe:
+        merged["screened_universe"] = True
+    # Provenance is the words that first stated the scan, not the word "yes" that
+    # finished it. Overwriting it would make the stored evidence disagree with the
+    # values it is supposed to justify.
+    merged.setdefault("source_text", " ".join((message or "").split())[:500])
+    return merged
+
+
+def _scan_window_contract(question: str, source_turn_id: str) -> ClarificationContract:
+    """The window question, as the same non-mutating contract the governed path builds."""
+
+    digest = hashlib.sha256(f"{source_turn_id}:read-only-window".encode()).hexdigest()[:20]
+    return ClarificationContract(
+        question_id=f"scan_window_{digest}",
+        question=question,
+        reason="The provider's rolling percentage field needs an explicit window.",
+        target_type="conversational",
+        expected_answer_schema=json.dumps(
+            {"type": "string", "enum": list(SUPPORTED_SCAN_WINDOWS)},
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        mutating=False,
+        allowed_options=list(SUPPORTED_SCAN_WINDOWS),
+    )
+
+
+def _goal_from_pending(
+    pending: Mapping[str, object],
+    conversation: SetupConversationContext,
+) -> ConversationalGoal:
+    """What the trader is still trying to do, read from the one stored copy of it.
+
+    The open question comes with it, so a confusion signal restates the goal *and* asks
+    the same question again rather than leaving the trader with an apology and nothing
+    to answer.
+    """
+
+    question = conversation.question_text or ""
+    if not pending:
+        return ConversationalGoal(kind="unknown", pending_question=question)
+    threshold = pending.get("threshold_percent")
+    return ConversationalGoal(
+        kind="scan",
+        threshold_percent=(
+            f"{float(str(threshold)):g}" if threshold is not None else None
+        ),
+        pending_question=question,
+    )
+
+
 #: Which question a missing field asks. One map, read by both clarification builders:
 #: they held separate copies, so a wording fixed in one still asked the old question
 #: from the other.
@@ -4575,9 +4725,12 @@ def _deterministic_conversation_reply(
     count = _condition_count(draft)
     if count == 0:
         return localized("status.nothing_set_up", language_of(language))
-    return localized("status.draft_count", language_of(language),
+    return localized(
+        "status.draft_count",
+        language_of(language),
         count=count,
         suffix="s" if count != 1 else "",
+        version=draft.version,
     )
 
 

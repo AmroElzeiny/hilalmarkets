@@ -43,11 +43,13 @@ from ai_market_monitor.db.models.enums import (
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
 )
+from ai_market_monitor.engine.conversation_intent import selected_mode_word
 from ai_market_monitor.engine.conversation_language import (
     governed_scan_error,
     language_of,
     localized,
     resolve_conversation_language,
+    scan_error_is_resolvable,
     scanner_labels,
     scope_labels,
 )
@@ -277,6 +279,14 @@ class SetupChatLaunchService:
         # sentence, and made the stored provenance disagree with what the user wrote.
         raw = message or option_label or option_value or ""
         cleaned = " ".join(raw.split())
+        # Typing "Scanner" is the same choice as pressing the Scanner button, so it takes
+        # the same governed route. It used to be answered conversationally instead, which
+        # left `draft.mode` on Monitor — and the governed scan reads `draft.mode`, so the
+        # very next market question refused itself for being in the wrong mode.
+        if not option_key:
+            typed_mode = selected_mode_word(cleaned)
+            if typed_mode is not None:
+                option_key, option_value = "setup_mode", typed_mode
         if option_key:
             if client_message_id:
                 turn_record = await self._get_or_create_turn(
@@ -2114,6 +2124,7 @@ return tostring(next_value)
             )
             content = _governed_scan_message(result, language)
             message_type = "scanner_result"
+            keep_request: dict[str, object] = {}
         except OnDemandScanError as exc:
             result = {
                 "status": "failed",
@@ -2131,12 +2142,19 @@ return tostring(next_value)
             }
             content = governed_scan_error(exc.code, str(exc), language_of(language))
             message_type = "scanner_error"
+            # Kept only when the refusal is one the trader can still clear — no screened
+            # scope yet, or a provider that is down. Throwing the values away there made
+            # them describe the same scan again after fixing the very thing we asked
+            # them to fix. A spent quota or an unsupported window ends the attempt.
+            keep_request = dict(request) if scan_error_is_resolvable(exc.code) else {}
 
         fingerprint = _chat_response_fingerprint(content)
         conversation = conversation.model_copy(
             update={
+                # The goal is closed either way: the open question was answered, and a
+                # scan that keeps re-running itself on every later message is a loop.
                 "active_goal": None,
-                "pending_read_only_scan": {},
+                "pending_read_only_scan": keep_request,
                 "last_assistant_summary": content[:1000],
                 "last_response_fingerprint": fingerprint,
             }
@@ -2285,26 +2303,13 @@ return tostring(next_value)
             history=tuple(history),
             setup_mode=draft.mode,
             active_language=active_language,
-            # The conversation's own memory. Without it every turn starts from nothing:
-            # the Scanner the trader chose is forgotten, the language resets on any
-            # turn with no language signal, and a confusion signal cannot tell whether
-            # the reply it is about to send has already been sent once.
-            active_mode=str(context.get("conversation_active_mode") or "") or None,
+            # The conversation's own memory. The mode comes from `draft.mode` above and
+            # the half-collected scan from `conversation.pending_read_only_scan`; only
+            # these three have nowhere else to live.
             previous_intent=str(context.get("conversation_previous_intent") or "") or None,
             session_language=str(context.get("conversation_language") or "") or None,
             previous_response_fingerprints=tuple(
                 str(item) for item in (context.get("conversation_response_fingerprints") or [])[-8:]
-            ),
-            pending_goal_kind=str(
-                (context.get("conversation_pending_goal") or {}).get("kind") or ""
-            )
-            or None,
-            pending_goal_threshold=str(
-                (context.get("conversation_pending_goal") or {}).get("threshold") or ""
-            )
-            or None,
-            pending_goal_question=str(
-                (context.get("conversation_pending_goal") or {}).get("question") or ""
             ),
             previous_turn_failed=bool(context.get("last_turn_failed")),
             # What has already failed in this chat, so a paid correction is not spent on
@@ -3950,7 +3955,19 @@ def _title(text: str) -> str:
 
 #: What one turn did, from the user's point of view rather than the code's. These are the
 #: only outcomes a turn can have, so a funnel row can never be uncategorised.
-FUNNEL_OUTCOMES: tuple[str, ...] = ("changed", "no_change", "answered", "refused")
+#: Every outcome a turn can end in. A read-only Scanner run is its own pair, because a
+#: scan that found nothing is not a refusal and a scan that ran is not a draft change.
+#: They were missing, so a completed scan raised `unknown turn outcome: scan_completed`
+#: *after* the scan had already run — the funnel recorder turning a finished turn into
+#: a failed one.
+FUNNEL_OUTCOMES: tuple[str, ...] = (
+    "changed",
+    "no_change",
+    "answered",
+    "refused",
+    "scan_completed",
+    "scan_refused",
+)
 
 #: How many turns of history the funnel keeps per chat. Enough to see a user give up;
 #: short enough that the session row stays small.
@@ -3960,15 +3977,13 @@ _FUNNEL_WINDOW = 40
 def _record_conversation_memory(context: dict[str, Any], telemetry: TurnTelemetry) -> None:
     """Carry this turn's routing decision, language and wording into the next turn.
 
-    Every field here is something the old pipeline recomputed from nothing each time,
-    which is why a Scanner selection was forgotten one turn later and why an identical
-    reply could be sent twice without anything noticing.
+    Only what has nowhere else to live. The selected mode is ``draft.mode`` and the
+    half-collected scan is ``conversation.pending_read_only_scan``; both used to be
+    copied here as well, and the copies were what the next turn read — so a scan could
+    be waiting in one place while the router looked in the other and found nothing.
     """
 
     notes = telemetry.notes
-    mode = notes.get("conversation_selected_mode") or notes.get("selected_mode")
-    if mode:
-        context["conversation_active_mode"] = str(mode)
     intent = notes.get("conversation_intent")
     if intent and intent != "CONFUSION_SIGNAL":
         # A confusion signal is *about* the previous intent, so it must not replace it.
@@ -3982,11 +3997,10 @@ def _record_conversation_memory(context: dict[str, Any], telemetry: TurnTelemetr
             *(context.get("conversation_response_fingerprints") or []),
             str(fingerprint),
         ][-8:]
-    goal = notes.get("pending_goal")
-    if isinstance(goal, dict) and any(goal.values()):
-        context["conversation_pending_goal"] = {
-            key: (str(value) if value is not None else None) for key, value in goal.items()
-        }
+    # Copies written by an earlier build. Removed on the way past so a stale one can
+    # never be read as current state.
+    context.pop("conversation_active_mode", None)
+    context.pop("conversation_pending_goal", None)
 
 
 def _record_intent_snapshot(context: dict[str, Any], telemetry: TurnTelemetry) -> None:
@@ -4024,7 +4038,10 @@ def _record_funnel(
     """
 
     if outcome not in FUNNEL_OUTCOMES:
-        raise ValueError(f"unknown turn outcome: {outcome}")
+        # Recording a turn must never be the thing that fails it. An outcome nobody
+        # listed is a gap in this table, not a reason to throw away a scan the user
+        # already paid for and the platform already ran.
+        outcome = "no_change"
     rows = list(context.get("setup_turn_funnel") or [])
     previous = rows[-1] if rows else {}
     rows.append(

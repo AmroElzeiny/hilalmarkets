@@ -100,7 +100,7 @@ _ANSWER_SHAPE: Final[dict[MissingChoice, str]] = {
     MissingChoice.SYMBOL_SCOPE: "all screened coins, or one named coin",
     MissingChoice.MOVEMENT_KIND: "a rise, a fall, or both",
     MissingChoice.MOVEMENT_SIZE: "a percentage, for example 5%",
-    MissingChoice.MEASUREMENT_WINDOW: "1 hour, 4 hours, 24 hours, or since the daily open",
+    MissingChoice.MEASUREMENT_WINDOW: "1 hour, 4 hours, or 1 day",
 }
 
 #: The offered choices, so the UI can show buttons and the answer stays bounded. A
@@ -120,18 +120,22 @@ _OPTIONS: Final[dict[MissingChoice, dict[ConversationLanguage, tuple[str, ...]]]
         ConversationLanguage.SPANISH: ("Una subida", "Una bajada", "Ambas"),
     },
     MissingChoice.MOVEMENT_SIZE: {},
+    #: Candle periods only, and only ones in ``SUPPORTED_TIMEFRAMES``. "Since the daily
+    #: open" was offered here and is not a candle period at all, so a trader who chose it
+    #: was choosing something the compiler had no way to build.
     MissingChoice.MEASUREMENT_WINDOW: {
-        ConversationLanguage.ENGLISH: (
-            "1 hour", "4 hours", "24 hours", "Since the daily open",
-        ),
-        ConversationLanguage.ARABIC: ("ساعة", "4 ساعات", "24 ساعة", "من افتتاح اليوم"),
-        ConversationLanguage.FRENCH: (
-            "1 heure", "4 heures", "24 heures", "Depuis l'ouverture du jour",
-        ),
-        ConversationLanguage.SPANISH: (
-            "1 hora", "4 horas", "24 horas", "Desde la apertura del día",
-        ),
+        ConversationLanguage.ENGLISH: ("1 hour", "4 hours", "1 day"),
+        ConversationLanguage.ARABIC: ("ساعة", "4 ساعات", "يوم"),
+        ConversationLanguage.FRENCH: ("1 heure", "4 heures", "1 jour"),
+        ConversationLanguage.SPANISH: ("1 hora", "4 horas", "1 día"),
+        ConversationLanguage.RUSSIAN: ("1 час", "4 часа", "1 день"),
     },
+}
+
+#: Which real timeframe each offered label means. Every option a clarification shows
+#: must appear here, and every value here must be in ``SUPPORTED_TIMEFRAMES``.
+OFFERED_WINDOW_TIMEFRAMES: Final[dict[MissingChoice, tuple[str, ...]]] = {
+    MissingChoice.MEASUREMENT_WINDOW: ("1h", "4h", "1d"),
 }
 
 

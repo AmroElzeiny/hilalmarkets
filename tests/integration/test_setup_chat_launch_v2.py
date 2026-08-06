@@ -363,6 +363,62 @@ async def test_allowlisted_ui_option_uses_canonical_turn_without_ai(test_context
         assert execution["operation_results"][0]["operation_id"].startswith("ui_setup_mode_")
 
 
+@pytest.mark.parametrize("typed", ("Scanner", "scanner", "  Scanner  "))
+async def test_typing_scanner_activates_the_same_mode_as_the_button(test_context, typed):
+    """One mode change, one route.
+
+    Typing the word used to be answered conversationally, which left ``draft.mode`` on
+    Monitor. Governed scan execution reads ``draft.mode``, so the next market question
+    then refused itself for being in the wrong mode — after the trader had chosen it.
+    """
+
+    user = await _user(test_context)
+    planner = StandInPlanner()
+    service = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], planner),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        before = load_strategy_draft_v2(chat)
+
+        await service.handle_message(
+            session,
+            chat,
+            message=typed,
+            client_message_id=f"launch-v2-typed-{typed.strip()}-{len(typed)}",
+        )
+
+        after = load_strategy_draft_v2(chat)
+        assert after.mode.value == "scanner"
+        assert after.executable_version == before.executable_version + 1
+        # And it cost no model call, exactly like the button.
+        assert planner.plan_calls == 0
+
+
+async def test_a_typed_mode_word_never_approves_or_builds_a_rule(test_context):
+    user = await _user(test_context)
+    planner = StandInPlanner()
+    service = AISetupChatService(
+        _launch_settings(test_context["settings"]),
+        MarketProvider(),
+        RuleBasedStrategyInterpreter(),
+        launch_agent=_agent(test_context["settings"], planner),
+    )
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+
+        await service.handle_message(
+            session, chat, message="Scanner", client_message_id="launch-v2-typed-safety"
+        )
+
+        after = load_strategy_draft_v2(chat)
+        assert after.condition_ast is None
+        assert not after.approval.approved
+
+
 async def test_runtime_preflight_verifies_every_explicit_symbol_and_timeframe(test_context):
     provider = MarketProvider()
     owner = AISetupChatService(

@@ -53,6 +53,9 @@ __all__ = [
     "ScanSlots",
     "classify_turn",
     "is_confusion_signal",
+    "scan_window_answer",
+    "scan_window_is_explicit",
+    "selected_mode_word",
 ]
 
 
@@ -141,17 +144,19 @@ _NOW_MARKERS: Final[re.Pattern[str]] = re.compile(
     r"|(?:دلوقتي|الان|الآن|النهارده|النهاردة|حاليا|حالياً|اليوم)"
     r"|\b(?:delwa2ti|dilwa2ti|elnaharda|enaharda)\b"
     r"|\b(?:maintenant|aujourd'hui|actuellement)\b"
-    r"|\b(?:ahora|hoy|actualmente)\b",
+    r"|\b(?:ahora|hoy|actualmente)\b"
+    r"|(?:сейчас|сегодня|в данный момент|на данный момент)",
     re.IGNORECASE,
 )
 
 #: Asking *the market* something: which coins, what is moving, show me.
 _MARKET_QUERY: Final[re.Pattern[str]] = re.compile(
     r"\b(?:what|which|any|show|list|find|search|scan|screen|give)\b"
-    r"|(?:ايه|إيه|انهي|أنهي|ما هي|ماهي|اعرض|هات|دور|افحص|فين)"
+    r"|(?:ايه|إيه|انهي|أنهي|ما هي|ماهي|اعرض|هات|دور|افحص|فين|ما ال|أي |اي |كم )"
     r"|\b(?:eh|anhi|hat|dawar|warini)\b"
     r"|\b(?:quel|quels|quelle|quelles|montre|affiche|cherche|trouve)\b"
-    r"|\b(?:qué|cuál|cuáles|muestra|busca|encuentra|dame)\b",
+    r"|\b(?:qué|cuál|cuáles|muestra|busca|encuentra|dame)\b"
+    r"|(?:какие|какая|какой|каких|что|покажи|найди|список|сколько)",
     re.IGNORECASE,
 )
 
@@ -162,7 +167,9 @@ _MARKET_SUBJECT: Final[re.Pattern[str]] = re.compile(
     r"|(?:عملة|عملات|العملات|سوق|السوق|رمز|رموز)"
     r"|\b(?:3omla|3omlat|coinat)\b"
     r"|\b(?:pièce|pièces|crypto|cryptos|marché|actif|actifs)\b"
-    r"|\b(?:moneda|monedas|cripto|criptos|mercado|activo|activos)\b",
+    r"|\b(?:moneda|monedas|cripto|criptos|mercado|activo|activos)\b"
+    r"|(?:монета|монеты|монет|монетах|криптовалюта|криптовалюты|рынок|рынке|"
+    r"актив|активы|пара|пары|токен|токены)",
     re.IGNORECASE,
 )
 
@@ -231,8 +238,78 @@ _MODE_WORDS: Final[dict[str, str]] = {
     "فحص": "scanner",
     "مراقبة": "monitor",
     "escáner": "scanner",
+    "escaner": "scanner",
     "moniteur": "monitor",
+    "сканер": "scanner",
+    "монитор": "monitor",
 }
+
+
+def selected_mode_word(message: str) -> str | None:
+    """``scanner``/``monitor`` when the whole turn is that one word, else ``None``.
+
+    Shared so a typed "Scanner" and the Scanner button reach the same governed mode
+    change. They used to be read in two places: the button set ``draft.mode`` through an
+    authorized patch, and the typed word set a note nothing else looked at, so the next
+    market question did not know Scanner had been chosen.
+    """
+
+    collapsed = " ".join((message or "").split()).casefold().strip(" .!?،؟")
+    return _MODE_WORDS.get(collapsed)
+
+
+#: Answers that mean "yes, the rolling 24-hour window". The backend supports no other
+#: window, so this is the whole accepted vocabulary for that question — including a bare
+#: yes, because a one-option question is answered that way more often than not.
+_WINDOW_24H: Final[re.Pattern[str]] = re.compile(
+    r"^(?:"
+    r"24\s*h(?:ours?|rs?)?|1\s*d|one\s+day|last\s+day|last\s+24\s*h(?:ours?)?|"
+    r"rolling\s+24\s*h(?:ours?)?|today|"
+    r"yes|yeah|yep|yup|ok|okay|sure|please|do it|go ahead|"
+    r"24\s*heures?|une\s+journ[ée]e|derni[èe]res?\s+24\s*heures?|oui|d.accord|"
+    r"24\s*horas?|un\s+d[ií]a|[úu]ltimas?\s+24\s*horas?|s[ií]|claro|vale|"
+    r"24\s*(?:часа|часов)|сутки|последние\s+24\s*часа|да|хорошо|конечно|"
+    r"نعم|أيوه|ايوه|اه|آه|تمام|ماشي|حاضر|24\s*ساعة|24\s*ساعه|يوم\s*كامل|آخر\s*24\s*ساعة"
+    r")$",
+    re.IGNORECASE,
+)
+
+#: The same window stated inside a longer sentence, for the first turn rather than a
+#: bare answer to the question.
+_WINDOW_24H_INLINE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:24\s*h(?:ours?|rs?)?|1d|one\s+day|last\s+day|rolling\s+24)\b"
+    r"|24\s*(?:ساعة|ساعه)|\bيوم\s*كامل\b"
+    r"|\b(?:24\s*heures?|une\s+journ[ée]e)\b"
+    r"|\b(?:24\s*horas?|un\s+d[ií]a)\b"
+    r"|24\s*(?:часа|часов)|\bсутки\b",
+    re.IGNORECASE,
+)
+
+
+def scan_window_answer(message: str) -> str | None:
+    """``"24h"`` when this turn answers the window question, else ``None``.
+
+    Deliberately total and deliberately narrow. The provider exposes one rolling
+    percentage window, so "24h" is the only value this can ever return — a different
+    period is not silently rounded to it, it simply is not recognised here.
+    """
+
+    collapsed = " ".join((message or "").split()).strip(" .!،؟")
+    if not collapsed:
+        return None
+    if _WINDOW_24H.match(collapsed) or _WINDOW_24H_INLINE.search(collapsed):
+        return "24h"
+    return None
+
+
+def scan_window_is_explicit(message: str) -> bool:
+    """Whether the text itself names the 24-hour window, rather than merely agreeing.
+
+    Grounding uses this: "yes" authorises the window the server offered, but it is not
+    the trader *writing* 24 hours, and provenance must not claim it was.
+    """
+
+    return bool(_WINDOW_24H_INLINE.search(" ".join((message or "").split())))
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +474,7 @@ def classify_turn(
     active_mode: str | None = None,
     previous_intent: ConversationIntent | None = None,
     has_open_question: bool = False,
+    pending_scan: bool = False,
 ) -> IntentReading:
     """Decide where this turn goes.
 
@@ -404,6 +482,12 @@ def classify_turn(
     what keeps a trader who selected Scanner and then asked a market question from
     being handed a product explanation: the destination they already chose stands
     unless this turn changes it.
+
+    ``pending_scan`` says a live scan is already half-collected and waiting on one
+    answer. It has to win over every reading below, because the answer to "which
+    period?" is a bare period — and a bare period is also what a strategy edit looks
+    like. "24 hours" was being compiled as a rule while the scan it belonged to sat
+    forgotten.
     """
 
     text = " ".join((message or "").split())
@@ -418,6 +502,54 @@ def classify_turn(
             ConversationIntent.CONFUSION_SIGNAL,
             selected_mode=active_mode,
             reasons=("confusion_marker",),
+        )
+
+    if pending_scan:
+        # A scan is waiting on one answer, so a bare "24 hours" belongs to it rather
+        # than being read as a strategy value. Two things still take the conversation
+        # away: choosing the other mode, and asking outright for something to be built.
+        # Without that second escape a trader could not leave a scan they had lost
+        # interest in — every message came back as the same question.
+        chosen = _MODE_WORDS.get(collapsed)
+        if chosen == "monitor":
+            return IntentReading(
+                ConversationIntent.CONTINUOUS_MONITOR,
+                selected_mode=chosen,
+                reasons=("mode_selection", "abandons_pending_scan"),
+            )
+        slots = _read_scan_slots(text)
+        window = scan_window_answer(text)
+        if window is None and (
+            _CREATE_MARKERS.search(text) or _CONTINUOUS_MARKERS.search(text)
+        ):
+            return IntentReading(
+                (
+                    ConversationIntent.CONTINUOUS_MONITOR
+                    if _CONTINUOUS_MARKERS.search(text) and active_mode != "scanner"
+                    else ConversationIntent.STRATEGY_EDIT
+                ),
+                selected_mode=active_mode,
+                slots=slots,
+                reasons=("abandons_pending_scan", "asks_for_something_built"),
+            )
+        return IntentReading(
+            ConversationIntent.ON_DEMAND_SCAN,
+            selected_mode=active_mode or "scanner",
+            slots=(
+                slots
+                if window is None
+                else ScanSlots(
+                    threshold_percent=slots.threshold_percent,
+                    direction=slots.direction,
+                    window=window,
+                    symbols=slots.symbols,
+                    screened_universe=slots.screened_universe,
+                )
+            ),
+            reasons=(
+                "pending_scan_open",
+                "answers_scan_window" if window is not None else "scan_answer_unclear",
+            ),
         )
 
     mode = _MODE_WORDS.get(collapsed)
