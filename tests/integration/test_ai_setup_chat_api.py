@@ -214,7 +214,10 @@ async def test_setup_chat_api_refuses_unrelated_and_serves_market_snapshot(test_
 
     unrelated = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
-        json={"message": "Give me a cupcake recipe"},
+        json={
+            "message": "Give me a cupcake recipe",
+            "client_message_id": "unrelated-request-001",
+        },
     )
     assert unrelated.status_code == 200
     assert unrelated.json()["messages"][-1]["message_type"] == "scope_refusal"
@@ -306,3 +309,120 @@ async def test_unknown_fragment_can_enter_certified_mechanic_queue(test_context)
         assert extension is not None
         assert extension.status == "queued"
         assert "moon-wobble" in extension.source_prompt
+
+
+# ---------------------------------------------------------------------------
+# The Guided Builder, driven over real HTTP.
+#
+# The service-level suite proves the behaviour; these prove the boundary — that the
+# routes exist, that the request schema refuses a change with no target, and that the
+# response carries everything the page needs to draw itself.
+# ---------------------------------------------------------------------------
+
+
+async def test_builder_contract_endpoint_is_authoritative_and_complete(test_context):
+    await _signup(test_context, "builder-contract-api@example.com")
+    response = await test_context["client"].get(
+        "/api/v1/dashboard/setup-chat/builder-contract"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    for key in ("mechanics", "starters", "modes", "universes", "logic", "lifecycle_states"):
+        assert payload[key], f"the contract sent no {key}"
+    for mechanic in payload["mechanics"]:
+        assert mechanic["label"] and mechanic["explanation"], mechanic["key"]
+        if not mechanic["available"]:
+            assert mechanic["unavailable_reason"], mechanic["key"]
+        for parameter in mechanic["parameters"]:
+            assert parameter["label"], f"{mechanic['key']}.{parameter['name']}"
+            if parameter["kind"] == "choice":
+                assert parameter["choices"], f"{mechanic['key']}.{parameter['name']}"
+    assert payload["ai_availability"]["builder"] is True
+
+
+async def test_builder_action_endpoint_builds_a_rule_and_returns_the_new_state(test_context):
+    await _signup(test_context, "builder-action-api@example.com")
+    client = test_context["client"]
+    created = await client.post("/api/v1/dashboard/setup-chat/sessions")
+    assert created.status_code == 201
+    chat_id = created.json()["id"]
+
+    moded = await client.post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/builder-actions",
+        json={
+            "action": "select_mode",
+            "client_message_id": "cm-api-builder-mode",
+            "value": "monitor",
+        },
+    )
+    assert moded.status_code == 200, moded.text
+    assert moded.json()["builder"]["mode"] == "monitor"
+
+    added = await client.post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/builder-actions",
+        json={
+            "action": "add_condition",
+            "client_message_id": "cm-api-builder-rule",
+            "mechanic_key": "open_to_close_percentage",
+            "values": {
+                "direction": "up",
+                "comparator": "gte",
+                "threshold": 5,
+                "timeframe": "1h",
+            },
+        },
+    )
+    assert added.status_code == 200, added.text
+    body = added.json()
+    assert body["builder"]["conditions"], "the response carries no rule to draw"
+    assert body["builder"]["conditions"][0]["editable"] is True
+    assert body["lifecycle"]["label"], "the response carries no lifecycle to show"
+
+
+async def test_a_builder_action_with_no_target_is_refused_at_the_boundary(test_context):
+    """Refused by the request schema, so a malformed change never reaches the draft."""
+
+    await _signup(test_context, "builder-invalid-api@example.com")
+    client = test_context["client"]
+    created = await client.post("/api/v1/dashboard/setup-chat/sessions")
+    chat_id = created.json()["id"]
+    response = await client.post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/builder-actions",
+        json={"action": "remove_condition", "client_message_id": "cm-api-no-target"},
+    )
+    assert response.status_code == 422
+
+
+async def test_a_builder_action_without_an_idempotency_key_is_refused(test_context):
+    """A double-clicked button must act once, so the key is not optional."""
+
+    await _signup(test_context, "builder-nokey-api@example.com")
+    client = test_context["client"]
+    created = await client.post("/api/v1/dashboard/setup-chat/sessions")
+    chat_id = created.json()["id"]
+    response = await client.post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/builder-actions",
+        json={"action": "select_mode", "value": "monitor"},
+    )
+    assert response.status_code == 422
+
+
+async def test_a_builder_action_cannot_touch_another_persons_setup(test_context):
+    """Ownership is checked before anything else. A session id alone is not enough."""
+
+    client = test_context["client"]
+    await _signup(test_context, "builder-owner-api@example.com")
+    created = await client.post("/api/v1/dashboard/setup-chat/sessions")
+    chat_id = created.json()["id"]
+
+    await client.post("/logout", follow_redirects=False)
+    await _signup(test_context, "builder-intruder-api@example.com")
+    response = await client.post(
+        f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/builder-actions",
+        json={
+            "action": "select_mode",
+            "client_message_id": "cm-api-not-mine",
+            "value": "scanner",
+        },
+    )
+    assert response.status_code in {403, 404}

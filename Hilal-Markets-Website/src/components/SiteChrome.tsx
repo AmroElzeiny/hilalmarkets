@@ -29,12 +29,15 @@ export function SiteNav() {
   }, [menuOpen])
 
   const onLanding = window.location.pathname === '/'
+  // Hilal Markets is invite-only while the private beta runs, so the header offers the
+  // waitlist and nothing else. There is no Pricing entry because there is nothing to
+  // buy yet, and no account entry because an account cannot be opened from here.
   const links = [
     { label: 'How it works', target: '#how-it-works' },
     { label: 'Features', target: '#features' },
-    { label: 'Pricing', target: '#pricing' },
     { label: 'FAQ', target: '#faq' },
   ]
+  const waitlistHref = `${onLanding ? '' : '/'}#waitlist`
   return (
     <header
       className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
@@ -74,20 +77,12 @@ export function SiteNav() {
 
         <div className="hidden items-center gap-2 lg:flex">
           <TrackedCta
-            href="/signin"
-            analyticsName="sign_in"
-            analyticsLocation="header"
-            className="rounded-full px-4 py-2.5 text-[15px] font-semibold text-ink transition-colors hover:bg-[#eef1f4]"
-          >
-            Sign in
-          </TrackedCta>
-          <TrackedCta
-            href="/subscribe?plan_code=demo&billing_interval=monthly"
-            analyticsName="start_free"
+            href={waitlistHref}
+            analyticsName="join_waitlist"
             analyticsLocation="header"
             className="rounded-full bg-apple px-6 py-2.5 font-sans text-[15px] font-bold text-[#2b2e35] shadow-[0_12px_28px_-16px_rgba(120,170,40,0.7)] transition-transform hover:-translate-y-0.5"
           >
-            Get started
+            Join the waitlist
           </TrackedCta>
         </div>
         <button
@@ -117,16 +112,14 @@ export function SiteNav() {
               {link.label}
             </TrackedCta>
           ))}
-          <TrackedCta href="/signin" analyticsName="sign_in" analyticsLocation="mobile_header">
-            Sign in
-          </TrackedCta>
           <TrackedCta
-            href="/subscribe?plan_code=demo&billing_interval=monthly"
-            analyticsName="start_free"
+            href={waitlistHref}
+            analyticsName="join_waitlist"
             analyticsLocation="mobile_header"
             className="site-mobile-primary"
+            onClick={() => setMenuOpen(false)}
           >
-            Get started
+            Join the waitlist
           </TrackedCta>
         </nav>
       </div>

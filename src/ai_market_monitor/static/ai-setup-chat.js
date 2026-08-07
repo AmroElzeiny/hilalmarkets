@@ -31,6 +31,47 @@
   let pendingScanRequestId = null;
   const optimisticMessages = new Map();
 
+  // The identity of the question currently on screen. Every message sent while a
+  // question is open carries it: typed answers, option clicks, yes, no, a replacement
+  // value, cancel, resume, a brand new request, a mode switch and a retry.
+  //
+  // Without it the server had to assume a message was written against whatever step is
+  // current *now*. A reply typed just before the step advanced — or sent from a tab left
+  // open, or from a retry of an older action — then landed on a field the trader was
+  // never asked about, silently. The pair is read fresh from the server's own payload on
+  // every render, so an old DOM button cannot answer a newer question: it re-reads this
+  // at click time, not at render time.
+  let activeQuestion = null;
+
+  function readActiveQuestion() {
+    const payload = latestAssistantPayload();
+    const contract = payload.clarification
+      || (Array.isArray(payload.clarifications) ? payload.clarifications[0] : null);
+    const questionId = contract?.question_id || contract?.key || null;
+    if (!questionId) {
+      activeQuestion = null;
+      return;
+    }
+    activeQuestion = {
+      questionId,
+      stepRevision: Number.isInteger(contract.step_revision) ? contract.step_revision : 0,
+      workflowId: contract.workflow_id || null,
+      canonicalValues: Array.isArray(contract.canonical_values) ? contract.canonical_values : [],
+    };
+  }
+
+  // Attached at send time, never captured when a button was drawn. A chip rendered under
+  // step one and clicked after step two arrived therefore carries step two's identity and
+  // is refused by the server, instead of quietly answering the wrong field.
+  function withQuestionIdentity(payload) {
+    if (!activeQuestion) return payload;
+    return {
+      ...payload,
+      question_id: activeQuestion.questionId,
+      step_revision: activeQuestion.stepRevision,
+    };
+  }
+
   const normalizedMessageText = (value) => String(value ?? "")
     .trim()
     .replace(/\s+/g, " ")
@@ -263,14 +304,18 @@
         return serverOptions.map((option) => ({
           ...option,
           key: option.key || item.key,
-          chatReply: false,
         }));
       }
-      const replyOptions = Array.isArray(item.allowed_options) ? item.allowed_options : [];
-      return replyOptions.map((value) => ({
-        value,
-        label: value,
-        chatReply: true,
+      // One generic control for every clarification option there is. These used to post
+      // the button's visible *label* as an ordinary chat message, so a reworded or
+      // translated label silently stopped answering its own question. The canonical value
+      // travels now; the label is only what the trader reads.
+      const canonical = Array.isArray(item.canonical_values) ? item.canonical_values : [];
+      const shown = Array.isArray(item.allowed_options) ? item.allowed_options : [];
+      return shown.map((label, index) => ({
+        key: "clarification_answer",
+        value: canonical[index] ?? label,
+        label,
       }));
     });
     const actionLabels = {
@@ -319,10 +364,6 @@
           return;
         }
         const label = option.label || option.value;
-        if (option.chatReply) {
-          sendMessage({message: String(option.value || label)}, label);
-          return;
-        }
         sendMessage({
           message: option.key === "apply_suggestion" ? label : "",
           option_key: option.key,
@@ -363,6 +404,9 @@
   }
 
   function renderConversation() {
+    // Read the identity of the question now on screen before anything is drawn, so every
+    // control created below sends the current step rather than the one it was born under.
+    readActiveQuestion();
     messagesTarget.innerHTML = "";
     const canonicalIds = new Set(
       (chat?.messages || []).map((item) => item.client_message_id).filter(Boolean),
@@ -559,6 +603,11 @@
     );
     renderConversation();
     renderPreview();
+    renderPendingChange();
+    renderLastChange();
+    renderHistoryActions();
+    renderDegradedNotice();
+    renderGuidedBuilder();
     publishDraftToCanvas();
     updateSendState();
   }
@@ -581,8 +630,755 @@
     input.style.height = `${Math.min(150, Math.max(48, input.scrollHeight))}px`;
   }
 
+  // A turn the server says is still running. While this is set the composer is closed:
+  // the server would refuse a second message anyway, and letting the user type into a
+  // box that cannot send is how a double-click became two paid turns.
+  function activeTurn() {
+    const state = chat?.turn_state;
+    return state && state.active ? state : null;
+  }
+
   function updateSendState() {
-    sendButton.disabled = loading || !input.value.trim();
+    const running = activeTurn();
+    // The assistant being unavailable closes the composer and nothing else. The guided
+    // fields stay live underneath, so the person carries on rather than being stuck.
+    const assistantOff = chat?.ai_availability?.assistant_available === false;
+    sendButton.disabled = loading || Boolean(running) || assistantOff || !input.value.trim();
+    input.disabled = Boolean(running) || assistantOff;
+    root.dataset.turnActive = running ? "true" : "false";
+    root.dataset.turnStage = running?.stage || "";
+    if (assistantOff && !running) {
+      input.placeholder = "The assistant is unavailable — use the guided fields below.";
+      return;
+    }
+    if (running) {
+      // Said in plain words, and it explicitly tells the user not to send again. A
+      // second send would be refused, but the refusal reads like a failure.
+      input.placeholder = running.slow
+        ? "This is taking longer than usual. Your message is safe — no need to send it again."
+        : "Working on your last message...";
+    } else if (input.placeholder.startsWith("Working on") || input.placeholder.startsWith("This is taking")) {
+      input.placeholder = "";
+    }
+  }
+
+  // Undo, Restore, Reset, and answering a pending change. Each is a server-owned
+  // operation with its own idempotency key, so a double-click acts once.
+  async function sendDraftAction(action, extra = {}) {
+    if (loading || !chat) return;
+    clearError();
+    const body = {
+      action,
+      client_message_id: newClientMessageId(),
+      ...extra,
+    };
+    lastAction = () => request(`/sessions/${chat.id}/draft-actions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((updated) => { chat = updated; render(); });
+    setLoading(true, draftActionLabel(action));
+    try {
+      chat = await request(`/sessions/${chat.id}/draft-actions`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      render();
+    } catch (error) {
+      if (error.payload?.id) { chat = error.payload; render(); }
+      showError(error);
+    } finally {
+      setLoading(false);
+      render();
+      updateApprovalState();
+    }
+  }
+
+  function draftActionLabel(action) {
+    return {
+      undo_last_material_change: "Undoing your last change",
+      restore_snapshot: "Putting back that version",
+      reset_current_draft: "Clearing this setup",
+      confirm_pending_change: "Applying the change",
+      cancel_pending_change: "Cancelling the change",
+    }[action] || "Working on it";
+  }
+
+  // Everything below renders the server's own before/after record. None of it reads the
+  // assistant's sentence: a turn that replaced every rule would describe itself as an
+  // update, and the user would only find out later.
+  function diffLines(diff) {
+    if (!diff) return [];
+    const lines = [];
+    for (const item of diff.removed_conditions || []) {
+      lines.push(`Removes: ${item.summary || item.condition_id}`);
+    }
+    for (const item of diff.added_conditions || []) {
+      lines.push(`Adds: ${item.summary || item.condition_id}`);
+    }
+    for (const item of diff.changed_fields || []) {
+      const from = item.before ?? "not set";
+      const to = item.after ?? "not set";
+      lines.push(`${item.label || "Changes"}: ${from} → ${to}`);
+    }
+    if (diff.boolean_topology_changed) {
+      lines.push(
+        `Rules now combine with ${diff.boolean_topology_after} instead of ${diff.boolean_topology_before}`,
+      );
+    }
+    for (const item of diff.methodology_changes || []) {
+      lines.push(`Sharia screening method: ${item.before ?? "not set"} → ${item.after ?? "not set"}`);
+    }
+    for (const item of diff.universe_changes || []) {
+      lines.push(`Coins watched: ${item.label} ${item.after ?? item.before ?? ""}`.trim());
+    }
+    for (const item of diff.market_scope_changes || []) {
+      lines.push(`${item.label}: ${item.before ?? "not set"} → ${item.after ?? "not set"}`);
+    }
+    if (diff.approval_invalidated) lines.push("Your approval is cleared, so it needs approving again.");
+    return lines;
+  }
+
+  function renderPendingChange() {
+    const target = root.querySelector("[data-ai-pending-change]");
+    if (!target) return;
+    const pending = chat?.pending_change || null;
+    target.hidden = !pending;
+    target.innerHTML = "";
+    if (!pending) return;
+    target.dataset.testid = "ai-pending-change";
+    target.dataset.proposalId = pending.proposal_id;
+
+    const heading = document.createElement("p");
+    heading.className = "ai-pending-change__title";
+    heading.textContent = pending.stale
+      ? "Your setup changed, so this change was not applied."
+      : "This is a big change. Please check it before I make it.";
+    target.append(heading);
+
+    const list = document.createElement("ul");
+    list.className = "ai-pending-change__list";
+    for (const line of [...(pending.summary_lines || []), ...diffLines(pending.diff)]) {
+      const entry = document.createElement("li");
+      entry.textContent = line;
+      list.append(entry);
+    }
+    for (const note of pending.governance_notes || []) {
+      const entry = document.createElement("li");
+      entry.className = "ai-pending-change__note";
+      entry.textContent = note;
+      list.append(entry);
+    }
+    target.append(list);
+
+    const actions = document.createElement("div");
+    actions.className = "ai-pending-change__actions";
+    if (!pending.stale) {
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = "btn btn-primary";
+      confirm.dataset.testid = "ai-pending-confirm";
+      confirm.textContent = "Yes, make this change";
+      confirm.addEventListener("click", () => sendDraftAction("confirm_pending_change", {
+        proposal_id: pending.proposal_id,
+        confirmed: true,
+      }));
+      actions.append(confirm);
+    }
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn btn-secondary";
+    cancel.dataset.testid = "ai-pending-cancel";
+    cancel.textContent = pending.stale ? "Close" : "No, keep it as it is";
+    cancel.addEventListener("click", () => sendDraftAction("cancel_pending_change", {
+      proposal_id: pending.proposal_id,
+    }));
+    actions.append(cancel);
+    target.append(actions);
+  }
+
+  function renderHistoryActions() {
+    const target = root.querySelector("[data-ai-draft-history]");
+    if (!target) return;
+    target.innerHTML = "";
+    const snapshots = Array.isArray(chat?.snapshots) ? chat.snapshots : [];
+    const canUndo = Boolean(chat?.can_undo);
+    target.hidden = !canUndo && snapshots.length < 2;
+    if (target.hidden) return;
+
+    if (canUndo) {
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.className = "btn btn-ghost";
+      undo.dataset.testid = "ai-undo";
+      undo.textContent = "Undo last change";
+      undo.disabled = Boolean(activeTurn());
+      undo.addEventListener("click", () => sendDraftAction("undo_last_material_change"));
+      target.append(undo);
+    }
+
+    if (snapshots.length > 1) {
+      const picker = document.createElement("select");
+      picker.className = "ai-draft-history__picker";
+      picker.dataset.testid = "ai-restore-picker";
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Go back to a saved version...";
+      picker.append(blank);
+      for (const item of snapshots) {
+        if (item.is_current) continue;
+        const option = document.createElement("option");
+        option.value = item.snapshot_id;
+        option.dataset.executableVersion = String(item.executable_version);
+        option.textContent = `Version ${item.executable_version} — ${(item.summary_lines || []).join(", ")}`;
+        picker.append(option);
+      }
+      picker.addEventListener("change", () => {
+        const chosen = picker.selectedOptions[0];
+        if (!chosen?.value) return;
+        sendDraftAction("restore_snapshot", {
+          snapshot_id: chosen.value,
+          expected_executable_version: Number(chosen.dataset.executableVersion),
+          confirmed: true,
+        });
+        picker.value = "";
+      });
+      target.append(picker);
+    }
+
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "btn btn-ghost";
+    reset.dataset.testid = "ai-reset-draft";
+    reset.textContent = "Clear this setup";
+    reset.disabled = Boolean(activeTurn());
+    reset.addEventListener("click", () => {
+      // Clearing loses work, so it asks first. Saved versions and any approved setup
+      // are untouched, and the question says so rather than leaving the user to guess.
+      const proceed = window.confirm(
+        "Clear this setup and start again? Your saved versions and any approved setup are kept.",
+      );
+      if (proceed) sendDraftAction("reset_current_draft", {confirmed: true});
+    });
+    target.append(reset);
+  }
+
+  function renderLastChange() {
+    const target = root.querySelector("[data-ai-last-change]");
+    if (!target) return;
+    const lines = diffLines(chat?.last_diff);
+    target.hidden = lines.length === 0;
+    target.innerHTML = "";
+    if (!lines.length) return;
+    target.dataset.testid = "ai-last-change";
+    const list = document.createElement("ul");
+    for (const line of lines) {
+      const entry = document.createElement("li");
+      entry.textContent = line;
+      list.append(entry);
+    }
+    target.append(list);
+  }
+
+  // ---------------------------------------------------------------------------
+  // The Guided Watch Plan Builder.
+  //
+  // This is the product path, not a fallback. Every field below is drawn from the
+  // server's own contract — the timeframes, the comparisons, the ranges, which rules
+  // exist at all. Nothing here decides what is valid; it only shows what the server
+  // said and sends back what was chosen. That is what makes the Builder work with the
+  // assistant switched off, and what stops the form offering something the compiler
+  // would refuse.
+  // ---------------------------------------------------------------------------
+
+  let builderContract = null;
+  let openRuleForm = null;
+
+  async function loadBuilderContract() {
+    if (builderContract) return builderContract;
+    try {
+      builderContract = await request("/builder-contract");
+    } catch (error) {
+      // The Builder cannot draw itself without the contract. It says so rather than
+      // guessing at a form, because a guessed form builds a rule nobody chose.
+      builderContract = null;
+      showError(error);
+    }
+    return builderContract;
+  }
+
+  function mechanicByKey(key) {
+    return (builderContract?.mechanics || []).find((item) => item.key === key) || null;
+  }
+
+  async function sendBuilderAction(action, extra = {}) {
+    if (loading || !chat) return;
+    clearError();
+    const body = {action, client_message_id: newClientMessageId(), ...extra};
+    const send = () => request(`/sessions/${chat.id}/builder-actions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    lastAction = () => send().then((updated) => { chat = updated; render(); });
+    setLoading(true, builderActionLabel(action));
+    try {
+      chat = await send();
+      openRuleForm = null;
+      render();
+    } catch (error) {
+      if (error.payload?.id) { chat = error.payload; render(); }
+      showError(error);
+    } finally {
+      setLoading(false);
+      render();
+      updateApprovalState();
+    }
+  }
+
+  function builderActionLabel(action) {
+    return {
+      select_mode: "Saving what to build",
+      rename_plan: "Saving the name",
+      select_universe: "Saving which coins",
+      select_watchlist: "Saving your list",
+      set_explicit_assets: "Saving your coins",
+      select_methodology: "Saving the screening method",
+      add_condition: "Adding your rule",
+      update_condition: "Saving your rule",
+      remove_condition: "Removing that rule",
+      arrange_conditions: "Rearranging your rules",
+      apply_starter: "Setting up your starting point",
+    }[action] || "Saving";
+  }
+
+  function element(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  function chipButton(label, explanation, selected, onClick) {
+    const button = element("button", "gb-chip", label);
+    button.type = "button";
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+    if (selected) button.classList.add("is-selected");
+    if (explanation) button.title = explanation;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function renderGuidedBuilder() {
+    const target = root.querySelector("[data-ai-guided-builder]");
+    if (!target) return;
+    const state = chat?.builder;
+    const availability = chat?.ai_availability || {};
+    target.hidden = !state || availability.builder === false;
+    if (target.hidden) return;
+    target.innerHTML = "";
+    target.dataset.testid = "guided-builder";
+    target.dataset.lifecycle = chat?.lifecycle?.state || "";
+
+    target.append(renderBuilderSteps(state));
+    target.append(renderBuilderMode(state));
+    target.append(renderBuilderAssets(state));
+    target.append(renderBuilderRules(state));
+    if ((state.conditions || []).length > 1) target.append(renderBuilderLogic(state));
+    target.append(renderBuilderReview(state));
+  }
+
+  function renderBuilderSteps(state) {
+    const box = element("nav", "gb-steps");
+    box.setAttribute("aria-label", "Setup steps");
+    box.dataset.testid = "guided-builder-steps";
+    for (const step of state.steps || []) {
+      const item = element("span", "gb-step", step.label);
+      item.dataset.step = step.key;
+      item.dataset.complete = step.complete ? "true" : "false";
+      if (step.todo) item.title = step.todo;
+      box.append(item);
+    }
+    return box;
+  }
+
+  function section(title, hint) {
+    const box = element("section", "gb-section");
+    box.append(element("h3", "gb-section-title", title));
+    if (hint) box.append(element("p", "gb-section-hint", hint));
+    return box;
+  }
+
+  function renderBuilderMode(state) {
+    const box = section("What should this do?", null);
+    box.dataset.testid = "guided-builder-mode";
+    const row = element("div", "gb-chip-row");
+    for (const choice of builderContract?.modes || []) {
+      row.append(chipButton(
+        choice.label,
+        choice.explanation,
+        state.mode === choice.value,
+        () => sendBuilderAction("select_mode", {value: choice.value}),
+      ));
+    }
+    box.append(row);
+    return box;
+  }
+
+  function renderBuilderAssets(state) {
+    const box = section(
+      "Which coins should it watch?",
+      state.universe_summary || "Pick the coins this should look at.",
+    );
+    box.dataset.testid = "guided-builder-assets";
+    const row = element("div", "gb-chip-row");
+    for (const choice of builderContract?.universes || []) {
+      row.append(chipButton(
+        choice.label,
+        choice.explanation,
+        state.universe_mode === choice.value,
+        () => sendBuilderAction("select_universe", {value: choice.value}),
+      ));
+    }
+    box.append(row);
+    if (state.universe_mode === "explicit_assets") {
+      const field = element("div", "gb-inline-field");
+      const entry = document.createElement("input");
+      entry.type = "text";
+      entry.placeholder = "BTC, ETH";
+      entry.setAttribute("aria-label", "Coins to watch");
+      const save = element("button", "gb-button", "Save coins");
+      save.type = "button";
+      save.addEventListener("click", () => {
+        if (entry.value.trim()) {
+          sendBuilderAction("set_explicit_assets", {value: entry.value.trim()});
+        }
+      });
+      field.append(entry, save);
+      box.append(field);
+    }
+    return box;
+  }
+
+  function renderBuilderRules(state) {
+    const box = section(
+      "What should it watch for?",
+      "Each rule is one thing to look for in the market.",
+    );
+    box.dataset.testid = "guided-builder-rules";
+    const list = element("ul", "gb-rule-list");
+    const conditions = state.conditions || [];
+    conditions.forEach((condition, index) => {
+      list.append(renderRuleCard(condition, index, conditions.length));
+    });
+    box.append(list);
+
+    if (!conditions.length) {
+      const starters = element("div", "gb-starters");
+      starters.dataset.testid = "guided-builder-starters";
+      starters.append(element("p", "gb-section-hint", "Not sure? Start from one of these."));
+      for (const starter of builderContract?.starters || []) {
+        const button = element("button", "gb-starter", starter.label);
+        button.type = "button";
+        button.title = starter.explanation;
+        button.addEventListener(
+          "click",
+          () => sendBuilderAction("apply_starter", {value: starter.key}),
+        );
+        starters.append(button);
+      }
+      box.append(starters);
+    }
+
+    const add = element("button", "gb-button gb-button-primary", "Add a rule");
+    add.type = "button";
+    add.dataset.testid = "guided-builder-add-rule";
+    add.addEventListener("click", () => {
+      openRuleForm = {mode: "add", mechanicKey: null, values: {}};
+      renderGuidedBuilder();
+    });
+    box.append(add);
+    if (openRuleForm) box.append(renderRuleForm());
+    return box;
+  }
+
+  function renderRuleCard(condition, index, total) {
+    const item = element("li", "gb-rule");
+    item.dataset.nodeId = condition.node_id;
+    item.dataset.testid = "guided-builder-rule";
+    item.append(element("p", "gb-rule-text", condition.sentence));
+    const meta = element("p", "gb-rule-meta", condition.label);
+    item.append(meta);
+
+    const actions = element("div", "gb-rule-actions");
+    if (condition.editable) {
+      const edit = element("button", "gb-button", "Edit");
+      edit.type = "button";
+      edit.addEventListener("click", () => {
+        openRuleForm = {
+          mode: "edit",
+          nodeId: condition.node_id,
+          mechanicKey: condition.mechanic_key,
+          values: {...condition.values},
+        };
+        renderGuidedBuilder();
+      });
+      actions.append(edit);
+
+      // Duplicating opens the same form filled in. An exact copy of a rule always
+      // fires with the original, so the platform refuses one — the useful thing is a
+      // near copy the person then changes.
+      const copy = element("button", "gb-button", "Duplicate");
+      copy.type = "button";
+      copy.addEventListener("click", () => {
+        openRuleForm = {
+          mode: "add",
+          mechanicKey: condition.mechanic_key,
+          values: {...condition.values},
+        };
+        renderGuidedBuilder();
+      });
+      actions.append(copy);
+    } else if (condition.not_editable_reason) {
+      actions.append(element("span", "gb-rule-note", condition.not_editable_reason));
+    }
+
+    const remove = element("button", "gb-button gb-button-quiet", "Remove");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (window.confirm(`Remove this rule?\n\n${condition.sentence}`)) {
+        sendBuilderAction("remove_condition", {node_id: condition.node_id});
+      }
+    });
+    actions.append(remove);
+
+    if (total > 1) {
+      const up = element("button", "gb-button gb-button-quiet", "Move up");
+      up.type = "button";
+      up.disabled = index === 0;
+      up.addEventListener("click", () => moveRule(index, index - 1));
+      const down = element("button", "gb-button gb-button-quiet", "Move down");
+      down.type = "button";
+      down.disabled = index === total - 1;
+      down.addEventListener("click", () => moveRule(index, index + 1));
+      actions.append(up, down);
+    }
+    item.append(actions);
+    return item;
+  }
+
+  function moveRule(from, to) {
+    const order = (chat?.builder?.conditions || []).map((item) => item.node_id);
+    if (to < 0 || to >= order.length) return;
+    const [moved] = order.splice(from, 1);
+    order.splice(to, 0, moved);
+    sendBuilderAction("arrange_conditions", {
+      order,
+      join: chat?.builder?.join || "and",
+    });
+  }
+
+  function renderRuleForm() {
+    const box = element("form", "gb-rule-form");
+    box.dataset.testid = "guided-builder-rule-form";
+    box.addEventListener("submit", (event) => event.preventDefault());
+
+    const picker = document.createElement("select");
+    picker.setAttribute("aria-label", "Kind of rule");
+    picker.dataset.testid = "guided-builder-mechanic";
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "Choose what to watch for…";
+    picker.append(blank);
+    for (const mechanic of builderContract?.mechanics || []) {
+      const option = document.createElement("option");
+      option.value = mechanic.key;
+      option.textContent = mechanic.available
+        ? mechanic.label
+        : `${mechanic.label} — not available yet`;
+      option.disabled = !mechanic.available;
+      option.selected = mechanic.key === openRuleForm.mechanicKey;
+      picker.append(option);
+    }
+    picker.addEventListener("change", () => {
+      openRuleForm.mechanicKey = picker.value || null;
+      openRuleForm.values = {};
+      renderGuidedBuilder();
+    });
+    box.append(picker);
+
+    const mechanic = mechanicByKey(openRuleForm.mechanicKey);
+    if (mechanic) {
+      box.append(element("p", "gb-section-hint", mechanic.explanation));
+      if (!mechanic.available && mechanic.unavailable_reason) {
+        box.append(element("p", "gb-rule-note", mechanic.unavailable_reason));
+      }
+      for (const parameter of mechanic.parameters) {
+        box.append(renderParameterField(mechanic, parameter));
+      }
+      const save = element(
+        "button",
+        "gb-button gb-button-primary",
+        openRuleForm.mode === "edit" ? "Save this rule" : "Add this rule",
+      );
+      save.type = "button";
+      save.dataset.testid = "guided-builder-save-rule";
+      save.addEventListener("click", () => {
+        const payload = {
+          mechanic_key: mechanic.key,
+          values: {...openRuleForm.values},
+        };
+        if (openRuleForm.mode === "edit") {
+          sendBuilderAction("update_condition", {...payload, node_id: openRuleForm.nodeId});
+        } else {
+          sendBuilderAction("add_condition", payload);
+        }
+      });
+      box.append(save);
+    }
+
+    const cancel = element("button", "gb-button gb-button-quiet", "Cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => {
+      openRuleForm = null;
+      renderGuidedBuilder();
+    });
+    box.append(cancel);
+    return box;
+  }
+
+  function renderParameterField(mechanic, parameter) {
+    const wrap = element("label", "gb-field");
+    wrap.append(element("span", "gb-field-label", parameter.label));
+    if (parameter.help) wrap.append(element("span", "gb-field-help", parameter.help));
+    const current = openRuleForm.values[parameter.name] ?? parameter.default ?? "";
+
+    if (parameter.kind === "choice" || parameter.kind === "timeframe") {
+      const select = document.createElement("select");
+      select.dataset.parameter = parameter.name;
+      if (!parameter.required) {
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = "Not set";
+        select.append(none);
+      }
+      for (const choice of parameter.choices) {
+        const option = document.createElement("option");
+        option.value = choice.value;
+        option.textContent = choice.label;
+        if (choice.explanation) option.title = choice.explanation;
+        option.selected = String(current) === choice.value;
+        select.append(option);
+      }
+      select.addEventListener("change", () => {
+        openRuleForm.values[parameter.name] = select.value;
+      });
+      openRuleForm.values[parameter.name] = select.value;
+      wrap.append(select);
+    } else if (parameter.kind === "boolean") {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.parameter = parameter.name;
+      box.checked = Boolean(current);
+      box.addEventListener("change", () => {
+        openRuleForm.values[parameter.name] = box.checked;
+      });
+      wrap.append(box);
+    } else {
+      const field = document.createElement("input");
+      field.type = parameter.kind === "text" ? "text" : "number";
+      field.dataset.parameter = parameter.name;
+      if (parameter.minimum !== null && parameter.minimum !== undefined) {
+        field.min = String(parameter.minimum);
+      }
+      if (parameter.maximum !== null && parameter.maximum !== undefined) {
+        field.max = String(parameter.maximum);
+      }
+      if (parameter.step) field.step = String(parameter.step);
+      field.value = current === null ? "" : String(current);
+      if (parameter.unit && parameter.unit !== "none") {
+        field.setAttribute("aria-describedby", `unit-${parameter.name}`);
+        wrap.append(element("span", "gb-field-unit", unitWord(parameter.unit)));
+      }
+      field.addEventListener("input", () => {
+        openRuleForm.values[parameter.name] = field.value;
+      });
+      if (field.value !== "") openRuleForm.values[parameter.name] = field.value;
+      wrap.append(field);
+    }
+    return wrap;
+  }
+
+  function unitWord(unit) {
+    return {
+      percent: "%",
+      price: "price",
+      count: "candles",
+      multiple: "×",
+      timeframe: "",
+    }[unit] || "";
+  }
+
+  function renderBuilderLogic(state) {
+    const box = section(
+      "How do these rules go together?",
+      "All of them at once, or any one on its own.",
+    );
+    box.dataset.testid = "guided-builder-logic";
+    const row = element("div", "gb-chip-row");
+    for (const choice of (builderContract?.logic || []).filter((item) => item.value !== "not")) {
+      row.append(chipButton(
+        choice.label,
+        choice.explanation,
+        (state.join || "and") === choice.value,
+        () => sendBuilderAction("arrange_conditions", {
+          order: (state.conditions || []).map((item) => item.node_id),
+          join: choice.value,
+        }),
+      ));
+    }
+    box.append(row);
+    return box;
+  }
+
+  function renderBuilderReview(state) {
+    const box = section("Where this setup is", null);
+    box.dataset.testid = "guided-builder-review";
+    const badge = element("p", "gb-lifecycle", chat?.lifecycle?.label || "");
+    badge.dataset.state = chat?.lifecycle?.state || "";
+    box.append(badge);
+    if (chat?.lifecycle?.explanation) {
+      box.append(element("p", "gb-section-hint", chat.lifecycle.explanation));
+    }
+    const todo = (state.steps || []).filter((item) => !item.complete && item.todo);
+    if (todo.length) {
+      const list = element("ul", "gb-todo");
+      for (const step of todo) list.append(element("li", null, step.todo));
+      box.append(list);
+    }
+    for (const question of state.open_questions || []) {
+      box.append(element("p", "gb-open-question", question.question));
+    }
+    for (const item of state.unsupported || []) {
+      box.append(element("p", "gb-unsupported", `Not supported yet: ${item.missing}`));
+    }
+    for (const item of state.provider_requirements || []) {
+      if (item.status === "unavailable") {
+        box.append(element("p", "gb-unsupported", "One rule needs market data you cannot use yet."));
+      }
+    }
+    return box;
+  }
+
+  // The assistant being unavailable is said once, plainly, and never dressed up as a
+  // problem with the setup. The Builder keeps working underneath it.
+  function renderDegradedNotice() {
+    const target = root.querySelector("[data-ai-degraded]");
+    if (!target) return;
+    const availability = chat?.ai_availability || {};
+    const message = availability.assistant_available === false ? availability.message : null;
+    target.hidden = !message;
+    target.textContent = message || "";
+    if (message) target.dataset.testid = "ai-degraded-notice";
+    root.dataset.assistantAvailable = availability.assistant_available === false ? "false" : "true";
   }
 
   async function loadOrCreate() {
@@ -606,10 +1402,10 @@
   async function sendMessage(payload, displayContent = null) {
     if (loading || !chat) return;
     clearError();
-    const requestPayload = {
+    const requestPayload = withQuestionIdentity({
       ...payload,
       client_message_id: payload.client_message_id || newClientMessageId(),
-    };
+    });
     const content = displayContent || payload.option_label || payload.message || payload.option_value;
     const existing = optimisticMessages.get(requestPayload.client_message_id);
     optimisticMessages.set(requestPayload.client_message_id, {
@@ -776,7 +1572,11 @@
     if (initialized) return;
     initialized = true;
     root.hidden = false;
+    // Fetched before the first render so the guided fields are there from the start,
+    // whether or not the assistant is reachable.
+    await loadBuilderContract();
     await loadOrCreate();
+    render();
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     if (
       ["scanner", "monitor"].includes(requestedMode || "")

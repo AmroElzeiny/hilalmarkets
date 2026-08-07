@@ -118,7 +118,9 @@
 }
 @media(max-width:900px){
   .public-links.is-open{max-height:calc(100vh - 120px);overflow:auto}
-  .public-mobile-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 4px 2px}
+  /* auto-fit, not a fixed pair: pre-launch there is one action ("Join the waitlist"),
+     and a fixed two-column grid would leave it stranded in the left half. */
+  .public-mobile-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:8px;padding:8px 4px 2px}
 }
 @media(max-width:700px){
   .public-page{padding-top:82px}.public-hero{padding:72px 0 56px}.public-hero-grid{gap:28px}.hero-art{min-height:300px}.hero-art-card{display:none}

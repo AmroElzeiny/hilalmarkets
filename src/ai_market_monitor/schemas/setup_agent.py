@@ -861,18 +861,18 @@ class SetupTurnExecutionResult(BaseModel):
 
 
 class PendingClarificationWorkflow(BaseModel):
-    """The one server-owned record of a multi-step question in progress.
+    """The conversational *projection* of a multi-step requirement in progress.
 
-    Progress used to live in two places that were written at different moments: the
-    reply was composed from a freshly built next step, while the durable copy sat
-    inside an unresolved field's answer schema and could be rewound by reconciliation.
-    The assistant could therefore *show* step two while the state it would validate the
-    next answer against was still step one.
+    Not the authority. The authority is ``UnresolvedFieldV2.completion_contract``, which
+    lives on the canonical draft where executable state belongs. This record exists so
+    the conversation can show a question, hold a near miss waiting on a yes/no, and know
+    which step is on screen — none of which are executable facts.
 
-    So: one record. It says which workflow this is, which step is current, what has
-    already been accepted, what is still missing, and which exact question the trader
-    is looking at. ``SetupConversationContext.active_question`` must always name this
-    record's current step; nothing may display a question this record does not hold.
+    It carries the canonical contract's id and hash for exactly that reason: when the two
+    disagree, this one is stale and is rebuilt from the canonical record. Before that
+    binding existed, progress had two writable homes that were written at different
+    moments, and the reply could describe step two while the state that would validate
+    the next answer was still step one.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -910,6 +910,42 @@ class PendingClarificationWorkflow(BaseModel):
     #: trader really typed. Without this the grounding gate refused every confirmation,
     #: correctly: nothing in "yes" says 1h.
     proposed_evidence: str = Field(default="", max_length=500)
+    #: The canonical completion contract this projection is *of*, and what that contract
+    #: looked like when the projection was built. When the hash no longer matches, this
+    #: record is stale: it is rebuilt from the canonical contract, never merged with it
+    #: and never allowed to win. Empty on a projection built before a canonical contract
+    #: existed, which is treated as "unbound" rather than as a mismatch.
+    canonical_contract_id: str = Field(default="", max_length=120)
+    canonical_contract_hash: str = Field(default="", max_length=64)
+
+    def matches_canonical(self, contract: object | None) -> bool:
+        """Whether this projection still describes the canonical record it came from.
+
+        ``True`` when nothing is bound — an unbound projection makes no claim and cannot
+        be wrong about one. ``False`` the moment a bound projection and its contract
+        disagree, which fails closed rather than picking a winner.
+        """
+
+        if not self.canonical_contract_hash:
+            return True
+        if contract is None:
+            return False
+        return (
+            getattr(contract, "contract_id", "") == self.canonical_contract_id
+            and getattr(contract, "contract_hash", "") == self.canonical_contract_hash
+        )
+
+    def bound_to(self, contract: object | None) -> PendingClarificationWorkflow:
+        """This projection, stamped with the canonical record it was built from."""
+
+        if contract is None:
+            return self
+        return self.model_copy(
+            update={
+                "canonical_contract_id": str(getattr(contract, "contract_id", "")),
+                "canonical_contract_hash": str(getattr(contract, "contract_hash", "")),
+            }
+        )
 
     @model_validator(mode="after")
     def validate_step(self) -> PendingClarificationWorkflow:
@@ -1021,6 +1057,22 @@ class SetupConversationContext(BaseModel):
     #: having to remember what was being asked.
     paused_question: ClarificationContract | None = None
     paused_workflow: PendingClarificationWorkflow | None = None
+    #: A near miss waiting on a yes/no when there is **no** multi-step workflow to hold
+    #: it — a one-question ask such as "which exchange?".
+    #:
+    #: A proposal used to live only on the workflow, so a question without one silently
+    #: dropped it: the trader was asked "did you mean binance?", said yes, and the yes
+    #: was read against the original list and refused. Exactly one of these two homes is
+    #: ever in use, and ``_check_one_step`` enforces that — a workflow owns its own
+    #: proposal, and this field owns the proposal when there is no workflow.
+    proposed_value: str | None = Field(default=None, max_length=120)
+    proposed_evidence: str = Field(default="", max_length=500)
+    #: A different, complete request the trader sent while a requirement was still open.
+    #: Kept, not applied and not thrown away: applying it immediately left the old
+    #: question's blocker in the draft with nothing on screen mentioning it, and dropping
+    #: it made the trader type the whole instruction again. It is routed only after the
+    #: old question is explicitly settled, and cleared the moment it is.
+    held_request: str | None = Field(default=None, max_length=5000)
     #: Fingerprint of the last rendered assistant response. Used to prevent a confusion
     #: signal from producing the same boilerplate again.
     last_response_fingerprint: str | None = Field(default=None, max_length=64)
@@ -1055,7 +1107,48 @@ class SetupConversationContext(BaseModel):
     @model_validator(mode="after")
     def validate_one_step(self) -> SetupConversationContext:
         self._check_one_step(self.active_question, self.pending_workflow)
+        if self.proposed_value is not None and self.pending_workflow is not None:
+            raise ValueError(
+                "a near miss has two homes: the workflow owns its own proposal"
+            )
         return self
+
+    @property
+    def active_proposal(self) -> tuple[str | None, str]:
+        """The near miss now awaiting a yes/no, and the words it was read from.
+
+        One reader for both homes, so no caller has to know which case it is in — which
+        is how the non-workflow case came to be forgotten in the first place.
+        """
+
+        workflow = self.pending_workflow
+        if workflow is not None:
+            return workflow.proposed_value, workflow.proposed_evidence
+        return self.proposed_value, self.proposed_evidence
+
+    def holding(self, value: str | None, evidence: str) -> SetupConversationContext:
+        """This conversation with the pending near miss stored in its one right home."""
+
+        workflow = self.pending_workflow
+        if workflow is not None:
+            return self.model_copy(
+                update={
+                    "pending_workflow": workflow.model_copy(
+                        update={
+                            "proposed_value": value,
+                            "proposed_evidence": evidence if value else "",
+                        }
+                    ),
+                    "proposed_value": None,
+                    "proposed_evidence": "",
+                }
+            )
+        return self.model_copy(
+            update={
+                "proposed_value": value,
+                "proposed_evidence": evidence if value else "",
+            }
+        )
 
     def with_question(
         self,

@@ -584,11 +584,16 @@ async def test_a_non_mutating_answer_closes_its_question_and_creates_no_conditio
     assert "confirm_reading" in result.conversation.answered_question_ids
 
 
-async def test_a_mutating_question_does_not_close_until_its_target_changes() -> None:
+async def test_a_mutating_question_with_no_continuation_is_paused_not_answered() -> None:
     """INV: a clarification cannot clear without resolving its declared target.
 
     Trusting `resolves_question` let an open item disappear while the draft stayed
     blocked for exactly the reason the question existed.
+
+    A mutating question can no longer be *created* without the completion that will
+    apply its answer. Stored state written before that rule can still contain one, and
+    this is what happens when it does: the question is put down visibly and the blocker
+    stays. It is never cleared, never claimed as answered, and never handed to a model.
     """
     contract = ClarificationContract(
         question_id="timeframe",
@@ -606,9 +611,13 @@ async def test_a_mutating_question_does_not_close_until_its_target_changes() -> 
         conversation=context,
     )
 
-    assert result.execution is not None
-    assert result.execution.answered_questions == [], "words alone cannot close it"
-    assert result.conversation.active_question_id == "timeframe", "it stays open"
+    assert result.execution is None, "words alone cannot close it"
+    assert result.conversation.active_question_id is None, "it is put down, not left open"
+    assert result.conversation.paused_question is not None, "and it is retrievable"
+    assert result.conversation.paused_question.question_id == "timeframe"
+    assert "timeframe" not in result.conversation.answered_question_ids, (
+        "pausing must never record the question as answered"
+    )
 
 
 async def test_a_mutating_answer_that_changes_the_target_does_close_it() -> None:

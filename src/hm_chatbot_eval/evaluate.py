@@ -360,13 +360,20 @@ def conversation_quality_metrics(turns: list[Any]) -> dict[str, float]:
                 draft = _find_nested_mapping(structured, "draft_v2")
                 if draft is not None:
                     unresolved = draft.get("unresolved_fields") or []
+                    # A rule in progress is recognised by its canonical completion
+                    # record. Older recordings kept the same fact inside the answer
+                    # schema under an ``x-`` key; both are accepted so a replay of an
+                    # old run still measures what it measured then.
                     canonical_pending = any(
                         isinstance(item, dict)
-                        and isinstance(
-                            (item.get("expected_answer_schema") or {}).get(
-                                "x-hilal-supported-request"
-                            ),
-                            dict,
+                        and (
+                            isinstance(item.get("completion_contract"), dict)
+                            or isinstance(
+                                (item.get("expected_answer_schema") or {}).get(
+                                    "x-hilal-supported-request"
+                                ),
+                                dict,
+                            )
                         )
                         for item in unresolved
                     )

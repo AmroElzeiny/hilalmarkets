@@ -62,7 +62,12 @@
 <body class="public-page page-{{ page }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   {% include "hilal/partials/public_header.html" %}
-  <main id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
+  <main id="main-content" tabindex="-1">{% block content %}{% endblock %}
+    {# Pre-launch, every public page closes on the waitlist. Including it here rather than
+       in each page means a page cannot be added without it, and one page cannot describe
+       the private beta in words the others do not use. #}
+    {% if waitlist_mode %}{% include "hilal/partials/public_waitlist_band.html" %}{% endif %}
+  </main>
   {% include "hilal/partials/public_footer.html" %}
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}

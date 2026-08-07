@@ -61,6 +61,17 @@ from ai_market_monitor.engine.claim_evidence import (
     requires_factual_answer,
     validate_claims,
 )
+from ai_market_monitor.engine.clarification_continuation import (
+    CLARIFICATION_ANSWER_SEGMENT_ID,
+    ContinuationAnswer,
+    ContinuationRefused,
+    build_continuation_operations,
+    governed_continuation,
+    governed_control_for,
+    governed_option_selection,
+    scan_continuation,
+    workflow_continuation,
+)
 from ai_market_monitor.engine.comparators import detect_comparator
 from ai_market_monitor.engine.conversation_intent import (
     ConversationIntent,
@@ -101,6 +112,7 @@ from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.repair_eligibility import RepairDecision, decide_repair
 from ai_market_monitor.engine.requirement_state import (
     active_requirement_states,
+    unresolved_target_path,
 )
 from ai_market_monitor.engine.response_reconciliation import (
     ConversationalGoal,
@@ -157,6 +169,13 @@ from ai_market_monitor.engine.validated_intent_snapshot import (
     ValidatedIntentSnapshot,
     normalized_intent_hash,
 )
+from ai_market_monitor.schemas.clarification_continuation import (
+    ClarificationCompletionContract,
+    ReplacementPolicy,
+    clean_answer_shape,
+    completion_contract_from_metadata,
+    metadata_from_completion_contract,
+)
 from ai_market_monitor.schemas.planner_intent import (
     FORBIDDEN_SCHEMA_MODELS,
     BooleanTopologyRepair,
@@ -175,6 +194,7 @@ from ai_market_monitor.schemas.setup_agent import (
     SETUP_REPLY_MAX_LENGTH,
     CapabilityRoutingCandidate,
     CapabilityRoutingContext,
+    ClarificationAnswer,
     ComposedReply,
     FactualClaim,
     PendingClarificationWorkflow,
@@ -508,8 +528,10 @@ def _turn_request(
     include_gates: bool,
     cancelled_requirement_keys: frozenset[str] = frozenset(),
     confirmed_answer: ConfirmedAnswer | None = None,
+    confirmed_paths: frozenset[str] = frozenset(),
 ) -> SetupTurnRequest:
     return SetupTurnRequest(
+        server_option_confirmed_paths=confirmed_paths,
         plan=plan,
         message=turn.message,
         draft=turn.draft,
@@ -923,7 +945,7 @@ class SetupChatAgent:
 
         if merged.get("measurement_window") is None:
             question = localized("ask.scan_window_24h", language.language)
-            clarification = _scan_window_contract(question, turn.source_turn_id)
+            clarification = scan_window_contract(question, turn.source_turn_id)
             reconciled = reconcile_reply((), clarification=question)
             telemetry.notes["scan_execution"] = "awaiting_user_choice"
             telemetry.notes["scan_pending_request"] = dict(merged)
@@ -1726,22 +1748,11 @@ class SetupChatAgent:
 
         if scan.measurement_window is None:
             question = localized("ask.scan_window_24h", language_of(turn.active_language))
-            digest = hashlib.sha256(
-                f"{turn.source_turn_id}:read-only-window".encode()
-            ).hexdigest()[:20]
-            clarification = ClarificationContract(
-                question_id=f"scan_window_{digest}",
-                question=question,
-                reason="The provider's rolling percentage field needs an explicit window.",
-                target_type="conversational",
-                expected_answer_schema=json.dumps(
-                    {"type": "string", "enum": ["24h"]},
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ),
-                mutating=False,
-                allowed_options=["24h"],
-            )
+            # One builder for this question, shared with the governed path. Two copies
+            # lived here before and they disagreed: this one named no field and no
+            # canonical values, so only the literal string `24h` could answer it and
+            # "24 hours" fell through as a brand new request.
+            clarification = scan_window_contract(question, turn.source_turn_id)
             request["measurement_window"] = None
             fingerprint = response_fingerprint(question)
             conversation = turn.conversation.model_copy(
@@ -1862,6 +1873,7 @@ class SetupChatAgent:
             fields=[field_name, *(item for item in missing if item != field_name)],
             evidence=segment.exact_source_text,
             language=language_of(turn.active_language),
+            draft=turn.draft,
         )
         semantic_object_id = f"object_{unresolved_id.removeprefix('supported_')}"
         metadata.update(
@@ -1874,15 +1886,16 @@ class SetupChatAgent:
                 "evidence_fragments": [segment.exact_source_text],
             }
         )
+        completion = _supported_completion(unresolved_id, metadata)
+        workflow = workflow.bound_to(completion)
         unresolved = UnresolvedFieldV2(
             unresolved_id=unresolved_id,
             semantic_object_id=semantic_object_id,
             source_turn_id=turn.source_turn_id,
             source_fragment=segment.exact_source_text,
             target_type="condition_creation",
-            expected_answer_schema=_supported_answer_schema(
-                clarification, metadata
-            ),
+            expected_answer_schema=_supported_answer_schema(clarification, metadata),
+            completion_contract=completion,
             missing_slots=_canonical_supported_slots(missing),
             allowed_options=list(clarification.allowed_options),
             question=clarification.question,
@@ -1971,13 +1984,110 @@ class SetupChatAgent:
         turn.telemetry.notes["active_question_stage"] = decision.stage.value
         if decision.transition is TransitionOutcome.NEW_REQUEST:
             return None
+        if decision.transition is TransitionOutcome.REPLACEMENT_REQUIRED:
+            return self._hold_new_request(turn, language, decision, trace=trace)
         if decision.ends_the_question:
-            return await self._end_active_question(turn, language, decision, trace=trace)
+            settled = await self._end_active_question(turn, language, decision, trace=trace)
+            return await self._route_held_request(turn, settled)
         if effects.question_stays_active:
             return self._repeat_active_question(turn, language, decision, trace=trace)
-        return await self._apply_clarification_answer(
+        applied = await self._apply_clarification_answer(
             turn, reading, language, decision, trace=trace
         )
+        if applied is None:
+            return None
+        # The trader chose to finish this requirement instead of abandoning it. If the
+        # requirement is now closed, the request they sent earlier is no longer waiting
+        # on anything and runs. Holding it forever would lose it as surely as dropping
+        # it did, just more quietly.
+        if applied.conversation.active_question is None:
+            return await self._route_held_request(turn, applied)
+        return applied
+
+    def _hold_new_request(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult:
+        """Keep the new request, change nothing, and ask which the trader wants.
+
+        A complete new request used to simply win the turn. The old question disappeared
+        and its blocker stayed in the draft, so the setup was blocked for a reason
+        nothing on screen mentioned any more — and the trader had no way to see it or
+        clear it. Nothing is applied here: the new request is stored, the open question
+        stays exactly as it was, and the next turn settles one of them explicitly.
+        """
+
+        contract = decision.contract
+        content = localized(
+            decision.effects.response_key,
+            language.language,
+            question=contract.question,
+        )
+        fingerprint = response_fingerprint(content)
+        turn.telemetry.notes["active_question_transition"] = decision.transition.value
+        turn.telemetry.notes["held_new_request"] = True
+        conversation = turn.conversation.model_copy(
+            update={
+                "active_language": turn.active_language,
+                "held_request": turn.message[:5000],
+                "last_assistant_summary": content[:1000],
+                "last_response_fingerprint": fingerprint,
+            }
+        )
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(
+                content, selected_clarification_id=contract.question_id
+            ),
+            execution=None,
+            draft=turn.draft,
+            conversation=conversation,
+            plan=None,
+            trace=_with(
+                trace,
+                patch_validation="active_question_replacement_required",
+                response_model="deterministic_clarification",
+                response_fingerprint=fingerprint,
+            ),
+            clarification=contract,
+            usage={},
+        )
+
+    async def _route_held_request(
+        self,
+        turn: SetupAgentTurnInput,
+        settled: SetupAgentTurnResult,
+    ) -> SetupAgentTurnResult:
+        """Now that the old requirement is settled, run the request that was waiting.
+
+        The order is the whole point. The blocker is removed or visibly paused *first*,
+        by an authorized operation, and only then does the held instruction reach normal
+        routing — with the settled draft and conversation, so it cannot be built on top
+        of state the trader has just abandoned.
+        """
+
+        held = (turn.conversation.held_request or "").strip()
+        if not held:
+            return settled
+        conversation = settled.conversation.model_copy(update={"held_request": None})
+        turn.telemetry.notes["held_request_routed"] = True
+        replayed = await self.run_turn(
+            replace(
+                turn,
+                message=held,
+                draft=settled.draft,
+                conversation=conversation,
+            )
+        )
+        # The settlement really happened, so its canonical result is kept whenever the
+        # replayed request did not itself change the draft. Reporting only the second
+        # half would lose the removal the trader just asked for.
+        if replayed.execution is None and settled.execution is not None:
+            return replace(replayed, execution=settled.execution, draft=settled.draft)
+        return replayed
 
     def _resume_paused_question(
         self,
@@ -2063,16 +2173,223 @@ class SetupChatAgent:
             # A screened universe or an approved methodology is governed Sharia policy.
             # Only the application's own allowlisted option route may set one, so a
             # *resolved* choice is handed straight to it — chat text never applies it.
-            # Everything else about this question was already answered above.
+            # The hand-off is a canonical value plus the control named by this question's
+            # own stored continuation, so it is still a zero-model turn.
             turn.telemetry.notes["active_question_handoff"] = "governed_option_route"
+            selection = governed_option_selection(
+                decision.contract.continuation, decision.canonical_value
+            )
+            if selection is not None:
+                turn.telemetry.notes["governed_option_selection"] = {
+                    "option_key": selection[0],
+                    "option_value": selection[1],
+                }
             return None
-        turn.telemetry.notes["active_question_handoff"] = "planner_operation"
-        turn.telemetry.notes["active_question_decided_answer"] = {
-            "question_id": decision.contract.question_id,
-            "target_field": decision.field_name,
-            "canonical_value": decision.canonical_value,
-        }
-        return None
+        return await self._apply_stored_continuation(turn, language, decision, trace=trace)
+
+    async def _close_non_mutating_question(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult:
+        """Close a question that never promised to change anything.
+
+        "Did I read that right?" is a real question with a real answer, and closing it is
+        a real event a later reply may cite — so it goes through the canonical tool and
+        is recorded in ``answered_questions``. It carries no operations, because there is
+        nothing to change, and it costs no model call, because there is nothing to read.
+        """
+
+        contract = decision.contract
+        segment_text = turn.message.strip() or contract.question
+        plan = SetupAgentTurnPlan(
+            source_turn_id=turn.source_turn_id,
+            segments=[
+                TurnSegment(
+                    segment_id=CLARIFICATION_ANSWER_SEGMENT_ID,
+                    exact_source_text=segment_text,
+                    start_offset=0,
+                    end_offset=len(segment_text),
+                    kind=SegmentKind.CLARIFICATION_ANSWER,
+                    action_required=False,
+                    confidence=1.0,
+                )
+            ],
+            operations=[],
+            clarification_answers=[
+                ClarificationAnswer(
+                    segment_id=CLARIFICATION_ANSWER_SEGMENT_ID,
+                    question_id=contract.question_id,
+                    answer_text=segment_text,
+                )
+            ],
+            overall_confidence=1.0,
+        )
+        return await self._execute_supported_workflow_plan(
+            turn,
+            plan,
+            trace=_with(trace, patch_validation="non_mutating_question_closed"),
+            usage={},
+            clarification=None,
+            intro=localized("status.question_answered", language.language),
+            include_gates=False,
+            pending_metadata={},
+            attach_next_question=False,
+        )
+
+    def _refuse_continuation(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+        refused: ContinuationRefused,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult:
+        """Say honestly that the answer could not be applied, and leave nothing hidden.
+
+        Three things can refuse here, and none of them means "answered":
+
+        * the stored question has no completion at all — legacy state, or a producer that
+          bypassed the invariant. It is **paused**, not cleared: the blocker is still real
+          and the trader must be able to come back to it;
+        * the draft moved after the question was asked, so the answer belongs to a state
+          that no longer exists;
+        * the value is not one this step said it could run.
+
+        The last two keep the question on screen and ask again. Reusing the *resolved*
+        wording here would tell the trader their answer landed when nothing happened —
+        which is the exact class of false claim this codebase refuses to make.
+        """
+
+        turn.telemetry.notes["continuation_refused"] = refused.code
+        if refused.code == "CONTINUATION_MISSING":
+            turn.telemetry.notes["orphan_question_paused"] = decision.contract.question_id
+            content = localized("status.setup_paused", language.language)
+            return self._closed_question_result(
+                turn,
+                content,
+                trace=_with(trace, patch_validation="continuation_missing_paused"),
+                patch_validation="continuation_missing_paused",
+                pause=True,
+            )
+        content = localized("ask.stale_answer", language.language)
+        contract = decision.contract
+        final = f"{content}\n\n{contract.question}"
+        fingerprint = response_fingerprint(final)
+        return SetupAgentTurnResult(
+            reply=deterministic_reply(
+                content, selected_clarification_id=contract.question_id
+            ),
+            execution=None,
+            draft=turn.draft,
+            conversation=turn.conversation.model_copy(
+                update={
+                    "active_language": turn.active_language,
+                    "last_assistant_summary": final[:1000],
+                    "last_response_fingerprint": fingerprint,
+                }
+            ),
+            plan=None,
+            trace=_with(
+                trace,
+                patch_validation=f"continuation_refused_{refused.code.casefold()}",
+                response_model="deterministic_clarification",
+                response_fingerprint=fingerprint,
+            ),
+            clarification=contract,
+            usage={},
+        )
+
+    async def _apply_stored_continuation(
+        self,
+        turn: SetupAgentTurnInput,
+        language: LanguageDecision,
+        decision: ClarificationTurn,
+        *,
+        trace: SetupAgentTrace,
+    ) -> SetupAgentTurnResult | None:
+        """Fill the one typed hole the question promised, and apply it. No model call.
+
+        Everything needed was decided when the question was created: which object the
+        answer lands on, which authorized operation carries it, and what the draft looked
+        like at the time. Filling a hole in that record needs no language understanding,
+        so this is the route that replaced "hand the answer to the planner".
+
+        A refusal here is honest and visible: the draft moved under the question, or the
+        value is not one this step said it could run. Both keep the question open and say
+        so, rather than passing an answer to a reader that never saw the question.
+        """
+
+        continuation = decision.contract.continuation
+        proposal_evidence = turn.conversation.active_proposal[1]
+        if continuation is None and not decision.contract.mutating:
+            # A question that promised to change nothing has nothing to apply, so there
+            # is nothing missing. It is closed and recorded as answered — the canonical
+            # evidence a reply may cite — without any operation and without a model call.
+            return await self._close_non_mutating_question(turn, language, decision, trace=trace)
+        answer = ContinuationAnswer(
+            canonical_value=cast(Any, decision.canonical_value),
+            evidence=turn.message,
+            proposal_evidence=(
+                proposal_evidence if decision.stage is AnswerStage.CONFIRMATION else ""
+            ),
+        )
+        try:
+            operations = build_continuation_operations(
+                continuation, answer, draft=turn.draft
+            )
+        except ContinuationRefused as refused:
+            return self._refuse_continuation(turn, language, decision, refused, trace=trace)
+        if not operations:
+            # A registered kind whose canonical write belongs to another authority. The
+            # caller above routes those; reaching here means nothing to apply.
+            turn.telemetry.notes["active_question_handoff"] = "delegated_continuation"
+            return None
+        turn.telemetry.notes["active_question_handoff"] = "deterministic_continuation"
+        # The segment quotes what the trader typed *this* turn, because the server
+        # locates every span in the real message. The earlier words that produced a
+        # confirmed near miss travel separately, in the confirmation proof below, which
+        # is the one channel allowed to say "this value came from an earlier turn".
+        plan = _supported_workflow_plan(
+            turn,
+            source_text=turn.message.strip() or decision.contract.question,
+            segment_kind=SegmentKind.CLARIFICATION_ANSWER,
+            operation=list(operations),
+            summary="Apply one clarification answer through its stored continuation.",
+            question_id=decision.contract.question_id,
+        )
+        return await self._execute_supported_workflow_plan(
+            turn,
+            plan,
+            trace=_with(trace, patch_validation="clarification_continuation_applied"),
+            usage={},
+            clarification=None,
+            intro=localized("status.question_answered", language.language),
+            include_gates=True,
+            pending_metadata={},
+            confirmed_answer=(
+                ConfirmedAnswer(
+                    field_name=decision.field_name,
+                    canonical_value=str(decision.canonical_value),
+                    proposal_evidence=answer.proposal_evidence,
+                )
+                if answer.proposal_evidence
+                else None
+            ),
+            # Reconciliation re-checks grounding for itself, and a confirmation turn's
+            # words are only "yes". This is the same server-owned channel the option
+            # controls use to say "a person really chose this", and it is opened for one
+            # path only: the exact requirement this confirmed answer just filled.
+            confirmed_paths=(
+                _confirmed_requirement_paths(turn.draft, continuation)
+                if decision.stage is AnswerStage.CONFIRMATION
+                else frozenset()
+            ),
+        )
 
     def _resume_pending_scan(
         self,
@@ -2264,31 +2581,25 @@ class SetupChatAgent:
         attached = None if confirming else contract
         final = f"{content}\n\n{contract.question}" if attached is not None else content
         fingerprint = response_fingerprint(final)
-        workflow = turn.conversation.pending_workflow
         # The words that produced the proposal are kept with it. They are the evidence
         # for the value: a later "yes" contains no period, and a rule may not hold a
         # value that appears in no message the trader wrote.
+        #
+        # ``holding`` puts them in the one home that applies — the workflow's when there
+        # is a workflow, the conversation's when there is not. A one-question ask used to
+        # have nowhere to keep a near miss, so the trader was asked "did you mean
+        # binance?", said yes, and the yes was read against the original list and refused.
         evidence = (
             turn.message
             if decision.stage is AnswerStage.ANSWER
-            else (workflow.proposed_evidence if workflow is not None else "")
+            else turn.conversation.active_proposal[1]
         )
-        conversation = turn.conversation.model_copy(
+        conversation = turn.conversation.holding(
+            decision.proposed_value, evidence[:500]
+        ).model_copy(
             update={
                 "active_language": turn.active_language,
                 "active_goal": turn.conversation.active_goal or "complete_supported_setup",
-                "pending_workflow": (
-                    workflow.model_copy(
-                        update={
-                            "proposed_value": decision.proposed_value,
-                            "proposed_evidence": (
-                                evidence[:500] if decision.proposed_value else ""
-                            ),
-                        }
-                    )
-                    if workflow is not None
-                    else None
-                ),
                 "last_response_fingerprint": fingerprint,
                 "last_assistant_summary": final[:1000],
             }
@@ -2468,11 +2779,15 @@ class SetupChatAgent:
                     cast(str | int | float | bool | None, value), evidence=segment_text
                 ).model_copy(update={"current_field": next_field}),
                 language=language_of(turn.active_language),
+                draft=turn.draft,
             )
             updated = unresolved.model_copy(
                 update={
                     "expected_answer_schema": _supported_answer_schema(
                         clarification, metadata
+                    ),
+                    "completion_contract": _supported_completion(
+                        unresolved.unresolved_id, metadata
                     ),
                     "missing_slots": _canonical_supported_slots(missing),
                     "allowed_options": list(clarification.allowed_options),
@@ -2480,6 +2795,11 @@ class SetupChatAgent:
                     "reason": clarification.reason,
                 }
             )
+            # Stamp the projection with the canonical record it now describes. Without
+            # this the conversation held its own copy of the progress with nothing tying
+            # the two together, so a divergence had no way of being noticed — it just
+            # quietly validated the next answer against the older of the two.
+            advanced = advanced.bound_to(updated.completion_contract)
             operation = AuthorizedPatchOperation(
                 operation_id=f"update_{unresolved.unresolved_id}_{turn.source_turn_id}"[:80],
                 authorizing_segment_id="supported_answer",
@@ -2508,6 +2828,37 @@ class SetupChatAgent:
                 confirmed_answer=confirmed,
             )
 
+        if not _supported_rule_is_assemblable(metadata):
+            # Every value the trader was asked for is in, and the rule still cannot be
+            # built: the requirement was recorded without the facts the assembler needs.
+            # Fail closed. The blocker stays, the trader is told plainly, and nothing is
+            # invented to fill the gap — a rule built from a guess would monitor the
+            # wrong market silently.
+            turn.telemetry.notes["supported_rule_not_assemblable"] = sorted(
+                item for item in _REQUIRED_RULE_FACTS if metadata.get(item) is None
+            )
+            content = localized("status.rule_not_buildable", language_of(turn.active_language))
+            fingerprint = response_fingerprint(content)
+            return SetupAgentTurnResult(
+                reply=deterministic_reply(content),
+                execution=None,
+                draft=turn.draft,
+                conversation=turn.conversation.cleared_question().model_copy(
+                    update={
+                        "active_language": turn.active_language,
+                        "last_assistant_summary": content[:1000],
+                        "last_response_fingerprint": fingerprint,
+                    }
+                ),
+                plan=None,
+                trace=_with(
+                    trace,
+                    patch_validation="supported_rule_not_assemblable",
+                    response_model="deterministic_clarification",
+                    response_fingerprint=fingerprint,
+                ),
+                usage=usage,
+            )
         node = _condition_from_supported_metadata(
             metadata,
             source_turn_id=turn.source_turn_id,
@@ -2565,6 +2916,7 @@ class SetupChatAgent:
         attach_next_question: bool = True,
         cancelled_requirement_keys: frozenset[str] = frozenset(),
         confirmed_answer: ConfirmedAnswer | None = None,
+        confirmed_paths: frozenset[str] = frozenset(),
     ) -> SetupAgentTurnResult:
         if turn.stage_callback is not None:
             await turn.stage_callback(
@@ -2580,6 +2932,7 @@ class SetupChatAgent:
                     include_gates=include_gates,
                     cancelled_requirement_keys=cancelled_requirement_keys,
                     confirmed_answer=confirmed_answer,
+                    confirmed_paths=confirmed_paths,
                 )
             )
         except SetupTurnRejected as exc:
@@ -3572,7 +3925,6 @@ class SetupChatAgent:
             "conversation_context": _conversation_context(
                 turn.conversation,
                 references,
-                decided_answer=turn.telemetry.notes.get("active_question_decided_answer"),
             ),
             "governed_sharia_choices": {
                 "methodologies": [item.prompt_dict() for item in references.methodologies],
@@ -3687,20 +4039,17 @@ def _model_capability_shortlist(shortlist: CapabilityShortlist) -> dict[str, Any
 def _conversation_context(
     conversation: SetupConversationContext,
     references: PlannerReferenceContext,
-    *,
-    decided_answer: Any = None,
 ) -> dict[str, Any]:
     """What the last few turns were about. Language only, never executable.
 
-    ``decided_answer`` is the server's own reading of this turn: the open question, and
-    the canonical value the deterministic resolver got from the trader's words. It is
-    stated rather than asked about on purpose — whether a message answered a
-    server-owned question is not the planner's decision to make, and letting it decide
-    is how a valid answer came back classified as a brand new request.
+    There is deliberately no "decided answer" field here any more. It existed to tell the
+    planner what the deterministic resolver had already read, because the planner then
+    had to build the operation. Nothing does that now: an answer to a server-owned
+    question is applied from the question's own stored continuation and the planner is
+    not called at all, so there is nothing to tell it.
     """
 
     return {
-        "server_decided_answer": decided_answer,
         "active_clarification_ref": next(
             (
                 reference
@@ -4408,7 +4757,6 @@ def _loop_aware_refusal(code: str, repeats: RepeatState, failure: _PlanFailure) 
     else:
         lines.append(base)
     return " ".join(lines)
-_SUPPORTED_REQUEST_SCHEMA_KEY = "x-hilal-supported-request"
 
 
 def _planner_answered_active_question(
@@ -4465,7 +4813,10 @@ def _scan_universe_is_ready(draft: StrategyDraftV2) -> bool:
 SCAN_SCOPE_QUESTION: Final[str] = "scan_screened_scope"
 
 
-def scan_scope_clarification(language: ConversationLanguage) -> ClarificationContract:
+def scan_scope_clarification(
+    language: ConversationLanguage,
+    draft: StrategyDraftV2 | None = None,
+) -> ClarificationContract:
     """Ask which screened markets to look at — as a real, answerable question.
 
     This used to be a sentence. A sentence cannot be answered: the next message had no
@@ -4479,6 +4830,10 @@ def scan_scope_clarification(language: ConversationLanguage) -> ClarificationCon
 
     values = list(display_options(AnswerDomain.UNIVERSE_MODE))
     labels = labels_for(AnswerDomain.UNIVERSE_MODE, values, language)
+    # A fresh draft has empty hashes, which is exactly "not bound to a draft state". That
+    # is right for this question: it collects a choice for the governed control and
+    # changes nothing itself, so a draft edit in between does not invalidate the answer.
+    draft = draft if draft is not None else StrategyDraftV2()
     return ClarificationContract(
         question_id=SCAN_SCOPE_QUESTION,
         question=localized("ask.universe", language),
@@ -4494,6 +4849,23 @@ def scan_scope_clarification(language: ConversationLanguage) -> ClarificationCon
         mutating=False,
         allowed_options=list(labels.values())[:6],
         canonical_values=values,
+        # The route to the governed control travels *with* the question. It used to be
+        # rediscovered later from a constant listing "question ids that are really
+        # governed" — a registry nobody could see, and one a new governed question would
+        # simply be missing from, letting chat text move Sharia policy.
+        continuation=governed_continuation(
+            question_id=SCAN_SCOPE_QUESTION,
+            step_revision=0,
+            target_type="conversational",
+            target_field="sharia_policy.universe_mode",
+            option_key="screened_universe_mode",
+            allowed_values=values,
+            draft=draft,
+            cancellation_policy=CancellationPolicy.CANCEL_CONVERSATION_ONLY,
+            # A live scan holds nothing canonical of its own, so a different request may
+            # take over without stranding a blocker.
+            replacement_policy=ReplacementPolicy.REPLACE_SILENTLY,
+        ),
     )
 
 
@@ -4647,12 +5019,18 @@ def _merge_scan_request(
     return merged
 
 
-def _scan_window_contract(question: str, source_turn_id: str) -> ClarificationContract:
+def scan_window_contract(question: str, source_turn_id: str) -> ClarificationContract:
     """The window question, as the same non-mutating contract the governed path builds."""
 
     digest = hashlib.sha256(f"{source_turn_id}:read-only-window".encode()).hexdigest()[:20]
+    question_id = f"scan_window_{digest}"
+    schema_text = json.dumps(
+        {"type": "string", "enum": list(SUPPORTED_SCAN_WINDOWS)},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     return ClarificationContract(
-        question_id=f"scan_window_{digest}",
+        question_id=question_id,
         question=question,
         reason="The provider's rolling percentage field needs an explicit window.",
         target_type="conversational",
@@ -4660,14 +5038,17 @@ def _scan_window_contract(question: str, source_turn_id: str) -> ClarificationCo
         # question speaks. Without it the question carried a bare option list, so only
         # the literal string `24h` answered it and "24 hours" did not.
         target_field="scan_window",
-        expected_answer_schema=json.dumps(
-            {"type": "string", "enum": list(SUPPORTED_SCAN_WINDOWS)},
-            separators=(",", ":"),
-            sort_keys=True,
-        ),
+        expected_answer_schema=schema_text,
         mutating=False,
         allowed_options=list(SUPPORTED_SCAN_WINDOWS),
         canonical_values=list(SUPPORTED_SCAN_WINDOWS),
+        continuation=scan_continuation(
+            question_id=question_id,
+            target_field="scan_window",
+            scan_field="measurement_window",
+            allowed_values=list(SUPPORTED_SCAN_WINDOWS),
+            answer_schema=schema_text,
+        ),
     )
 
 
@@ -4727,15 +5108,28 @@ def _supported_clarification(
     digest = hashlib.sha256(
         f"{turn.source_turn_id}:{source_seed}:{field_name}".encode()
     ).hexdigest()[:20]
+    question_id = f"clarification_{digest}"
+    schema_text = json.dumps(expected, sort_keys=True, separators=(",", ":"))
     return ClarificationContract(
-        question_id=f"clarification_{digest}",
+        question_id=question_id,
         question=question,
         reason="One user-controlled choice is still required for this supported rule.",
         target_type="condition_creation",
         target_field=field_name,
-        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
+        expected_answer_schema=schema_text,
         mutating=True,
         allowed_options=options,
+        continuation=workflow_continuation(
+            question_id=question_id,
+            workflow_id=source_seed,
+            step_revision=0,
+            current_field=field_name,
+            remaining_fields=(),
+            allowed_values=list(canonical_values(domain_for_field(field_name))),
+            answer_schema=schema_text,
+            source_evidence=[turn.message],
+            draft=turn.draft,
+        ),
     )
 
 
@@ -4743,6 +5137,7 @@ def _workflow_step(
     workflow: PendingClarificationWorkflow,
     *,
     language: ConversationLanguage,
+    draft: StrategyDraftV2,
     mutating: bool = True,
 ) -> tuple[PendingClarificationWorkflow, ClarificationContract]:
     """The question for a workflow's current step, and the record that validates it.
@@ -4772,18 +5167,35 @@ def _workflow_step(
     committed = workflow.model_copy(
         update={"canonical_values": values[:64], "offered_values": shown[:8]}
     )
+    schema_text = json.dumps(expected, sort_keys=True, separators=(",", ":"))
     contract = ClarificationContract(
         question_id=committed.question_id,
         question=question,
         reason="One user-controlled choice is still required for this supported rule.",
         target_type="condition_creation",
         target_field=field_name,
-        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
+        expected_answer_schema=schema_text,
         mutating=mutating,
         allowed_options=list(labels.values())[:6],
         workflow_id=committed.workflow_id,
         step_revision=committed.step_revision,
         canonical_values=values[:64],
+        # Built here, with the step, so the question and the thing that will apply its
+        # answer are one object. Deriving the completion later — from whatever code
+        # happened to see the next message — is what sent clarification answers to the
+        # planner and let a bare `1h` be re-read as a request with nothing in it.
+        continuation=workflow_continuation(
+            question_id=committed.question_id,
+            workflow_id=committed.workflow_id,
+            step_revision=committed.step_revision,
+            current_field=field_name,
+            remaining_fields=committed.remaining_fields,
+            allowed_values=values[:64],
+            answer_schema=schema_text,
+            source_evidence=committed.source_evidence,
+            draft=draft,
+            mutating=mutating,
+        ),
     )
     return committed, contract
 
@@ -4794,6 +5206,7 @@ def _new_supported_workflow(
     fields: Sequence[str],
     evidence: str,
     language: ConversationLanguage,
+    draft: StrategyDraftV2,
 ) -> tuple[PendingClarificationWorkflow, ClarificationContract]:
     """Open a multi-step question at its first field."""
 
@@ -4811,21 +5224,37 @@ def _new_supported_workflow(
     skeleton = skeleton.model_copy(
         update={"question_id": skeleton.step_question_id(first, 0)}
     )
-    return _workflow_step(skeleton, language=language)
+    return _workflow_step(skeleton, language=language, draft=draft)
 
 
 def _supported_answer_schema(
     clarification: ClarificationContract,
     metadata: dict[str, object],
 ) -> dict[str, object]:
+    """The answer's *shape*, with no workflow progression in it.
+
+    ``metadata`` is deliberately unused for the schema now: progress belongs to the
+    canonical ``completion_contract``, and writing a second copy in here is the exact
+    duplication that let the displayed step and the validated step disagree.
+    """
+
+    del metadata
     try:
         schema = json.loads(clarification.expected_answer_schema)
     except (TypeError, ValueError):
         schema = {"type": "string"}
     if not isinstance(schema, dict):
         schema = {"type": "string"}
-    schema[_SUPPORTED_REQUEST_SCHEMA_KEY] = metadata
-    return schema
+    return clean_answer_shape(schema)
+
+
+def _supported_completion(
+    unresolved_id: str,
+    metadata: dict[str, object],
+) -> ClarificationCompletionContract:
+    """The canonical progress record this requirement will carry from now on."""
+
+    return completion_contract_from_metadata(unresolved_id, metadata)
 
 
 def _active_supported_unresolved(
@@ -4834,9 +5263,7 @@ def _active_supported_unresolved(
 ) -> UnresolvedFieldV2 | None:
     active_id = conversation.active_question_id
     candidates = [
-        item
-        for item in draft.unresolved_fields
-        if isinstance(item.expected_answer_schema.get(_SUPPORTED_REQUEST_SCHEMA_KEY), dict)
+        item for item in draft.unresolved_fields if item.completion_contract is not None
     ]
     return next((item for item in candidates if item.unresolved_id == active_id), None) or (
         candidates[0] if len(candidates) == 1 else None
@@ -4844,8 +5271,9 @@ def _active_supported_unresolved(
 
 
 def _supported_metadata(item: UnresolvedFieldV2) -> dict[str, object]:
-    raw = item.expected_answer_schema.get(_SUPPORTED_REQUEST_SCHEMA_KEY)
-    return dict(raw) if isinstance(raw, dict) else {}
+    """One requirement's progress, read from its canonical contract and nowhere else."""
+
+    return metadata_from_completion_contract(item.completion_contract)
 
 
 def _workflow_from_metadata(
@@ -4972,6 +5400,44 @@ def _apply_supported_answer(
         metadata["threshold"] = value
     else:
         metadata[field_name] = value
+
+
+#: What the rule assembler needs before it can build anything. Named once, and checked
+#: before the assembler runs — reaching it without these raised a bare ``KeyError``, and
+#: a diagnostic must never become the failure.
+_REQUIRED_RULE_FACTS: Final[tuple[str, ...]] = (
+    "formula",
+    "movement_direction",
+    "comparator",
+    "threshold",
+    "trigger_timeframe",
+)
+
+
+def _confirmed_requirement_paths(
+    draft: StrategyDraftV2,
+    continuation: object,
+) -> frozenset[str]:
+    """The one canonical path a confirmed answer just filled, named by the draft itself.
+
+    Read through ``unresolved_target_path`` rather than rebuilt here. Where a value lives
+    already had two different answers in this codebase once; a third would be worse.
+    """
+
+    wanted = str(getattr(continuation, "unresolved_id", "") or "")
+    if not wanted:
+        return frozenset()
+    return frozenset(
+        unresolved_target_path(item)
+        for item in draft.unresolved_fields
+        if item.unresolved_id == wanted
+    )
+
+
+def _supported_rule_is_assemblable(metadata: Mapping[str, object]) -> bool:
+    """Whether every fact the assembler needs is really present."""
+
+    return all(metadata.get(item) is not None for item in _REQUIRED_RULE_FACTS)
 
 
 def _condition_from_supported_metadata(
@@ -5229,15 +5695,44 @@ def _clarification_for_supported_incomplete(
     digest = hashlib.sha256(
         f"{turn.source_turn_id}:supported:{request.segment_ref}:{selected}".encode()
     ).hexdigest()[:20]
+    question_id = f"clarification_{digest}"
+    schema_text = json.dumps(expected, sort_keys=True, separators=(",", ":"))
+    mutating = turn.setup_mode != DraftMode.SCANNER
+    continuation: Any
+    if target_type == "universe":
+        continuation = governed_continuation(
+            question_id=question_id,
+            step_revision=0,
+            target_type=target_type,
+            target_field=target_field or "",
+            option_key="screened_universe_mode",
+            allowed_values=list(canonical_values(AnswerDomain.UNIVERSE_MODE)),
+            draft=turn.draft,
+            cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        )
+    else:
+        continuation = workflow_continuation(
+            question_id=question_id,
+            workflow_id=f"supported_{digest}",
+            step_revision=0,
+            current_field=target_field or selected,
+            remaining_fields=(),
+            allowed_values=list(canonical_values(domain_for_field(selected))),
+            answer_schema=schema_text,
+            source_evidence=[turn.message],
+            draft=turn.draft,
+            mutating=mutating,
+        )
     return ClarificationContract(
-        question_id=f"clarification_{digest}",
+        question_id=question_id,
         question=question,
         reason="A supported request is missing one user-controlled choice.",
         target_type=target_type,
         target_field=target_field,
-        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
-        mutating=turn.setup_mode != DraftMode.SCANNER,
+        expected_answer_schema=schema_text,
+        mutating=mutating,
         allowed_options=options,
+        continuation=continuation,
     )
 
 
@@ -5299,15 +5794,46 @@ def _clarification_for_failure(
     digest = hashlib.sha256(
         f"{turn.source_turn_id}:{target_type}:{target_field or path}".encode()
     ).hexdigest()[:20]
+    question_id = f"clarification_{digest}"
+    schema_text = json.dumps(expected, sort_keys=True, separators=(",", ":"))
+    # Built here, at the moment the question is raised, from the failure the server
+    # already validated. A compiler-authored question that could not carry a completion
+    # used to be shown anyway and its answer handed back to the planner; now the
+    # completion exists before the question does, or the question is not asked.
+    failure_continuation: Any
+    if target_type == "sharia_policy":
+        failure_continuation = governed_continuation(
+            question_id=question_id,
+            step_revision=0,
+            target_type=target_type,
+            target_field=target_field or "",
+            option_key=governed_control_for(target_field or "", "screened_universe_mode"),
+            allowed_values=options,
+            draft=turn.draft,
+            cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        )
+    else:
+        failure_continuation = workflow_continuation(
+            question_id=question_id,
+            workflow_id=f"failure_{digest}",
+            step_revision=0,
+            current_field=target_field or path or "rule",
+            remaining_fields=(),
+            allowed_values=options,
+            answer_schema=schema_text,
+            source_evidence=[turn.message],
+            draft=turn.draft,
+        )
     return ClarificationContract(
-        question_id=f"clarification_{digest}",
+        question_id=question_id,
         question=question,
         reason=reason,
         target_type=target_type,
         target_field=target_field,
-        expected_answer_schema=json.dumps(expected, sort_keys=True, separators=(",", ":")),
+        expected_answer_schema=schema_text,
         mutating=True,
         allowed_options=options,
+        continuation=failure_continuation,
     )
 
 

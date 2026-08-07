@@ -1,3 +1,13 @@
+/**
+ * Not rendered while the site is in waitlist mode.
+ *
+ * Hilal Markets is invite-only during the private beta, so the landing page shows the
+ * waitlist form where this section used to sit. Nothing here is stale: the plans, the
+ * comparison table and the launch-price countdown still read from the same server
+ * values as the dashboard, so putting `<Pricing />` back into `App.tsx` restores the
+ * section exactly as it shipped. Deleting it would mean rebuilding it from memory
+ * later, and a rebuilt price is a price that can disagree with the server's.
+ */
 import { useCallback, useEffect, useState } from 'react'
 import {
   trackBillingIntervalChanged,

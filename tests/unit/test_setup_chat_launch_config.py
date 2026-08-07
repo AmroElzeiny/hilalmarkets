@@ -251,19 +251,44 @@ async def test_handle_releases_reservation_when_the_turn_raises(monkeypatch) -> 
     async def fail_turn(*_args, **_kwargs):
         raise RuntimeError("provider failed")
 
+    async def no_replay(*_args, **_kwargs):
+        return None
+
+    async def no_pending(*_args, **_kwargs):
+        return None
+
+    async def stub_turn(*_args, **_kwargs):
+        return SimpleNamespace(
+            source_message_id=None,
+            status="RECEIVED",
+            stage_timestamps_json={},
+            lease_expires_at=None,
+        )
+
     monkeypatch.setattr(service, "_reserve_user_cost_budget", reserve)
     monkeypatch.setattr(service, "_release_user_cost_reservation", release)
     monkeypatch.setattr(service, "_run_agent_turn", fail_turn)
+    # The database is not the subject here. Everything that would touch it is stubbed
+    # so the test proves exactly one thing: a turn that blows up still gives back the
+    # cost reservation it took.
+    monkeypatch.setattr(service, "_replayed_turn", no_replay)
+    monkeypatch.setattr(service, "_pending_change", no_pending)
+    monkeypatch.setattr(service, "_get_or_create_turn", stub_turn)
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    session = SimpleNamespace(flush=noop, commit=noop, get=noop)
 
     with pytest.raises(RuntimeError, match="provider failed"):
         await service.handle(
-            SimpleNamespace(),  # type: ignore[arg-type]
+            session,  # type: ignore[arg-type]
             chat,
             message="Build a monitor",
             option_key=None,
             option_value=None,
             option_label=None,
-            client_message_id=None,
+            client_message_id="cm-reservation-release",
         )
 
     assert released == [sentinel]

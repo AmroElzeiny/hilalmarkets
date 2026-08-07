@@ -16,6 +16,12 @@ from ai_market_monitor.db.models.enums import (
     ShariaAssetStatus,
     ShariaUniverseMode,
 )
+from ai_market_monitor.schemas.clarification_continuation import (
+    SUPPORTED_REQUEST_SCHEMA_KEY,
+    ClarificationCompletionContract,
+    clean_answer_shape,
+    completion_contract_from_metadata,
+)
 from ai_market_monitor.schemas.screening_execution import ReviewedScreeningEvidence
 from ai_market_monitor.schemas.strategy import (
     CapabilityParameterScalar as _CapabilityParameterScalar,
@@ -416,6 +422,87 @@ UnresolvedTargetType = Literal[
 ]
 
 
+def _seed_completion_contract(migrated: dict[str, object]) -> dict[str, object]:
+    """Give a rule-in-progress its canonical progress record the moment it is stored.
+
+    A blocker that says "this rule is missing three values" and nothing else is a
+    question the server can ask but cannot promise to apply: whatever code saw the next
+    message had to work out for itself what the answer was for, and for most of them that
+    code was the planner. Seeding the record here means the completion exists before the
+    question does, which is the whole ordering this design rests on.
+
+    Only the missing slots are seeded. No value is invented, and a record that already
+    has a contract is left exactly as it is.
+    """
+
+    if (
+        migrated.get("target_type") != "condition_creation"
+        or migrated.get("completion_contract") is not None
+    ):
+        return migrated
+    raw_slots = migrated.get("missing_slots")
+    slots = [str(item) for item in raw_slots if str(item)] if isinstance(raw_slots, list) else []
+    key = str(migrated.get("unresolved_id") or "")
+    if not slots or not key:
+        return migrated
+    migrated["completion_contract"] = ClarificationCompletionContract(
+        contract_id=key,
+        workflow_kind="supported_rule",
+        pending_fields=slots[:24],
+        current_field=slots[0],
+        evidence_fragments=[str(migrated.get("source_fragment") or "")][:24],
+    )
+    return migrated
+
+
+def _lift_completion_contract(migrated: dict[str, object]) -> dict[str, object]:
+    """Move workflow progress out of the answer schema and into the typed contract.
+
+    Old drafts kept a multi-step requirement's progress inside
+    ``expected_answer_schema`` under an ``x-`` extension key. That put one fact in two
+    writable places, and they drifted: the reply was composed from a freshly derived
+    step while the durable copy could be rewound by reconciliation, so a correct answer
+    was validated against a step the trader was no longer looking at.
+
+    The lift happens on read, once, and the extension key is removed. Three cases:
+
+    * only the legacy key — it becomes the typed contract;
+    * only the typed contract — nothing to do;
+    * both — they must describe the same progress, or the record is refused. Choosing a
+      winner silently is what a fail-closed rule exists to prevent.
+    """
+
+    schema = migrated.get("expected_answer_schema")
+    if not isinstance(schema, dict) or SUPPORTED_REQUEST_SCHEMA_KEY not in schema:
+        return _seed_completion_contract(migrated)
+    legacy = schema.get(SUPPORTED_REQUEST_SCHEMA_KEY)
+    migrated["expected_answer_schema"] = clean_answer_shape(schema)
+    if not isinstance(legacy, dict) or not legacy:
+        # A malformed or empty extension carries no recoverable progress. Dropping the
+        # key is right; inventing a contract from nothing would not be.
+        return migrated
+    contract_id = str(migrated.get("unresolved_id") or "")
+    if not contract_id:
+        return migrated
+    rebuilt = completion_contract_from_metadata(contract_id, legacy)
+    existing = migrated.get("completion_contract")
+    if existing is None:
+        migrated["completion_contract"] = rebuilt
+        return migrated
+    current = (
+        existing
+        if isinstance(existing, ClarificationCompletionContract)
+        else ClarificationCompletionContract.model_validate(existing)
+    )
+    if current.contract_hash != rebuilt.contract_hash:
+        raise ValueError(
+            "this requirement holds two different records of its own progress; "
+            "it must be paused and asked again rather than resolved by guessing"
+        )
+    migrated["completion_contract"] = current
+    return migrated
+
+
 class UnresolvedFieldV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -431,7 +518,14 @@ class UnresolvedFieldV2(BaseModel):
     target_type: UnresolvedTargetType
     target_field: str | None = Field(default=None, max_length=120)
     target_condition_id: str | None = Field(default=None, max_length=120)
+    #: What a usable answer *looks like*, and nothing else. Workflow progression used to
+    #: live in here too, under an ``x-`` extension key, which gave one fact two writable
+    #: homes; it now lives in ``completion_contract`` and is migrated out on read.
     expected_answer_schema: dict[str, object] = Field(default_factory=dict)
+    #: The canonical, executable record of a multi-step requirement in progress. The one
+    #: authority: the conversation's ``PendingClarificationWorkflow`` is a projection of
+    #: this and carries its id and hash, so the two can never quietly disagree.
+    completion_contract: ClarificationCompletionContract | None = None
     #: A coalesced condition requirement may need several slots.  The server owns this
     #: list and asks one question for the semantic object instead of one per field.
     missing_slots: list[str] = Field(default_factory=list, max_length=32)
@@ -491,7 +585,7 @@ class UnresolvedFieldV2(BaseModel):
             migrated["allowed_options"] = []
         migrated.setdefault("reason", "This value is required to compile the setup exactly.")
         migrated.setdefault("created_workflow_revision", 1)
-        return migrated
+        return _lift_completion_contract(migrated)
 
     @model_validator(mode="after")
     def validate_target(self) -> UnresolvedFieldV2:

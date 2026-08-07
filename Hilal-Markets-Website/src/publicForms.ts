@@ -1,15 +1,24 @@
-export type PublicFormErrorType =
-  | 'invalid_email'
-  | 'required_field'
-  | 'duplicate_email'
-  | 'rate_limited'
-  | 'network_error'
-  | 'server_error'
-  | 'unknown_error'
+import type { FirstTouchAttribution, WaitlistErrorType } from './analytics'
+
+/**
+ * Why a public form could not be submitted. One list, owned by `analytics.ts`, so the
+ * reason shown to the visitor and the reason reported to analytics can never drift
+ * apart into two slightly different vocabularies.
+ */
+export type PublicFormErrorType = WaitlistErrorType
 
 type Bootstrap = {
   csrf_token: string
+  waitlist_endpoint: string
   contact_endpoint: string
+}
+
+type WaitlistResponse = {
+  status: 'created' | 'already_registered'
+  created: boolean
+  code: 'waitlist_created' | 'duplicate_email'
+  sheet_delivery_status: 'sent' | 'queued' | 'retrying' | 'not_configured'
+  message: string
 }
 
 type ContactResponse = {
@@ -73,6 +82,24 @@ function idempotency(prefix: string): string {
   return `${prefix}:${random}`
 }
 
+export async function submitWaitlist(
+  values: { email: string; betaContactConsent: boolean },
+  attribution: FirstTouchAttribution,
+  idempotencyKey: string,
+): Promise<WaitlistResponse> {
+  const config = await bootstrap()
+  return post<WaitlistResponse>(config.waitlist_endpoint, config.csrf_token, {
+    email: values.email,
+    // Sent as its own field so the server records the answer the visitor actually
+    // left in the box, whether that is the offered Yes or a cleared No.
+    beta_contact_consent: values.betaContactConsent,
+    source_page: window.location.pathname || '/',
+    attribution,
+    idempotency_key: idempotencyKey,
+    company_website: '',
+  })
+}
+
 export async function submitContact(
   values: { title: string; email: string; description: string },
   idempotencyKey: string,
@@ -84,6 +111,10 @@ export async function submitContact(
     idempotency_key: idempotencyKey,
     company_website: '',
   })
+}
+
+export function newWaitlistIdempotencyKey(): string {
+  return idempotency('waitlist')
 }
 
 export function newContactIdempotencyKey(): string {

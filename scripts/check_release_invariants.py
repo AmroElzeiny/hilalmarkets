@@ -110,6 +110,10 @@ def main() -> int:
         "AI_AGENT_SHADOW_MODE": "false",
         "AI_AGENT_ROLLOUT_PERCENT": "0",
         "CAPABILITY_EXTENSION_ENABLED": "true",
+        # The public site ships pre-launch: waitlist, no plans, no account entry. Turning
+        # this off is a deliberate launch decision, not a deployment detail, so the
+        # production example has to state it.
+        "PUBLIC_WAITLIST_MODE": "true",
         "PUBLIC_CHAT_ENABLED": "true",
         "PUBLIC_CHAT_AI_ENABLED": "true",
         "PUBLIC_CHAT_INQUIRY_EMAIL": "office@hilalmarkets.com",

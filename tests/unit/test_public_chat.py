@@ -36,6 +36,69 @@ def test_public_knowledge_answers_only_from_catalog():
     assert "WhatsApp" not in channels[1]
 
 
+def test_every_public_fact_avoids_account_entry_while_the_site_is_pre_launch():
+    """No fact the assistant can quote may tell a visitor to sign in or sign up.
+
+    The assistant only ever repeats these entries, so removing the wording here is what
+    actually stops it appearing. Checked across the whole catalogue rather than the one
+    entry that mentioned it, because a second entry saying the same thing would be just
+    as wrong.
+    """
+
+    settings = _settings()
+    assert settings.public_waitlist_mode is True
+    service = PublicKnowledgeService(settings)
+
+    for entry in service.entries:
+        answer = entry.answer.casefold()
+        for forbidden in ("sign in", "sign-in", "sign up", "log in", "create an account"):
+            assert forbidden not in answer, (entry.source_id, forbidden)
+        assert "dashboard entry" not in answer, entry.source_id
+
+    # And the private-account refusal points at the waitlist instead of a sign-in page.
+    refusal = service.boundary_answer("Can you look up my account?")
+    assert refusal is not None
+    assert refusal[0] == "refused"
+    assert "waitlist" in refusal[1].casefold()
+    assert "sign in" not in refusal[1].casefold()
+    assert "dashboard_entry" not in refusal[4]
+
+
+def test_the_assistant_prompt_forbids_account_advice_while_pre_launch():
+    """Removing the fact is not enough; the model also knows the old advice by heart."""
+
+    from ai_market_monitor.services.public_support_ai import _public_support_instructions
+
+    pre_launch = _public_support_instructions(waitlist_mode=True).casefold()
+    assert "invite-only" in pre_launch
+    for forbidden_step in ("sign in", "sign up", "log in", "create an account", "dashboard"):
+        assert forbidden_step in pre_launch
+    assert "never tell a visitor to sign in" in pre_launch
+    assert "waitlist form on the home page" in pre_launch
+    assert "do not quote or estimate any" in pre_launch
+
+    # The rule is added, not substituted: every existing boundary is still stated.
+    open_product = _public_support_instructions(waitlist_mode=False)
+    assert "invite-only" not in open_product
+    assert open_product in _public_support_instructions(waitlist_mode=True)
+
+
+def test_the_open_product_still_explains_account_access():
+    """Turning the switch off restores the account wording; nothing is lost."""
+
+    settings = _settings()
+    settings.public_waitlist_mode = False
+    service = PublicKnowledgeService(settings)
+
+    entry = next(item for item in service.entries if item.source_id == "beta:account-access:v1")
+    assert "sign in" in entry.answer.casefold()
+    assert entry.route_id == "dashboard_entry"
+
+    refusal = service.boundary_answer("Can you look up my account?")
+    assert refusal is not None
+    assert "dashboard_entry" in refusal[4]
+
+
 def test_public_knowledge_refuses_advice_religious_rulings_and_secret_injection(
 ):
     service = PublicKnowledgeService(_settings())

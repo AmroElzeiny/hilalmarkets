@@ -67,6 +67,7 @@ from ai_market_monitor.schemas.ai_setup_chat import (
 )
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
+from ai_market_monitor.schemas.request_identity import is_valid_client_message_id
 from ai_market_monitor.schemas.screening_execution import ReviewedScreeningEvidence
 from ai_market_monitor.schemas.strategy import (
     Comparator,
@@ -1178,6 +1179,97 @@ class AISetupChatService:
         payload["usage"] = usage
         assistant.payload = payload
 
+    async def handle_draft_action(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        action: str,
+        client_message_id: str,
+        snapshot_id: str | None = None,
+        expected_executable_version: int | None = None,
+        proposal_id: str | None = None,
+        confirmed: bool = False,
+    ) -> AISetupChatSession:
+        """Route one Undo, Restore, Reset, Confirm or Cancel to the canonical owner.
+
+        These never take the legacy path. There is no legacy implementation of them, and
+        inventing one would mean two different ideas of what Undo means.
+        """
+
+        try:
+            return await SetupChatLaunchService(
+                self.settings,
+                self,
+                agent=self.launch_agent,
+            ).handle_draft_action(
+                session,
+                chat,
+                action=action,
+                client_message_id=client_message_id,
+                snapshot_id=snapshot_id,
+                expected_executable_version=expected_executable_version,
+                proposal_id=proposal_id,
+                confirmed=confirmed,
+            )
+        except SetupLaunchError as exc:
+            raise SetupChatError(
+                exc.code,
+                str(exc),
+                status_code=exc.status_code,
+                stage=exc.stage,
+                retryable=exc.retryable,
+            ) from exc
+
+    async def handle_builder_action(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        action: str,
+        client_message_id: str,
+        value: str | None = None,
+        mechanic_key: str | None = None,
+        values: dict[str, Any] | None = None,
+        node_id: str | None = None,
+        required: bool = True,
+        order: list[str] | None = None,
+        join: str | None = None,
+    ) -> AISetupChatSession:
+        """Route one guided Builder change to the canonical owner.
+
+        There is no legacy path here on purpose. The Builder writes the same draft
+        through the same mutation authority the assistant uses; a second implementation
+        would be a second idea of what "add a rule" means.
+        """
+
+        try:
+            return await SetupChatLaunchService(
+                self.settings,
+                self,
+                agent=self.launch_agent,
+            ).handle_builder_action(
+                session,
+                chat,
+                action=action,
+                client_message_id=client_message_id,
+                value=value,
+                mechanic_key=mechanic_key,
+                values=values,
+                node_id=node_id,
+                required=required,
+                order=order,
+                join=join,
+            )
+        except SetupLaunchError as exc:
+            raise SetupChatError(
+                exc.code,
+                str(exc),
+                status_code=exc.status_code,
+                stage=exc.stage,
+                retryable=exc.retryable,
+            ) from exc
+
     async def handle_message(
         self,
         session: AsyncSession,
@@ -1192,6 +1284,17 @@ class AISetupChatService:
         answered_step_revision: int | None = None,
     ) -> AISetupChatSession:
         if not self.settings.setup_chat_legacy_test_compat_enabled:
+            if not is_valid_client_message_id(client_message_id):
+                # Every turn on this path costs money and can change the user's setup,
+                # so it must be possible to tell "the user asked again" from "the browser
+                # retried". Without a key those are the same request, and a dropped
+                # response becomes a second paid mutation.
+                raise SetupChatError(
+                    "CLIENT_MESSAGE_ID_REQUIRED",
+                    "This message is missing its request id. Refresh the page and try again.",
+                    status_code=422,
+                    stage="intent",
+                )
             try:
                 return await SetupChatLaunchService(
                     self.settings,
@@ -1204,7 +1307,7 @@ class AISetupChatService:
                     option_key=option_key,
                     option_value=option_value,
                     option_label=option_label,
-                    client_message_id=client_message_id,
+                    client_message_id=str(client_message_id),
                     answered_question_id=answered_question_id,
                     answered_step_revision=answered_step_revision,
                 )
@@ -4157,6 +4260,13 @@ class AISetupChatService:
                 }
                 turn.executable_version_after = draft.executable_version
                 turn.workflow_revision_after = draft.workflow_revision
+                # A failed turn owes nothing more, so it gives the session back at once.
+                # Leaving the claim would lock the user out of their own chat until the
+                # lease expired and the recovery worker noticed — minutes of being
+                # unable to retry, after an error that was not their fault.
+                turn.session_claim = None
+                turn.lease_owner = None
+                turn.lease_expires_at = None
                 if not envelope.retryable:
                     turn.completed_at = datetime.now(UTC)
 

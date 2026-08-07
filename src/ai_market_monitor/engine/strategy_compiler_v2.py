@@ -8,6 +8,7 @@ from ai_market_monitor.db.models.enums import (
     MarketType,
     TriggerMode,
 )
+from ai_market_monitor.engine.capability_contract import DIRECTION_WORDS
 from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.schemas.strategy import (
@@ -261,14 +262,15 @@ def _compile_exact_capability(
             "capability_contract_mismatch",
             f"Capability {node.capability_key!r} does not support {node.operator.value}.",
         )
-    if node.movement_direction.value not in capability.direction_support and not (
-        node.movement_direction == MovementDirection.NEUTRAL
-        and "neutral" in capability.direction_support
-    ):
+    # The draft writes ``up``/``down``; the registry writes ``bullish``/``bearish``. This
+    # used to compare the two lists directly, so a capability that fully supports a
+    # rising move refused every rule that asked for one. The translation lives in
+    # `engine/capability_contract.py` and is imported, never restated.
+    direction_word = DIRECTION_WORDS[node.movement_direction]
+    if direction_word not in capability.direction_support:
         raise StrategyV2CompileError(
             "capability_contract_mismatch",
-            "Capability "
-            f"{node.capability_key!r} does not support {node.movement_direction.value}.",
+            f"Capability {node.capability_key!r} does not support {direction_word}.",
         )
     kind = {
         "indicator": OperandKind.INDICATOR,

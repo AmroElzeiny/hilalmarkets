@@ -86,6 +86,11 @@ class PublicFormsService:
                 "email": normalized_email,
                 "source_page": self._path(payload.source_page),
                 "attribution": attribution,
+                # The beta-contact answer is part of what the submission means, so
+                # reusing one request identifier with a different answer is a
+                # different request and is refused rather than silently keeping the
+                # first answer.
+                "beta_contact_consent": payload.beta_contact_consent,
             }
         )
         existing_key = await self.session.scalar(
@@ -114,6 +119,7 @@ class PublicFormsService:
             country_code=country_code,
             source_page=self._path(payload.source_page),
             attribution=attribution,
+            beta_contact_consent=payload.beta_contact_consent,
             idempotency_key=payload.idempotency_key,
             request_hash=request_hash,
             status="active",
@@ -277,6 +283,7 @@ class PublicFormsService:
                             "submitted_at": signup.submitted_at.isoformat(),
                             "country": signup.country_code or "unknown",
                             "source_page": signup.source_page,
+                            "beta_contact_consent": signup.beta_contact_consent,
                             **signup.attribution,
                         },
                     )

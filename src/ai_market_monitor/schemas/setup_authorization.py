@@ -18,11 +18,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-from enum import StrEnum
 from typing import Literal
 
 from pydantic import Field, model_validator
 
+from ai_market_monitor.schemas.clarification_continuation import (
+    DEFAULT_CANCELLATION_POLICY,
+    CancellationPolicy,
+    ClarificationContinuation,
+    ClarificationTargetType,
+    ReplacementPolicy,
+)
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeV2,
     DraftFieldPatch,
@@ -217,68 +223,6 @@ class AuthorizedPatchOperation(StrictModel):
         return self
 
 
-#: What kind of thing a clarification is asking about, so an answer can be checked
-#: against the slot it claims to fill.
-ClarificationTargetType = Literal[
-    "conversational",
-    "draft_field",
-    "condition_field",
-    "condition_creation",
-    "universe",
-    "market_scope",
-    "sharia_policy",
-    "boolean_structure",
-    "capability_parameter",
-    "reference_definition",
-    "unsupported_requirement",
-    "unsupported_resolution",
-]
-
-
-class CancellationPolicy(StrEnum):
-    """What ``cancel`` must do to the canonical state behind one question.
-
-    Cancelling used to mean only "stop showing the question". The blocker that caused
-    it stayed in the draft, so the setup was still blocked for a reason nothing on
-    screen mentioned any more — hidden blocked state a trader could not see or clear.
-
-    So every question now says, when it is created, what cancelling it means. There are
-    exactly three honest answers and none of them is "clear the question and say
-    nothing about the blocker".
-    """
-
-    #: The trader is abandoning a rule they themselves started. The canonical blocker
-    #: goes with it, and no half-built condition is created in its place.
-    REMOVE_PENDING_REQUIREMENT = "remove_pending_requirement"
-    #: The platform requires this before the setup can run — a screened universe, an
-    #: approved methodology. It is put down, not thrown away: the blocker stays, and the
-    #: reply says plainly that the setup is still incomplete and how to come back to it.
-    PAUSE_PENDING_REQUIREMENT = "pause_pending_requirement"
-    #: Nothing canonical is behind it. A read-only Scanner question is the whole family:
-    #: dropping it changes no draft, no rule and no governed policy.
-    CANCEL_CONVERSATION_ONLY = "cancel_conversation_only"
-
-
-#: What cancelling means for a question that did not say. Chosen per target type and
-#: deliberately fail-closed: anything the platform itself requires is *paused*, so a
-#: cancellation can never quietly claim to have removed a requirement that is still
-#: blocking the draft. Only questions whose blocker the trader authored are removable.
-DEFAULT_CANCELLATION_POLICY: dict[str, CancellationPolicy] = {
-    "conversational": CancellationPolicy.CANCEL_CONVERSATION_ONLY,
-    "condition_creation": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "condition_field": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "boolean_structure": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "capability_parameter": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "reference_definition": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "unsupported_requirement": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "unsupported_resolution": CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
-    "draft_field": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
-    "universe": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
-    "market_scope": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
-    "sharia_policy": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
-}
-
-
 class ClarificationContract(StrictModel):
     """A question the server authorised, and what would count as answering it.
 
@@ -317,6 +261,12 @@ class ClarificationContract(StrictModel):
     #: the question is created, never guessed at cancellation time — by then the code
     #: that knew whether the blocker was the trader's or the platform's is long gone.
     cancellation_policy: CancellationPolicy = CancellationPolicy.CANCEL_CONVERSATION_ONLY
+    #: Exactly what the server will do when this question is answered, built and checked
+    #: **before** the question is shown. A mutating question without one cannot be
+    #: persisted or rendered: it would be a question whose answer has no authority able
+    #: to apply it, which is how clarification answers used to reach the planner and be
+    #: re-read as brand new requests.
+    continuation: ClarificationContinuation | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -362,4 +312,47 @@ class ClarificationContract(StrictModel):
             and not self.target_field
         ):
             raise ValueError("a field question must name its field")
+        if self.continuation is not None:
+            if self.continuation.question_id != self.question_id:
+                raise ValueError(
+                    "the continuation belongs to a different question: "
+                    f"{self.continuation.question_id!r} not {self.question_id!r}"
+                )
+            if self.continuation.step_revision != self.step_revision:
+                raise ValueError("the continuation belongs to a different step of this question")
+            if self.continuation.target_type != self.target_type:
+                raise ValueError("the continuation completes a different kind of target")
+            if (self.continuation.target_field or "") != (self.target_field or ""):
+                raise ValueError("the continuation fills a different field")
+            if (self.continuation.target_condition_id or "") != (self.target_condition_id or ""):
+                raise ValueError("the continuation targets a different rule")
+            if self.continuation.cancellation_policy is not self.cancellation_policy:
+                raise ValueError("the continuation and the question disagree about cancelling")
         return self
+
+    def client_payload(self) -> dict[str, object]:
+        """This question as the browser may see it: wording, options and identity.
+
+        The continuation is deliberately left out. It holds the server's own plan — a
+        stored rule template, the draft hash the answer is bound to, the allowlisted
+        control that will run — and none of that is the client's business. The client
+        needs enough to draw the question and to say which question it answered, and
+        nothing more.
+        """
+
+        payload = self.model_dump(mode="json")
+        payload.pop("continuation", None)
+        return payload
+
+    @property
+    def replacement_policy(self) -> ReplacementPolicy:
+        """What a new request may do to this question while it is open.
+
+        Read from the continuation, which is the record that knows whether anything
+        canonical is behind the question. A question with no continuation has nothing to
+        strand, so a new request may simply take over.
+        """
+
+        if self.continuation is None:
+            return ReplacementPolicy.REPLACE_SILENTLY
+        return self.continuation.replacement_policy

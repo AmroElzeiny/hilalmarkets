@@ -8,14 +8,25 @@
       {% for item in public_navigation %}
       <a class="public-nav-link {{ 'is-active' if page == item.page else '' }}" href="{{ url_for(item.endpoint) }}" {% if page == item.page %}aria-current="page"{% endif %}>{{ item.label }}</a>
       {% endfor %}
+      {# Hilal Markets is invite-only while the private beta runs. In that state the
+         header offers the waitlist and nothing else: an account cannot be opened from
+         a public page, so a "Sign in" or "Start free" button would lead nowhere useful. #}
       <div class="public-mobile-actions">
+        {% if waitlist_mode %}
+        <a class="btn btn-primary" href="{{ waitlist_url }}">Join the waitlist</a>
+        {% else %}
         <a class="btn btn-secondary" href="{{ url_for('signin_page') }}">Sign in</a>
         <a class="btn btn-primary" href="{{ url_for('signup_page') }}">Start free</a>
+        {% endif %}
       </div>
     </div>
     <div class="nav-actions">
+      {% if waitlist_mode %}
+      <a class="btn btn-primary public-desktop-action" href="{{ waitlist_url }}"><span data-icon="arrow" data-icon-class="icon"></span>Join the waitlist</a>
+      {% else %}
       <a class="btn btn-secondary public-desktop-action" href="{{ url_for('signin_page') }}"><span data-icon="user" data-icon-class="icon"></span>Sign in</a>
       <a class="btn btn-primary public-desktop-action" href="{{ url_for('signup_page') }}"><span data-icon="arrow" data-icon-class="icon"></span>Start free</a>
+      {% endif %}
       <button class="btn btn-secondary btn-icon mobile-menu" type="button" data-public-menu aria-label="Open navigation" aria-controls="public-navigation" aria-expanded="false"><span data-icon="menu" data-icon-class="icon"></span></button>
     </div>
   </div>

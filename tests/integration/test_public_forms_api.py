@@ -23,9 +23,11 @@ def _waitlist_payload(
     *,
     email: str = "visitor@example.com",
     key: str = "waitlist:test:1234567890",
+    beta_contact_consent: bool = True,
 ) -> dict:
     return {
         "email": email,
+        "beta_contact_consent": beta_contact_consent,
         "source_page": "/?utm_source=private-value",
         "attribution": {
             "utm_source": "newsletter",
@@ -78,6 +80,80 @@ async def test_waitlist_is_idempotent_and_drops_attribution_without_consent(test
         assert signup is not None
         assert signup.attribution == {}
         assert signup.source_page == "/"
+
+
+async def test_waitlist_records_the_beta_contact_answer_exactly_as_it_arrives(
+    test_context,
+):
+    """The box is offered ticked, but only what the person left is stored.
+
+    A cleared box still joins the waitlist. Recording it as agreement would make the
+    saved record say something the visitor never said.
+    """
+
+    test_context["settings"].waitlist_google_sheets_enabled = False
+    client = test_context["client"]
+    token = await _csrf(client)
+
+    agreed = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=_waitlist_payload(email="yes@example.com", key="waitlist:test:consent-yes"),
+    )
+    assert agreed.status_code == 200
+
+    declined = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=_waitlist_payload(
+            email="no@example.com",
+            key="waitlist:test:consent-no",
+            beta_contact_consent=False,
+        ),
+    )
+    assert declined.status_code == 200
+    assert declined.json()["created"] is True
+
+    async with test_context["session_factory"]() as session:
+        rows = {
+            row.normalized_email: row.beta_contact_consent
+            for row in (await session.scalars(select(WaitlistSignup))).all()
+        }
+    assert rows == {"yes@example.com": True, "no@example.com": False}
+
+
+async def test_reusing_one_request_key_with_a_different_answer_is_refused(test_context):
+    """One identifier means one submission, and the answer is part of what it means."""
+
+    test_context["settings"].waitlist_google_sheets_enabled = False
+    client = test_context["client"]
+    token = await _csrf(client)
+    key = "waitlist:test:consent-reuse"
+
+    first = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=_waitlist_payload(email="reuse@example.com", key=key),
+    )
+    assert first.status_code == 200
+
+    changed = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=_waitlist_payload(
+            email="reuse@example.com",
+            key=key,
+            beta_contact_consent=False,
+        ),
+    )
+    assert changed.status_code == 409
+    assert changed.json()["detail"]["code"] == "idempotency_conflict"
+
+    # The stored answer is still the one that was actually sent first.
+    async with test_context["session_factory"]() as session:
+        signup = await session.scalar(select(WaitlistSignup))
+        assert signup is not None
+        assert signup.beta_contact_consent is True
 
 
 async def test_waitlist_accepts_same_origin_and_rejects_foreign_origin(test_context):
@@ -155,6 +231,7 @@ async def test_waitlist_syncs_server_side_country_and_first_touch_without_leakin
             "submitted_at": captured[0]["submitted_at"],
             "country": "EG",
             "source_page": "/",
+            "beta_contact_consent": True,
             "utm_source": "newsletter",
             "utm_medium": "email",
             "utm_campaign": "private-beta",

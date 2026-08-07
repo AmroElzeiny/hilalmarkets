@@ -756,6 +756,308 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
             "текущий шаг."
         ),
     },
+    #: A big change is written down and waiting. Nothing has been applied, and no other
+    #: message may be worked on until the trader answers this one. Said plainly, because
+    #: silence here would let them believe their new instruction had landed.
+    "change.pending_blocks_turn": {
+        ConversationLanguage.ENGLISH: (
+            "You have a big change waiting for your answer. I have not applied it, and "
+            "I have not changed anything else. Please confirm it or cancel it first."
+        ),
+        ConversationLanguage.ARABIC: (
+            "في تغيير كبير مستني ردك. أنا ما طبقتوش، وما غيرتش أي حاجة تانية. من فضلك "
+            "أكّده أو الغيه الأول."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Un changement important attend votre réponse. Je ne l'ai pas appliqué et je "
+            "n'ai rien changé d'autre. Confirmez-le ou annulez-le d'abord."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Tienes un cambio grande esperando tu respuesta. No lo apliqué y no cambié "
+            "nada más. Confírmalo o cancélalo primero."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Большое изменение ждёт вашего ответа. Я его не применил и ничего другого не "
+            "менял. Сначала подтвердите его или отмените."
+        ),
+    },
+    #: A change large enough to need a yes before it happens. The list of what it would
+    #: do comes from the canonical diff, never from the assistant's own description.
+    "change.confirm_required": {
+        ConversationLanguage.ENGLISH: (
+            "This is a big change, so I have not made it yet. Here is exactly what it "
+            "would do. Say yes to apply it, or cancel to keep things as they are."
+        ),
+        ConversationLanguage.ARABIC: (
+            "ده تغيير كبير، فما عملتوش لسه. دي بالظبط اللي هيحصل. قول نعم عشان أطبقه، أو "
+            "الغي عشان نسيب كل حاجة زي ما هي."
+        ),
+        ConversationLanguage.FRENCH: (
+            "C'est un changement important, je ne l'ai donc pas encore fait. Voici "
+            "exactement ce qu'il ferait. Dites oui pour l'appliquer, ou annulez pour "
+            "tout garder tel quel."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Es un cambio grande, así que todavía no lo hice. Esto es exactamente lo que "
+            "haría. Di sí para aplicarlo, o cancela para dejar todo igual."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Это большое изменение, поэтому я его пока не сделал. Вот что именно "
+            "произойдёт. Скажите «да», чтобы применить, или отмените."
+        ),
+    },
+    #: The proposal was built against a draft that has since moved. It cannot be applied
+    #: to the new one, because the thing it was going to change may not be there now.
+    "change.proposal_stale": {
+        ConversationLanguage.ENGLISH: (
+            "Your setup changed after I offered that change, so I did not apply it. "
+            "Nothing was lost. Please ask again and I will show you the new version."
+        ),
+        ConversationLanguage.ARABIC: (
+            "الإعداد بتاعك اتغير بعد ما عرضت التغيير ده، فما طبقتوش. ما ضاعش أي حاجة. "
+            "اطلبه تاني وأنا هوريك النسخة الجديدة."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Votre configuration a changé après ma proposition, je ne l'ai donc pas "
+            "appliquée. Rien n'est perdu. Redemandez-le et je vous montrerai la nouvelle "
+            "version."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Tu configuración cambió después de que ofrecí ese cambio, así que no lo "
+            "apliqué. No se perdió nada. Pídelo otra vez y te muestro la versión nueva."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Ваша настройка изменилась после того, как я предложил это изменение, поэтому "
+            "я его не применил. Ничего не потеряно. Попросите ещё раз."
+        ),
+    },
+    #: The trader said no. Nothing moved, and that is stated rather than implied.
+    "change.cancelled": {
+        ConversationLanguage.ENGLISH: (
+            "I cancelled that change. Your setup is exactly as it was."
+        ),
+        ConversationLanguage.ARABIC: "لغيت التغيير ده. الإعداد بتاعك زي ما هو بالظبط.",
+        ConversationLanguage.FRENCH: (
+            "J'ai annulé ce changement. Votre configuration est exactement comme avant."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Cancelé ese cambio. Tu configuración está exactamente como estaba."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я отменил это изменение. Ваша настройка осталась прежней."
+        ),
+    },
+    #: The last real change was put back. Undo makes a new version; it never rewrites
+    #: history, so the version they undid is still there to go forward to.
+    "change.undone": {
+        ConversationLanguage.ENGLISH: (
+            "I undid your last change. Your earlier version is back, and nothing older "
+            "was deleted."
+        ),
+        ConversationLanguage.ARABIC: (
+            "رجّعت آخر تغيير. النسخة القديمة رجعت، وما اتمسحش أي حاجة أقدم."
+        ),
+        ConversationLanguage.FRENCH: (
+            "J'ai annulé votre dernière modification. Votre version précédente est de "
+            "retour et rien de plus ancien n'a été supprimé."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Deshice tu último cambio. Tu versión anterior volvió y no se borró nada más "
+            "antiguo."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я отменил ваше последнее изменение. Прежняя версия вернулась, и ничего "
+            "старого не удалено."
+        ),
+    },
+    #: A guided change that turned out to change nothing. Said plainly instead of
+    #: reporting a save that did not happen.
+    "builder.nothing_changed": {
+        ConversationLanguage.ENGLISH: (
+            "That was already how your setup was, so nothing changed."
+        ),
+        ConversationLanguage.ARABIC: "ده كان زي ما هو بالظبط، فمفيش حاجة اتغيرت.",
+        ConversationLanguage.FRENCH: (
+            "C'était déjà ainsi dans votre configuration, donc rien n'a changé."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Tu configuración ya estaba así, así que no cambió nada."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "У вас уже было именно так, поэтому ничего не изменилось."
+        ),
+    },
+    #: There is nothing to undo. Said instead of pretending something was undone.
+    "change.nothing_to_undo": {
+        ConversationLanguage.ENGLISH: (
+            "There is no change to undo yet. Your setup is at its earliest version."
+        ),
+        ConversationLanguage.ARABIC: "مفيش تغيير أرجّعه لسه. الإعداد عند أول نسخة ليه.",
+        ConversationLanguage.FRENCH: (
+            "Il n'y a pas encore de changement à annuler. Votre configuration est à sa "
+            "première version."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Todavía no hay ningún cambio que deshacer. Tu configuración está en su "
+            "primera versión."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Отменять пока нечего. Ваша настройка на самой первой версии."
+        ),
+    },
+    #: An older version was put back as a new current version.
+    "change.restored": {
+        ConversationLanguage.ENGLISH: (
+            "I put that older version back. It is now your current setup, and every "
+            "saved version is still there."
+        ),
+        ConversationLanguage.ARABIC: (
+            "رجّعت النسخة القديمة دي. بقت هي الإعداد الحالي، وكل النسخ المحفوظة لسه "
+            "موجودة."
+        ),
+        ConversationLanguage.FRENCH: (
+            "J'ai remis cette ancienne version. C'est maintenant votre configuration "
+            "actuelle, et toutes les versions enregistrées sont toujours là."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Puse esa versión anterior de vuelta. Ahora es tu configuración actual y "
+            "todas las versiones guardadas siguen ahí."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я вернул эту старую версию. Теперь это ваша текущая настройка, и все "
+            "сохранённые версии на месте."
+        ),
+    },
+    #: The working draft was cleared. Saved versions and approved setups are untouched,
+    #: and that is said out loud because it is the thing a user would fear.
+    "change.reset": {
+        ConversationLanguage.ENGLISH: (
+            "I cleared this draft so you can start again. Your saved versions and any "
+            "approved setup were not touched."
+        ),
+        ConversationLanguage.ARABIC: (
+            "مسحت المسودة دي عشان تبدأ من جديد. النسخ المحفوظة وأي إعداد متوافق عليه "
+            "ما اتلمسوش."
+        ),
+        ConversationLanguage.FRENCH: (
+            "J'ai effacé ce brouillon pour que vous puissiez recommencer. Vos versions "
+            "enregistrées et toute configuration approuvée n'ont pas été touchées."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Borré este borrador para que puedas empezar de nuevo. Tus versiones "
+            "guardadas y cualquier configuración aprobada no se tocaron."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я очистил этот черновик, чтобы вы могли начать заново. Сохранённые версии и "
+            "утверждённая настройка не тронуты."
+        ),
+    },
+    #: A message arrived while the previous one was still running. Nothing is lost and
+    #: nothing is duplicated; the user is told to wait rather than to send again.
+    "turn.in_progress": {
+        ConversationLanguage.ENGLISH: (
+            "I am still working on your previous message. Please wait a moment — you do "
+            "not need to send it again."
+        ),
+        ConversationLanguage.ARABIC: (
+            "لسه بشتغل على رسالتك اللي قبلها. استنى شوية — مش محتاج تبعتها تاني."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Je travaille encore sur votre message précédent. Patientez un instant — "
+            "inutile de le renvoyer."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Todavía estoy trabajando en tu mensaje anterior. Espera un momento — no "
+            "hace falta enviarlo otra vez."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я ещё работаю над вашим предыдущим сообщением. Подождите немного — "
+            "отправлять снова не нужно."
+        ),
+    },
+    #: The draft moved while this message was being understood, and the change could not
+    #: be safely re-aimed at the new state.
+    "turn.draft_moved": {
+        ConversationLanguage.ENGLISH: (
+            "This setup changed in another tab. Your request was not applied. Please "
+            "look at the latest version and try again."
+        ),
+        ConversationLanguage.ARABIC: (
+            "الإعداد ده اتغير في تبويب تاني. طلبك ما اتطبقش. بص على آخر نسخة وحاول تاني."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Cette configuration a changé dans un autre onglet. Votre demande n'a pas "
+            "été appliquée. Consultez la dernière version et réessayez."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Esta configuración cambió en otra pestaña. Tu petición no se aplicó. Mira "
+            "la última versión e inténtalo otra vez."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Эта настройка изменилась в другой вкладке. Ваш запрос не применён. "
+            "Посмотрите последнюю версию и попробуйте снова."
+        ),
+    },
+    #: Every value the trader was asked for is in, and the rule still cannot be built.
+    #: Said plainly, with nothing invented to fill the gap — a rule built from a guess
+    #: would monitor the wrong market and say nothing about it.
+    "status.rule_not_buildable": {
+        ConversationLanguage.ENGLISH: (
+            "Thank you. I still cannot build that rule from what I have, so I have not "
+            "added it. Please describe the rule again in one message and I will set it "
+            "up properly."
+        ),
+        ConversationLanguage.ARABIC: (
+            "شكرًا. لسه مش قادر أبني القاعدة دي من اللي عندي، فما ضفتهاش. لو سمحت اوصف "
+            "القاعدة تاني في رسالة واحدة وأنا هجهزها صح."
+        ),
+        ConversationLanguage.FRENCH: (
+            "Merci. Je ne peux toujours pas construire cette règle avec ce que j'ai, je "
+            "ne l'ai donc pas ajoutée. Décrivez-la à nouveau en un seul message et je "
+            "la mettrai en place correctement."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Gracias. Todavía no puedo construir esa regla con lo que tengo, así que no "
+            "la añadí. Describe la regla otra vez en un solo mensaje y la preparo bien."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Спасибо. Я всё ещё не могу собрать это правило из того, что у меня есть, "
+            "поэтому не добавил его. Опишите правило ещё раз одним сообщением, и я "
+            "настрою его правильно."
+        ),
+    },
+    #: A different, complete request arrived while a requirement was still open. Nothing
+    #: is applied and nothing is thrown away — the trader is asked which they want first,
+    #: so the open requirement can never quietly become invisible.
+    "ask.settle_before_new_request": {
+        # The words offered here are words the cancel vocabulary really knows. Offering a
+        # phrase the reader cannot read would leave a beginner repeating a suggestion the
+        # product itself made, and getting the same question back every time.
+        ConversationLanguage.ENGLISH: (
+            "I saved your new request. First, what should I do with the one we were "
+            "still setting up? Answer the question below to finish it, or say \"cancel\" "
+            "and I will move on to your new request."
+        ),
+        ConversationLanguage.ARABIC: (
+            "حفظت طلبك الجديد. الأول، أعمل إيه في اللي كنا بنجهزه؟ جاوب على السؤال ده "
+            "علشان نخلصه، أو قول «سيبك» وأنا هبدأ في طلبك الجديد."
+        ),
+        ConversationLanguage.FRENCH: (
+            "J'ai gardé votre nouvelle demande. D'abord, que faire de celle en cours ? "
+            "Répondez à la question ci-dessous pour la terminer, ou dites « laisse "
+            "tomber » et je passe à la nouvelle."
+        ),
+        ConversationLanguage.SPANISH: (
+            "Guardé tu nueva petición. Primero, ¿qué hago con la que estábamos "
+            "preparando? Responde la pregunta de abajo para terminarla, o di «déjalo» y "
+            "paso a la nueva."
+        ),
+        ConversationLanguage.RUSSIAN: (
+            "Я сохранил ваш новый запрос. Сначала: что делать с тем, который мы ещё "
+            "настраивали? Ответьте на вопрос ниже, чтобы закончить его, или скажите "
+            "«отмена», и я перейду к новому."
+        ),
+    },
     #: Coming back to a question the trader put down. It names nothing as new: every
     #: value they already chose is still there.
     "status.setup_resumed": {

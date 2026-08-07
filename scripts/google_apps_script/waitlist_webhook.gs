@@ -17,6 +17,23 @@ const WAITLIST_HEADERS = [
   'Country',
   'Signup Source',
   'Campaign',
+  'Beta Testing Consent',
+  'Status',
+  'Notes',
+  'System Delivery ID',
+];
+
+/**
+ * The layout used before the beta-consent column existed. A sheet already holding
+ * these headers is upgraded in place; its rows keep every value and gain one blank
+ * consent cell, because those people were never asked the question.
+ */
+const WAITLIST_HEADERS_V2 = [
+  'Email Address',
+  'Joined At (UTC)',
+  'Country',
+  'Signup Source',
+  'Campaign',
   'Status',
   'Notes',
   'System Delivery ID',
@@ -29,6 +46,12 @@ const WAITLIST_STATUS_OPTIONS = [
   'Follow Up',
   'Not Interested',
 ];
+
+const WAITLIST_CONSENT_COLUMN = 6;
+const WAITLIST_STATUS_COLUMN = 7;
+const WAITLIST_NOTES_COLUMN = 8;
+const WAITLIST_DELIVERY_ID_COLUMN = 9;
+const WAITLIST_VISIBLE_COLUMNS = WAITLIST_DELIVERY_ID_COLUMN - 1;
 
 function doPost(event) {
   const lock = LockService.getScriptLock();
@@ -73,6 +96,7 @@ function doPost(event) {
       safeCellText_(payload.country || 'Unknown'),
       source,
       campaign,
+      consentLabel_(payload.beta_contact_consent),
       'New',
       '',
       deliveryId,
@@ -86,6 +110,17 @@ function doPost(event) {
   }
 }
 
+/**
+ * "Yes" or "No" only when the server actually sent an answer. A delivery from an older
+ * server build carries no field at all, and a blank cell says that honestly instead of
+ * recording a refusal nobody made.
+ */
+function consentLabel_(value) {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  return '';
+}
+
 function prepareWaitlistSheet_(sheet) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length).setValues([WAITLIST_HEADERS]);
@@ -93,7 +128,7 @@ function prepareWaitlistSheet_(sheet) {
     const currentHeaders = sheet
       .getRange(1, 1, 1, Math.min(sheet.getLastColumn(), WAITLIST_HEADERS.length))
       .getDisplayValues()[0];
-    if (!headersMatch_(currentHeaders)) migrateLegacyRows_(sheet);
+    if (!headersMatch_(currentHeaders)) upgradeSheetLayout_(sheet);
   }
 
   const header = sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length);
@@ -108,9 +143,10 @@ function prepareWaitlistSheet_(sheet) {
   sheet.setColumnWidth(3, 100);
   sheet.setColumnWidth(4, 150);
   sheet.setColumnWidth(5, 170);
-  sheet.setColumnWidth(6, 130);
-  sheet.setColumnWidth(7, 300);
-  sheet.hideColumns(8);
+  sheet.setColumnWidth(WAITLIST_CONSENT_COLUMN, 170);
+  sheet.setColumnWidth(WAITLIST_STATUS_COLUMN, 130);
+  sheet.setColumnWidth(WAITLIST_NOTES_COLUMN, 300);
+  sheet.hideColumns(WAITLIST_DELIVERY_ID_COLUMN);
   formatWaitlistRows_(sheet);
 }
 
@@ -118,9 +154,54 @@ function headersMatch_(headers) {
   return WAITLIST_HEADERS.every((header, index) => headers[index] === header);
 }
 
-function migrateLegacyRows_(sheet) {
+function matchesHeaderSet_(row, expected) {
+  return expected.every((header, index) => String(row[index] || '').trim() === header);
+}
+
+/**
+ * Bring an older sheet up to the current layout without losing a single row.
+ *
+ * Two older shapes are recognised. Anything else throws, so an unknown sheet is left
+ * exactly as it is rather than being overwritten by a guess.
+ */
+function upgradeSheetLayout_(sheet) {
   const values = sheet.getDataRange().getValues();
-  const legacyRows = values.filter(row => row.some(value => String(value).trim() !== ''));
+  const rows = values.filter(row => row.some(value => String(value).trim() !== ''));
+  if (rows.length === 0) return;
+
+  let migrated;
+  if (matchesHeaderSet_(rows[0], WAITLIST_HEADERS_V2)) {
+    migrated = rows.slice(1).map(row => {
+      const joinedAt = new Date(String(row[1] || ''));
+      if (Number.isNaN(joinedAt.getTime())) throw new Error('waitlist_legacy_timestamp_invalid');
+      return [
+        safeCellText_(row[0]),
+        joinedAt,
+        safeCellText_(row[2] || 'Unknown'),
+        safeCellText_(row[3] || 'Direct'),
+        safeCellText_(row[4] || ''),
+        // Never asked, so never answered.
+        '',
+        safeCellText_(row[5] || 'New'),
+        safeCellText_(row[6] || ''),
+        String(row[7] || '').slice(0, 255),
+      ];
+    });
+  } else {
+    migrated = migrateLegacyRows_(rows);
+  }
+
+  const existingFilter = sheet.getFilter();
+  if (existingFilter) existingFilter.remove();
+  sheet.clear();
+  sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length).setValues([WAITLIST_HEADERS]);
+  if (migrated.length > 0) {
+    sheet.getRange(2, 1, migrated.length, WAITLIST_HEADERS.length).setValues(migrated);
+  }
+}
+
+function migrateLegacyRows_(rows) {
+  const legacyRows = rows.slice();
   if (legacyRows.length > 0 && isLegacyHeader_(legacyRows[0])) legacyRows.shift();
   const canMigrate = legacyRows.every(row => {
     const deliveryId = String(row[0] || '');
@@ -129,7 +210,7 @@ function migrateLegacyRows_(sheet) {
   });
   if (!canMigrate) throw new Error('waitlist_sheet_schema_unrecognized');
 
-  const migrated = legacyRows.map(row => {
+  return legacyRows.map(row => {
     const submittedAt = new Date(String(row[2] || ''));
     if (Number.isNaN(submittedAt.getTime())) {
       throw new Error('waitlist_legacy_timestamp_invalid');
@@ -140,19 +221,12 @@ function migrateLegacyRows_(sheet) {
       safeCellText_(row[3] || 'Unknown'),
       safeCellText_(row[5] || row[4] || 'Direct'),
       safeCellText_(row[7] || ''),
+      '',
       'New',
       '',
       String(row[0]).slice(0, 255),
     ];
   });
-
-  const existingFilter = sheet.getFilter();
-  if (existingFilter) existingFilter.remove();
-  sheet.clear();
-  sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length).setValues([WAITLIST_HEADERS]);
-  if (migrated.length > 0) {
-    sheet.getRange(2, 1, migrated.length, WAITLIST_HEADERS.length).setValues(migrated);
-  }
 }
 
 function isLegacyHeader_(row) {
@@ -164,7 +238,7 @@ function isLegacyHeader_(row) {
 function findDeliveryId_(sheet, deliveryId) {
   if (sheet.getLastRow() < 2) return null;
   return sheet
-    .getRange(2, 8, sheet.getLastRow() - 1, 1)
+    .getRange(2, WAITLIST_DELIVERY_ID_COLUMN, sheet.getLastRow() - 1, 1)
     .createTextFinder(deliveryId)
     .matchEntireCell(true)
     .findNext();
@@ -187,9 +261,9 @@ function formatWaitlistRows_(sheet) {
     .requireValueInList(WAITLIST_STATUS_OPTIONS, true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, 6, rowCount, 1).setDataValidation(validation);
-  sheet.getRange(2, 1, rowCount, 7).setVerticalAlignment('middle');
-  sheet.getRange(2, 7, rowCount, 1).setWrap(true);
+  sheet.getRange(2, WAITLIST_STATUS_COLUMN, rowCount, 1).setDataValidation(validation);
+  sheet.getRange(2, 1, rowCount, WAITLIST_VISIBLE_COLUMNS).setVerticalAlignment('middle');
+  sheet.getRange(2, WAITLIST_NOTES_COLUMN, rowCount, 1).setWrap(true);
   refreshWaitlistFilter_(sheet);
 }
 
@@ -198,10 +272,15 @@ function refreshWaitlistFilter_(sheet) {
   const existing = sheet.getFilter();
   if (existing) {
     const range = existing.getRange();
-    if (range.getNumRows() === requiredRows && range.getNumColumns() === 7) return;
+    if (
+      range.getNumRows() === requiredRows &&
+      range.getNumColumns() === WAITLIST_VISIBLE_COLUMNS
+    ) {
+      return;
+    }
     existing.remove();
   }
-  sheet.getRange(1, 1, requiredRows, 7).createFilter();
+  sheet.getRange(1, 1, requiredRows, WAITLIST_VISIBLE_COLUMNS).createFilter();
 }
 
 function safeCellText_(value) {

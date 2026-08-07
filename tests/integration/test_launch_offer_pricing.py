@@ -26,6 +26,20 @@ from ai_market_monitor.core.plans import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _open_for_business(test_context: dict) -> None:
+    """Every test here describes the site once the product is open for sale.
+
+    While the public site is in waitlist mode there are no plans on the landing page and
+    the pricing page redirects to the waitlist, so these rules have nothing to bite on.
+    They still matter: they are what the pricing surfaces must do the day the switch is
+    turned off, and asserting them here keeps the plans, the offer and the deadline from
+    drifting apart while the section is out of sight.
+    """
+
+    test_context["settings"].public_waitlist_mode = False
+
+
 def _runtime_commerce(html: str) -> dict:
     """The commerce block the landing page hands to the React app."""
 

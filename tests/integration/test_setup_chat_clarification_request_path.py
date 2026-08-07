@@ -93,6 +93,47 @@ def _conversation(chat) -> SetupConversationContext:
     return SetupConversationContext.model_validate(stored)
 
 
+def _identity(chat) -> dict[str, object]:
+    """What the official client attaches to every message while a question is open.
+
+    Read fresh from the stored contract, exactly as the browser reads it from the last
+    assistant payload — never captured when a control was drawn. That is the difference
+    between a button that answers the question on screen and one that answers the
+    question it happened to be created under.
+    """
+
+    contract = _conversation(chat).active_question
+    if contract is None:
+        return {}
+    return {
+        "answered_question_id": contract.question_id,
+        "answered_step_revision": contract.step_revision,
+    }
+
+
+def _key(label: str) -> str:
+    """A valid idempotency key from a short test label.
+
+    The server requires at least eight characters, because a key short enough to guess
+    is a key another user could collide with. Tests name their turns "typed-4", so the
+    padding happens here rather than at every call site.
+    """
+
+    return f"cm-{label}"
+
+
+async def _say(service, session, chat, message: str, client_message_id: str, **extra):
+    """One message from the official client, carrying the current question identity."""
+
+    return await service.handle_message(
+        session,
+        chat,
+        message=message,
+        client_message_id=_key(client_message_id),
+        **{**_identity(chat), **extra},
+    )
+
+
 async def _user(test_context) -> User:
     async with test_context["session_factory"]() as session:
         user = User(display_name=f"Clarification path {uuid4().hex[:8]}")
@@ -115,18 +156,9 @@ def _service(test_context, planner: StandInPlanner) -> AISetupChatService:
 async def _scanner_awaiting_scope(service, session, chat, prefix: str) -> None:
     """Drive the real service to the point where the screened-scope question is open."""
 
-    await service.handle_message(
-        session, chat, message="Scanner", client_message_id=f"{prefix}-1"
-    )
-    await service.handle_message(
-        session,
-        chat,
-        message="what coins are up at least 5% now?",
-        client_message_id=f"{prefix}-2",
-    )
-    await service.handle_message(
-        session, chat, message="24 hours", client_message_id=f"{prefix}-3"
-    )
+    await _say(service, session, chat, "Scanner", f"{prefix}-1")
+    await _say(service, session, chat, "what coins are up at least 5% now?", f"{prefix}-2")
+    await _say(service, session, chat, "24 hours", f"{prefix}-3")
 
 
 # ---------------------------------------------------------------------------------
@@ -152,9 +184,7 @@ async def test_an_unreadable_scope_answer_keeps_the_question_through_the_real_pa
         held = dict(opened.pending_read_only_scan)
         before = load_strategy_draft_v2(chat).executable_hash
 
-        await service.handle_message(
-            session, chat, message="purple bananas", client_message_id="scope-miss-4"
-        )
+        await _say(service, session, chat, "purple bananas", "scope-miss-4")
 
         after = _conversation(chat)
         assert after.active_question is not None, "the question survives"
@@ -179,9 +209,7 @@ async def test_a_scope_typo_is_asked_about_rather_than_applied(test_context) -> 
 
         # One deletion away from "favorites" and nothing else. A real near miss, unlike
         # "favorite", which the alias table already reads exactly.
-        await service.handle_message(
-            session, chat, message="favorits", client_message_id="scope-typo-4"
-        )
+        await _say(service, session, chat, "favorits", "scope-typo-4")
 
         after = load_strategy_draft_v2(chat)
         assert after.sharia_policy.universe_mode == before.sharia_policy.universe_mode, (
@@ -207,22 +235,24 @@ async def test_typing_a_scope_answer_and_clicking_it_produce_identical_state(
     async with test_context["session_factory"]() as session:
         typed = await service.create_session(session, typed_user.id)
         await _scanner_awaiting_scope(service, session, typed, "typed")
-        await service.handle_message(
-            session, typed, message="my favorites", client_message_id="typed-4"
-        )
+        await _say(service, session, typed, "my favorites", "typed-4")
         typed_draft = load_strategy_draft_v2(typed)
 
     async with test_context["session_factory"]() as session:
         clicked = await service.create_session(session, clicked_user.id)
         await _scanner_awaiting_scope(service, session, clicked, "clicked")
+        # The generic clarification control, exactly as the browser sends it: canonical
+        # value, localized label for the human, and the identity of the question on
+        # screen. The label is presentation only and is never what answers the question.
         await service.handle_message(
             session,
             clicked,
             message="",
-            option_key="screened_universe_mode",
+            option_key="clarification_answer",
             option_value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
             option_label="My Favorites",
-            client_message_id="clicked-4",
+            client_message_id=_key("clicked-4"),
+            **_identity(clicked),
         )
         clicked_draft = load_strategy_draft_v2(clicked)
 
@@ -260,10 +290,10 @@ async def test_a_click_from_a_stale_screen_is_refused_by_the_service(
             session,
             chat,
             message="",
-            option_key="screened_universe_mode",
+            option_key="clarification_answer",
             option_value=ShariaUniverseMode.APPROVED_WATCHLIST.value,
             option_label="My Favorites",
-            client_message_id="stale-4",
+            client_message_id=_key("stale-4"),
             answered_question_id="a_question_from_an_older_screen",
             answered_step_revision=0,
         )
@@ -276,23 +306,113 @@ async def test_a_click_from_a_stale_screen_is_refused_by_the_service(
         assert "earlier question" in latest.casefold()
 
 
-async def test_an_answer_with_no_question_identity_still_works(test_context) -> None:
-    """Typing carries no identity, so the check must never make typing impossible."""
+async def test_a_typed_answer_from_a_stale_screen_is_refused_too(test_context) -> None:
+    """Typed text is exactly as unsafe as a click when the screen has moved on.
+
+    Both land on whatever field is current *now*, which is a field the trader was never
+    asked about. Exempting typing would leave the whole class open.
+    """
 
     user = await _user(test_context)
     service = _service(test_context, StandInPlanner())
 
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
-        await _scanner_awaiting_scope(service, session, chat, "no-identity")
+        await _scanner_awaiting_scope(service, session, chat, "stale-typed")
+        before = load_strategy_draft_v2(chat)
 
         await service.handle_message(
-            session, chat, message="my favorites", client_message_id="no-identity-4"
+            session,
+            chat,
+            message="my favorites",
+            client_message_id=_key("stale-typed-4"),
+            answered_question_id="a_question_from_an_older_screen",
+            answered_step_revision=0,
         )
+
+        after = load_strategy_draft_v2(chat)
+        assert after.sharia_policy.universe_mode == before.sharia_policy.universe_mode
+        assert after.executable_hash == before.executable_hash
+        assert _conversation(chat).active_question is not None
+
+
+async def test_a_message_with_no_question_identity_is_refused_while_one_is_open(
+    test_context,
+) -> None:
+    """The public contract: identity is required, not optional, once a question is open.
+
+    Left optional, a message written just before the step advanced still lands on the new
+    field, silently. Nothing canonical moves here and no model call is made; the current
+    question and its identity go back so the client can recover.
+    """
+
+    user = await _user(test_context)
+    planner = StandInPlanner()
+    service = _service(test_context, planner)
+
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await _scanner_awaiting_scope(service, session, chat, "no-identity")
+        before = load_strategy_draft_v2(chat)
+        calls_before = planner.plan_calls
+
+        await service.handle_message(
+            session, chat, message="my favorites", client_message_id=_key("no-identity-4")
+        )
+
+        after = load_strategy_draft_v2(chat)
+        assert after.sharia_policy.universe_mode == before.sharia_policy.universe_mode
+        assert after.executable_hash == before.executable_hash
+        assert planner.plan_calls == calls_before, "a refusal costs nothing"
+        assert _conversation(chat).active_question is not None
+
+
+async def test_the_same_answer_with_identity_is_accepted(test_context) -> None:
+    """The refusal above is about the missing identity, not about the answer."""
+
+    user = await _user(test_context)
+    service = _service(test_context, StandInPlanner())
+
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await _scanner_awaiting_scope(service, session, chat, "with-identity")
+
+        await _say(service, session, chat, "my favorites", "with-identity-4")
 
         assert load_strategy_draft_v2(chat).sharia_policy.universe_mode == (
             ShariaUniverseMode.APPROVED_WATCHLIST
         )
+
+
+async def test_a_clicked_option_the_question_cannot_take_is_refused(
+    test_context,
+) -> None:
+    """A canonical value is authoritative only after it is checked against the question."""
+
+    from ai_market_monitor.services.ai_setup_chat import SetupChatError
+
+    user = await _user(test_context)
+    service = _service(test_context, StandInPlanner())
+
+    async with test_context["session_factory"]() as session:
+        chat = await service.create_session(session, user.id)
+        await _scanner_awaiting_scope(service, session, chat, "bad-option")
+        before = load_strategy_draft_v2(chat)
+
+        with pytest.raises(SetupChatError) as refused:
+            await service.handle_message(
+                session,
+                chat,
+                message="",
+                option_key="clarification_answer",
+                option_value="whatever_i_like",
+                option_label="Whatever I like",
+                client_message_id=_key("bad-option-4"),
+                **_identity(chat),
+            )
+
+        assert refused.value.code == "CLARIFICATION_ANSWER_NOT_EXECUTABLE"
+        assert load_strategy_draft_v2(chat).executable_hash == before.executable_hash
 
 
 # ---------------------------------------------------------------------------------
@@ -311,16 +431,12 @@ async def test_replaying_a_clarification_answer_returns_the_same_outcome(
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
         await _scanner_awaiting_scope(service, session, chat, "replay")
-        await service.handle_message(
-            session, chat, message="my favorites", client_message_id="replay-4"
-        )
+        await _say(service, session, chat, "my favorites", "replay-4")
         settled = load_strategy_draft_v2(chat)
         settled_conversation = _conversation(chat)
         messages_before = await _message_count(session, chat)
 
-        await service.handle_message(
-            session, chat, message="my favorites", client_message_id="replay-4"
-        )
+        await _say(service, session, chat, "my favorites", "replay-4")
 
         replayed = load_strategy_draft_v2(chat)
         assert replayed.executable_hash == settled.executable_hash
@@ -343,15 +459,11 @@ async def test_replaying_an_unreadable_answer_repeats_the_same_refusal(
     async with test_context["session_factory"]() as session:
         chat = await service.create_session(session, user.id)
         await _scanner_awaiting_scope(service, session, chat, "replay-miss")
-        await service.handle_message(
-            session, chat, message="purple bananas", client_message_id="replay-miss-4"
-        )
+        await _say(service, session, chat, "purple bananas", "replay-miss-4")
         first = await _latest_assistant(session, chat)
         count = await _message_count(session, chat)
 
-        await service.handle_message(
-            session, chat, message="purple bananas", client_message_id="replay-miss-4"
-        )
+        await _say(service, session, chat, "purple bananas", "replay-miss-4")
 
         assert await _latest_assistant(session, chat) == first
         assert await _message_count(session, chat) == count
@@ -377,7 +489,7 @@ async def test_the_question_the_trader_reads_is_the_stored_contract(
             start=1,
         ):
             await service.handle_message(
-                session, chat, message=message, client_message_id=f"render-{index}"
+                session, chat, message=message, client_message_id=_key(f"render-{index}")
             )
             contract = _conversation(chat).active_question
             if contract is None:

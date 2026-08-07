@@ -32,6 +32,7 @@ from ai_market_monitor.engine.active_clarification import (
     resolve_active_clarification_turn,
     workflow_invariants,
 )
+from ai_market_monitor.engine.clarification_continuation import continuation_for_unresolved
 from ai_market_monitor.engine.conversation_language import ConversationLanguage
 from ai_market_monitor.schemas.setup_agent import SetupConversationContext
 from ai_market_monitor.schemas.setup_authorization import (
@@ -414,38 +415,99 @@ async def test_a_planner_generated_question_owns_its_answer_too() -> None:
     assert session.planner.calls == 0, "a deterministic reading needs no model call"
 
 
-async def test_a_planner_generated_question_hands_a_decided_answer_to_the_planner() -> None:
-    """The planner is *told* the answer. It never decides whether one was given."""
+async def test_a_planner_authored_question_applies_its_own_answer_deterministically() -> None:
+    """The reversal of the old rule. The planner is not told the answer — it is not asked.
+
+    This test used to assert the opposite: that a question the planner raised handed its
+    decided answer *back* to the planner to build the operation. That was the defect. The
+    same message went to a model twice, and the second model had never seen the question,
+    so a bare ``1h`` read as a timeframe with nothing attached and the answer was lost.
+
+    The question now carries its own completion, built and checked before it was shown,
+    so answering it costs nothing and cannot be re-read as anything else.
+    """
 
     unresolved = UnresolvedFieldV2(
-        unresolved_id="draft_period",
+        unresolved_id="draft_name",
         source_turn_id="turn-0",
-        source_fragment="watch BTC",
+        source_fragment="call it my breakout watch",
         target_type="draft_field",
-        target_field="trigger_timeframe",
+        target_field="name",
         expected_answer_schema={"type": "string"},
-        question="Which candle period should I use?",
-        reason="the setup cannot compile without a period",
+        question="What should I call this setup?",
+        reason="the setup needs a name",
     )
+    draft = StrategyDraftV2(unresolved_fields=[unresolved])
+    continuation = continuation_for_unresolved(
+        unresolved,
+        draft,
+        question_id="draft_name",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    assert continuation is not None, "a mutating question must carry its completion"
     contract = ClarificationContract(
-        question_id="draft_period",
+        question_id="draft_name",
         question=unresolved.question,
         reason=unresolved.reason,
         target_type="draft_field",
-        target_field="trigger_timeframe",
+        target_field="name",
         expected_answer_schema='{"type":"string"}',
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        continuation=continuation,
     )
     session = _Session(
-        draft=StrategyDraftV2(unresolved_fields=[unresolved]),
+        draft=draft,
         conversation=SetupConversationContext().with_question(contract),
     )
-    await session.say("1h")
-    decided = session.planner.payloads[0]["conversation_context"]["server_decided_answer"]
-    assert decided == {
-        "question_id": "draft_period",
-        "target_field": "trigger_timeframe",
-        "canonical_value": "1h",
-    }
+
+    result = await session.say("My breakout watch")
+
+    assert session.planner.calls == 0, "answering our own question needs no model"
+    assert result.execution is not None, "the answer really became canonical state"
+    assert result.draft.name == "My breakout watch"
+    assert session.unresolved_ids == set(), "the blocker it answered is closed"
+
+
+async def test_an_answer_never_reaches_the_planner_as_a_decided_value() -> None:
+    """There is no "decided answer" channel any more, because nothing needs one."""
+
+    unresolved = UnresolvedFieldV2(
+        unresolved_id="draft_name_2",
+        source_turn_id="turn-0",
+        source_fragment="call it my breakout watch",
+        target_type="draft_field",
+        target_field="name",
+        expected_answer_schema={"type": "string"},
+        question="What should I call this setup?",
+        reason="the setup needs a name",
+    )
+    draft = StrategyDraftV2(unresolved_fields=[unresolved])
+    continuation = continuation_for_unresolved(
+        unresolved,
+        draft,
+        question_id="draft_name_2",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    contract = ClarificationContract(
+        question_id="draft_name_2",
+        question=unresolved.question,
+        reason=unresolved.reason,
+        target_type="draft_field",
+        target_field="name",
+        expected_answer_schema='{"type":"string"}',
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        continuation=continuation,
+    )
+    session = _Session(
+        draft=draft,
+        conversation=SetupConversationContext().with_question(contract),
+    )
+
+    await session.say("My breakout watch")
+
+    assert session.planner.payloads == [], "no planner call was made at all"
 
 
 # ---------------------------------------------------------------------------------
@@ -852,9 +914,114 @@ async def test_choosing_a_mode_says_what_that_mode_does(mode: str, expected: str
     assert session.planner.calls == 0
 
 
-async def test_choosing_a_mode_still_wins_over_an_open_question() -> None:
+async def test_choosing_a_mode_over_an_open_requirement_asks_before_switching() -> None:
+    """The reversal of the old rule. A mode button used to bypass ownership entirely.
+
+    It returned straight to the mode route, so the half-built rule's blocker stayed in
+    the draft with nothing on screen mentioning it — a setup blocked for a reason the
+    trader could not see or clear. The switch is now settled explicitly: nothing is
+    applied, the requirement is still there, and the question is still on screen.
+    """
+
     session = _Session()
     await session.say(ALERT_REQUEST)
     assert session.conversation.active_question is not None
+    blocked = set(session.unresolved_ids)
+    assert blocked, "the half-built rule is canonical while it is open"
+    calls_before = session.planner.calls
+
+    result = await session.say("Scanner")
+
+    assert session.conversation.active_question is not None, "the question survives"
+    assert session.unresolved_ids == blocked, "and so does its blocker"
+    assert session.conversation.held_request == "Scanner", "the new request is kept"
+    assert session.planner.calls == calls_before, "settling costs nothing"
+    assert result.execution is None, "nothing canonical moved"
+
+
+async def test_settling_the_old_requirement_then_runs_the_request_that_was_waiting() -> None:
+    """Order is the whole point: the blocker goes first, then the new request runs."""
+
+    session = _Session()
+    await session.say(ALERT_REQUEST)
+    assert session.unresolved_ids
+
+    await session.say("Scanner")
+    assert session.conversation.held_request == "Scanner"
+
+    await session.say("cancel")
+
+    assert session.unresolved_ids == set(), "the abandoned requirement really went"
+    assert session.conversation.held_request is None, "the held request was used, not lost"
+    assert session.condition_count == 0, "cancelling never builds a half-made rule"
+
+
+async def test_a_mode_button_with_nothing_open_still_switches_immediately() -> None:
+    """Nothing is stranded, so nothing needs settling."""
+
+    session = _Session()
     result = await session.say("Scanner")
     assert "scanner" in result.message.casefold()
+    assert session.conversation.held_request is None
+
+
+async def test_a_confirmed_typo_applies_on_the_deterministic_route() -> None:
+    """``qh`` -> *did you mean 1h?* -> ``yes`` on a question the workflow does not own.
+
+    This is the case the grounding gate correctly used to refuse: the turn's words are
+    only "yes", and nothing in "yes" says a candle period. The confirmation itself is
+    the evidence, for exactly the field that was shown and exactly the value that was
+    put to the trader — the gate is extended, never relaxed.
+    """
+
+    unresolved = UnresolvedFieldV2(
+        unresolved_id="draft_exchange",
+        source_turn_id="turn-0",
+        source_fragment="watch it on binance",
+        target_type="draft_field",
+        target_field="exchange",
+        expected_answer_schema={"type": "string"},
+        question="Which exchange should I watch?",
+        reason="the setup needs an exchange",
+        allowed_options=["binance", "bybit"],
+    )
+    draft = StrategyDraftV2(unresolved_fields=[unresolved])
+    continuation = continuation_for_unresolved(
+        unresolved,
+        draft,
+        question_id="draft_exchange",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        allowed_values=["binance", "bybit"],
+    )
+    assert continuation is not None
+    contract = ClarificationContract(
+        question_id="draft_exchange",
+        question=unresolved.question,
+        reason=unresolved.reason,
+        target_type="draft_field",
+        target_field="exchange",
+        expected_answer_schema='{"type":"string"}',
+        allowed_options=["binance", "bybit"],
+        canonical_values=["binance", "bybit"],
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        continuation=continuation,
+    )
+    session = _Session(
+        draft=draft,
+        conversation=SetupConversationContext().with_question(contract),
+    )
+
+    proposed = await session.say("bybt")
+    assert session.conversation.active_question is not None, "a near miss is asked about"
+    assert "bybit" in proposed.message
+    assert session.conversation.proposed_value == "bybit", (
+        "a one-question ask must have somewhere to keep its near miss"
+    )
+
+    confirmed = await session.say("yes")
+
+    assert session.planner.calls == 0, "the whole lifecycle spends nothing"
+    assert confirmed.execution is not None, "the confirmed value really landed"
+    assert confirmed.draft.market_scope.exchange == "bybit"
+    assert session.unresolved_ids == set(), "and the blocker it answered is closed"

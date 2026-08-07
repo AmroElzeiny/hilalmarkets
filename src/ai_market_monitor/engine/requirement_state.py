@@ -884,6 +884,22 @@ def blocking_requirement_states(draft: StrategyDraftV2) -> list[RequirementState
     return [item for item in active_requirement_states(draft) if item.blocking]
 
 
+#: Draft fields that live inside ``market_scope`` rather than at the top level. Named
+#: once, here, because the path a requirement is checked at and the place the value is
+#: really read from have to agree — they did not, and a `draft_field` blocker for the
+#: exchange could therefore never be satisfied: the trader answered, the value really
+#: landed, and the same question came back anyway.
+_MARKET_SCOPE_FIELDS: frozenset[str] = frozenset({"exchange", "quote_asset", "market_type"})
+
+
+def _draft_field_holder(draft: StrategyDraftV2, field: str) -> tuple[Any, Any]:
+    """Where one of the draft's own fields really lives, and the model that declares it."""
+
+    if field in _MARKET_SCOPE_FIELDS:
+        return draft.market_scope, MarketScopeV2
+    return draft, StrategyDraftV2
+
+
 def unresolved_target_path(item: UnresolvedFieldV2) -> str:
     if item.target_type in {"condition_field", "capability_parameter", "reference_definition"}:
         field = item.target_field or "reference_definition"
@@ -891,7 +907,15 @@ def unresolved_target_path(item: UnresolvedFieldV2) -> str:
     if item.target_type == "market_scope":
         return f"market_scope.{item.target_field or 'scope'}"
     if item.target_type == "draft_field":
-        return item.target_field or f"draft.{item.unresolved_id}"
+        field = item.target_field or ""
+        # Three of the draft's own fields do not live at the top level: the exchange, the
+        # quote asset and the market type are all inside ``market_scope``. Naming them
+        # bare meant the reconciler looked for a value at a path that holds nothing, so
+        # the requirement could never be seen as satisfied — the trader answered, the
+        # value really landed, and the same question came back anyway.
+        if field in _MARKET_SCOPE_FIELDS:
+            return f"market_scope.{field}"
+        return field or f"draft.{item.unresolved_id}"
     if item.target_type == "sharia_policy":
         return f"sharia_policy.{item.target_field or 'policy'}"
     if item.target_type == "universe":
@@ -1091,6 +1115,12 @@ def _operation_assignments(
                     field=path.rsplit(".", 1)[-1],
                     node=final_conditions.get(condition_id or ""),
                 )
+                # A path the server itself declared confirmed this turn. Reconciliation
+                # re-checks grounding for itself, and a confirmation turn's words are
+                # only "yes" — nothing in "yes" names a value. Only a server-owned
+                # control or a confirmed clarification answer can name a path here; a
+                # plan can neither set this argument nor put a path into it.
+                or path in confirmed_paths
             )
             assignments.append(
                 _Assignment(
@@ -1456,8 +1486,9 @@ def _target_value(
             value = getattr(node, field or "reference_definition", None)
         return _determined(value, model=ConditionNodeV2, field=field), value
     if target_type == "draft_field":
-        value = getattr(draft, field, None)
-        return _determined(value, model=StrategyDraftV2, field=field), value
+        holder, model = _draft_field_holder(draft, field)
+        value = getattr(holder, field, None)
+        return _determined(value, model=model, field=field), value
     if target_type == "sharia_policy":
         value = getattr(draft.sharia_policy, field, None)
         return _determined(value, model=type(draft.sharia_policy), field=field), value

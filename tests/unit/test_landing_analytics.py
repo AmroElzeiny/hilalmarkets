@@ -29,6 +29,11 @@ def test_landing_uses_one_provider_agnostic_consent_aware_analytics_module():
         "trackSectionView",
         "trackFaqOpen",
         "trackCtaClick",
+        "trackWaitlistFormView",
+        "trackWaitlistFormStart",
+        "trackWaitlistSubmitAttempt",
+        "trackWaitlistSuccess",
+        "trackWaitlistError",
         "trackPricingSectionView",
         "trackBillingIntervalChanged",
         "trackPlanSelected",
@@ -156,6 +161,7 @@ def test_non_dashboard_image_elements_have_descriptive_alt_text():
 def test_section_visibility_supports_long_entry_and_configurable_percentage_modes():
     tracking = TRACKING.read_text(encoding="utf-8")
     pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
+    app = APP.read_text(encoding="utf-8")
     assert "IntersectionObserver" in tracking
     assert "visibilityMode?: VisibilityMode" in tracking
     assert "visibilityMode: options.visibilityMode ?? 'entry'" in tracking
@@ -167,6 +173,11 @@ def test_section_visibility_supports_long_entry_and_configurable_percentage_mode
     assert "window.clearTimeout(timer)" in tracking
     assert "visibilityMode: 'entry'" in pricing
     assert "dwellMs: 1000" in pricing
+    # The waitlist form is the section the landing page is currently built around, and
+    # it counts as seen only after half of it has been on screen for a second.
+    assert "visibilityMode: 'percentage'" in app
+    assert "threshold: 0.5" in app
+    assert "dwellMs: 1000" in app
 
 
 def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads():
@@ -184,7 +195,7 @@ def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads
         "feature_monitor",
         "feature_connect",
         "trust_control",
-        "pricing",
+        "waitlist",
         "faq",
     }
     for section in expected_sections - {
@@ -229,14 +240,22 @@ def test_landing_tracks_each_feature_row_and_stable_faq_id_without_text_payloads
     assert "trackFaqOpen," in analytics
 
 
-def test_pricing_replaces_waitlist_and_tracks_only_validated_commerce_metadata():
+def test_waitlist_replaces_pricing_and_tracks_only_validated_commerce_metadata():
+    """The landing page is pre-launch: the waitlist form stands where the plans stood.
+
+    `Pricing.tsx` is kept, and still has to satisfy every rule it satisfied before, so
+    putting the section back is one import rather than a rebuild from memory. What it
+    must not do is appear on the page while nobody can buy anything.
+    """
+
     app = APP.read_text(encoding="utf-8")
     analytics = ANALYTICS.read_text(encoding="utf-8")
     pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
-    assert "<Pricing />" in app
-    assert "Waitlist" not in app
-    assert 'id="waitlist"' not in app
-    assert "trackWaitlist" not in analytics
+    assert "<Waitlist />" in app
+    assert 'id="waitlist"' in app
+    assert "<Pricing />" not in app
+    assert "components/Pricing" not in app
+    assert "trackWaitlist" in analytics
     assert "trackPricingSectionView" in pricing
     assert "trackBillingIntervalChanged" in pricing
     assert "trackPlanSelected" in pricing
@@ -246,16 +265,92 @@ def test_pricing_replaces_waitlist_and_tracks_only_validated_commerce_metadata()
     assert "email_address" not in pricing
 
 
+def test_the_landing_page_offers_the_waitlist_and_never_an_account():
+    """Nothing rendered by the site may lead to sign-in, sign-up or the dashboard.
+
+    Checked across every rendered source file rather than the few obvious ones. The
+    header was not the only place with a way into the product: the hero illustration
+    carried its own "Build plan" button straight to checkout, and a test that only
+    looked at `App.tsx` and `SiteChrome.tsx` would have passed with it still there.
+    """
+
+    app = APP.read_text(encoding="utf-8")
+    chrome = (FRONTEND / "components" / "SiteChrome.tsx").read_text(encoding="utf-8")
+    rendered = [
+        path
+        for path in (*FRONTEND.rglob("*.tsx"), *FRONTEND.rglob("*.ts"))
+        # Kept on purpose and not imported by anything; it is the section that returns
+        # when the product opens, so it still holds the real plan links.
+        if path.name != "Pricing.tsx"
+    ]
+    assert len(rendered) > 10
+    for path in rendered:
+        source = path.read_text(encoding="utf-8")
+        for forbidden in (
+            "/signin",
+            "/signup",
+            "/dashboard",
+            "/subscribe?",
+            "Sign in",
+            "Get started",
+            "Start free",
+            "Create a free account",
+        ):
+            assert forbidden not in source, (path.name, forbidden)
+
+    # Every call to action points at the one form, and it is named the same way in
+    # every place a visitor can meet it: the hero button, the desktop header and the
+    # phone menu.
+    assert app.count('href="#waitlist"') == 1
+    assert "waitlistHref" in chrome
+    assert chrome.count("href={waitlistHref}") == 2
+    assert chrome.count(">\n            Join the waitlist\n          </TrackedCta>") == 2
+    assert "{ label: 'Pricing', target: '#pricing' }" not in chrome
+
+
+def test_the_waitlist_form_asks_for_beta_contact_consent_and_offers_it_ticked():
+    app = APP.read_text(encoding="utf-8")
+    public_forms = (FRONTEND / "publicForms.ts").read_text(encoding="utf-8")
+
+    assert "useState(true)" in app
+    assert 'type="checkbox"' in app
+    assert 'id="waitlist-beta-consent"' in app
+    assert "checked={betaConsent}" in app
+    assert "I agree to be contacted about taking part in private beta testing." in app
+    # The label is joined to the box, so tapping the words works on a phone.
+    assert 'htmlFor="waitlist-beta-consent"' in app
+    # Whatever state the box is in is what is sent. The value is never assumed.
+    assert "betaContactConsent: betaConsent" in app
+    assert "beta_contact_consent: values.betaContactConsent" in public_forms
+    # A changed answer is a different submission, so it gets its own request identifier.
+    assert app.count("resetIdempotency()") >= 4
+
+    # The panel is apple green, where the site's green focus ring would vanish.
+    styles = STYLES.read_text(encoding="utf-8")
+    assert "#waitlist input:focus-visible" in styles
+    assert "#waitlist button:focus-visible" in styles
+    assert "outline: 3px solid var(--color-ink)" in styles
+    assert "min-height: 44px" in styles
+    assert "@media (prefers-reduced-motion: reduce)" in styles
+
+
 def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
+    """`Pricing.tsx` is not on the page today, but it still has to be correct.
+
+    It is kept so the section can return with one import when the product opens. Every
+    rule it had to satisfy while it was live is asserted here, so it cannot rot into a
+    version that quotes a price the server no longer charges.
+    """
+
     app = APP.read_text(encoding="utf-8")
     pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
     chrome = (FRONTEND / "components" / "SiteChrome.tsx").read_text(encoding="utf-8")
     styles = STYLES.read_text(encoding="utf-8")
 
-    assert app.index('analyticsName="pricing"') < app.index('analyticsName="faq"')
-    assert "{ label: 'Pricing', target: '#pricing' }" in chrome
+    # The one thing a visitor can act on comes before the questions, wherever that
+    # section happens to be.
+    assert app.index('analyticsName="waitlist"') < app.index('analyticsName="faq"')
     assert 'aria-label="Mobile navigation"' in chrome
-    assert 'href="/signin"' in chrome
     for content in (
         "Choose how deeply you want to monitor the market.",
         "Basic",

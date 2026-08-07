@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import hashlib
@@ -6,7 +6,6 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from time import monotonic
 from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID, uuid4
@@ -30,6 +29,7 @@ from ai_market_monitor.db.models import (
     ApprovedWatchlist,
     SetupChatDraftSnapshot,
     SetupChatOperationalIssue,
+    SetupChatPendingChange,
     SetupChatTurn,
     ShariaMethodology,
     ShariaMethodologyFamily,
@@ -48,9 +48,20 @@ from ai_market_monitor.engine.active_question import (
     labels_for,
     resolve_active_answer,
 )
+from ai_market_monitor.engine.builder_contract import find_mechanic
+from ai_market_monitor.engine.builder_operations import (
+    BuilderActionError,
+    add_condition_plan,
+    arrange_plan,
+    remove_condition_plan,
+    update_condition_plan,
+)
+from ai_market_monitor.engine.builder_starters import find_starter
 from ai_market_monitor.engine.capability_shortlist import (
     configured_runtime_provider_requirements,
 )
+from ai_market_monitor.engine.change_review import build_draft_diff, build_pending_change
+from ai_market_monitor.engine.clarification_continuation import governed_option_selection
 from ai_market_monitor.engine.conversation_intent import selected_mode_word
 from ai_market_monitor.engine.conversation_language import (
     governed_scan_error,
@@ -60,6 +71,16 @@ from ai_market_monitor.engine.conversation_language import (
     scan_error_is_resolvable,
     scanner_labels,
     scope_labels,
+)
+from ai_market_monitor.engine.destructive_change import (
+    classify_destructive_change,
+    may_be_destructive,
+)
+from ai_market_monitor.engine.draft_diff import diff_drafts
+from ai_market_monitor.engine.plan_freshness import (
+    FreshnessVerdict,
+    PlanningAuthority,
+    plan_freshness,
 )
 from ai_market_monitor.engine.planner_references import (
     MethodologyReference,
@@ -72,6 +93,13 @@ from ai_market_monitor.engine.setup_turn_execution import (
     ScreeningGate,
     SetupTurnRequest,
     apply_setup_turn,
+)
+from ai_market_monitor.engine.setup_turn_lifecycle import (
+    RecoveryAction,
+    TurnStatus,
+    holds_session,
+    lease_seconds,
+    recovery_policy,
 )
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
@@ -88,6 +116,7 @@ from ai_market_monitor.engine.validated_intent_snapshot import (
     snapshot_history,
 )
 from ai_market_monitor.schemas.preflight_cache import PreflightCacheEntry
+from ai_market_monitor.schemas.request_identity import request_fingerprint
 from ai_market_monitor.schemas.screening_execution import (
     PreflightContract,
     PreflightManifest,
@@ -106,6 +135,11 @@ from ai_market_monitor.schemas.setup_agent import (
 from ai_market_monitor.schemas.setup_authorization import (
     AuthorizedPatchOperation,
     ClarificationContract,
+)
+from ai_market_monitor.schemas.setup_change_review import (
+    PENDING_CHANGE_TTL_MINUTES,
+    PendingDestructiveChange,
+    SetupDraftDiff,
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.schemas.strategy_draft_v2 import (
@@ -129,6 +163,7 @@ from ai_market_monitor.services.setup_chat_agent import (
     SetupAgentTurnInput,
     SetupChatAgent,
     deterministic_summary,
+    scan_window_contract,
 )
 from ai_market_monitor.services.sharia_screening import ShariaScreeningService
 from ai_market_monitor.services.sharia_universe import (
@@ -177,6 +212,45 @@ _PREFLIGHT_CONTRACT_VERSION = 2
 #: Re-selecting the value that is already stored is a choice too — "all eligible spot
 #: assets" is also the platform default, and inferring from change alone left it
 #: permanently unanswerable.
+#: The one control every clarification option uses, whatever step it belongs to.
+#:
+#: Before this existed, only six governed controls had allowlisted keys. Every other
+#: option button — a candle period, a reference point, a capability parameter — had no
+#: key, so the client posted its visible *label* as an ordinary chat message and hoped
+#: the label still parsed back to the value. A translated or reworded label silently
+#: stopped answering its own question. One generic control removes that whole class:
+#: the canonical value travels, the label is presentation, and the server validates the
+#: value against the question that is actually open.
+CLARIFICATION_ANSWER_OPTION: Final[str] = "clarification_answer"
+
+#: Who authorises an Undo, a Restore, a Reset or a confirmed change. There is no user
+#: sentence behind these — the user pressed a control the server drew — so the segment
+#: names the server rather than quoting words nobody typed.
+_DRAFT_ACTION_SEGMENT_ID: Final[str] = "server_draft_action"
+
+#: Where the last turn's canonical before/after difference is kept for the client. One
+#: key, written only from a real diff of two stored drafts.
+LAST_DIFF_KEY: Final[str] = "last_draft_diff"
+
+
+def _capability_keys_of(mechanic_key: str | None) -> frozenset[str]:
+    """The registry key behind one guided control, if it has one.
+
+    This is the shortlist for a Builder turn. It is not a waiver: the key came out of
+    the platform's own catalogue when the control was drawn, so naming it here is
+    evidence that the platform really offered it.
+    """
+
+    mechanic = find_mechanic(mechanic_key or "")
+    if mechanic is None or not mechanic.capability_key:
+        return frozenset()
+    return frozenset({mechanic.capability_key})
+
+#: The database constraint that stops two mutating turns owning one chat session. Named
+#: here so a lost race can be recognised and answered as "wait", rather than escaping as
+#: a server error the user can do nothing about.
+_CLAIM_CONSTRAINT: Final[str] = "uq_setup_chat_turn_active_claim"
+
 SERVER_OPTION_CONFIRMED_PATHS: Final[dict[str, frozenset[str]]] = {
     "screened_universe_mode": frozenset({"sharia_policy.universe_mode"}),
     "screened_watchlist": frozenset(
@@ -214,6 +288,23 @@ class SetupLaunchError(ValueError):
         self.stage = stage
         self.retryable = retryable
         self.status_code = status_code
+        #: Set only by ``TURN_IN_PROGRESS``, so the client can show which message is
+        #: still running instead of guessing that its own send was lost.
+        self.active_client_message_id: str | None = None
+        self.active_stage: str | None = None
+
+
+class _PendingChangeRequired(Exception):
+    """Control flow: this turn produced a change too big to apply without asking.
+
+    Raised from the execution checkpoint, which is the last moment before anything is
+    written. It carries the stored proposal so the caller answers with the confirmation
+    card rather than re-deciding anything.
+    """
+
+    def __init__(self, proposal: SetupChatPendingChange) -> None:
+        super().__init__("pending destructive change")
+        self.proposal = proposal
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,14 +347,25 @@ class SetupChatLaunchService:
         option_key: str | None,
         option_value: str | None,
         option_label: str | None,
-        client_message_id: str | None,
+        client_message_id: str,
         answered_question_id: str | None = None,
         answered_step_revision: int | None = None,
     ) -> AISetupChatSession:
         started = monotonic()
         turn_record: SetupChatTurn | None = None
+        # What this request actually asks for. Computed once, before anything routes on
+        # it, so the replay check and the conflict check read the same identity.
+        fingerprint = request_fingerprint(
+            message=message,
+            option_key=option_key,
+            option_value=option_value,
+            question_id=answered_question_id,
+            step_revision=answered_step_revision,
+        )
         if client_message_id:
-            replay = await self._replayed_turn(session, chat, client_message_id)
+            replay = await self._replayed_turn(
+                session, chat, client_message_id, fingerprint=fingerprint
+            )
             if replay is not None:
                 # The completed turn already owns exact measured telemetry.  A replay
                 # must not replace it with an empty zero-call record and make the paid
@@ -307,18 +409,55 @@ class SetupChatLaunchService:
         # sentence, and made the stored provenance disagree with what the user wrote.
         raw = message or option_label or option_value or ""
         cleaned = " ".join(raw.split())
-        # A client that says which question it was answering is held to it. The check
-        # runs here, before any routing decision, because a stale answer must not reach
-        # the governed option route *or* the agent — either one would apply yesterday's
-        # choice to today's field. A client that sends no identity is unaffected, so
-        # typing an answer stays possible exactly as before.
-        stale = _answer_is_stale(
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        active = conversation.active_question
+        # While a question is open, every message must say which question it was written
+        # under — typed text included. The check runs here, before any routing decision,
+        # because a stale or unidentified message must not reach the governed option
+        # route *or* the agent: either one would apply yesterday's choice to today's
+        # field, and the trader would never see it happen.
+        if active is not None and answered_question_id is None:
+            if not self.settings.setup_chat_allow_missing_answer_identity:
+                return await self._refuse_unidentified_answer(session, chat, conversation)
+            context = dict(chat.context_json or {})
+            context["legacy_answers_without_identity"] = (
+                int(context.get("legacy_answers_without_identity") or 0) + 1
+            )
+            chat.context_json = context
+        if _answer_is_stale(
             chat,
             question_id=answered_question_id,
             step_revision=answered_step_revision,
-        )
-        if stale:
+        ):
             return await self._refuse_stale_answer(session, chat, client_message_id)
+        # One generic control for every clarification option there is. Every step used to
+        # need its own allowlisted key, so a timeframe or reference-point button had no
+        # key at all and posted its visible *label* as ordinary chat text — which meant a
+        # renamed or translated label silently stopped answering its own question. The
+        # canonical value is carried here and validated against the question that is
+        # A change the user has not answered yet blocks every other mutating message.
+        # Letting a new instruction through would build on a draft the user believes is
+        # about to be replaced, and the proposal would then be stale through no fault of
+        # theirs. Nothing canonical moves here and no model is called.
+        pending = await self._pending_change(session, chat)
+        if pending is not None:
+            return await self._refuse_while_pending(session, chat, pending)
+        # actually open before anything else looks at it.
+        if option_key == CLARIFICATION_ANSWER_OPTION:
+            resolved = self._clarification_option(conversation, option_value or cleaned)
+            if resolved is None:
+                raise SetupLaunchError(
+                    "CLARIFICATION_ANSWER_NOT_EXECUTABLE",
+                    "That choice is not one this question can take. Please choose again.",
+                    stage="intent",
+                    status_code=422,
+                )
+            option_key, option_value, typed = resolved
+            if option_key is None:
+                # Not a governed control, so it takes the ordinary answer path with the
+                # canonical value standing in for what the trader would have typed. Typed
+                # and clicked therefore produce the same reading and the same operation.
+                message, raw, cleaned, option_value = typed, typed, typed, None
         # Typing "Scanner" is the same choice as pressing the Scanner button, so it takes
         # the same governed route. It used to be answered conversationally instead, which
         # left `draft.mode` on Monitor — and the governed scan reads `draft.mode`, so the
@@ -340,6 +479,7 @@ class SetupChatLaunchService:
                     session,
                     chat,
                     client_message_id,
+                    fingerprint=fingerprint,
                 )
             selected_chat = await self._run_server_option_turn(
                 session,
@@ -360,6 +500,7 @@ class SetupChatLaunchService:
                     session,
                     chat,
                     client_message_id,
+                    fingerprint=fingerprint,
                 )
             user_message = (
                 await session.get(AISetupChatMessage, turn_record.source_message_id)
@@ -400,6 +541,962 @@ class SetupChatLaunchService:
         finally:
             await self._release_user_cost_reservation(reservation)
 
+    async def _pending_change(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+    ) -> SetupChatPendingChange | None:
+        """The proposal this session is waiting on, if it is still valid.
+
+        An expired proposal is marked stale here rather than being quietly ignored. The
+        user needs to be told their old change was not applied; silence would leave them
+        believing it was.
+        """
+
+        row = await session.scalar(
+            select(SetupChatPendingChange)
+            .where(
+                SetupChatPendingChange.chat_session_id == chat.id,
+                SetupChatPendingChange.status == "pending",
+            )
+            .order_by(SetupChatPendingChange.created_at.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        expires = row.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if datetime.now(UTC) >= expires:
+            row.status = "stale"
+            row.resolved_at = datetime.now(UTC)
+            await session.flush()
+            return None
+        return row
+
+    def _pending_is_stale(
+        self,
+        row: SetupChatPendingChange,
+        draft: StrategyDraftV2,
+    ) -> bool:
+        """True when the draft moved after this proposal was offered.
+
+        Both hashes are checked. An answered clarification moves only the workflow
+        hash, and applying a stored operation set across that is exactly the "edit a
+        condition that was deleted" case the proposal exists to prevent.
+        """
+
+        return (
+            row.executable_hash != draft.executable_hash
+            or row.workflow_state_hash != draft.workflow_state_hash
+        )
+
+    async def _refuse_while_pending(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        row: SetupChatPendingChange,
+    ) -> AISetupChatSession:
+        """Say plainly that a change is waiting, and do nothing else.
+
+        No draft change, no workflow advance, no model call. The proposal travels back
+        with the refusal so the client can render the same confirmation card again.
+        """
+
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        language = language_of(conversation.active_language)
+        lines = [str(item) for item in (row.summary_json or [])]
+        content = localized("change.pending_blocks_turn", language)
+        rendered = content if not lines else content + "\n\n" + "\n".join(f"- {i}" for i in lines)
+        await self.owner._assistant(
+            session,
+            chat,
+            rendered,
+            message_type="pending_change",
+            payload={
+                "error_code": "PENDING_CHANGE_AWAITING_CONFIRMATION",
+                "proposal_id": row.proposal_id,
+                "model_call_count": 0,
+            },
+        )
+        await session.flush()
+        await session.commit()
+        return chat
+
+    async def handle_draft_action(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        action: str,
+        client_message_id: str,
+        snapshot_id: str | None = None,
+        expected_executable_version: int | None = None,
+        proposal_id: str | None = None,
+        confirmed: bool = False,
+    ) -> AISetupChatSession:
+        """Undo, Restore, Reset, or answer a pending change — all without a model.
+
+        None of these ask the model to rebuild an old state. Undo and Restore replay an
+        immutable snapshot the user already owns. Reset writes a known empty draft.
+        Confirm replays operations that were authorized when the change was proposed.
+        A model that reconstructed any of them would be inventing the past.
+
+        Every one of them is keyed, so a double-clicked button acts once.
+        """
+
+        started = monotonic()
+        fingerprint = request_fingerprint(
+            message="",
+            option_key=f"draft_action:{action}",
+            option_value=snapshot_id or proposal_id or str(expected_executable_version or ""),
+        )
+        replay = await self._replayed_turn(
+            session, chat, client_message_id, fingerprint=fingerprint
+        )
+        if replay is not None:
+            return replay
+        turn_record = await self._get_or_create_turn(
+            session, chat, client_message_id, fingerprint=fingerprint
+        )
+        self._touch_stage(turn_record, TurnStatus.EXECUTING.value)
+        turn_record.planner_model = "server_owned_draft_action"
+        await session.flush()
+        await session.commit()
+
+        try:
+            if action == "cancel_pending_change":
+                return await self._cancel_pending_change(
+                    session, chat, proposal_id or "", turn_record, started=started
+                )
+            if action == "confirm_pending_change":
+                return await self._confirm_pending_change(
+                    session, chat, proposal_id or "", turn_record, started=started
+                )
+            if action == "reset_current_draft":
+                return await self._reset_draft(
+                    session, chat, turn_record, confirmed=confirmed, started=started
+                )
+            return await self._restore_version(
+                session,
+                chat,
+                turn_record,
+                action=action,
+                snapshot_id=snapshot_id,
+                expected_executable_version=expected_executable_version,
+                started=started,
+            )
+        except SetupLaunchError:
+            # The claim must come back even when the action is refused, or the user is
+            # locked out of their own chat by a message that never ran.
+            self._release_claim(turn_record)
+            turn_record.status = TurnStatus.RETRYABLE_FAILURE.value
+            await session.flush()
+            await session.commit()
+            raise
+
+    async def handle_builder_action(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        action: str,
+        client_message_id: str,
+        value: str | None = None,
+        mechanic_key: str | None = None,
+        values: dict[str, Any] | None = None,
+        node_id: str | None = None,
+        required: bool = True,
+        order: list[str] | None = None,
+        join: str | None = None,
+    ) -> AISetupChatSession:
+        """One guided change, applied through the same authority a chat turn uses.
+
+        Nothing here is a second way to write a draft. The operations are built by
+        ``engine/builder_operations.py`` from fields the server drew, then handed to
+        ``_apply_server_owned_operations`` — the identical path Undo, Restore and every
+        option button already take. Screening, providers, Boolean topology, approval
+        binding and version history all run exactly as they do for the assistant.
+
+        Zero model calls. That is the point: a person must be able to finish a setup
+        with the assistant switched off entirely.
+        """
+
+        if not self.settings.setup_builder_enabled:
+            raise SetupLaunchError(
+                "BUILDER_DISABLED",
+                "The guided builder is switched off at the moment.",
+                stage="intent",
+                status_code=503,
+            )
+        started = monotonic()
+        fingerprint = request_fingerprint(
+            message="",
+            option_key=f"builder_action:{action}",
+            option_value=json.dumps(
+                {
+                    "value": value,
+                    "mechanic_key": mechanic_key,
+                    "values": values or {},
+                    "node_id": node_id,
+                    "required": required,
+                    "order": order or [],
+                    "join": join,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+        )
+        replay = await self._replayed_turn(
+            session, chat, client_message_id, fingerprint=fingerprint
+        )
+        if replay is not None:
+            return replay
+        turn_record = await self._get_or_create_turn(
+            session, chat, client_message_id, fingerprint=fingerprint
+        )
+        self._touch_stage(turn_record, TurnStatus.EXECUTING.value)
+        turn_record.planner_model = "server_owned_builder"
+        await session.flush()
+        await session.commit()
+
+        try:
+            draft = load_strategy_draft_v2(chat)
+            source_turn_id = str(turn_record.id)
+            operations, rendered, capability_keys = await self._builder_operations(
+                session,
+                chat,
+                draft=draft,
+                action=action,
+                value=value,
+                mechanic_key=mechanic_key,
+                values=values or {},
+                node_id=node_id,
+                required=required,
+                order=order or [],
+                join=join,
+                source_turn_id=source_turn_id,
+            )
+            if not operations:
+                return await self._deterministic_action_reply(
+                    session,
+                    chat,
+                    turn_record,
+                    key="builder.nothing_changed",
+                    started=started,
+                    diff=None,
+                )
+            return await self._apply_server_owned_operations(
+                session,
+                chat,
+                turn_record,
+                operations=operations,
+                history=await self._snapshot_history(session, chat),
+                rendered=rendered,
+                reply_key=None,
+                started=started,
+                allowed_capability_keys=capability_keys,
+            )
+        except BuilderActionError as exc:
+            self._release_claim(turn_record)
+            turn_record.status = TurnStatus.RETRYABLE_FAILURE.value
+            await session.flush()
+            await session.commit()
+            raise SetupLaunchError(
+                exc.code,
+                str(exc),
+                stage="patch",
+                status_code=422,
+            ) from exc
+        except SetupLaunchError:
+            # The claim must come back even when the change is refused, or the person is
+            # locked out of their own setup by a click that never ran.
+            self._release_claim(turn_record)
+            turn_record.status = TurnStatus.RETRYABLE_FAILURE.value
+            await session.flush()
+            await session.commit()
+            raise
+
+    #: Guided steps that reuse the option-button path exactly. Both surfaces would
+    #: otherwise grow their own copy of "what does choosing Scanner do", and the copies
+    #: would stop agreeing the first time the screening rules changed.
+    _BUILDER_OPTION_KEYS: Final[dict[str, str]] = {
+        "select_mode": "setup_mode",
+        "rename_plan": "monitor_name",
+        "select_universe": "screened_universe_mode",
+        "select_watchlist": "screened_watchlist",
+        "set_explicit_assets": "screened_explicit_assets",
+        "select_methodology": "sharia_methodology",
+    }
+
+    async def _builder_operations(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        draft: StrategyDraftV2,
+        action: str,
+        value: str | None,
+        mechanic_key: str | None,
+        values: dict[str, Any],
+        node_id: str | None,
+        required: bool,
+        order: list[str],
+        join: str | None,
+        source_turn_id: str,
+    ) -> tuple[list[AuthorizedPatchOperation], str, frozenset[str]]:
+        """Build the canonical operations for one guided action."""
+
+        option_key = self._BUILDER_OPTION_KEYS.get(action)
+        if option_key is not None:
+            operations = await self._server_option_operations(
+                session,
+                chat,
+                draft=draft,
+                option_key=option_key,
+                option_value=value or "",
+                source_turn_id=source_turn_id,
+            )
+            # `_server_option_operations` authorises against its own segment id, and the
+            # draft-action path draws a different one. Re-point rather than duplicate the
+            # builder: one producer, one meaning, two callers.
+            repointed = [
+                item.model_copy(update={"authorizing_segment_id": _DRAFT_ACTION_SEGMENT_ID})
+                for item in operations
+            ]
+            return repointed, f"{action.replace('_', ' ')}: {value}", frozenset()
+
+        if action == "add_condition":
+            plan = add_condition_plan(
+                mechanic_key=mechanic_key or "",
+                values=values,
+                source_turn_id=source_turn_id,
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+                required=required,
+            )
+            return list(plan.operations), plan.rendered, _capability_keys_of(mechanic_key)
+
+        if action == "update_condition":
+            self._require_existing_condition(draft, node_id or "")
+            plan = update_condition_plan(
+                node_id=node_id or "",
+                mechanic_key=mechanic_key or "",
+                values=values,
+                source_turn_id=source_turn_id,
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+                required=required,
+            )
+            return list(plan.operations), plan.rendered, _capability_keys_of(mechanic_key)
+
+        if action == "remove_condition":
+            self._require_existing_condition(draft, node_id or "")
+            plan = remove_condition_plan(
+                node_id=node_id or "",
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            )
+            return list(plan.operations), plan.rendered, frozenset()
+
+        if action == "arrange_conditions":
+            plan = arrange_plan(
+                root=draft.condition_ast,
+                order=order,
+                join=join or "and",
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            )
+            return list(plan.operations), plan.rendered, frozenset()
+
+        if action == "apply_starter":
+            return await self._starter_operations(
+                session,
+                chat,
+                draft=draft,
+                starter_key=value or "",
+                source_turn_id=source_turn_id,
+            )
+
+        raise SetupLaunchError(
+            "BUILDER_ACTION_UNKNOWN",
+            "That is not something the guided builder can do.",
+            stage="intent",
+            status_code=422,
+        )
+
+    @staticmethod
+    def _require_existing_condition(draft: StrategyDraftV2, node_id: str) -> None:
+        """Refuse an edit aimed at a rule that is not there.
+
+        The rule may have been removed in another tab, or the page may be showing an
+        older version. Either way the safe answer is to say so — applying the edit to
+        whatever rule is there now would change something nobody pointed at.
+        """
+
+        existing = {
+            node.node_id
+            for node in (draft.condition_ast.walk() if draft.condition_ast else [])
+        }
+        if node_id not in existing:
+            raise SetupLaunchError(
+                "CONDITION_NOT_FOUND",
+                "That rule is no longer part of this Watch Plan. Reload and try again.",
+                stage="patch",
+                status_code=409,
+            )
+
+    async def _starter_operations(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        draft: StrategyDraftV2,
+        starter_key: str,
+        source_turn_id: str,
+    ) -> tuple[list[AuthorizedPatchOperation], str, frozenset[str]]:
+        """A starting point, expanded into the clicks it stands for.
+
+        A starter is not a separate kind of setup. It produces the same operations the
+        person's own choices would have produced, so there is nothing extra to execute
+        and nothing extra that can go wrong.
+        """
+
+        starter = find_starter(starter_key)
+        if starter is None:
+            raise SetupLaunchError(
+                "STARTER_UNKNOWN",
+                "That starting point is not available.",
+                stage="intent",
+                status_code=404,
+            )
+        operations: list[AuthorizedPatchOperation] = []
+        capability_keys: set[str] = set()
+        if starter.mode != draft.mode.value:
+            operations.extend(
+                item.model_copy(update={"authorizing_segment_id": _DRAFT_ACTION_SEGMENT_ID})
+                for item in await self._server_option_operations(
+                    session,
+                    chat,
+                    draft=draft,
+                    option_key="setup_mode",
+                    option_value=starter.mode,
+                    source_turn_id=source_turn_id,
+                )
+            )
+        for index, rule in enumerate(starter.rules, start=1):
+            plan = add_condition_plan(
+                mechanic_key=rule.mechanic_key,
+                values=dict(rule.values),
+                source_turn_id=source_turn_id,
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+                required=rule.required,
+            )
+            operations.extend(
+                item.model_copy(update={"operation_id": f"{item.operation_id}_{index}"[:80]})
+                for item in plan.operations
+            )
+            capability_keys |= _capability_keys_of(rule.mechanic_key)
+        return operations, f"start from “{starter.label}”", frozenset(capability_keys)
+
+    async def _restore_version(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn,
+        *,
+        action: str,
+        snapshot_id: str | None,
+        expected_executable_version: int | None,
+        started: float,
+    ) -> AISetupChatSession:
+        """Put back a version the user owns, as a new current version.
+
+        Undo picks the target itself: the newest saved version below the current one.
+        Restore is given the target. After that the two are the same operation, so
+        there is one code path and one set of gates rather than two that can drift.
+        """
+
+        draft = load_strategy_draft_v2(chat)
+        history = await self._snapshot_history(session, chat)
+        owned = [
+            item
+            for item in history
+            if isinstance(item.get("draft"), dict)
+            and int(item.get("executable_version") or 0) > 0
+        ]
+        if action == "undo_last_material_change":
+            # The newest version strictly below the current one. A conversation-only
+            # turn never made a version, so it can never be an undo target — which is
+            # exactly the requirement that "Undo ignores conversation-only turns".
+            candidates = [
+                item
+                for item in owned
+                if int(item["executable_version"]) < draft.executable_version
+            ]
+            if not candidates:
+                return await self._deterministic_action_reply(
+                    session,
+                    chat,
+                    turn_record,
+                    key="change.nothing_to_undo",
+                    started=started,
+                    diff=None,
+                )
+            target = max(candidates, key=lambda item: int(item["executable_version"]))
+        else:
+            target = next(
+                (item for item in owned if str(item.get("snapshot_id")) == str(snapshot_id)),
+                {},
+            )
+            if not target:
+                raise SetupLaunchError(
+                    "SNAPSHOT_NOT_FOUND",
+                    "That saved version is not available on this setup.",
+                    stage="patch",
+                    status_code=404,
+                )
+            if (
+                expected_executable_version is not None
+                and int(target["executable_version"]) != expected_executable_version
+            ):
+                raise SetupLaunchError(
+                    "SNAPSHOT_VERSION_MISMATCH",
+                    "That saved version has moved. Open the version list again.",
+                    stage="patch",
+                    status_code=409,
+                )
+
+        operation = AuthorizedPatchOperation(
+            operation_id=f"draft_action_{action}",
+            authorizing_segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            kind="restore_snapshot",
+            target_snapshot_id=str(target["snapshot_id"]),
+            target_executable_version=int(target["executable_version"]),
+        )
+        return await self._apply_server_owned_operations(
+            session,
+            chat,
+            turn_record,
+            operations=[operation],
+            history=history,
+            rendered=action.replace("_", " "),
+            reply_key=(
+                "change.undone" if action == "undo_last_material_change" else "change.restored"
+            ),
+            started=started,
+        )
+
+    async def _reset_draft(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn,
+        *,
+        confirmed: bool,
+        started: float,
+    ) -> AISetupChatSession:
+        """Return this draft to its starting state, keeping every saved version.
+
+        Reset is deliberately *not* a planner operation. Nothing the user types can
+        reach it, so no misreading of a sentence can clear their work.
+
+        It also does exactly one thing. Archiving a Watch Plan, stopping live
+        monitoring and deleting account data are separate actions with their own
+        lifecycles, and collapsing them into this one is how a user loses more than
+        they asked to.
+        """
+
+        draft = load_strategy_draft_v2(chat)
+        already_empty = draft.condition_ast is None and not draft.unresolved_fields
+        if not already_empty and not confirmed:
+            raise SetupLaunchError(
+                "RESET_CONFIRMATION_REQUIRED",
+                "Clearing this draft removes the rules you have built. Confirm to continue.",
+                stage="patch",
+                status_code=428,
+            )
+        # Store what is there now, so reset itself can be undone.
+        if draft.condition_ast is not None:
+            await self._store_snapshot(
+                session, chat, draft.model_dump(mode="json"), source_turn_id=None
+            )
+        fresh = StrategyDraftV2(
+            draft_id=draft.draft_id,
+            executable_version=draft.executable_version + 1,
+            workflow_revision=draft.workflow_revision + 1,
+        )
+        before = draft
+        context = dict(chat.context_json or {})
+        context["strategy_draft_v2"] = fresh.model_dump(mode="json")
+        context["strategy_state_authority"] = "v2"
+        # The conversation starts again with the draft. Leaving an open question behind
+        # would ask about a rule that no longer exists.
+        context["setup_conversation_context"] = SetupConversationContext().model_dump(mode="json")
+        context.pop("last_execution_result", None)
+        context.pop("last_semantic_diff", None)
+        if chat.status == "approved":
+            _archive_approval(chat, context, "reset draft")
+        chat.context_json = context
+        chat.status = "interviewing"
+        await self._persist_draft_state(session, chat, fresh)
+        return await self._deterministic_action_reply(
+            session,
+            chat,
+            turn_record,
+            key="change.reset",
+            started=started,
+            diff=build_draft_diff(before, fresh),
+        )
+
+    async def _cancel_pending_change(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        proposal_id: str,
+        turn_record: SetupChatTurn,
+        *,
+        started: float,
+    ) -> AISetupChatSession:
+        """Throw the proposal away. The draft was never touched, so nothing reverts."""
+
+        row = await self._owned_proposal(session, chat, proposal_id)
+        row.status = "cancelled"
+        row.resolved_at = datetime.now(UTC)
+        await session.flush()
+        return await self._deterministic_action_reply(
+            session, chat, turn_record, key="change.cancelled", started=started, diff=None
+        )
+
+    async def _confirm_pending_change(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        proposal_id: str,
+        turn_record: SetupChatTurn,
+        *,
+        started: float,
+    ) -> AISetupChatSession:
+        """Apply exactly the operations that were offered — no re-planning.
+
+        Six things are checked before anything moves: the proposal exists, this user
+        owns it, it has not expired, the draft is still the one it was built for, its
+        stored operations still hash to what was shown, and it is still pending. A
+        proposal that fails any of them is marked stale and refused, never applied to a
+        draft it was not built against.
+        """
+
+        row = await self._owned_proposal(session, chat, proposal_id)
+        draft = load_strategy_draft_v2(chat)
+        expires = row.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        stale = datetime.now(UTC) >= expires or self._pending_is_stale(row, draft)
+        if not stale:
+            stored = PendingDestructiveChange.model_validate(
+                {
+                    "proposal_id": row.proposal_id,
+                    "source_turn_id": str(row.source_turn_id or row.proposal_id),
+                    "client_message_id": row.client_message_id or "",
+                    "executable_hash": row.executable_hash,
+                    "workflow_state_hash": row.workflow_state_hash,
+                    "executable_version": row.executable_version,
+                    "operations": row.operations_json,
+                    "diff": row.diff_json,
+                    "reasons": row.reasons_json,
+                    "summary_lines": row.summary_json,
+                    "invalidates_approval": row.invalidates_approval,
+                    "governance_notes": row.governance_notes_json or [],
+                    "created_at": row.created_at,
+                    "expires_at": row.expires_at,
+                    "status": "pending",
+                }
+            )
+            # The stored list must still be the list that was shown. A payload edited
+            # between offering and confirming is a different change wearing the same id.
+            stale = stored.operation_payload_hash != row.operation_payload_hash
+        if stale:
+            row.status = "stale"
+            row.resolved_at = datetime.now(UTC)
+            await session.flush()
+            return await self._deterministic_action_reply(
+                session,
+                chat,
+                turn_record,
+                key="change.proposal_stale",
+                started=started,
+                diff=None,
+            )
+
+        operations = [
+            AuthorizedPatchOperation.model_validate(item) for item in row.operations_json
+        ]
+        row.status = "confirmed"
+        await session.flush()
+        result = await self._apply_server_owned_operations(
+            session,
+            chat,
+            turn_record,
+            operations=operations,
+            history=await self._snapshot_history(session, chat),
+            rendered="confirm change",
+            reply_key=None,
+            started=started,
+        )
+        row.status = "applied"
+        row.resolved_at = datetime.now(UTC)
+        await session.flush()
+        await session.commit()
+        return result
+
+    async def _owned_proposal(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        proposal_id: str,
+    ) -> SetupChatPendingChange:
+        """Load a proposal that belongs to this user and this chat, or refuse.
+
+        Ownership is checked on both, not only on the id. A proposal id alone must
+        never be enough to change somebody else's setup.
+        """
+
+        row = await session.scalar(
+            select(SetupChatPendingChange)
+            .where(
+                SetupChatPendingChange.proposal_id == proposal_id,
+                SetupChatPendingChange.chat_session_id == chat.id,
+                SetupChatPendingChange.user_id == chat.user_id,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            raise SetupLaunchError(
+                "PENDING_CHANGE_NOT_FOUND",
+                "That change is no longer waiting for an answer.",
+                stage="patch",
+                status_code=404,
+            )
+        if row.status != "pending":
+            raise SetupLaunchError(
+                "PENDING_CHANGE_ALREADY_SETTLED",
+                "That change was already answered.",
+                stage="patch",
+                status_code=409,
+            )
+        return row
+
+    async def _apply_server_owned_operations(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn,
+        *,
+        operations: list[AuthorizedPatchOperation],
+        history: list[dict[str, Any]],
+        rendered: str,
+        reply_key: str | None,
+        started: float,
+        allowed_capability_keys: frozenset[str] = frozenset(),
+    ) -> AISetupChatSession:
+        """Run an operation list the server built, through the normal gates.
+
+        ``server_owned_option`` skips *language* grounding, because there is no user
+        sentence to ground against — the user pressed a button the server drew. Every
+        other gate still runs: screening, providers, Boolean topology, approval
+        binding. Skipping those would make this a way around them.
+
+        ``allowed_capability_keys`` is the shortlist for this turn. For a server-drawn
+        control it holds exactly the key behind the control that was pressed, taken from
+        the platform's own registry — so the capability shortlist gate is satisfied by
+        evidence rather than waived.
+        """
+
+        before = load_strategy_draft_v2(chat)
+        segment = TurnSegment(
+            segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            exact_source_text=rendered,
+            start_offset=0,
+            end_offset=len(rendered),
+            kind=SegmentKind.CLARIFICATION_ANSWER,
+            reply_required=False,
+            action_required=True,
+            confidence=1.0,
+        )
+        plan = SetupAgentTurnPlan(
+            source_turn_id=str(turn_record.id),
+            segments=[segment],
+            operations=operations,
+            overall_confidence=1.0,
+        )
+        outcome = await apply_setup_turn(
+            SetupTurnRequest(
+                plan=plan,
+                message=rendered,
+                draft=before,
+                source_turn_id=str(turn_record.id),
+                allowed_capability_keys=allowed_capability_keys,
+                history=history,
+                conversation=_load_conversation_context(dict(chat.context_json or {})),
+                screening=self._screening_gate(session, chat),
+                providers=self._provider_gate(),
+                runtime_preflight=self._runtime_preflight(),
+                preflight_manifest=self._read_preflight_manifest,
+                server_owned_option=True,
+            )
+        )
+        context = dict(chat.context_json or {})
+        if outcome.material_change and chat.status == "approved":
+            _archive_approval(chat, context, rendered)
+        context["strategy_draft_v2"] = outcome.draft.model_dump(mode="json")
+        context["strategy_state_authority"] = "v2"
+        context["setup_conversation_context"] = outcome.conversation.model_dump(mode="json")
+        context["last_execution_result"] = outcome.result.model_dump(mode="json")
+        chat.context_json = context
+        await self._persist_draft_state(
+            session,
+            chat,
+            outcome.draft,
+            definition=outcome.definition,
+            execution=outcome.result,
+        )
+        await self._store_snapshot(
+            session, chat, outcome.draft.model_dump(mode="json"), source_turn_id=None
+        )
+        return await self._deterministic_action_reply(
+            session,
+            chat,
+            turn_record,
+            key=reply_key,
+            started=started,
+            diff=build_draft_diff(before, outcome.draft),
+            execution=outcome.result,
+        )
+
+    async def _deterministic_action_reply(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn,
+        *,
+        key: str | None,
+        started: float,
+        diff: SetupDraftDiff | None,
+        execution: SetupTurnExecutionResult | None = None,
+    ) -> AISetupChatSession:
+        """Answer a draft action from stored facts. Zero model calls, always."""
+
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        language = conversation.active_language
+        if key is not None:
+            content = localized(key, language_of(language))
+        elif execution is not None:
+            content = deterministic_summary(execution, language=language)
+        else:
+            content = localized("change.cancelled", language_of(language))
+        payload: dict[str, Any] = {
+            "draft_v2": load_strategy_draft_v2(chat).model_dump(mode="json"),
+            "model_call_count": 0,
+            "server_owned_action": True,
+        }
+        if diff is not None:
+            payload["draft_diff"] = diff.model_dump(mode="json")
+        if execution is not None:
+            payload["execution_result"] = execution.model_dump(mode="json")
+        context = dict(chat.context_json or {})
+        if diff is not None:
+            context[LAST_DIFF_KEY] = diff.model_dump(mode="json")
+            chat.context_json = context
+        assistant = await self.owner._assistant(
+            session,
+            chat,
+            content,
+            message_type="draft_action",
+            payload=payload,
+        )
+        await self._complete_db_turn(
+            session,
+            chat,
+            turn_record,
+            reply={"message": content, "execution_result": payload.get("execution_result")},
+            assistant_message_id=assistant.id,
+        )
+        _set_runtime(chat, started, model_calls=0, cache_hits=0)
+        await session.flush()
+        await session.commit()
+        return chat
+
+    def _clarification_option(
+        self,
+        conversation: SetupConversationContext,
+        value: str,
+    ) -> tuple[str | None, str | None, str] | None:
+        """Validate one clicked clarification answer against the question really open.
+
+        Returns the allowlisted control to route to and the value it expects, or
+        ``(None, None, canonical)`` when the answer takes the ordinary path. ``None``
+        means the value is not one this question can execute — refused, never guessed at.
+
+        The label the trader saw is presentation only and is never trusted here. The
+        canonical value is authoritative *after* it has been checked against the open
+        question, which is what makes a clicked answer exactly as safe as a typed one.
+        """
+
+        contract = conversation.active_question
+        if contract is None:
+            return None
+        canonical = str(value or "").strip()
+        if not canonical:
+            return None
+        permitted = set(contract.canonical_values) | set(contract.allowed_options)
+        continuation = contract.continuation
+        if continuation is not None and continuation.allowed_canonical_values:
+            permitted |= set(continuation.allowed_canonical_values)
+        if permitted and canonical not in permitted:
+            return None
+        selection = governed_option_selection(continuation, canonical)
+        if selection is not None:
+            return selection[0], selection[1], canonical
+        return None, None, canonical
+
+    async def _refuse_unidentified_answer(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        conversation: SetupConversationContext,
+    ) -> AISetupChatSession:
+        """Refuse a message that does not say which question it was written under.
+
+        Nothing canonical moves and no model call is made. The current question and its
+        identity go back with the refusal, so an out-of-date client can recover by
+        re-reading the question rather than by guessing.
+        """
+
+        contract = conversation.active_question
+        language = language_of(conversation.active_language)
+        content = localized("ask.stale_answer", language)
+        rendered = f"{content}\n\n{contract.question}" if contract is not None else content
+        context = dict(chat.context_json or {})
+        context["last_identity_required_refusal"] = True
+        chat.context_json = context
+        await self.owner._assistant(
+            session,
+            chat,
+            rendered,
+            message_type="clarification" if contract is not None else "text",
+            payload={
+                "clarification": (
+                    contract.client_payload() if contract is not None else None
+                ),
+                "error_code": "ACTIVE_QUESTION_IDENTITY_REQUIRED",
+                "active_question_id": contract.question_id if contract is not None else None,
+                "active_step_revision": (
+                    contract.step_revision if contract is not None else None
+                ),
+                "model_call_count": 0,
+            },
+        )
+        await session.flush()
+        await session.commit()
+        return chat
+
     async def _refuse_stale_answer(
         self,
         session: AsyncSession,
@@ -429,7 +1526,7 @@ class SetupChatLaunchService:
             message_type="clarification" if contract is not None else "text",
             payload={
                 "clarification": (
-                    contract.model_dump(mode="json") if contract is not None else None
+                    contract.client_payload() if contract is not None else None
                 ),
                 "stale_answer_refused": True,
             },
@@ -1323,27 +2420,16 @@ return tostring(next_value)
             and not pending_scan.get("measurement_window")
         ):
             question = localized("ask.scan_window_24h", language_of(language))
-            digest = hashlib.sha256(
-                f"{chat.id}:pending-scan-window".encode()
-            ).hexdigest()[:20]
-            clarification = ClarificationContract(
-                question_id=f"scan_window_{digest}",
-                question=question,
-                reason="The verified rolling percentage query needs an explicit window.",
-                target_type="conversational",
-                expected_answer_schema=json.dumps(
-                    {"type": "string", "enum": ["24h"]},
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                mutating=False,
-                allowed_options=["24h"],
-            )
+            # One builder for this question. This was the third copy of it, and the
+            # copies disagreed: this one named no field and no canonical values, so only
+            # the literal string `24h` could answer it and "24 hours" fell through as a
+            # brand new request with no market in it.
+            clarification = scan_window_contract(question, f"{chat.id}:pending-scan-window")
             return (
                 localized("scope.selected", language_of(language)),
                 "scanner_window_required",
                 {
-                    "clarifications": [clarification.model_dump(mode="json")],
+                    "clarifications": [clarification.client_payload()],
                     "_active_question": clarification.model_dump(mode="json"),
                     "can_scan": False,
                 },
@@ -1597,6 +2683,271 @@ return tostring(next_value)
         store_preflight_manifest(chat, manifest)
         return definition, current
 
+    async def _answer_with_proposal(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn_record: SetupChatTurn | None,
+        *,
+        proposal: SetupChatPendingChange,
+        started: float,
+        telemetry: TurnTelemetry | None = None,
+    ) -> AISetupChatSession:
+        """Show exactly what the change would do, and change nothing.
+
+        The sentences come from the canonical diff. The assistant is not asked to
+        describe its own work here, because a planner that misread the instruction would
+        also misdescribe the result.
+        """
+
+        conversation = _load_conversation_context(dict(chat.context_json or {}))
+        language = language_of(conversation.active_language)
+        lines = [str(item) for item in (proposal.summary_json or [])]
+        notes = [str(item) for item in (proposal.governance_notes_json or [])]
+        body = "\n".join(f"- {item}" for item in lines + notes)
+        content = localized("change.confirm_required", language)
+        rendered = f"{content}\n\n{body}" if body else content
+        assistant = await self.owner._assistant(
+            session,
+            chat,
+            rendered,
+            message_type="pending_change",
+            payload={
+                "pending_change": {
+                    "proposal_id": proposal.proposal_id,
+                    "reasons": list(proposal.reasons_json or []),
+                    "summary_lines": lines,
+                    "governance_notes": notes,
+                    "invalidates_approval": bool(proposal.invalidates_approval),
+                    "diff": proposal.diff_json,
+                    "expires_at": proposal.expires_at.isoformat(),
+                },
+                "draft_v2": load_strategy_draft_v2(chat).model_dump(mode="json"),
+                # Nothing was applied. Saying so in the payload stops a client from
+                # rendering this as a completed change.
+                "strategy_mutated": False,
+                "model_call_count": telemetry.model_calls if telemetry is not None else 0,
+            },
+        )
+        await self._complete_db_turn(
+            session,
+            chat,
+            turn_record,
+            reply={"message": rendered, "pending_change_id": proposal.proposal_id},
+            assistant_message_id=assistant.id,
+        )
+        if turn_record is not None:
+            # The turn finished honestly: it produced a proposal, not a mutation.
+            turn_record.mutation_committed = False
+        _set_runtime(
+            chat,
+            started,
+            model_calls=telemetry.model_calls if telemetry is not None else 0,
+            cache_hits=telemetry.cache_hits if telemetry is not None else 0,
+            telemetry=telemetry,
+        )
+        await session.flush()
+        await session.commit()
+        return chat
+
+    async def _propose_if_destructive(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        turn: SetupChatTurn,
+        *,
+        draft: StrategyDraftV2,
+        plan_payload: object,
+        message: str,
+        source_turn_id: str,
+    ) -> SetupChatPendingChange | None:
+        """Turn a big change into a proposal instead of applying it.
+
+        Two steps, in this order, because the second is real work:
+
+        1. A cheap look at the typed operation list. Almost every turn adds one rule or
+           answers one question, and those can stop here.
+        2. Only if that says "maybe": run the operations against a **copy** of the draft
+           to see exactly what they would do, then classify from that real difference.
+
+        The copy is what makes the shown diff trustworthy. It is the outcome confirming
+        will produce, not a description of one. Nothing is written to the session here —
+        the projection runs on a detached draft and its result is thrown away except for
+        the diff.
+
+        Returns the stored proposal, or ``None`` when the change may simply be applied.
+        """
+
+        if not isinstance(plan_payload, dict):
+            return None
+        try:
+            plan = SetupAgentTurnPlan.model_validate(plan_payload)
+        except ValidationError:
+            return None
+        kinds = tuple(item.kind for item in plan.operations)
+        if not kinds or not may_be_destructive(plan.operations):
+            return None
+
+        projection = await apply_setup_turn(
+            SetupTurnRequest(
+                plan=plan,
+                message=message,
+                draft=draft,
+                source_turn_id=source_turn_id,
+                allowed_capability_keys=frozenset(),
+                history=await self._snapshot_history(session, chat),
+                conversation=_load_conversation_context(dict(chat.context_json or {})),
+                screening=self._screening_gate(session, chat),
+                providers=self._provider_gate(),
+                runtime_preflight=self._runtime_preflight(),
+                preflight_manifest=self._read_preflight_manifest,
+                # The plan was already grounded once, when it was built. Re-grounding a
+                # projection would refuse it for wording reasons that have nothing to do
+                # with whether the change is destructive.
+                server_owned_option=True,
+            )
+        )
+        verdict = classify_destructive_change(
+            before=draft,
+            after=projection.draft,
+            changes=diff_drafts(draft, projection.draft),
+            operation_kinds=kinds,
+            referenced_condition_ids=tuple(
+                item.target_condition_id
+                for item in plan.operations
+                if item.target_condition_id and item.kind != "remove_condition"
+            ),
+        )
+        if not verdict.requires_confirmation:
+            return None
+
+        pending = build_pending_change(
+            proposal_id=uuid4().hex,
+            source_turn_id=str(turn.id),
+            client_message_id=str(turn.client_message_id or ""),
+            draft=draft,
+            projected=projection.draft,
+            operations=list(plan.operations),
+            verdict=verdict,
+            governance_notes=self._governance_notes(draft, projection.draft),
+            ttl_minutes=PENDING_CHANGE_TTL_MINUTES,
+        )
+        row = SetupChatPendingChange(
+            chat_session_id=chat.id,
+            user_id=chat.user_id,
+            proposal_id=pending.proposal_id,
+            source_turn_id=turn.id,
+            client_message_id=turn.client_message_id,
+            status="pending",
+            executable_hash=pending.executable_hash,
+            workflow_state_hash=pending.workflow_state_hash,
+            executable_version=pending.executable_version,
+            operations_json=[item.model_dump(mode="json") for item in pending.operations],
+            operation_payload_hash=pending.operation_payload_hash,
+            diff_json=pending.diff.model_dump(mode="json"),
+            reasons_json=list(pending.reasons),
+            summary_json=list(pending.summary_lines),
+            invalidates_approval=pending.invalidates_approval,
+            governance_notes_json=list(pending.governance_notes),
+            expires_at=pending.expires_at,
+            created_at=pending.created_at,
+        )
+        session.add(row)
+        await session.flush()
+        return row
+
+    @staticmethod
+    def _governance_notes(
+        before: StrategyDraftV2,
+        after: StrategyDraftV2,
+    ) -> tuple[str, ...]:
+        """Plain warnings about Sharia and market-data effects, when there are any.
+
+        These are statements about what would change, never a Sharia ruling. The
+        platform's own review process assigns status; this only says that the setting
+        deciding which review applies is about to move.
+        """
+
+        notes: list[str] = []
+        if before.sharia_policy.methodology_id != after.sharia_policy.methodology_id:
+            notes.append(
+                "The Sharia screening method would change, so which coins pass may change."
+            )
+        if before.sharia_policy.universe_mode != after.sharia_policy.universe_mode:
+            notes.append("The list of coins your setup watches would change.")
+        before_providers = {
+            (item.provider, item.capability) for item in before.provider_requirements
+        }
+        after_providers = {
+            (item.provider, item.capability) for item in after.provider_requirements
+        }
+        if after_providers - before_providers:
+            notes.append("This would need market data your setup does not use yet.")
+        if before.approval.approved and not after.approval.approved:
+            notes.append("Your approved setup would need approving again.")
+        return tuple(notes)
+
+    @staticmethod
+    def _capability_registry_version() -> str:
+        """Which reading of the capability catalogue this plan was built against.
+
+        A capability whose meaning changed between planning and execution must not be
+        executed on the old reading. Failing to read the version is not a reason to skip
+        the check, so an unreadable registry returns a value that never compares equal.
+        """
+
+        try:
+            from ai_market_monitor.engine.capability_index import get_capability_index
+
+            return str(get_capability_index().snapshot.registry_version)
+        except Exception:
+            return "registry-unavailable"
+
+    def _freshness(
+        self,
+        chat: AISetupChatSession,
+        authoritative: StrategyDraftV2,
+        *,
+        planning_authority: PlanningAuthority | None,
+        expected_executable_hash: str,
+        expected_workflow_state_hash: str,
+        plan: object,
+    ) -> FreshnessVerdict:
+        """Compare every authority the plan depended on against the draft right now.
+
+        Falls back to the two hashes when there is no recorded authority — a turn
+        started by an older code path still gets the protection it always had, rather
+        than silently getting none.
+        """
+
+        if planning_authority is None:
+            same = (
+                authoritative.executable_hash == expected_executable_hash
+                and authoritative.workflow_state_hash == expected_workflow_state_hash
+            )
+            return FreshnessVerdict(decision="apply" if same else "refuse")
+        kinds: list[str] = []
+        targets: list[str] = []
+        if isinstance(plan, dict):
+            for item in plan.get("operations") or []:
+                if not isinstance(item, dict):
+                    continue
+                kinds.append(str(item.get("kind") or ""))
+                target = item.get("target_condition_id")
+                if target:
+                    targets.append(str(target))
+        current = PlanningAuthority.read(
+            authoritative,
+            _load_conversation_context(dict(chat.context_json or {})),
+            capability_registry_version=planning_authority.capability_registry_version,
+        )
+        return plan_freshness(
+            planning_authority,
+            current,
+            operation_kinds=tuple(kinds),
+            target_condition_ids=tuple(targets),
+        )
+
     def _turn_stage_callback(
         self,
         session: AsyncSession,
@@ -1607,35 +2958,87 @@ return tostring(next_value)
         source_turn_id: str,
         expected_executable_hash: str,
         expected_workflow_state_hash: str,
+        planning_authority: PlanningAuthority | None = None,
+        confirm_destructive: bool = False,
     ) -> Any:
         async def persist(stage: str, payload: dict[str, Any]) -> None:
             execution = payload.get("execution_result")
             if stage == TurnStatus.EXECUTING.value and not isinstance(execution, dict):
-                # The model call has finished, so it is safe to hold this row lock only
-                # across deterministic execution and its gates. This prevents two
-                # different client-message IDs from both applying to the same stale
-                # before-turn draft and losing one user's update.
+                # The model call has finished, so it is safe to take the row lock now and
+                # hold it only across deterministic execution and its gates. Holding it
+                # across the provider call would have made every slow answer block the
+                # user's whole session.
                 await session.refresh(chat, with_for_update=True)
                 authoritative = load_strategy_draft_v2(chat)
-                if (
-                    authoritative.executable_hash != expected_executable_hash
-                    or authoritative.workflow_state_hash != expected_workflow_state_hash
-                ):
+                verdict = self._freshness(
+                    chat,
+                    authoritative,
+                    planning_authority=planning_authority,
+                    expected_executable_hash=expected_executable_hash,
+                    expected_workflow_state_hash=expected_workflow_state_hash,
+                    plan=payload.get("plan"),
+                )
+                if verdict.is_refusal:
+                    turn.failure_details_json = [
+                        f"stale:{item}" for item in verdict.moved[:8]
+                    ] + [verdict.reason[:200]]
                     raise SetupLaunchError(
                         "SETUP_TURN_CONFLICT",
                         (
-                            "The draft changed while this message was being understood. "
-                            "Retry it against the latest draft."
+                            "This Watch Plan changed in another tab. Your request was not "
+                            "applied. Review the latest version and try again."
                         ),
                         stage="patch",
                         retryable=True,
                         status_code=409,
                     )
-            turn.status = stage
+                if verdict.decision == "rebase":
+                    # Something moved, but nothing this plan touches. It runs against the
+                    # newer draft with no extra model call — the operation names its own
+                    # target, so it was never about the part that changed.
+                    stamps = dict(turn.stage_timestamps_json or {})
+                    stamps["rebased"] = datetime.now(UTC).isoformat()
+                    turn.stage_timestamps_json = stamps
+                    turn.recovery_disposition = "deterministic_rebase"
+                # A change big enough to lose the user's work is written down and
+                # offered, not applied. This runs after the freshness check, so a
+                # proposal is always built against a draft that is still current.
+                #
+                # Only free-text turns are gated. A server-drawn control *is* the
+                # confirmation: the user pressed a button this application rendered,
+                # showing exactly the choice it would make. Asking them to confirm their
+                # own answer to our own question teaches them to click through.
+                proposal = await self._propose_if_destructive(
+                    session,
+                    chat,
+                    turn,
+                    draft=authoritative,
+                    plan_payload=payload.get("plan"),
+                    # The exact words the plan was built from. The projection re-runs
+                    # that plan, and every segment's offsets point into this string, so
+                    # anything else fails span verification against text nobody wrote.
+                    message=message,
+                    source_turn_id=source_turn_id,
+                ) if confirm_destructive else None
+                if proposal is not None:
+                    raise _PendingChangeRequired(proposal)
+            # When this checkpoint carries an execution result, the mutation commits in
+            # this very transaction. The honest state at that moment is EXECUTED — the
+            # draft has moved and the reply has not been written yet — and recovery from
+            # EXECUTED knows never to run the mutation again.
+            self._touch_stage(
+                turn,
+                TurnStatus.EXECUTED.value if isinstance(execution, dict) else stage,
+            )
             turn.planner_model = str(payload.get("planner_model") or "") or None
             plan = payload.get("plan")
             if isinstance(plan, dict):
                 turn.plan_json = plan
+                usage = payload.get("planner_usage")
+                if isinstance(usage, dict) and turn.planner_usage_json is None:
+                    # Only the first recording. A retry must never overwrite what the
+                    # paid original actually cost.
+                    turn.planner_usage_json = usage
             if isinstance(execution, dict):
                 result = SetupTurnExecutionResult.model_validate(execution)
                 draft = StrategyDraftV2.model_validate(payload.get("draft_after"))
@@ -1774,14 +3177,111 @@ return tostring(next_value)
         turn.failure_stage = None
         turn.failure_retryable = None
         turn.completed_at = datetime.now(UTC)
+        stamps = dict(turn.stage_timestamps_json or {})
+        stamps[TurnStatus.COMPLETED.value] = turn.completed_at.isoformat()
+        turn.stage_timestamps_json = stamps
+        # Finished turns give the session back. Without this the next message would be
+        # refused as a duplicate for as long as the row survived.
+        self._release_claim(turn)
         await session.flush()
+
+    async def _active_turn(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        exclude_client_message_id: str | None = None,
+    ) -> SetupChatTurn | None:
+        """The mutating turn that currently owns this session, if there is one.
+
+        Read from ``session_claim``, which the database keeps unique. A stale claim
+        whose lease has expired does not count: the recovery worker will settle it, and
+        until then a user must not be locked out of their own chat forever.
+        """
+
+        held = await session.scalar(
+            select(SetupChatTurn)
+            .where(SetupChatTurn.session_claim == chat.id)
+            .with_for_update()
+        )
+        if held is None:
+            return None
+        if exclude_client_message_id and held.client_message_id == exclude_client_message_id:
+            return None
+        if not holds_session(held.status):
+            # Settled but never released — release it now so the session is usable.
+            held.session_claim = None
+            await session.flush()
+            return None
+        if self._lease_expired(held):
+            return None
+        return held
+
+    @staticmethod
+    def _lease_expired(turn: SetupChatTurn) -> bool:
+        """True when this turn has been silent past what its stage is allowed."""
+
+        deadline = turn.lease_expires_at
+        if deadline is None:
+            reference = turn.updated_at or turn.created_at
+            if reference is None:
+                return False
+            if reference.tzinfo is None:
+                reference = reference.replace(tzinfo=UTC)
+            deadline = reference + timedelta(seconds=lease_seconds(turn.status))
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        return datetime.now(UTC) >= deadline
+
+    @staticmethod
+    def _touch_stage(turn: SetupChatTurn, stage: str) -> None:
+        """Record that a stage was entered, and give it a fresh lease.
+
+        The lease is what a recovery owner reads to tell a slow turn from a dead one,
+        so it has to be renewed at every stage rather than set once at the start.
+        """
+
+        now = datetime.now(UTC)
+        stamps = dict(turn.stage_timestamps_json or {})
+        stamps[stage] = now.isoformat()
+        turn.stage_timestamps_json = stamps
+        turn.status = stage
+        turn.lease_expires_at = now + timedelta(seconds=max(lease_seconds(stage), 30))
+
+    @staticmethod
+    def _release_claim(turn: SetupChatTurn | None) -> None:
+        """Give the session back. Every terminal path must call this.
+
+        Leaving a claim behind would lock the user out of their own chat until the
+        recovery worker noticed, which is a much worse failure than the double-turn it
+        was protecting against.
+        """
+
+        if turn is not None:
+            turn.session_claim = None
+            turn.lease_expires_at = None
+            turn.lease_owner = None
 
     async def _get_or_create_turn(
         self,
         session: AsyncSession,
         chat: AISetupChatSession,
         client_message_id: str,
+        *,
+        fingerprint: str | None = None,
+        is_mutating: bool = True,
     ) -> SetupChatTurn:
+        """Find this exact attempt, or claim the session for a new one.
+
+        Two different refusals live here and they mean different things:
+
+        * ``IDEMPOTENCY_KEY_CONFLICT`` — this id was used for a *different* request.
+          Answering from the stored record would show a reply to a message the user
+          never sent, so it is refused instead.
+        * ``TURN_IN_PROGRESS`` — a different message already owns the session. Its
+          state comes back so the client can wait rather than send again.
+        """
+
         existing = await session.scalar(
             select(SetupChatTurn)
             .where(
@@ -1791,32 +3291,117 @@ return tostring(next_value)
             .with_for_update()
         )
         if existing is not None:
+            self._require_matching_fingerprint(existing, fingerprint)
+            if existing.request_fingerprint is None and fingerprint:
+                # A turn stored before fingerprints existed. Record it now so the next
+                # retry of this same id is checked properly.
+                existing.request_fingerprint = fingerprint
+                await session.flush()
             return existing
+
+        if is_mutating:
+            blocking = await self._active_turn(session, chat)
+            if blocking is not None:
+                raise self._turn_in_progress(blocking)
+
         draft = load_strategy_draft_v2(chat)
+        now = datetime.now(UTC)
         created = SetupChatTurn(
             chat_session_id=chat.id,
             client_message_id=client_message_id,
+            request_fingerprint=fingerprint,
+            session_claim=chat.id if is_mutating else None,
+            is_mutating=is_mutating,
             status=TurnStatus.RECEIVED.value,
             executable_version_before=draft.executable_version,
             workflow_revision_before=draft.workflow_revision,
+            executable_hash_before=draft.executable_hash,
+            workflow_state_hash_before=draft.workflow_state_hash,
+            stage_timestamps_json={TurnStatus.RECEIVED.value: now.isoformat()},
+            lease_expires_at=now + timedelta(seconds=lease_seconds(TurnStatus.RECEIVED)),
         )
         try:
             async with session.begin_nested():
                 session.add(created)
                 await session.flush()
-        except IntegrityError:
+        except IntegrityError as conflict:
+            # Two different constraints can fire here and they need different answers:
+            #
+            # * the client-message-id constraint — this exact attempt already has a
+            #   turn, so hand that one back
+            # * the session-claim constraint — a *different* message got the session
+            #   first, so this one waits
+            #
+            # The claim losing a race is normal under load. It must read as
+            # TURN_IN_PROGRESS, never as a server error: the user did nothing wrong and
+            # their message is not lost.
+            if created in session:
+                # The savepoint rollback usually detaches it already; this covers the
+                # case where it did not, so a failed insert cannot be flushed again.
+                session.expunge(created)
             concurrent = await session.scalar(
-                select(SetupChatTurn)
-                .where(
+                select(SetupChatTurn).where(
                     SetupChatTurn.chat_session_id == chat.id,
                     SetupChatTurn.client_message_id == client_message_id,
                 )
-                .with_for_update()
             )
-            if concurrent is None:
-                raise
-            return concurrent
+            if concurrent is not None:
+                self._require_matching_fingerprint(concurrent, fingerprint)
+                return concurrent
+            holder = await self._active_turn(session, chat)
+            if holder is not None:
+                raise self._turn_in_progress(holder) from None
+            if _CLAIM_CONSTRAINT in str(conflict.orig or conflict):
+                # The winner's row is not visible from this transaction yet, which is
+                # exactly what losing the race looks like from here.
+                raise SetupLaunchError(
+                    "TURN_IN_PROGRESS",
+                    (
+                        "Another message for this setup started first. "
+                        "It will finish in a moment."
+                    ),
+                    stage="intent",
+                    retryable=True,
+                    status_code=409,
+                ) from None
+            raise
         return created
+
+    @staticmethod
+    def _require_matching_fingerprint(turn: SetupChatTurn, fingerprint: str | None) -> None:
+        """Refuse a reused key that carries different content.
+
+        Returning the stored answer here would be worse than an error: the user would
+        read a confident reply to a question they did not ask, and nothing would say so.
+        """
+
+        stored = turn.request_fingerprint
+        if not stored or not fingerprint or stored == fingerprint:
+            return
+        raise SetupLaunchError(
+            "IDEMPOTENCY_KEY_CONFLICT",
+            (
+                "This message id was already used for a different message. "
+                "Send the new message with its own id."
+            ),
+            stage="intent",
+            status_code=409,
+        )
+
+    @staticmethod
+    def _turn_in_progress(turn: SetupChatTurn) -> SetupLaunchError:
+        """One message at a time, said in a way the client can act on."""
+
+        error = SetupLaunchError(
+            "TURN_IN_PROGRESS",
+            "Your previous message is still being worked on. It will finish in a moment.",
+            stage="intent",
+            retryable=True,
+            status_code=409,
+        )
+        error.active_client_message_id = turn.client_message_id
+        error.active_stage = str(turn.status or "")
+        return error
 
     async def _store_snapshot(
         self,
@@ -1930,6 +3515,9 @@ return tostring(next_value)
                 turn.failure_stage = stage
                 turn.failure_retryable = retryable
                 turn.failure_details_json = [str(item)[:300] for item in details[:12]]
+                # A failed turn owes nothing more, so it must not keep holding the
+                # session. The user has to be able to try again straight away.
+                self._release_claim(turn)
             await session.flush()
         # The measurement belongs to this exact idempotency record. Keep the session's
         # latest-turn compatibility view in sync, but never rely on that overwriteable
@@ -1951,6 +3539,7 @@ return tostring(next_value)
         session: AsyncSession,
         chat: AISetupChatSession,
         client_message_id: str,
+        fingerprint: str | None = None,
     ) -> AISetupChatSession | None:
         """Answer a repeated key from the stored record instead of re-running the turn.
 
@@ -1961,6 +3550,10 @@ return tostring(next_value)
         * ``COMPLETED`` — the same final answer, no model call, no second patch
         * ``RETRYABLE_FAILURE`` — reprocess, because nothing was applied
         * ``PLANNING`` / ``EXECUTING`` — an in-progress conflict, never a silent no-op
+
+        The fingerprint is checked first. A key reused for different content is refused
+        outright: returning the old answer would show a confident reply to a message the
+        user never sent.
         """
         record = await session.scalar(
             select(SetupChatTurn)
@@ -1970,6 +3563,8 @@ return tostring(next_value)
             )
             .with_for_update()
         )
+        if record is not None:
+            self._require_matching_fingerprint(record, fingerprint)
         if record is None:
             existing = await session.scalar(
                 select(AISetupChatMessage.id).where(
@@ -2003,6 +3598,7 @@ return tostring(next_value)
             }
             return chat
         if status in {
+            TurnStatus.EXECUTED.value,
             TurnStatus.COMPOSING.value,
             TurnStatus.RETRYABLE_FAILURE.value,
         } and isinstance(record.execution_result_json, dict):
@@ -2064,16 +3660,40 @@ return tostring(next_value)
                 return chat
         if status in {
             TurnStatus.PLANNING.value,
+            TurnStatus.PLANNED.value,
             TurnStatus.EXECUTING.value,
+            TurnStatus.EXECUTED.value,
             TurnStatus.COMPOSING.value,
+            TurnStatus.RECOVERING.value,
         }:
-            raise SetupLaunchError(
-                "TURN_IN_PROGRESS",
-                "That message is still being processed. Try again in a moment.",
-                stage="interpret",
-                retryable=True,
-                status_code=409,
-            )
+            # Still running, or stalled and not yet recovered. Either way this exact
+            # message must not be started a second time, because the first attempt may
+            # be about to commit. The lease is what tells them apart, and the recovery
+            # worker owns that decision — not this request.
+            if not self._lease_expired(record):
+                raise self._turn_in_progress(record)
+            # The lease is gone, so nothing is going to finish this turn on its own.
+            # Anything after execution may already be committed, so it is recovered from
+            # what is stored rather than re-run.
+            if recovery_policy(status).mutation_may_be_committed:
+                raise SetupLaunchError(
+                    "TURN_RECOVERY_PENDING",
+                    (
+                        "Your previous message is being checked after an interruption. "
+                        "Nothing was lost. Try again in a moment."
+                    ),
+                    stage="interpret",
+                    retryable=True,
+                    status_code=409,
+                )
+            # Nothing was committed, so this key may safely start again.
+            record.status = TurnStatus.RECEIVED.value
+            record.retry_count += 1
+            record.recovery_disposition = RecoveryAction.ABANDON_AMBIGUOUS.value
+            self._touch_stage(record, TurnStatus.RECEIVED.value)
+            record.session_claim = chat.id
+            await session.flush()
+            return None
         if status == TurnStatus.PERMANENT_FAILURE.value:
             raise SetupLaunchError(
                 str(record.failure_code or "TURN_FAILED"),
@@ -2081,12 +3701,28 @@ return tostring(next_value)
                 stage="interpret",
                 status_code=422,
             )
+        if status in {
+            TurnStatus.CANCELLED.value,
+            TurnStatus.ABANDONED.value,
+            TurnStatus.SUPERSEDED.value,
+        }:
+            # Settled without a stored reply. Reprocessing is safe: by definition
+            # nothing was committed for these states.
+            record.status = TurnStatus.RECEIVED.value
+            record.retry_count += 1
+            self._touch_stage(record, TurnStatus.RECEIVED.value)
+            record.session_claim = chat.id
+            await session.flush()
+            return None
         if status == TurnStatus.RETRYABLE_FAILURE.value:
             record.retry_count += 1
             record.status = TurnStatus.RECEIVED.value
             record.failure_code = None
             record.failure_stage = None
             record.failure_retryable = None
+            # Retrying reclaims the session: this turn is in flight again.
+            record.session_claim = chat.id
+            self._touch_stage(record, TurnStatus.RECEIVED.value)
             await session.flush()
         # RECEIVED or retryable-without-mutation: reprocessing is safe.
         return None
@@ -2353,6 +3989,17 @@ return tostring(next_value)
             context = dict(chat.context_json or {})
         stage_callback = None
         if turn_record is not None:
+            # One recording of every authority this plan is about to depend on, taken
+            # before the paid call and compared after it. Two hashes alone missed a
+            # changed methodology, a granted approval and a reordered rule list.
+            authority = PlanningAuthority.read(
+                draft,
+                conversation,
+                capability_registry_version=self._capability_registry_version(),
+            )
+            turn_record.executable_hash_before = draft.executable_hash
+            turn_record.workflow_state_hash_before = draft.workflow_state_hash
+            turn_record.schema_version = str(draft.schema_version)
             canonical_stage_callback = self._turn_stage_callback(
                 session,
                 chat,
@@ -2361,6 +4008,10 @@ return tostring(next_value)
                 source_turn_id=source_turn_id,
                 expected_executable_hash=draft.executable_hash,
                 expected_workflow_state_hash=draft.workflow_state_hash,
+                planning_authority=authority,
+                # Free text is the one place a change can be much bigger than the user
+                # realised, because it is the one place they did not pick from a list.
+                confirm_destructive=True,
             )
 
             async def stage_callback(stage: str, payload: dict[str, Any]) -> None:
@@ -2427,6 +4078,18 @@ return tostring(next_value)
         )
         try:
             outcome = await self.agent.run_turn(turn)
+        except _PendingChangeRequired as pending:
+            # The change was understood and priced, and then not applied. The draft is
+            # untouched, the proposal is stored, and the user decides. No second model
+            # call happens on confirm — the operations are already written down.
+            return await self._answer_with_proposal(
+                session,
+                chat,
+                turn_record,
+                proposal=pending.proposal,
+                started=started,
+                telemetry=telemetry,
+            )
         except SetupAgentError as exc:
             # Planning can be paid and complete even when the server subsequently
             # rejects an ungrounded operation. Usage belongs to the attempted turn,
@@ -2563,7 +4226,7 @@ return tostring(next_value)
             )
             chat.context_json = context
             clarification_payloads = (
-                [outcome.clarification.model_dump(mode="json")]
+                [outcome.clarification.client_payload()]
                 if outcome.clarification is not None
                 else _pending_scope_clarifications(
                     outcome.draft, outcome.conversation.active_language
@@ -2690,7 +4353,7 @@ return tostring(next_value)
                     "segments": list(outcome.trace.segments),
                     "semantic_violations": list(state.violations),
                     "clarifications": (
-                        [outcome.clarification.model_dump(mode="json")]
+                        [outcome.clarification.client_payload()]
                         if outcome.clarification is not None
                         else []
                     ),
@@ -3670,18 +5333,6 @@ def _archive_approval(
     chat.approved_at = None
     chat.approved_strategy_id = None
     chat.approved_strategy_version_id = None
-
-
-class TurnStatus(StrEnum):
-    """Where one keyed turn got to. Durable, so a retry knows what already happened."""
-
-    RECEIVED = "RECEIVED"
-    PLANNING = "PLANNING"
-    EXECUTING = "EXECUTING"
-    COMPOSING = "COMPOSING"
-    COMPLETED = "COMPLETED"
-    RETRYABLE_FAILURE = "RETRYABLE_FAILURE"
-    PERMANENT_FAILURE = "PERMANENT_FAILURE"
 
 
 def _draft_is_approved(draft: StrategyDraftV2) -> bool:

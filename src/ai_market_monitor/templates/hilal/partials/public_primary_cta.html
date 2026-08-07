@@ -1,0 +1,10 @@
+{#- The one primary call to action on a public page.
+
+     While the site is pre-launch there is no account to open, so every page invites the
+     visitor to join the waitlist instead. One partial owns that decision: a page that
+     wrote its own button would keep sending people to sign-up after the switch was
+     turned on.
+
+     Set `cta_label` before including it to change the wording used outside waitlist
+     mode; the waitlist wording is fixed so the same words appear everywhere. -#}
+{% if waitlist_mode %}<a class="btn btn-primary" href="{{ waitlist_url }}">Join the waitlist</a>{% else %}<a class="btn btn-primary" href="{{ url_for('signup_page') }}">{{ cta_label | default('Start free', true) }}</a>{% endif %}

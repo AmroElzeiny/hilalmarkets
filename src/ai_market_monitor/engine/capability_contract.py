@@ -37,12 +37,21 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
 )
 
 #: How a draft direction maps onto the registry's own vocabulary.
-_DIRECTION_WORDS: dict[MovementDirection, str] = {
+#:
+#: The draft says ``up``/``down``; the capability registry says ``bullish``/``bearish``.
+#: Two names for one idea, so there is exactly one translation and every reader imports
+#: it. The compiler used to compare the draft's word against the registry's list
+#: directly, which meant a capability declaring ``bullish`` refused every rule that said
+#: ``up`` — that is, every directional capability rule ever built.
+DIRECTION_WORDS: dict[MovementDirection, str] = {
     MovementDirection.UP: "bullish",
     MovementDirection.DOWN: "bearish",
     MovementDirection.NEUTRAL: "neutral",
     MovementDirection.NOT_APPLICABLE: "neutral",
 }
+
+#: Read alias kept because this module already uses the private spelling throughout.
+_DIRECTION_WORDS = DIRECTION_WORDS
 
 #: Parameters the platform supplies, so the trader never has to state them and they are
 #: exempt from source grounding. Anything else numeric is the trader's choice.
@@ -73,12 +82,23 @@ def validate_capability_node(
     source_turn_id: str | None = None,
     require_current_shortlist: bool = True,
     previous_node: ConditionNodeV2 | None = None,
+    language_grounded: bool = True,
 ) -> CapabilityContractResult:
     """Check one capability node against its registry contract.
 
     ``authorizing_text`` is the single segment that permitted this node. Trader-chosen
     parameter values are grounded there and nowhere else, so a number written about a
     different rule cannot supply this one's period or level.
+
+    ``language_grounded=False`` is for a control the server drew itself — the Guided
+    Builder's capability picker, or an option button in Setup Chat. There is no sentence
+    to ground against, because nobody wrote one: the key came out of this registry and
+    the values came out of fields whose ranges this registry supplied. The three checks
+    that ask *"did the trader's words say this?"* are therefore skipped, exactly as
+    ``server_owned_option`` already skips operation grounding. Everything the registry
+    itself asserts — executable, available, operator supported, side supported,
+    timeframe supported, parameters present, nothing invented, every value inside its
+    declared bounds — still runs, so this is not a way around the contract.
     """
 
     if node.formula != FormulaKind.CAPABILITY:
@@ -86,7 +106,8 @@ def validate_capability_node(
     key = node.capability_key
     if not key:
         return CapabilityContractResult(errors=(f"{node.node_id}:capability_key_missing",))
-    if require_current_shortlist and key not in allowed_keys:
+    shortlist_required = require_current_shortlist and language_grounded
+    if shortlist_required and key not in allowed_keys:
         return CapabilityContractResult(
             errors=(f"{node.node_id}:capability_not_offered:{key}",)
         )
@@ -95,7 +116,7 @@ def validate_capability_node(
         return CapabilityContractResult(errors=(f"{node.node_id}:capability_unknown:{key}",))
 
     errors: list[str] = []
-    if require_current_shortlist and key not in _exact_capability_keys(authorizing_text):
+    if shortlist_required and key not in _exact_capability_keys(authorizing_text):
         errors.append(f"{node.node_id}:capability_semantics_not_exact:{key}")
     if node.capability_version != spec.capability_version:
         errors.append(
@@ -125,6 +146,7 @@ def validate_capability_node(
             spec,
             authorizing_text=authorizing_text,
             previous_node=previous_node,
+            language_grounded=language_grounded,
         )
     )
 
@@ -168,6 +190,7 @@ def _parameter_errors(
     *,
     authorizing_text: str,
     previous_node: ConditionNodeV2 | None = None,
+    language_grounded: bool = True,
 ) -> list[str]:
     """Required present, nothing invented, every value inside its declared bounds."""
 
@@ -232,6 +255,11 @@ def _parameter_errors(
         errors.append(f"{node.node_id}:parameter_{validator}:{location}")
 
     for name, value in validation_payload.items():
+        if not language_grounded:
+            # Nobody wrote a sentence, so there is nothing to find this value in. The
+            # schema check above already proved it is inside the range this registry
+            # declared, which is the whole of what the registry can assert about it.
+            continue
         rules = properties.get(name) if isinstance(properties, dict) else None
         semantic_unit = (
             str(rules.get("x-semantic-unit"))
@@ -265,19 +293,20 @@ def _parameter_errors(
     # they are assigned, so `period=3, confirmation=14` passed while monitoring the
     # opposite of what was asked for. Role grounding asks the second half: *why is this
     # number this parameter?* See `engine/parameter_roles.py`.
-    errors.extend(
-        role_grounding_errors(
-            node_id=node.node_id,
-            supplied={
-                name: value
-                for name, value in supplied.items()
-                if name not in _PLATFORM_PARAMETERS
-            },
-            defaults=registry_defaults,
-            parameter_schema=properties,
-            authorizing_text=authorizing_text,
+    if language_grounded:
+        errors.extend(
+            role_grounding_errors(
+                node_id=node.node_id,
+                supplied={
+                    name: value
+                    for name, value in supplied.items()
+                    if name not in _PLATFORM_PARAMETERS
+                },
+                defaults=registry_defaults,
+                parameter_schema=properties,
+                authorizing_text=authorizing_text,
+            )
         )
-    )
     return errors
 
 
@@ -429,6 +458,7 @@ def capability_condition_errors(
     source_turn_id: str | None = None,
     changed_node_ids: frozenset[str] = frozenset(),
     previous_nodes_by_id: dict[str, ConditionNodeV2] | None = None,
+    language_grounded: bool = True,
 ) -> tuple[list[str], list[ProviderRequirementV2]]:
     """Validate every capability node in one place, before compilation."""
 
@@ -442,6 +472,7 @@ def capability_condition_errors(
             source_turn_id=source_turn_id,
             require_current_shortlist=node.node_id in changed_node_ids,
             previous_node=(previous_nodes_by_id or {}).get(node.node_id),
+            language_grounded=language_grounded,
         )
         errors.extend(result.errors)
         providers.extend(result.provider_requirements)

@@ -72,6 +72,10 @@ app.conf.update(
             "task": "ai_market_monitor.expire_setup_instances",
             "schedule": 60,
         },
+        "recover-stalled-setup-chat-turns": {
+            "task": "ai_market_monitor.recover_setup_chat_turns",
+            "schedule": settings.setup_chat_recovery_interval_seconds,
+        },
         "process-dashboard-replay-jobs-every-thirty-seconds": {
             "task": "ai_market_monitor.process_dashboard_replay_jobs",
             "schedule": 30,
@@ -287,6 +291,11 @@ def run_scan_job(self, job_id: str) -> dict:
 @app.task(name="ai_market_monitor.expire_setup_instances")
 def expire_setup_instances() -> dict:
     return _run_async_task(_expire_setup_instances())
+
+
+@app.task(name="ai_market_monitor.recover_setup_chat_turns")
+def recover_setup_chat_turns() -> dict:
+    return _run_async_task(_recover_setup_chat_turns())
 
 
 @app.task(name="ai_market_monitor.process_dashboard_replay_jobs")
@@ -1323,6 +1332,24 @@ async def _monitor_published_sharia_sources() -> dict:
         result = await ShariaSourceMonitoringService(session, settings).run_due()
         await session.commit()
         return result
+
+
+async def _recover_setup_chat_turns() -> dict:
+    """Settle Setup Chat turns a crash left half-finished.
+
+    Safe to run on several workers at once and safe to restart mid-pass: each turn is
+    claimed by a conditional update that only one worker can win, and each is settled in
+    its own transaction.
+    """
+
+    from ai_market_monitor.core.config import get_settings
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.setup_chat_recovery import SetupChatRecoveryService
+
+    settings = get_settings()
+    async with SessionFactory() as session:
+        outcome = await SetupChatRecoveryService(settings).run_once(session)
+    return outcome.to_dict()
 
 
 async def _expire_setup_instances() -> dict:

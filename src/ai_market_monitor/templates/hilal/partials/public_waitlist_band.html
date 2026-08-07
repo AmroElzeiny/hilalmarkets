@@ -1,0 +1,29 @@
+{# The pre-launch closing section, shown at the foot of every public page.
+
+   It is included by base_public.html rather than by each page, so a page added later
+   cannot ship without it and no two pages can describe the private beta differently.
+   The wording comes from core/site_content.py.
+
+   Brand rule 8 keeps the trading-bars pattern for the landing page's own waitlist
+   section: it must not repeat across the site, so this band carries none. #}
+<section class="section section-tint waitlist-band" id="waitlist-band" aria-labelledby="waitlist-band-title">
+  <div class="container grid grid-2">
+    <div>
+      <span class="eyebrow">{{ waitlist_eyebrow }}</span>
+      <h2 id="waitlist-band-title">{{ waitlist_headline }}</h2>
+      <p>{{ waitlist_body }}</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="{{ waitlist_url }}"><span data-icon="arrow" data-icon-class="icon"></span>{{ waitlist_cta_label }}</a>
+        <a class="btn btn-secondary" href="{{ url_for('public_contact') }}">Ask a question first</a>
+      </div>
+    </div>
+    <div class="card">
+      <h3>What happens after you join</h3>
+      <div class="feature-points">
+        <div class="feature-point"><span data-icon="check" data-icon-class="icon"></span>We email you from the waitlist when a place opens</div>
+        <div class="feature-point"><span data-icon="check" data-icon-class="icon"></span>You choose whether to help test the product first</div>
+        <div class="feature-point"><span data-icon="check" data-icon-class="icon"></span>Nothing is charged during the private beta</div>
+      </div>
+    </div>
+  </div>
+</section>

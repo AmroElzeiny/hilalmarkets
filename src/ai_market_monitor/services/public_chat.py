@@ -19,7 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
-from ai_market_monitor.core.site_content import HELP_CATEGORIES, PUBLIC_PAGES, PURCHASE_FAQS
+from ai_market_monitor.core.site_content import (
+    HELP_CATEGORIES,
+    PUBLIC_PAGES,
+    PURCHASE_FAQS,
+    WAITLIST_HIDDEN_PAGES,
+)
 from ai_market_monitor.db.models import (
     CustomerConversationEvent,
     PublicChatAnswerEvent,
@@ -251,6 +256,21 @@ class PublicKnowledgeService:
         if not authenticated and any(
             pattern.search(cleaned) for pattern in _PRIVATE_ACCOUNT_PATTERNS
         ):
+            # While the product is invite-only the assistant must not send a visitor to
+            # an account page: they cannot open one, so "sign in" would be an
+            # instruction they are unable to follow. The refusal stands either way;
+            # only the next step it offers changes.
+            if self.settings.public_waitlist_mode:
+                return (
+                    "refused",
+                    "I cannot look at private accounts or Watchlists here. Hilal Markets "
+                    "is invite-only right now, so the way in is the waitlist on the home "
+                    "page.",
+                    1.0,
+                    ["boundary:no-private-account-access"],
+                    ["home", "help"],
+                    "private_account",
+                )
             return (
                 "refused",
                 "I cannot inspect private accounts or Watchlists without an authenticated "
@@ -371,6 +391,61 @@ class PublicKnowledgeService:
             for score, entry in selected
         ]
 
+    def _account_access_entry(self) -> PublicKnowledgeEntry:
+        """What the assistant is allowed to say about getting in.
+
+        The question "how do I sign up?" has one true answer at a time. While Hilal
+        Markets is invite-only that answer is the waitlist, so the fact the assistant is
+        grounded in says exactly that and never mentions a sign-in page a visitor cannot
+        use. When the product opens, the same entry returns to describing the account
+        flow.
+        """
+
+        if self.settings.public_waitlist_mode:
+            return PublicKnowledgeEntry(
+                source_id="beta:account-access:v1",
+                title="How to get access to Hilal Markets",
+                answer=(
+                    "Hilal Markets is invite-only during its private beta, so accounts are "
+                    "not open to everyone yet. Join the waitlist on the home page with an "
+                    "email address, and selected waitlist members are contacted directly as "
+                    "access becomes available. The waitlist form also asks whether you are "
+                    "happy to help with beta testing. Private account details are never "
+                    "available to anonymous visitors."
+                ),
+                route_id="home",
+                keywords=(
+                    "get access",
+                    "join waitlist",
+                    "waitlist",
+                    "early access",
+                    "create account",
+                    "sign up",
+                    "sign in",
+                    "private beta",
+                    "invite",
+                ),
+            )
+        return PublicKnowledgeEntry(
+            source_id="beta:account-access:v1",
+            title="Private-beta account and dashboard access",
+            answer=(
+                "Create or sign in to a Hilal Markets account through the Dashboard entry. "
+                "Email verification protects account ownership. Password recovery, account "
+                "preferences, and authenticated support are available from the account flow; "
+                "private account details are never available to anonymous visitors."
+            ),
+            route_id="dashboard_entry",
+            keywords=(
+                "create account",
+                "sign in",
+                "email verification code",
+                "reset password",
+                "private beta",
+                "dashboard access",
+            ),
+        )
+
     def _entries(self) -> tuple[PublicKnowledgeEntry, ...]:
         entries: list[PublicKnowledgeEntry] = [
             PublicKnowledgeEntry(
@@ -390,25 +465,7 @@ class PublicKnowledgeService:
                     "not an exchange",
                 ),
             ),
-            PublicKnowledgeEntry(
-                source_id="beta:account-access:v1",
-                title="Private-beta account and dashboard access",
-                answer=(
-                    "Create or sign in to a Hilal Markets account through the Dashboard entry. "
-                    "Email verification protects account ownership. Password recovery, account "
-                    "preferences, and authenticated support are available from the account flow; "
-                    "private account details are never available to anonymous visitors."
-                ),
-                route_id="dashboard_entry",
-                keywords=(
-                    "create account",
-                    "sign in",
-                    "email verification code",
-                    "reset password",
-                    "private beta",
-                    "dashboard access",
-                ),
-            ),
+            self._account_access_entry(),
             PublicKnowledgeEntry(
                 source_id="product:screened-market:v1",
                 title="Halal Assets and My Screened Watchlist",
@@ -509,17 +566,26 @@ class PublicKnowledgeService:
                         keywords=(category["title"], category["slug"]),
                     )
                 )
+        # Pages the public site hides while it is pre-launch. The assistant reads the
+        # same set the menus and the sitemap read, so it cannot describe a page a visitor
+        # cannot open, and it cannot route an answer to one either.
+        hidden_pages = (
+            WAITLIST_HIDDEN_PAGES if self.settings.public_waitlist_mode else frozenset()
+        )
+        plan_route = "home" if "pricing" in hidden_pages else "pricing"
         for index, item in enumerate(PURCHASE_FAQS):
             entries.append(
                 PublicKnowledgeEntry(
                     source_id=f"purchase-faq:{index + 1}",
                     title=item["question"],
                     answer=item["answer"],
-                    route_id="pricing" if "plan" in item["answer"].casefold() else "help",
+                    route_id=plan_route if "plan" in item["answer"].casefold() else "help",
                     keywords=("purchase", "pricing", "product boundary"),
                 )
             )
         for page in PUBLIC_PAGES:
+            if page.page in hidden_pages:
+                continue
             entries.append(
                 PublicKnowledgeEntry(
                     source_id=f"public-page:{page.page}",
@@ -529,7 +595,18 @@ class PublicKnowledgeService:
                     keywords=(page.page.replace("_", " "),),
                 )
             )
-        if self.settings.billing_enabled:
+        pricing_route = "pricing"
+        if self.settings.public_waitlist_mode:
+            # Prices are not published while nothing can be bought, so the assistant is
+            # not given a plan catalogue it would then have to quote.
+            pricing_answer = (
+                "Hilal Markets is invite-only during its private beta and there is nothing "
+                "to buy yet. Plans and prices are not published while the waitlist is open. "
+                "Join the waitlist on the home page, and selected waitlist members are "
+                "contacted as access becomes available."
+            )
+            pricing_route = "home"
+        elif self.settings.billing_enabled:
             plan_summary = "; ".join(
                 f"{PLAN_DEFINITIONS[code].name}: ${PLAN_DEFINITIONS[code].monthly_price}"
                 for code in PUBLIC_PLAN_CODES
@@ -549,7 +626,7 @@ class PublicKnowledgeService:
                     source_id="plan-catalog:public",
                     title="How much does Hilal Markets cost during private beta?",
                     answer=pricing_answer,
-                    route_id="pricing",
+                    route_id=pricing_route,
                     keywords=("price", "pricing", "cost", "free", "plan", "beta", "trial"),
                 ),
                 PublicKnowledgeEntry(

@@ -1185,24 +1185,39 @@ class TelegramBotService:
             ],
         )
 
+    def _pricing_text(self) -> str:
+        if self.settings.public_waitlist_mode:
+            # The public pricing page is not published before launch, so a button here
+            # would open the waitlist under a "Pricing" label. Say what is true instead.
+            return (
+                "💸 Pricing\n\nHilal Markets is invite-only during its private beta, so "
+                "plans and prices are not published yet. Nothing is charged in the beta."
+            )
+        return "💸 Pricing\n\nCompare plans on the public pricing page."
+
+    def _pricing_buttons(self) -> list[TelegramButton]:
+        if self.settings.public_waitlist_mode:
+            return []
+        return [
+            TelegramButton(
+                "Open Pricing",
+                "external:pricing",
+                url=self._dashboard_url("/pricing#pricing"),
+            )
+        ]
+
     def _pricing_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
-        pricing_url = self._dashboard_url("/pricing#pricing")
         return self._plain(
             message,
-            "💸 Pricing\n\nCompare plans on the public pricing page.",
-            buttons=[
-                TelegramButton("Open Pricing", "external:pricing", url=pricing_url),
-            ],
+            self._pricing_text(),
+            buttons=self._pricing_buttons(),
         )
 
     def _pricing_callback(self, callback: TelegramCallback) -> TelegramOutboundMessage:
-        pricing_url = self._dashboard_url("/pricing#pricing")
         return self._plain_callback(
             callback,
-            "💸 Pricing\n\nCompare plans on the public pricing page.",
-            buttons=[
-                TelegramButton("Open Pricing", "external:pricing", url=pricing_url),
-            ],
+            self._pricing_text(),
+            buttons=self._pricing_buttons(),
         )
 
     def _support_menu_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:

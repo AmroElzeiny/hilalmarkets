@@ -115,6 +115,109 @@ FOOTER_NAVIGATION = (
 )
 
 
+#: Where every "join the waitlist" call to action goes while the site is pre-launch.
+#: The form lives in the landing page, so a visitor on any other page is taken back to
+#: it rather than to a second copy that could drift out of step with the first.
+WAITLIST_ANCHOR = "/#waitlist"
+
+
+#: Pages that only make sense once anybody can open an account.
+#:
+#: While the public site is in waitlist mode there is nothing to buy and no dashboard to
+#: enter, so a menu entry pointing at either one is a promise the product cannot keep.
+#: One set, read by every menu, so the header and the footer can never disagree about
+#: what a visitor is allowed to reach.
+WAITLIST_HIDDEN_PAGES = frozenset({"pricing", "screened_market"})
+
+
+#: Every address that only works once the visitor has an account.
+#:
+#: Removing a page from the menus is not enough on its own: a link written into the body
+#: of a page reaches the same place and no menu ever sees it. That is how a "Halal Assets"
+#: button on How We Screen and a "Dashboard support" button on the Help Center kept
+#: pointing into the product after the menus had been emptied. One list of prefixes, read
+#: by the templates' own gate and by the invariant test that renders every public page, so
+#: a page added later cannot invent its own idea of what counts as inside the product.
+ACCOUNT_ONLY_PATH_PREFIXES = (
+    "/dashboard",
+    "/signin",
+    "/signup",
+    "/subscribe",
+    "/checkout",
+    "/billing",
+    "/account",
+)
+
+
+def is_account_only_path(path: str) -> bool:
+    """True when the address can only be used by somebody who already has an account."""
+
+    normalized = path.split("?", 1)[0].split("#", 1)[0].rstrip("/") or "/"
+    return any(
+        normalized == prefix or normalized.startswith(f"{prefix}/") or normalized.startswith(prefix)
+        for prefix in ACCOUNT_ONLY_PATH_PREFIXES
+    )
+
+
+#: The pre-launch message, written once.
+#:
+#: The header, the closing section on every page, the assistant and the landing form all
+#: say the same thing because they all read these. Wording kept for a beginner: no
+#: "onboarding", no "cohort", no "early access tier".
+WAITLIST_EYEBROW = "Private beta"
+WAITLIST_HEADLINE = "Hilal Markets is in a private beta."
+WAITLIST_BODY = (
+    "Accounts are invite-only while the beta runs, so you cannot sign up yet. "
+    "Leave your email on the waitlist and we will contact you directly when a place "
+    "opens. You can also tell us you are happy to help test the product first."
+)
+WAITLIST_CTA_LABEL = "Join the waitlist"
+
+
+#: The Help Center article about plans, in each of the two states the product can be in.
+#:
+#: Before launch there is no Pricing page and no dashboard to open, so the launched answer
+#: would send a reader to two places that do not exist for them.
+_PLAN_ARTICLE_OPEN: HelpArticle = {
+    "question": "Where do I manage my plan?",
+    "answer": (
+        "Open Plan & Billing in the dashboard. The limits there come from the "
+        "same catalog as the public Pricing page."
+    ),
+}
+_PLAN_ARTICLE_WAITLIST: HelpArticle = {
+    "question": "What does Hilal Markets cost?",
+    "answer": (
+        "Plans and prices are not published while Hilal Markets is in its private "
+        "beta, and nothing is charged during the beta. Join the waitlist on the home "
+        "page and we will explain the plans before anything is ever payable."
+    ),
+}
+
+
+def public_navigation(*, waitlist_mode: bool) -> tuple[NavigationItem, ...]:
+    """Header menu for the public site, with account-only pages removed in waitlist mode."""
+
+    if not waitlist_mode:
+        return PUBLIC_NAVIGATION
+    return tuple(item for item in PUBLIC_NAVIGATION if item.page not in WAITLIST_HIDDEN_PAGES)
+
+
+def footer_navigation(*, waitlist_mode: bool) -> tuple[NavigationGroup, ...]:
+    """Footer menu for the public site, using the same hidden-page set as the header."""
+
+    if not waitlist_mode:
+        return FOOTER_NAVIGATION
+    groups = []
+    for group in FOOTER_NAVIGATION:
+        items = tuple(
+            item for item in group.items if item.page not in WAITLIST_HIDDEN_PAGES
+        )
+        if items:
+            groups.append(NavigationGroup(group.label, items))
+    return tuple(groups)
+
+
 DASHBOARD_NAVIGATION = (
     NavigationGroup(
         "Discover",
@@ -238,7 +341,7 @@ PUBLIC_PAGES = (
         "Help Center",
         (
             "Get clear answers about Halal Assets, Watchlists, alerts, evidence, "
-            "billing, and account safety."
+            "and account safety."
         ),
         "hilal/public/help.html",
     ),
@@ -420,13 +523,7 @@ HELP_CATEGORIES: tuple[HelpCategory, ...] = (
         "title": "Account, billing, and privacy",
         "icon": "settings",
         "articles": (
-            {
-                "question": "Where do I manage my plan?",
-                "answer": (
-                    "Open Plan & Billing in the dashboard. The limits there come from the "
-                    "same catalog as the public Pricing page."
-                ),
-            },
+            _PLAN_ARTICLE_OPEN,
             {
                 "question": "Can I change optional cookie choices?",
                 "answer": (
@@ -437,6 +534,38 @@ HELP_CATEGORIES: tuple[HelpCategory, ...] = (
         ),
     },
 )
+
+
+def public_help_categories(*, waitlist_mode: bool) -> tuple[HelpCategory, ...]:
+    """Help Center articles, answering the plan question for the state the product is in.
+
+    The Help Center, the assistant's grounded facts and the site menus all read this one
+    function, so a reader cannot be told to open Plan & Billing on a page whose menu no
+    longer offers a way in.
+    """
+
+    if not waitlist_mode:
+        return HELP_CATEGORIES
+    categories: list[HelpCategory] = []
+    for category in HELP_CATEGORIES:
+        articles = tuple(
+            _PLAN_ARTICLE_WAITLIST if article is _PLAN_ARTICLE_OPEN else article
+            for article in category["articles"]
+        )
+        title = (
+            "Account and privacy"
+            if category["slug"] == "account"
+            else category["title"]
+        )
+        categories.append(
+            {
+                "slug": category["slug"],
+                "title": title,
+                "icon": category["icon"],
+                "articles": articles,
+            }
+        )
+    return tuple(categories)
 
 
 SHARIA_STATUS_PRESENTATION = {

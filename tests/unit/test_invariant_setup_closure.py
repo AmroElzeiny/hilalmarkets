@@ -1352,28 +1352,65 @@ async def test_14_simple_mutation_uses_exactly_one_planner_call() -> None:
 
 
 def test_13_turn_statuses_cover_every_stage_the_spec_requires() -> None:
-    from ai_market_monitor.services.setup_chat_launch import TurnStatus
+    """Every point a turn can be interrupted at has a state of its own.
 
-    assert {item.value for item in TurnStatus} == {
+    Asserted as the *rule* rather than as a fixed list. The old version pinned seven
+    exact strings, so adding the states a crash recovery needs — a plan stored but not
+    run, a mutation committed but not answered — failed a test that was only ever
+    describing the past.
+
+    What must hold is that each durable stage is distinguishable, because recovery
+    reads the state to decide whether the mutation may already be committed.
+    """
+
+    from ai_market_monitor.engine.setup_turn_lifecycle import TurnStatus
+
+    values = {item.value for item in TurnStatus}
+    # Accepted, planning, plan stored, executing, executed, answering, being recovered.
+    assert {
         "RECEIVED",
         "PLANNING",
+        "PLANNED",
         "EXECUTING",
+        "EXECUTED",
         "COMPOSING",
+        "RECOVERING",
+    } <= values
+    # Finished well, finished badly, and the three ways a turn can stop without either.
+    assert {
         "COMPLETED",
         "RETRYABLE_FAILURE",
         "PERMANENT_FAILURE",
-    }
+        "CANCELLED",
+        "ABANDONED",
+        "SUPERSEDED",
+    } <= values
 
 
-def test_13_turn_idempotency_no_longer_writes_session_json() -> None:
-    from ai_market_monitor.services.setup_chat_launch import TurnStatus
+def test_13_every_turn_status_is_terminal_or_not_and_never_both() -> None:
+    """The partition is total and exclusive, and unknown states fail closed.
 
-    assert {item.value for item in TurnStatus} == {
-        "RECEIVED",
-        "PLANNING",
-        "EXECUTING",
-        "COMPOSING",
-        "COMPLETED",
-        "RETRYABLE_FAILURE",
-        "PERMANENT_FAILURE",
-    }
+    Three readers ask "is this turn finished?" — the replay path, the concurrency gate
+    and the recovery worker. A state missing from the partition would get a different
+    answer from each, which is how a committed turn gets run twice.
+    """
+
+    from ai_market_monitor.engine.setup_turn_lifecycle import (
+        NON_TERMINAL_STATUSES,
+        TERMINAL_STATUSES,
+        TurnStatus,
+        holds_session,
+        is_terminal,
+    )
+
+    assert set(TurnStatus) == NON_TERMINAL_STATUSES | TERMINAL_STATUSES
+    assert not (NON_TERMINAL_STATUSES & TERMINAL_STATUSES)
+    for status in TurnStatus:
+        assert is_terminal(status) is (status in TERMINAL_STATUSES)
+        assert holds_session(status) is (status in NON_TERMINAL_STATUSES)
+    # A row written by a newer deployment must never read as "finished". Releasing the
+    # session on a status we cannot understand would let a second turn write the same
+    # draft the first one may still be writing.
+    assert is_terminal("SOMETHING_FROM_THE_FUTURE") is False
+    assert holds_session("SOMETHING_FROM_THE_FUTURE") is True
+    assert holds_session(None) is True

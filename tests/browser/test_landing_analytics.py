@@ -166,7 +166,49 @@ def test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain(
     assert "xPixelId" not in response.text()
 
 
-def test_consent_cta_sections_and_pricing_events_are_grounded_and_deduplicated(
+def _stub_waitlist_api(page: Page, *, created: bool = True) -> list[dict]:
+    """Answer the public-forms endpoints in the browser and keep what was sent."""
+
+    import json
+
+    submitted: list[dict] = []
+
+    page.route(
+        "**/api/v1/public-forms/bootstrap",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "csrf_token": "browser-test-token",
+                    "waitlist_endpoint": "/api/v1/public-forms/waitlist",
+                    "contact_endpoint": "/api/v1/public-forms/contact",
+                }
+            ),
+        ),
+    )
+
+    def _waitlist(route) -> None:
+        submitted.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "status": "created" if created else "already_registered",
+                    "created": created,
+                    "code": "waitlist_created" if created else "duplicate_email",
+                    "sheet_delivery_status": "not_configured",
+                    "message": "You are on the waitlist.",
+                }
+            ),
+        )
+
+    page.route("**/api/v1/public-forms/waitlist", _waitlist)
+    return submitted
+
+
+def test_consent_cta_sections_and_waitlist_events_are_grounded_and_deduplicated(
     page: Page,
     base_url: str,
 ) -> None:
@@ -196,40 +238,46 @@ def test_consent_cta_sections_and_pricing_events_are_grounded_and_deduplicated(
     assert _event_count(page, "page_view") == 1
     assert _meta_event_count(page, "PageView") == 1
 
-    hero_cta = page.locator('main a[href^="/subscribe?plan_code=demo"]').first
+    submitted = _stub_waitlist_api(page)
+
+    hero_cta = page.locator('main a[href="#waitlist"]').first
     hero_cta.evaluate(
         "(element) => element.addEventListener('click', event => event.preventDefault())"
     )
     hero_cta.evaluate("(element) => { element.click(); element.click(); }")
     assert _event_count(page, "cta_click") == 1
 
-    pricing = page.locator("#pricing")
-    pricing.scroll_into_view_if_needed()
+    waitlist = page.locator("#waitlist")
+    waitlist.scroll_into_view_if_needed()
     page.wait_for_timeout(1200)
-    assert _event_count(page, "pricing_section_view") == 1
+    assert _event_count(page, "waitlist_form_view") == 1
     page.evaluate("window.scrollTo(0, 0)")
-    pricing.scroll_into_view_if_needed()
+    waitlist.scroll_into_view_if_needed()
     page.wait_for_timeout(1200)
-    assert _event_count(page, "pricing_section_view") == 1
+    assert _event_count(page, "waitlist_form_view") == 1
 
-    expect(page.get_by_label("Annual")).to_be_disabled()
-    assert _event_count(page, "billing_interval_changed") == 0
+    # The beta-contact question is offered already answered "yes".
+    consent = page.locator("#waitlist-beta-consent")
+    expect(consent).to_be_checked()
 
-    monitor_cta = page.get_by_role("link", name="Choose Monitor monthly")
-    expect(monitor_cta).to_have_attribute(
-        "href",
-        "/subscribe?plan_code=trader&billing_interval=monthly",
-    )
-    monitor_cta.evaluate(
-        "(element) => element.addEventListener('click', event => event.preventDefault())"
-    )
-    monitor_cta.click()
-    assert _event_count(page, "plan_selected") == 1
-    assert _event_count(page, "checkout_started") == 0
-    assert _event_count(page, "waitlist_signup_success") == 0
+    email = page.locator("#waitlist-email")
+    email.fill(f"browser-{uuid4().hex[:8]}@example.com")
+    assert _event_count(page, "waitlist_form_start") == 1
 
-    page.get_by_role("button", name="View all features").first.click()
-    expect(page.get_by_role("button", name="Show fewer features").first).to_be_visible()
+    page.get_by_role("button", name="Join the waitlist").last.click()
+    expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
+    assert _event_count(page, "waitlist_submit_attempt") == 1
+    assert _event_count(page, "waitlist_signup_success") == 1
+    assert _event_count(page, "waitlist_form_error") == 0
+    assert _meta_event_count(page, "Lead") == 1
+
+    # What the browser sent is what the box said, and no analytics event carries the
+    # address that was typed.
+    assert len(submitted) == 1
+    assert submitted[0]["beta_contact_consent"] is True
+    success_events = _google_event_parameters(page, "waitlist_signup_success")
+    assert success_events == [{}]
+    assert "@example.com" not in str(_google_event_parameters(page, "waitlist_form_start"))
 
 
 def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
@@ -259,7 +307,7 @@ def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
         "feature_monitor",
         "feature_connect",
         "trust_control",
-        "pricing",
+        "waitlist",
         "faq",
     ]
     for section_name in expected[1:]:
@@ -286,7 +334,7 @@ def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
     assert "@example.com" not in serialized
 
 
-def test_long_entry_section_and_pricing_visibility(
+def test_long_entry_section_and_waitlist_visibility(
     page: Page,
     base_url: str,
 ) -> None:
@@ -304,17 +352,21 @@ def test_long_entry_section_and_pricing_visibility(
     ]
     assert section_names.count("feature_screen") == 1
 
-    pricing = page.locator("#pricing")
-    pricing.evaluate("element => { element.style.minHeight = '300vh'; }")
-    pricing.scroll_into_view_if_needed()
+    # A section taller than the window never reaches full visibility, so the form is
+    # counted as seen from the share of it that is on screen.
+    waitlist = page.locator("#waitlist")
+    waitlist.evaluate("element => { element.style.minHeight = '300vh'; }")
+    waitlist.scroll_into_view_if_needed()
     page.wait_for_timeout(1100)
-    assert _event_count(page, "pricing_section_view") == 1
+    assert _event_count(page, "waitlist_form_view") == 1
 
 
-def test_missing_or_failed_tracking_provider_does_not_block_plan_navigation(
+def test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission(
     page: Page,
     base_url: str,
 ) -> None:
+    """Analytics is never allowed to stand between a visitor and the waitlist."""
+
     page.route(
         "https://www.googletagmanager.com/**",
         lambda route: route.fulfill(
@@ -323,6 +375,7 @@ def test_missing_or_failed_tracking_provider_does_not_block_plan_navigation(
             body="/* the test dispatches the provider error explicitly */",
         ),
     )
+    submitted = _stub_waitlist_api(page)
     page.goto(base_url, wait_until="domcontentloaded")
     expect(page.locator("main h1")).to_be_visible()
     page.evaluate(
@@ -338,74 +391,97 @@ def test_missing_or_failed_tracking_provider_does_not_block_plan_navigation(
     provider_script = page.locator('script[data-hm-provider="google-tag-manager"]')
     expect(provider_script).to_be_attached()
     provider_script.dispatch_event("error")
-    page.locator("#pricing").scroll_into_view_if_needed()
-    page.get_by_role("link", name="Start free").click()
-    expect(page).to_have_url(
-        f"{base_url}/signup?plan_code=demo&billing_interval=monthly"
-    )
+
+    page.locator("#waitlist").scroll_into_view_if_needed()
+    page.locator("#waitlist-email").fill(f"broken-provider-{uuid4().hex[:8]}@example.com")
+    page.get_by_role("button", name="Join the waitlist").last.click()
+    expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
+    assert len(submitted) == 1
 
 
-def test_monitor_monthly_selection_is_preserved_when_billing_is_disabled(
+def test_a_cleared_consent_box_still_joins_the_waitlist(
     page: Page,
     base_url: str,
 ) -> None:
+    """Clearing the box is a choice about contact, not a refusal to join."""
+
+    submitted = _stub_waitlist_api(page)
     page.goto(base_url, wait_until="domcontentloaded")
-    page.locator("#pricing").scroll_into_view_if_needed()
-    expect(page.get_by_label("Annual")).to_be_disabled()
-    page.get_by_role("link", name="Choose Monitor monthly").click()
-    expect(page).to_have_url(
-        f"{base_url}/signup?plan_code=trader&billing_interval=monthly"
+    page.locator("#waitlist").scroll_into_view_if_needed()
+    consent = page.locator("#waitlist-beta-consent")
+    expect(consent).to_be_checked()
+    consent.uncheck()
+    page.locator("#waitlist-email").fill(f"no-beta-{uuid4().hex[:8]}@example.com")
+    page.get_by_role("button", name="Join the waitlist").last.click()
+    expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
+    assert len(submitted) == 1
+    assert submitted[0]["beta_contact_consent"] is False
+
+
+def test_a_duplicate_email_is_explained_without_claiming_success(
+    page: Page,
+    base_url: str,
+) -> None:
+    _stub_waitlist_api(page, created=False)
+    page.goto(base_url, wait_until="domcontentloaded")
+    # Analytics is switched on deliberately: "no success event" only means something
+    # once the transport that would have carried one is actually loaded.
+    _configure_fake_providers(page)
+    page.locator("[data-cookie-accept-analytics]").click()
+    page.wait_for_selector(
+        'script[data-hm-provider="google-tag-manager"]', state="attached"
     )
+    page.locator("#waitlist").scroll_into_view_if_needed()
+    page.locator("#waitlist-email").fill("already-there@example.com")
+    page.get_by_role("button", name="Join the waitlist").last.click()
     expect(
-        page.get_by_text("Your Monitor plan choice will be kept after authentication.")
+        page.get_by_text("This email is already on the waitlist.")
     ).to_be_visible()
+    assert _event_count(page, "waitlist_signup_success") == 0
+    assert _meta_event_count(page, "Lead") == 0
+    errors = _google_event_parameters(page, "waitlist_form_error")
+    assert [event.get("error_type") for event in errors] == ["duplicate_email"]
 
 
-def test_pricing_is_responsive_keyboard_accessible_and_reduced_motion_safe(
+def test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account(
     page: Page,
     base_url: str,
 ) -> None:
     for width in (1440, 768, 390, 320):
         page.set_viewport_size({"width": width, "height": 900})
         page.goto(base_url, wait_until="domcontentloaded")
-        pricing = page.locator("#pricing")
-        pricing.scroll_into_view_if_needed()
-        expect(pricing).to_be_visible()
-        expect(pricing.locator(".pricing-card")).to_have_count(3)
+        waitlist = page.locator("#waitlist")
+        waitlist.scroll_into_view_if_needed()
+        expect(waitlist).to_be_visible()
+        expect(page.locator("#waitlist-email")).to_be_visible()
+        expect(page.locator("#waitlist-beta-consent")).to_be_visible()
         assert page.evaluate(
             "() => document.documentElement.scrollWidth <= window.innerWidth"
         )
-        columns = pricing.locator(".pricing-grid").evaluate(
-            "element => getComputedStyle(element).gridTemplateColumns.split(' ').length"
-        )
-        assert columns == (3 if width == 1440 else 2 if width == 768 else 1)
-        if width == 1440:
-            for selector in (
-                ".pricing-heading p",
-                ".pricing-card-head p",
-                ".plan-price span",
-                ".plan-features li",
-                ".pricing-trust",
-            ):
-                assert pricing.locator(selector).first.evaluate(
-                    "element => getComputedStyle(element).color"
-                ) == "rgb(43, 46, 53)"
 
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(base_url, wait_until="domcontentloaded")
     menu = page.get_by_role("button", name="Menu")
     menu.click()
-    pricing_link = page.get_by_role("navigation", name="Mobile navigation").get_by_role(
-        "link", name="Pricing"
-    )
-    expect(pricing_link).to_be_visible()
-    pricing_link.click()
-    expect(page.locator("#pricing")).to_be_in_viewport()
+    mobile_menu = page.get_by_role("navigation", name="Mobile navigation")
+    # No route into the product exists on a phone either.
+    expect(mobile_menu.get_by_role("link", name="Sign in")).to_have_count(0)
+    expect(mobile_menu.get_by_role("link", name="Pricing")).to_have_count(0)
+    waitlist_link = mobile_menu.get_by_role("link", name="Join the waitlist")
+    expect(waitlist_link).to_be_visible()
+    waitlist_link.click()
+    expect(page.locator("#waitlist")).to_be_in_viewport()
 
-    expander = page.locator(".feature-expander").first
-    expander.focus()
-    expander.press("Enter")
-    expect(expander).to_have_attribute("aria-expanded", "true")
+    # The whole form can be completed from the keyboard.
+    email = page.locator("#waitlist-email")
+    email.focus()
+    email.type("keyboard@example.com")
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Join the waitlist")).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.locator("#waitlist-beta-consent")).to_be_focused()
+    page.keyboard.press("Space")
+    expect(page.locator("#waitlist-beta-consent")).not_to_be_checked()
 
     page.emulate_media(reduced_motion="reduce")
     assert page.locator("html").evaluate(

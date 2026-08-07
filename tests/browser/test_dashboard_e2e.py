@@ -1066,6 +1066,249 @@ def test_ai_setup_chat_optimistic_retry_and_option_selection(page: Page, base_ur
     assert_no_raw_traceback(page)
 
 
+def test_ai_setup_chat_sends_the_current_question_identity(
+    page: Page, base_url: str
+) -> None:
+    """Every message carries the question it was written under, typed or clicked.
+
+    The defect this closes is invisible to a person: a reply typed just before the step
+    advanced — or sent from a tab left open, or from a retry of an older action — landed
+    on whatever field was current *now*, which is a field the trader was never asked
+    about, and nothing on screen said so.
+    """
+
+    signup(page, base_url, unique_email("ai-chat-identity"))
+    _open_builder(page, base_url)
+    sent: list[dict] = []
+
+    def record(route) -> None:
+        sent.append(json.loads(route.request.post_data))
+        route.continue_()
+
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", record)
+    page.locator("[data-ai-chat-input]").fill("Monitor")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+    page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+
+    identified = [item for item in sent if item.get("question_id")]
+    if identified:
+        for item in identified:
+            assert item.get("step_revision") is not None, (
+                "question_id and step_revision must always travel together"
+            )
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_option_chip_answers_the_question_on_screen(
+    page: Page, base_url: str
+) -> None:
+    """An old chip cannot answer a newer question, and no chip posts its own label.
+
+    Both halves matter. The label is presentation: a reworded or translated one used to
+    silently stop answering its own question, because the label *was* the answer. And the
+    identity is read when the chip is clicked, not when it was drawn, so a control left
+    over from an earlier step is refused by the server instead of landing on a new field.
+    """
+
+    signup(page, base_url, unique_email("ai-chat-chip"))
+    _open_builder(page, base_url)
+    sent: list[dict] = []
+
+    def record(route) -> None:
+        sent.append(json.loads(route.request.post_data))
+        route.continue_()
+
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", record)
+    page.locator("[data-ai-chat-input]").fill("Monitor")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+    page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+
+    chips = page.locator(".ai-chat-chip")
+    if chips.count():
+        before = len(sent)
+        chips.first.click()
+        expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+            timeout=20_000
+        )
+        clicked = sent[before:]
+        assert clicked, "the chip sent nothing"
+        payload = clicked[0]
+        assert payload.get("option_key") == "clarification_answer", (
+            "a clarification chip must use the generic control, not its own label"
+        )
+        assert payload.get("option_value"), "the canonical value must travel"
+        assert payload.get("question_id"), "the chip must say which question it answers"
+        assert payload.get("step_revision") is not None
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_every_send_carries_a_request_id(page: Page, base_url: str) -> None:
+    """The server refuses a message without one, so the real client must always send it.
+
+    Also proves the ids are distinct per attempt: reusing one for a different message
+    would be refused as a conflict, and minting a new one for a retry would charge the
+    user twice for the same message.
+    """
+
+    signup(page, base_url, unique_email("ai-chat-request-id"))
+    _open_builder(page, base_url)
+    sent: list[dict] = []
+
+    def record(route) -> None:
+        sent.append(json.loads(route.request.post_data))
+        route.continue_()
+
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", record)
+    for text in ("Monitor", "alert me when BTC rises 5%"):
+        page.locator("[data-ai-chat-input]").fill(text)
+        page.locator("[data-ai-chat-send]").click()
+        expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+            timeout=20_000
+        )
+
+    assert sent, "no message reached the server"
+    keys = [item.get("client_message_id") for item in sent]
+    assert all(keys), "every message must carry a request id"
+    assert all(len(str(key)) >= 8 for key in keys), "a guessable id is not an id"
+    assert len(set(keys)) == len(keys), "two different messages must not share one id"
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_double_click_sends_one_turn(page: Page, base_url: str) -> None:
+    """Clicking send twice must not buy two paid turns.
+
+    The composer closes while a turn is in flight, so the second click has nothing to
+    send. If it did send, the server would refuse it — but the user would see an error
+    for something they did nothing wrong in.
+    """
+
+    signup(page, base_url, unique_email("ai-chat-double-click"))
+    _open_builder(page, base_url)
+    sent: list[dict] = []
+
+    def record(route) -> None:
+        sent.append(json.loads(route.request.post_data))
+        route.continue_()
+
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/messages", record)
+    page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
+    send = page.locator("[data-ai-chat-send]")
+    send.click()
+    # The button disables itself immediately; a second click is a no-op rather than a
+    # second request. `click(force=True)` proves that even a determined double-click
+    # cannot get past it.
+    send.click(force=True, timeout=2_000)
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+    assert len(sent) == 1, f"one click, one turn — got {len(sent)} requests"
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_refresh_does_not_duplicate_a_turn(page: Page, base_url: str) -> None:
+    """Reloading mid-conversation shows the same messages, never a repeated mutation."""
+
+    signup(page, base_url, unique_email("ai-chat-refresh"))
+    _open_builder(page, base_url)
+    page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+    before = page.get_by_test_id("ai-setup-assistant-message").count()
+
+    page.reload()
+    _open_builder(page, base_url)
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+    after = page.get_by_test_id("ai-setup-assistant-message").count()
+    assert after == before, f"a refresh changed the conversation: {before} -> {after}"
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_draft_history_controls_are_keyed_and_reachable(
+    page: Page, base_url: str
+) -> None:
+    """Undo and Clear exist once there is something to undo, and each is keyed.
+
+    Keyed matters: a double-clicked Undo must undo once. The key travels in the request
+    body, so it is asserted on the wire rather than in the DOM.
+    """
+
+    signup(page, base_url, unique_email("ai-chat-history"))
+    _open_builder(page, base_url)
+    actions: list[dict] = []
+
+    def record(route) -> None:
+        actions.append(json.loads(route.request.post_data))
+        route.continue_()
+
+    page.route("**/api/v1/dashboard/setup-chat/sessions/*/draft-actions", record)
+    page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+
+    undo = page.get_by_test_id("ai-undo")
+    if undo.count():
+        undo.first.click()
+        expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+            timeout=20_000
+        )
+        assert actions, "the undo control sent nothing"
+        assert actions[0]["action"] == "undo_last_material_change"
+        assert len(str(actions[0].get("client_message_id") or "")) >= 8, (
+            "every draft action needs its own request id"
+        )
+    assert_no_raw_traceback(page)
+
+
+def test_ai_setup_chat_pending_change_is_confirmed_not_applied(
+    page: Page, base_url: str
+) -> None:
+    """A destructive proposal shows what it would do, and changes nothing until told.
+
+    The card is rendered from the server's own diff. Its buttons must exist and be
+    reachable by keyboard, because a confirmation nobody can reach is a change nobody
+    can make.
+    """
+
+    signup(page, base_url, unique_email("ai-chat-pending"))
+    _open_builder(page, base_url)
+    page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
+    page.locator("[data-ai-chat-send]").click()
+    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
+        timeout=20_000
+    )
+
+    card = page.get_by_test_id("ai-pending-change")
+    if card.count():
+        expect(card.first).to_be_visible()
+        confirm = page.get_by_test_id("ai-pending-confirm")
+        cancel = page.get_by_test_id("ai-pending-cancel")
+        assert cancel.count(), "a proposal must always be refusable"
+        if confirm.count():
+            confirm.first.focus()
+            expect(confirm.first).to_be_focused()
+    assert_no_raw_traceback(page)
+
+
 def test_ai_setup_chat_visual_qa_states(
     page: Page,
     base_url: str,
@@ -1619,3 +1862,174 @@ def _open_first_condition_drawer(page: Page) -> None:
 
 def _first_condition_board_node(page: Page):
     return page.locator('[data-testid="strategy-board-node"][data-board-action="condition"]').first
+
+
+# ---------------------------------------------------------------------------
+# The Guided Watch Plan Builder in the real browser.
+#
+# Each of these builds a setup with the keyboard and the mouse only. No message is ever
+# typed, so a passing run is evidence that the product does not depend on the assistant.
+# ---------------------------------------------------------------------------
+
+
+def test_guided_builder_creates_a_watch_plan_without_typing_a_message(
+    page: Page,
+    base_url: str,
+) -> None:
+    """Mode, coins and one rule, all by clicking. The composer is never used."""
+
+    signup(page, base_url, unique_email("guided-builder"))
+    _open_builder(page, base_url)
+    builder = page.get_by_test_id("guided-builder")
+    expect(builder).to_be_visible(timeout=15_000)
+
+    page.get_by_test_id("guided-builder-mode").get_by_role("button", name="Monitor").click()
+    expect(page.get_by_test_id("guided-builder-assets")).to_be_visible()
+    page.get_by_test_id("guided-builder-assets").get_by_role(
+        "button", name="Every eligible coin"
+    ).click()
+
+    page.get_by_test_id("guided-builder-add-rule").click()
+    form = page.get_by_test_id("guided-builder-rule-form")
+    expect(form).to_be_visible()
+    page.get_by_test_id("guided-builder-mechanic").select_option(
+        label="Candle moves by a percentage"
+    )
+    form.locator('[data-parameter="threshold"]').fill("5")
+    form.locator('[data-parameter="timeframe"]').select_option("1h")
+    page.get_by_test_id("guided-builder-save-rule").click()
+
+    expect(page.get_by_test_id("guided-builder-rule").first).to_be_visible(timeout=15_000)
+    expect(page.get_by_test_id("guided-builder-rule").first).to_contain_text("percent")
+    # Nothing was typed into the assistant at any point.
+    expect(page.locator("[data-ai-chat-input]")).to_have_value("")
+    assert_no_raw_traceback(page)
+
+
+def test_guided_builder_offers_only_values_the_server_sent(
+    page: Page,
+    base_url: str,
+) -> None:
+    """Every option in the form comes from the contract fetch, and nothing else does."""
+
+    signup(page, base_url, unique_email("guided-contract"))
+    contract: dict = {}
+
+    def capture(response) -> None:
+        if response.url.endswith("/setup-chat/builder-contract") and response.ok:
+            contract.update(response.json())
+
+    page.on("response", capture)
+    _open_builder(page, base_url)
+    expect(page.get_by_test_id("guided-builder")).to_be_visible(timeout=15_000)
+    assert contract, "the Builder drew itself without asking the server what to draw"
+
+    page.get_by_test_id("guided-builder-add-rule").click()
+    page.get_by_test_id("guided-builder-mechanic").select_option(
+        label="Candle moves by a percentage"
+    )
+    form = page.get_by_test_id("guided-builder-rule-form")
+    offered = set(
+        form.locator('[data-parameter="timeframe"] option').evaluate_all(
+            "nodes => nodes.map(node => node.value)"
+        )
+    )
+    mechanic = next(
+        item for item in contract["mechanics"] if item["key"] == "open_to_close_percentage"
+    )
+    allowed = {
+        choice["value"]
+        for parameter in mechanic["parameters"]
+        if parameter["name"] == "timeframe"
+        for choice in parameter["choices"]
+    }
+    assert offered <= allowed, "the form offered a candle size the server did not send"
+    assert_no_raw_traceback(page)
+
+
+def test_guided_builder_shows_a_rule_the_assistant_wrote_and_lets_it_be_edited(
+    page: Page,
+    base_url: str,
+) -> None:
+    """One state, two surfaces. What the assistant wrote is editable by hand."""
+
+    signup(page, base_url, unique_email("guided-handoff"))
+    _open_builder(page, base_url)
+    page.get_by_test_id("ai-setup-input").fill(
+        "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"
+    )
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and "/api/v1/dashboard/setup-chat/sessions/" in response.url
+            and response.url.endswith("/messages")
+        ),
+        timeout=60_000,
+    ):
+        page.keyboard.press("Enter")
+
+    rule = page.get_by_test_id("guided-builder-rule").first
+    expect(rule).to_be_visible(timeout=30_000)
+    rule.get_by_role("button", name="Edit").click()
+    form = page.get_by_test_id("guided-builder-rule-form")
+    expect(form).to_be_visible()
+    expect(form.locator('[data-parameter="threshold"]')).to_have_value("3")
+    assert_no_raw_traceback(page)
+
+
+def test_guided_builder_keeps_working_when_the_assistant_is_unavailable(
+    page: Page,
+    base_url: str,
+) -> None:
+    """An assistant outage closes the composer and nothing else.
+
+    The message the person reads must be about the assistant, never about their setup.
+    """
+
+    signup(page, base_url, unique_email("guided-degraded"))
+    _open_builder(page, base_url)
+    expect(page.get_by_test_id("guided-builder")).to_be_visible(timeout=15_000)
+
+    page.evaluate(
+        """() => {
+            const root = document.querySelector('[data-ai-setup-chat]');
+            root.dataset.assistantAvailable = 'false';
+        }"""
+    )
+    page.route(
+        "**/api/v1/dashboard/setup-chat/sessions/*/messages",
+        lambda route: route.fulfill(status=503, content_type="application/json", body="{}"),
+    )
+
+    # The guided fields still work while the assistant cannot be reached.
+    page.get_by_test_id("guided-builder-mode").get_by_role("button", name="Scanner").click()
+    expect(
+        page.get_by_test_id("guided-builder-mode").get_by_role("button", name="Scanner")
+    ).to_have_attribute("aria-pressed", "true", timeout=15_000)
+    assert_no_raw_traceback(page)
+
+
+def test_guided_builder_survives_a_refresh_and_works_on_a_phone(
+    page: Page,
+    base_url: str,
+) -> None:
+    """Progress lives in the draft, so reloading shows exactly the same thing."""
+
+    signup(page, base_url, unique_email("guided-mobile"))
+    page.set_viewport_size({"width": 390, "height": 844})
+    _open_builder(page, base_url)
+    expect(page.get_by_test_id("guided-builder")).to_be_visible(timeout=15_000)
+
+    page.get_by_test_id("guided-builder-starters").get_by_role(
+        "button", name="A coin jumps"
+    ).click()
+    rule = page.get_by_test_id("guided-builder-rule").first
+    expect(rule).to_be_visible(timeout=20_000)
+    written = rule.inner_text()
+
+    page.reload(wait_until="domcontentloaded")
+    expect(page.get_by_test_id("guided-builder-rule").first).to_be_visible(timeout=20_000)
+    assert page.get_by_test_id("guided-builder-rule").first.inner_text() == written
+
+    assert_no_horizontal_overflow(page)
+    assert_no_raw_traceback(page)

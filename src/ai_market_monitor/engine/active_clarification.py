@@ -48,7 +48,15 @@ from ai_market_monitor.engine.active_question import (
     labels_for,
     resolve_active_answer,
 )
+from ai_market_monitor.engine.clarification_continuation import (
+    continuation_is_deterministic,
+    mutates_executable_draft,
+)
 from ai_market_monitor.engine.conversation_language import ConversationLanguage
+from ai_market_monitor.schemas.clarification_continuation import (
+    ContinuationKind,
+    ReplacementPolicy,
+)
 from ai_market_monitor.schemas.setup_agent import (
     PendingClarificationWorkflow,
     SetupConversationContext,
@@ -61,7 +69,6 @@ from ai_market_monitor.schemas.setup_authorization import (
 from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 
 __all__ = [
-    "GOVERNED_QUESTION_IDS",
     "ApplyRoute",
     "CanonicalBlocker",
     "ClarificationHandler",
@@ -69,13 +76,15 @@ __all__ = [
     "ResumePolicy",
     "TransitionEffects",
     "TransitionOutcome",
+    "TransitionPlan",
     "answer_domain_for",
     "answer_field_for",
-    "canonical_blocker_for",
     "cancellation_policy_for",
+    "canonical_blocker_for",
     "effects_of",
     "handler_for",
     "has_registered_handler",
+    "may_be_rendered",
     "registered_target_types",
     "resolve_active_clarification_turn",
     "resolved_handler",
@@ -119,7 +128,13 @@ class TransitionOutcome(StrEnum):
     CANCELLED = "CANCELLED"
     #: Stop asking, and keep the requirement — the platform still needs it.
     PAUSED = "PAUSED"
-    #: Not an answer: a different, complete request. Routing takes the turn.
+    #: A different, complete request arrived while a requirement is still open. The new
+    #: request is kept, nothing is applied, and the trader is asked which they want. A
+    #: new request used to simply win, and the old question's blocker stayed in the draft
+    #: with nothing on screen mentioning it — blocked state nobody could see or clear.
+    REPLACEMENT_REQUIRED = "REPLACEMENT_REQUIRED"
+    #: Not an answer, and nothing canonical is stranded by letting it through. Routing
+    #: takes the turn.
     NEW_REQUEST = "NEW_REQUEST"
     #: Written against a question that is no longer the one on screen.
     STALE_WORKFLOW = "STALE_WORKFLOW"
@@ -127,24 +142,30 @@ class TransitionOutcome(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TransitionEffects:
-    """Exactly what one outcome is allowed to do. The table, not the prose."""
+    """What one outcome does, before the route is taken into account.
+
+    This is half of the answer and is deliberately never used on its own. "Resolved"
+    means the same thing about the *question* everywhere — it closes, and a value is
+    stored — but it means completely different things about the *draft*: a resolved
+    Scanner window changes no executable state at all, while a resolved governed universe
+    rewrites Sharia policy. A single table claiming one answer for both was a table that
+    had to be wrong about one of them.
+
+    :func:`plan_transition` combines this with the question's route and continuation to
+    produce the exact plan. Read that; never read this alone.
+    """
 
     #: Does the trader still have this question in front of them afterwards?
     question_stays_active: bool
     #: Is a canonical value stored for the current field?
     commits_value: bool
-    #: May this transition change executable draft state?
-    changes_draft_state: bool
+    #: May this transition change *anything* canonical? Route-independent upper bound:
+    #: a transition that stores nothing may never change state, whatever the route.
+    may_change_canonical_state: bool
     #: May it change the pending workflow — advance it, hold a proposal, drop it?
     changes_workflow_state: bool
-    #: May the planner build the canonical operation for this turn? Never true for a
-    #: transition that stores nothing, which is the whole "invalid answers do not escape
-    #: into planning" rule stated once, as data.
-    planner_may_build_the_operation: bool
-    #: Always ``False``. Whether a server-owned question was answered is decided by the
-    #: deterministic resolver and by nothing else — this field exists so that rule is
-    #: written down and testable rather than merely intended.
-    planner_may_decide_the_answer: bool
+    #: May a new request be routed on this turn instead of being treated as an answer?
+    releases_the_turn: bool
     #: The catalogue key family the reply is built from. Named here so the wording and
     #: the state change can never describe different things.
     response_key: str
@@ -155,64 +176,57 @@ _EFFECTS: Final[dict[TransitionOutcome, TransitionEffects]] = {
     TransitionOutcome.RESOLVED: TransitionEffects(
         question_stays_active=False,
         commits_value=True,
-        changes_draft_state=True,
+        may_change_canonical_state=True,
         changes_workflow_state=True,
-        planner_may_build_the_operation=True,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="status.question_answered",
     ),
     TransitionOutcome.CONFIRM_CANDIDATE: TransitionEffects(
         question_stays_active=True,
         commits_value=False,
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=True,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="ask.confirm_candidate",
     ),
     TransitionOutcome.CONFIRMATION_ACCEPTED: TransitionEffects(
         question_stays_active=False,
         commits_value=True,
-        changes_draft_state=True,
+        may_change_canonical_state=True,
         changes_workflow_state=True,
-        planner_may_build_the_operation=True,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="status.question_answered",
     ),
     TransitionOutcome.CONFIRMATION_REJECTED: TransitionEffects(
         question_stays_active=True,
         commits_value=False,
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=True,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="ask.confirm_rejected",
     ),
     TransitionOutcome.AMBIGUOUS: TransitionEffects(
         question_stays_active=True,
         commits_value=False,
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=False,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="ask.pick_one_reading",
     ),
     TransitionOutcome.UNSUPPORTED: TransitionEffects(
         question_stays_active=True,
         commits_value=False,
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=False,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="ask.unsupported_value",
     ),
     TransitionOutcome.INVALID: TransitionEffects(
         question_stays_active=True,
         commits_value=False,
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=False,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="ask.repeat_options",
     ),
     TransitionOutcome.CANCELLED: TransitionEffects(
@@ -221,10 +235,9 @@ _EFFECTS: Final[dict[TransitionOutcome, TransitionEffects]] = {
         # A cancellation removes the canonical requirement the trader abandoned. That is
         # a draft change, and it goes through the same authorized operation path as
         # every other one.
-        changes_draft_state=True,
+        may_change_canonical_state=True,
         changes_workflow_state=True,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="status.rule_cancelled",
     ),
     TransitionOutcome.PAUSED: TransitionEffects(
@@ -232,37 +245,45 @@ _EFFECTS: Final[dict[TransitionOutcome, TransitionEffects]] = {
         commits_value=False,
         # Nothing canonical moves. That is the point: the blocker is still there and the
         # reply says so, so the UI and the draft cannot disagree about it.
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=True,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="status.setup_paused",
+    ),
+    TransitionOutcome.REPLACEMENT_REQUIRED: TransitionEffects(
+        question_stays_active=True,
+        commits_value=False,
+        may_change_canonical_state=False,
+        changes_workflow_state=False,
+        # The new request is held, not routed. Routing it now is what left the old
+        # question's blocker in the draft with nothing on screen mentioning it.
+        releases_the_turn=False,
+        response_key="ask.settle_before_new_request",
     ),
     TransitionOutcome.NEW_REQUEST: TransitionEffects(
         question_stays_active=False,
         commits_value=False,
-        changes_draft_state=True,
+        may_change_canonical_state=True,
         changes_workflow_state=True,
-        planner_may_build_the_operation=True,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=True,
         response_key="",
     ),
     TransitionOutcome.STALE_WORKFLOW: TransitionEffects(
         question_stays_active=True,
         commits_value=False,
-        changes_draft_state=False,
+        may_change_canonical_state=False,
         changes_workflow_state=False,
-        planner_may_build_the_operation=False,
-        planner_may_decide_the_answer=False,
+        releases_the_turn=False,
         response_key="ask.stale_answer",
     ),
 }
 
 
 def effects_of(outcome: TransitionOutcome) -> TransitionEffects:
-    """What this outcome is allowed to do."""
+    """What this outcome does to the *question*. Never the whole answer — see below."""
 
     return _EFFECTS[outcome]
+
 
 
 class ResumePolicy(StrEnum):
@@ -280,9 +301,15 @@ class ApplyRoute(StrEnum):
 
     Reading an answer is always deterministic and always happens here. *Applying* it is
     not the same job: storing a candle period on a half-built rule, choosing a governed
-    screened universe and filling a field the planner invented a question for are three
+    screened universe and filling a field the compiler raised a question for are three
     different authorities. Naming the authority per question is what stops one of them
     quietly doing another's work.
+
+    There is deliberately no "hand it to the planner" member any more. That route sent
+    the same message to a model twice — once to notice it was an answer, once to build
+    the operation — and the second model had never seen the question, so it read ``1h``
+    as a bare timeframe with nothing attached and the answer was lost. Every route below
+    applies its answer from state the server already holds.
     """
 
     #: The agent's own multi-step rule workflow. Deterministic end to end: no model call
@@ -297,12 +324,10 @@ class ApplyRoute(StrEnum):
     #: question (a typo, an ambiguity, a value the platform cannot take, a cancellation)
     #: still belongs here, which is what keeps the question answerable in words.
     GOVERNED_OPTION = "governed_option"
-    #: A question the planner or the compiler authored, about a field only they can
-    #: build an operation for. The answer is still read here — an unreadable one keeps
-    #: the question and never reaches the planner — and the canonical value is handed to
-    #: the planner as a *decided* answer, so it cannot re-read the message as a new
-    #: request.
-    PLANNER_OPERATION = "planner_operation"
+    #: A question whose stored continuation already holds the exact operation template.
+    #: The answer fills one typed hole in it and the result goes straight through the
+    #: same authorization gates as any other change. No model call, whoever asked.
+    DETERMINISTIC_CONTINUATION = "deterministic_continuation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,11 +353,18 @@ class ClarificationHandler:
 
     @property
     def is_deterministic(self) -> bool:
-        """True when a resolved answer is applied without any model call."""
+        """True when a resolved answer is applied without any model call.
+
+        True for every route there is. It is still written as a property so the claim is
+        checked rather than assumed: a future route that needs a model would have to say
+        so here and would immediately fail the invariant test that asserts otherwise.
+        """
 
         return self.apply_route in {
             ApplyRoute.SUPPORTED_RULE_WORKFLOW,
             ApplyRoute.PENDING_SCAN,
+            ApplyRoute.GOVERNED_OPTION,
+            ApplyRoute.DETERMINISTIC_CONTINUATION,
         }
 
 
@@ -356,49 +388,49 @@ _HANDLERS: Final[dict[str, ClarificationHandler]] = {
     ),
     "condition_field": ClarificationHandler(
         target_type="condition_field",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.ENUMERATED,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
     ),
     "capability_parameter": ClarificationHandler(
         target_type="capability_parameter",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.ENUMERATED,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
     ),
     "boolean_structure": ClarificationHandler(
         target_type="boolean_structure",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.FREE_TEXT,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
     ),
     "reference_definition": ClarificationHandler(
         target_type="reference_definition",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.FREE_TEXT,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
     ),
     "unsupported_requirement": ClarificationHandler(
         target_type="unsupported_requirement",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.FREE_TEXT,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
     ),
     "unsupported_resolution": ClarificationHandler(
         target_type="unsupported_resolution",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.FREE_TEXT,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
     ),
     "draft_field": ClarificationHandler(
         target_type="draft_field",
-        apply_route=ApplyRoute.PLANNER_OPERATION,
+        apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION,
         default_cancellation=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
         fallback_domain=AnswerDomain.FREE_TEXT,
         resume_policy=ResumePolicy.RESUME_ON_REQUEST,
@@ -448,12 +480,31 @@ if _UNREGISTERED:  # pragma: no cover - a build-time contract, not a runtime bra
     )
 
 
-#: Question ids that are governed choices even though their contract is a plain
-#: conversational one. The screened-scope question is asked inside a read-only Scanner
-#: flow, so it cannot be ``mutating``; but the answer changes governed Sharia policy and
-#: may only be applied by the allowlisted option route. One constant, read here and by
-#: the launch service, so the two cannot disagree about which question that is.
-GOVERNED_QUESTION_IDS: Final[frozenset[str]] = frozenset({"scan_screened_scope"})
+#: Which authority applies an answer, read from the question's own stored continuation.
+#: This replaced a constant listing "question ids that are really governed choices" — a
+#: second, invisible registry: a new governed question was governed only if somebody
+#: remembered to add its id to that list, and if nobody did, chat text moved Sharia
+#: policy. The continuation is part of the question, so it cannot be forgotten.
+_ROUTE_BY_CONTINUATION_KIND: Final[dict[str, ApplyRoute]] = {
+    ContinuationKind.SUPPORTED_WORKFLOW: ApplyRoute.SUPPORTED_RULE_WORKFLOW,
+    ContinuationKind.GOVERNED_OPTION: ApplyRoute.GOVERNED_OPTION,
+    ContinuationKind.PENDING_SCAN: ApplyRoute.PENDING_SCAN,
+    ContinuationKind.EXISTING_CONDITION_FIELD: ApplyRoute.DETERMINISTIC_CONTINUATION,
+    ContinuationKind.NEW_CONDITION: ApplyRoute.DETERMINISTIC_CONTINUATION,
+    ContinuationKind.DRAFT_FIELD: ApplyRoute.DETERMINISTIC_CONTINUATION,
+    ContinuationKind.BOOLEAN_STRUCTURE: ApplyRoute.DETERMINISTIC_CONTINUATION,
+    ContinuationKind.CAPABILITY_PARAMETER: ApplyRoute.DETERMINISTIC_CONTINUATION,
+    ContinuationKind.REFERENCE_DEFINITION: ApplyRoute.DETERMINISTIC_CONTINUATION,
+    ContinuationKind.UNSUPPORTED_RESOLUTION: ApplyRoute.DETERMINISTIC_CONTINUATION,
+}
+
+_UNROUTED_KINDS: Final[tuple[str, ...]] = tuple(
+    sorted(str(item) for item in ContinuationKind if item not in _ROUTE_BY_CONTINUATION_KIND)
+)
+if _UNROUTED_KINDS:  # pragma: no cover - a build-time contract, not a runtime branch
+    raise RuntimeError(
+        "every continuation kind needs an apply route; missing: " + ", ".join(_UNROUTED_KINDS)
+    )
 
 
 def registered_target_types() -> frozenset[str]:
@@ -478,6 +529,56 @@ def has_registered_handler(contract: ClarificationContract | None) -> bool:
     return contract is None or handler_for(contract.target_type) is not None
 
 
+def orphan_reason(
+    contract: ClarificationContract | None,
+    draft: StrategyDraftV2 | None = None,
+) -> str:
+    """Why this question must not be shown, or ``""`` when it may be.
+
+    The hard invariant. A **mutating** question is a promise that answering it will
+    change executable state, so before it is persisted or rendered the server must
+    already hold everything needed to keep that promise without another model call:
+
+    * a registered handler for its kind;
+    * a canonical blocker or a stored continuation — something the answer lands on;
+    * a continuation that targets the same field and object the question names;
+    * a continuation whose builder can produce an authorized operation.
+
+    A question failing any of these is an orphan. Showing one meant the trader typed a
+    correct answer and the server had nowhere to put it, so the message fell through to
+    general planning and came back as "nothing is set up yet".
+    """
+
+    if contract is None:
+        return ""
+    if handler_for(contract.target_type) is None:
+        return f"no registered handler for {contract.target_type}"
+    continuation = contract.continuation
+    if not contract.mutating:
+        # A question that changes nothing cannot strand anything. It still may not carry
+        # a continuation that disagrees with it — the contract validator covers that.
+        return ""
+    blocker = (
+        canonical_blocker_for(draft, contract) if draft is not None else None
+    )
+    if continuation is None and blocker is None:
+        return "a mutating question with no canonical blocker and no continuation"
+    if continuation is None:
+        return "a mutating question with no deterministic continuation"
+    if not continuation_is_deterministic(continuation):
+        return f"no registered builder for continuation {continuation.kind}"
+    return ""
+
+
+def may_be_rendered(
+    contract: ClarificationContract | None,
+    draft: StrategyDraftV2 | None = None,
+) -> bool:
+    """Whether this question is safe to persist and show. Fail closed on ``False``."""
+
+    return not orphan_reason(contract, draft)
+
+
 def resolved_handler(
     contract: ClarificationContract,
     *,
@@ -485,26 +586,25 @@ def resolved_handler(
 ) -> ClarificationHandler:
     """The handler that owns this exact question.
 
-    Mostly the ``target_type``'s, with two state-dependent corrections:
+    The stored continuation decides, because it is the record that was built and checked
+    when the question was created. A question that carries one is routed by what it
+    actually promised to do, not by what its target type usually means — which is how a
+    governed choice asked through a conversational contract stays governed, without a
+    hand-maintained list of "ids that are secretly governed".
 
-    * a governed choice asked through a conversational contract is applied by the
-      option route whatever its target type says — pretending otherwise would let chat
-      text move Sharia policy;
-    * ``conversational`` covers both a live Scanner question and an ordinary yes/no the
-      planner asked. Only the first belongs to the scan, so the pending scan decides.
-      Sending a plain confirmation to the scan collector would answer "did I read that
-      right?" by running a market check.
+    Only a question with no continuation falls back to its target type. ``conversational``
+    covers both a live Scanner question and an ordinary yes/no; only the first belongs to
+    the scan, so the pending scan decides. Sending a plain confirmation to the scan
+    collector would answer "did I read that right?" by running a market check.
     """
 
     base = _HANDLERS[contract.target_type]
-    if contract.question_id in GOVERNED_QUESTION_IDS:
-        return replace(
-            base,
-            apply_route=ApplyRoute.GOVERNED_OPTION,
-            fallback_domain=AnswerDomain.UNIVERSE_MODE,
-        )
+    continuation = contract.continuation
+    if continuation is not None:
+        route = _ROUTE_BY_CONTINUATION_KIND[continuation.kind]
+        return replace(base, apply_route=route)
     if base.apply_route is ApplyRoute.PENDING_SCAN and not scan_is_pending:
-        return replace(base, apply_route=ApplyRoute.PLANNER_OPERATION)
+        return replace(base, apply_route=ApplyRoute.DETERMINISTIC_CONTINUATION)
     return base
 
 
@@ -552,6 +652,109 @@ def canonical_blocker_for(
         if candidate and candidate in unsupported:
             return CanonicalBlocker("remove_unsupported_key", candidate)
     return None
+
+@dataclass(frozen=True, slots=True)
+class TransitionPlan:
+    """Exactly what this turn will do, for this outcome on this route.
+
+    The global table could not state the truth. "Resolved" closes the question the same
+    way everywhere, but a resolved Scanner window touches no executable state while a
+    resolved governed universe rewrites Sharia policy — so one row claiming a single
+    answer for ``changes_draft_state`` was always wrong about one of them, and a reply
+    built from it could announce a rule change that never happened.
+
+    Every field here is derived from the outcome *and* the route *and* the continuation
+    that is actually in play.
+    """
+
+    outcome: TransitionOutcome
+    route: ApplyRoute
+    #: Does the trader still have this question in front of them?
+    question_stays_active: bool
+    #: Is a canonical value accepted for the current field?
+    accepts_value: bool
+    #: Does the conversation record change — question, proposal, paused state?
+    changes_conversation_state: bool
+    #: Does the pending multi-step workflow advance, hold or drop?
+    changes_workflow_state: bool
+    #: Does the draft-side record of workflow progress change?
+    changes_draft_workflow_state: bool
+    #: May executable strategy state change on this turn?
+    changes_executable_draft_state: bool
+    #: The deterministic operation that will run, named. Empty when none runs.
+    operation: str
+    #: Do the screening, provider and compiler gates run for this turn?
+    runs_gates: bool
+    #: May a genuinely new request be routed instead of answered?
+    may_route_new_request: bool
+    #: Always ``False`` for every answer, confirmation, replacement and cancellation.
+    #: Written as data so the rule is checked by a test rather than merely intended.
+    model_calls_allowed: bool
+    response_key: str
+
+
+#: Which canonical operation each route runs when it accepts a value. Read here rather
+#: than restated at each call site, so the plan and the code cannot describe different
+#: changes.
+_OPERATION_BY_ROUTE: Final[dict[ApplyRoute, str]] = {
+    ApplyRoute.SUPPORTED_RULE_WORKFLOW: "update_unresolved",
+    ApplyRoute.PENDING_SCAN: "",
+    ApplyRoute.GOVERNED_OPTION: "set_sharia_policy",
+    ApplyRoute.DETERMINISTIC_CONTINUATION: "continuation_operations",
+}
+
+
+def plan_transition(
+    outcome: TransitionOutcome,
+    *,
+    route: ApplyRoute,
+    continuation: object | None = None,
+    blocker: CanonicalBlocker | None = None,
+    cancellation: CancellationPolicy | None = None,
+) -> TransitionPlan:
+    """The exact plan for this outcome on this route. The authority for what happens.
+
+    ``model_calls_allowed`` is ``False`` on every row this function can produce except
+    the one that hands a genuinely separate new request to routing. That is the whole
+    non-negotiable invariant, expressed as data so a test can read it instead of trusting
+    a comment.
+    """
+
+    effects = _EFFECTS[outcome]
+    accepts = effects.commits_value
+    executable = False
+    operation = ""
+    if outcome is TransitionOutcome.CANCELLED:
+        # Removing the abandoned requirement is an authorized draft change; pausing is
+        # deliberately not, which is what keeps a paused blocker visible.
+        removes = cancellation is CancellationPolicy.REMOVE_PENDING_REQUIREMENT
+        executable = bool(removes and blocker is not None)
+        operation = blocker.operation_kind if executable and blocker is not None else ""
+    elif accepts and effects.may_change_canonical_state:
+        executable = route is not ApplyRoute.PENDING_SCAN and (
+            continuation is None or mutates_executable_draft(continuation)
+        )
+        operation = _OPERATION_BY_ROUTE[route]
+    return TransitionPlan(
+        outcome=outcome,
+        route=route,
+        question_stays_active=effects.question_stays_active,
+        accepts_value=accepts,
+        changes_conversation_state=outcome is not TransitionOutcome.STALE_WORKFLOW,
+        changes_workflow_state=effects.changes_workflow_state,
+        # Draft-side progress only moves when a value is really accepted onto a
+        # multi-step requirement. A Scanner answer and a governed choice both leave the
+        # draft's own workflow record untouched.
+        changes_draft_workflow_state=bool(
+            accepts and route is ApplyRoute.SUPPORTED_RULE_WORKFLOW
+        ),
+        changes_executable_draft_state=executable,
+        operation=operation,
+        runs_gates=executable,
+        may_route_new_request=effects.releases_the_turn,
+        model_calls_allowed=effects.releases_the_turn,
+        response_key=effects.response_key,
+    )
 
 
 def cancellation_policy_for(contract: ClarificationContract) -> CancellationPolicy:
@@ -637,6 +840,7 @@ def _transition_for(
     resolution: AnswerResolution,
     *,
     cancellation: CancellationPolicy,
+    replacement: ReplacementPolicy = ReplacementPolicy.REPLACE_SILENTLY,
 ) -> TransitionOutcome:
     """Turn one value reading into one state-machine transition.
 
@@ -647,7 +851,14 @@ def _transition_for(
     """
 
     if resolution.outcome is AnswerOutcome.NEW_REQUEST:
-        return TransitionOutcome.NEW_REQUEST
+        # A new request may only take the turn when nothing canonical is left behind by
+        # letting it. Otherwise the trader is asked which they want, and the old
+        # requirement is settled explicitly before the new one starts.
+        return (
+            TransitionOutcome.REPLACEMENT_REQUIRED
+            if replacement is ReplacementPolicy.REQUIRE_EXPLICIT_CHOICE
+            else TransitionOutcome.NEW_REQUEST
+        )
     if resolution.outcome is AnswerOutcome.CANCELLED:
         # Stopping means different things depending on whose requirement it was. The
         # policy was decided when the question was created, by the code that knew.
@@ -704,15 +915,27 @@ class ClarificationTurn:
 
     @property
     def effects(self) -> TransitionEffects:
-        """Exactly what this transition may do. Read, never re-derived."""
+        """What this transition does to the question. Half the answer — see ``plan``."""
 
         return _EFFECTS[self.transition]
+
+    @property
+    def plan(self) -> TransitionPlan:
+        """Exactly what this turn will do, for this outcome on this route."""
+
+        return plan_transition(
+            self.transition,
+            route=self.handler.apply_route,
+            continuation=self.contract.continuation,
+            blocker=self.blocker,
+            cancellation=self.cancellation,
+        )
 
     @property
     def owns_the_turn(self) -> bool:
         """Whether the question keeps this turn rather than handing it to routing."""
 
-        return self.transition is not TransitionOutcome.NEW_REQUEST
+        return not self.plan.may_route_new_request
 
     @property
     def stores_a_value(self) -> bool:
@@ -775,10 +998,6 @@ def resolve_active_clarification_turn(
     contract = conversation.active_question
     if contract is None:
         return None
-    if mode_selected:
-        # The product's own start button. It is a destination, not an answer, and it has
-        # always been allowed to take the conversation somewhere else.
-        return None
     if handler_for(contract.target_type) is None:  # pragma: no cover - see _UNREGISTERED
         return None
     handler = resolved_handler(
@@ -799,6 +1018,16 @@ def resolve_active_clarification_turn(
     shown = [labels.get(item, item) for item in offered] or list(contract.allowed_options)
     cancellation = cancellation_policy_for(contract)
     blocker = canonical_blocker_for(draft, contract, workflow)
+    # What a new request is allowed to do to this question. A question holding a real
+    # blocker has to be settled first or that blocker becomes invisible — and that is
+    # true whether or not the question carries a continuation, because the blocker is
+    # what would be stranded. Only a question with nothing canonical behind it at all may
+    # simply be replaced.
+    replacement = contract.replacement_policy
+    if blocker is not None:
+        replacement = ReplacementPolicy.REQUIRE_EXPLICIT_CHOICE
+    elif contract.continuation is None:
+        replacement = ReplacementPolicy.REPLACE_SILENTLY
 
     def decided(
         resolution: AnswerResolution,
@@ -809,7 +1038,9 @@ def resolve_active_clarification_turn(
             transition=(
                 transition
                 if transition is not None
-                else _transition_for(resolution, cancellation=cancellation)
+                else _transition_for(
+                    resolution, cancellation=cancellation, replacement=replacement
+                )
             ),
             outcome=resolution.outcome,
             contract=contract,
@@ -840,11 +1071,27 @@ def resolve_active_clarification_turn(
                 AnswerOutcome.AMBIGUOUS,
                 candidates=tuple(allowed),
                 reason="the answer was written against an older step",
-                proposed_value=(
-                    workflow.proposed_value if workflow is not None else None
-                ),
+                proposed_value=conversation.active_proposal[0],
             ),
             transition=TransitionOutcome.STALE_WORKFLOW,
+        )
+
+    if mode_selected:
+        # The product's own start button. It is a destination, not an answer — but it is
+        # still a *replacement*, and it used to bypass ownership entirely by returning
+        # straight to the mode route, leaving the open question's blocker in the draft
+        # with nothing on screen mentioning it. It now settles the same way any other new
+        # request does.
+        return decided(
+            AnswerResolution(
+                AnswerOutcome.NEW_REQUEST,
+                reason="a mode was chosen while a question was open",
+            ),
+            transition=(
+                TransitionOutcome.REPLACEMENT_REQUIRED
+                if replacement is ReplacementPolicy.REQUIRE_EXPLICIT_CHOICE
+                else TransitionOutcome.NEW_REQUEST
+            ),
         )
 
     return decided(
@@ -855,9 +1102,24 @@ def resolve_active_clarification_turn(
             offered_values=offered,
             display_labels=labels,
             looks_like_new_request=looks_like_new_request,
-            proposed_value=workflow.proposed_value if workflow is not None else None,
+            proposed_value=conversation.active_proposal[0],
         )
     )
+
+
+def canonical_completion_for(
+    draft: StrategyDraftV2,
+    workflow: PendingClarificationWorkflow | None,
+) -> object | None:
+    """The canonical progress record a conversational projection claims to describe."""
+
+    if workflow is None:
+        return None
+    wanted = workflow.canonical_contract_id or workflow.workflow_id
+    for item in draft.unresolved_fields:
+        if item.unresolved_id == wanted:
+            return item.completion_contract
+    return None
 
 
 def workflow_invariants(conversation: SetupConversationContext) -> tuple[str, ...]:

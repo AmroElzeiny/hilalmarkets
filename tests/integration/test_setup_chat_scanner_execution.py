@@ -47,6 +47,7 @@ from tests.integration.test_setup_chat_launch_v2 import (
     StandInPlanner,
     _agent,
 )
+from tests.support.setup_chat_client import active_question_identity
 
 #: What the provider reports as each coin's rolling 24-hour change. BTC clears 5%, ETH
 #: does not, so a scan that invents results and a scan that runs cannot look alike.
@@ -175,6 +176,12 @@ def _conversation_of(chat) -> dict:
     return dict((chat.context_json or {}).get("setup_conversation_context") or {})
 
 
+def _identity(chat) -> dict:
+    """What the official client attaches while a question is open. One shared owner."""
+
+    return active_question_identity(chat)
+
+
 async def _run_full_scanner_journey(service, session, chat, *, prefix: str) -> None:
     """Every step a trader takes, in order, ending in a governed scan."""
 
@@ -197,7 +204,8 @@ async def _run_full_scanner_journey(service, session, chat, *, prefix: str) -> N
     ]
     for index, step in enumerate(steps, start=1):
         await service.handle_message(
-            session, chat, client_message_id=f"{prefix}-{index}", **step
+            session, chat, client_message_id=f"{prefix}-{index}", **step,
+            **_identity(chat),
         )
 
 
@@ -229,7 +237,8 @@ async def test_the_three_turn_scanner_flow_reaches_governed_execution(test_conte
 
         # 1. Choose Scanner by typing it, not by pressing the button.
         await service.handle_message(
-            session, chat, message="Scanner", client_message_id="scanflow-1"
+            session, chat, message="Scanner", client_message_id="scanflow-1",
+            **_identity(chat),
         )
         assert load_strategy_draft_v2(chat).mode.value == "scanner"
 
@@ -239,13 +248,15 @@ async def test_the_three_turn_scanner_flow_reaches_governed_execution(test_conte
             chat,
             message="what coins are up at least 5% now?",
             client_message_id="scanflow-2",
+            **_identity(chat),
         )
 
         # 3. Answer the one question it asked. The screened scope is still unchosen, so
         #    the scan is held here rather than run — governed screening is not skipped
         #    to answer faster.
         await service.handle_message(
-            session, chat, message="24 hours", client_message_id="scanflow-3"
+            session, chat, message="24 hours", client_message_id="scanflow-3",
+            **_identity(chat),
         )
         held = _conversation_of(chat)
         assert held["pending_read_only_scan"]["measurement_window"] == "24h"
@@ -262,6 +273,7 @@ async def test_the_three_turn_scanner_flow_reaches_governed_execution(test_conte
             option_value="explicit_assets",
             option_label="Specific eligible assets",
             client_message_id="scanflow-4",
+            **_identity(chat),
         )
         await service.handle_message(
             session,
@@ -271,6 +283,7 @@ async def test_the_three_turn_scanner_flow_reaches_governed_execution(test_conte
             option_value="BTC/USDT, ETH/USDT",
             option_label="BTC/USDT, ETH/USDT",
             client_message_id="scanflow-5",
+            **_identity(chat),
         )
 
         run = await session.scalar(
@@ -330,6 +343,7 @@ async def _scope_answer_journey(test_context, *, answer: str, prefix: str):
                 chat,
                 message=message,
                 client_message_id=f"{prefix}-{index}",
+                **_identity(chat),
             )
         run = await session.scalar(
             select(OnDemandScanRun).where(OnDemandScanRun.user_id == user.id)
@@ -411,7 +425,8 @@ async def test_an_unreadable_scope_answer_keeps_the_question_and_the_scan(test_c
             ("Scanner", "what coins are up at least 5% now?", "24 hours"), start=1
         ):
             await service.handle_message(
-                session, chat, message=message, client_message_id=f"scope-bad-{index}"
+                session, chat, message=message, client_message_id=f"scope-bad-{index}",
+                **_identity(chat),
             )
         conversation = _conversation_of(chat)
         assert conversation.get("active_question_id") == SCAN_SCOPE_QUESTION
@@ -470,7 +485,8 @@ async def test_the_governed_scan_is_read_only_and_costs_no_model_call(test_conte
             ("Scanner", "what coins are up at least 5% now?", "24 hours"), start=1
         ):
             await service.handle_message(
-                session, chat, message=message, client_message_id=f"scanflow-ro-{index}"
+                session, chat, message=message, client_message_id=f"scanflow-ro-{index}",
+                **_identity(chat),
             )
 
         after = load_strategy_draft_v2(chat)

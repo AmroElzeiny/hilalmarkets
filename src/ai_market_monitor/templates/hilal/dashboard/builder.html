@@ -39,7 +39,18 @@
     <button type="button" data-guided-starter="I want to monitor price reaching or crossing a specific level.">Price level</button>
     <button type="button" data-guided-starter="">My own words</button>
   </div>
+      {# The assistant is unavailable. Said once, plainly, and never as a problem with
+         the setup. The guided fields on the right keep working. #}
+      <p class="ai-degraded-notice" data-ai-degraded role="status" aria-live="polite" hidden></p>
       <div class="ai-chat-error" data-ai-chat-error data-testid="ai-setup-request-error" role="alert" hidden><span data-ai-chat-error-text></span><button type="button" data-ai-chat-retry>Retry</button></div>
+      {# A big change, written down and waiting. Nothing has been applied while this is
+         showing. The lines inside come from the server's own before/after record, never
+         from the assistant's sentence about its own work. #}
+      <section class="ai-pending-change" data-ai-pending-change role="alertdialog" aria-live="assertive" aria-label="Confirm this change" hidden></section>
+      {# What the last turn really changed, and the ways back: undo, an older version,
+         or clearing the draft. Hidden until there is something to show. #}
+      <div class="ai-last-change" data-ai-last-change aria-label="What changed" hidden></div>
+      <div class="ai-draft-history" data-ai-draft-history aria-label="Go back" hidden></div>
       <form class="ai-chat-composer" data-ai-chat-form>
         <label class="sr-only" for="ai-setup-chat-input">Describe your setup</label>
         <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Describe your setup…"></textarea>
@@ -52,6 +63,10 @@
       <div class="ai-preview-head"><div class="ai-preview-title"><h2>AI Sheet</h2><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div></div>
       <div class="ai-preview-empty" data-ai-preview-empty><span class="icon-box"><span data-icon="scan" data-icon-class="icon-lg"></span></span><h3>Your reviewed rules will appear here</h3><p>Primary trigger, required filters, confirmations, screened universe, policy, assumptions, and alert behavior remain separate.</p></div>
       <div class="ai-preview-content" data-ai-preview-content data-testid="ai-setup-structured-preview" hidden></div>
+      {# The Guided Watchlist Builder. Every field in here is drawn from the server's
+         own contract, and every change goes through the same authority a chat message
+         does. It is the way to finish a setup when the assistant cannot help. #}
+      <section class="guided-builder" data-ai-guided-builder aria-label="Guided setup" hidden></section>
       <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve data-testid="ai-setup-approval" disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan data-testid="ai-setup-run-scanner" hidden>Run Scanner</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
     </aside>
   </div>

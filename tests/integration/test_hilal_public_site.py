@@ -36,6 +36,9 @@ async def _signup(test_context, email: str) -> None:
 async def test_every_public_page_renders_unique_metadata_without_prototype_content(
     test_context,
 ):
+    # Checked with waitlist mode off so the pricing page is rendered rather than
+    # redirected; its own metadata still has to be unique and complete.
+    test_context["settings"].public_waitlist_mode = False
     titles: set[str] = set()
     canonicals: set[str] = set()
 
@@ -133,6 +136,7 @@ async def test_public_legal_pages_do_not_expose_internal_launch_placeholders(
 
 
 async def test_public_header_and_footer_follow_the_central_navigation(test_context):
+    test_context["settings"].public_waitlist_mode = False
     response = await test_context["client"].get("/features")
     assert response.status_code == 200
     content = html.unescape(response.text)
@@ -152,6 +156,44 @@ async def test_public_header_and_footer_follow_the_central_navigation(test_conte
     assert ">Cookie Settings</button>" in content
 
 
+async def test_waitlist_mode_removes_every_public_route_into_the_product(test_context):
+    """Pre-launch, no public page may offer a plan, an account or the dashboard.
+
+    One setting decides this, so the header, the phone menu, the footer, the sitemap and
+    the pricing address all have to change together. A surface that kept its own copy of
+    the decision would still be inviting people to sign up after the switch was thrown.
+    """
+
+    assert test_context["settings"].public_waitlist_mode is True
+
+    for path in ("/features", "/how-it-works", "/help", "/about"):
+        response = await test_context["client"].get(path)
+        assert response.status_code == 200, path
+        content = html.unescape(response.text)
+        assert "Join the waitlist" in content, path
+        for forbidden in (">Sign in</a>", ">Start free</a>", ">Create a free account</a>"):
+            assert forbidden not in content, (path, forbidden)
+        # Menu entries for pages nobody can use are gone from the header and the footer.
+        assert ">Pricing</a>" not in content, path
+        assert ">Halal Assets</a>" not in content, path
+
+    # The plans and the comparison table are not reachable, and an old link lands on
+    # the waitlist rather than on a page of prices.
+    redirected = await test_context["client"].get("/pricing", follow_redirects=False)
+    assert redirected.status_code == 303
+    assert redirected.headers["location"] == "/#waitlist"
+
+    # A redirect is not a page to index.
+    sitemap = await test_context["client"].get("/sitemap.xml")
+    assert "/pricing</loc>" not in sitemap.text
+
+    # And the landing page carries no plan prices in its source at all.
+    landing = await test_context["client"].get("/")
+    assert '"plans": []' in landing.text
+    assert '"comparisonRows": []' in landing.text
+    assert "monthlyPrice" not in landing.text
+
+
 async def test_public_landing_is_available_without_screening_seed_data(test_context):
     response = await test_context["client"].get("/")
     assert response.status_code == 200
@@ -166,6 +208,9 @@ async def test_public_landing_is_available_without_screening_seed_data(test_cont
 
 async def test_every_public_shell_exposes_gtm_config_without_preloading(test_context):
     settings = test_context["settings"]
+    # Every public page has to carry the same consent-aware tag configuration, and that
+    # includes the pricing page, so it is checked with the pre-launch redirect off.
+    settings.public_waitlist_mode = False
     settings.vite_analytics_enabled = True
     settings.vite_gtm_id = "GTM-HILALTEST1"
     settings.vite_ga4_measurement_id = None
@@ -193,6 +238,7 @@ async def test_every_public_shell_exposes_gtm_config_without_preloading(test_con
 
 
 async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
+    test_context["settings"].public_waitlist_mode = False
     sitemap = await test_context["client"].get("/sitemap.xml")
     assert sitemap.status_code == 200
     for path in ("/", *(page.path for page in PUBLIC_PAGES)):
@@ -208,6 +254,9 @@ async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
 
 
 async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
+    # The pricing page only exists once the product is open, so this is asserted with
+    # waitlist mode off: it is the launch-day page that must match the dashboard.
+    test_context["settings"].public_waitlist_mode = False
     catalog = await test_context["client"].get("/api/v1/billing/plans")
     assert catalog.status_code == 200
     catalog_plans = {plan["code"]: plan for plan in catalog.json()["plans"]}

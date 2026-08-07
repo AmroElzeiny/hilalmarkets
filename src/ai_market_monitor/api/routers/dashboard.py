@@ -35,7 +35,7 @@ from ai_market_monitor.core.plans import (
     visible_plan_comparison_headers,
     visible_public_plan_codes,
 )
-from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION
+from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION, WAITLIST_ANCHOR
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -948,7 +948,11 @@ async def subscribe(
         billing_interval,
     )
     if selected_plan is None:
-        return _redirect("/#pricing")
+        # The landing page has no pricing section while the site is pre-launch, so a
+        # bad plan link would otherwise send the visitor to an anchor that is not there.
+        return _redirect(
+            WAITLIST_ANCHOR if settings.public_waitlist_mode else "/#pricing"
+        )
     user = await _current_user(request, session, settings)
     if user is None:
         selection_query = urlencode(

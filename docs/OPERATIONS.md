@@ -103,6 +103,7 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `STRIPE_SECRET_KEY` | Optional Stripe server API key if the provider is switched later. |
 | `STRIPE_PRICE_IDS` | Optional Stripe price-id map if the provider is switched later. |
 | `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED` | Requires Access headers in addition to application ADMIN auth. Enable only after origin access is restricted. |
+| `PUBLIC_WAITLIST_MODE` | Pre-launch mode for the public site. `true` replaces the pricing section and plan comparison with the waitlist form, turns every "Sign in" / "Start free" call to action into "Join the waitlist", removes Pricing and Halal Assets from the public menus and the sitemap, redirects `/pricing` to `/#waitlist`, and stops the support assistant from sending an anonymous visitor to an account page. `/signin`, `/signup` and the dashboard keep working for invited users; they are only unadvertised. Set `false` to restore the pricing site unchanged. |
 | `PUBLIC_CHAT_ENABLED` | Enables the separate public product-information assistant. |
 | `PUBLIC_CHAT_AI_ENABLED` | Enables grounded multi-turn AI support. Deployed public chat requires `true`. |
 | `PUBLIC_CHAT_AI_MODEL` / `PUBLIC_CHAT_AI_REASONING_EFFORT` | Configurable support model and effort; defaults to the main model and `low`. |

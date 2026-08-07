@@ -322,6 +322,77 @@ async def test_public_chat_answer_is_grounded_and_stores_only_redacted_audit(tes
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "How do I sign up?",
+        "How do I create an account?",
+        "How do I get access to Hilal Markets?",
+        "Where do I sign in?",
+        "How much does Hilal Markets cost?",
+        "Can you look up my account?",
+    ],
+)
+async def test_the_support_assistant_never_sends_a_visitor_to_an_account_page(
+    test_context,
+    question,
+):
+    """Pre-launch, "sign in" is an instruction a visitor cannot follow.
+
+    The assistant answers from server-owned facts, so the fix is in the fact itself:
+    while the site is invite-only, the only way in it knows about is the waitlist. Asked
+    six different ways, it must never name sign-in, sign-up, an account or the dashboard.
+    """
+
+    assert test_context["settings"].public_waitlist_mode is True
+    client = test_context["client"]
+    token = await _bootstrap(client)
+    response = await client.post(
+        "/api/v1/public-chat/answers",
+        headers={"X-CSRF-Token": token},
+        json={
+            "question": question,
+            "session_id": f"session_{abs(hash(question)):016d}"[:24],
+            "client_message_id": f"public-chat-access-{abs(hash(question))}"[:60],
+            "source_page": "/",
+        },
+    )
+    assert response.status_code == 200
+    message = response.json()["message"].casefold()
+    for forbidden in (
+        "sign in",
+        "sign-in",
+        "sign up",
+        "sign up",
+        "log in",
+        "create an account",
+        "dashboard entry",
+    ):
+        assert forbidden not in message, (question, forbidden)
+    assert response.json()["related_links"] == []
+
+
+async def test_the_support_assistant_answers_how_to_get_access_with_the_waitlist(
+    test_context,
+):
+    client = test_context["client"]
+    token = await _bootstrap(client)
+    response = await client.post(
+        "/api/v1/public-chat/answers",
+        headers={"X-CSRF-Token": token},
+        json={
+            "question": "How do I get access to Hilal Markets?",
+            "session_id": "session_access_00000001",
+            "client_message_id": "public-chat-access-waitlist-1",
+            "source_page": "/",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "answered"
+    assert "waitlist" in payload["message"].casefold()
+
+
+@pytest.mark.parametrize(
     ("question", "stage"),
     [
         ("hi", "GREETING_AND_PROFILE"),

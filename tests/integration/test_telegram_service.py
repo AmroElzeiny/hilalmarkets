@@ -291,7 +291,10 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
             )
         )
         assert "Pricing" in pricing.text
-        assert any(button.url and "/pricing#pricing" in button.url for button in pricing.buttons)
+        # Pre-launch there is no public pricing page to open, so the reply explains that
+        # rather than offering a button that lands on the waitlist under a price label.
+        assert "invite-only" in pricing.text
+        assert not any(button.url and "/pricing" in button.url for button in pricing.buttons)
         await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-feedback",

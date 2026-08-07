@@ -38,6 +38,9 @@ from ai_market_monitor.db.models import (
     NearMissSnapshot,
     ObservabilityExplanation,
     OutcomeReview,
+    SetupChatDraftSnapshot,
+    SetupChatPendingChange,
+    SetupChatTurn,
     SetupConditionResult,
     SetupInstance,
     SetupLifecycleEvent,
@@ -71,16 +74,38 @@ from ai_market_monitor.db.models.enums import (
     StrategyVersionStatus,
     UserStatus,
 )
+from ai_market_monitor.engine.builder_contract import (
+    LOGIC_CHOICES,
+    MODE_CHOICES,
+    UNIVERSE_CHOICES,
+    BuilderChoice,
+)
+from ai_market_monitor.engine.builder_operations import mechanic_catalog
+from ai_market_monitor.engine.builder_starters import STARTERS
+from ai_market_monitor.engine.builder_state import builder_state
 from ai_market_monitor.engine.condition_registry import condition_registry_payload
 from ai_market_monitor.engine.models import ensure_aware
+from ai_market_monitor.engine.setup_lifecycle import (
+    EDITABLE_STATES,
+    LifecycleState,
+    resolve_lifecycle,
+)
+from ai_market_monitor.engine.setup_lifecycle import describe as describe_lifecycle
+from ai_market_monitor.engine.setup_turn_lifecycle import holds_session
 from ai_market_monitor.schemas.ai_setup_chat import (
     MarketSnapshotResponse,
+    SetupBuilderActionRequest,
+    SetupBuilderState,
     SetupChatApprovalRequest,
+    SetupChatDraftActionRequest,
     SetupChatErrorEnvelope,
     SetupChatMessageRequest,
     SetupChatMessageResponse,
+    SetupChatPendingChangeResponse,
     SetupChatScanRequest,
     SetupChatSessionResponse,
+    SetupChatSnapshotSummary,
+    SetupChatTurnState,
 )
 from ai_market_monitor.schemas.on_demand import (
     LightScanRequest,
@@ -88,13 +113,15 @@ from ai_market_monitor.schemas.on_demand import (
     OnDemandScanResponse,
 )
 from ai_market_monitor.schemas.onboarding import GuidedSetupRequest
+from ai_market_monitor.schemas.setup_change_review import SetupDraftDiff
 from ai_market_monitor.schemas.strategy import (
     InterpretationIssue,
     InterpretationPreview,
     StrategyDefinition,
 )
-from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
+from ai_market_monitor.schemas.strategy_draft_v2 import ConditionNodeType, StrategyDraftV2
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
+from ai_market_monitor.services.ai_availability import availability_for
 from ai_market_monitor.services.ai_setup_chat import (
     AISetupChatService,
     SetupChatError,
@@ -119,7 +146,7 @@ from ai_market_monitor.services.openai_interpreter import configured_strategy_in
 from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
 )
-from ai_market_monitor.services.setup_chat_launch import load_strategy_draft_v2
+from ai_market_monitor.services.setup_chat_launch import LAST_DIFF_KEY, load_strategy_draft_v2
 from ai_market_monitor.services.setup_chat_lifecycle import (
     is_turn_complete,
     setup_lifecycle_state,
@@ -1016,6 +1043,157 @@ def get_ai_setup_chat_service(
     )
 
 
+def _stored_draft_diff(context: dict[str, Any]) -> SetupDraftDiff | None:
+    """The last turn's real before/after difference, if one was recorded.
+
+    A payload that no longer validates is reported as absent rather than partially
+    rendered. Half a diff is worse than none: it would show some changes and silently
+    hide others.
+    """
+
+    payload = context.get(LAST_DIFF_KEY)
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return SetupDraftDiff.model_validate(payload)
+    except ValidationError:
+        return None
+
+
+async def _pending_change_response(
+    session: AsyncSession,
+    chat: AISetupChatSession,
+    draft: StrategyDraftV2 | None,
+) -> SetupChatPendingChangeResponse | None:
+    """A change waiting on the user, with whether it can still be applied."""
+
+    row = await session.scalar(
+        select(SetupChatPendingChange)
+        .where(
+            SetupChatPendingChange.chat_session_id == chat.id,
+            SetupChatPendingChange.status == "pending",
+        )
+        .order_by(SetupChatPendingChange.created_at.desc())
+        .limit(1)
+    )
+    if row is None:
+        return None
+    try:
+        diff = SetupDraftDiff.model_validate(row.diff_json)
+    except ValidationError:
+        return None
+    expires = row.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    stale = datetime.now(UTC) >= expires or (
+        draft is not None
+        and (
+            row.executable_hash != draft.executable_hash
+            or row.workflow_state_hash != draft.workflow_state_hash
+        )
+    )
+    return SetupChatPendingChangeResponse(
+        proposal_id=row.proposal_id,
+        status="pending",
+        reasons=[str(item) for item in (row.reasons_json or [])],
+        summary_lines=[str(item) for item in (row.summary_json or [])],
+        governance_notes=[str(item) for item in (row.governance_notes_json or [])],
+        invalidates_approval=bool(row.invalidates_approval),
+        diff=diff,
+        expires_at=expires,
+        stale=stale,
+    )
+
+
+async def _turn_state_response(
+    session: AsyncSession,
+    chat: AISetupChatSession,
+) -> SetupChatTurnState:
+    """Whether a turn is in flight, so the composer waits instead of sending again.
+
+    Read from the same claim column the database uses to enforce one turn at a time, so
+    what the client shows and what the server allows cannot disagree.
+    """
+
+    held = await session.scalar(
+        select(SetupChatTurn).where(SetupChatTurn.session_claim == chat.id).limit(1)
+    )
+    if held is None or not holds_session(held.status):
+        return SetupChatTurnState(active=False, accepts_input=True)
+    started = held.created_at
+    if started is not None and started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    slow = started is not None and (datetime.now(UTC) - started).total_seconds() > 20
+    return SetupChatTurnState(
+        active=True,
+        stage=str(held.status or ""),
+        client_message_id=held.client_message_id,
+        accepts_input=False,
+        slow=slow,
+    )
+
+
+async def _snapshot_summaries(
+    session: AsyncSession,
+    chat: AISetupChatSession,
+    draft: StrategyDraftV2 | None,
+) -> list[SetupChatSnapshotSummary]:
+    """Restorable versions, described from each stored draft rather than from chat text."""
+
+    rows = list(
+        await session.scalars(
+            select(SetupChatDraftSnapshot)
+            .where(
+                SetupChatDraftSnapshot.chat_session_id == chat.id,
+                SetupChatDraftSnapshot.user_id == chat.user_id,
+            )
+            .order_by(SetupChatDraftSnapshot.executable_version.asc())
+            .limit(50)
+        )
+    )
+    summaries: list[SetupChatSnapshotSummary] = []
+    for row in rows:
+        try:
+            stored = StrategyDraftV2.model_validate(row.draft_json)
+        except ValidationError:
+            continue
+        created = row.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        summaries.append(
+            SetupChatSnapshotSummary(
+                snapshot_id=row.id,
+                executable_version=row.executable_version,
+                executable_hash=row.executable_hash,
+                created_at=created,
+                summary_lines=_draft_summary_lines(stored),
+                is_current=draft is not None and stored.executable_hash == draft.executable_hash,
+            )
+        )
+    return summaries
+
+
+def _draft_summary_lines(draft: StrategyDraftV2) -> list[str]:
+    """Plain sentences about one saved version, read off the draft itself."""
+
+    rules = 0
+    if draft.condition_ast is not None:
+        rules = sum(
+            1
+            for node in draft.condition_ast.walk()
+            if node.node_type == ConditionNodeType.CONDITION
+        )
+    lines = [f"{rules} rule" if rules == 1 else f"{rules} rules"]
+    if draft.name:
+        lines.insert(0, draft.name)
+    open_questions = len(draft.unresolved_fields)
+    if open_questions:
+        lines.append(
+            "1 open question" if open_questions == 1 else f"{open_questions} open questions"
+        )
+    return lines
+
+
 async def _setup_chat_response(
     service: AISetupChatService,
     session: AsyncSession,
@@ -1116,6 +1294,12 @@ async def _setup_chat_response(
         ),
         version_status=(approved_version.status.value if approved_version is not None else None),
     )
+    # Everything the client needs to show what happened, taken from stored server facts
+    # rather than inferred from the assistant's wording.
+    last_diff = _stored_draft_diff(chat_context)
+    pending_change = await _pending_change_response(session, chat, draft_v2)
+    turn_state = await _turn_state_response(session, chat)
+    snapshots = await _snapshot_summaries(session, chat, draft_v2)
     return SetupChatSessionResponse(
         id=chat.id,
         status=response_status,
@@ -1183,6 +1367,36 @@ async def _setup_chat_response(
         turn_execution_result=(
             replay_result if isinstance(replay_result, dict) else None
         ),
+        last_diff=last_diff,
+        pending_change=pending_change,
+        turn_state=turn_state,
+        snapshots=snapshots,
+        can_undo=any(not item.is_current for item in snapshots),
+        builder=(
+            SetupBuilderState.model_validate(
+                builder_state(
+                    draft_v2,
+                    editable=resolve_lifecycle(
+                        draft_v2, session_status=response_status
+                    )
+                    in EDITABLE_STATES,
+                )
+            )
+            if draft_v2 is not None
+            else None
+        ),
+        lifecycle=(
+            describe_lifecycle(resolve_lifecycle(draft_v2, session_status=response_status))
+            if draft_v2 is not None
+            else {}
+        ),
+        ai_availability=availability_for(
+            service.settings,
+            user_id=chat.user_id,
+            language=str((chat_context.get("setup_conversation_context") or {}).get(
+                "active_language"
+            ) or "en"),
+        ).to_dict(),
         updated_at=chat.updated_at,
     )
 
@@ -1392,6 +1606,169 @@ async def send_ai_setup_chat_message(
         mark_evaluator_fault_applied()
         return await _setup_chat_response(service, session, chat, error=envelope)
     mark_evaluator_fault_applied()
+    return await _setup_chat_response(service, session, chat)
+
+
+@router.post(
+    "/setup-chat/sessions/{chat_id}/draft-actions",
+    response_model=SetupChatSessionResponse,
+)
+async def run_ai_setup_chat_draft_action(
+    chat_id: UUID,
+    payload: SetupChatDraftActionRequest,
+    response: Response,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    """Undo, Restore, Reset, or answer a pending change.
+
+    Every one of these is a server-owned operation. None of them asks a model to rebuild
+    an old state, and each is keyed, so a double-clicked button acts once.
+    """
+
+    # Ownership is looked up inside the guard. Outside it, a setup that is not this
+    # person's escaped as an unhandled error and reached the browser as a bare 500 —
+    # which reads as "we are broken" rather than "that is not yours".
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+    except SetupChatError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    try:
+        await service.handle_draft_action(
+            session,
+            chat,
+            action=payload.action,
+            client_message_id=payload.client_message_id,
+            snapshot_id=payload.snapshot_id,
+            expected_executable_version=payload.expected_executable_version,
+            proposal_id=payload.proposal_id,
+            confirmed=payload.confirmed,
+        )
+        await session.commit()
+        await session.refresh(chat)
+    except SetupChatError as exc:
+        await session.rollback()
+        envelope = setup_chat_error_envelope(exc)
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        response.status_code = exc.status_code
+        return await _setup_chat_response(service, session, chat, error=envelope)
+    return await _setup_chat_response(service, session, chat)
+
+
+def _choice_payload(choice: BuilderChoice) -> dict[str, str]:
+    """One pickable value, with the words a person reads beside it."""
+
+    return {
+        "value": choice.value,
+        "label": choice.label,
+        "explanation": choice.explanation,
+    }
+
+
+@router.get("/setup-chat/builder-contract")
+async def ai_setup_chat_builder_contract(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Everything the guided Builder may draw, decided by the server.
+
+    The client renders from this and invents nothing: no timeframe it made up, no
+    comparison the compiler does not own, no capability the registry did not offer. A
+    mechanic the platform cannot run is listed with its reason rather than hidden, so a
+    person sees "not yet" instead of an option that quietly disappeared.
+    """
+
+    availability = availability_for(settings, user_id=principal.user_id)
+    return {
+        "mechanics": [
+            {
+                "key": item.key,
+                "version": item.version,
+                "label": item.label,
+                "explanation": item.explanation,
+                "category": item.category,
+                "unit": item.unit,
+                "available": item.available,
+                "unavailable_reason": item.unavailable_reason,
+                "provider_requirements": list(item.provider_requirements),
+                "timeframes": list(item.timeframes),
+                "examples": list(item.examples),
+                "operators": [_choice_payload(choice) for choice in item.operators],
+                "directions": [_choice_payload(choice) for choice in item.directions],
+                "parameters": [
+                    {
+                        "name": parameter.name,
+                        "label": parameter.label,
+                        "kind": parameter.kind,
+                        "required": parameter.required,
+                        "unit": parameter.unit,
+                        "help": parameter.help,
+                        "minimum": parameter.minimum,
+                        "maximum": parameter.maximum,
+                        "step": parameter.step,
+                        "default": parameter.default,
+                        "choices": [_choice_payload(choice) for choice in parameter.choices],
+                    }
+                    for parameter in item.parameters
+                ],
+            }
+            for item in mechanic_catalog()
+        ],
+        "starters": [item.to_dict() for item in STARTERS],
+        "modes": [_choice_payload(item) for item in MODE_CHOICES],
+        "universes": [_choice_payload(item) for item in UNIVERSE_CHOICES],
+        "logic": [_choice_payload(item) for item in LOGIC_CHOICES],
+        "lifecycle_states": [describe_lifecycle(state) for state in LifecycleState],
+        "ai_availability": availability.to_dict(),
+    }
+
+
+@router.post(
+    "/setup-chat/sessions/{chat_id}/builder-actions",
+    response_model=SetupChatSessionResponse,
+)
+async def run_ai_setup_chat_builder_action(
+    chat_id: UUID,
+    payload: SetupBuilderActionRequest,
+    response: Response,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> SetupChatSessionResponse:
+    """One guided change, with no model call anywhere in it.
+
+    This is the path that makes Setup Chat optional: every launch-supported setup can be
+    created, edited, reviewed and taken to approval through here, whether or not the
+    assistant is available.
+    """
+
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+    except SetupChatError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    try:
+        await service.handle_builder_action(
+            session,
+            chat,
+            action=payload.action,
+            client_message_id=payload.client_message_id,
+            value=payload.value,
+            mechanic_key=payload.mechanic_key,
+            values=payload.values,
+            node_id=payload.node_id,
+            required=payload.required,
+            order=payload.order,
+            join=payload.join,
+        )
+        await session.commit()
+        await session.refresh(chat)
+    except SetupChatError as exc:
+        await session.rollback()
+        envelope = setup_chat_error_envelope(exc)
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+        response.status_code = exc.status_code
+        return await _setup_chat_response(service, session, chat, error=envelope)
     return await _setup_chat_response(service, session, chat)
 
 

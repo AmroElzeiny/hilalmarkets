@@ -294,6 +294,50 @@ class Settings(BaseSettings):
     setup_chat_emergency_disabled: bool = False
     setup_chat_private_beta_user_ids: list[str] = Field(default_factory=list, max_length=10000)
     setup_chat_legacy_test_compat_enabled: bool = False
+    #: Bounded compatibility for clients deployed before question identity was required.
+    #: While it is on, a message sent with no ``question_id``/``step_revision`` while a
+    #: question is open is accepted and counted; while it is off, it is refused. It is
+    #: forbidden in a deployed environment: a permanently optional identity means a
+    #: message written against a screen that has moved on can still land on whatever
+    #: field is current now, which is a field the trader was never asked about.
+    setup_chat_allow_missing_answer_identity: bool = False
+    #: Emergency switch for the crash-recovery worker. Turning it off stops new recovery
+    #: work; it never hides a committed result, because a replay still answers from the
+    #: stored record. Left on by default: without recovery, a crashed turn locks its own
+    #: session and the user cannot send anything.
+    setup_chat_recovery_disabled: bool = False
+    #: How often stalled turns are looked for, in seconds. Shorter than the shortest
+    #: stage lease so a dead turn is never left holding a session for long.
+    setup_chat_recovery_interval_seconds: int = Field(default=60, ge=15, le=900)
+
+    # --- Independent controls, one per surface. -----------------------------------
+    #
+    # These are separate on purpose. When the planner is failing, the answer is to turn
+    # off the planner — not to take the whole product down. Each switch stands alone, so
+    # the Builder keeps working while any AI part is off, and turning the Builder off
+    # never affects live monitors.
+    #
+    #: Free-text messages in Setup Chat. Off means the composer is closed and the guided
+    #: fields are the way in. Everything already saved stays exactly as it is.
+    setup_free_text_enabled: bool = True
+    #: The planner: the model call that reads a sentence into operations.
+    setup_planner_enabled: bool = True
+    #: The composer: the model call that writes the reply. Off means replies are built
+    #: from the deterministic summary of what really changed.
+    setup_composer_enabled: bool = True
+    #: The Guided Watch Plan Builder. Off only for an emergency; with it off and AI off
+    #: there is no way to author a setup at all.
+    setup_builder_enabled: bool = True
+    #: Running a Scanner sweep from a reviewed draft.
+    setup_scanner_enabled: bool = True
+    #: Creating and running Monitors from a reviewed draft.
+    setup_monitor_enabled: bool = True
+    #: Cohort rollout for the Builder, by user id. Empty means everybody who is allowed
+    #: into Setup Chat at all. A non-empty list limits it to exactly those users.
+    setup_builder_user_ids: list[str] = Field(default_factory=list, max_length=10000)
+    #: Languages the assistant is offered in. Empty means every language the product
+    #: supports. A person outside the list still gets the Builder, which needs no model.
+    setup_ai_languages: list[str] = Field(default_factory=list, max_length=50)
 
     # --- Setup Agent bounds. These are the ones that control Setup Chat traffic. ---
     #: Retained for environment compatibility only. Authenticated Setup Chat never
@@ -464,6 +508,13 @@ class Settings(BaseSettings):
     public_chat_notion_max_characters: int = Field(default=12000, ge=1000, le=50000)
     public_chat_notion_max_file_bytes: int = Field(default=262144, ge=1024, le=2_000_000)
     public_forms_enabled: bool = True
+    # Pre-launch mode for the public marketing site. While it is on, the site asks
+    # visitors to join the waitlist instead of offering plans or account entry: no
+    # pricing, no plan comparison, no sign-in or sign-up call to action, and a support
+    # assistant that never sends an anonymous visitor to an account page. Sign-in and
+    # sign-up themselves keep working for the people already invited; they are simply
+    # not advertised. One setting owns this so no surface can disagree with another.
+    public_waitlist_mode: bool = True
     contact_form_sender_email: str = "office@hilalmarkets.com"
     contact_form_recipient_email: str = "office@hilalmarkets.com"
     public_form_email_max_attempts: int = Field(default=5, ge=1, le=20)
@@ -586,6 +637,10 @@ class Settings(BaseSettings):
         if self.is_deployed and self.setup_chat_legacy_test_compat_enabled:
             raise ValueError(
                 "SETUP_CHAT_LEGACY_TEST_COMPAT_ENABLED is forbidden outside local tests"
+            )
+        if self.is_deployed and self.setup_chat_allow_missing_answer_identity:
+            raise ValueError(
+                "SETUP_CHAT_ALLOW_MISSING_ANSWER_IDENTITY is forbidden outside local tests"
             )
         invalid_beta_ids = [
             item

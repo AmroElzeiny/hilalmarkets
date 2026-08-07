@@ -351,7 +351,10 @@ async def test_provider_unavailability_is_explicit_and_contains_no_invented_valu
     chat_id = await _new_chat(test_context)
     response = await test_context["client"].post(
         f"/api/v1/dashboard/setup-chat/sessions/{chat_id}/messages",
-        json={"message": "How is the market today?"},
+        json={
+            "message": "How is the market today?",
+            "client_message_id": "provider-unavailable-1",
+        },
     )
     assert response.status_code == 200, response.text
     latest = response.json()["messages"][-1]

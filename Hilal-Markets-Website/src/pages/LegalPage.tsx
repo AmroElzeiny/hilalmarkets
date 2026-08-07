@@ -71,7 +71,7 @@ function privacySections(privacyEmail: string): LegalSection[] {
       title: '3. Information we collect',
       content: (
         <BulletList>
-          <Bullet><strong>Waitlist and contact details:</strong> email address, message title, message content, submission time, source page, and optional first-touch campaign details. Country may be recorded from a trusted edge-provider country header; we do not ask your browser to disclose precise location.</Bullet>
+          <Bullet><strong>Waitlist and contact details:</strong> email address, whether you agreed to be contacted about private beta testing, message title, message content, submission time, source page, and optional first-touch campaign details. Country may be recorded from a trusted edge-provider country header; we do not ask your browser to disclose precise location.</Bullet>
           <Bullet><strong>Account and security information:</strong> name, email, password hash, verification and recovery records, session data, consent choices, security events, and audit records.</Bullet>
           <Bullet><strong>Product information:</strong> Screened Watchlist selections, Watchlist descriptions and approved rules, strategy versions, scans, setup lifecycles, alert evidence, settings, and notification preferences.</Bullet>
           <Bullet><strong>Shariah-evidence interactions:</strong> methodologies and Passport versions viewed or attached to evaluations. AI may support factual research, but it does not issue Shariah decisions.</Bullet>

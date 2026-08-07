@@ -271,6 +271,16 @@ class SetupChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="uq_setup_chat_turn_session_client_message",
         ),
         Index("ix_setup_chat_turn_session_status", "chat_session_id", "status"),
+        # One mutating turn may own a session at a time, enforced by the database and
+        # not only by a process lock. ``session_claim`` carries the session id while the
+        # turn is in flight and NULL once it settles, so the unique index is what makes
+        # a second concurrent turn impossible even across two web workers.
+        #
+        # A partial index would express the same rule, but NULL-with-unique works on
+        # both PostgreSQL and SQLite without dialect-specific clauses, and the test
+        # suite must be able to prove the constraint it ships.
+        UniqueConstraint("session_claim", name="uq_setup_chat_turn_active_claim"),
+        Index("ix_setup_chat_turn_lease", "status", "lease_expires_at"),
     )
 
     chat_session_id: Mapped[UUID] = mapped_column(
@@ -278,6 +288,17 @@ class SetupChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     client_message_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    #: What this request actually asked for. Reusing an id with different content is a
+    #: client bug, and answering it from the old record would show a reply to a message
+    #: the user never sent, so the mismatch is refused instead.
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    #: The session id while this turn holds it, NULL once it settles. See the unique
+    #: constraint above — this column *is* the lock.
+    session_claim: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_setup_chat_sessions.id", ondelete="CASCADE")
+    )
+    #: False for a read-only turn, which may run beside a mutating one.
+    is_mutating: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     source_message_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("ai_setup_chat_messages.id", ondelete="SET NULL")
     )
@@ -301,6 +322,29 @@ class SetupChatTurn(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     failure_details_json: Mapped[list[str] | None] = mapped_column(JSON)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The exact draft identity this turn planned against. Versions alone could not tell
+    #: "unchanged" from "changed and changed back", so the hashes travel with them.
+    executable_hash_before: Mapped[str | None] = mapped_column(String(64))
+    workflow_state_hash_before: Mapped[str | None] = mapped_column(String(64))
+    #: Which prompt and schema produced the plan. A plan built by an older prompt must
+    #: not be executed by a newer server that means something different by the same word.
+    prompt_version: Mapped[str | None] = mapped_column(String(40))
+    schema_version: Mapped[str | None] = mapped_column(String(40))
+    #: What the planner call actually cost and which provider request it was. Kept
+    #: separate from recovery usage so a replay can never overwrite the paid original.
+    planner_usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    provider_request_id: Mapped[str | None] = mapped_column(String(120))
+    #: When each lifecycle stage was entered. The recovery worker reads this to tell a
+    #: slow turn from a dead one.
+    stage_timestamps_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: Recovery bookkeeping. One owner at a time, holding a lease that expires.
+    lease_owner: Mapped[str | None] = mapped_column(String(80))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recovery_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    recovery_disposition: Mapped[str | None] = mapped_column(String(48))
+    #: Model calls made while recovering, counted apart from the original turn so the
+    #: cost report never merges a paid plan with a free deterministic replay.
+    recovery_usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 class SetupChatOperationalIssue(UUIDPrimaryKeyMixin, Base):
@@ -335,6 +379,58 @@ class SetupChatOperationalIssue(UUIDPrimaryKeyMixin, Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution_note: Mapped[str | None] = mapped_column(Text)
+
+
+class SetupChatPendingChange(UUIDPrimaryKeyMixin, Base):
+    """A destructive change that is proposed and not applied.
+
+    This is deliberately its own table rather than a field on the session. A proposal
+    is not draft state — nothing in the canonical draft moves while one exists — and
+    storing it beside the draft is how the two would start to be confused for each
+    other. It also has to outlive a crashed turn, so it cannot live only in memory.
+    """
+
+    __tablename__ = "setup_chat_pending_changes"
+    __table_args__ = (
+        UniqueConstraint("proposal_id", name="uq_setup_chat_pending_change_proposal"),
+        Index(
+            "ix_setup_chat_pending_change_owner",
+            "chat_session_id",
+            "status",
+            "expires_at",
+        ),
+    )
+
+    chat_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ai_setup_chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_turn_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("setup_chat_turns.id", ondelete="SET NULL")
+    )
+    client_message_id: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    #: The draft this was built against. Confirming against any other draft is refused.
+    executable_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    workflow_state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    executable_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: The authorized operations exactly as they were built. Confirming replays these;
+    #: it never re-reads the user's words and never calls a model.
+    operations_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    operation_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    diff_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    reasons_json: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    summary_json: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    invalidates_approval: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    governance_notes_json: Mapped[list[str] | None] = mapped_column(JSON)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class SetupChatDraftSnapshot(UUIDPrimaryKeyMixin, Base):

@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
+from ai_market_monitor.engine.clarification_continuation import workflow_continuation
 from ai_market_monitor.engine.conversation_language import (
     ConversationLanguage,
     localized,
@@ -43,6 +44,7 @@ from ai_market_monitor.engine.conversation_language import (
 from ai_market_monitor.engine.price_movement import movement_direction
 from ai_market_monitor.engine.turn_fragments import extract_symbols, extract_timeframes
 from ai_market_monitor.schemas.setup_authorization import ClarificationContract
+from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.schemas.timeframes import COMMON_TIMEFRAMES
 
 __all__ = [
@@ -102,6 +104,16 @@ _ANSWER_SHAPE: Final[dict[MissingChoice, str]] = {
     MissingChoice.MOVEMENT_KIND: "a rise, a fall, or both",
     MissingChoice.MOVEMENT_SIZE: "a percentage, for example 5%",
     MissingChoice.MEASUREMENT_WINDOW: "1 hour, 4 hours, or 1 day",
+}
+
+#: Which canonical field each missing choice fills. Named here so the question's stored
+#: completion targets the same field the rule assembler will read, instead of the two
+#: agreeing only by accident.
+_FIELD_FOR_CHOICE: Final[dict[MissingChoice, str]] = {
+    MissingChoice.SYMBOL_SCOPE: "symbols",
+    MissingChoice.MOVEMENT_KIND: "movement_direction",
+    MissingChoice.MOVEMENT_SIZE: "threshold",
+    MissingChoice.MEASUREMENT_WINDOW: "trigger_timeframe",
 }
 
 #: The offered choices, so the UI can show buttons and the answer stays bounded. A
@@ -385,6 +397,7 @@ def clarification_for_choice(
     language: ConversationLanguage,
     source_turn_id: str,
     threshold_percent: str | None = None,
+    draft: StrategyDraftV2 | None = None,
 ) -> ClarificationContract:
     """One typed question, in the conversation's language, in plain words.
 
@@ -396,16 +409,38 @@ def clarification_for_choice(
     threshold = f"{threshold_percent}%" if threshold_percent else "the"
     question = localized(_QUESTION_KEY[choice], language, threshold=threshold)
     digest = hashlib.sha256(f"{source_turn_id}:{choice.value}".encode()).hexdigest()[:20]
+    question_id = f"clarification_{digest}"
+    schema_text = json.dumps(
+        {"description": _ANSWER_SHAPE[choice]}, sort_keys=True, separators=(",", ":")
+    )
+    options = _options_for(choice, language)
+    field_name = _FIELD_FOR_CHOICE[choice]
     return ClarificationContract(
-        question_id=f"clarification_{digest}",
+        question_id=question_id,
         question=question,
         # The reason is operator-facing evidence, never shown as a second sentence.
         reason=f"supported request waiting on {choice.value}",
         target_type="condition_creation",
-        target_field=None,
-        expected_answer_schema=json.dumps(
-            {"description": _ANSWER_SHAPE[choice]}, sort_keys=True, separators=(",", ":")
-        ),
+        # Naming the canonical field is what tells the one answer resolver which
+        # vocabulary this question speaks. Left unnamed, it carried only a list of button
+        # labels, so a trader who typed the same choice in their own words was refused.
+        target_field=field_name,
+        expected_answer_schema=schema_text,
         mutating=True,
-        allowed_options=_options_for(choice, language),
+        allowed_options=options,
+        # The completion is built with the question, never derived afterwards from
+        # whatever code sees the reply. That ordering is the whole fix: a question
+        # created without one had to hand its answer to the planner, which had not seen
+        # the question and read the bare value as a fresh request with nothing in it.
+        continuation=workflow_continuation(
+            question_id=question_id,
+            workflow_id=f"supported_{digest}",
+            step_revision=0,
+            current_field=field_name,
+            remaining_fields=(),
+            allowed_values=options,
+            answer_schema=schema_text,
+            source_evidence=(),
+            draft=draft if draft is not None else StrategyDraftV2(),
+        ),
     )

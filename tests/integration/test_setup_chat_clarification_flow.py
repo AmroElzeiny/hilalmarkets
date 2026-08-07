@@ -182,6 +182,12 @@ class _Session:
         return contract.question if contract is not None else ""
 
     @property
+    def unresolved_ids(self) -> set[str]:
+        """The open items really in the draft, not the ones the conversation mentions."""
+
+        return {item.unresolved_id for item in self.draft.unresolved_fields}
+
+    @property
     def accepted(self) -> dict[str, Any]:
         workflow = self.conversation.pending_workflow
         return dict(workflow.accepted_values) if workflow is not None else {}
@@ -661,17 +667,44 @@ async def test_free_text_and_button_wording_reach_the_same_state(
     assert accepted.get("reference_point") in {"candle_open", "previous_close"}
 
 
-async def test_a_complete_new_instruction_is_allowed_to_take_the_turn() -> None:
-    """The one escape that is not cancellation: a whole new, buildable request."""
+async def test_a_complete_new_instruction_is_held_until_the_old_one_is_settled() -> None:
+    """A whole new request no longer just wins the turn.
+
+    It used to. The open question vanished and its blocker stayed in the draft, so the
+    setup was blocked for a reason nothing on screen mentioned any more — and the trader
+    had no way to see it or clear it. The new request is kept, nothing is applied, and
+    the trader is asked which they want first.
+    """
 
     session = _Session()
     await session.say(ALERT_REQUEST)
     calls_after_start = session.planner.calls
+    blocked = set(session.unresolved_ids)
+    assert blocked, "the half-built rule is canonical while it is open"
 
+    new_request = "alert me when BTC/USDT drops 3% on the 4h candle"
+    await session.say(new_request)
+
+    assert session.planner.calls == calls_after_start, "settling costs nothing"
+    assert session.conversation.held_request == new_request, "and loses nothing"
+    assert session.conversation.active_question is not None, "the question stays"
+    assert session.unresolved_ids == blocked, "and so does its blocker"
+
+
+async def test_the_held_instruction_reaches_the_planner_once_the_old_one_is_settled() -> None:
+    """Order is the whole point: settle first, then route what was waiting."""
+
+    session = _Session()
+    await session.say(ALERT_REQUEST)
     await session.say("alert me when BTC/USDT drops 3% on the 4h candle")
+    calls_before_settling = session.planner.calls
 
-    assert session.planner.calls > calls_after_start, (
-        "a complete new request must reach the planner, not be treated as an answer"
+    await session.say("cancel")
+
+    assert session.unresolved_ids == set(), "the abandoned requirement really went"
+    assert session.conversation.held_request is None, "the held request was used"
+    assert session.planner.calls > calls_before_settling, (
+        "the new request reaches the planner, but only after the old one is settled"
     )
 
 

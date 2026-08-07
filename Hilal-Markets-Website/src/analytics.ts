@@ -70,12 +70,29 @@ export type LegalRuntimeConfig = {
   reviewRequired?: boolean
 }
 
+/**
+ * The pre-launch message, sent by the server rather than written again here.
+ *
+ * The Jinja pages and these React pages are two different renderers of the same site. If
+ * each kept its own copy of the wording, one of them would still be describing an open
+ * product after the other had been changed.
+ */
+export type WaitlistRuntimeConfig = {
+  mode?: boolean
+  eyebrow?: string
+  headline?: string
+  body?: string
+  ctaLabel?: string
+  href?: string
+}
+
 declare global {
   interface Window {
     HilalMarketsRuntimeConfig?: {
       analytics?: AnalyticsRuntimeConfig
       legal?: LegalRuntimeConfig
       commerce?: CommerceRuntimeConfig
+      waitlist?: WaitlistRuntimeConfig
     }
     HilalAnalytics?: typeof publicAnalyticsApi
     dataLayer?: unknown[]
@@ -396,6 +413,66 @@ export function trackCtaClick(
   )
 }
 
+export type WaitlistErrorType =
+  | 'invalid_email'
+  | 'required_field'
+  | 'duplicate_email'
+  | 'rate_limited'
+  | 'network_error'
+  | 'server_error'
+  | 'unknown_error'
+
+export function trackWaitlistFormView(formLocation: string): boolean {
+  return emitOnce(`waitlist-view:${pagePath()}:${formLocation}`, () =>
+    emitGoogle('waitlist_form_view', {
+      form_location: formLocation.slice(0, 80),
+      page_path: pagePath(),
+    }),
+  )
+}
+
+export function trackWaitlistFormStart(formLocation: string): boolean {
+  return emitOnce(`waitlist-start:${pagePath()}:${formLocation}`, () =>
+    emitGoogle('waitlist_form_start', {
+      form_location: formLocation.slice(0, 80),
+      page_path: pagePath(),
+    }),
+  )
+}
+
+export function trackWaitlistSubmitAttempt(formLocation: string): boolean {
+  return emitDebounced(`waitlist-attempt:${pagePath()}:${formLocation}`, () =>
+    emitGoogle('waitlist_submit_attempt', {
+      form_location: formLocation.slice(0, 80),
+      page_path: pagePath(),
+    }),
+  )
+}
+
+export function trackWaitlistSuccess(
+  formLocation: string,
+  submissionId = '',
+): boolean {
+  const eventScope = submissionId.trim().slice(0, 128)
+    || `${pagePath()}:${formLocation.slice(0, 80)}`
+  const google = emitOnce(`waitlist-success:${eventScope}`, () =>
+    emitGoogle('waitlist_signup_success', {}),
+  )
+  const meta = emitOnce(`meta-lead:${eventScope}`, () => emitMeta('Lead'))
+  return google || meta
+}
+
+export function trackWaitlistError(
+  errorType: WaitlistErrorType,
+  formLocation: string,
+): boolean {
+  return emitGoogle('waitlist_form_error', {
+    error_type: errorType,
+    form_location: formLocation.slice(0, 80),
+    page_path: pagePath(),
+  })
+}
+
 function validPlanCode(value: string): value is PublicPlanCode {
   return value === 'demo' || value === 'trader' || value === 'pro'
 }
@@ -572,6 +649,11 @@ const publicAnalyticsApi = {
   trackSectionView,
   trackFaqOpen,
   trackCtaClick,
+  trackWaitlistFormView,
+  trackWaitlistFormStart,
+  trackWaitlistSubmitAttempt,
+  trackWaitlistSuccess,
+  trackWaitlistError,
   trackPricingSectionView,
   trackBillingIntervalChanged,
   trackPlanSelected,

@@ -61,3 +61,281 @@ body.ai-canvas-active .builder-shell{margin-right:370px}
 @media(max-width:1050px){.guided-builder-heading{display:grid}.guided-builder-heading-actions,.advanced-control-launcher{width:100%}.ai-setup-chat-shell{height:auto;min-height:0}}
 @media(max-width:700px){.guided-builder-heading h1{font-size:2.2rem}.guided-starts{flex-wrap:nowrap;overflow-x:auto}.guided-starts button{white-space:nowrap}.ai-chat-head-actions{flex-wrap:nowrap}.ai-setup-chat-shell{margin:0}body.ai-canvas-active .builder-shell{margin-right:0}.embedded-board-header{align-items:flex-start;flex-direction:column}.strategy-board-tools{width:100%;flex-wrap:wrap}.strategy-board-surface{min-height:470px}}
 @media(prefers-reduced-motion:reduce){.guided-starts button{transition:none}}
+
+/* ---------------------------------------------------------------------------
+   The Guided Watch Plan Builder.
+
+   Colours, spacing and shapes come from the dashboard's own tokens. Nothing here
+   introduces a new visual language: the guided fields sit inside the Strategy Canvas
+   panel and read as part of it.
+   --------------------------------------------------------------------------- */
+
+.guided-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 0 4px;
+  border-top: 1px solid var(--dash-line);
+}
+
+.gb-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gb-step {
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dash-line);
+  color: var(--dash-muted);
+  background: var(--dash-bg);
+}
+
+.gb-step[data-complete="true"] {
+  color: var(--dash-text);
+  border-color: var(--dash-mint);
+}
+
+.gb-step[data-complete="true"]::before {
+  content: "\2713\00a0";
+  color: var(--dash-mint);
+}
+
+.gb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gb-section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dash-text);
+}
+
+.gb-section-hint,
+.gb-field-help {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--dash-muted);
+}
+
+.gb-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gb-chip,
+.gb-button,
+.gb-starter {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--dash-line);
+  background: var(--dash-panel);
+  color: var(--dash-text);
+  cursor: pointer;
+}
+
+.gb-chip:hover,
+.gb-button:hover,
+.gb-starter:hover {
+  border-color: var(--dash-mint);
+}
+
+.gb-chip:focus-visible,
+.gb-button:focus-visible,
+.gb-starter:focus-visible,
+.guided-builder select:focus-visible,
+.guided-builder input:focus-visible {
+  outline: 2px solid var(--dash-mint);
+  outline-offset: 2px;
+}
+
+.gb-chip.is-selected {
+  border-color: var(--dash-mint);
+  box-shadow: inset 0 0 0 1px var(--dash-mint);
+  font-weight: 600;
+}
+
+.gb-button-primary {
+  border-color: var(--dash-mint);
+  font-weight: 600;
+}
+
+.gb-button-quiet {
+  background: transparent;
+  color: var(--dash-muted);
+}
+
+.gb-button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.gb-rule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gb-rule {
+  padding: 12px;
+  border: 1px solid var(--dash-line);
+  border-radius: 12px;
+  background: var(--dash-bg);
+}
+
+.gb-rule-text {
+  margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--dash-text);
+}
+
+.gb-rule-meta {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--dash-muted);
+}
+
+.gb-rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gb-rule-note {
+  font-size: 12px;
+  color: var(--dash-amber);
+  align-self: center;
+}
+
+.gb-rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  margin-top: 12px;
+  border: 1px solid var(--dash-line);
+  border-radius: 12px;
+  background: var(--dash-bg);
+}
+
+.gb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gb-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dash-text);
+}
+
+.gb-field-unit {
+  font-size: 12px;
+  color: var(--dash-muted);
+}
+
+.guided-builder select,
+.guided-builder input[type="text"],
+.guided-builder input[type="number"] {
+  font: inherit;
+  font-size: 14px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--dash-line);
+  background: var(--dash-panel);
+  color: var(--dash-text);
+  width: 100%;
+  max-width: 100%;
+}
+
+.gb-inline-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.gb-inline-field input {
+  flex: 1 1 180px;
+}
+
+.gb-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.gb-starters .gb-section-hint {
+  flex-basis: 100%;
+}
+
+.gb-lifecycle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dash-text);
+}
+
+.gb-lifecycle[data-state="approved"],
+.gb-lifecycle[data-state="active"],
+.gb-lifecycle[data-state="ready_for_review"] {
+  color: var(--dash-mint);
+}
+
+.gb-lifecycle[data-state="needs_information"],
+.gb-lifecycle[data-state="unsupported"],
+.gb-lifecycle[data-state="provider_unavailable"],
+.gb-lifecycle[data-state="invalidated_by_edit"] {
+  color: var(--dash-amber);
+}
+
+.gb-todo {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dash-muted);
+}
+
+.gb-open-question,
+.gb-unsupported {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--dash-amber);
+}
+
+.ai-degraded-notice {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--dash-amber);
+  background: var(--dash-bg);
+  color: var(--dash-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .guided-builder { gap: 14px; }
+  .gb-chip-row { gap: 6px; }
+  .gb-rule-actions .gb-button { flex: 1 1 auto; }
+}

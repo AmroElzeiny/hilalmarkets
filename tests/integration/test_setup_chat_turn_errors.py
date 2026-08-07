@@ -97,7 +97,10 @@ def test_validation_error_is_a_serialize_stage_failure_with_the_field() -> None:
 def test_maximum_valid_message_uses_a_bounded_non_authoritative_segment() -> None:
     message = "Keep this explanation concise. " * 180
     message = message[:SETUP_CHAT_MESSAGE_MAX_LENGTH]
-    request = SetupChatMessageRequest(message=message)
+    request = SetupChatMessageRequest(
+        message=message,
+        client_message_id="max-length-message-1",
+    )
     classification = _fallback_turn_classification(
         request.message,
         active_clarification=None,

@@ -186,6 +186,26 @@ body:hover *::-webkit-scrollbar-thumb {
   outline-offset: 3px;
 }
 
+/* ---- Waitlist form ------------------------------------------------------ */
+/* The form sits on the apple-green panel, where the green focus ring used
+   everywhere else would disappear. Near-black keeps the ring visible without
+   introducing a second focus colour anywhere it is not needed. */
+#waitlist input:focus-visible,
+#waitlist button:focus-visible {
+  outline: 3px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+#waitlist button[type='submit'] {
+  min-height: 44px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #waitlist button {
+    transition: none;
+  }
+}
+
 .site-mobile-menu {
   position: absolute;
   top: calc(100% + 12px);

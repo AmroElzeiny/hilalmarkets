@@ -29,6 +29,9 @@ from ai_market_monitor.engine.active_clarification import (
     effects_of,
     handler_for,
     has_registered_handler,
+    may_be_rendered,
+    orphan_reason,
+    plan_transition,
     registered_target_types,
     resolve_active_clarification_turn,
     stale_step,
@@ -44,6 +47,14 @@ from ai_market_monitor.engine.active_question import (
     normalize_answer_text,
     resolve_active_answer,
     resolve_confirmation,
+)
+from ai_market_monitor.engine.clarification_continuation import (
+    ContinuationAnswer,
+    ContinuationRefused,
+    build_continuation_operations,
+    continuation_for_unresolved,
+    continuation_is_deterministic,
+    registered_builders,
 )
 from ai_market_monitor.engine.conversation_intent import scan_window_answer
 from ai_market_monitor.engine.conversation_language import ConversationLanguage
@@ -64,6 +75,22 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
 from ai_market_monitor.schemas.timeframes import COMMON_TIMEFRAMES
 
 TARGET_TYPES = sorted(registered_target_types())
+
+
+def _blocked_draft(unresolved_id: str = "supported_1") -> StrategyDraftV2:
+    """A draft holding one real open requirement, so a question really strands something."""
+
+    return StrategyDraftV2(
+        unresolved_fields=[
+            UnresolvedFieldV2(
+                unresolved_id=unresolved_id,
+                source_fragment="alert me when BTC rises 5%",
+                target_type="condition_creation",
+                question="Which candle period should I use?",
+                reason="one user-controlled choice is still required",
+            )
+        ]
+    )
 
 
 def _decide(
@@ -170,55 +197,110 @@ def test_every_transition_declares_what_it_is_allowed_to_do(
     effects = effects_of(transition)
     assert isinstance(effects.question_stays_active, bool)
     assert isinstance(effects.commits_value, bool)
-    assert isinstance(effects.changes_draft_state, bool)
+    assert isinstance(effects.may_change_canonical_state, bool)
     assert isinstance(effects.changes_workflow_state, bool)
-    assert isinstance(effects.planner_may_build_the_operation, bool)
+    assert isinstance(effects.releases_the_turn, bool)
 
 
 @pytest.mark.parametrize("transition", list(TransitionOutcome))
-def test_the_planner_never_decides_whether_a_question_was_answered(
+@pytest.mark.parametrize("route", list(ApplyRoute))
+def test_no_answer_transition_may_ever_spend_a_model_call(
     transition: TransitionOutcome,
+    route: ApplyRoute,
 ) -> None:
-    """The one rule that has no exception anywhere in the table."""
+    """The non-negotiable invariant, checked on every outcome × every route.
 
-    assert effects_of(transition).planner_may_decide_the_answer is False
+    The one exception is a genuinely separate new request, which is not an answer to
+    anything and is allowed to reach the planner as the fresh instruction it is.
+    """
 
-
-@pytest.mark.parametrize("transition", list(TransitionOutcome))
-def test_a_transition_that_stores_nothing_never_reaches_the_planner(
-    transition: TransitionOutcome,
-) -> None:
-    """An answer we could not use must not become a request we try to build."""
-
-    effects = effects_of(transition)
+    plan = plan_transition(transition, route=route)
     if transition is TransitionOutcome.NEW_REQUEST:
+        assert plan.may_route_new_request is True
         return
-    if not effects.commits_value:
-        assert effects.planner_may_build_the_operation is False, transition
+    assert plan.model_calls_allowed is False, (transition, route)
+    assert plan.may_route_new_request is False, (transition, route)
 
 
-@pytest.mark.parametrize("transition", list(TransitionOutcome))
+@pytest.mark.parametrize("route", list(ApplyRoute))
 def test_a_transition_that_keeps_the_question_never_changes_the_draft(
-    transition: TransitionOutcome,
+    route: ApplyRoute,
 ) -> None:
-    effects = effects_of(transition)
-    if effects.question_stays_active:
-        assert effects.changes_draft_state is False, transition
+    for transition in TransitionOutcome:
+        plan = plan_transition(transition, route=route)
+        if plan.question_stays_active:
+            assert plan.changes_executable_draft_state is False, (transition, route)
+            assert plan.operation == "", (transition, route)
 
 
-@pytest.mark.parametrize("transition", list(TransitionOutcome))
-def test_only_a_committing_transition_commits(transition: TransitionOutcome) -> None:
-    effects = effects_of(transition)
-    if effects.commits_value:
-        assert effects.changes_draft_state is True, transition
-        assert effects.question_stays_active is False, transition
+@pytest.mark.parametrize("route", list(ApplyRoute))
+def test_only_a_committing_transition_commits(route: ApplyRoute) -> None:
+    for transition in TransitionOutcome:
+        plan = plan_transition(transition, route=route)
+        if plan.accepts_value:
+            assert plan.question_stays_active is False, (transition, route)
+
+
+def test_a_scanner_answer_never_touches_executable_state() -> None:
+    """A resolved Scanner window is not a rule change, and must never report as one."""
+
+    plan = plan_transition(TransitionOutcome.RESOLVED, route=ApplyRoute.PENDING_SCAN)
+    assert plan.accepts_value is True
+    assert plan.changes_executable_draft_state is False
+    assert plan.changes_draft_workflow_state is False
+    assert plan.runs_gates is False
+    assert plan.operation == ""
+
+
+def test_a_governed_answer_reports_the_exact_policy_operation() -> None:
+    plan = plan_transition(TransitionOutcome.RESOLVED, route=ApplyRoute.GOVERNED_OPTION)
+    assert plan.changes_executable_draft_state is True
+    assert plan.operation == "set_sharia_policy"
+    assert plan.runs_gates is True
+
+
+def test_an_accepted_workflow_step_advances_draft_side_progress() -> None:
+    plan = plan_transition(
+        TransitionOutcome.CONFIRMATION_ACCEPTED,
+        route=ApplyRoute.SUPPORTED_RULE_WORKFLOW,
+    )
+    assert plan.changes_draft_workflow_state is True
+    assert plan.operation == "update_unresolved"
 
 
 def test_pausing_changes_no_canonical_state() -> None:
     """That is the whole difference between pausing and cancelling."""
 
-    assert effects_of(TransitionOutcome.PAUSED).changes_draft_state is False
-    assert effects_of(TransitionOutcome.CANCELLED).changes_draft_state is True
+    blocker = CanonicalBlocker("resolve_unresolved_key", "supported_1")
+    paused = plan_transition(
+        TransitionOutcome.PAUSED,
+        route=ApplyRoute.SUPPORTED_RULE_WORKFLOW,
+        blocker=blocker,
+        cancellation=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    cancelled = plan_transition(
+        TransitionOutcome.CANCELLED,
+        route=ApplyRoute.SUPPORTED_RULE_WORKFLOW,
+        blocker=blocker,
+        cancellation=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    )
+    assert paused.changes_executable_draft_state is False
+    assert paused.operation == ""
+    assert cancelled.changes_executable_draft_state is True
+    assert cancelled.operation == "resolve_unresolved_key"
+
+
+def test_cancelling_with_nothing_behind_it_removes_nothing() -> None:
+    """A reply may only claim a removal that really happened."""
+
+    plan = plan_transition(
+        TransitionOutcome.CANCELLED,
+        route=ApplyRoute.PENDING_SCAN,
+        blocker=None,
+        cancellation=CancellationPolicy.CANCEL_CONVERSATION_ONLY,
+    )
+    assert plan.changes_executable_draft_state is False
+    assert plan.operation == ""
 
 
 @pytest.mark.parametrize("transition", list(TransitionOutcome))
@@ -600,7 +682,7 @@ def test_an_unclear_confirmation_stays_a_confirmation() -> None:
     assert decision is not None
     assert decision.transition is TransitionOutcome.CONFIRM_CANDIDATE
     assert decision.proposed_value == "1h"
-    assert decision.effects.planner_may_build_the_operation is False
+    assert decision.plan.model_calls_allowed is False
 
 
 def test_several_plausible_readings_are_not_the_same_as_none() -> None:
@@ -736,9 +818,41 @@ def test_no_question_means_no_decision_to_make() -> None:
     assert _decide(SetupConversationContext(), "1h") is None
 
 
-def test_the_mode_button_always_takes_the_turn() -> None:
+def test_a_mode_button_with_nothing_canonical_open_may_take_the_turn() -> None:
+    """No blocker and no continuation means nothing is stranded by letting it through."""
+
     conversation = SetupConversationContext().with_question(_contract("condition_creation"))
-    assert _decide(conversation, "Scanner", mode_selected=True) is None
+    decision = _decide(conversation, "Scanner", mode_selected=True)
+    assert decision is not None
+    assert decision.transition is TransitionOutcome.NEW_REQUEST
+    assert decision.owns_the_turn is False
+
+
+def test_a_mode_button_over_a_real_requirement_must_be_settled_first() -> None:
+    """A mode switch used to bypass ownership entirely and hide the open blocker."""
+
+    contract = _contract("condition_creation", workflow_id="supported_1")
+    conversation = SetupConversationContext().with_question(contract)
+    decision = _decide(conversation, "Scanner", mode_selected=True, draft=_blocked_draft())
+    assert decision is not None
+    assert decision.transition is TransitionOutcome.REPLACEMENT_REQUIRED
+    assert decision.owns_the_turn is True
+    assert decision.plan.changes_executable_draft_state is False
+    assert decision.plan.model_calls_allowed is False
+
+
+def test_a_new_request_over_a_real_requirement_must_be_settled_first() -> None:
+    contract = _contract("condition_creation", workflow_id="supported_1")
+    conversation = SetupConversationContext().with_question(contract)
+    decision = _decide(
+        conversation,
+        "alert me when ETH falls 3% on the 15m candle",
+        draft=_blocked_draft(),
+        looks_like_new_request=True,
+    )
+    assert decision is not None
+    assert decision.transition is TransitionOutcome.REPLACEMENT_REQUIRED
+    assert decision.plan.may_route_new_request is False
 
 
 @pytest.mark.parametrize("target_type", TARGET_TYPES)
@@ -752,7 +866,7 @@ def test_a_typo_never_falls_through_to_general_routing(target_type: str) -> None
     assert decision is not None
     assert decision.owns_the_turn is True
     assert decision.transition is not TransitionOutcome.NEW_REQUEST
-    assert decision.effects.planner_may_build_the_operation is False
+    assert decision.plan.model_calls_allowed is False
 
 
 @pytest.mark.parametrize("target_type", TARGET_TYPES)
@@ -777,7 +891,7 @@ def test_an_invalid_answer_keeps_every_question_type_open(target_type: str) -> N
     assert decision.transition is TransitionOutcome.INVALID
     assert decision.keeps_the_question is True
     assert decision.canonical_value is None
-    assert decision.effects.planner_may_build_the_operation is False
+    assert decision.plan.model_calls_allowed is False
 
 
 @pytest.mark.parametrize("target_type", TARGET_TYPES)
@@ -830,3 +944,325 @@ def test_the_choices_shown_back_are_in_the_conversation_language(
     assert decision is not None
     assert decision.display_labels
     assert "candle_open" not in decision.display_labels or language is None
+
+
+# ---------------------------------------------------------------------------------
+# Every mutating question carries a deterministic continuation, or is not asked
+# ---------------------------------------------------------------------------------
+
+
+def test_every_continuation_kind_has_a_registered_builder() -> None:
+    """Fail closed at import: a kind with no builder stops the process from starting."""
+
+    from ai_market_monitor.schemas.clarification_continuation import ContinuationKind
+
+    assert registered_builders() == {str(item) for item in ContinuationKind}
+
+
+def test_every_registered_continuation_applies_without_a_model_call() -> None:
+    from ai_market_monitor.schemas.clarification_continuation import ContinuationKind
+
+    for kind in ContinuationKind:
+        assert continuation_is_deterministic(_KindProbe(kind)) is True
+
+
+class _KindProbe:
+    """The smallest thing that answers "which kind are you?"."""
+
+    def __init__(self, kind: object) -> None:
+        self.kind = kind
+
+
+@pytest.mark.parametrize("target_type", TARGET_TYPES)
+def test_a_mutating_question_without_a_continuation_is_never_rendered(
+    target_type: str,
+) -> None:
+    """The no-orphan rule, across every question kind there is.
+
+    An orphan is a question whose correct answer has nowhere to go: the trader types the
+    right thing and is told it was not understood, every time, with no way forward.
+    """
+
+    contract = _contract(target_type, target_field="trigger_timeframe")
+    if not contract.mutating:
+        assert may_be_rendered(contract, StrategyDraftV2()) is True
+        return
+    assert may_be_rendered(contract, StrategyDraftV2()) is False
+    assert "continuation" in orphan_reason(contract, StrategyDraftV2())
+
+
+def test_a_blocker_with_no_deterministic_completion_is_not_asked_about() -> None:
+    """A topology cannot be derived from a word, so no honest continuation exists."""
+
+    item = UnresolvedFieldV2(
+        unresolved_id="boolean_1",
+        source_fragment="either of those two",
+        target_type="boolean_structure",
+        question="How should those rules combine?",
+        reason="the shape is ambiguous",
+    )
+    built = continuation_for_unresolved(
+        item,
+        StrategyDraftV2(),
+        question_id="boolean_1",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+    )
+    assert built is None
+
+
+def test_a_draft_field_blocker_builds_the_operation_it_promised() -> None:
+    item = UnresolvedFieldV2(
+        unresolved_id="name_1",
+        source_fragment="call it my breakout watch",
+        target_type="draft_field",
+        target_field="name",
+        question="What should I call this setup?",
+        reason="a monitor needs a name",
+    )
+    continuation = continuation_for_unresolved(
+        item,
+        StrategyDraftV2(),
+        question_id="name_1",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    assert continuation is not None
+    operations = build_continuation_operations(
+        continuation,
+        ContinuationAnswer(canonical_value="My breakout watch", evidence="call it that"),
+        draft=StrategyDraftV2(),
+    )
+    assert [item.kind for item in operations] == ["set_fields", "resolve_unresolved_key"]
+    assert operations[0].fields is not None
+    assert operations[0].fields.name == "My breakout watch"
+    assert operations[1].target_key == "name_1"
+
+
+def test_a_continuation_refuses_a_value_the_step_cannot_run() -> None:
+    """Never clamp, never substitute: a value outside the step is refused."""
+
+    item = UnresolvedFieldV2(
+        unresolved_id="name_2",
+        source_fragment="use spot",
+        target_type="draft_field",
+        target_field="market_type",
+        question="Which market type?",
+        reason="the market type is required",
+        allowed_options=["spot"],
+    )
+    continuation = continuation_for_unresolved(
+        item,
+        StrategyDraftV2(),
+        question_id="name_2",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        allowed_values=["spot"],
+    )
+    assert continuation is not None
+    with pytest.raises(ContinuationRefused) as refused:
+        build_continuation_operations(
+            continuation,
+            ContinuationAnswer(canonical_value="futures", evidence="use futures"),
+            draft=StrategyDraftV2(),
+        )
+    assert refused.value.code == "CONTINUATION_VALUE_NOT_EXECUTABLE"
+
+
+def test_a_continuation_refuses_an_answer_written_against_a_draft_that_moved() -> None:
+    """The answer belongs to a state that no longer exists, so it is asked again."""
+
+    moved = StrategyDraftV2(name="Renamed")
+    item = UnresolvedFieldV2(
+        unresolved_id="name_3",
+        source_fragment="call it that",
+        target_type="draft_field",
+        target_field="name",
+        question="What should I call this setup?",
+        reason="a monitor needs a name",
+    )
+    continuation = continuation_for_unresolved(
+        item,
+        StrategyDraftV2(),
+        question_id="name_3",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    assert continuation is not None
+    # The draft the question was asked against, whatever its hash happened to be.
+    continuation = continuation.model_copy(update={"expected_executable_hash": "a" * 64})
+    with pytest.raises(ContinuationRefused) as refused:
+        build_continuation_operations(
+            continuation,
+            ContinuationAnswer(canonical_value="Renamed", evidence="call it Renamed"),
+            draft=moved,
+        )
+    assert refused.value.code == "CONTINUATION_DRAFT_MOVED"
+
+
+def test_a_continuation_must_belong_to_the_question_that_carries_it() -> None:
+    """The displayed question and the stored plan can never describe different things."""
+
+    continuation = continuation_for_unresolved(
+        UnresolvedFieldV2(
+            unresolved_id="name_4",
+            source_fragment="call it that",
+            target_type="draft_field",
+            target_field="name",
+            question="What should I call this setup?",
+            reason="a monitor needs a name",
+        ),
+        StrategyDraftV2(),
+        question_id="a_different_question",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    with pytest.raises(ValueError, match="different question"):
+        ClarificationContract(
+            question_id="name_4",
+            question="What should I call this setup?",
+            reason="a monitor needs a name",
+            target_type="draft_field",
+            target_field="name",
+            expected_answer_schema='{"type":"string"}',
+            mutating=True,
+            cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+            continuation=continuation,
+        )
+
+
+# ---------------------------------------------------------------------------------
+# Every producer of a question obeys the same rule
+# ---------------------------------------------------------------------------------
+
+
+def test_every_question_producer_supplies_a_continuation() -> None:
+    """A future producer that forgets is caught here, not by a stranded trader.
+
+    Read from the source rather than by calling each builder, because the point is to
+    catch the *next* one: a new ``ClarificationContract(...)`` added anywhere in the
+    server must either be non-mutating or carry the completion that will apply its
+    answer. There is no third option that leaves a trader able to reply.
+    """
+
+    import pathlib
+
+    def _call_bodies(text: str, opener: str) -> list[str]:
+        """Every ``opener(...)`` call body, with nested brackets balanced properly.
+
+        A regular expression stops at the first closing bracket it sees, which here is
+        the one closing a wrapped ``question=(...)`` string — so it read a real producer
+        as if it had no continuation. Counting brackets is the only honest way.
+        """
+
+        bodies: list[str] = []
+        start = text.find(opener)
+        while start >= 0:
+            index = start + len(opener)
+            depth = 1
+            while index < len(text) and depth:
+                if text[index] == "(":
+                    depth += 1
+                elif text[index] == ")":
+                    depth -= 1
+                index += 1
+            bodies.append(text[start + len(opener) : index - 1])
+            start = text.find(opener, index)
+        return bodies
+
+    sources = sorted(pathlib.Path("src/ai_market_monitor").rglob("*.py"))
+    constructions: list[tuple[str, str]] = []
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        constructions.extend(
+            (path.name, body)
+            for body in _call_bodies(text, "ClarificationContract(")
+            # The class statement itself is not a producer.
+            if "StrictModel" not in body.strip()
+        )
+
+    assert len(constructions) >= 6, "the producers moved; this test must be pointed at them"
+    for name, body in constructions:
+        non_mutating = "mutating=False" in body
+        carries = "continuation=" in body
+        assert non_mutating or carries, (
+            f"{name} builds a mutating question with no continuation:\n{body[:400]}"
+        )
+
+
+def test_the_question_and_its_continuation_must_describe_one_thing() -> None:
+    """Shown and stored can never be about different fields, objects or steps."""
+
+    continuation = continuation_for_unresolved(
+        UnresolvedFieldV2(
+            unresolved_id="name_5",
+            source_fragment="call it that",
+            target_type="draft_field",
+            target_field="name",
+            question="What should I call this setup?",
+            reason="a monitor needs a name",
+        ),
+        StrategyDraftV2(),
+        question_id="name_5",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    assert continuation is not None
+
+    def _build(**overrides: object) -> ClarificationContract:
+        payload: dict[str, object] = {
+            "question_id": "name_5",
+            "question": "What should I call this setup?",
+            "reason": "a monitor needs a name",
+            "target_type": "draft_field",
+            "target_field": "name",
+            "expected_answer_schema": '{"type":"string"}',
+            "mutating": True,
+            "cancellation_policy": CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+            "continuation": continuation,
+        }
+        payload.update(overrides)
+        return ClarificationContract(**payload)  # type: ignore[arg-type]
+
+    assert _build().continuation is not None
+    with pytest.raises(ValueError, match="different step"):
+        _build(step_revision=1)
+    with pytest.raises(ValueError, match="disagree about cancelling"):
+        _build(cancellation_policy=CancellationPolicy.REMOVE_PENDING_REQUIREMENT)
+
+
+def test_a_rendered_question_never_leaks_the_server_plan_to_the_client() -> None:
+    """The stored plan is the server's business: a rule template, a hash, a control."""
+
+    continuation = continuation_for_unresolved(
+        UnresolvedFieldV2(
+            unresolved_id="name_6",
+            source_fragment="call it that",
+            target_type="draft_field",
+            target_field="name",
+            question="What should I call this setup?",
+            reason="a monitor needs a name",
+        ),
+        StrategyDraftV2(),
+        question_id="name_6",
+        step_revision=0,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+    )
+    contract = ClarificationContract(
+        question_id="name_6",
+        question="What should I call this setup?",
+        reason="a monitor needs a name",
+        target_type="draft_field",
+        target_field="name",
+        expected_answer_schema='{"type":"string"}',
+        mutating=True,
+        cancellation_policy=CancellationPolicy.PAUSE_PENDING_REQUIREMENT,
+        continuation=continuation,
+    )
+
+    payload = contract.client_payload()
+
+    assert "continuation" not in payload
+    # Everything the client actually needs is still there.
+    assert payload["question_id"] == "name_6"
+    assert payload["step_revision"] == 0

@@ -36,11 +36,12 @@ from pydantic_core import PydanticUndefined
 
 from ai_market_monitor.db.models.enums import ShariaUniverseMode
 from ai_market_monitor.engine.action_grounding import SemanticAction, action_is_grounded
-from ai_market_monitor.engine.active_clarification import has_registered_handler
+from ai_market_monitor.engine.active_clarification import may_be_rendered
 from ai_market_monitor.engine.capability_contract import (
     capability_condition_errors,
     grounded_operator_and_timeframe,
 )
+from ai_market_monitor.engine.clarification_continuation import continuation_for_unresolved
 from ai_market_monitor.engine.draft_diff import DraftChange, diff_drafts
 from ai_market_monitor.engine.operation_reconciliation import (
     TurnReconciliation,
@@ -75,6 +76,10 @@ from ai_market_monitor.engine.semantic_grounding import (
     grounds_timeframe_role,
     grounds_unit,
 )
+from ai_market_monitor.engine.setup_lifecycle import (
+    chat_status_for,
+    turn_lifecycle_state,
+)
 from ai_market_monitor.engine.strategy_compiler_v2 import (
     StrategyV2CompileError,
     compile_strategy_draft_v2,
@@ -86,6 +91,11 @@ from ai_market_monitor.engine.strategy_draft_v2 import (
     validate_draft_semantics,
 )
 from ai_market_monitor.engine.turn_timing import TurnTelemetry, null_telemetry
+from ai_market_monitor.schemas.clarification_continuation import (
+    DEFAULT_CANCELLATION_POLICY,
+    CancellationPolicy,
+    metadata_from_completion_contract,
+)
 from ai_market_monitor.schemas.screening_execution import (
     PreflightManifest,
     ScreeningExecutionResult,
@@ -136,11 +146,6 @@ ApprovalStatus = Literal["not_eligible", "eligible", "approved", "invalidated_by
 
 #: How many questions one draft may ask.
 MAX_CLARIFICATIONS_PER_DRAFT = 3
-
-# JSON-Schema extension written only by the server when a supported rule is being
-# completed across several turns.  It lives on the canonical unresolved record, so
-# earlier grounded values are never taken from mutable conversation prose.
-_SUPPORTED_REQUEST_SCHEMA_KEY = "x-hilal-supported-request"
 
 #: Segment kinds that can never author a change, however the plan labels them.
 #: A boundary refusal, an approval request or a question is answered in words only.
@@ -1051,7 +1056,7 @@ def _ground_set_fields(
     unresolved: dict[str, Any],
     unsupported: dict[str, Any],
 ) -> list[str]:
-    del request, existing, unresolved, unsupported
+    del existing, unresolved, unsupported
     assert operation.fields is not None
     text = segment.exact_source_text.casefold()
     errors: list[str] = []
@@ -1065,6 +1070,12 @@ def _ground_set_fields(
             grounded = rendered in text
         else:
             grounded = bool(re.search(rf"(?<!\w){re.escape(rendered)}(?!\w)", text))
+        # A confirmed near miss was written across two turns. This turn's words are only
+        # "yes", and nothing in "yes" says `1h` — so the confirmation itself is the
+        # evidence. It is not a weakening: the value must be exactly the candidate the
+        # server put to the trader, for exactly this field, agreed to on this turn.
+        if not grounded and _confirmation_grounds(request, field_name, value):
+            grounded = True
         if not grounded:
             errors.append(f"{operation.operation_id}:set_fields:{field_name}:not_grounded")
     return errors
@@ -1330,15 +1341,14 @@ def _ground_symbol_operation(
 
 
 def _is_supported_unresolved(item: Any) -> bool:
-    return bool(
-        item is not None
-        and isinstance(
-            getattr(item, "expected_answer_schema", {}).get(
-                _SUPPORTED_REQUEST_SCHEMA_KEY
-            ),
-            dict,
-        )
-    )
+    """Whether this blocker is a multi-step requirement the server is completing.
+
+    Read from the one canonical record. It used to be read from a key inside the answer
+    *shape*, which meant a requirement was "in progress" only as long as two different
+    writers happened to agree about a JSON-Schema extension.
+    """
+
+    return item is not None and getattr(item, "completion_contract", None) is not None
 
 
 def _supported_completion_unresolved(
@@ -1353,8 +1363,13 @@ def _supported_completion_unresolved(
 
 
 def _supported_metadata(item: Any) -> dict[str, Any]:
-    raw = item.expected_answer_schema.get(_SUPPORTED_REQUEST_SCHEMA_KEY)
-    return dict(raw) if isinstance(raw, dict) else {}
+    """One requirement's progress, read from its canonical contract.
+
+    Derived on every read, never stored. A derived reading cannot drift from its source;
+    a second stored copy always eventually does, which is what this replaced.
+    """
+
+    return metadata_from_completion_contract(getattr(item, "completion_contract", None))
 
 
 def _canonical_supported_slots(values: list[str]) -> list[str]:
@@ -1458,6 +1473,21 @@ def _confirmation_grounds(
     if confirmed is None or confirmed.field_name != field_name:
         return False
     return value is not None and str(value) == confirmed.canonical_value
+
+
+def _confirmed_field_covers(request: SetupTurnRequest, errors: list[str]) -> bool:
+    """Whether every ungrounded field is the one field the trader just confirmed.
+
+    Deliberately strict. One confirmation clears one field. If a change touched anything
+    else that could not be grounded, the confirmation does not cover it and the whole
+    operation is refused — a yes to "did you mean 1h?" is not a yes to everything else
+    that happened to be in the same payload.
+    """
+
+    confirmed = request.confirmed_answer
+    if confirmed is None or not errors:
+        return False
+    return all(error.split(":")[-2] == confirmed.field_name for error in errors)
 
 
 def _expected_evidence_tail(request: SetupTurnRequest, segment: TurnSegment) -> list[str]:
@@ -1840,12 +1870,18 @@ def _ground_condition_operation(
             supported_open,
         )
     if operation.kind == "update_condition":
-        return _update_grounding(
+        update_errors = _update_grounding(
             existing.get(operation.target_condition_id or ""),
             operation.condition,
             text,
             request.source_turn_id,
         )
+        # A confirmed near miss is written across two turns, and this turn's words are
+        # only "yes". The confirmation is the evidence — for exactly the field that was
+        # put to the trader, with exactly the value that was shown, agreed to now.
+        if update_errors and _confirmed_field_covers(request, update_errors):
+            return []
+        return update_errors
     errors: list[str] = []
     nodes = operation.condition.walk()
     if operation.condition.node_type != ConditionNodeType.CONDITION:
@@ -2849,6 +2885,13 @@ def _capability_gate(
             continue
         for node in operation.condition.walk():
             authorizing[node.node_id] = segment.exact_source_text
+    # A server-drawn control has no sentence behind it. The registry contract still runs
+    # in full; only the "were these the trader's own words" checks stand down, exactly as
+    # they do for every other operation on a server-owned turn. Before this, a capability
+    # picked from a server-rendered list could never pass — operation grounding was
+    # skipped for it while the capability gate still demanded a sentence that did not
+    # exist.
+    language_grounded = not request.server_owned_option
     errors, _providers = capability_condition_errors(
         nodes,
         authorizing_text_by_node=authorizing,
@@ -2856,11 +2899,13 @@ def _capability_gate(
         source_turn_id=request.source_turn_id,
         changed_node_ids=shortlist_required_node_ids,
         previous_nodes_by_id=previous,
+        language_grounded=language_grounded,
     )
-    for node in nodes:
-        text = authorizing.get(node.node_id)
-        if text and previous.get(node.node_id) is None:
-            errors.extend(grounded_operator_and_timeframe(node, authorizing_text=text))
+    if language_grounded:
+        for node in nodes:
+            text = authorizing.get(node.node_id)
+            if text and previous.get(node.node_id) is None:
+                errors.extend(grounded_operator_and_timeframe(node, authorizing_text=text))
     return errors, list(draft.static_provider_requirements)
 
 
@@ -3059,16 +3104,25 @@ def _final_chat_status(
     approval_status: ApprovalStatus,
     approval_eligible: bool,
 ) -> str:
-    """The status the session will carry, decided here so nothing can contradict it."""
+    """The status the session will carry, decided here so nothing can contradict it.
 
-    if approval_status == "approved":
-        return "approved"
-    if not approval_eligible:
-        return "needs_clarification"
-    # Scanner and Monitor share the same reviewed-draft boundary. A Scanner run is
-    # deterministic execution against market data, but it must still be bound to the
-    # exact authenticated approval before that execution is exposed.
-    return "ready_for_approval"
+    The rule itself lives in ``engine/setup_lifecycle.py``, because the Guided Builder
+    now writes the same draft and has to reach the same answer. Two surfaces with two
+    readiness calculations is how a setup finished in one place reads as unfinished in
+    the other.
+
+    Scanner and Monitor share the same reviewed-draft boundary. A Scanner run is
+    deterministic execution against market data, but it must still be bound to the
+    exact authenticated approval before that execution is exposed.
+    """
+
+    return chat_status_for(
+        turn_lifecycle_state(
+            draft,
+            approval_status=approval_status,
+            approval_eligible=approval_eligible,
+        )
+    )
 
 
 def _assert_lifecycle(
@@ -3134,6 +3188,28 @@ def _allowed_clarifications(
             or unresolved_target_path(item) not in blocking_paths
         ):
             continue
+        schema_text = json.dumps(
+            item.expected_answer_schema,
+            sort_keys=True,
+            separators=(",", ":"),
+        )[:200]
+        continuation = continuation_for_unresolved(
+            item,
+            draft,
+            question_id=item.key,
+            step_revision=0,
+            cancellation_policy=DEFAULT_CANCELLATION_POLICY.get(
+                item.target_type, CancellationPolicy.PAUSE_PENDING_REQUIREMENT
+            ),
+            allowed_values=item.allowed_options,
+            answer_schema=schema_text,
+        )
+        if continuation is None:
+            # No deterministic completion exists for this blocker, so asking about it
+            # would be a promise the server cannot keep. The blocker stays and is
+            # reported; a question whose correct answer has nowhere to go is worse than
+            # no question at all.
+            continue
         allowed.append(
             ClarificationContract(
                 question_id=item.key,
@@ -3142,13 +3218,10 @@ def _allowed_clarifications(
                 target_type=item.target_type,
                 target_field=item.target_field,
                 target_condition_id=item.target_condition_id,
-                expected_answer_schema=json.dumps(
-                    item.expected_answer_schema,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )[:200],
+                expected_answer_schema=schema_text,
                 mutating=True,
                 allowed_options=item.allowed_options[:6],
+                continuation=continuation,
             )
         )
     for blocker in draft.unsupported_requirements:
@@ -3169,13 +3242,21 @@ def _allowed_clarifications(
                 target_type="unsupported_requirement",
                 expected_answer_schema="a measurable rule, or drop the requirement",
                 mutating=True,
+                continuation=continuation_for_unresolved(
+                    blocker,
+                    draft,
+                    question_id=blocker.key,
+                    step_revision=0,
+                    cancellation_policy=CancellationPolicy.REMOVE_PENDING_REQUIREMENT,
+                    answer_schema="a measurable rule, or drop the requirement",
+                ),
             )
         )
     remaining = MAX_CLARIFICATIONS_PER_DRAFT - conversation.clarifications_asked
     deduplicated: list[ClarificationContract] = []
     seen_targets: set[tuple[str, str, str]] = set()
     for contract in allowed:
-        if not has_registered_handler(contract):
+        if not may_be_rendered(contract, draft):
             # Fail closed. A question nobody can answer is worse than a blocker with no
             # question: the trader would type a correct reply and be told it was not
             # understood, every time, with no way forward. The blocker itself stays.

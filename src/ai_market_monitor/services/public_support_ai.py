@@ -114,7 +114,9 @@ class PublicSupportAIService:
             "store": False,
             "max_output_tokens": self.settings.public_chat_ai_max_output_tokens,
             "reasoning": {"effort": reasoning},
-            "instructions": _public_support_instructions(),
+            "instructions": _public_support_instructions(
+                waitlist_mode=self.settings.public_waitlist_mode,
+            ),
             "input": [
                 {
                     "role": "user",
@@ -220,9 +222,23 @@ def _response_output_text(response: dict[str, Any]) -> str:
     return "".join(parts).strip()
 
 
-def _public_support_instructions() -> str:
+def _public_support_instructions(*, waitlist_mode: bool = False) -> str:
+    # While the product is invite-only there is no account for a visitor to open, so the
+    # assistant is told plainly not to send anybody to sign in, sign up, or the
+    # dashboard. The grounded facts already say the same thing; this rule stops the
+    # model adding the old advice out of its own general knowledge.
+    waitlist_rule = (
+        "Hilal Markets is invite-only right now and public sign-up is closed. Never tell a "
+        "visitor to sign in, sign up, log in, create an account, or open the dashboard, and "
+        "never describe those steps as the way to get started. The only way in is the "
+        "waitlist form on the home page, so say that instead. Plans and prices are not "
+        "published while the waitlist is open; do not quote or estimate any. "
+        if waitlist_mode
+        else ""
+    )
     return (
-        "You are Hilal Markets' public product assistant. Be friendly, concise, natural, and "
+        waitlist_rule
+        + "You are Hilal Markets' public product assistant. Be friendly, concise, natural, and "
         "beginner-safe. Select exactly one declared conversation mode and stage. PRODUCT_FACT "
         "covers current product features, scope, pricing, screening, Passports, integrations, "
         "security, privacy, alerts, and beta state. Ground every PRODUCT_FACT claim in "

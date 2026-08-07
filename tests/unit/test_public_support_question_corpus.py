@@ -20,12 +20,17 @@ AUTHENTICATED_READ_TOOLS = {
 }
 
 
-def _settings() -> Settings:
+def _settings(*, waitlist_mode: bool = False) -> Settings:
+    # The corpus was reviewed against the open product, where "how do I create an
+    # account?" is answered from the account-entry fact. Pre-launch that fact is
+    # replaced by the waitlist one, so the two modes are asserted separately rather than
+    # by loosening what either of them has to satisfy.
     return Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         database_url="sqlite+aiosqlite://",
         sharia_default_methodology_code=None,
+        public_waitlist_mode=waitlist_mode,
     )
 
 
@@ -78,6 +83,31 @@ def test_public_support_corpus_routes_have_grounded_server_content() -> None:
             assert group["expected_route"] in supported_routes
         elif group["expected_behavior"] == "authenticated_tool":
             assert group["expected_route"] in PUBLIC_ROUTE_PATHS
+
+
+def test_pre_launch_corpus_answers_account_and_price_questions_from_the_home_facts() -> None:
+    """Every reviewed question still has an answer while the site is pre-launch.
+
+    The two routes that only exist for an open product disappear, so the questions that
+    pointed at them must land on the waitlist fact instead of falling through to a
+    knowledge gap. A visitor asking how to sign up must never be told nothing is known.
+    """
+
+    service = PublicKnowledgeService(_settings(waitlist_mode=True))
+    routes = {entry.route_id for entry in service.entries}
+    assert "dashboard_entry" not in routes
+    assert "pricing" not in routes
+
+    for group in _groups():
+        if group["category"] not in {"account_and_beta", "pricing_and_billing"}:
+            continue
+        for question in group["questions"]:
+            # "refused" is a correct outcome for the questions that ask about private
+            # account data; the boundary is unchanged, only the next step it offers.
+            _status, message, _score, _sources, routes, _gap = service.answer(question)
+            for forbidden in ("sign in", "sign up", "create an account", "log in"):
+                assert forbidden not in message.casefold(), (question, forbidden)
+            assert "dashboard_entry" not in routes, question
 
 
 def test_public_support_safety_corpus_is_enforced_before_ai_generation() -> None:

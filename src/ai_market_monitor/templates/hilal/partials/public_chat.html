@@ -60,7 +60,14 @@
         <button type="button" class="chip" data-public-chat-question="What does Hilal Markets do?">What does it do?</button>
         <button type="button" class="chip" data-public-chat-question="How does Sharia screening work?">How screening works</button>
         <button type="button" class="chip" data-public-chat-question="Which markets are available in private beta?">Private-beta markets</button>
+        {# While the product is invite-only, "Pricing" would invite a question with no
+           answer. The suggestion offered instead is the one thing a visitor can act
+           on today. #}
+        {% if waitlist_mode %}
+        <button type="button" class="chip" data-public-chat-question="How do I get access to Hilal Markets?">Getting access</button>
+        {% else %}
         <button type="button" class="chip" data-public-chat-question="How much does the private beta cost?">Pricing</button>
+        {% endif %}
       </div>
 
       <form class="public-chat-inquiry" data-public-chat-inquiry hidden>
