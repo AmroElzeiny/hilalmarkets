@@ -29,6 +29,9 @@ from ai_market_monitor.schemas.public_forms import (
     WaitlistSignupRequest,
 )
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
+from ai_market_monitor.services.waitlist_sheet_contract import (
+    build_waitlist_sheet_payload,
+)
 
 PUBLIC_FORMS_CSRF_COOKIE = "hm_public_forms_csrf"
 
@@ -270,15 +273,15 @@ class PublicFormsService:
                     response = await client.post(
                         endpoint,
                         headers={"Content-Type": "application/json"},
-                        json={
-                            "webhook_secret": secret_value,
-                            "event_id": row.event_key,
-                            "email": signup.normalized_email,
-                            "submitted_at": signup.submitted_at.isoformat(),
-                            "country": signup.country_code or "unknown",
-                            "source_page": signup.source_page,
-                            **signup.attribution,
-                        },
+                        # The body is built by the one module that owns the agreement
+                        # with the receiving Apps Script. The signup row keeps its own
+                        # richer record — the time, the page, the attribution — in this
+                        # product's database; the sheet is only told what it reads.
+                        json=build_waitlist_sheet_payload(
+                            secret=secret_value,
+                            email=signup.normalized_email,
+                            country=signup.country_code,
+                        ),
                     )
                     response.raise_for_status()
                     acknowledgement = response.json()

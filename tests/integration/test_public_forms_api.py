@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
 import httpx
@@ -11,6 +12,7 @@ from ai_market_monitor.db.models import (
     WaitlistSheetDelivery,
     WaitlistSignup,
 )
+from ai_market_monitor.services.public_forms import PublicFormsService
 
 
 async def _csrf(client) -> str:
@@ -162,9 +164,19 @@ async def test_waitlist_accepts_same_origin_and_rejects_foreign_origin(test_cont
     assert foreign.json()["detail"]["code"] == "origin_rejected"
 
 
-async def test_waitlist_syncs_server_side_country_and_first_touch_without_leaking_url(
-    test_context,
-):
+async def test_waitlist_sends_the_sheet_exactly_what_the_apps_script_reads(test_context):
+    """The request body is the six fields the deployed Apps Script reads, and no others.
+
+    The script authorises on ``secret``. While the server sent ``webhook_secret`` the
+    script answered "unauthorized" to every signup and no row was ever written. This
+    checks the body on the wire, not the code that builds it, so the two sides cannot
+    drift apart again unnoticed.
+
+    The extra values the old body carried are not lost: the time, the page and the
+    first-touch attribution are still recorded in Hilal Markets' own database, which is
+    checked below. They are simply not sent to a receiver that ignores them.
+    """
+
     settings = test_context["settings"]
     settings.waitlist_google_sheets_enabled = True
     settings.waitlist_google_sheets_webhook_url = (
@@ -173,11 +185,11 @@ async def test_waitlist_syncs_server_side_country_and_first_touch_without_leakin
     settings.waitlist_google_sheets_webhook_secret = "sheet-secret"
     settings.waitlist_trust_cloudflare_country_header = True
     captured: list[dict] = []
+    hosts: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        assert payload.pop("webhook_secret") == "sheet-secret"
-        captured.append(payload)
+        hosts.append(request.url.host)
+        captured.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True})
 
     test_context["app"].dependency_overrides[get_public_forms_sheet_transport] = (
@@ -206,23 +218,176 @@ async def test_waitlist_syncs_server_side_country_and_first_touch_without_leakin
     assert response.json()["sheet_delivery_status"] == "sent"
     assert captured == [
         {
-            "event_id": captured[0]["event_id"],
+            "secret": "sheet-secret",
             "email": "country@example.com",
-            "submitted_at": captured[0]["submitted_at"],
+            "name": "",
+            "source": "hilalmarkets_waitlist",
             "country": "EG",
-            "source_page": "/",
-            "utm_source": "newsletter",
-            "utm_medium": "email",
-            "utm_campaign": "private-beta",
-            "utm_content": "hero",
-            "utm_term": "screening",
-            "referrer": "https://example.org/article",
-            "landing_page": "https://testserver/",
+            "status": "waitlist",
         }
     ]
+
+    # The secret travels server to server only. It is never in anything a browser reads.
+    assert hosts == ["script.google.com"]
+    assert "sheet-secret" not in response.text
     assert "script.google.com" not in response.text
     landing = await client.get("/")
+    assert "sheet-secret" not in landing.text
     assert "script.google.com/macros/s/test-deployment" not in landing.text
+    bootstrap = await client.get("/api/v1/public-forms/bootstrap")
+    assert "sheet-secret" not in bootstrap.text
+
+    # Nothing was dropped from this product's own record of the signup.
+    async with test_context["session_factory"]() as session:
+        signup = await session.scalar(
+            select(WaitlistSignup).where(
+                WaitlistSignup.normalized_email == "country@example.com"
+            )
+        )
+    assert signup is not None
+    assert signup.country_code == "EG"
+    assert signup.source_page == "/"
+    assert signup.submitted_at is not None
+    assert signup.attribution == {
+        "utm_source": "newsletter",
+        "utm_medium": "email",
+        "utm_campaign": "private-beta",
+        "utm_content": "hero",
+        "utm_term": "screening",
+        "referrer": "https://example.org/article",
+        "landing_page": "https://testserver/",
+    }
+    test_context["app"].dependency_overrides.pop(get_public_forms_sheet_transport, None)
+
+
+async def test_a_country_the_server_does_not_know_is_written_as_the_word_unknown(
+    test_context,
+):
+    settings = test_context["settings"]
+    settings.waitlist_google_sheets_enabled = True
+    settings.waitlist_google_sheets_webhook_url = (
+        "https://script.google.com/macros/s/test-deployment/exec"
+    )
+    settings.waitlist_google_sheets_webhook_secret = "sheet-secret"
+    settings.waitlist_trust_cloudflare_country_header = False
+    captured: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True})
+
+    test_context["app"].dependency_overrides[get_public_forms_sheet_transport] = (
+        lambda: httpx.MockTransport(handler)
+    )
+    client = test_context["client"]
+    token = await _csrf(client)
+    response = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=_waitlist_payload(email="nowhere@example.com", key="waitlist:test:nocountry1"),
+    )
+    assert response.status_code == 200
+    assert captured == [
+        {
+            "secret": "sheet-secret",
+            "email": "nowhere@example.com",
+            "name": "",
+            "source": "hilalmarkets_waitlist",
+            "country": "unknown",
+            "status": "waitlist",
+        }
+    ]
+    test_context["app"].dependency_overrides.pop(get_public_forms_sheet_transport, None)
+
+
+async def test_a_sheet_failure_keeps_the_signup_and_leaves_the_delivery_retryable(
+    test_context,
+):
+    """A refusal by the sheet is a delivery problem, not a signup problem.
+
+    The person joined the waitlist. That record is this product's, and it stands whatever
+    Google answers. The delivery row goes back to "retryable" so the queue tries again,
+    and the second try succeeds without the person doing anything.
+    """
+
+    settings = test_context["settings"]
+    settings.waitlist_google_sheets_enabled = True
+    settings.waitlist_google_sheets_webhook_url = (
+        "https://script.google.com/macros/s/test-deployment/exec"
+    )
+    settings.waitlist_google_sheets_webhook_secret = "sheet-secret"
+    attempts: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(json.loads(request.content))
+        if len(attempts) == 1:
+            return httpx.Response(200, json={"ok": False, "error": "unauthorized"})
+        return httpx.Response(200, json={"ok": True})
+
+    test_context["app"].dependency_overrides[get_public_forms_sheet_transport] = (
+        lambda: httpx.MockTransport(handler)
+    )
+    client = test_context["client"]
+    token = await _csrf(client)
+    response = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=_waitlist_payload(email="retry@example.com", key="waitlist:test:retry12345"),
+    )
+    assert response.status_code == 200
+    assert response.json()["created"] is True
+    assert response.json()["sheet_delivery_status"] == "retrying"
+
+    async with test_context["session_factory"]() as session:
+        signup = await session.scalar(
+            select(WaitlistSignup).where(
+                WaitlistSignup.normalized_email == "retry@example.com"
+            )
+        )
+        delivery = await session.scalar(
+            select(WaitlistSheetDelivery).where(
+                WaitlistSheetDelivery.signup_id == signup.id
+            )
+        )
+    assert signup is not None
+    assert signup.status == "active"
+    assert delivery is not None
+    assert delivery.status == "retryable"
+    assert delivery.attempt_count == 1
+    assert delivery.next_retry_at is not None
+
+    # The queue retries it later. The second attempt sends the same six fields.
+    async with test_context["session_factory"]() as session:
+        service = PublicFormsService(
+            session,
+            settings,
+            sheet_transport=httpx.MockTransport(handler),
+        )
+        delivery = await session.scalar(
+            select(WaitlistSheetDelivery).where(
+                WaitlistSheetDelivery.signup_id == signup.id
+            )
+        )
+        delivery.next_retry_at = datetime.now(UTC) - timedelta(minutes=1)
+        await session.commit()
+        result = await service.process_waitlist_due(signup_id=signup.id, limit=1)
+    assert result["sent"] == 1
+    assert attempts[1] == attempts[0]
+    assert attempts[0]["secret"] == "sheet-secret"
+
+    async with test_context["session_factory"]() as session:
+        delivery = await session.scalar(
+            select(WaitlistSheetDelivery).where(
+                WaitlistSheetDelivery.signup_id == signup.id
+            )
+        )
+        assert await session.scalar(
+            select(func.count())
+            .select_from(WaitlistSignup)
+            .where(WaitlistSignup.normalized_email == "retry@example.com")
+        ) == 1
+    assert delivery.status == "sent"
+    assert delivery.delivered_at is not None
     test_context["app"].dependency_overrides.pop(get_public_forms_sheet_transport, None)
 
 

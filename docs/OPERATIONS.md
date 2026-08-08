@@ -300,12 +300,40 @@ To connect the waitlist Sheet:
 5. Behind Cloudflare, enable `WAITLIST_TRUST_CLOUDFLARE_COUNTRY_HEADER` only after direct-origin
    traffic is blocked. Otherwise country remains `unknown` instead of trusting a spoofable header.
 
-The receiver serializes writes with a script lock and keeps the visible worksheet business-facing:
-Email Address, Joined At (UTC), Country, Signup Source, Campaign, Status, and Notes. Status is an
-editable controlled list and Notes is free text for the beta team. Retry deduplication uses a final
-system column that Apps Script hides automatically. The first request after upgrading the script
-migrates rows written by the earlier technical layout. The endpoint, secret, and delivery metadata
-never enter HTML, browser JavaScript, analytics, or public form responses.
+The server sends one fixed request body, built only by
+`src/ai_market_monitor/services/waitlist_sheet_contract.py`:
+
+| Field | Value |
+|---|---|
+| `secret` | `WAITLIST_GOOGLE_SHEETS_WEBHOOK_SECRET` |
+| `email` | the signup email |
+| `name` | always empty — the form asks for an email and nothing else |
+| `source` | always `hilalmarkets_waitlist` |
+| `country` | the server-side country, or the word `unknown` |
+| `status` | always `waitlist` |
+
+Change that list in one place only. A receiver that reads a different field name rejects every
+signup, and the rejection looks like an ordinary delivery failure. Whatever else Hilal Markets
+knows about a signup — when it happened, which page it came from, first-touch attribution — stays
+in `waitlist_signups` and is not sent.
+
+> **The receiver currently deployed does not match `waitlist_webhook.gs` in this repository.**
+> The deployed script authorises on `secret` and reads the six fields above. The script file here
+> still authorises on `webhook_secret` and requires `event_id` and `submitted_at`. Deploying the
+> file as it stands would reject every signup. Reconcile the two before touching either side.
+
+Because the deployed receiver is not sent a delivery id, it cannot recognise a retry by that id. A
+delivery that timed out after the sheet had already written the row can produce a second row for
+the same person. `waitlist_signups` stays correct either way; the duplicate, if it appears, is in
+the sheet only.
+
+The receiver in `waitlist_webhook.gs` serializes writes with a script lock and keeps the visible
+worksheet business-facing: Email Address, Joined At (UTC), Country, Signup Source, Campaign,
+Status, and Notes. Status is an editable controlled list and Notes is free text for the beta team.
+Retry deduplication uses a final system column that Apps Script hides automatically. The first
+request after upgrading the script migrates rows written by the earlier technical layout. The
+endpoint, secret, and delivery metadata never enter HTML, browser JavaScript, analytics, or public
+form responses.
 
 Analytics is off by default. Configure `VITE_GTM_ID`, keep the deprecated
 `VITE_GA4_MEASUREMENT_ID` empty, then set `VITE_ANALYTICS_ENABLED=true`. GA4 must be configured
