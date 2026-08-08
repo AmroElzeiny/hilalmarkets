@@ -1253,10 +1253,20 @@ class TelegramBotService:
         )
 
     def _account_auth_callback(self, callback: TelegramCallback) -> TelegramOutboundMessage:
+        # Pre-launch, "sign up on the Dashboard" is an instruction most readers cannot
+        # follow: accounts are issued by invitation. The buttons stay, because an invited
+        # person still needs them to link Telegram to the account they were given.
+        text = (
+            "Hilal Markets is invite-only during its private beta. Join the waitlist on "
+            "the website to be considered. If you have already been invited, use the "
+            "buttons below to link this Telegram chat to your account."
+            if self.settings.public_waitlist_mode
+            else "Sign up or sign in on the Dashboard, then Telegram will link to that "
+            "account for trial status, monitor counts, subscription dates and alerts."
+        )
         return self._plain_callback(
             callback,
-            "Sign up or sign in on the Dashboard, then Telegram will link to that "
-            "account for trial status, monitor counts, subscription dates and alerts.",
+            text,
             buttons=[
                 TelegramButton("Sign up", "account:signup"),
                 TelegramButton("Sign in", "account:signin"),

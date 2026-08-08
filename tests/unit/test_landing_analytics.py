@@ -166,7 +166,16 @@ def test_section_visibility_supports_long_entry_and_configurable_percentage_mode
     assert "visibilityMode?: VisibilityMode" in tracking
     assert "visibilityMode: options.visibilityMode ?? 'entry'" in tracking
     assert "visibilityMode === 'entry'" in tracking
-    assert "entry.intersectionRatio >= threshold" in tracking
+    # "Seen" is measured against the element or the window, whichever is smaller.
+    # `intersectionRatio` alone is the share of the element, which a section taller than
+    # the window can never raise above a third - so it was never counted as seen.
+    assert "visibleShare(entry) >= threshold" in tracking
+    assert "Math.min(elementHeight, windowHeight)" in tracking
+    assert "entry.intersectionRect.height / reference" in tracking
+    assert "entry.intersectionRatio" not in tracking
+    # And the browser is asked for enough steps to notice while a long section scrolls.
+    assert "PERCENTAGE_OBSERVER_STEPS = 20" in tracking
+    assert "threshold: [0, threshold, 1]" not in tracking
     assert "window.setTimeout(attempt, dwellMs)" in tracking
     assert "rootMargin: '0px 0px -20% 0px'" in tracking
     assert "observer.disconnect()" in tracking
@@ -308,22 +317,103 @@ def test_the_landing_page_offers_the_waitlist_and_never_an_account():
     assert "{ label: 'Pricing', target: '#pricing' }" not in chrome
 
 
-def test_the_waitlist_form_asks_for_beta_contact_consent_and_offers_it_ticked():
+def test_every_react_page_closes_on_the_waitlist_using_the_servers_own_wording():
+    """Contact, Privacy and Terms end on the waitlist, like every server-rendered page.
+
+    They are the half of the site the bundle draws, so without this they stayed silent
+    about the private beta while the other half spoke about nothing else. The words come
+    from the server's runtime config rather than being typed again here: two renderers,
+    one message, so neither can be updated without the other.
+    """
+
+    band = (FRONTEND / "components" / "WaitlistBand.tsx").read_text(encoding="utf-8")
+    contact = (FRONTEND / "pages" / "ContactPage.tsx").read_text(encoding="utf-8")
+    legal = (FRONTEND / "pages" / "LegalPage.tsx").read_text(encoding="utf-8")
+
+    # The band takes every word from the server, so no copy is duplicated in the bundle.
+    assert "window.HilalMarketsRuntimeConfig?.waitlist" in band
+    assert "config.headline" in band
+    assert "config.body" in band
+    assert "if (!config?.mode) return null" in band
+    # It links back to the one form; it does not grow a second copy of it.
+    assert "/#waitlist" in band
+    assert "<input" not in band
+    assert "submitWaitlist" not in band
+
+    for name, source in (("ContactPage.tsx", contact), ("LegalPage.tsx", legal)):
+        assert "import { WaitlistBand }" in source, name
+        assert "<WaitlistBand location=" in source, name
+        # Inside <main>, above the footer, so it is part of the page rather than chrome.
+        assert source.index("<WaitlistBand") < source.index("<SiteFooter />"), name
+
+    # Privacy and Terms each get their own name, so the analytics can tell them apart.
+    assert "privacy_footer" in legal
+    assert "terms_footer" in legal
+
+
+def test_legal_pages_scope_accounts_and_billing_to_the_private_beta():
+    """The legal text may not read as though anyone can buy or open an account today."""
+
+    legal = (FRONTEND / "pages" / "LegalPage.tsx").read_text(encoding="utf-8")
+
+    # Terms: paid access is not offered, with no escape hatch that reopens it silently.
+    assert "unless a separately presented offer expressly states otherwise" not in legal
+    assert "Paid access is not offered to the public during the private beta." in legal
+    assert "nothing is charged for use of the service in this period" in legal
+    # The protection for a future paid launch is kept, not deleted with the rest.
+    assert "must disclose the price, currency, access period" in legal
+
+    # Accounts exist, but only by invitation, in both documents.
+    assert "Accounts are not open to the public during the private beta" in legal
+    assert "Accounts are issued by invitation during the private beta." in legal
+    assert "Accounts are not open to the public: they are issued only to people" in legal
+    assert "invited private-beta users only" in legal
+    # And the account obligations for invited users survive.
+    assert "Account information must be accurate and kept current." in legal
+    assert "You are responsible for protecting credentials" in legal
+
+
+def test_the_waitlist_form_asks_for_an_email_address_and_nothing_else():
+    """No consent box, on the page or on the wire.
+
+    The form briefly offered a pre-ticked "contact me about beta testing" box. A box that
+    is already ticked records an answer the person never gave, so the question was
+    withdrawn. This checks the whole path, not just the missing input: a field still sent
+    by the browser, still accepted by the server, or still written to the sheet would keep
+    storing that invented answer with nothing on screen to show for it.
+    """
+
     app = APP.read_text(encoding="utf-8")
     public_forms = (FRONTEND / "publicForms.ts").read_text(encoding="utf-8")
+    schema = (
+        ROOT / "src/ai_market_monitor/schemas/public_forms.py"
+    ).read_text(encoding="utf-8")
+    service = (
+        ROOT / "src/ai_market_monitor/services/public_forms.py"
+    ).read_text(encoding="utf-8")
+    model = (
+        ROOT / "src/ai_market_monitor/db/models/public_forms.py"
+    ).read_text(encoding="utf-8")
+    apps_script = (
+        ROOT / "scripts/google_apps_script/waitlist_webhook.gs"
+    ).read_text(encoding="utf-8")
 
-    assert "useState(true)" in app
-    assert 'type="checkbox"' in app
-    assert 'id="waitlist-beta-consent"' in app
-    assert "checked={betaConsent}" in app
-    assert "I agree to be contacted about taking part in private beta testing." in app
-    # The label is joined to the box, so tapping the words works on a phone.
-    assert 'htmlFor="waitlist-beta-consent"' in app
-    # Whatever state the box is in is what is sent. The value is never assumed.
-    assert "betaContactConsent: betaConsent" in app
-    assert "beta_contact_consent: values.betaContactConsent" in public_forms
-    # A changed answer is a different submission, so it gets its own request identifier.
-    assert app.count("resetIdempotency()") >= 4
+    assert 'id="waitlist-email"' in app
+    for source, name in (
+        (app, "App.tsx"),
+        (public_forms, "publicForms.ts"),
+        (schema, "schemas/public_forms.py"),
+        (service, "services/public_forms.py"),
+        (model, "db/models/public_forms.py"),
+    ):
+        for forbidden in ("beta_contact_consent", "betaContactConsent", "betaConsent"):
+            assert forbidden not in source, (name, forbidden)
+    assert 'type="checkbox"' not in app
+    # The sheet keeps a name for the withdrawn column so an existing sheet can be brought
+    # back to the current layout, but no new row is ever given a consent value.
+    assert "'Beta Testing Consent'" in apps_script
+    assert "WAITLIST_HEADERS_WITH_CONSENT" in apps_script
+    assert "consentLabel_" not in apps_script
 
     # The panel is apple green, where the site's green focus ring would vanish.
     styles = STYLES.read_text(encoding="utf-8")

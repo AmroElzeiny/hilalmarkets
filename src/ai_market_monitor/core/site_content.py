@@ -140,6 +140,10 @@ WAITLIST_HIDDEN_PAGES = frozenset({"pricing", "screened_market"})
 #: a page added later cannot invent its own idea of what counts as inside the product.
 ACCOUNT_ONLY_PATH_PREFIXES = (
     "/dashboard",
+    # Named in full rather than left to a "starts with /dashboard" rule. Guessing from
+    # the shape of a name cuts both ways: a rule loose enough to catch this one also
+    # claims an innocent /signup-guide article and fails a build over a public page.
+    "/dashboard-entry",
     "/signin",
     "/signup",
     "/subscribe",
@@ -150,11 +154,16 @@ ACCOUNT_ONLY_PATH_PREFIXES = (
 
 
 def is_account_only_path(path: str) -> bool:
-    """True when the address can only be used by somebody who already has an account."""
+    """True when the address can only be used by somebody who already has an account.
+
+    A prefix matches the address itself or a child of it, and nothing else. Every other
+    account-only address has to be named in ACCOUNT_ONLY_PATH_PREFIXES, which is the
+    point: the list is the decision, and it is written down rather than inferred.
+    """
 
     normalized = path.split("?", 1)[0].split("#", 1)[0].rstrip("/") or "/"
     return any(
-        normalized == prefix or normalized.startswith(f"{prefix}/") or normalized.startswith(prefix)
+        normalized == prefix or normalized.startswith(f"{prefix}/")
         for prefix in ACCOUNT_ONLY_PATH_PREFIXES
     )
 
@@ -167,9 +176,8 @@ def is_account_only_path(path: str) -> bool:
 WAITLIST_EYEBROW = "Private beta"
 WAITLIST_HEADLINE = "Hilal Markets is in a private beta."
 WAITLIST_BODY = (
-    "Accounts are invite-only while the beta runs, so you cannot sign up yet. "
-    "Leave your email on the waitlist and we will contact you directly when a place "
-    "opens. You can also tell us you are happy to help test the product first."
+    "Accounts are invite-only while the beta runs. Leave your email on the waitlist "
+    "and we will contact you directly when a place opens. We ask for nothing else."
 )
 WAITLIST_CTA_LABEL = "Join the waitlist"
 

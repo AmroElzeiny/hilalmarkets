@@ -29,11 +29,6 @@ class WaitlistSignupRequest(StrictPublicFormModel):
     email: EmailStr
     source_page: str = Field(default="/", min_length=1, max_length=240)
     attribution: FirstTouchAttribution = Field(default_factory=FirstTouchAttribution)
-    #: Whether this person agreed to be contacted about private beta testing.
-    #: The form offers the box already ticked, so the browser normally sends True. It is
-    #: recorded exactly as it arrives: a visitor who clears the box still joins the
-    #: waitlist, and the team can see that they did not agree to beta contact.
-    beta_contact_consent: bool = True
     idempotency_key: str = Field(
         min_length=16,
         max_length=160,

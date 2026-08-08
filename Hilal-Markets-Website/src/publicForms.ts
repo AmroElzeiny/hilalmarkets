@@ -83,16 +83,13 @@ function idempotency(prefix: string): string {
 }
 
 export async function submitWaitlist(
-  values: { email: string; betaContactConsent: boolean },
+  values: { email: string },
   attribution: FirstTouchAttribution,
   idempotencyKey: string,
 ): Promise<WaitlistResponse> {
   const config = await bootstrap()
   return post<WaitlistResponse>(config.waitlist_endpoint, config.csrf_token, {
     email: values.email,
-    // Sent as its own field so the server records the answer the visitor actually
-    // left in the box, whether that is the offered Yes or a cleared No.
-    beta_contact_consent: values.betaContactConsent,
     source_page: window.location.pathname || '/',
     attribution,
     idempotency_key: idempotencyKey,

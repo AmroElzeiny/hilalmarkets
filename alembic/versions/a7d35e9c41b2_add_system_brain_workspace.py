@@ -233,7 +233,22 @@ def upgrade() -> None:
     _create_event_triggers()
 
 
+def _is_postgresql() -> bool:
+    """Whether the database being migrated understands PL/pgSQL triggers.
+
+    Production runs on PostgreSQL. The test databases run on SQLite, which has no
+    `CREATE FUNCTION ... LANGUAGE plpgsql`, so an unguarded trigger block stops the
+    migration with a syntax error and every SQLite-backed suite fails before its first
+    test. The tables and their data are created on both; only the PostgreSQL-only
+    convenience triggers are skipped.
+    """
+
+    return op.get_bind().dialect.name == "postgresql"
+
+
 def _create_event_triggers() -> None:
+    if not _is_postgresql():
+        return
     statements = (
         """
         CREATE FUNCTION hm_emit_setup_session_event() RETURNS trigger AS $$
@@ -359,24 +374,27 @@ def _create_event_triggers() -> None:
 
 
 def downgrade() -> None:
-    for trigger, table in (
-        ("tr_public_turn_admin_event", "public_chat_turns"),
-        ("tr_public_message_admin_event", "public_chat_messages"),
-        ("tr_public_conversation_admin_event", "public_chat_conversations"),
-        ("tr_setup_turn_admin_event", "setup_chat_turns"),
-        ("tr_setup_message_admin_event", "ai_setup_chat_messages"),
-        ("tr_setup_session_admin_event", "ai_setup_chat_sessions"),
-    ):
-        op.execute(f"DROP TRIGGER IF EXISTS {trigger} ON {table}")
-    for function in (
-        "hm_emit_public_turn_event",
-        "hm_emit_public_message_event",
-        "hm_emit_public_conversation_event",
-        "hm_emit_setup_turn_event",
-        "hm_emit_setup_message_event",
-        "hm_emit_setup_session_event",
-    ):
-        op.execute(f"DROP FUNCTION IF EXISTS {function}()")
+    # Only PostgreSQL was given these triggers, and only PostgreSQL understands the
+    # statements that remove them.
+    if _is_postgresql():
+        for trigger, table in (
+            ("tr_public_turn_admin_event", "public_chat_turns"),
+            ("tr_public_message_admin_event", "public_chat_messages"),
+            ("tr_public_conversation_admin_event", "public_chat_conversations"),
+            ("tr_setup_turn_admin_event", "setup_chat_turns"),
+            ("tr_setup_message_admin_event", "ai_setup_chat_messages"),
+            ("tr_setup_session_admin_event", "ai_setup_chat_sessions"),
+        ):
+            op.execute(f"DROP TRIGGER IF EXISTS {trigger} ON {table}")
+        for function in (
+            "hm_emit_public_turn_event",
+            "hm_emit_public_message_event",
+            "hm_emit_public_conversation_event",
+            "hm_emit_setup_turn_event",
+            "hm_emit_setup_message_event",
+            "hm_emit_setup_session_event",
+        ):
+            op.execute(f"DROP FUNCTION IF EXISTS {function}()")
     op.drop_index("ix_public_chat_messages_turn_id", table_name="public_chat_messages")
     op.drop_index("ix_public_chat_message_retain_until", table_name="public_chat_messages")
     op.drop_index("ix_public_chat_message_conversation_created", table_name="public_chat_messages")

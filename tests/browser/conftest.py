@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -182,6 +183,15 @@ def _terminate_server_process(process: subprocess.Popen[str]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=10)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "deliberate_console_errors(*fragments): the test provokes these browser console "
+        "errors on purpose, so they are not treated as a runtime failure. Every other "
+        "console error still fails the test.",
+    )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -436,6 +446,14 @@ def page(
         "BROWSER_E2E_HEADED"
     ) in {"1", "true", "yes"}
     runtime_errors: dict[str, list[str]] = {"console": [], "page": [], "network": []}
+    # A test that deliberately makes the server refuse a request cannot avoid the
+    # browser logging that refusal. It names the message it expects; everything else it
+    # logs still fails the test.
+    deliberate_console_errors = tuple(
+        str(fragment)
+        for marker in request.node.iter_markers("deliberate_console_errors")
+        for fragment in marker.args
+    )
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=not headed)
         context = browser.new_context(
@@ -451,7 +469,8 @@ def page(
             lambda message: runtime_errors["console"].append(
                 f"{message.type}: {message.text}"
             )
-            if message.type == "error" and not _allowed_console_error(message.text)
+            if message.type == "error"
+            and not _allowed_console_error(message.text, deliberate_console_errors)
             else None,
         )
         page.on("pageerror", lambda exc: runtime_errors["page"].append(str(exc)))
@@ -1529,13 +1548,14 @@ def _with_pythonpath(repo_root: Path) -> str:
     return os.pathsep.join(paths)
 
 
-def _allowed_console_error(message: str) -> bool:
+def _allowed_console_error(message: str, deliberate: Sequence[str] = ()) -> bool:
     allow = [
         "favicon.ico",
         "api.iconify.design",
         "fonts.googleapis.com",
         "fonts.gstatic.com",
         "cdn.jsdelivr.net",
+        *deliberate,
     ]
     return any(item in message for item in allow)
 

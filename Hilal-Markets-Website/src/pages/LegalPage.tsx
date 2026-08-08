@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Reveal } from '../components/Reveal'
 import { SiteFooter, SiteNav } from '../components/SiteChrome'
+import { WaitlistBand } from '../components/WaitlistBand'
 
 type LegalKind = 'privacy' | 'terms'
 
@@ -48,10 +49,10 @@ function privacySections(privacyEmail: string): LegalSection[] {
       content: (
         <>
           <Paragraph>
-            This Privacy Policy explains how Hilal Markets handles personal information when you visit our public pages, join the waitlist, contact us, create or use an account, build Watchlists, review Shariah-screening evidence, receive alerts, or ask for support.
+            This Privacy Policy explains how Hilal Markets handles personal information when you visit our public pages, join the waitlist, contact us, or ask for support. It also covers the use of an invited private-beta account: building Watchlists, reviewing Shariah-screening evidence, and receiving alerts.
           </Paragraph>
           <Paragraph>
-            The service is currently being prepared for private beta. Features and data practices may develop as the beta progresses. Material changes will be reflected in an updated policy and, where required, brought to your attention before they take effect.
+            The service is currently in private beta. Accounts are not open to the public: they are issued only to people Hilal Markets has invited from the waitlist, so the account sections below apply to invited users. Features and data practices may develop as the beta progresses. Material changes will be reflected in an updated policy and, where required, brought to your attention before they take effect.
           </Paragraph>
         </>
       ),
@@ -71,8 +72,8 @@ function privacySections(privacyEmail: string): LegalSection[] {
       title: '3. Information we collect',
       content: (
         <BulletList>
-          <Bullet><strong>Waitlist and contact details:</strong> email address, whether you agreed to be contacted about private beta testing, message title, message content, submission time, source page, and optional first-touch campaign details. Country may be recorded from a trusted edge-provider country header; we do not ask your browser to disclose precise location.</Bullet>
-          <Bullet><strong>Account and security information:</strong> name, email, password hash, verification and recovery records, session data, consent choices, security events, and audit records.</Bullet>
+          <Bullet><strong>Waitlist and contact details:</strong> email address, message title, message content, submission time, source page, and optional first-touch campaign details. Country may be recorded from a trusted edge-provider country header; we do not ask your browser to disclose precise location.</Bullet>
+          <Bullet><strong>Account and security information (invited private-beta users only):</strong> name, email, password hash, verification and recovery records, session data, consent choices, security events, and audit records.</Bullet>
           <Bullet><strong>Product information:</strong> Screened Watchlist selections, Watchlist descriptions and approved rules, strategy versions, scans, setup lifecycles, alert evidence, settings, and notification preferences.</Bullet>
           <Bullet><strong>Shariah-evidence interactions:</strong> methodologies and Passport versions viewed or attached to evaluations. AI may support factual research, but it does not issue Shariah decisions.</Bullet>
           <Bullet><strong>Communications:</strong> support requests, public-assistant feedback, delivery status, and connected-channel identifiers needed to send requested notifications.</Bullet>
@@ -213,7 +214,7 @@ function termsSections(supportEmail: string): LegalSection[] {
       title: '1. Agreement and provider',
       content: (
         <>
-          <Paragraph>These Terms govern access to Hilal Markets and its public pages, private-beta product, research tools, Watchlists, evidence Passports, monitoring, alerts, and related services. By creating an account or using the service, you agree to these Terms and the related Privacy Policy, Cookie Policy, and Risk Disclosure.</Paragraph>
+          <Paragraph>These Terms govern access to Hilal Markets and its public pages, private-beta product, research tools, Watchlists, evidence Passports, monitoring, alerts, and related services. Accounts are not open to the public during the private beta: they are created only for people Hilal Markets has invited from the waitlist. By using the public pages, or by using an account issued to you, you agree to these Terms and the related Privacy Policy, Cookie Policy, and Risk Disclosure.</Paragraph>
           <Paragraph>Hilal Markets provides the service described in these Terms. Questions about the service or these Terms may be sent to <PrivacyContact email={supportEmail} />.</Paragraph>
         </>
       ),
@@ -224,6 +225,7 @@ function termsSections(supportEmail: string): LegalSection[] {
       content: (
         <BulletList>
           <Bullet>You must be at least 18 and legally able to enter this agreement.</Bullet>
+          <Bullet>Accounts are issued by invitation during the private beta. The rules below apply to invited users from the moment an account is issued to them.</Bullet>
           <Bullet>Account information must be accurate and kept current.</Bullet>
           <Bullet>You are responsible for protecting credentials and promptly reporting suspected unauthorized access.</Bullet>
           <Bullet>You may not share an account to avoid security, access, or entitlement limits.</Bullet>
@@ -308,7 +310,7 @@ function termsSections(supportEmail: string): LegalSection[] {
     {
       id: 'billing',
       title: '14. Plans and billing',
-      content: <Paragraph>Billing is disabled for the initial private beta unless a separately presented offer expressly states otherwise. If paid access is introduced, the checkout must disclose the price, currency, access period, renewal behavior, plan limits, cancellation behavior, and applicable refund terms before payment. Provider capability and verified payment state control entitlement; these Terms do not invent automatic renewal.</Paragraph>,
+      content: <Paragraph>Paid access is not offered to the public during the private beta. No plan or price is published, no checkout is available, and nothing is charged for use of the service in this period. If paid access is introduced later, the checkout must disclose the price, currency, access period, renewal behavior, plan limits, cancellation behavior, and applicable refund terms before payment, and no charge may be made without that disclosure and your payment. Provider capability and verified payment state control entitlement; these Terms do not invent automatic renewal.</Paragraph>,
     },
     {
       id: 'suspension',
@@ -402,6 +404,7 @@ export default function LegalPage({ kind }: { kind: LegalKind }) {
             ))}
           </div>
         </section>
+        <WaitlistBand location={isPrivacy ? 'privacy_footer' : 'terms_footer'} />
       </main>
       <SiteFooter />
     </div>

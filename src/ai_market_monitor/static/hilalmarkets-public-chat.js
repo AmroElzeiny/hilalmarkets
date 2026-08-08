@@ -6,6 +6,9 @@
   const backdrop = document.querySelector("[data-public-chat-backdrop]");
   if (!launcher || !panel || !backdrop) return;
 
+  // Whether the product is invite-only, decided by the server and stamped on the panel.
+  const waitlistMode = panel.dataset.publicChatWaitlistMode === "true";
+
   const view = {
     close: panel.querySelector("[data-public-chat-close]"),
     newConversation: panel.querySelector("[data-public-chat-new]"),
@@ -250,7 +253,13 @@
     setHidden(view.composer, false);
     if (!state.started) {
       state.started = true;
-      appendMessage("assistant", `Hi ${firstName(state.profile?.name)}. I can explain Hilal Markets, screening evidence, private-beta access, pricing, and product boundaries. What would you like to know?`);
+      // Pre-launch there is no published price, so naming pricing as a topic invites a
+      // question the assistant is not allowed to answer. The server stamps the state on
+      // the panel; the greeting follows it rather than keeping its own idea of it.
+      const topics = waitlistMode
+        ? "screening evidence, private-beta access, the waitlist, and product boundaries"
+        : "screening evidence, private-beta access, pricing, and product boundaries";
+      appendMessage("assistant", `Hi ${firstName(state.profile?.name)}. I can explain Hilal Markets, ${topics}. What would you like to know?`);
     }
     window.setTimeout(() => view.input?.focus(), 30);
   }

@@ -17,23 +17,26 @@ const WAITLIST_HEADERS = [
   'Country',
   'Signup Source',
   'Campaign',
-  'Beta Testing Consent',
   'Status',
   'Notes',
   'System Delivery ID',
 ];
 
 /**
- * The layout used before the beta-consent column existed. A sheet already holding
- * these headers is upgraded in place; its rows keep every value and gain one blank
- * consent cell, because those people were never asked the question.
+ * The layout used while the form asked for beta-testing consent.
+ *
+ * The question was withdrawn: the box was offered already ticked, so its answer was not
+ * a choice anybody made. A sheet still holding that column is brought back to the layout
+ * above. Every row keeps its email, date, source, status and notes; only the consent cell
+ * is dropped, because it never held a real answer to keep.
  */
-const WAITLIST_HEADERS_V2 = [
+const WAITLIST_HEADERS_WITH_CONSENT = [
   'Email Address',
   'Joined At (UTC)',
   'Country',
   'Signup Source',
   'Campaign',
+  'Beta Testing Consent',
   'Status',
   'Notes',
   'System Delivery ID',
@@ -47,10 +50,9 @@ const WAITLIST_STATUS_OPTIONS = [
   'Not Interested',
 ];
 
-const WAITLIST_CONSENT_COLUMN = 6;
-const WAITLIST_STATUS_COLUMN = 7;
-const WAITLIST_NOTES_COLUMN = 8;
-const WAITLIST_DELIVERY_ID_COLUMN = 9;
+const WAITLIST_STATUS_COLUMN = 6;
+const WAITLIST_NOTES_COLUMN = 7;
+const WAITLIST_DELIVERY_ID_COLUMN = 8;
 const WAITLIST_VISIBLE_COLUMNS = WAITLIST_DELIVERY_ID_COLUMN - 1;
 
 function doPost(event) {
@@ -96,7 +98,6 @@ function doPost(event) {
       safeCellText_(payload.country || 'Unknown'),
       source,
       campaign,
-      consentLabel_(payload.beta_contact_consent),
       'New',
       '',
       deliveryId,
@@ -108,17 +109,6 @@ function doPost(event) {
   } finally {
     lock.releaseLock();
   }
-}
-
-/**
- * "Yes" or "No" only when the server actually sent an answer. A delivery from an older
- * server build carries no field at all, and a blank cell says that honestly instead of
- * recording a refusal nobody made.
- */
-function consentLabel_(value) {
-  if (value === true) return 'Yes';
-  if (value === false) return 'No';
-  return '';
 }
 
 function prepareWaitlistSheet_(sheet) {
@@ -143,7 +133,6 @@ function prepareWaitlistSheet_(sheet) {
   sheet.setColumnWidth(3, 100);
   sheet.setColumnWidth(4, 150);
   sheet.setColumnWidth(5, 170);
-  sheet.setColumnWidth(WAITLIST_CONSENT_COLUMN, 170);
   sheet.setColumnWidth(WAITLIST_STATUS_COLUMN, 130);
   sheet.setColumnWidth(WAITLIST_NOTES_COLUMN, 300);
   sheet.hideColumns(WAITLIST_DELIVERY_ID_COLUMN);
@@ -159,10 +148,11 @@ function matchesHeaderSet_(row, expected) {
 }
 
 /**
- * Bring an older sheet up to the current layout without losing a single row.
+ * Bring a sheet in any other recognised shape to the current layout, losing no rows.
  *
- * Two older shapes are recognised. Anything else throws, so an unknown sheet is left
- * exactly as it is rather than being overwritten by a guess.
+ * Two other shapes are recognised: the one that carried the withdrawn consent column,
+ * and the oldest delivery-id-first layout. Anything else throws, so an unknown sheet is
+ * left exactly as it is rather than being overwritten by a guess.
  */
 function upgradeSheetLayout_(sheet) {
   const values = sheet.getDataRange().getValues();
@@ -170,7 +160,7 @@ function upgradeSheetLayout_(sheet) {
   if (rows.length === 0) return;
 
   let migrated;
-  if (matchesHeaderSet_(rows[0], WAITLIST_HEADERS_V2)) {
+  if (matchesHeaderSet_(rows[0], WAITLIST_HEADERS_WITH_CONSENT)) {
     migrated = rows.slice(1).map(row => {
       const joinedAt = new Date(String(row[1] || ''));
       if (Number.isNaN(joinedAt.getTime())) throw new Error('waitlist_legacy_timestamp_invalid');
@@ -180,11 +170,11 @@ function upgradeSheetLayout_(sheet) {
         safeCellText_(row[2] || 'Unknown'),
         safeCellText_(row[3] || 'Direct'),
         safeCellText_(row[4] || ''),
-        // Never asked, so never answered.
-        '',
-        safeCellText_(row[5] || 'New'),
-        safeCellText_(row[6] || ''),
-        String(row[7] || '').slice(0, 255),
+        // row[5] was the consent cell and is dropped. Status, notes and the delivery id
+        // shift back one place; every one of them is carried across.
+        safeCellText_(row[6] || 'New'),
+        safeCellText_(row[7] || ''),
+        String(row[8] || '').slice(0, 255),
       ];
     });
   } else {
@@ -221,7 +211,6 @@ function migrateLegacyRows_(rows) {
       safeCellText_(row[3] || 'Unknown'),
       safeCellText_(row[5] || row[4] || 'Direct'),
       safeCellText_(row[7] || ''),
-      '',
       'New',
       '',
       String(row[0]).slice(0, 255),

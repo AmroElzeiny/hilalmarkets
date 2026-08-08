@@ -449,6 +449,28 @@ export function trackWaitlistSubmitAttempt(formLocation: string): boolean {
   )
 }
 
+/**
+ * The data-layer event the GTM container turns into the GA4 waitlist conversion.
+ *
+ * Named once here so the site has a single spelling of the conversion. A second copy
+ * typed into a component is how a container trigger and a page end up disagreeing by
+ * one character and the conversion silently stops counting.
+ */
+export const WAITLIST_JOIN_EVENT = 'waitlist_join'
+
+/**
+ * A signup the server confirmed as new. This is the only place the site may report a
+ * waitlist conversion.
+ *
+ * Every event here is scoped to `submissionId` - the idempotency key of that one
+ * submission - so a re-render, a retried callback or a second call with the same key
+ * reports nothing further. A genuinely new submission carries a new key and is counted
+ * again, which is what a second person joining actually is.
+ *
+ * Nothing is emitted unless Analytics consent has been granted: `emitGoogle` returns
+ * false without it, and `emitOnce` then keeps the key unused, so the event is dropped
+ * rather than stored up and released later.
+ */
 export function trackWaitlistSuccess(
   formLocation: string,
   submissionId = '',
@@ -458,8 +480,11 @@ export function trackWaitlistSuccess(
   const google = emitOnce(`waitlist-success:${eventScope}`, () =>
     emitGoogle('waitlist_signup_success', {}),
   )
+  const join = emitOnce(`waitlist-join:${eventScope}`, () =>
+    emitGoogle(WAITLIST_JOIN_EVENT, {}),
+  )
   const meta = emitOnce(`meta-lead:${eventScope}`, () => emitMeta('Lead'))
-  return google || meta
+  return google || join || meta
 }
 
 export function trackWaitlistError(

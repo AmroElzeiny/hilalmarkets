@@ -3,6 +3,7 @@ import { trackCtaClick } from '../analytics'
 import { CheckIcon } from '../components/brand'
 import { Reveal } from '../components/Reveal'
 import { SiteFooter, SiteNav } from '../components/SiteChrome'
+import { WaitlistBand } from '../components/WaitlistBand'
 import {
   newContactIdempotencyKey,
   PublicFormError,
@@ -183,6 +184,7 @@ export default function ContactPage() {
           </div>
           <div className="mt-10 lg:hidden"><MessageRouteGraph /></div>
         </section>
+        <WaitlistBand location="contact_footer" />
       </main>
       <SiteFooter />
     </div>

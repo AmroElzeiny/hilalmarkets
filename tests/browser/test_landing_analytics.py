@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from playwright.sync_api import Page, expect
 
 
@@ -166,8 +167,17 @@ def test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain(
     assert "xPixelId" not in response.text()
 
 
-def _stub_waitlist_api(page: Page, *, created: bool = True) -> list[dict]:
-    """Answer the public-forms endpoints in the browser and keep what was sent."""
+def _stub_waitlist_api(
+    page: Page,
+    *,
+    created: bool = True,
+    status: int = 200,
+) -> list[dict]:
+    """Answer the public-forms endpoints in the browser and keep what was sent.
+
+    `created=False` is the address that is already on the list; `status` above 399 is a
+    submission the server refused. Neither is a new signup, so neither may be counted.
+    """
 
     import json
 
@@ -190,6 +200,13 @@ def _stub_waitlist_api(page: Page, *, created: bool = True) -> list[dict]:
 
     def _waitlist(route) -> None:
         submitted.append(json.loads(route.request.post_data or "{}"))
+        if status >= 400:
+            route.fulfill(
+                status=status,
+                content_type="application/json",
+                body=json.dumps({"detail": "The request could not be handled."}),
+            )
+            return
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -256,9 +273,8 @@ def test_consent_cta_sections_and_waitlist_events_are_grounded_and_deduplicated(
     page.wait_for_timeout(1200)
     assert _event_count(page, "waitlist_form_view") == 1
 
-    # The beta-contact question is offered already answered "yes".
-    consent = page.locator("#waitlist-beta-consent")
-    expect(consent).to_be_checked()
+    # An email address is the only thing the form asks for.
+    expect(page.locator("#waitlist form input")).to_have_count(1)
 
     email = page.locator("#waitlist-email")
     email.fill(f"browser-{uuid4().hex[:8]}@example.com")
@@ -268,16 +284,33 @@ def test_consent_cta_sections_and_waitlist_events_are_grounded_and_deduplicated(
     expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
     assert _event_count(page, "waitlist_submit_attempt") == 1
     assert _event_count(page, "waitlist_signup_success") == 1
+    # The GA4 waitlist conversion: one per confirmed signup, and nothing attached to it.
+    assert _event_count(page, "waitlist_join") == 1
+    assert _google_event_parameters(page, "waitlist_join") == [{}]
     assert _event_count(page, "waitlist_form_error") == 0
     assert _meta_event_count(page, "Lead") == 1
 
-    # What the browser sent is what the box said, and no analytics event carries the
-    # address that was typed.
+    # The browser sends the email and nothing about beta-testing consent, and no
+    # analytics event carries the address that was typed.
     assert len(submitted) == 1
-    assert submitted[0]["beta_contact_consent"] is True
+    assert "beta_contact_consent" not in submitted[0]
     success_events = _google_event_parameters(page, "waitlist_signup_success")
     assert success_events == [{}]
     assert "@example.com" not in str(_google_event_parameters(page, "waitlist_form_start"))
+
+    # A repeated callback for the same submission reports nothing further. This is the
+    # real duplicate: the same signup told to the page again, by a re-render, a retried
+    # promise, or a handler that ran twice.
+    page.evaluate(
+        """(key) => {
+          window.HilalAnalytics.trackWaitlistSuccess('landing_final', key);
+          window.HilalAnalytics.trackWaitlistSuccess('landing_final', key);
+        }""",
+        submitted[0]["idempotency_key"],
+    )
+    assert _event_count(page, "waitlist_join") == 1
+    assert _event_count(page, "waitlist_signup_success") == 1
+    assert _meta_event_count(page, "Lead") == 1
 
 
 def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
@@ -399,23 +432,26 @@ def test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission(
     assert len(submitted) == 1
 
 
-def test_a_cleared_consent_box_still_joins_the_waitlist(
+def test_the_form_shows_no_consent_box_and_sends_no_consent_answer(
     page: Page,
     base_url: str,
 ) -> None:
-    """Clearing the box is a choice about contact, not a refusal to join."""
+    """The withdrawn box is gone from the running page, not only from the source.
+
+    It was offered already ticked, which records an answer the person never gave. Checked
+    on the real page because the source and the served bundle are two different things.
+    """
 
     submitted = _stub_waitlist_api(page)
     page.goto(base_url, wait_until="domcontentloaded")
     page.locator("#waitlist").scroll_into_view_if_needed()
-    consent = page.locator("#waitlist-beta-consent")
-    expect(consent).to_be_checked()
-    consent.uncheck()
+    expect(page.locator("#waitlist-beta-consent")).to_have_count(0)
+    expect(page.locator("#waitlist input[type='checkbox']")).to_have_count(0)
     page.locator("#waitlist-email").fill(f"no-beta-{uuid4().hex[:8]}@example.com")
     page.get_by_role("button", name="Join the waitlist").last.click()
     expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
     assert len(submitted) == 1
-    assert submitted[0]["beta_contact_consent"] is False
+    assert "beta_contact_consent" not in submitted[0]
 
 
 def test_a_duplicate_email_is_explained_without_claiming_success(
@@ -438,9 +474,55 @@ def test_a_duplicate_email_is_explained_without_claiming_success(
         page.get_by_text("This email is already on the waitlist.")
     ).to_be_visible()
     assert _event_count(page, "waitlist_signup_success") == 0
+    assert _event_count(page, "waitlist_join") == 0
     assert _meta_event_count(page, "Lead") == 0
     errors = _google_event_parameters(page, "waitlist_form_error")
     assert [event.get("error_type") for event in errors] == ["duplicate_email"]
+
+
+@pytest.mark.deliberate_console_errors("429 (Too Many Requests)")
+def test_a_refused_submission_reports_no_waitlist_conversion(
+    page: Page,
+    base_url: str,
+) -> None:
+    """A signup that did not happen is never counted - before or after consent.
+
+    Two ways the conversion could be invented are checked together: the server refusing
+    the submission, and analytics running before the visitor allowed it. Each is checked
+    on the running page, because the count that matters is the one GTM would receive.
+
+    The refusal is a 429. A 5xx would be caught by the fixture's own check for failed
+    API calls, and every refusal reaches the same branch of the submit handler.
+    """
+
+    _stub_waitlist_api(page, status=429)
+    page.goto(base_url, wait_until="domcontentloaded")
+
+    # First: no consent yet. Nothing may be pushed at all.
+    page.locator("#waitlist").scroll_into_view_if_needed()
+    page.locator("#waitlist-email").fill(f"refused-{uuid4().hex[:8]}@example.com")
+    page.get_by_role("button", name="Join the waitlist").last.click()
+    expect(page.get_by_text("You are on the waitlist.")).to_have_count(0)
+    assert _event_count(page, "waitlist_join") == 0
+
+    # Then with analytics switched on, so "no event" means the transport was there and
+    # stayed silent rather than being absent.
+    _configure_fake_providers(page)
+    page.locator("[data-cookie-accept-analytics]").click()
+    page.wait_for_selector(
+        'script[data-hm-provider="google-tag-manager"]', state="attached"
+    )
+    page.locator("#waitlist-email").fill(f"refused-{uuid4().hex[:8]}@example.com")
+    page.get_by_role("button", name="Join the waitlist").last.click()
+    errors = _google_event_parameters(page, "waitlist_form_error")
+    assert [event.get("error_type") for event in errors] == ["rate_limited"]
+    assert _event_count(page, "waitlist_join") == 0
+    assert _event_count(page, "waitlist_signup_success") == 0
+    assert _meta_event_count(page, "Lead") == 0
+
+    # A retry of the refused submission is still not a signup.
+    page.get_by_role("button", name="Join the waitlist").last.click()
+    assert _event_count(page, "waitlist_join") == 0
 
 
 def test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account(
@@ -454,7 +536,6 @@ def test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account(
         waitlist.scroll_into_view_if_needed()
         expect(waitlist).to_be_visible()
         expect(page.locator("#waitlist-email")).to_be_visible()
-        expect(page.locator("#waitlist-beta-consent")).to_be_visible()
         assert page.evaluate(
             "() => document.documentElement.scrollWidth <= window.innerWidth"
         )
@@ -472,16 +553,13 @@ def test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account(
     waitlist_link.click()
     expect(page.locator("#waitlist")).to_be_in_viewport()
 
-    # The whole form can be completed from the keyboard.
+    # The whole form can be completed from the keyboard: type the address, one Tab to the
+    # button. There is nothing else in it to reach.
     email = page.locator("#waitlist-email")
     email.focus()
     email.type("keyboard@example.com")
     page.keyboard.press("Tab")
     expect(page.get_by_role("button", name="Join the waitlist")).to_be_focused()
-    page.keyboard.press("Tab")
-    expect(page.locator("#waitlist-beta-consent")).to_be_focused()
-    page.keyboard.press("Space")
-    expect(page.locator("#waitlist-beta-consent")).not_to_be_checked()
 
     page.emulate_media(reduced_motion="reduce")
     assert page.locator("html").evaluate(

@@ -4,7 +4,9 @@
 </button>
 
 <div class="public-chat-backdrop" data-public-chat-backdrop aria-hidden="true" hidden></div>
-<section class="public-chat-panel" id="public-product-chat" data-public-chat-panel data-evaluator-target="public-support-chat" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="public-chat-title" aria-describedby="public-chat-description" hidden>
+{# The widget's own greeting has to describe the same product state as the pages around
+   it. The server decides that state, so it is stamped here rather than guessed in JS. #}
+<section class="public-chat-panel" id="public-product-chat" data-public-chat-panel data-public-chat-waitlist-mode="{{ 'true' if waitlist_mode else 'false' }}" data-evaluator-target="public-support-chat" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="public-chat-title" aria-describedby="public-chat-description" hidden>
   <header class="public-chat-head">
     <div class="public-chat-brand">
       <span class="public-chat-brand-icon" data-icon="spark" aria-hidden="true"></span>
@@ -93,7 +95,16 @@
           <select class="select" id="public-chat-category" name="category">
             <option value="product">Product</option>
             <option value="screening">Screening</option>
+            {# Pre-launch there is no price to ask about, so offering "Pricing" as a topic
+               invites a question nobody can answer. The reader sees the question they
+               actually have. The stored value stays "pricing" because it is the same
+               commercial-access topic and every saved inquiry already uses that word;
+               renaming it would split one queue into two that mean the same thing. #}
+            {% if waitlist_mode %}
+            <option value="pricing">Waitlist and beta access</option>
+            {% else %}
             <option value="pricing">Pricing</option>
+            {% endif %}
             <option value="technical_support">Technical support</option>
             <option value="partnership">Partnership</option>
             <option value="other">Other</option>

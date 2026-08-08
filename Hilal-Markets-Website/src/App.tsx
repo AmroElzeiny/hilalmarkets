@@ -174,14 +174,13 @@ function TrustControl() {
  * here creates an account or reaches the dashboard: the private beta is entered by
  * invitation, so asking for a password would promise access the visitor does not have.
  *
- * The beta-contact box is offered already ticked. Whatever state it is in when the form
- * is sent is what the server records — clearing it still joins the waitlist, and the
- * team can see that this person did not agree to be contacted about beta testing.
+ * The form asks for an email address and nothing else. It briefly carried a pre-ticked
+ * "contact me about beta testing" box; a box that is already ticked is not a choice the
+ * person made, so it was removed rather than left recording an answer nobody gave.
  */
 function Waitlist() {
   const bars = [1, 0.62, 0.38, 0.22, 0.12, 0.06]
   const [email, setEmail] = useState('')
-  const [betaConsent, setBetaConsent] = useState(true)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'duplicate' | 'error'>('idle')
   const [errorType, setErrorType] = useState<WaitlistErrorType>('unknown_error')
   const idempotencyKey = useRef(newWaitlistIdempotencyKey())
@@ -208,7 +207,7 @@ function Waitlist() {
 
     try {
       const result = await submitWaitlist(
-        { email, betaContactConsent: betaConsent },
+        { email },
         getFirstTouchAttribution(),
         idempotencyKey.current,
       )
@@ -268,7 +267,6 @@ function Waitlist() {
                 className="mt-4 text-[13px] font-semibold text-ink underline decoration-ink/30 underline-offset-4"
                 onClick={() => {
                   setEmail('')
-                  setBetaConsent(true)
                   setStatus('idle')
                   resetIdempotency()
                 }}
@@ -277,64 +275,44 @@ function Waitlist() {
               </button>
             </div>
           ) : (
+            // One row: the address and the button. Stacked on a narrow phone, side by
+            // side from the small breakpoint up.
             <form
-              className="mx-auto mt-8 flex max-w-[440px] flex-col gap-3"
+              className="mx-auto mt-8 flex max-w-[440px] flex-col gap-3 sm:flex-row"
               onSubmit={handleSubmit}
             >
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <label className="sr-only" htmlFor="waitlist-email">Email address</label>
-                <input
-                  id="waitlist-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  aria-invalid={status === 'duplicate' || status === 'error' ? true : undefined}
-                  aria-describedby={status === 'duplicate' || status === 'error' ? 'waitlist-email-error' : undefined}
-                  onFocus={() => trackWaitlistFormStart('landing_final')}
-                  onPaste={() => trackWaitlistFormStart('landing_final')}
-                  onChange={(event) => {
-                    trackWaitlistFormStart('landing_final')
-                    setEmail(event.target.value)
-                    resetIdempotency()
-                    if (status === 'duplicate' || status === 'error') setStatus('idle')
-                  }}
-                  placeholder="you@email.com"
-                  className={`w-full rounded-full border bg-white/70 px-5 py-3.5 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/40 focus:bg-white ${
-                    status === 'duplicate' || status === 'error'
-                      ? 'border-[#8d3029] focus:border-[#8d3029] focus:ring-4 focus:ring-[#8d3029]/10'
-                      : 'border-ink/15 focus:border-ink/50'
-                  }`}
-                />
-                <button
-                  type="submit"
-                  disabled={status === 'submitting'}
-                  aria-busy={status === 'submitting'}
-                  className="shrink-0 rounded-full bg-ink px-7 py-3.5 text-[15px] font-medium !text-[#fff] transition-transform hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
-                >
-                  {status === 'submitting' ? 'Joining...' : 'Join the waitlist'}
-                </button>
-              </div>
-              <label
-                htmlFor="waitlist-beta-consent"
-                className="flex items-start gap-2.5 rounded-[16px] border border-ink/10 bg-white/60 px-4 py-3 text-left text-[14px] leading-[1.45] text-[#2b2e35]"
+              <label className="sr-only" htmlFor="waitlist-email">Email address</label>
+              <input
+                id="waitlist-email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                aria-invalid={status === 'duplicate' || status === 'error' ? true : undefined}
+                aria-describedby={status === 'duplicate' || status === 'error' ? 'waitlist-email-error' : undefined}
+                onFocus={() => trackWaitlistFormStart('landing_final')}
+                onPaste={() => trackWaitlistFormStart('landing_final')}
+                onChange={(event) => {
+                  trackWaitlistFormStart('landing_final')
+                  setEmail(event.target.value)
+                  resetIdempotency()
+                  if (status === 'duplicate' || status === 'error') setStatus('idle')
+                }}
+                placeholder="you@email.com"
+                className={`w-full rounded-full border bg-white/70 px-5 py-3.5 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/40 focus:bg-white ${
+                  status === 'duplicate' || status === 'error'
+                    ? 'border-[#8d3029] focus:border-[#8d3029] focus:ring-4 focus:ring-[#8d3029]/10'
+                    : 'border-ink/15 focus:border-ink/50'
+                }`}
+              />
+              <button
+                type="submit"
+                disabled={status === 'submitting'}
+                aria-busy={status === 'submitting'}
+                className="shrink-0 rounded-full bg-ink px-7 py-3.5 text-[15px] font-medium !text-[#fff] transition-transform hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
               >
-                <input
-                  id="waitlist-beta-consent"
-                  name="beta_contact_consent"
-                  type="checkbox"
-                  checked={betaConsent}
-                  onChange={(event) => {
-                    setBetaConsent(event.target.checked)
-                    resetIdempotency()
-                    if (status === 'duplicate' || status === 'error') setStatus('idle')
-                  }}
-                  className="mt-0.5 size-[18px] shrink-0 accent-[#2b2e35] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2b2e35]"
-                />
-                <span>
-                  I agree to be contacted about taking part in private beta testing.
-                </span>
-              </label>
+                {status === 'submitting' ? 'Joining...' : 'Join the waitlist'}
+              </button>
             </form>
           )}
           {(status === 'duplicate' || status === 'error') && (

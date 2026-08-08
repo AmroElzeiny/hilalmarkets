@@ -20,10 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import (
-    HELP_CATEGORIES,
     PUBLIC_PAGES,
     PURCHASE_FAQS,
     WAITLIST_HIDDEN_PAGES,
+    is_account_only_path,
+    public_help_categories,
 )
 from ai_market_monitor.db.models import (
     CustomerConversationEvent,
@@ -81,6 +82,24 @@ PUBLIC_ROUTE_PATHS: dict[str, tuple[str, str]] = {
     "cookies": ("Cookie Policy", "/cookies"),
     "dashboard_entry": ("Dashboard", "/dashboard-entry"),
 }
+
+
+def offerable_route_ids(settings: Settings) -> frozenset[str]:
+    """Routes the assistant may point an anonymous visitor at.
+
+    A route id becomes a link the visitor is invited to follow, so the gate belongs here
+    rather than at each of the places that can produce one. Pre-launch, an address that
+    needs an account is not a next step; it is a closed door, and the pricing page is a
+    redirect. Both are dropped for every caller at once.
+    """
+
+    if not settings.public_waitlist_mode:
+        return frozenset(PUBLIC_ROUTE_PATHS)
+    return frozenset(
+        route_id
+        for route_id, (_label, path) in PUBLIC_ROUTE_PATHS.items()
+        if not is_account_only_path(path) and route_id not in WAITLIST_HIDDEN_PAGES
+    )
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]*>")
@@ -409,8 +428,8 @@ class PublicKnowledgeService:
                     "Hilal Markets is invite-only during its private beta, so accounts are "
                     "not open to everyone yet. Join the waitlist on the home page with an "
                     "email address, and selected waitlist members are contacted directly as "
-                    "access becomes available. The waitlist form also asks whether you are "
-                    "happy to help with beta testing. Private account details are never "
+                    "access becomes available. An email address is the only thing the "
+                    "waitlist form asks for. Private account details are never "
                     "available to anonymous visitors."
                 ),
                 route_id="home",
@@ -555,7 +574,13 @@ class PublicKnowledgeService:
                 keywords=("support", "contact", "partnership", "email the team"),
             ),
         ]
-        for category in HELP_CATEGORIES:
+        # The assistant reads the same Help Center the visitor reads. Reading the raw
+        # articles instead let it answer "Where do I manage my plan?" with "Open Plan &
+        # Billing in the dashboard" while the visible Help Center had already stopped
+        # saying that — the page and the assistant disagreeing about the same product.
+        for category in public_help_categories(
+            waitlist_mode=self.settings.public_waitlist_mode
+        ):
             for index, article in enumerate(category["articles"]):
                 entries.append(
                     PublicKnowledgeEntry(
@@ -1305,16 +1330,20 @@ class PublicChatService:
                 "Normal product conversation cannot request account tools."
             )
 
-    @staticmethod
     def _authoritative_route_ids(
+        self,
         model_routes: list[str],
         tool_results: list[Any],
     ) -> list[str]:
-        routes = [route for route in model_routes if route in PUBLIC_ROUTE_PATHS]
+        # One gate for every producer of a route id — the model, the read tools, and any
+        # caller added later. Filtering at each producer would mean remembering to do it
+        # again the next time one is added.
+        offerable = offerable_route_ids(self.settings)
+        routes = [route for route in model_routes if route in offerable]
         routes.extend(
             item.route_id
             for item in tool_results
-            if item.route_id and item.route_id in PUBLIC_ROUTE_PATHS
+            if item.route_id and item.route_id in offerable
         )
         return list(dict.fromkeys(routes))[:12]
 
@@ -1865,8 +1894,16 @@ class PublicChatService:
         stamp = datetime.now(UTC).strftime("%Y%m%d")
         return f"HM-{stamp}-{secrets.token_hex(4).upper()}"
 
-    @staticmethod
-    def _related_link(route_id: str) -> PublicChatRelatedLink:
+    def _related_link(self, route_id: str) -> PublicChatRelatedLink | None:
+        """The link for a route id, or None when the visitor cannot use that address.
+
+        Public answers currently carry no links at all. The gate is here anyway: the day
+        links are switched back on, the switch must not also switch on a "Pricing" or
+        "Dashboard" suggestion for somebody who has no account.
+        """
+
+        if route_id not in offerable_route_ids(self.settings):
+            return None
         label, path = PUBLIC_ROUTE_PATHS[route_id]
         return PublicChatRelatedLink(route_id=route_id, label=label, path=path)
 

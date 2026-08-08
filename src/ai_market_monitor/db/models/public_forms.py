@@ -4,7 +4,6 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
-    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -12,7 +11,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,12 +30,6 @@ class WaitlistSignup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     country_code: Mapped[str | None] = mapped_column(String(2))
     source_page: Mapped[str] = mapped_column(String(240), nullable=False)
     attribution: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    #: What this person chose about being contacted for private beta testing.
-    #: Older rows were created before the question existed, so they default to False:
-    #: an absent answer must never be read as agreement.
-    beta_contact_consent: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("false"), nullable=False
-    )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)

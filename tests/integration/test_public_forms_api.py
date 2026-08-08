@@ -23,11 +23,9 @@ def _waitlist_payload(
     *,
     email: str = "visitor@example.com",
     key: str = "waitlist:test:1234567890",
-    beta_contact_consent: bool = True,
 ) -> dict:
     return {
         "email": email,
-        "beta_contact_consent": beta_contact_consent,
         "source_page": "/?utm_source=private-value",
         "attribution": {
             "utm_source": "newsletter",
@@ -82,78 +80,60 @@ async def test_waitlist_is_idempotent_and_drops_attribution_without_consent(test
         assert signup.source_page == "/"
 
 
-async def test_waitlist_records_the_beta_contact_answer_exactly_as_it_arrives(
+async def test_the_waitlist_records_nothing_but_the_email_and_its_own_metadata(
     test_context,
 ):
-    """The box is offered ticked, but only what the person left is stored.
+    """The form asks for an email address, so that is all a signup row may hold.
 
-    A cleared box still joins the waitlist. Recording it as agreement would make the
-    saved record say something the visitor never said.
+    A pre-ticked "contact me about beta testing" box was offered here for a short time.
+    Ticked-by-default is not a choice the person made, so the question was withdrawn. This
+    checks the row itself, not the page: a field the server still accepted would go on
+    recording an answer nobody gave, invisibly.
     """
 
     test_context["settings"].waitlist_google_sheets_enabled = False
     client = test_context["client"]
     token = await _csrf(client)
 
-    agreed = await client.post(
+    joined = await client.post(
         "/api/v1/public-forms/waitlist",
         headers={"X-CSRF-Token": token},
         json=_waitlist_payload(email="yes@example.com", key="waitlist:test:consent-yes"),
     )
-    assert agreed.status_code == 200
+    assert joined.status_code == 200
 
-    declined = await client.post(
-        "/api/v1/public-forms/waitlist",
-        headers={"X-CSRF-Token": token},
-        json=_waitlist_payload(
-            email="no@example.com",
-            key="waitlist:test:consent-no",
-            beta_contact_consent=False,
-        ),
-    )
-    assert declined.status_code == 200
-    assert declined.json()["created"] is True
-
-    async with test_context["session_factory"]() as session:
-        rows = {
-            row.normalized_email: row.beta_contact_consent
-            for row in (await session.scalars(select(WaitlistSignup))).all()
-        }
-    assert rows == {"yes@example.com": True, "no@example.com": False}
-
-
-async def test_reusing_one_request_key_with_a_different_answer_is_refused(test_context):
-    """One identifier means one submission, and the answer is part of what it means."""
-
-    test_context["settings"].waitlist_google_sheets_enabled = False
-    client = test_context["client"]
-    token = await _csrf(client)
-    key = "waitlist:test:consent-reuse"
-
-    first = await client.post(
-        "/api/v1/public-forms/waitlist",
-        headers={"X-CSRF-Token": token},
-        json=_waitlist_payload(email="reuse@example.com", key=key),
-    )
-    assert first.status_code == 200
-
-    changed = await client.post(
-        "/api/v1/public-forms/waitlist",
-        headers={"X-CSRF-Token": token},
-        json=_waitlist_payload(
-            email="reuse@example.com",
-            key=key,
-            beta_contact_consent=False,
-        ),
-    )
-    assert changed.status_code == 409
-    assert changed.json()["detail"]["code"] == "idempotency_conflict"
-
-    # The stored answer is still the one that was actually sent first.
     async with test_context["session_factory"]() as session:
         signup = await session.scalar(select(WaitlistSignup))
-        assert signup is not None
-        assert signup.beta_contact_consent is True
+    assert signup is not None
+    assert signup.normalized_email == "yes@example.com"
+    assert not hasattr(signup, "beta_contact_consent")
+
+
+async def test_a_withdrawn_consent_field_is_refused_rather_than_quietly_ignored(
+    test_context,
+):
+    """A browser still sending the old field must be told, not silently obeyed.
+
+    The request model is strict, so an unknown field is a rejected request. That matters:
+    accepting and dropping it would look identical to accepting and storing it, and
+    nobody would find out which one was happening.
+    """
+
+    client = test_context["client"]
+    token = await _csrf(client)
+
+    payload = _waitlist_payload(email="stale@example.com", key="waitlist:test:stale-1")
+    payload["beta_contact_consent"] = True
+
+    response = await client.post(
+        "/api/v1/public-forms/waitlist",
+        headers={"X-CSRF-Token": token},
+        json=payload,
+    )
+    assert response.status_code == 422
+
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(WaitlistSignup)) is None
 
 
 async def test_waitlist_accepts_same_origin_and_rejects_foreign_origin(test_context):
@@ -231,7 +211,6 @@ async def test_waitlist_syncs_server_side_country_and_first_touch_without_leakin
             "submitted_at": captured[0]["submitted_at"],
             "country": "EG",
             "source_page": "/",
-            "beta_contact_consent": True,
             "utm_source": "newsletter",
             "utm_medium": "email",
             "utm_campaign": "private-beta",

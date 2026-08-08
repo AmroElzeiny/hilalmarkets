@@ -127,8 +127,13 @@ Implemented events:
 | Waitlist form visible | `waitlist_form_view` | None | No |
 | First email-field interaction | `waitlist_form_start` | None | No |
 | Valid submit attempt | `waitlist_submit_attempt` | None | No |
-| New server-confirmed signup | `waitlist_signup_success` (mapped by GTM to GA4 `generate_lead`) | `Lead` | Candidate |
+| New server-confirmed signup | `waitlist_join` and `waitlist_signup_success` | `Lead` | Yes, in GTM |
 | Failed or duplicate signup | `waitlist_form_error` | None | No |
+
+`waitlist_join` is the waitlist conversion. Both success events are pushed from the single
+success branch in `trackWaitlistSuccess`, scoped to the submission's idempotency key, so one
+confirmed signup pushes each of them exactly once. **Trigger the GA4 conversion tag from one of
+the two, not both** - GTM firing a key event on each name would count one signup twice.
 
 Only normalized error categories are emitted. The submitted email, title, description, raw server
 errors, custom IP data, user identifiers, and credentials are never analytics parameters.
@@ -183,10 +188,14 @@ No external event delivery is claimed.
 2. Grant Analytics consent on staging and submit a new, unique waitlist email.
 3. Temporarily set `VITE_ANALYTICS_DEBUG=true` and inspect GA4 DebugView. Google documents
    DebugView and debug mode here: https://support.google.com/analytics/answer/7201382
-4. Verify the website emits one `waitlist_signup_success` data-layer event and the published GTM
-   container maps it to one GA4 `generate_lead` event. Do not implement `generate_lead` directly
-   in the website or mark section, CTA, form-view, form-start, attempt, or error events as key events.
-5. Disable debug mode after verification.
+4. Verify the website emits one `waitlist_join` data-layer event per confirmed signup, and that
+   the published GTM container turns it into one GA4 event on property `G-2Q0KT6RGE8`. The
+   measurement ID belongs in the container only; it is never compiled into the site.
+5. Choose one success event as the conversion trigger. `waitlist_join` and
+   `waitlist_signup_success` both fire on the same confirmed signup, so a key-event tag on each
+   would count that signup twice. Do not implement `generate_lead` directly in the website, and
+   do not mark section, CTA, form-view, form-start, attempt, or error events as key events.
+6. Disable debug mode after verification.
 
 ### Meta
 

@@ -78,8 +78,18 @@ async def test_the_shipped_landing_bundle_matches_the_waitlist_source(test_conte
         ROOT / "src/ai_market_monitor/static/landing/assets/landing.js"
     ).read_text(encoding="utf-8")
     assert "Join the waitlist" in bundle
-    assert "beta_contact_consent" in bundle
     assert "public-forms/bootstrap" in bundle
+    # The withdrawn consent box is gone from what visitors are actually served, not only
+    # from the source. A stale bundle would keep showing it and keep sending its answer.
+    for withdrawn in ("beta_contact_consent", "waitlist-beta-consent", "beta testing"):
+        assert withdrawn not in bundle, withdrawn
+    # The Contact, Privacy and Terms pages carry the waitlist band, and their legal text
+    # scopes accounts and payment to the private beta. Both are drawn by this file.
+    assert "contact_footer" in bundle
+    assert "privacy_footer" in bundle
+    assert "terms_footer" in bundle
+    assert "Paid access is not offered to the public during the private beta." in bundle
+    assert "Accounts are issued by invitation during the private beta." in bundle
     for forbidden in (
         "/signin",
         "/signup",
@@ -87,6 +97,7 @@ async def test_the_shipped_landing_bundle_matches_the_waitlist_source(test_conte
         "Choose Monitor monthly",
         "monthlyPrice",
         "7-day money-back guarantee",
+        "unless a separately presented offer expressly states otherwise",
     ):
         assert forbidden not in bundle, forbidden
 

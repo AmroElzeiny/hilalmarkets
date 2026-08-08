@@ -110,6 +110,71 @@ def test_pre_launch_corpus_answers_account_and_price_questions_from_the_home_fac
             assert "dashboard_entry" not in routes, question
 
 
+#: The words that name a place an anonymous visitor cannot reach. The assistant may
+#: describe the dashboard as a product feature; it must not tell this reader to open one.
+_FORBIDDEN_INSTRUCTIONS = (
+    "sign in",
+    "sign up",
+    "log in",
+    "create an account",
+    "open plan & billing",
+    "plan & billing",
+    "pricing page",
+    "checkout",
+)
+
+
+def test_pre_launch_assistant_never_sends_a_visitor_to_an_account_page() -> None:
+    """The regression: the assistant read the raw Help Center, not the visible one.
+
+    The Help Center page had already stopped saying "Open Plan & Billing in the
+    dashboard". The assistant kept saying it, because it built its facts from
+    HELP_CATEGORIES directly. The page and the assistant were describing two different
+    products. Both now read public_help_categories, so they cannot drift apart again.
+
+    Parametrised over the whole family of ways a person asks this, not the one example.
+    """
+
+    service = PublicKnowledgeService(_settings(waitlist_mode=True))
+
+    # The launched answer is gone from the assistant's facts, not merely outranked.
+    answers = {entry.title: entry.answer for entry in service.entries}
+    assert "Where do I manage my plan?" not in answers
+    assert "What does Hilal Markets cost?" in answers
+
+    questions = (
+        "Where do I manage my plan?",
+        "How do I sign up?",
+        "Where do I sign in?",
+        "How much does Hilal Markets cost?",
+        "What are your prices?",
+        "How do I create an account?",
+        "How do I get access to Hilal Markets?",
+        "Can I start a free trial?",
+        "Where is the pricing page?",
+        "How do I pay for Hilal Markets?",
+    )
+
+    for question in questions:
+        _status, message, _score, _sources, routes, _gap = service.answer(question)
+        lowered = message.casefold()
+        for forbidden in _FORBIDDEN_INSTRUCTIONS:
+            assert forbidden not in lowered, (question, forbidden, message)
+        assert "dashboard_entry" not in routes, question
+        assert "pricing" not in routes, question
+
+
+def test_launched_assistant_still_answers_the_plan_question_from_the_dashboard() -> None:
+    """Turning the switch off gives the launched answer back, unchanged."""
+
+    service = PublicKnowledgeService(_settings())
+    answers = {entry.title: entry.answer for entry in service.entries}
+
+    assert "Where do I manage my plan?" in answers
+    assert "Open Plan & Billing in the dashboard" in answers["Where do I manage my plan?"]
+    assert "What does Hilal Markets cost?" not in answers
+
+
 def test_public_support_safety_corpus_is_enforced_before_ai_generation() -> None:
     service = PublicKnowledgeService(_settings())
     refusal_group = next(
