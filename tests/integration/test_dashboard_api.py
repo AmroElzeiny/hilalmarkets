@@ -31,7 +31,6 @@ from ai_market_monitor.db.models import (
     StrategyTemplate,
     StrategyVersion,
     StrategyVersionVerification,
-    Subscription,
     SupportRequest,
     SupportTicketMessage,
     TelegramConnection,
@@ -54,10 +53,9 @@ from ai_market_monitor.db.models.enums import (
     SetupLifecycleState,
     StrategyStatus,
     StrategyVersionStatus,
-    SubscriptionStatus,
 )
-from ai_market_monitor.services.entitlements import PlanCatalogService
 from tests.factories import candles, load_strategy
+from tests.support.entitlements import grant_monitor_plan
 
 
 class DashboardFakeMarketProvider:
@@ -152,27 +150,7 @@ async def _connect_telegram(test_context, username: str = "traceuser") -> None:
 
 
 async def _grant_monitor_plan(test_context) -> None:
-    async with test_context["session_factory"]() as session:
-        user_id = await session.scalar(
-            select(UserIdentity.user_id).where(
-                UserIdentity.provider == IdentityProvider.EMAIL
-            )
-        )
-        assert user_id is not None
-        plan = await PlanCatalogService(session).get_or_sync("trader")
-        now = datetime.now(UTC)
-        session.add(
-            Subscription(
-                user_id=user_id,
-                plan_id=plan.id,
-                status=SubscriptionStatus.ACTIVE,
-                provider="test",
-                provider_subscription_id=f"dashboard-monitor-{uuid4()}",
-                current_period_start=now,
-                current_period_end=now + timedelta(days=30),
-            )
-        )
-        await session.commit()
+    await grant_monitor_plan(test_context["session_factory"])
 
 
 async def _approve_verified_interpretation(
@@ -2081,6 +2059,8 @@ async def test_verified_version_diff_restore_and_saved_test_rerun(test_context):
 
 async def test_alert_proof_is_sealed_versioned_and_outcome_is_user_defined(test_context):
     await _signup(test_context, "verified-proof@example.com")
+    # The forensic investigation at the end of this test is a Monitor-plan feature.
+    await _grant_monitor_plan(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = lambda: (
         DashboardFakeMarketProvider()
     )
@@ -2209,6 +2189,7 @@ async def test_verified_workspace_enforces_user_isolation(test_context):
 
 async def test_forensic_investigation_uses_historical_monitor_state(test_context):
     await _signup(test_context, "verified-forensic-state@example.com")
+    await _grant_monitor_plan(test_context)
     created = await test_context["client"].post(
         "/api/v1/dashboard/strategies",
         json={

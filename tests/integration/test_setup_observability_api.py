@@ -12,6 +12,7 @@ from ai_market_monitor.db.models import (
     User,
 )
 from ai_market_monitor.db.models.enums import AlertType, DeliveryChannel, DeliveryStatus
+from tests.support.entitlements import grant_monitor_plan
 from tests.unit.test_setup_observability import _seed_lifecycle, _seed_monitor
 
 
@@ -37,6 +38,8 @@ async def _signup(test_context, email: str) -> None:
 
 async def test_observability_api_filter_investigation_and_user_isolation(test_context):
     await _signup(test_context, "observability-api@example.com")
+    # The investigation call further down is a Monitor-plan feature.
+    await grant_monitor_plan(test_context["session_factory"])
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))
         _same_user, strategy, version = await _seed_monitor(

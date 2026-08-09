@@ -3,7 +3,6 @@ import { trackCtaClick } from '../analytics'
 import { CheckIcon } from '../components/brand'
 import { Reveal } from '../components/Reveal'
 import { SiteFooter, SiteNav } from '../components/SiteChrome'
-import { WaitlistBand } from '../components/WaitlistBand'
 import {
   newContactIdempotencyKey,
   PublicFormError,
@@ -12,37 +11,15 @@ import {
 
 type ContactStatus = 'idle' | 'submitting' | 'success' | 'error'
 
-function MessageRouteGraph() {
-  return (
-    <div className="relative overflow-hidden rounded-[28px] border border-hairline bg-white p-6 shadow-[0_24px_60px_-44px_rgba(43,46,53,0.5)] sm:p-8">
-      <div className="pointer-events-none absolute -right-24 -top-24 size-64 rounded-full bg-apple/20 blur-3xl" aria-hidden="true" />
-      <p className="text-[12px] font-medium text-apple-deep">A clear route to the team</p>
-      <div className="relative mt-8 grid gap-4 sm:grid-cols-[1fr_auto_1fr_auto_1fr] sm:items-stretch">
-        {[
-          ['1', 'Your message', 'A clear title and description'],
-          ['2', 'Secure delivery', 'One idempotent office email'],
-          ['3', 'Human review', 'The right context reaches the team'],
-        ].map(([step, title, copy], index) => (
-          <div key={step} className="contents">
-            <div className="h-full min-h-[142px] rounded-[20px] border border-hairline bg-[#f8fafb] p-4">
-              <span className="flex size-8 items-center justify-center rounded-full bg-apple font-medium text-ink">
-                {step}
-              </span>
-              <strong className="mt-4 block font-display text-[16px] font-medium text-ink">{title}</strong>
-              <span className="mt-1 block text-[13px] leading-relaxed text-ink-soft">{copy}</span>
-            </div>
-            {index < 2 && (
-              <svg className="mx-auto size-5 self-center rotate-90 text-accent-blue sm:rotate-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M3 10h13M12 5l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
+/**
+ * Contact is the form and the address, and nothing else.
+ *
+ * The page used to carry a three-step "A clear route to the team" diagram and, under it,
+ * the private-beta waitlist band. Neither helped somebody who came here to write a
+ * message: the diagram described our own inbox handling, and the band asked for a second,
+ * unrelated action at the moment the person was filling in a form. Both were removed.
+ * The band still closes the Privacy and Terms pages, where there is nothing else to do.
+ */
 export default function ContactPage() {
   const [status, setStatus] = useState<ContactStatus>('idle')
   const idempotencyKey = useRef(newContactIdempotencyKey())
@@ -77,7 +54,7 @@ export default function ContactPage() {
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
       <main id="top" className="overflow-hidden pt-36">
-        <section className="relative mx-auto max-w-[1200px] px-5 pb-20">
+        <section className="relative mx-auto max-w-[1200px] px-5 pb-24">
           <div className="pointer-events-none absolute left-1/2 top-0 -z-10 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-white opacity-80 blur-3xl" aria-hidden="true" />
           <div className="grid items-start gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
             <Reveal>
@@ -99,7 +76,6 @@ export default function ContactPage() {
                   </a>
                   .
                 </p>
-                <div className="mt-10 hidden lg:block"><MessageRouteGraph /></div>
               </div>
             </Reveal>
 
@@ -182,9 +158,7 @@ export default function ContactPage() {
               </form>
             </Reveal>
           </div>
-          <div className="mt-10 lg:hidden"><MessageRouteGraph /></div>
         </section>
-        <WaitlistBand location="contact_footer" />
       </main>
       <SiteFooter />
     </div>

@@ -1,5 +1,6 @@
 from ai_market_monitor.db.models import User
 from tests.factories import candle_sets, load_strategy
+from tests.support.entitlements import grant_monitor_plan
 
 
 async def test_why_no_alert_endpoint_returns_deterministic_reconstruction(test_context):
@@ -8,6 +9,9 @@ async def test_why_no_alert_endpoint_returns_deterministic_reconstruction(test_c
         session.add(user)
         await session.commit()
         user_id = user.id
+    # "Why wasn't I alerted?" is a Monitor-plan feature, so a free account is refused
+    # before the reconstruction ever runs.
+    await grant_monitor_plan(test_context["session_factory"], user_id=user_id)
     strategy = load_strategy()
     sets = candle_sets(volume_multiplier=1.0)
     response = await test_context["client"].post(

@@ -567,6 +567,72 @@ def test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account(
     ) == "auto"
 
 
+def test_the_hero_illustration_is_visible_and_fits_at_every_width(
+    page: Page,
+    base_url: str,
+) -> None:
+    """The picture in the hero is shown on a phone, a tablet and a desktop.
+
+    It used to be dropped below 640 pixels wide, so a phone saw the headline and nothing
+    else. Every width is checked, not only the phone that was reported: the illustration
+    must be on the screen, none of its three panels may be empty, and nothing inside it
+    may stick out past the side of the screen.
+    """
+
+    for width in (320, 390, 768, 1024, 1440):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.goto(base_url, wait_until="domcontentloaded")
+        flow = page.locator('[data-name="Hero flow"]')
+        flow.scroll_into_view_if_needed()
+        expect(flow).to_be_visible()
+
+        # The three panels are all drawn, and each one has real height.
+        panels = flow.locator("> div")
+        expect(panels).to_have_count(3)
+        for index in range(3):
+            box = panels.nth(index).bounding_box()
+            assert box is not None, (width, index)
+            assert box["height"] > 40, (width, index, box)
+
+        # Nothing inside the illustration reaches past the edge of the screen.
+        overflow = page.evaluate(
+            """() => {
+              const flow = document.querySelector('[data-name="Hero flow"]');
+              if (!flow) return ['missing'];
+              const viewport = window.innerWidth;
+              return [...flow.querySelectorAll('*'), flow]
+                .filter((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return rect.width > 0 && (rect.left < -1 || rect.right > viewport + 1);
+                })
+                .slice(0, 6)
+                .map((element) => element.className || element.tagName);
+            }"""
+        )
+        assert overflow == [], (width, overflow)
+        assert page.evaluate(
+            "() => document.documentElement.scrollWidth <= window.innerWidth"
+        ), width
+
+
+def test_contact_page_is_only_the_form_and_the_address(
+    page: Page,
+    base_url: str,
+) -> None:
+    """No private-beta band and no inbox diagram are drawn on the contact page."""
+
+    for width in (390, 1440):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.goto(f"{base_url}/contact", wait_until="domcontentloaded")
+        expect(page.locator("[data-contact-form]")).to_be_visible()
+        body = page.locator("main").inner_text()
+        for removed in ("A clear route to the team", "Secure delivery", "Human review"):
+            assert removed not in body, (width, removed)
+        # The waitlist band is the only thing that used to sit between the form and the
+        # footer, so a page that still had it would still offer this link inside <main>.
+        assert page.locator('main a[href*="#waitlist"]').count() == 0, width
+
+
 def test_contact_form_shows_branded_success_without_duplicate_client_submission(
     page: Page,
     base_url: str,

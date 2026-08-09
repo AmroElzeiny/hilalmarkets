@@ -43,7 +43,6 @@ export default function Component10Footer() {
           <nav className="flex flex-wrap items-center gap-x-8 gap-y-3 text-[13px] font-medium text-white" aria-label="Footer navigation">
             <TrackedCta analyticsName="privacy" analyticsLocation="footer" href="/privacy" className="text-white transition-opacity hover:opacity-75">Privacy Policy</TrackedCta>
             <TrackedCta analyticsName="terms" analyticsLocation="footer" href="/terms" className="text-white transition-opacity hover:opacity-75">Terms of Use</TrackedCta>
-            <TrackedCta analyticsName="how_we_screen" analyticsLocation="footer" href="/how-we-screen" className="text-white transition-opacity hover:opacity-75">How We Screen</TrackedCta>
             <TrackedCta analyticsName="contact" analyticsLocation="footer" href="/contact" className="text-white transition-opacity hover:opacity-75">Contact</TrackedCta>
           </nav>
         </div>

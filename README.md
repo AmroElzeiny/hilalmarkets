@@ -85,8 +85,9 @@ The public landing and contact routes use the supplied `Hilal-Markets-Website/` 
 Geometria/Onest typography, responsive motion, and Hilal Markets brand assets. FastAPI provides a
 minimal metadata/consent shell and same-origin form APIs; the remaining public product pages keep
 the shared Jinja shell and server-owned content sources. Dedicated routes cover Features, How It
-Works, How We Screen, Pricing, Help, Contact, About, Trust & Safety, Risk Disclosure, Privacy,
-Terms, and Cookies.
+Works, Pricing, Help, Contact, About, Trust & Safety, Risk Disclosure, Privacy, Terms, and Cookies.
+`/how-we-screen` is still served so saved links and search results keep working, but it is
+deliberately absent from every menu, page body, and assistant answer.
 Public Pricing and authenticated Billing read the same plan catalog. The private beta exposes only
 free invite access and rejects paid checkout while billing is disabled. Optional analytics is disabled
 by default; Consent Mode denied defaults execute before the reusable GA4/GTM and Meta loaders, and

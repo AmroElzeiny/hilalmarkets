@@ -7,6 +7,8 @@ the Help Center page knew there was no Plan & Billing while the assistant still 
 was. Each test below pins one owner and checks every caller agrees with it.
 """
 
+from pathlib import Path
+
 import pytest
 
 from ai_market_monitor.core.config import Settings
@@ -15,6 +17,7 @@ from ai_market_monitor.core.site_content import (
     FOOTER_NAVIGATION,
     HELP_CATEGORIES,
     PUBLIC_NAVIGATION,
+    PUBLIC_PAGES,
     WAITLIST_BODY,
     WAITLIST_CTA_LABEL,
     WAITLIST_HEADLINE,
@@ -110,6 +113,57 @@ def test_the_menus_and_the_assistant_hide_the_same_pages():
     for route_id in offerable:
         _label, path = PUBLIC_ROUTE_PATHS[route_id]
         assert not is_account_only_path(path), route_id
+
+
+def test_the_unlinked_page_is_unlinked_everywhere():
+    """How We Screen is served but never linked, on every surface at once.
+
+    A page is reached from four kinds of place, and each one remembers the decision
+    separately: the header menu, the footer menu, a button written into the body of
+    another page, and the assistant's list of links it may offer. Emptying the menus and
+    leaving a button behind is exactly how the "Halal Assets" button survived on this same
+    page after the menus had dropped it. So all four are asserted here together.
+
+    The page itself stays reachable on purpose: an old bookmark or a search result must
+    not turn into a "page not found".
+    """
+
+    unlinked = "how_we_screen"
+    templates = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "ai_market_monitor"
+        / "templates"
+    )
+
+    # 1 and 2 - the two menus, in both product states.
+    for mode in (True, False):
+        assert unlinked not in {item.page for item in public_navigation(waitlist_mode=mode)}
+        assert unlinked not in {
+            item.page
+            for group in footer_navigation(waitlist_mode=mode)
+            for item in group.items
+        }
+
+    # 3 - the assistant cannot name it, so no answer can offer it as a next step.
+    assert unlinked not in PUBLIC_ROUTE_PATHS
+    for mode in (True, False):
+        assert unlinked not in offerable_route_ids(_settings(waitlist_mode=mode))
+
+    # 4 - no page body links to it. Both spellings are refused: the address written out,
+    # and the route name a Jinja url_for() would use.
+    offenders = []
+    for template in templates.rglob("*.html"):
+        if template.name == "how_we_screen.html":
+            continue
+        body = template.read_text(encoding="utf-8")
+        if "/how-we-screen" in body or "public_how_we_screen" in body:
+            offenders.append(template.name)
+    assert offenders == [], offenders
+
+    # And the page is still served, with its own address still in the site map.
+    assert unlinked in {item.page for item in PUBLIC_PAGES}
+    assert "/how-we-screen" in {item.path for item in PUBLIC_PAGES}
 
 
 def test_turning_waitlist_mode_off_restores_every_menu_and_route():

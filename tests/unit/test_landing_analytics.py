@@ -317,17 +317,19 @@ def test_the_landing_page_offers_the_waitlist_and_never_an_account():
     assert "{ label: 'Pricing', target: '#pricing' }" not in chrome
 
 
-def test_every_react_page_closes_on_the_waitlist_using_the_servers_own_wording():
-    """Contact, Privacy and Terms end on the waitlist, like every server-rendered page.
+def test_the_reading_pages_close_on_the_waitlist_using_the_servers_own_wording():
+    """Privacy and Terms end on the waitlist, like every server-rendered reading page.
 
     They are the half of the site the bundle draws, so without this they stayed silent
     about the private beta while the other half spoke about nothing else. The words come
     from the server's runtime config rather than being typed again here: two renderers,
     one message, so neither can be updated without the other.
+
+    Contact is deliberately not in this family. It already asks the visitor to do one
+    thing, and a private-beta band under the form asked for a second, unrelated one.
     """
 
     band = (FRONTEND / "components" / "WaitlistBand.tsx").read_text(encoding="utf-8")
-    contact = (FRONTEND / "pages" / "ContactPage.tsx").read_text(encoding="utf-8")
     legal = (FRONTEND / "pages" / "LegalPage.tsx").read_text(encoding="utf-8")
 
     # The band takes every word from the server, so no copy is duplicated in the bundle.
@@ -340,7 +342,7 @@ def test_every_react_page_closes_on_the_waitlist_using_the_servers_own_wording()
     assert "<input" not in band
     assert "submitWaitlist" not in band
 
-    for name, source in (("ContactPage.tsx", contact), ("LegalPage.tsx", legal)):
+    for name, source in (("LegalPage.tsx", legal),):
         assert "import { WaitlistBand }" in source, name
         assert "<WaitlistBand location=" in source, name
         # Inside <main>, above the footer, so it is part of the page rather than chrome.
@@ -349,6 +351,36 @@ def test_every_react_page_closes_on_the_waitlist_using_the_servers_own_wording()
     # Privacy and Terms each get their own name, so the analytics can tell them apart.
     assert "privacy_footer" in legal
     assert "terms_footer" in legal
+
+
+def test_the_contact_page_is_the_form_and_the_address_and_nothing_else():
+    """No private-beta band, and no diagram of our own inbox handling.
+
+    Both were competing with the one thing the page is for. This checks the whole path
+    rather than the two names that were reported: the band's import, its element and its
+    analytics location, and the three-step graph in every part it was built from.
+    """
+
+    # A note in the code explaining what was taken away is not something a visitor sees,
+    # so the check reads the page without its comments.
+    contact = re.sub(
+        r"/\*.*?\*/", "", CONTACT.read_text(encoding="utf-8"), flags=re.DOTALL
+    )
+
+    for removed in (
+        "WaitlistBand",
+        "contact_footer",
+        "MessageRouteGraph",
+        "A clear route to the team",
+        "Secure delivery",
+        "Human review",
+    ):
+        assert removed not in contact, removed
+
+    # What the page is for is still there, whole.
+    assert "data-contact-form" in contact
+    assert "office@hilalmarkets.com" in contact
+    assert "<SiteFooter />" in contact
 
 
 def test_legal_pages_scope_accounts_and_billing_to_the_private_beta():
@@ -550,7 +582,6 @@ def test_contact_page_has_branded_accessible_success_and_safe_failure_states():
     assert "We could not send your message." in contact
     assert 'href="mailto:office@hilalmarkets.com"' in contact
     assert "decoration-dotted" in contact
-    assert 'min-h-[142px]' in contact
     assert "font-semibold text-ink" in contact
     assert "traceback" not in contact.casefold()
     assert "stack trace" not in contact.casefold()
@@ -624,6 +655,44 @@ def test_responsive_sections_keep_the_original_prototype_internals():
     assert "text-align: center" in styles
     assert 'max-w-[820px]' in hero_flow
     assert 'data-name="Hero flow"' in hero_flow
+
+
+def test_the_hero_illustration_is_shown_at_every_screen_size():
+    """A phone gets the picture too, reshaped rather than removed.
+
+    The rule is checked for the whole family, not for the one wrapper that was hiding it:
+    nothing in the hero or in the illustration may be dropped at a breakpoint. `hidden`
+    paired with a breakpoint is how a piece of a page silently disappears on a phone, so
+    no such pair is allowed in either file.
+    """
+
+    app = APP.read_text(encoding="utf-8")
+    hero_flow = (FRONTEND / "components" / "HeroFlow.tsx").read_text(encoding="utf-8")
+
+    for name, source in (("App.tsx", app), ("HeroFlow.tsx", hero_flow)):
+        for hiding in (
+            "hidden sm:",
+            "hidden md:",
+            "hidden lg:",
+            "sm:hidden",
+            "md:hidden",
+            "lg:hidden",
+        ):
+            assert hiding not in source, (name, hiding)
+
+    # One column on a phone, two on a tablet, the original three on a desktop.
+    assert "md:grid-cols-2" in hero_flow
+    assert "lg:grid-cols-[1fr_1.15fr_1fr]" in hero_flow
+    # The three state cards follow the same grid instead of staying a tall column.
+    assert "md:col-span-2 md:grid md:grid-cols-3" in hero_flow
+    assert "lg:col-span-1 lg:flex lg:flex-col" in hero_flow
+    # The phone gutter is the hero text's own gutter, so the picture lines up with it.
+    assert "px-[15px]" in hero_flow
+    assert "mx-[15px]" in app
+    # And the desktop row keeps a side margin, so a 1024-wide laptop does not put the
+    # cards against both edges of the screen.
+    assert "lg:px-6" in hero_flow
+    assert "lg:px-0" not in hero_flow
 
 
 def test_legal_pages_use_the_landing_shell_and_cover_required_product_boundaries():

@@ -70,7 +70,10 @@ PUBLIC_ROUTE_PATHS: dict[str, tuple[str, str]] = {
     "home": ("Hilal Markets", "/"),
     "features": ("Features", "/features"),
     "how_it_works": ("How It Works", "/how-it-works"),
-    "how_we_screen": ("How We Screen", "/how-we-screen"),
+    # How We Screen is deliberately absent. The page still answers at its own address,
+    # but it was withdrawn from every menu and page body, so the assistant must not be
+    # the one surface that still sends visitors there. Screening questions go to the
+    # Help Center. See UNLINKED_PAGES in core/site_content.py.
     "pricing": ("Pricing", "/pricing"),
     "help": ("Help Center", "/help"),
     "contact": ("Contact", "/contact"),
@@ -260,7 +263,7 @@ class PublicKnowledgeService:
                 "methodology, evidence, and qualified human decision recorded for each asset.",
                 1.0,
                 ["boundary:no-religious-rulings"],
-                ["how_we_screen"],
+                ["help"],
                 "religious_ruling",
             )
         if any(pattern.search(cleaned) for pattern in _CROSS_ACCOUNT_PATTERNS):
@@ -505,7 +508,7 @@ class PublicKnowledgeService:
                     "qualifications. It reports the recorded decision; Hilal Markets does not "
                     "issue an independent religious ruling."
                 ),
-                route_id="how_we_screen",
+                route_id="help",
                 keywords=("passport", "methodology", "qualification", "use case"),
             ),
             PublicKnowledgeEntry(
@@ -527,7 +530,7 @@ class PublicKnowledgeService:
                     "and current Passport versions, re-resolves affected Watchlists, applies "
                     "the selected fail-closed policy, and explains the impact."
                 ),
-                route_id="how_we_screen",
+                route_id="help",
                 keywords=("compliance change", "status change", "hold", "restoration"),
             ),
             PublicKnowledgeEntry(

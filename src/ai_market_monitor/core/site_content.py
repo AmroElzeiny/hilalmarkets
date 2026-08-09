@@ -61,10 +61,18 @@ SOCIAL_PREVIEW_PATH = "/static/hilalmarkets-social-preview.png"
 COOKIE_CONSENT_VERSION = 1
 
 
+#: How We Screen is deliberately missing from both menus below.
+#:
+#: The page itself is still served, and it is still in PUBLIC_PAGES and the sitemap, so a
+#: saved bookmark or a search result keeps working. Nothing on the site leads a visitor to
+#: it any more: not the header, not the footer, not the body of another page, and not the
+#: assistant. Removing it from one of those four and leaving the others is the failure this
+#: product keeps repeating, so all four are checked together by
+#: `test_the_unlinked_page_is_unlinked_everywhere` in
+#: tests/unit/test_invariant_public_waitlist_surface.py.
 PUBLIC_NAVIGATION = (
     NavigationItem("Features", "public_features", "features"),
     NavigationItem("How It Works", "public_how_it_works", "how_it_works"),
-    NavigationItem("How We Screen", "public_how_we_screen", "how_we_screen"),
     NavigationItem("Pricing", "public_pricing", "pricing"),
     NavigationItem("Help Center", "public_help", "help"),
 )
@@ -87,7 +95,6 @@ FOOTER_NAVIGATION = (
     NavigationGroup(
         "Trust",
         (
-            NavigationItem("How We Screen", "public_how_we_screen", "how_we_screen"),
             NavigationItem("Trust & Safety", "public_trust_safety", "trust_safety"),
             NavigationItem(
                 "Risk Disclosure",

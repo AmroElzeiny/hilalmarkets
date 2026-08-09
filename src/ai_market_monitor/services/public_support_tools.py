@@ -84,7 +84,10 @@ class PublicSupportReadTools:
                     )
                 },
                 evidence_refs=[],
-                route_id=("how_we_screen" if tool_name == "public_passport" else "help"),
+                # Passport and account failures both send the reader to the Help Center.
+                # They used to split, with the Passport branch pointing at How We Screen;
+                # that page is no longer linked from anywhere on the site.
+                route_id="help",
             )
 
     async def _public_passport(self, question: str) -> PublicSupportToolResult:
@@ -120,7 +123,7 @@ class PublicSupportReadTools:
                 status="unavailable",
                 data={"reason": "No asset symbol was identified in the question."},
                 evidence_refs=[],
-                route_id="how_we_screen",
+                route_id="help",
             )
         asset = await self.session.scalar(
             select(CanonicalAsset)
@@ -134,7 +137,7 @@ class PublicSupportReadTools:
                 status="unavailable",
                 data={"reason": "No published asset identity matched the supplied symbol."},
                 evidence_refs=[],
-                route_id="how_we_screen",
+                route_id="help",
             )
         publication = await self.session.scalar(
             select(PublishedAssetAssessment)
@@ -155,7 +158,7 @@ class PublicSupportReadTools:
                     "reason": "This asset has no current published Passport.",
                 },
                 evidence_refs=[],
-                route_id="how_we_screen",
+                route_id="help",
             )
         assessment = await self.session.get(
             AssetShariaAssessment,
@@ -167,7 +170,7 @@ class PublicSupportReadTools:
                 status="unavailable",
                 data={"reason": "The published Passport record is incomplete."},
                 evidence_refs=[],
-                route_id="how_we_screen",
+                route_id="help",
             )
         snapshot = dict(publication.passport_snapshot or {})
         methodology = dict(snapshot.get("methodology_result") or {})
@@ -191,7 +194,7 @@ class PublicSupportReadTools:
                 ),
             },
             evidence_refs=[f"published-passport:{publication.id}"],
-            route_id="how_we_screen",
+            route_id="help",
         )
 
     async def _account_state(self, user_id: UUID) -> PublicSupportToolResult:

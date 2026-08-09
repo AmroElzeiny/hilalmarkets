@@ -94,7 +94,10 @@ function Hero() {
         </Reveal>
       </div>
 
-      <Reveal delay={200} cascade className="mt-16 hidden sm:block">
+      {/* The illustration is part of the hero on a phone too. It was hidden below the
+          small breakpoint, which left a phone with the headline and nothing to look at;
+          HeroFlow now reshapes itself instead of disappearing. */}
+      <Reveal delay={200} cascade className="mt-10 sm:mt-16">
         <HeroFlow />
       </Reveal>
     </section>

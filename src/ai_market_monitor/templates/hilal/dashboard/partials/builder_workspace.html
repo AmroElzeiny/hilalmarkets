@@ -192,7 +192,6 @@
             <div class="builder-screened-market-banner {{ 'ready' if builder_screening.configured else 'blocked' }}" role="status">
               <span data-icon="compliance" data-icon-class="icon"></span>
               <div><span>Halal Assets</span><strong>{% if builder_screening.configured %}{{ builder_screening.methodology_name }} | v{{ builder_screening.methodology_version }}{% else %}Approved methodology required{% endif %}</strong><small>{% if builder_screening.configured %}Default scope: eligible assets and eligible assets with qualifications. Status changes pause the affected asset.{% else %}This draft can be edited, but validation and activation stay blocked until qualified governance activates a real methodology.{% endif %}</small></div>
-              <a href="/how-we-screen">How We Screen</a>
             </div>
 
             <nav class="builder-mobile-stepper" aria-label="Mobile strategy steps">

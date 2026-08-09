@@ -63,6 +63,10 @@ async def test_landing_page_links_to_primary_start_paths(test_context):
     assert "Sign in" not in chrome
     for href in ('href="/privacy"', 'href="/terms"', 'href="/contact"'):
         assert href in footer
+    # "How We Screen" was withdrawn from the footer menu. Both the address and the
+    # analytics name go, so a click cannot be recorded for a link nobody can see.
+    for withdrawn in ('href="/how-we-screen"', "how_we_screen", "How We Screen"):
+        assert withdrawn not in footer, withdrawn
     assert "TODO_" not in response.text
 
 
@@ -83,9 +87,10 @@ async def test_the_shipped_landing_bundle_matches_the_waitlist_source(test_conte
     # from the source. A stale bundle would keep showing it and keep sending its answer.
     for withdrawn in ("beta_contact_consent", "waitlist-beta-consent", "beta testing"):
         assert withdrawn not in bundle, withdrawn
-    # The Contact, Privacy and Terms pages carry the waitlist band, and their legal text
-    # scopes accounts and payment to the private beta. Both are drawn by this file.
-    assert "contact_footer" in bundle
+    # The Privacy and Terms pages carry the waitlist band, and their legal text scopes
+    # accounts and payment to the private beta. Both are drawn by this file. Contact does
+    # not carry the band: its own form is the one action on that page.
+    assert "contact_footer" not in bundle
     assert "privacy_footer" in bundle
     assert "terms_footer" in bundle
     assert "Paid access is not offered to the public during the private beta." in bundle

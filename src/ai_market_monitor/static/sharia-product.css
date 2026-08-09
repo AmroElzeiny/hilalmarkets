@@ -447,9 +447,12 @@ body.sidebar-collapsed .dash-nav-section { display: none; }
 .monitor-screening-strip span { color: var(--te-muted); font-size: 10px; }
 .monitor-screening-strip strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 
+/* Two columns: the mark and the text. There was a third for a "How We Screen" link,
+   which was withdrawn with the rest of that page's links. An unused auto column still
+   costs a 12px gap, so it goes with the link rather than leaving a hole on the right. */
 .builder-screened-market-banner {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   margin: 12px 0 0;
@@ -469,7 +472,6 @@ body.sidebar-collapsed .dash-nav-section { display: none; }
 .builder-screened-market-banner small { color: var(--te-muted); }
 .builder-screened-market-banner span { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .builder-screened-market-banner strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.builder-screened-market-banner a { color: #0f5c4d; font-size: 12px; font-weight: 600; }
 
 @media (max-width: 1180px) {
   .screened-market-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -495,7 +497,6 @@ body.sidebar-collapsed .dash-nav-section { display: none; }
   .activity-item > .button { grid-column: 1 / -1; width: 100%; }
   .monitor-screening-strip { grid-template-columns: 1fr; }
   .builder-screened-market-banner { grid-template-columns: 30px minmax(0, 1fr); }
-  .builder-screened-market-banner a { grid-column: 2; }
 }
 @media (max-width: 520px) {
   .screened-summary-strip { grid-template-columns: 1fr; }

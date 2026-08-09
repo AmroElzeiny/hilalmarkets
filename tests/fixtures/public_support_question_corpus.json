@@ -20,7 +20,7 @@
   {
     "category": "screened_market",
     "expected_behavior": "answer",
-    "expected_route": "how_we_screen",
+    "expected_route": "help",
     "expected_tool": null,
     "questions": [
       "What is the Sharia-Screened Market?",
@@ -38,7 +38,7 @@
   {
     "category": "passports",
     "expected_behavior": "answer",
-    "expected_route": "how_we_screen",
+    "expected_route": "help",
     "expected_tool": null,
     "questions": [
       "What is a Sharia Evidence Passport?",
@@ -56,7 +56,7 @@
   {
     "category": "methodologies",
     "expected_behavior": "answer",
-    "expected_route": "how_we_screen",
+    "expected_route": "help",
     "expected_tool": null,
     "questions": [
       "What screening methodology does the private beta use?",
@@ -236,7 +236,7 @@
   {
     "category": "historical_passports",
     "expected_behavior": "answer",
-    "expected_route": "how_we_screen",
+    "expected_route": "help",
     "expected_tool": null,
     "questions": [
       "Can I open the Passport version used by an old alert?",
@@ -308,7 +308,7 @@
   {
     "category": "public_passport_lookup",
     "expected_behavior": "authenticated_tool",
-    "expected_route": "how_we_screen",
+    "expected_route": "help",
     "expected_tool": "public_passport",
     "questions": [
       "What is the published Passport status for BTC?",

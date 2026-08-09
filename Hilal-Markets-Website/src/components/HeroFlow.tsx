@@ -34,9 +34,27 @@ function Sparkline() {
   )
 }
 
+/**
+ * The hero illustration, at every screen size.
+ *
+ * It used to be hidden below the small breakpoint, so a phone met the hero with words
+ * only. It is the same three panels everywhere; only the shape of the grid changes:
+ *
+ *   phone   one column, page gutter matched to the hero text (15px)
+ *   tablet  two columns — watchlist beside the prompt, the three states in a row below
+ *   desktop the original three columns
+ *
+ * Nothing inside a panel is removed or swapped per size, so the phone shows the whole
+ * story rather than a cut-down version of it.
+ *
+ * Every size keeps a side margin. The desktop row used to be a fixed 1180px box with no
+ * padding, so on a screen between 1024 and 1180 wide the cards touched both edges. The
+ * box is 1228 wide with a 24px gutter instead: the same 1180 of content on a wide screen,
+ * and a margin that survives on a narrow laptop.
+ */
 export function HeroFlow() {
   return (
-    <div className="relative mx-auto grid w-full max-w-[820px] items-stretch gap-4 px-5 lg:max-w-[1180px] lg:grid-cols-[1fr_1.15fr_1fr] lg:gap-3 lg:px-0" data-name="Hero flow">
+    <div className="relative mx-auto grid w-full max-w-[560px] items-stretch gap-3 px-[15px] sm:max-w-[820px] sm:gap-4 sm:px-5 md:grid-cols-2 lg:max-w-[1228px] lg:grid-cols-[1fr_1.15fr_1fr] lg:gap-3 lg:px-6" data-name="Hero flow">
 {/* Panel 1 — screened watchlist */}
       <div className="rounded-[22px] border border-hairline bg-surface p-4 shadow-[0_18px_40px_-28px_rgba(43,46,53,0.35)]">
         <div className="space-y-2.5">
@@ -83,20 +101,22 @@ export function HeroFlow() {
       </div>
 
       {/* Panel 2 — describe what to watch */}
-      <div className="rounded-[22px] border border-[#c8cdd5] bg-surface p-5">
+      <div className="rounded-[22px] border border-[#c8cdd5] bg-surface p-4 sm:p-5">
+        {/* The mark and the pill keep their size on a narrow phone; only the sentence
+            between them gives way and wraps, so the row never squashes the label. */}
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-apple text-ink">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-apple text-ink">
             <svg viewBox="0 0 14 14" className="size-3.5" fill="none" aria-hidden="true">
               <path d="M7 1v12M1 7h12" stroke="#2b2e35" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </span>
           <p className="text-[13px] font-bold text-ink">Describe what you want to watch</p>
-          <span className="ml-auto rounded-full bg-[#edf1f4] px-2.5 py-1 text-[9px] font-bold text-[#656b74]">
+          <span className="ml-auto shrink-0 rounded-full bg-[#edf1f4] px-2.5 py-1 text-[9px] font-bold text-[#656b74]">
             screened only
           </span>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-hairline bg-[#f2f5f7] p-4">
+        <div className="mt-4 rounded-2xl border border-hairline bg-[#f2f5f7] p-3.5 sm:p-4">
           <div className="flex gap-2.5">
             <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white">
               you
@@ -118,8 +138,9 @@ export function HeroFlow() {
         </TrackedCta>
       </div>
 
-      {/* Panel 3 — monitoring states */}
-      <div className="flex flex-col gap-2.5">
+      {/* Panel 3 — monitoring states. Three cards: stacked on a phone, a row across the
+          full width on a tablet, back to a column beside the other panels on a desktop. */}
+      <div className="flex flex-col gap-2.5 md:col-span-2 md:grid md:grid-cols-3 md:gap-3 lg:col-span-1 lg:flex lg:flex-col lg:gap-2.5">
         <div className="rounded-2xl border border-hairline bg-surface p-3.5">
           <StatusPill tone="blue" dot>forming</StatusPill>
           <p className="mt-2 text-[13px] font-bold text-ink tnum">BTC/USDT recovery: +2.3% of +5%</p>

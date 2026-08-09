@@ -1,5 +1,105 @@
 {
   "$defs": {
+    "ClarificationCompletionContract": {
+      "additionalProperties": false,
+      "description": "The one canonical record of a multi-step requirement in progress.\n\nProgress used to live in two writable places at once: this data inside an unresolved\nfield's ``expected_answer_schema``, and a parallel copy on the conversation. Two\nwritable copies of one fact is the defect class this repository keeps paying for \u2014\nthey were written at different moments and drifted, so a correct answer was validated\nagainst a step the trader was no longer looking at.\n\nSo this is the authority, and it lives on the canonical draft where executable state\nbelongs. ``PendingClarificationWorkflow`` is now a conversational *projection* of it:\nit carries this contract's id and hash, and a mismatch fails closed rather than\npicking a winner.",
+      "properties": {
+        "accepted_values": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Accepted Values",
+          "type": "object"
+        },
+        "contract_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Contract Id",
+          "type": "string"
+        },
+        "current_field": {
+          "default": "",
+          "maxLength": 120,
+          "title": "Current Field",
+          "type": "string"
+        },
+        "evidence_fragments": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 24,
+          "title": "Evidence Fragments",
+          "type": "array"
+        },
+        "grounded_values": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Grounded Values",
+          "type": "object"
+        },
+        "pending_fields": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 24,
+          "title": "Pending Fields",
+          "type": "array"
+        },
+        "symbols": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1000,
+          "title": "Symbols",
+          "type": "array"
+        },
+        "workflow_kind": {
+          "default": "supported_rule",
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Workflow Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract_id"
+      ],
+      "title": "ClarificationCompletionContract",
+      "type": "object"
+    },
     "Comparator": {
       "enum": [
         "gt",
@@ -786,6 +886,17 @@
           "default": true,
           "title": "Blocking",
           "type": "boolean"
+        },
+        "completion_contract": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClarificationCompletionContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "created_workflow_revision": {
           "default": 1,

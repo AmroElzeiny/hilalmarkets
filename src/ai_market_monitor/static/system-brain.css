@@ -474,7 +474,10 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-conversation-results { max-height: 640px; overflow: auto; }
 .brain-conversation-detail { min-height: 260px; border-left: 1px solid var(--hm-hairline); padding-left: 14px; }
 .brain-customer-timeline { display: grid; gap: 8px; max-height: 520px; overflow: auto; padding: 10px 0; }
-.brain-secondary-button { border: 1px solid var(--hm-hairline); border-radius: 9px; background: var(--hm-surface); padding: 9px 12px; cursor: pointer; }
+/* The text colour is set on purpose. A <button> with no colour of its own falls back to
+   the browser's ButtonText, which is pure black and outside the brand palette. Every
+   other button here names its own ink; this one was the last that did not. */
+.brain-secondary-button { border: 1px solid var(--hm-hairline); border-radius: 9px; background: var(--hm-surface); padding: 9px 12px; color: var(--hm-ink); cursor: pointer; }
 
 /* Unified registry and progressive operations */
 .brain-saved-views { display: flex; gap: 7px; margin: 0 0 12px; padding-bottom: 2px; overflow-x: auto; }
