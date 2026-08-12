@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import TypedDict
+from urllib.parse import urlsplit, urlunsplit
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,35 @@ SOCIAL_PREVIEW_TITLE = "Halal Trading With Clarity"
 SOCIAL_PREVIEW_DESCRIPTION = SITE_DESCRIPTION
 SOCIAL_PREVIEW_PATH = "/static/hilalmarkets-social-preview.png"
 COOKIE_CONSENT_VERSION = 1
+
+#: Hosts where an ``https`` social URL would be wrong rather than safer.
+#:
+#: A developer machine has no certificate, so forcing the scheme there would produce
+#: a link that fails to load locally while proving nothing.
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+
+
+def social_image_url(base_url: str, configured: str | None = None) -> str:
+    """The absolute, HTTPS image address used by ``og:image`` and ``twitter:image``.
+
+    Every social scraper needs an absolute address, and every one of them refuses a
+    plain-HTTP image on an HTTPS page. The tag was being built from
+    ``PUBLIC_BASE_URL`` alone, so any deployment whose base URL was not already
+    ``https`` published a preview image nothing would fetch — and locally it
+    published ``http://localhost:8000/...``, an address no scraper on earth can
+    reach.
+
+    So the scheme is forced here for every real host, and left alone for a local one
+    where HTTPS would simply be broken.
+    """
+
+    candidate = (configured or "").strip() or (
+        f"{base_url.rstrip('/')}/{SOCIAL_PREVIEW_PATH.lstrip('/')}"
+    )
+    parts = urlsplit(candidate)
+    if parts.scheme == "https" or (parts.hostname or "") in _LOCAL_HOSTS:
+        return candidate
+    return urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
 
 
 #: How We Screen is deliberately missing from both menus below.
@@ -314,7 +344,7 @@ PUBLIC_PAGES = (
         "/features",
         "Features",
         (
-            "Explore Sharia-screened discovery, guided Watchlists, evidence, "
+            "Explore Shariah-screened discovery, guided Watchlists, evidence, "
             "and compliance monitoring."
         ),
         "hilal/public/features.html",
@@ -336,7 +366,7 @@ PUBLIC_PAGES = (
         "/how-we-screen",
         "How We Screen",
         (
-            "Understand methodology-specific Sharia screening, evidence, review "
+            "Understand methodology-specific Shariah screening, evidence, review "
             "authority, and status changes."
         ),
         "hilal/public/how_we_screen.html",
@@ -475,7 +505,7 @@ HELP_CATEGORIES: tuple[HelpCategory, ...] = (
         "icon": "passport",
         "articles": (
             {
-                "question": "What does Sharia-screened mean here?",
+                "question": "What does Shariah-screened mean here?",
                 "answer": (
                     "It means an asset met a disclosed methodology using the evidence "
                     "and version shown in its Evidence Passport. It is not a universal "

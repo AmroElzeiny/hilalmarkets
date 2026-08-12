@@ -30,7 +30,6 @@ from ai_market_monitor.core.site_content import (
     SITE_DESCRIPTION,
     SITE_NAME,
     SOCIAL_PREVIEW_DESCRIPTION,
-    SOCIAL_PREVIEW_PATH,
     SOCIAL_PREVIEW_TITLE,
     WAITLIST_ANCHOR,
     WAITLIST_BODY,
@@ -43,6 +42,9 @@ from ai_market_monitor.core.site_content import (
     footer_navigation,
     public_help_categories,
     public_navigation,
+)
+from ai_market_monitor.core.site_content import (
+    social_image_url as build_social_image_url,
 )
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     evaluator_fault_control_available,
@@ -150,12 +152,14 @@ def _public_context(
     legal_review_required: bool = False,
     **extra: Any,
 ) -> dict[str, Any]:
-    waitlist_mode = settings.public_waitlist_mode
-    default_social_image_url = _absolute_url(settings, SOCIAL_PREVIEW_PATH)
-    social_image_url = (
-        str(settings.public_og_image_url)
-        if settings.public_og_image_url
-        else default_social_image_url
+    waitlist_mode = settings.waitlist_mode
+    # One owner for the preview address, in core/site_content.py. It forces HTTPS for
+    # any real host, which the previous inline expression did not: it copied
+    # PUBLIC_BASE_URL's scheme, so a plain-HTTP base published an image no social
+    # scraper will fetch.
+    social_image_url = build_social_image_url(
+        str(settings.public_base_url),
+        str(settings.public_og_image_url) if settings.public_og_image_url else None,
     )
     telegram_username = (
         settings.telegram_bot_username.lstrip("@").strip()
@@ -494,7 +498,7 @@ async def pricing(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    if settings.public_waitlist_mode:
+    if settings.waitlist_mode:
         # The plans and the comparison table are hidden together with every other way
         # to buy. An old link, a bookmark or a search result lands on the waitlist
         # instead of on prices nobody can pay yet.
@@ -680,7 +684,7 @@ async def sitemap(settings: Settings = Depends(get_settings)) -> Response:
     # A page that redirects is not a page to index. The same hidden-page set that empties
     # the menus keeps those addresses out of the sitemap, so the header, the footer and
     # search engines are told the same thing.
-    hidden = WAITLIST_HIDDEN_PAGES if settings.public_waitlist_mode else frozenset()
+    hidden = WAITLIST_HIDDEN_PAGES if settings.waitlist_mode else frozenset()
     paths = ["/", *(item.path for item in PUBLIC_PAGES if item.page not in hidden)]
     locations = "".join(
         f"<url><loc>{_absolute_url(settings, path)}</loc></url>" for path in paths
