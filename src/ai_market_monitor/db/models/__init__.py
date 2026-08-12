@@ -100,6 +100,10 @@ from ai_market_monitor.db.models.observability import (
     MonitorHealthSummary,
     ObservabilityExplanation,
 )
+from ai_market_monitor.db.models.operations import (
+    OperationalIssue,
+    OperationalIssueEvent,
+)
 from ai_market_monitor.db.models.public_chat import (
     PublicChatAnswerEvent,
     PublicChatAnswerFeedback,
@@ -285,6 +289,8 @@ __all__ = [
     "OnDemandScanMarketRecord",
     "OnDemandScanRun",
     "OnboardingSession",
+    "OperationalIssue",
+    "OperationalIssueEvent",
     "OperationalMetric",
     "OfficialSource",
     "ObservabilityExplanation",

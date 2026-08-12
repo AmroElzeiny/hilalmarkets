@@ -30,6 +30,10 @@ from ai_market_monitor.db.models.enums import (
     SupportRequestStatus,
     UserRole,
 )
+from ai_market_monitor.observability.alerts import evaluate_alert_rules
+from ai_market_monitor.observability.issues import OperationalIssueService
+from ai_market_monitor.observability.metrics import get_metrics_recorder
+from ai_market_monitor.observability.slos import SLO_DEFINITION_VERSION, evaluate_all_slos
 from ai_market_monitor.services.admin import AdminCommercialService
 from ai_market_monitor.services.billing import BillingService, BillingWebhookResult
 from ai_market_monitor.services.interfaces import RecentMarketPreviewer
@@ -164,6 +168,13 @@ class AdminDashboardService:
                 select(MarketDataHealth).order_by(MarketDataHealth.checked_at.desc()).limit(25)
             )
         ).all()
+        # Objectives, firing alerts and the issue queue are added to the dashboard the
+        # operator already opens, rather than to a second console. The existing keys
+        # are untouched: anything reading this endpoint today keeps working.
+        recorder = get_metrics_recorder()
+        evaluations = evaluate_all_slos(recorder)
+        fired = evaluate_alert_rules(recorder)
+        issues = await OperationalIssueService(self.session).summary()
         return {
             "overall_status": summary.overall_status.value,
             "market_data": summary.market_data,
@@ -171,6 +182,46 @@ class AdminDashboardService:
             "open_incidents": summary.open_incidents,
             "failed_jobs": summary.failed_jobs,
             "generated_at": summary.generated_at,
+            "slo_definition_version": SLO_DEFINITION_VERSION,
+            "service_level_objectives": [
+                {
+                    "name": item.slo.name,
+                    "service": item.slo.service,
+                    "owner": item.slo.owner,
+                    "objective": item.slo.objective,
+                    "comparison": item.slo.comparison,
+                    "unit": item.slo.unit,
+                    "measured": item.measured,
+                    # "no_data" is its own state, never folded into "met". An
+                    # objective with no traffic behind it has not been tested.
+                    "state": item.state,
+                    "launch_blocking": item.slo.launch_blocking,
+                    "severity_on_breach": item.slo.severity_on_breach,
+                    "runbook_anchor": item.slo.runbook_anchor,
+                }
+                for item in evaluations
+            ],
+            "firing_alerts": [
+                {
+                    "name": item.rule.name,
+                    "severity": item.rule.severity,
+                    "what_broke": item.rule.what_broke,
+                    "blast_radius": item.rule.blast_radius,
+                    "first_mitigation": item.rule.first_mitigation,
+                    "runbook_anchor": item.rule.runbook_anchor,
+                    "delivery_route": item.rule.delivery_route,
+                    "measured": item.measured,
+                }
+                for item in fired
+            ],
+            "operational_issues": {
+                "open": issues.open,
+                "acknowledged": issues.acknowledged,
+                "mitigated": issues.mitigated,
+                "suppressed": issues.suppressed,
+                "resolved": issues.resolved,
+                "needs_attention": issues.needs_attention,
+            },
             "recent_market_data": [
                 {
                     "provider": row.provider,
