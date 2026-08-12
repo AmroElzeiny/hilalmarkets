@@ -27,6 +27,7 @@ from ai_market_monitor.api.routers import (
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.logging import configure_logging
 from ai_market_monitor.core.startup import validate_runtime_configuration
+from ai_market_monitor.observability.asgi import record_http_request
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -72,15 +73,32 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
 
     @application.middleware("http")
     async def add_process_time_header(request: Request, call_next):
+        # The one place an HTTP request is measured. The timing was already here for
+        # the response header; the metrics ride the same measurement rather than a
+        # second middleware taking its own clock reading of the same request.
         started = perf_counter()
         guarded = await apply_request_guards(request, settings)
         if guarded is not None:
-            guarded.headers["X-Process-Time-Ms"] = (
-                f"{(perf_counter() - started) * 1000:.3f}"
+            elapsed_ms = (perf_counter() - started) * 1000
+            guarded.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.3f}"
+            # A guard rejection is still an answered request. Leaving it out would
+            # hide every rate-limit and CSRF refusal from the availability objective.
+            record_http_request(
+                scope=request.scope,
+                method=request.method,
+                status_code=guarded.status_code,
+                duration_ms=elapsed_ms,
             )
             return guarded
         response = await call_next(request)
-        response.headers["X-Process-Time-Ms"] = f"{(perf_counter() - started) * 1000:.3f}"
+        elapsed_ms = (perf_counter() - started) * 1000
+        response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.3f}"
+        record_http_request(
+            scope=request.scope,
+            method=request.method,
+            status_code=response.status_code,
+            duration_ms=elapsed_ms,
+        )
         return response
 
     application.include_router(public_router)
