@@ -136,11 +136,15 @@ def _launch_stage_errors(settings: Settings) -> list[str]:
             f"LAUNCH_STAGE={resolved.effective.value} exposes checkout without "
             "advertising pricing"
         )
-    if exposure.shows_waitlist and not settings.public_forms_enabled:
-        errors.append(
-            f"LAUNCH_STAGE={resolved.effective.value} leads with the waitlist but "
-            "PUBLIC_FORMS_ENABLED is false, so the form cannot accept anybody"
-        )
+    # There is deliberately no "waitlist stage with forms disabled" check here.
+    #
+    # It looked like an obvious incoherence — a page whose only call to action points
+    # at a form that cannot accept anybody — and it refused a configuration the product
+    # genuinely supports: a deployment with no public surface at all, where the chat and
+    # the forms are both off and nothing serves the marketing site. Because
+    # PUBLIC_FORMS_ENABLED=false *is* how "no public surface" is expressed, the check
+    # could only ever fire on a legitimate deployment. A guard with no true positive is
+    # not a safeguard, so it is gone rather than narrowed.
     if (
         settings.is_deployed
         and settings.public_og_image_url is not None
