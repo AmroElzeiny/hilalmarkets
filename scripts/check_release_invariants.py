@@ -183,12 +183,9 @@ def main() -> int:
                 "PUBLIC_WAITLIST_MODE ceiling"
             )
         exposure = resolved.exposure
-        billing_on = production.get("BILLING_ENABLED", "").casefold() == "true"
-        if exposure.exposes_checkout and not billing_on:
-            failures.append(
-                f"LAUNCH_STAGE={resolved.effective.value} exposes checkout while "
-                "BILLING_ENABLED=false"
-            )
+        # Pricing exposure is the gate that matters here, not billing. A launched site
+        # with billing off is a supported state: the prices show and the button says
+        # the plan is not on sale yet.
         if exposure.advertises_pricing:
             failures.append(
                 f"LAUNCH_STAGE={resolved.effective.value} advertises pricing; the "

@@ -172,6 +172,69 @@ def test_waitlist_mode_is_derived_from_the_stage_not_read_from_the_setting() -> 
     assert clamped.resolved_launch_stage.clamped_by_environment is True
 
 
+def _settings(**overrides) -> Settings:
+    return Settings(
+        _env_file=None,
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+        **overrides,
+    )
+
+
+def test_turning_the_old_switch_off_still_opens_the_product() -> None:
+    """The reconciliation the older switch needs, and the one I broke first time.
+
+    Every deployment configures exposure with PUBLIC_WAITLIST_MODE alone. When the
+    stage ignored it, setting it to false changed nothing: the site stayed on the
+    waitlist while the setting said otherwise. That is the silent disagreement this
+    whole layer exists to remove, so it is asserted rather than trusted.
+    """
+
+    open_site = _settings(public_waitlist_mode=False)
+    assert open_site.resolved_launch_stage.effective is LaunchStage.PUBLIC_LAUNCH
+    assert open_site.waitlist_mode is False
+    assert open_site.stage_exposure.advertises_pricing is True
+
+
+def test_leaving_the_old_switch_on_keeps_the_waitlist() -> None:
+    pre_launch = _settings(public_waitlist_mode=True)
+    assert pre_launch.resolved_launch_stage.effective is LaunchStage.PUBLIC_WAITLIST
+    assert pre_launch.waitlist_mode is True
+
+
+def test_the_switch_is_read_when_it_changes_not_only_at_startup() -> None:
+    """Operators and tests flip it at runtime; a value cached at boot would go stale."""
+
+    settings = _settings(public_waitlist_mode=True)
+    assert settings.waitlist_mode is True
+    settings.public_waitlist_mode = False
+    assert settings.waitlist_mode is False
+
+
+def test_an_explicit_stage_outranks_the_old_switch() -> None:
+    """Once the stage is stated, it is the authority and the switch is only a cap."""
+
+    narrowed = _settings(
+        launch_stage=LaunchStage.INTERNAL,
+        public_waitlist_mode=False,
+    )
+    assert narrowed.resolved_launch_stage.effective is LaunchStage.INTERNAL
+    assert narrowed.waitlist_mode is False
+
+
+def test_a_launched_site_with_billing_off_is_a_supported_state() -> None:
+    """Prices stay on the page; the button says the plan is not on sale yet.
+
+    Treating this as incoherent would refuse to boot a state the product supports on
+    purpose, which is what an earlier version of the startup guard did.
+    """
+
+    from ai_market_monitor.core.startup import validate_runtime_configuration
+
+    validate_runtime_configuration(
+        _settings(public_waitlist_mode=False, billing_enabled=False)
+    )
+
+
 def test_an_unrecognised_stage_is_refused_at_configuration_time() -> None:
     with pytest.raises(ValueError):
         Settings(

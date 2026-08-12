@@ -126,11 +126,11 @@ def _launch_stage_errors(settings: Settings) -> list[str]:
     errors: list[str] = []
     resolved = settings.resolved_launch_stage
     exposure = resolved.exposure
-    if exposure.exposes_checkout and not settings.billing_enabled:
-        errors.append(
-            f"LAUNCH_STAGE={resolved.effective.value} exposes checkout but "
-            "BILLING_ENABLED is false"
-        )
+    # Deliberately *not* checking "checkout exposed but billing disabled". Prices stay
+    # on the page whether or not checkout is switched on; what changes is the button,
+    # which `core/plans.plan_offer` already marks as not yet available. Treating that
+    # combination as incoherent would refuse to boot a state the product supports on
+    # purpose, and which `check_release_invariants` asserts must keep working.
     if exposure.exposes_checkout and not exposure.advertises_pricing:
         errors.append(
             f"LAUNCH_STAGE={resolved.effective.value} exposes checkout without "

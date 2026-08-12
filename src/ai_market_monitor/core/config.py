@@ -825,10 +825,35 @@ class Settings(BaseSettings):
 
     @property
     def resolved_launch_stage(self) -> ResolvedStage:
-        """The stage actually in force, after the environment ceiling is applied."""
+        """The stage actually in force, after the environment ceiling is applied.
 
+        When ``LAUNCH_STAGE`` is not set explicitly, the stage is *derived* from
+        ``PUBLIC_WAITLIST_MODE``. That is the reconciliation the older switch needs,
+        not a second authority: every deployment and test today configures exposure
+        with that switch alone, and turning it off is how the product was always going
+        to be opened. A stage that ignored it would leave an operator setting it to
+        ``false`` watching nothing change — the site staying on the waitlist while the
+        setting said otherwise, which is precisely the silent disagreement this layer
+        exists to remove.
+
+        Derived on read rather than at construction because the switch is also flipped
+        at runtime, in tests and by an operator reloading configuration. A value
+        computed once at startup would answer with the old exposure for the life of
+        the process.
+
+        The moment ``LAUNCH_STAGE`` is set explicitly it becomes the authority, and
+        the switch narrows to being only a ceiling over it.
+        """
+
+        configured = self.launch_stage
+        if "launch_stage" not in self.model_fields_set:
+            configured = (
+                LaunchStage.PUBLIC_WAITLIST
+                if self.public_waitlist_mode
+                else LaunchStage.PUBLIC_LAUNCH
+            )
         return resolve_launch_stage(
-            self.launch_stage,
+            configured,
             waitlist_ceiling=self.public_waitlist_mode,
         )
 
