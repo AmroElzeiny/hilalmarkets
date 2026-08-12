@@ -951,7 +951,7 @@ async def subscribe(
         # The landing page has no pricing section while the site is pre-launch, so a
         # bad plan link would otherwise send the visitor to an anchor that is not there.
         return _redirect(
-            WAITLIST_ANCHOR if settings.public_waitlist_mode else "/#pricing"
+            WAITLIST_ANCHOR if settings.waitlist_mode else "/#pricing"
         )
     user = await _current_user(request, session, settings)
     if user is None:

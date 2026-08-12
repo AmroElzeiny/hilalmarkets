@@ -3,6 +3,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
+from ai_market_monitor.observability.alerts import AlertRuleError, validate_alert_rules
+from ai_market_monitor.observability.slos import undeclared_metric_names
 
 DEFAULT_SECRET = "development-only-change-me-32-characters"
 
@@ -89,8 +91,69 @@ def _weak_database_password(database_url: str) -> str | None:
     return None
 
 
+def _observability_errors() -> list[str]:
+    """Refuse to boot with an objective nothing measures or an alert that cannot arrive.
+
+    Both failures are invisible at runtime. An objective over a metric no code emits
+    reads as "no data" forever, which looks like calm. An alert routed through the
+    subsystem it watches is generated correctly and never delivered. Neither is
+    discoverable except during the incident it was written for, so both are checked
+    here instead.
+    """
+
+    errors: list[str] = []
+    missing = undeclared_metric_names()
+    if missing:
+        errors.append(
+            "Service-level objectives reference metrics nothing emits: "
+            + ", ".join(missing)
+        )
+    try:
+        validate_alert_rules()
+    except AlertRuleError as exc:
+        errors.append(str(exc))
+    return errors
+
+
+def _launch_stage_errors(settings: Settings) -> list[str]:
+    """Refuse an internally inconsistent launch stage.
+
+    The stage decides what the public site promises. A stage that offers something
+    the deployment cannot deliver — checkout with no payment provider — is a promise
+    the product breaks at the moment a customer accepts it.
+    """
+
+    errors: list[str] = []
+    resolved = settings.resolved_launch_stage
+    exposure = resolved.exposure
+    if exposure.exposes_checkout and not settings.billing_enabled:
+        errors.append(
+            f"LAUNCH_STAGE={resolved.effective.value} exposes checkout but "
+            "BILLING_ENABLED is false"
+        )
+    if exposure.exposes_checkout and not exposure.advertises_pricing:
+        errors.append(
+            f"LAUNCH_STAGE={resolved.effective.value} exposes checkout without "
+            "advertising pricing"
+        )
+    if exposure.shows_waitlist and not settings.public_forms_enabled:
+        errors.append(
+            f"LAUNCH_STAGE={resolved.effective.value} leads with the waitlist but "
+            "PUBLIC_FORMS_ENABLED is false, so the form cannot accept anybody"
+        )
+    if (
+        settings.is_deployed
+        and settings.public_og_image_url is not None
+        and not str(settings.public_og_image_url).startswith("https://")
+    ):
+        errors.append("PUBLIC_OG_IMAGE_URL must use HTTPS in staging and production")
+    return errors
+
+
 def validate_runtime_configuration(settings: Settings) -> None:
     errors: list[str] = []
+    errors.extend(_observability_errors())
+    errors.extend(_launch_stage_errors(settings))
     if settings.is_deployed:
         if (
             settings.ai_setup_evaluator_enabled

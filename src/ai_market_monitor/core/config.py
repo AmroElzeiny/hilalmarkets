@@ -13,6 +13,13 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from ai_market_monitor.core.launch_stage import (
+    LaunchStage,
+    ResolvedStage,
+    StageExposure,
+    resolve_launch_stage,
+)
+
 WHATSAPP_TEMPLATE_EVENTS = frozenset(
     {
         "connection_confirmation",
@@ -557,12 +564,18 @@ class Settings(BaseSettings):
     public_chat_notion_max_characters: int = Field(default=12000, ge=1000, le=50000)
     public_chat_notion_max_file_bytes: int = Field(default=262144, ge=1024, le=2_000_000)
     public_forms_enabled: bool = True
-    # Pre-launch mode for the public marketing site. While it is on, the site asks
-    # visitors to join the waitlist instead of offering plans or account entry: no
-    # pricing, no plan comparison, no sign-in or sign-up call to action, and a support
-    # assistant that never sends an anonymous visitor to an account page. Sign-in and
-    # sign-up themselves keep working for the people already invited; they are simply
-    # not advertised. One setting owns this so no surface can disagree with another.
+    #: How open the product is. The authority for what every public surface shows:
+    #: advertised routes, calls to action, pricing and checkout exposure, offered
+    #: channels, and what the public assistant may claim. See
+    #: `core/launch_stage.py`, which holds the exposure table and the legal moves.
+    launch_stage: LaunchStage = LaunchStage.PUBLIC_WAITLIST
+    # The emergency ceiling, kept as an environment variable on purpose.
+    #
+    # It is no longer an independent authority: no surface reads it directly any
+    # more, they read `waitlist_mode`, which is derived from the resolved stage.
+    # What it still does is cap exposure. While it is true the product can be no more
+    # open than `public_waitlist`, whatever LAUNCH_STAGE says, so one variable can
+    # pull the site back without a deploy. It only ever narrows.
     public_waitlist_mode: bool = True
     contact_form_sender_email: str = "office@hilalmarkets.com"
     contact_form_recipient_email: str = "office@hilalmarkets.com"
@@ -809,6 +822,33 @@ class Settings(BaseSettings):
         merged.setdefault("public_waitlist", {"limit": 5, "window_seconds": 3600})
         merged.setdefault("public_contact", {"limit": 5, "window_seconds": 3600})
         return merged
+
+    @property
+    def resolved_launch_stage(self) -> ResolvedStage:
+        """The stage actually in force, after the environment ceiling is applied."""
+
+        return resolve_launch_stage(
+            self.launch_stage,
+            waitlist_ceiling=self.public_waitlist_mode,
+        )
+
+    @property
+    def stage_exposure(self) -> StageExposure:
+        """What the effective stage shows, offers and permits."""
+
+        return self.resolved_launch_stage.exposure
+
+    @property
+    def waitlist_mode(self) -> bool:
+        """Whether the public site leads with the waitlist.
+
+        A *derived view* of the stage, not a setting. Every surface that used to read
+        ``public_waitlist_mode`` reads this, so a stage change reaches the header, the
+        footer, the sitemap, the assistant and Telegram together instead of one at a
+        time.
+        """
+
+        return self.stage_exposure.shows_waitlist
 
     @property
     def is_production(self) -> bool:

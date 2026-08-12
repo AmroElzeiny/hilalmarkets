@@ -115,7 +115,7 @@ class PublicSupportAIService:
             "max_output_tokens": self.settings.public_chat_ai_max_output_tokens,
             "reasoning": {"effort": reasoning},
             "instructions": _public_support_instructions(
-                waitlist_mode=self.settings.public_waitlist_mode,
+                waitlist_mode=self.settings.waitlist_mode,
             ),
             "input": [
                 {

@@ -1186,7 +1186,7 @@ class TelegramBotService:
         )
 
     def _pricing_text(self) -> str:
-        if self.settings.public_waitlist_mode:
+        if self.settings.waitlist_mode:
             # The public pricing page is not published before launch, so a button here
             # would open the waitlist under a "Pricing" label. Say what is true instead.
             return (
@@ -1196,7 +1196,7 @@ class TelegramBotService:
         return "💸 Pricing\n\nCompare plans on the public pricing page."
 
     def _pricing_buttons(self) -> list[TelegramButton]:
-        if self.settings.public_waitlist_mode:
+        if self.settings.waitlist_mode:
             return []
         return [
             TelegramButton(
@@ -1260,7 +1260,7 @@ class TelegramBotService:
             "Hilal Markets is invite-only during its private beta. Join the waitlist on "
             "the website to be considered. If you have already been invited, use the "
             "buttons below to link this Telegram chat to your account."
-            if self.settings.public_waitlist_mode
+            if self.settings.waitlist_mode
             else "Sign up or sign in on the Dashboard, then Telegram will link to that "
             "account for trial status, monitor counts, subscription dates and alerts."
         )

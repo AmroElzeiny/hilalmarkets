@@ -96,7 +96,7 @@ def offerable_route_ids(settings: Settings) -> frozenset[str]:
     redirect. Both are dropped for every caller at once.
     """
 
-    if not settings.public_waitlist_mode:
+    if not settings.waitlist_mode:
         return frozenset(PUBLIC_ROUTE_PATHS)
     return frozenset(
         route_id
@@ -282,7 +282,7 @@ class PublicKnowledgeService:
             # an account page: they cannot open one, so "sign in" would be an
             # instruction they are unable to follow. The refusal stands either way;
             # only the next step it offers changes.
-            if self.settings.public_waitlist_mode:
+            if self.settings.waitlist_mode:
                 return (
                     "refused",
                     "I cannot look at private accounts or Watchlists here. Hilal Markets "
@@ -423,7 +423,7 @@ class PublicKnowledgeService:
         flow.
         """
 
-        if self.settings.public_waitlist_mode:
+        if self.settings.waitlist_mode:
             return PublicKnowledgeEntry(
                 source_id="beta:account-access:v1",
                 title="How to get access to Hilal Markets",
@@ -582,7 +582,7 @@ class PublicKnowledgeService:
         # Billing in the dashboard" while the visible Help Center had already stopped
         # saying that — the page and the assistant disagreeing about the same product.
         for category in public_help_categories(
-            waitlist_mode=self.settings.public_waitlist_mode
+            waitlist_mode=self.settings.waitlist_mode
         ):
             for index, article in enumerate(category["articles"]):
                 entries.append(
@@ -598,7 +598,7 @@ class PublicKnowledgeService:
         # same set the menus and the sitemap read, so it cannot describe a page a visitor
         # cannot open, and it cannot route an answer to one either.
         hidden_pages = (
-            WAITLIST_HIDDEN_PAGES if self.settings.public_waitlist_mode else frozenset()
+            WAITLIST_HIDDEN_PAGES if self.settings.waitlist_mode else frozenset()
         )
         plan_route = "home" if "pricing" in hidden_pages else "pricing"
         for index, item in enumerate(PURCHASE_FAQS):
@@ -624,7 +624,7 @@ class PublicKnowledgeService:
                 )
             )
         pricing_route = "pricing"
-        if self.settings.public_waitlist_mode:
+        if self.settings.waitlist_mode:
             # Prices are not published while nothing can be bought, so the assistant is
             # not given a plan catalogue it would then have to quote.
             pricing_answer = (
