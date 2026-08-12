@@ -67,6 +67,49 @@ During the window, execute and record each once:
 7. Submit one public inquiry and force one retry; verify exactly two logical recipient events and
    no duplicated email event keys.
 
+## Objectives and the issue queue during the soak
+
+From 2026-08-12 the soak also watches the service-level objectives directly. They are the same
+definitions the alerts use, so a soak that stays green is a soak measured against the thresholds
+that will page somebody in production. Read them at the same UTC hour as the daily audit:
+
+```bash
+curl -fsS -H "X-User-ID: <admin-uuid>" https://<staging-host>/api/v1/admin/health \
+  > slo-day-N.json
+```
+
+Retain, for each of the seven days:
+
+- every objective's `state`, which is `met`, `breached` or `no_data`;
+- `firing_alerts`, which should normally be empty;
+- `operational_issues.needs_attention`.
+
+**An objective reading `no_data` for a whole day is a finding, not a pass.** It means nothing
+exercised that path, so the objective was never tested. During a soak with live scan jobs and
+delivered alerts, `scheduled_scan_completion`, `market_data_freshness`, `alert_delivery_success` and
+`worker_liveness` must all report a real number every day. If one of them stays `no_data`, find out
+what is not running before trusting anything else in the window.
+
+The launch-blocking objectives are `api_availability`, `setup_chat_turn_success`,
+`ai_provider_success`, `scheduled_scan_completion`, `market_data_freshness`,
+`alert_delivery_success`, `worker_liveness` and `review_case_sla`. A breach of any one of them
+during the window restarts the window after correction, on the same rule as an unexplained
+duplicate.
+
+Check the issue queue rather than only the alert list: the queue keeps `occurrence_count` and
+`first_seen_at`, so a fault that fired once on day two and again on day six shows as one row with a
+count of two. That pattern is invisible in a list of current alerts and is exactly the kind of
+intermittent fault a seven-day window exists to catch.
+
+### Two more controlled events
+
+8. Take the AI provider offline for ten minutes. Verify that customers see the AI-unavailable
+   banner, that approved Watchlists keep evaluating and keep delivering alerts, and that **no
+   customer-visible message describes the outage as a Shariah, screening or compiler problem**.
+   Verify `ai_provider_degraded` fires and one issue row is created.
+9. Let the same alert fire on two separate days. Verify the queue holds **one** row with
+   `occurrence_count` of two and an audit trail showing the reopen, not two rows.
+
 ## Acceptance
 
 All seven daily audit outputs must report `status: pass` and every duplicate-group value must be

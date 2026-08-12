@@ -8,13 +8,18 @@ from ai_market_monitor.api.route_security import (
     audit_versioned_api_routes,
     iter_versioned_api_routes,
 )
+from ai_market_monitor.core.copy_rules import customer_copy_sources, scan_customer_copy
+from ai_market_monitor.core.launch_stage import LaunchStage, resolve_launch_stage
 from ai_market_monitor.core.plans import (
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
     plan_offer,
     visible_public_plan_codes,
 )
+from ai_market_monitor.core.product_boundaries import BOUNDARY_REGISTRY, refuse
 from ai_market_monitor.main import app
+from ai_market_monitor.observability.alerts import AlertRuleError, validate_alert_rules
+from ai_market_monitor.observability.slos import undeclared_metric_names
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_PUBLIC_PLANS = ("demo", "trader", "pro")
@@ -25,21 +30,12 @@ FORBIDDEN_TRACKED_PATTERNS = (
     re.compile(r"(^|/)(?!VvvebJs/).*\.(db|sqlite|sqlite3|log)$", re.IGNORECASE),
     re.compile(r"^PLAYWRIGHT_E2E_REPORT\.md$"),
 )
-CUSTOMER_LANGUAGE_FILES = (
-    ROOT / "src" / "ai_market_monitor" / "templates" / "dashboard_public.html",
-    ROOT / "src" / "ai_market_monitor" / "templates" / "hilal",
-    ROOT / "src" / "ai_market_monitor" / "core" / "site_content.py",
-    ROOT / "src" / "ai_market_monitor" / "services" / "product_language.py",
-)
-# The customer-facing name for a monitor is "Watchlist". "Watch Plan" was the older
-# name; both together taught two words for one thing, so the old one is now blocked
-# here rather than left to reappear one template at a time.
-FORBIDDEN_CUSTOMER_PHRASES = (
-    "watch plan",
-    "watch plans",
-    "halal market",
-    "market scanner",
-)
+# The forbidden-phrase list, the copy sources and the spelling rule now live in
+# `core/copy_rules.py`, and both readers import them: this gate and
+# `tests/unit/test_launch_stage_and_boundaries.py`. They used to keep separate lists,
+# which is the duplicate-vocabulary failure this repository keeps repeating — two
+# guards, each understanding a different subset, each passing while the other would
+# have failed.
 ACTIVE_DISCORD_SCAN_ROOTS = (
     ROOT / "src" / "ai_market_monitor" / "api",
     ROOT / "src" / "ai_market_monitor" / "templates",
@@ -51,15 +47,29 @@ ACTIVE_DISCORD_SCAN_ROOTS = (
 ACTIVE_DISCORD_SUFFIXES = {".py", ".html", ".js", ".css"}
 
 
-def _production_example() -> dict[str, str]:
+#: Keys that must exist in BOTH environment examples.
+#:
+#: A key added to one file only is a key an operator discovers is missing during a
+#: deployment, which is the worst moment to learn what it does.
+REQUIRED_KEY_PARITY = (
+    "LAUNCH_STAGE",
+    "PUBLIC_WAITLIST_MODE",
+)
+
+
+def _example_values(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
-    for raw in (ROOT / ".env.production.example").read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         values[key] = value
     return values
+
+
+def _production_example() -> dict[str, str]:
+    return _example_values(ROOT / ".env.production.example")
 
 
 def main() -> int:
@@ -143,18 +153,81 @@ def main() -> int:
         if any(pattern.search(normalized) for pattern in FORBIDDEN_TRACKED_PATTERNS):
             failures.append(f"Generated/runtime artifact is tracked: {path}")
 
-    for source in CUSTOMER_LANGUAGE_FILES:
-        candidates = source.rglob("*") if source.is_dir() else (source,)
-        for candidate in candidates:
-            if not candidate.is_file() or candidate.suffix not in {".html", ".py"}:
-                continue
-            content = candidate.read_text(encoding="utf-8").casefold()
-            for phrase in FORBIDDEN_CUSTOMER_PHRASES:
-                if phrase in content:
-                    relative = candidate.relative_to(ROOT)
-                    failures.append(
-                        f"Deprecated product terminology in {relative}: {phrase!r}"
-                    )
+    copy_sources = customer_copy_sources(ROOT)
+    if len(copy_sources) < 4:
+        # A lint over an empty file list passes for the wrong reason. If a rename ever
+        # moves these files, this gate must fail loudly rather than quietly stop
+        # checking anything.
+        failures.append(
+            f"Customer copy sources not found: only {len(copy_sources)} located"
+        )
+    for violation in scan_customer_copy(ROOT):
+        failures.append(f"Customer copy: {violation.describe(ROOT)}")
+
+    # -- Launch stage coherence -------------------------------------------
+    # The production example must ship a stage that exists, and one no wider than the
+    # emergency ceiling beside it. A stage wider than the ceiling boots clamped, which
+    # means the file says one thing and the product does another.
+    configured_stage = production.get("LAUNCH_STAGE", "").strip()
+    if configured_stage not in {stage.value for stage in LaunchStage}:
+        failures.append(
+            f"Production example LAUNCH_STAGE is missing or unknown: {configured_stage!r}"
+        )
+    else:
+        stage = LaunchStage(configured_stage)
+        ceiling_on = production.get("PUBLIC_WAITLIST_MODE", "").casefold() == "true"
+        resolved = resolve_launch_stage(stage, waitlist_ceiling=ceiling_on)
+        if resolved.clamped_by_environment:
+            failures.append(
+                f"Production example sets LAUNCH_STAGE={stage.value} above its own "
+                "PUBLIC_WAITLIST_MODE ceiling"
+            )
+        exposure = resolved.exposure
+        billing_on = production.get("BILLING_ENABLED", "").casefold() == "true"
+        if exposure.exposes_checkout and not billing_on:
+            failures.append(
+                f"LAUNCH_STAGE={resolved.effective.value} exposes checkout while "
+                "BILLING_ENABLED=false"
+            )
+        if exposure.advertises_pricing:
+            failures.append(
+                f"LAUNCH_STAGE={resolved.effective.value} advertises pricing; the "
+                "product is not open yet"
+            )
+
+    # -- Every new key exists in both examples ----------------------------
+    development = _example_values(ROOT / ".env.example")
+    for key in REQUIRED_KEY_PARITY:
+        if key not in development:
+            failures.append(f".env.example is missing {key}")
+        if key not in production:
+            failures.append(f".env.production.example is missing {key}")
+
+    # -- The operational-truth layer is coherent ---------------------------
+    missing_metrics = undeclared_metric_names()
+    if missing_metrics:
+        failures.append(
+            "Service-level objectives reference metrics nothing emits: "
+            + ", ".join(missing_metrics)
+        )
+    try:
+        validate_alert_rules()
+    except AlertRuleError as exc:
+        failures.append(str(exc))
+
+    # -- The boundary registry is present and complete ---------------------
+    if not BOUNDARY_REGISTRY:
+        failures.append("The product boundary registry is empty")
+    for entry in BOUNDARY_REGISTRY:
+        if not entry.reason.strip():
+            failures.append(f"Boundary {entry.key} has no customer-readable reason")
+    for key in ("trade_execution", "brokerage_custody", "buy_sell_recommendations",
+                "financial_advice"):
+        try:
+            if not refuse(key).is_permanent:
+                failures.append(f"Boundary {key} must be permanently out of scope")
+        except (KeyError, ValueError):
+            failures.append(f"Boundary registry is missing the {key} statement")
 
     for source in ACTIVE_DISCORD_SCAN_ROOTS:
         candidates = source.rglob("*") if source.is_dir() else (source,)

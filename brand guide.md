@@ -218,8 +218,16 @@ Never communicate a Shariah or monitoring status through colour alone. Always pa
 
 ### Headings
 
-- Typeface: **Geometrica**.
+- Typeface: **Geometria**.
 - Weight: **Medium**.
+
+> Corrected on 12 August 2026. This document previously said "Geometrica", which is
+> not the font the product ships. The typeface actually in use is **Geometria**: it is
+> declared in `Hilal-Markets-Website/src/index.css` with real `@font-face` sources, it
+> is present in the built landing bundle at
+> `src/ai_market_monitor/static/landing/assets/landing.css`, and the font files
+> themselves are in the repository. `README.md` already said Geometria. The brand
+> guide was the incorrect document, so the brand guide is what changed.
 - Use sentence case.
 - Keep headings concise.
 - Use generous line spacing and clear hierarchy.

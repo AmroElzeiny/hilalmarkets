@@ -272,6 +272,72 @@ roles; mutating actions require `ADMIN`.
 secret redaction and user strategy text that attempts code execution. It is a guardrail, not a
 replacement for CI dependency/container vulnerability scanning.
 
+### Operational truth layer
+
+`observability/` is the one place the product decides what is measured, what is promised, and what
+wakes somebody up. It replaced three parallel recorders — the scanner's `OperationalMetric` rows,
+Setup Chat's per-turn telemetry and the bounded agent's own counters — which spelled the same
+provider three different ways and could not answer "is the product healthy" from any one of them.
+
+| Module | Owns |
+|---|---|
+| `labels.py` | The only allowed metric labels, and the redaction rule |
+| `metrics.py` | The registry of every metric, and the in-process recorder |
+| `slos.py` | Eleven objectives, each naming a metric from that registry |
+| `alerts.py` | Twelve rules that page or ticket when an objective breaks |
+| `issues.py` | The deduplicated operational issue queue |
+| `banners.py` | The customer-facing degradation messages |
+| `asgi.py` | Turning one HTTP request into its two metrics |
+
+Four properties are enforced rather than documented:
+
+1. **A metric must be declared before it can be recorded.** An undeclared name raises, and a
+   declared metric states its complete label set, so a metric cannot mean different things at two
+   call sites.
+2. **A label must be bounded.** Enumerated labels have a closed value set; identifier labels must
+   match an identifier shape and carry a per-label ceiling on distinct values. A UUID, an email or
+   a long hex run is refused outright. The ceiling is what catches a label by user id, because each
+   individual value looks reasonable and only the count gives it away.
+3. **An objective must be computable.** `undeclared_metric_names()` is read by both a unit test and
+   `core/startup.py`; an objective over a metric nothing emits stops the deployment. Such an
+   objective would otherwise read "no data" forever, which on a dashboard looks like health.
+4. **An alert may not travel through what it watches.** `DELIVERY_ROUTE_DEPENDENCIES` maps each
+   route to the components it needs, and `validate_alert_rules()` refuses a rule whose watched
+   service appears there. Page-worthy alerts must use a route with no application dependency at all.
+
+The layer is read-only with respect to the product. It writes only `operational_issues` and
+`operational_issue_events`, and never touches strategy, Passport, entitlement or approval state.
+Recording is in-process and never opens a transaction, so instrumentation cannot fail the request
+that produced it.
+
+`OperationalIssue` is deliberately separate from `Incident`. An incident is a declared,
+customer-facing event with impact rows and a published timeline. An issue is the layer underneath:
+one deduplicated row per recurring problem, with an occurrence count and an append-only audit trail,
+before anybody has decided it is an incident.
+
+Not yet built: a metrics exporter and any alert transport. Values live in one process and are read
+by `/api/v1/admin/health`; nothing ships them to a long-term store and nothing actually sends a page.
+
+### Launch stage and product boundaries
+
+`core/launch_stage.py` is the server-owned authority for how open the product is. Four stages —
+`internal`, `private_beta_invite`, `public_waitlist`, `public_launch` — each declare in one table
+what they advertise, whether pricing and checkout are exposed, which channels are offered and what
+the public assistant may claim.
+
+`PUBLIC_WAITLIST_MODE` remains as a hard ceiling, not an authority. No surface reads it directly;
+they read `settings.waitlist_mode`, derived from the resolved stage. While the ceiling is on, the
+product can be no wider than `public_waitlist` whatever the stage says, and a disagreement is
+reported through `ResolvedStage.clamped_by_environment` rather than applied silently. Widening moves
+one step at a time; narrowing is allowed from any stage to any narrower one, because pulling the
+product back is an emergency action.
+
+`core/product_boundaries.py` is the versioned registry of what the product does, does not do yet,
+and will never do. A refusal names the missing capability and carries no substitute — there is no
+`suggested_alternative` field, because that is the hook that turns "we cannot do that" into "we
+quietly did something else". `core/copy_rules.py` owns the forbidden phrases and the Shariah
+spelling rule, imported by both the release gate and the tests so the two cannot drift apart.
+
 ### Public Support AI
 
 `services/public_chat.py` and `services/public_support_ai.py` keep the public Support assistant

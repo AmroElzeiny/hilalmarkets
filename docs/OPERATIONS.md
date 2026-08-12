@@ -1,6 +1,11 @@
-# TraceEdge Operations Guide
+# Hilal Markets operations guide
 
-Date: 2026-06-15
+Date: 2026-08-12
+
+> Renamed on 12 August 2026. This file was titled "TraceEdge Operations Guide", the
+> name of an earlier product. Nothing in the running system is called TraceEdge, and an
+> operations guide that opens with the wrong product name is the first thing a new
+> person on call reads.
 
 ## Environment Variables
 
@@ -432,6 +437,189 @@ chat ID; never use a customer chat for deployment verification.
 Before inviting external users, execute the seven-day staging procedure in
 `docs/PRIVATE_BETA_SOAK_RUNBOOK.md`. Retain the daily output of
 `scripts/audit_private_beta_soak.py`; never commit those environment-specific reports.
+
+## Service-level objectives, alerts and the issue queue
+
+Everything operational is defined in one place, `src/ai_market_monitor/observability/`:
+
+| File | What it owns |
+|---|---|
+| `labels.py` | The only allowed metric labels, and the rule that keeps secrets out |
+| `metrics.py` | Every metric the product records, and the recorder that writes them |
+| `slos.py` | The objectives. Each names a metric from `metrics.py` |
+| `alerts.py` | The rules that page or raise a ticket when an objective breaks |
+| `issues.py` | The deduplicated queue of operational problems |
+| `banners.py` | What a customer is told while something is degraded |
+
+Two rules are enforced by the application itself and will stop a deployment:
+
+1. **An objective must be measurable.** If an objective names a metric nothing emits,
+   startup refuses to boot. An unmeasurable objective reads as "no data" forever, which
+   on a dashboard looks exactly like health.
+2. **An alert may not travel through what it is watching.** The alert about Telegram
+   delivery cannot be a Telegram message. Startup refuses that too, because the failure
+   is silent: the alert is generated correctly and never arrives.
+
+Where to look:
+
+- `/api/v1/admin/health` — every objective with its current reading, every firing
+  alert, and the issue-queue counts. This is the operator view; there is no second
+  console.
+- `/api/v1/admin/activity` — scan, alert, delivery and billing activity.
+
+An objective reading `no_data` has **not** passed. It has not been tested.
+
+### How to read an issue
+
+One row per problem, not one per occurrence. `occurrence_count` and `first_seen_at`
+together answer the only question that matters at the start: how long has this been
+happening, and is it getting worse.
+
+States move `open → acknowledged → mitigated → resolved`. A resolved problem that
+happens again **reopens the same row** rather than starting a new one, so a recurring
+fault keeps its history. Suppression always has an end time; a suppression with no
+expiry is how a known problem stops being reported and then stops being known.
+
+Issues never hold customer content. No strategy text, no religious status, no secrets.
+This is enforced in code, not by convention.
+
+## Incident runbooks
+
+One section per alert. Each is written to be followed by somebody who was asleep ten
+minutes ago.
+
+**Before any of them:** none of these procedures involves turning off Shariah
+screening, widening the screened universe, or relaxing the market-data staleness
+check. Those are fail-closed gates. If one of them is blocking, it is doing its job,
+and forcing it open converts a visible outage into a wrong answer shown to a customer.
+
+### API availability
+*Alert: `api_unavailable` — pages.*
+
+- **Detection.** `api_availability` below 99.5% over one hour.
+- **Triage.** Open `/api/v1/admin/health`. Check `dependency_health` for the database
+  and Redis first. Most 5xx bursts are one of those two, not the application.
+- **Mitigation.** If both dependencies are healthy, roll back to the previous release.
+- **Rollback.** Redeploy the previous image tag; no schema rollback is needed for this
+  phase's migration.
+- **Verification.** `curl -fsS https://<host>/health` and watch `api_availability`
+  return above objective for fifteen minutes.
+
+### API latency
+*Alert: `api_slow` — ticket.*
+
+- **Detection.** `api_latency_p95` above 1000 ms over one hour.
+- **Triage.** Compare with `provider_call_duration_ms` and `queue_depth`. A slow
+  upstream shows here before it shows anywhere else.
+- **Mitigation.** None needed urgently; nothing is wrong, only slow.
+- **Verification.** p95 back under 1000 ms.
+
+### Setup Chat turn failures
+*Alert: `setup_chat_failing` — pages.*
+
+- **Detection.** `setup_chat_turn_success` below 98% over one hour.
+- **Triage.** Check `ai_provider_success` first. If the provider is also breached, this
+  is a provider incident; follow that section instead.
+- **Mitigation.** Set `SETUP_CHAT_EMERGENCY_DISABLED=true` and restart the API. Turns
+  then stop cleanly behind the AI-unavailable banner instead of failing mid-turn.
+- **What keeps working.** Every approved Watchlist keeps evaluating and keeps alerting.
+  Nothing saved is changed or lost. Say this to customers.
+- **Rollback.** Set the switch back to `false` and restart.
+- **Verification.** Send one authenticated turn and confirm it completes.
+
+### Setup Chat latency
+*Alert: `setup_chat_slow` — ticket.*
+
+- **Detection.** `setup_chat_latency_p95` above 12 s.
+- **Triage.** Check provider latency before touching routing or timeouts.
+- **Mitigation.** Raising `SETUP_TURN_DEADLINE_SECONDS` is not a fix. It moves the
+  failure from the server to the browser.
+
+### AI provider degraded
+*Alert: `ai_provider_degraded` — pages.*
+
+- **Detection.** `ai_provider_success` below 97% over thirty minutes.
+- **Triage.** Check `provider_circuit_state` for `openai`. An open circuit means the
+  application has already stopped calling out, which is correct.
+- **Mitigation.** Confirm the AI-unavailable banner is showing. Nothing else is
+  required; the circuit breaker recovers on its own.
+- **Never.** Do not disable screening, and do not describe this to a customer as a
+  Shariah or compiler problem. It is neither.
+- **Verification.** Circuit returns to `closed` and success rate recovers.
+
+### Scans delayed
+*Alert: `scans_delayed` — pages.*
+
+- **Detection.** `scheduled_scan_completion` below 99% over three hours.
+- **Triage.** Check `worker_heartbeat_age_seconds` and `queue_depth` before anything
+  else. A dead scheduler shows here first.
+- **Mitigation.** Restart the worker and scheduler containers. Do not re-queue jobs by
+  hand; recovery is idempotent and claims are atomic.
+- **Verification.** `scan_jobs_total{job_phase="run"}` rises and the objective recovers.
+
+### Market data stale
+*Alert: `market_data_stale` — pages.*
+
+- **Detection.** `market_data_freshness` above 300 seconds.
+- **Triage.** Check the exchange connection and `provider_calls_total` for the market
+  data provider.
+- **Mitigation.** Restore the exchange connection.
+- **Never.** Do not relax the staleness check to clear the alert. Confirmed alerts are
+  being blocked on purpose: the product would rather send nothing than send an alert
+  computed from old prices.
+- **Verification.** Freshness back under 300 seconds.
+
+### Alert delivery failing
+*Alert: `alert_delivery_failing` — pages.*
+
+- **Detection.** `alert_delivery_success` below 99% over one hour.
+- **Triage.** Check `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` first; an
+  expired or rotated token is the usual cause.
+- **Mitigation.** Restore the credential. Deliveries retry automatically, so nothing
+  is lost yet.
+- **Verification.** `alert_delivery_attempts_total{delivery_result="delivered"}` rises.
+
+### Email outbox backed up
+*Alert: `email_outbox_backed_up` — ticket.*
+
+- **Detection.** `email_outbox_drain_p95` above 900 seconds.
+- **Triage.** Check SMTP credentials and that the retry task is running.
+- **Mitigation.** Fix the credential; the outbox drains itself. Do not re-enqueue rows
+  by hand — the outbox is idempotent per logical event and manual copies break that.
+- **Verification.** `email_outbox_depth` falls.
+
+### Worker or scheduler down
+*Alert: `worker_or_scheduler_down` — pages.*
+
+- **Detection.** `worker_heartbeat_age_seconds` above 180 seconds.
+- **Blast radius.** Nothing scheduled runs: no scans, no retries, no reminders.
+  Customers see no error, only silence. This is the most easily missed outage in the
+  product.
+- **Mitigation.** Restart the scheduler container.
+- **Verification.** Watch one heartbeat arrive before leaving. A restarted container
+  that crashes again on boot looks identical to a fixed one for about a minute.
+
+### Review case overdue
+*Alert: `review_case_overdue` — ticket.*
+
+- **Detection.** `review_case_sla` above 48 hours.
+- **Blast radius.** None for customers. Assets stay unpublished, which is the
+  fail-closed behaviour working.
+- **Mitigation.** Assign the case to the on-duty reviewer.
+- **Never.** Do not publish an asset to clear this alert. Publication is a governance
+  decision with its own evidence requirements, not a queue-cleaning action.
+
+### Screening refusing everything
+*Alert: `screening_refusing_everything` — pages.*
+
+- **Detection.** More than fifty `no_active_passport` refusals in the window.
+- **Triage.** Check whether a methodology version was archived or a publication was
+  rolled back. This alert almost always means a governance change, not a bug.
+- **Blast radius.** Customers see an empty or much smaller screened market. No wrong
+  religious status is shown — the layer is failing closed exactly as designed.
+- **Never.** Do not widen the universe to clear the alert.
+- **Verification.** Refusal rate returns to normal after the methodology or publication
+  is restored.
 
 ## Monitoring Setup
 

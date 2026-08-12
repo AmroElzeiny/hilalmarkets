@@ -123,18 +123,60 @@ failures and 18 browser setup errors. The six code failures were corrected and t
 passed. The browser errors were caused by a missing Playwright Chromium installation, not test
 assertions.
 
-Post-patch full verification is currently blocked by the workstation, not reported as green:
+### Corrected on 2026-08-12
 
-- `.venv` targets a removed Python 3.12 installation;
-- only Python 3.11 is installed while the project requires Python 3.12;
-- Node is not installed;
-- Docker Engine access is denied from this session.
+The workstation blockers recorded above were re-measured and are **no longer true**. The
+previous entry claimed the toolchain could not run; it can. Measured on 2026-08-12:
 
-Static checks completed after the latest patch: changed Python syntax passed; `git diff --check`
-passed; the migration graph has one statically derived head (`1acbd2e3f405`); the production beta
-profile has no mismatches; active Discord scan count is zero; and forbidden tracked artifact count
-is zero. These checks do not replace pytest, MyPy, Ruff, Playwright, Alembic/PostgreSQL, dependency,
-secret, or container scans.
+| Previous claim | Measured |
+|---|---|
+| `.venv` targets a removed Python 3.12 | `.venv/Scripts/python.exe` reports Python 3.12.0 |
+| Only Python 3.11 is installed | 3.11, 3.12 and 3.13 are all installed |
+| Node is not installed | Node v20.19.5 |
+| Playwright Chromium missing | Chromium is installed; the browser suite runs |
+
+What actually ran on 2026-08-12, at commit `afcf977f`, before any Phase 5 change:
+
+| Command | Result |
+|---|---|
+| `ruff check src tests scripts` | All checks passed |
+| `mypy src/ai_market_monitor` | Success, no issues in 284 source files |
+| `pytest` (whole suite) | Every non-browser test passed |
+| `pytest tests/browser` | **19 failures**, all in `tests/browser/` |
+
+The 19 browser failures are a **pre-existing** condition of the repository, not a
+consequence of Phase 5. They are real assertion failures, not a missing browser. This is
+the first time they have been measured rather than assumed away as a setup problem.
+
+Docker Engine access was not re-tested and remains unverified.
+
+## Phase 5: operational truth and product boundaries
+
+| Item | Repository | CI | Staging |
+|---|---|---|---|
+| One instrumentation layer; no per-router metric helpers | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| Metric labels are low-cardinality and refuse identifiers | IMPLEMENTED | CI PENDING | N/A |
+| Secrets, prompts, model output and plan text cannot enter a record | IMPLEMENTED | CI PENDING | N/A |
+| Eleven SLOs, every indicator computable from an emitted metric | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| Alerts bound to SLOs; page vs ticket is a field | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| No alert is delivered through the subsystem it watches | IMPLEMENTED | CI PENDING | Configure PagerDuty |
+| Deduplicated operational issue queue with audit trail | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| One runbook section per alert, anchor-checked by a test | IMPLEMENTED | CI PENDING | N/A |
+| Server-owned launch stage; PUBLIC_WAITLIST_MODE is a ceiling | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| Product boundary registry with explicit refusals | IMPLEMENTED | CI PENDING | Owner content review |
+| Shariah spelling rule applied to customer copy | IMPLEMENTED | CI PENDING | N/A |
+| Forbidden-claim copy lint in the release gate | IMPLEMENTED | CI PENDING | N/A |
+| Status banners driven by the same signals as the alerts | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| og:image derives from PUBLIC_BASE_URL over HTTPS | IMPLEMENTED | CI PENDING | Verify with a real scraper |
+
+Not delivered by Phase 5, and still required before external users:
+
+- A metrics **exporter**. Values are held in process and read by the admin surface and
+  the objectives. Nothing ships them to a long-term store yet, so history does not
+  survive a restart and no cross-process aggregation exists.
+- Alert **delivery**. The rules decide what should fire and where it should go. No
+  PagerDuty or ops-Telegram transport is wired, so nothing is actually sent.
+- The 19 pre-existing browser failures.
 
 ## Release Decision
 

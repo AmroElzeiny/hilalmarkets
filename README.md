@@ -176,6 +176,26 @@ configuration.
 The current live-AI code and verification status is recorded in
 [docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md](docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md).
 
+## Operational truth and product boundaries
+
+`src/ai_market_monitor/observability/` is the one place the product decides what is measured, what
+is promised and what wakes somebody up: one metric registry, eleven service-level objectives, twelve
+alert rules, a deduplicated operational issue queue, and the customer-facing degradation banners.
+Every objective names a metric that something actually emits — startup refuses to boot otherwise —
+and no alert may be delivered through the subsystem it is reporting on. `docs/OPERATIONS.md` holds
+one runbook section per alert, and a test fails if an alert points at a section that does not exist.
+
+Values are held in one process and read by `/api/v1/admin/health`. There is no exporter and no alert
+transport yet, so nothing survives a restart and nothing is actually sent to a person.
+
+How open the product is, is server-owned: `core/launch_stage.py` holds four stages
+(`internal`, `private_beta_invite`, `public_waitlist`, `public_launch`) and one table saying what
+each exposes. `PUBLIC_WAITLIST_MODE` is now an emergency ceiling over that stage rather than an
+independent switch. `core/product_boundaries.py` is the versioned list of what the product does,
+does not do yet, and will never do; an unsupported request is refused by name and never answered
+with a nearby capability. Hilal Markets does not execute trades, is not a broker, gives no buy or
+sell recommendations, and provides no financial advice.
+
 The `.github/workflows/release-gate.yml` workflow is the release authority for automated checks.
 Committed Markdown reports are explanatory records, not test proof. Require every workflow job in
 branch protection before merging a release candidate.
