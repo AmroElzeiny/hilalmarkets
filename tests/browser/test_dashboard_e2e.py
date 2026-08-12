@@ -24,6 +24,29 @@ from tests.browser.conftest import (
 )
 from tests.factories import load_strategy
 
+
+def expected_primary_cta() -> str:
+    """The main call to action the current launch stage declares.
+
+    Read from the server-owned stage table rather than written here as a literal.
+    This assertion used to hard-code "Get started", which only exists once the
+    product is open; the site ships pre-launch, so the landing page says "Join the
+    waitlist" and the test had been failing against a page that was behaving
+    correctly.
+
+    Deriving it means the next stage change moves the test with the product instead
+    of leaving a stale string to be discovered as a mystery browser failure.
+    """
+
+    from ai_market_monitor.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        app_secret_key="browser-test-secret-key-at-least-32-characters",
+    )
+    return settings.stage_exposure.primary_cta_label
+
+
 EXECUTABLE_PROMPT = {
     "goal": "Find coins where RSI crosses back above 30 on 15m.",
     "must": "Volume is at least 1.5x average and price is above EMA 200.",
@@ -187,7 +210,9 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
         "A better way for Muslim crypto traders"
     )
     expect(page.locator("#features")).to_be_attached()
-    expect(page.get_by_role("link", name="Get started").first).to_be_visible()
+    expect(
+        page.get_by_role("link", name=expected_primary_cta()).first
+    ).to_be_visible()
     assert "TODO_" not in page.content()
     page.evaluate(
         """async () => {
@@ -260,7 +285,7 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
     page.get_by_role("button", name="Menu").click()
     expect(
         page.get_by_role("navigation", name="Mobile navigation").get_by_text(
-            "Get started"
+            expected_primary_cta()
         )
     ).to_be_visible()
 

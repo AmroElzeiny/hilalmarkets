@@ -28,3 +28,10 @@ celery -A ai_market_monitor.worker.app inspect scheduled
 Workers run the same fail-closed production configuration validator as the API. A deployed worker
 will refuse unsafe mock providers, SQLite, default secrets, or enabled integrations without their
 required credentials.
+
+Since 2026-08-12 that validator also refuses an incoherent operational or launch configuration: a
+service-level objective naming a metric nothing emits, an alert routed through the subsystem it
+watches, or a launch stage promising something the deployment cannot deliver. A worker fails on
+these for the same reason the API does — the worker is where scan and delivery metrics are recorded,
+so a worker booted with an unmeasurable objective produces the silence those objectives exist to
+detect.

@@ -252,6 +252,79 @@ async def test_the_ai_disabled_banner_is_the_same_message_as_an_ai_outage() -> N
     assert banner_for_ai_disabled().kind is BannerKind.AI_UNAVAILABLE
 
 
+async def _signup(test_context: dict, email: str) -> None:
+    client: AsyncClient = test_context["client"]
+    response = await client.post(
+        "/signup",
+        data={
+            "email": email,
+            "password": "CorrectHorse123!",
+            "repeat_password": "CorrectHorse123!",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    code = test_context["settings"].email_test_outbox[-1]["code"]
+    verified = await client.post(
+        "/signup/verify",
+        data={"email": email, "code": code},
+        follow_redirects=False,
+    )
+    assert verified.status_code == 303
+
+
+async def test_a_healthy_dashboard_renders_no_banner(test_context: dict) -> None:
+    await _signup(test_context, "phase5-clean@example.com")
+    page = await test_context["client"].get("/dashboard")
+    assert page.status_code == 200
+    assert "data-status-banner" not in page.text
+
+
+async def test_the_dashboard_renders_the_banner_with_both_halves(
+    test_context: dict,
+) -> None:
+    """Proof the wiring reaches the page, not only that the service returns objects."""
+
+    await _signup(test_context, "phase5-banner@example.com")
+    page = await test_context["client"].get(
+        "/dashboard?force_status_banner=ai_unavailable"
+    )
+    assert page.status_code == 200
+    assert 'data-status-banner="ai_unavailable"' in page.text
+    assert 'role="status"' in page.text
+    assert "Still working:" in page.text
+    assert "Paused:" in page.text
+    lowered = page.text.casefold()
+    banner_start = lowered.index("data-status-banner")
+    banner_text = lowered[banner_start : banner_start + 900]
+    for forbidden in ("shariah", "compiler", "haram"):
+        assert forbidden not in banner_text
+
+
+async def test_the_forced_banner_control_is_inert_outside_development(
+    test_context: dict,
+) -> None:
+    """A query string must never decide what a deployed customer is told.
+
+    Checked directly against the helper with a production environment, because the
+    test client can only ever run as app_env=test.
+    """
+
+    from starlette.datastructures import QueryParams
+
+    from ai_market_monitor.api.routers.dashboard import _status_banners
+
+    class _Request:
+        query_params = QueryParams("force_status_banner=ai_unavailable")
+
+    production = Settings(
+        _env_file=None,
+        app_env="production",
+        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
+    )
+    assert _status_banners(_Request(), production) == []
+
+
 # --------------------------------------------------------------------------
 # Unsupported capabilities
 # --------------------------------------------------------------------------

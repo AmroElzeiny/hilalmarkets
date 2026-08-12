@@ -1,0 +1,37 @@
+{# Customer-visible degradation, driven by the service-level objectives.
+
+   The list comes from `observability/banners.py`, which reads the same measurements
+   the on-call alerts read. There is no switch a person turns on: a banner somebody
+   has to remember goes up late and comes down early.
+
+   Three things this markup has to get right:
+
+   * Status is never colour alone (brand guide section 10 and 18). Every banner shows
+     an icon and a word — "Service notice" or "Reduced service" — so the meaning
+     survives without colour perception.
+   * `role="status"` is polite, not assertive. These describe reduced service, not an
+     emergency the reader must act on this second, and an assertive live region
+     interrupts whatever a screen-reader user was in the middle of reading.
+   * Both halves are always shown. "What still works" is the half that stops a
+     customer assuming the whole product is broken, which in this product is almost
+     never true.
+#}
+{% if status_banners %}
+<div class="status-banner-stack" data-status-banners>
+  {% for banner in status_banners %}
+  <div class="notice notice-{{ 'warning' if banner.tone == 'warning' else 'info' }}"
+       role="status"
+       aria-live="polite"
+       data-status-banner="{{ banner.kind }}"
+       data-status-tone="{{ banner.tone }}">
+    <span data-icon="alert" data-icon-class="icon" aria-hidden="true"></span>
+    <div>
+      <strong>{{ 'Reduced service' if banner.tone == 'warning' else 'Service notice' }}</strong>
+      <p data-status-banner-headline>{{ banner.headline }}</p>
+      <p data-status-banner-works><strong>Still working:</strong> {{ banner.still_works }}</p>
+      <p data-status-banner-paused><strong>Paused:</strong> {{ banner.paused }}</p>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

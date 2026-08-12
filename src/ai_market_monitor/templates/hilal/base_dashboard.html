@@ -60,6 +60,7 @@
     <main class="app-main">
       {% include "hilal/partials/dashboard_topbar.html" %}
       <div class="app-content">
+        {% include "hilal/partials/status_banners.html" %}
         {% set dashboard_error_messages = {
           'billing_disabled': 'Paid subscriptions are not available yet. Your selected plan was kept and no charge was created.',
           'billing_cycle_not_available': 'That checkout option is not available. Monitor monthly is the only paid option currently open.',

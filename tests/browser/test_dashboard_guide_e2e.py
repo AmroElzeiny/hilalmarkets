@@ -773,9 +773,34 @@ def test_reduced_motion_removes_the_animation_but_keeps_the_guide(
         "() => [...document.querySelectorAll('[data-hm-guide-panel], [data-hm-guide-spotlight],"
         " [data-hm-guide-popover]')].map(n => getComputedStyle(n).transitionDuration)"
     )
-    assert all(
-        set(value.replace(" ", "").split(",")) <= {"0s", ""} for value in transitions
-    ), transitions
+    # Asserted as imperceptible, not as exactly "0s".
+    #
+    # This assertion used to require the literal string "0s" and had been failing. The
+    # cause was not a regression in the guide: `hilalmarkets-brand.css` carries the
+    # standard reduced-motion reset, `transition-duration: .01ms !important` on `*`,
+    # which wins over the guide's own `transition: none` and computes as `1e-05s`.
+    #
+    # The `.01ms` value is deliberate and is the one to keep. A hard `0s` can stop
+    # `transitionend` and `animationend` from firing, and the built landing bundle
+    # contains library code that waits for exactly those events; a listener that never
+    # fires leaves the interface stuck. One hundred-thousandth of a second is motion
+    # nobody can perceive, which is what the accessibility rule actually asks for.
+    #
+    # So the test now asserts the rule — no perceptible motion — instead of one
+    # implementation of it. A real 300ms transition still fails here.
+    def _seconds(value: str) -> float:
+        text = value.strip()
+        if text.endswith("ms"):
+            return float(text[:-2]) / 1000
+        if text.endswith("s"):
+            return float(text[:-1])
+        return 0.0
+
+    slowest = max(
+        (_seconds(part) for value in transitions for part in value.split(",") if part.strip()),
+        default=0.0,
+    )
+    assert slowest <= 0.001, transitions
     blur = page.evaluate(
         "() => getComputedStyle(document.querySelector('[data-hm-guide-panel]')).backdropFilter"
     )

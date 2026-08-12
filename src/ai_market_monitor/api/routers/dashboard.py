@@ -81,6 +81,11 @@ from ai_market_monitor.db.models.enums import (
     UserRole,
 )
 from ai_market_monitor.engine.quality import alert_trust_score_from_proof
+from ai_market_monitor.observability.banners import (
+    banner_for_ai_disabled,
+    customer_status_banners,
+)
+from ai_market_monitor.observability.metrics import get_metrics_recorder
 from ai_market_monitor.services.activity import ActivityReadService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import (
@@ -734,6 +739,39 @@ async def _send_telegram_connected_notification(
         return
 
 
+def _status_banners(request: Request, settings: Settings) -> list[dict[str, str]]:
+    """Degradation messages for the current customer, from the live measurements.
+
+    Read from the same objectives the on-call alerts read, so a banner cannot say the
+    product is healthy while an alert says it is not.
+
+    ``force_status_banner`` is a development and test control only. Browser tests
+    cannot break a real provider from outside the process, and the alternative — a
+    stub that renders a banner the product would never produce — proves nothing about
+    the real path. It follows the precedent already set by header admin principals in
+    ``api/dependencies.py``: available in development and test, inert everywhere else,
+    so a query string can never change what a deployed customer is told.
+    """
+
+    # The two switches that actually close the assistant to a customer: the emergency
+    # stop, and the free-text composer.
+    #
+    # Deliberately not AI_INTERPRETER_PROVIDER. That selects the legacy deterministic
+    # interpreter and says nothing about whether Setup Chat is usable; reading it here
+    # would raise a permanent "assistant unavailable" banner on every deployment that
+    # sets it to `rules`, including the browser test app. A banner that is always on is
+    # a banner nobody reads.
+    ai_enabled = (
+        not settings.setup_chat_emergency_disabled and settings.setup_free_text_enabled
+    )
+    banners = customer_status_banners(get_metrics_recorder(), ai_enabled=ai_enabled)
+    if settings.app_env in {"development", "test"}:
+        forced = request.query_params.get("force_status_banner")
+        if forced == "ai_unavailable" and not banners:
+            banners = (banner_for_ai_disabled(),)
+    return [banner.as_dict() for banner in banners]
+
+
 async def _context(
     *,
     request: Request,
@@ -823,6 +861,10 @@ async def _context(
             and entitlement.feature_enabled("whatsapp")
             and settings.whatsapp_enabled
         ),
+        # Built once, here, for every dashboard page. A per-page banner decision is how
+        # one screen ends up telling a customer the assistant is down while the next
+        # screen says nothing.
+        "status_banners": _status_banners(request, settings),
         "unread_notification_count": unread_notification_count,
         "dashboard_theme": dashboard_theme,
         "dashboard_csrf_token": csrf_token(settings, user.id) if user else None,
