@@ -406,6 +406,40 @@ def test_every_objective_points_at_a_runbook_section_that_exists(slo) -> None:
     assert slo.runbook_anchor in _operations_anchors()
 
 
+def test_every_enum_column_is_wide_enough_for_its_longest_value() -> None:
+    """The defect class behind the compliance-alert bug, checked across every enum.
+
+    ``alerts.alert_type`` was created from a six-value enum and rendered
+    ``VARCHAR(9)``. ``AlertType`` later gained ``compliance``, which is ten
+    characters, and nothing widened the column. SQLite ignores ``VARCHAR`` length so
+    every offline test passed; PostgreSQL rejects the insert, so compliance alerts
+    failed in production only.
+
+    Asserted over every string-backed enum column in the metadata rather than over
+    the one that was found, because the same mistake is available to any enum that
+    gains a longer member later.
+    """
+
+    from sqlalchemy import Enum as SAEnum
+
+    from ai_market_monitor.db.base import Base
+
+    too_narrow: list[str] = []
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            column_type = column.type
+            if not isinstance(column_type, SAEnum) or column_type.native_enum:
+                continue
+            longest = max((len(value) for value in column_type.enums), default=0)
+            declared = getattr(column_type, "length", None)
+            if declared is not None and declared < longest:
+                too_narrow.append(
+                    f"{table.name}.{column.name} holds {declared} characters but its "
+                    f"longest value needs {longest}"
+                )
+    assert not too_narrow, "\n".join(too_narrow)
+
+
 def test_the_operations_guide_no_longer_carries_the_old_product_name() -> None:
     text = (
         Path(__file__).resolve().parents[2] / "docs" / "OPERATIONS.md"
