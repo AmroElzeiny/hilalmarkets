@@ -7,22 +7,38 @@ the Builder reads fields the server itself drew. Both then hand
 ``AuthorizedPatchOperation`` list and every gate runs unchanged.
 
 Everything here fails closed. A value that is not one this mechanic offers is refused
-with a plain reason — never coerced to the nearest one it does offer, never clamped into
+with a plain reason вЂ” never coerced to the nearest one it does offer, never clamped into
 range, never silently dropped. A form that could substitute is a form that can build a
 rule nobody asked for, which is the same defect as a compiler that guesses.
 
 This module also reads in the other direction: :func:`describe_condition` turns a stored
 rule back into the fields that would rebuild it. That one function is why an edit made
-in the Builder and an edit made in chat produce the same card — there is one description
+in the Builder and an edit made in chat produce the same card вЂ” there is one description
 of what a rule *is*, not one per surface.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any
 
+from ai_market_monitor.engine.builder_boolean import (
+    BooleanStructureError,
+)
+from ai_market_monitor.engine.builder_boolean import (
+    group_conditions as boolean_group_conditions,
+)
+from ai_market_monitor.engine.builder_boolean import (
+    move_condition as boolean_move_condition,
+)
+from ai_market_monitor.engine.builder_boolean import (
+    set_group_operator as boolean_set_group_operator,
+)
+from ai_market_monitor.engine.builder_boolean import (
+    ungroup as boolean_ungroup,
+)
 from ai_market_monitor.engine.builder_contract import (
     BuilderMechanic,
     BuilderParameter,
@@ -44,7 +60,7 @@ class BuilderActionError(ValueError):
     """A Builder request the server will not turn into a change.
 
     Carries a code for the client and a sentence for the person. The sentence never
-    names a field path or an internal identifier — the reader is a beginner.
+    names a field path or an internal identifier вЂ” the reader is a beginner.
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -103,8 +119,11 @@ ASSISTANT_ONLY_REASON = (
 )
 
 
-@lru_cache(maxsize=1)
-def mechanic_catalog() -> tuple[BuilderMechanic, ...]:
+@lru_cache(maxsize=8)
+def mechanic_catalog(
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> tuple[BuilderMechanic, ...]:
     """Every mechanic, with ``available`` corrected by actually trying to build one.
 
     The contract describes what a mechanic *is*. This asks the harder question: given
@@ -112,12 +131,12 @@ def mechanic_catalog() -> tuple[BuilderMechanic, ...]:
     cannot is marked unavailable with a plain reason, so the Builder never offers a
     form whose every submission would be refused.
 
-    The check runs the real validators — the registry contract and the draft's own
-    semantic rules — so it cannot drift from what the mutation path enforces.
+    The check runs the real validators вЂ” the registry contract and the draft's own
+    semantic rules вЂ” so it cannot drift from what the mutation path enforces.
     """
 
     checked: list[BuilderMechanic] = []
-    for mechanic in builder_mechanics():
+    for mechanic in builder_mechanics(configured_providers, disabled_capabilities):
         if not mechanic.available:
             checked.append(mechanic)
             continue
@@ -130,15 +149,28 @@ def mechanic_catalog() -> tuple[BuilderMechanic, ...]:
     return tuple(checked)
 
 
-@lru_cache(maxsize=1)
-def _catalog_by_key() -> dict[str, BuilderMechanic]:
-    return {item.key: item for item in mechanic_catalog()}
+@lru_cache(maxsize=8)
+def _catalog_by_key(
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> dict[str, BuilderMechanic]:
+    return {
+        item.key: item
+        for item in mechanic_catalog(configured_providers, disabled_capabilities)
+    }
 
 
-def offered_mechanics() -> tuple[BuilderMechanic, ...]:
+def offered_mechanics(
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> tuple[BuilderMechanic, ...]:
     """The mechanics a person can actually pick right now."""
 
-    return tuple(item for item in mechanic_catalog() if item.available)
+    return tuple(
+        item
+        for item in mechanic_catalog(configured_providers, disabled_capabilities)
+        if item.available
+    )
 
 
 def _probe_values(mechanic: BuilderMechanic) -> dict[str, Any]:
@@ -206,8 +238,18 @@ def _self_check(mechanic: BuilderMechanic) -> bool:
     return True
 
 
-def _require_mechanic(mechanic_key: str) -> BuilderMechanic:
-    mechanic = _catalog_by_key().get(mechanic_key) or find_mechanic(mechanic_key)
+def _require_mechanic(
+    mechanic_key: str,
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> BuilderMechanic:
+    mechanic = _catalog_by_key(
+        configured_providers, disabled_capabilities
+    ).get(mechanic_key) or find_mechanic(
+        mechanic_key,
+        configured_providers=configured_providers,
+        disabled_capabilities=disabled_capabilities,
+    )
     if mechanic is None:
         raise BuilderActionError(
             "MECHANIC_UNKNOWN",
@@ -246,7 +288,7 @@ def _read_choice(parameter: BuilderParameter, raw: Any) -> str:
             _CHOICE_CODES.get(parameter.name, "VALUE_NOT_OFFERED"),
             _CHOICE_MESSAGES.get(
                 parameter.name,
-                f"“{parameter.label}” must be one of the choices shown.",
+                f"вЂњ{parameter.label}вЂќ must be one of the choices shown.",
             ),
         )
     return value
@@ -256,31 +298,31 @@ def _read_number(parameter: BuilderParameter, raw: Any) -> float:
     if isinstance(raw, bool) or not isinstance(raw, int | float | str):
         raise BuilderActionError(
             "VALUE_NOT_A_NUMBER",
-            f"“{parameter.label}” needs a number.",
+            f"вЂњ{parameter.label}вЂќ needs a number.",
         )
     try:
         value = float(str(raw).strip())
     except ValueError as exc:
         raise BuilderActionError(
             "VALUE_NOT_A_NUMBER",
-            f"“{parameter.label}” needs a number.",
+            f"вЂњ{parameter.label}вЂќ needs a number.",
         ) from exc
     if parameter.kind == "integer" and value != int(value):
         raise BuilderActionError(
             "VALUE_NOT_A_WHOLE_NUMBER",
-            f"“{parameter.label}” needs a whole number.",
+            f"вЂњ{parameter.label}вЂќ needs a whole number.",
         )
     # Out of range is refused, never clamped. Clamping turns "RSI at least 999" into a
     # rule about 100 that the person never wrote.
     if parameter.minimum is not None and value < parameter.minimum:
         raise BuilderActionError(
             "VALUE_OUT_OF_RANGE",
-            f"“{parameter.label}” cannot be smaller than {parameter.minimum:g}.",
+            f"вЂњ{parameter.label}вЂќ cannot be smaller than {parameter.minimum:g}.",
         )
     if parameter.maximum is not None and value > parameter.maximum:
         raise BuilderActionError(
             "VALUE_OUT_OF_RANGE",
-            f"“{parameter.label}” cannot be larger than {parameter.maximum:g}.",
+            f"вЂњ{parameter.label}вЂќ cannot be larger than {parameter.maximum:g}.",
         )
     return value
 
@@ -306,7 +348,7 @@ def _read_values(mechanic: BuilderMechanic, values: dict[str, Any]) -> dict[str,
             if parameter.required and parameter.default is None:
                 raise BuilderActionError(
                     "VALUE_REQUIRED",
-                    f"“{parameter.label}” is needed before this rule can be saved.",
+                    f"вЂњ{parameter.label}вЂќ is needed before this rule can be saved.",
                 )
             if parameter.default is not None:
                 read[parameter.name] = parameter.default
@@ -374,6 +416,8 @@ def build_condition(
     source_turn_id: str,
     node_id: str | None = None,
     required: bool = True,
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
 ) -> tuple[ConditionNodeV2, str]:
     """One validated rule, plus the sentence that describes it.
 
@@ -383,7 +427,7 @@ def build_condition(
     """
 
     return _build(
-        _require_mechanic(mechanic_key),
+        _require_mechanic(mechanic_key, configured_providers, disabled_capabilities),
         values,
         source_turn_id=source_turn_id,
         node_id=node_id,
@@ -497,7 +541,7 @@ def _build(
             payload["threshold"] = read["threshold"]
         # Only the capability's own registry fields go in its parameter bag. The
         # comparison, the side and the candle size belong to the rule, and most registry
-        # schemas refuse an unexpected key outright — so a stray one is not a cosmetic
+        # schemas refuse an unexpected key outright вЂ” so a stray one is not a cosmetic
         # problem, it makes every submission of that form fail.
         payload["capability_parameters"] = {
             name: value
@@ -609,7 +653,7 @@ def describe_condition(node: ConditionNodeV2) -> BuilderConditionView:
 
     A rule written by the assistant and a rule written in the Builder are the same
     object, so this reads both. When a rule uses something the Builder has no form for,
-    it is reported as not editable *with the reason* — never hidden, and never shown as
+    it is reported as not editable *with the reason* вЂ” never hidden, and never shown as
     an empty card the person could overwrite by accident.
     """
 
@@ -622,8 +666,8 @@ def describe_condition(node: ConditionNodeV2) -> BuilderConditionView:
     declared = {item.name for item in mechanic.parameters} if mechanic else set()
 
     # What the *person* chose. Deliberately not everything the node holds: a compiled
-    # rule also carries parameters the platform fills in itself — an open-to-close move
-    # records that it measures open against close — and treating those as choices made
+    # rule also carries parameters the platform fills in itself вЂ” an open-to-close move
+    # records that it measures open against close вЂ” and treating those as choices made
     # every assistant-written rule look like it used settings the form cannot show.
     carried: dict[str, Any] = {}
     if node.operator is not None:
@@ -735,7 +779,7 @@ def rebuild_tree(
     if join not in {"and", "or"}:
         raise BuilderActionError(
             "LOGIC_NOT_OFFERED",
-            "Rules can be joined with “all of these” or “any of these”.",
+            "Rules can be joined with вЂњall of theseвЂќ or вЂњany of theseвЂќ.",
         )
     children = [existing[node_id] for node_id in order]
     if len(children) == 1:
@@ -783,12 +827,16 @@ def add_condition_plan(
     source_turn_id: str,
     segment_id: str,
     required: bool = True,
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
 ) -> BuilderPlan:
     node, sentence = build_condition(
         mechanic_key=mechanic_key,
         values=values,
         source_turn_id=source_turn_id,
         required=required,
+        configured_providers=configured_providers,
+        disabled_capabilities=disabled_capabilities,
     )
     return BuilderPlan(
         operations=(
@@ -811,6 +859,8 @@ def update_condition_plan(
     source_turn_id: str,
     segment_id: str,
     required: bool = True,
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
 ) -> BuilderPlan:
     node, sentence = build_condition(
         mechanic_key=mechanic_key,
@@ -818,6 +868,8 @@ def update_condition_plan(
         source_turn_id=source_turn_id,
         node_id=node_id,
         required=required,
+        configured_providers=configured_providers,
+        disabled_capabilities=disabled_capabilities,
     )
     return BuilderPlan(
         operations=(
@@ -848,6 +900,131 @@ def remove_condition_plan(
             ),
         ),
         rendered="remove one rule",
+    )
+
+
+def _structural(build: Callable[[], ConditionNodeV2]) -> ConditionNodeV2:
+    """Run a structural edit, reporting its refusal the way every Builder action does.
+
+    ``builder_boolean`` raises its own error type because it knows nothing about the
+    Builder's request envelope. Translating here вЂ” once вЂ” keeps every refusal reaching
+    the client as the same shape, so a grouping that is too deep reads to the person
+    exactly like any other refused change, with its own code and its own sentence.
+    """
+
+    try:
+        return build()
+    except BooleanStructureError as error:
+        raise BuilderActionError(error.code, error.message) from error
+
+
+def _structure_plan(
+    tree: ConditionNodeV2,
+    *,
+    operation_id: str,
+    segment_id: str,
+    rendered: str,
+) -> BuilderPlan:
+    """One structural change, expressed the same way every other Builder edit is.
+
+    Structural edits go through ``replace_groups`` like the flat arrange does, so the
+    canonical diff, the approval invalidation and the evidence trail treat a regrouping
+    exactly as they treat any other change to the rules.
+    """
+
+    return BuilderPlan(
+        operations=(
+            _operation("replace_groups", operation_id, segment_id, condition=tree),
+        ),
+        rendered=rendered,
+    )
+
+
+def group_conditions_plan(
+    *,
+    root: ConditionNodeV2 | None,
+    node_ids: list[str],
+    operator: str,
+    segment_id: str,
+) -> BuilderPlan:
+    """Wrap selected rules in a group, leaving every other rule where it is."""
+
+    tree = _structural(lambda: boolean_group_conditions(root, node_ids=node_ids, operator=operator))
+    wording = {
+        "and": "grouped those rules so all of them must match",
+        "or": "grouped those rules so any one of them may match",
+        "not": "set that rule to alert only when it does not match",
+    }[operator]
+    return _structure_plan(
+        tree,
+        operation_id=f"builder_group_{operator}_{'_'.join(node_ids)[:40]}",
+        segment_id=segment_id,
+        rendered=wording,
+    )
+
+
+def ungroup_conditions_plan(
+    *,
+    root: ConditionNodeV2 | None,
+    group_id: str,
+    segment_id: str,
+) -> BuilderPlan:
+    """Dissolve one group, lifting its rules into the group above it."""
+
+    tree = _structural(lambda: boolean_ungroup(root, group_id=group_id))
+    return _structure_plan(
+        tree,
+        operation_id=f"builder_ungroup_{group_id}",
+        segment_id=segment_id,
+        rendered="removed that grouping and kept every rule",
+    )
+
+
+def set_group_operator_plan(
+    *,
+    root: ConditionNodeV2 | None,
+    group_id: str,
+    operator: str,
+    segment_id: str,
+) -> BuilderPlan:
+    """Change how one group joins, without touching the rules inside it."""
+
+    tree = _structural(
+        lambda: boolean_set_group_operator(root, group_id=group_id, operator=operator)
+    )
+    wording = {
+        "and": "that group now needs all of its rules to match",
+        "or": "that group now needs any one of its rules to match",
+        "not": "that group now alerts only when its rule does not match",
+    }[operator]
+    return _structure_plan(
+        tree,
+        operation_id=f"builder_regroup_{group_id}_{operator}",
+        segment_id=segment_id,
+        rendered=wording,
+    )
+
+
+def move_condition_plan(
+    *,
+    root: ConditionNodeV2 | None,
+    node_id: str,
+    group_id: str,
+    position: int | None,
+    segment_id: str,
+) -> BuilderPlan:
+    """Move one rule or group into another group, at an exact place."""
+
+    tree = _structural(
+        lambda: boolean_move_condition(
+            root, node_id=node_id, target_group_id=group_id, position=position
+        )
+    )
+    return _structure_plan(
+        tree,
+        operation_id=f"builder_move_{node_id}_to_{group_id}",
+        segment_id=segment_id,
+        rendered="moved that rule into the other group",
     )
 
 

@@ -43,11 +43,16 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         from ai_market_monitor.api.dependencies import get_market_data_provider
+        from ai_market_monitor.services.provider_runtime import shutdown_provider_runtime
 
         provider = get_market_data_provider()
         close = getattr(provider, "close", None)
         if close is not None:
             await close()
+        # The pooled provider clients are process-scoped, so they are closed here rather
+        # than per call. Skipping this leaks sockets across a reload until the process is
+        # killed, which looks like a slow connection leak nobody can attribute.
+        await shutdown_provider_runtime()
 
 
 def create_app(settings_override: Settings | None = None) -> FastAPI:

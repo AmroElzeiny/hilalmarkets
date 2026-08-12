@@ -137,8 +137,109 @@ class AIUsageEvent(UUIDPrimaryKeyMixin, Base):
         Numeric(18, 8), default=Decimal("0"), nullable=False
     )
     pricing_source: Mapped[str] = mapped_column(String(200), nullable=False)
+    #: The reservation this spend was taken against. Without it the ledger and the budget
+    #: are two records of the same money that cannot be reconciled with each other: an
+    #: auditor can see £4 spent and £4 reserved and has no way to tell whether that is one
+    #: turn recorded twice or two turns recorded once.
+    reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ai_budget_reservations.id", ondelete="SET NULL"), index=True
+    )
+    #: The provider's own identifier for the request. The single most useful thing to
+    #: quote back to a provider when disputing a charge or chasing a failure.
+    provider_request_id: Mapped[str | None] = mapped_column(String(160))
+    #: Which processing tier answered. Priced differently, so the ledger has to say.
+    service_tier: Mapped[str | None] = mapped_column(String(40))
+    #: How the call ended: "completed", "provider_failed", "refused", "cancelled".
+    #: A failed call that still burned tokens costs real money, and a ledger that only
+    #: records successes disagrees with the invoice every month.
+    outcome: Mapped[str | None] = mapped_column(String(40))
+    #: The rollout configuration in force when this call was made, so a spend spike can be
+    #: replayed against the rollout that caused it rather than today's configuration.
+    rollout_version: Mapped[str | None] = mapped_column(String(40))
     raw_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AIBudgetCounter(Base):
+    """One lockable row per budget window. The authority on what has been spent.
+
+    Deliberately a *counter row*, not a query. Checking a budget with
+    ``SELECT SUM(cost) ... `` and then acting on the answer is a read followed by an
+    independent write: two workers both read "£9 of £10 spent", both decide there is room,
+    and both spend. The row here is taken with ``SELECT ... FOR UPDATE`` inside the same
+    transaction that increments it, so the second worker waits for the first and then
+    reads the number the first one wrote.
+
+    ``reserved_usd`` holds money that is promised but not yet spent. A budget check must
+    count it, or every in-flight call is invisible to the next one.
+    """
+
+    __tablename__ = "ai_budget_counters"
+    __table_args__ = (
+        UniqueConstraint("scope", "scope_key", "window_key", name="uq_ai_budget_window"),
+        Index("ix_ai_budget_counter_lookup", "scope", "scope_key", "window_key"),
+    )
+
+    #: "user_daily", "user_monthly", "global_daily", "global_monthly", "model_daily".
+    scope: Mapped[str] = mapped_column(String(40), primary_key=True)
+    #: The user id, the model name, or "global" — whatever the scope counts.
+    scope_key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    #: "2026-08-08" for a day, "2026-08" for a month. The window this row counts.
+    window_key: Mapped[str] = mapped_column(String(20), primary_key=True)
+    spent_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), default=Decimal("0"), nullable=False
+    )
+    reserved_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), default=Decimal("0"), nullable=False
+    )
+    #: How many reservations are outstanding against this window right now.
+    reserved_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AIBudgetReservation(UUIDPrimaryKeyMixin, Base):
+    """Money promised to one turn, before anybody knows what it will actually cost.
+
+    The reservation is what makes two simultaneous requests unable to spend the same
+    remaining budget: the first one takes it, the second sees it gone.
+
+    ``idempotency_key`` is unique, which is what makes replay free. A retried request
+    finds its own reservation instead of taking a second one, so a crash between
+    executing and reconciling can never charge twice.
+    """
+
+    __tablename__ = "ai_budget_reservations"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_ai_budget_reservation_key"),
+        Index("ix_ai_budget_reservation_state", "state", "expires_at"),
+        Index("ix_ai_budget_reservation_user", "user_id", "created_at"),
+    )
+
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    feature: Mapped[str] = mapped_column(String(60), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), default="openai", nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    service_tier: Mapped[str | None] = mapped_column(String(40))
+    #: What the turn was allowed to spend at most. Held against every window it counts in.
+    estimated_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    #: What it really cost, once the provider said. Null until reconciled.
+    actual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    provider_request_id: Mapped[str | None] = mapped_column(String(160))
+    #: "reserved", "settled", "released", "expired".
+    state: Mapped[str] = mapped_column(String(20), default="reserved", nullable=False)
+    #: Why it ended: "completed", "provider_failed", "cancelled", "expired".
+    outcome: Mapped[str | None] = mapped_column(String(40))
+    #: Which counter rows this reservation is held against, so releasing it touches
+    #: exactly the same rows that took it — never a recomputed guess.
+    windows: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: A reservation nobody settles must not hold budget for ever. A crashed worker's
+    #: promise is swept back rather than leaking capacity until a restart.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentRun(UUIDPrimaryKeyMixin, Base):

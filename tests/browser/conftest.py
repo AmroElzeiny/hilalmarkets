@@ -480,6 +480,13 @@ def page(
                 f"{response.status} {response.url}"
             )
             if _critical_failed_response(browser_app.base_url, response)
+            # A test that provokes a refusal on purpose cannot avoid the browser seeing
+            # it. The same marker covers the console line and the response, because they
+            # are one event: the marker names the fragment, and everything it did not
+            # name still fails the test.
+            and not _allowed_console_error(
+                f"{response.status} {response.url}", deliberate_console_errors
+            )
             else None,
         )
 

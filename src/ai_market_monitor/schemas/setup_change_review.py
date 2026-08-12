@@ -1,4 +1,4 @@
-﻿"""What changed, and what is waiting to be confirmed — as server-owned facts.
+"""What changed, and what is waiting to be confirmed — as server-owned facts.
 
 The dashboard used to work out whether a turn had broken something by reading the
 assistant's sentence. That is the model describing its own work, so a turn that

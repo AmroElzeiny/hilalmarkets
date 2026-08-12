@@ -98,6 +98,7 @@ from ai_market_monitor.services.hybrid_capability_resolution import (
 from ai_market_monitor.services.interfaces import MarketDataProvider, StrategyInterpreter
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.setup_chat_agent import SetupChatAgent
 from ai_market_monitor.services.setup_chat_launch import (
     REVIEWED_PREFLIGHT_MANIFEST_KEY,
@@ -527,6 +528,33 @@ class OpenAISetupChatInterviewer:
         self.transport = transport
         self.last_usage: dict[str, Any] = {}
 
+    async def _responses_call(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        operation: str,
+    ) -> httpx.Response:
+        """One pooled, breaker-guarded call to the provider."""
+
+        return await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+            provider="openai",
+            operation=operation,
+            # One paid answer per turn: this call is not repeated.
+            retry=False,
+            model=str(payload.get("model") or ""),
+            timeout=self.settings.openai_timeout_seconds,
+            # The turn owns the clock, so retries fit inside the caller's own timeout
+            # rather than extending it.
+            deadline_seconds=float(self.settings.openai_timeout_seconds),
+            mutation_committed=False,
+            transport=self.transport,
+            headers=headers,
+            json=payload,
+        )
+
     async def classify_turn(
         self,
         *,
@@ -584,12 +612,7 @@ class OpenAISetupChatInterviewer:
         try:
             response_payload = consume_evaluator_llm_fault()
             if response_payload is None:
-                async with httpx.AsyncClient(
-                    base_url=str(self.settings.openai_base_url).rstrip("/"),
-                    timeout=self.settings.openai_timeout_seconds,
-                    transport=self.transport,
-                ) as client:
-                    response = await client.post("/responses", headers=headers, json=payload)
+                response = await self._responses_call(payload, headers, "classify_turn")
                 response.raise_for_status()
                 response_payload = response.json()
             self.last_usage = {
@@ -666,12 +689,7 @@ class OpenAISetupChatInterviewer:
         try:
             response_payload = consume_evaluator_llm_fault()
             if response_payload is None:
-                async with httpx.AsyncClient(
-                    base_url=str(self.settings.openai_base_url).rstrip("/"),
-                    timeout=self.settings.openai_timeout_seconds,
-                    transport=self.transport,
-                ) as client:
-                    response = await client.post("/responses", headers=headers, json=payload)
+                response = await self._responses_call(payload, headers, "interview")
                 response.raise_for_status()
                 response_payload = response.json()
             self.last_usage = {
@@ -1235,6 +1253,10 @@ class AISetupChatService:
         required: bool = True,
         order: list[str] | None = None,
         join: str | None = None,
+        node_ids: list[str] | None = None,
+        operator: str | None = None,
+        group_id: str | None = None,
+        position: int | None = None,
     ) -> AISetupChatSession:
         """Route one guided Builder change to the canonical owner.
 
@@ -1260,6 +1282,10 @@ class AISetupChatService:
                 required=required,
                 order=order,
                 join=join,
+                node_ids=node_ids,
+                operator=operator,
+                group_id=group_id,
+                position=position,
             )
         except SetupLaunchError as exc:
             raise SetupChatError(

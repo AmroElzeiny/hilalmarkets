@@ -29,6 +29,7 @@ from ai_market_monitor.schemas.public_forms import (
     WaitlistSignupRequest,
 )
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.waitlist_sheet_contract import (
     build_waitlist_sheet_payload,
 )
@@ -265,31 +266,36 @@ class PublicFormsService:
                 ).strip()
                 if not secret_value:
                     raise RuntimeError("waitlist_sheet_secret_missing")
-                async with httpx.AsyncClient(
-                    transport=self.sheet_transport,
+                response = await provider_request(
+                    self.settings,
+                    "POST",
+                    endpoint,
+                    provider="google_sheets",
+                    operation="waitlist_append",
                     timeout=self.settings.waitlist_google_sheets_timeout_seconds,
+                    # Appending a row is a change on the far side, so a repeat would
+                    # add the same person to the sheet twice.
+                    mutation_committed=True,
+                    transport=self.sheet_transport,
                     follow_redirects=True,
-                ) as client:
-                    response = await client.post(
-                        endpoint,
-                        headers={"Content-Type": "application/json"},
-                        # The body is built by the one module that owns the agreement
-                        # with the receiving Apps Script. The signup row keeps its own
-                        # richer record — the time, the page, the attribution — in this
-                        # product's database; the sheet is only told what it reads.
-                        json=build_waitlist_sheet_payload(
-                            secret=secret_value,
-                            email=signup.normalized_email,
-                            country=signup.country_code,
-                        ),
-                    )
-                    response.raise_for_status()
-                    acknowledgement = response.json()
-                    if (
-                        not isinstance(acknowledgement, dict)
-                        or acknowledgement.get("ok") is not True
-                    ):
-                        raise RuntimeError("waitlist_sheet_rejected")
+                    headers={"Content-Type": "application/json"},
+                    # The body is built by the one module that owns the agreement
+                    # with the receiving Apps Script. The signup row keeps its own
+                    # richer record — the time, the page, the attribution — in this
+                    # product's database; the sheet is only told what it reads.
+                    json=build_waitlist_sheet_payload(
+                        secret=secret_value,
+                        email=signup.normalized_email,
+                        country=signup.country_code,
+                    ),
+                )
+                response.raise_for_status()
+                acknowledgement = response.json()
+                if (
+                    not isinstance(acknowledgement, dict)
+                    or acknowledgement.get("ok") is not True
+                ):
+                    raise RuntimeError("waitlist_sheet_rejected")
             except Exception as exc:
                 row = await self.session.get(WaitlistSheetDelivery, row.id) or row
                 exhausted = (

@@ -1,0 +1,55 @@
+{
+  "note": [
+    "Which hosted model sits behind each engineering tier.",
+    "",
+    "Hosted only. The target VPS is small, and a local model there would be slow enough",
+    "that engineers stop using the tool - the same outcome as not building it.",
+    "",
+    "Override one tier for a single session without editing this file:",
+    "  $env:HM_OI_FAST_MODEL   = 'openai/gpt-5-nano'",
+    "  $env:HM_OI_NORMAL_MODEL = 'openai/gpt-5-mini'",
+    "  $env:HM_OI_DEEP_MODEL   = 'openai/gpt-5.4-mini'",
+    "",
+    "Model strings are litellm-style: '<provider>/<model>'. Anything litellm supports",
+    "works, so anthropic/... or gemini/... are valid if the key allows them.",
+    "",
+    "IMPORTANT when changing a model: Open Interpreter is a tool-calling client, and a",
+    "model that will not accept a tool call does nothing here at all. Check a new model",
+    "before trusting it. gpt-5.6-luna - the model the product itself uses - fails: it",
+    "rejects tools whenever a reasoning effort is set, and litellm sets one for it",
+    "automatically, so every turn returns HTTP 400.",
+    "",
+    "The api key comes from HM_OI_API_KEY. It does NOT fall back to OPENAI_API_KEY",
+    "unless HM_OI_ALLOW_SHARED_KEY=1 is set on purpose. The product's key pays for",
+    "customer turns, and its spend is reported as customer spend; engineering sessions",
+    "billed to it would corrupt the only number that says whether the product's AI cost",
+    "is under control.",
+    "",
+    "The prices below are a rough guide for choosing between tiers by hand. They are",
+    "never used as a billing figure - the provider's own accounting is authoritative.",
+    "Check them against your account before relying on them."
+  ],
+  "tiers": {
+    "fast": {
+      "model": "openai/gpt-5-nano",
+      "reasoning_effort": "minimal",
+      "approx_input_usd_per_million": 0.05,
+      "approx_output_usd_per_million": 0.4,
+      "use_for": "finding files, locating tests, reading logs, simple classification"
+    },
+    "normal": {
+      "model": "openai/gpt-5-mini",
+      "reasoning_effort": "low",
+      "approx_input_usd_per_million": 0.25,
+      "approx_output_usd_per_million": 2.0,
+      "use_for": "routine bug investigation, planning, writing tests, small fixes"
+    },
+    "deep": {
+      "model": "openai/gpt-5.4-mini",
+      "reasoning_effort": "high",
+      "approx_input_usd_per_million": 0.75,
+      "approx_output_usd_per_million": 4.5,
+      "use_for": "architecture, security, Setup Chat semantics, repeated failed fixes, high-risk change"
+    }
+  }
+}

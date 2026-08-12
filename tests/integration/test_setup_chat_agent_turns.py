@@ -2311,8 +2311,10 @@ async def test_redis_success_bookkeeping_failure_never_repeats_the_model_call() 
         async def delete(self, *args, **kwargs):
             raise RedisError("shared state unavailable")
 
+    # Installed into the one shared breaker. The agent used to carry a second breaker of
+    # its own, so this test could only reach the copy; now it reaches the real one.
+    _use_circuit_store(RedisWithFailedSuccessWrite())
     agent = SetupChatAgent(_settings(), transport=script.transport())
-    agent._circuit_redis = RedisWithFailedSuccessWrite()  # type: ignore[assignment]
     result = await agent.run_turn(
         SetupAgentTurnInput(
             message=message,
@@ -2326,6 +2328,28 @@ async def test_redis_success_bookkeeping_failure_never_repeats_the_model_call() 
     assert len(script.composer_payloads) == 1
     assert result.execution is not None
     assert result.execution.strategy_mutated is True
+
+
+
+def _use_circuit_store(client: object) -> None:
+    """Give the one process breaker a shared store that is about to misbehave.
+
+    Reaching into the module is deliberate: the breaker is process state on purpose, and
+    the test conftest resets it after every test. Building a private breaker here instead
+    would test a copy, which is exactly the mistake this refactor removed.
+    """
+
+    from ai_market_monitor.services import provider_runtime
+    from ai_market_monitor.services.provider_reliability import (
+        CircuitBreaker,
+        RedisCircuitStateStore,
+    )
+
+    provider_runtime._breaker = CircuitBreaker(  # noqa: SLF001
+        failure_threshold=5,
+        recovery_seconds=60.0,
+        store=RedisCircuitStateStore(client),
+    )
 
 
 async def test_redis_outage_does_not_make_healthy_ai_semantics_unavailable() -> None:
@@ -2359,8 +2383,8 @@ async def test_redis_outage_does_not_make_healthy_ai_semantics_unavailable() -> 
         async def delete(self, *args, **kwargs):
             raise RedisError("shared state unavailable")
 
+    _use_circuit_store(RedisUnavailable())
     agent = SetupChatAgent(_settings(), transport=script.transport())
-    agent._circuit_redis = RedisUnavailable()  # type: ignore[assignment]
     result = await agent.run_turn(
         SetupAgentTurnInput(
             message=message,

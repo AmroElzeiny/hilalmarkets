@@ -11,6 +11,8 @@ import httpx
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import ExternalAssessment
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.sharia_identity import (
     CanonicalAssetCandidate,
     ExchangeMarketIdentity,
@@ -553,41 +555,36 @@ class CoinGeckoIdentityDiscovery:
                 else "x-cg-demo-api-key"
             )
             headers[header] = self.settings.coingecko_api_key.get_secret_value()
+        # The politeness gap between calls stays here: it is this provider's published
+        # rate limit, not a reliability decision. The retrying itself moved to the shared
+        # matrix, which already knew about both forms of Retry-After and about 409 and
+        # 507 — this loop's private copy did not.
+        base = str(self.settings.coingecko_api_base).rstrip("/")
         last_status = 0
         last_transport_error = False
-        retry_delay_seconds = 0.0
-        for attempt in range(4):
-            if attempt:
-                await asyncio.sleep(
-                    retry_delay_seconds or min(8.0, 1.5 * (2**attempt))
+        try:
+            async with self._request_lock:
+                await self._wait_for_provider_slot()
+                response = await provider_request(
+                    self.settings,
+                    "GET",
+                    f"{base}/{path.lstrip('/')}",
+                    provider="coingecko",
+                    operation="identity_lookup",
+                    timeout=30,
+                    mutation_committed=False,
+                    transport=self.transport,
+                    follow_redirects=True,
+                    headers=headers,
+                    params=params,
                 )
-                retry_delay_seconds = 0.0
-            try:
-                async with self._request_lock:
-                    await self._wait_for_provider_slot()
-                    async with httpx.AsyncClient(
-                        base_url=str(self.settings.coingecko_api_base).rstrip("/"),
-                        timeout=30,
-                        follow_redirects=True,
-                        transport=self.transport,
-                        headers=headers,
-                    ) as client:
-                        response = await client.get(
-                            path.lstrip("/"),
-                            params=params,
-                        )
-                    self._last_request_at = asyncio.get_running_loop().time()
-            except httpx.HTTPError:
-                last_transport_error = True
-                continue
+                self._last_request_at = asyncio.get_running_loop().time()
+        except (httpx.HTTPError, ProviderCallError):
+            last_transport_error = True
+        else:
             last_status = response.status_code
-            last_transport_error = False
             if response.status_code < 400:
                 return response.json()
-            if response.status_code == 429:
-                retry_delay_seconds = _retry_after_seconds(response)
-            if response.status_code not in {408, 429} and response.status_code < 500:
-                break
         detail = (
             "after repeated secure connection failures"
             if last_transport_error

@@ -42,6 +42,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
 from ai_market_monitor.services.agent_tools import strict_json_schema
 from ai_market_monitor.services.ai_model_routing import select_setup_model
 from ai_market_monitor.services.ai_setup_evaluator_control import consume_evaluator_llm_fault
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class StrategyPatchExtractionError(ValueError):
@@ -170,12 +171,22 @@ class LaunchStrategyPatchExtractor:
         try:
             response_payload = consume_evaluator_llm_fault()
             if response_payload is None:
-                async with httpx.AsyncClient(
-                    base_url=str(self.settings.openai_base_url).rstrip("/"),
+                response = await provider_request(
+                    self.settings,
+                    "POST",
+                    f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+                    provider="openai",
+                    operation="patch_extraction",
+                    # One paid answer per turn: this call is not repeated.
+                    retry=False,
+                    model=str(payload.get("model") or ""),
                     timeout=httpx.Timeout(self.settings.openai_timeout_seconds),
+                    deadline_seconds=float(self.settings.openai_timeout_seconds),
+                    mutation_committed=False,
                     transport=self.transport,
-                ) as client:
-                    response = await client.post("/responses", headers=headers, json=payload)
+                    headers=headers,
+                    json=payload,
+                )
                 response.raise_for_status()
                 response_payload = response.json()
             self.last_usage = {

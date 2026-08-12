@@ -169,6 +169,8 @@ from ai_market_monitor.db.models.support import (
 from ai_market_monitor.db.models.system_brain import (
     AgentRun,
     AgentToolCall,
+    AIBudgetCounter,
+    AIBudgetReservation,
     AIUsageEvent,
     CapabilityAliasProposal,
     CapabilityResolutionEvent,
@@ -206,6 +208,8 @@ __all__ = [
     "AccountAdminAction",
     "AccountBan",
     "AccountEmailDelivery",
+    "AIBudgetCounter",
+    "AIBudgetReservation",
     "AgentRun",
     "AgentToolCall",
     "AISetupChatMessage",

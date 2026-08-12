@@ -245,6 +245,13 @@ SetupBuilderAction = Literal[
     "update_condition",
     "remove_condition",
     "arrange_conditions",
+    # Boolean structure, edited by stable node id. ``arrange_conditions`` can only
+    # produce one flat root join, so on its own it silently flattened "A and (B or C)"
+    # into "A and B and C" — a different strategy that still compiles and still fires.
+    "group_conditions",
+    "ungroup_conditions",
+    "set_group_operator",
+    "move_condition",
     "apply_starter",
 ]
 
@@ -277,6 +284,17 @@ class SetupBuilderActionRequest(BaseModel):
     #: `arrange_conditions` — every rule id in its new order, and how they join.
     order: list[str] = Field(default_factory=list, max_length=100)
     join: Literal["and", "or"] | None = None
+    #: `group_conditions` — the rules to wrap in a new group. They must share a parent;
+    #: grouping across branches would move rules out of the logic their author chose.
+    node_ids: list[str] = Field(default_factory=list, max_length=100)
+    #: `group_conditions`, `set_group_operator` — which grouping to apply. "not" is here
+    #: and not in `join` because a negation takes exactly one child, so it can never be a
+    #: root join over a list.
+    operator: Literal["and", "or", "not"] | None = None
+    #: `ungroup_conditions`, `set_group_operator`, `move_condition` — the group acted on.
+    group_id: str | None = Field(default=None, max_length=120)
+    #: `move_condition` — where in the target group the rule lands. None appends.
+    position: int | None = Field(default=None, ge=0, le=100)
 
     @model_validator(mode="after")
     def action_carries_its_target(self) -> "SetupBuilderActionRequest":
@@ -303,6 +321,14 @@ class SetupBuilderActionRequest(BaseModel):
             raise ValueError(f"{self.action} requires node_id")
         if self.action == "arrange_conditions" and not (self.order and self.join):
             raise ValueError("arrange_conditions requires order and join")
+        if self.action == "group_conditions" and not (self.node_ids and self.operator):
+            raise ValueError("group_conditions requires node_ids and operator")
+        if self.action == "set_group_operator" and not (self.group_id and self.operator):
+            raise ValueError("set_group_operator requires group_id and operator")
+        if self.action == "ungroup_conditions" and not self.group_id:
+            raise ValueError("ungroup_conditions requires group_id")
+        if self.action == "move_condition" and not (self.node_id and self.group_id):
+            raise ValueError("move_condition requires node_id and group_id")
         return self
 
 
@@ -405,6 +431,11 @@ class SetupBuilderState(BaseModel):
     #: ``and`` when every rule must match, ``or`` when any one is enough, ``""`` when
     #: there is only one rule and nothing to join.
     join: str = ""
+    #: The shape of the logic: one row per node, each naming its parent and its depth.
+    #: ``join`` describes only the outermost join, so on its own it made nested groups
+    #: invisible in the Builder — and invisible structure is structure the next rearrange
+    #: destroys without anybody noticing.
+    structure: list[dict[str, Any]] = Field(default_factory=list)
     steps: list[SetupBuilderStep] = Field(default_factory=list)
     open_questions: list[dict[str, Any]] = Field(default_factory=list)
     unsupported: list[dict[str, Any]] = Field(default_factory=list)

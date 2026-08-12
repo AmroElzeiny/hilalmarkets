@@ -42,6 +42,32 @@ def isolate_settings_from_local_env_file() -> Iterator[None]:
         Settings.model_config["env_file"] = original
 
 
+@pytest.fixture(autouse=True)
+def reset_provider_runtime_between_tests() -> Iterator[None]:
+    """Each test starts with a provider circuit that has never seen a failure.
+
+    The breaker is deliberately *process* state in production: an outage one code path
+    discovers is an outage every other code path already knows about. In a test run that
+    same sharing becomes coupling — a test that makes the provider return 500 five times
+    opens the circuit for every test that runs after it in the same process, and the
+    victim is whichever test happens to come next. That is a test order dependency, not a
+    finding.
+
+    Reset between tests, never inside one, so a test that is *about* the breaker still
+    sees the real accumulating behaviour.
+    """
+
+    import asyncio
+
+    from ai_market_monitor.services.provider_runtime import shutdown_provider_runtime
+
+    yield
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(shutdown_provider_runtime())
+
+
 class SuccessfulPreviewer:
     async def run(self, strategy) -> MarketPreviewResponse:
         return MarketPreviewResponse(

@@ -4,7 +4,18 @@ from typing import Any
 import httpx
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.telegram.types import TelegramOutboundMessage
+
+#: What the connection pool is keyed by. The bot token lives in the path, never in the
+#: pool key, the provider label or any log line.
+_TELEGRAM_ORIGIN = "https://api.telegram.org"
+
+#: Telegram methods that only read. Everything else changes something on Telegram's side —
+#: a message posted, a keyboard replaced, a webhook moved — and must not be repeated.
+_TELEGRAM_READ_ONLY_METHODS: frozenset[str] = frozenset(
+    {"getMe", "getUpdates", "getChat", "getWebhookInfo", "getFile", "getChatMember"}
+)
 
 
 class TelegramDeliveryError(RuntimeError):
@@ -41,6 +52,7 @@ class TelegramHttpAdapter:
                 "Telegram bot token is not configured.",
                 retryable=False,
             )
+        self.settings = settings
         self.base_url = f"https://api.telegram.org/bot{token.get_secret_value()}"
         self.transport = transport
 
@@ -173,16 +185,21 @@ class TelegramHttpAdapter:
         data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption[:1024]
-        async with httpx.AsyncClient(
-            base_url=self.base_url,
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{self.base_url}/sendPhoto",
+            provider="telegram",
+            operation="sendPhoto",
+            base_url=_TELEGRAM_ORIGIN,
             timeout=30,
+            # A photo that was delivered and then timed out looks exactly like one that
+            # was never delivered. Sending it again would post it twice.
+            mutation_committed=True,
             transport=self.transport,
-        ) as client:
-            response = await client.post(
-                "/sendPhoto",
-                data=data,
-                files={"photo": (filename, content, content_type)},
-            )
+            data=data,
+            files={"photo": (filename, content, content_type)},
+        )
         try:
             body = response.json()
         except ValueError:
@@ -199,12 +216,21 @@ class TelegramHttpAdapter:
         return TelegramDeliveryResult(message_ids=[message_id] if message_id else [])
 
     async def _call(self, method: str, payload: dict[str, Any]) -> Any:
-        async with httpx.AsyncClient(
-            base_url=self.base_url,
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{self.base_url}/{method}",
+            provider="telegram",
+            operation=method,
+            base_url=_TELEGRAM_ORIGIN,
             timeout=15,
+            # Anything not on the read-only list is assumed to have changed something on
+            # Telegram's side, so it is never retried. The safe default is the strict one:
+            # a new method added later must be named here before it can be repeated.
+            mutation_committed=method not in _TELEGRAM_READ_ONLY_METHODS,
             transport=self.transport,
-        ) as client:
-            response = await client.post(f"/{method}", json=payload)
+            json=payload,
+        )
         body: dict[str, Any]
         try:
             body = response.json()

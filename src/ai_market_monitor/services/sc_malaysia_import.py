@@ -19,6 +19,7 @@ from ai_market_monitor.db.models import (
     ShariaMonitoringRun,
     SourceSnapshot,
 )
+from ai_market_monitor.services.provider_runtime import provider_request
 
 SC_AUTHORITY = "Shariah Advisory Council of the Securities Commission Malaysia"
 SC_SCOPE = "Securities Commission Malaysia regulated digital-assets framework"
@@ -89,13 +90,18 @@ class SCSourceFetcher:
         if self.settings.sharia_scraper_obey_robots:
             await self._assert_robots_allowed(url)
         await asyncio.sleep(self.settings.sharia_scraper_download_delay_seconds)
-        async with httpx.AsyncClient(
+        response = await provider_request(
+            self.settings,
+            "GET",
+            url,
+            provider="sc_malaysia",
+            operation="fetch_source",
             timeout=60,
-            follow_redirects=True,
+            mutation_committed=False,
             transport=self.transport,
+            follow_redirects=True,
             headers={"User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"},
-        ) as client:
-            response = await client.get(url)
+        )
         if response.status_code >= 400:
             raise SCImportError(
                 "sc_source_fetch_failed",
@@ -119,13 +125,18 @@ class SCSourceFetcher:
     async def _assert_robots_allowed(self, url: str) -> None:
         parsed = urlparse(url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-        async with httpx.AsyncClient(
+        response = await provider_request(
+            self.settings,
+            "GET",
+            robots_url,
+            provider="sc_malaysia",
+            operation="robots",
             timeout=20,
-            follow_redirects=True,
+            mutation_committed=False,
             transport=self.transport,
+            follow_redirects=True,
             headers={"User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"},
-        ) as client:
-            response = await client.get(robots_url)
+        )
         if response.status_code == 404:
             return
         if response.status_code >= 400:

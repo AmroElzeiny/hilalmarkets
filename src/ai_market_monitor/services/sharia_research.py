@@ -3,7 +3,6 @@ import difflib
 import hashlib
 import io
 import json
-import random
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -33,6 +32,8 @@ from ai_market_monitor.db.models import (
     SourceSnapshot,
 )
 from ai_market_monitor.db.models.enums import ShariaMethodologyStatus
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_call, provider_request
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 
 SCRAPER_VERSION = "scrapling-evidence-v1"
@@ -174,20 +175,26 @@ class OfficialEvidenceFetcher:
             await asyncio.sleep(
                 self.settings.sharia_scraper_download_delay_seconds
             )
-            async with httpx.AsyncClient(
+            response = await provider_request(
+                self.settings,
+                "GET",
+                source.source_url,
+                provider="official_source",
+                operation="fetch_evidence",
                 timeout=90,
-                follow_redirects=True,
+                # Reading a public document changes nothing on the far side.
+                mutation_committed=False,
                 transport=self.transport,
+                follow_redirects=True,
                 headers={
                     "User-Agent": (
                         "HilalMarketsEvidenceBot/1.0 (+compliance research)"
                     )
                 },
-            ) as client:
-                response = await client.get(source.source_url)
+            )
         except ShariaResearchError:
             raise
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ProviderCallError) as exc:
             raise ShariaResearchError(
                 "official_source_unavailable",
                 "The official source could not be reached securely.",
@@ -220,13 +227,18 @@ class OfficialEvidenceFetcher:
         origin = f"{parsed.scheme}://{parsed.netloc}"
         if origin not in self._robots:
             robots_url = f"{origin}/robots.txt"
-            async with httpx.AsyncClient(
+            response = await provider_request(
+                self.settings,
+                "GET",
+                robots_url,
+                provider="official_source",
+                operation="robots",
                 timeout=20,
-                follow_redirects=True,
+                mutation_committed=False,
                 transport=self.transport,
+                follow_redirects=True,
                 headers={"User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"},
-            ) as client:
-                response = await client.get(robots_url)
+            )
             if response.status_code == 404:
                 self._robots[origin] = None
             elif response.status_code >= 400:
@@ -299,50 +311,59 @@ class ShariaAIResearchClient:
             "Authorization": f"Bearer {api_key.get_secret_value()}",
             "Content-Type": "application/json",
         }
-        retry_count = 0
+        # Retrying an HTTP call is not this module's decision. It used to keep its own
+        # status list, its own backoff and its own Retry-After reading, all of which had
+        # already drifted from the shared matrix. What is genuinely local is the *service
+        # tier* fallback below: dropping from "flex" to "default" is a different request,
+        # not another attempt at the same one.
+        attempts_used = 0
         service_tier = str(payload.get("service_tier") or "default")
         while True:
             try:
-                async with httpx.AsyncClient(
-                    base_url=str(self.settings.openai_base_url).rstrip("/"),
+                outcome = await provider_call(
+                    self.settings,
+                    "POST",
+                    f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+                    provider="openai",
+                    operation="sharia_research",
+                    model=str(payload.get("model") or ""),
                     timeout=self.settings.sharia_ai_timeout_seconds,
+                    mutation_committed=False,
                     transport=self.transport,
-                ) as client:
-                    response = await client.post("/responses", headers=headers, json=payload)
-                if response.status_code < 400:
-                    return response.json(), retry_count
-                retryable = response.status_code in {408, 429} or response.status_code >= 500
-                if not retryable:
+                    headers=headers,
+                    json=payload,
+                )
+            except ProviderCallError as exc:
+                attempts_used += max(0, len(exc.attempts) - 1)
+                status_code = exc.status
+                if status_code is not None and not (
+                    status_code in {408, 429} or status_code >= 500
+                ):
                     raise ShariaResearchError(
                         "openai_non_retryable",
-                        f"OpenAI returned HTTP {response.status_code}.",
-                    )
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                retryable = True
+                        f"OpenAI returned HTTP {status_code}.",
+                    ) from exc
                 last_exc: Exception = exc
             else:
-                status_code = response.status_code
+                response = outcome.response
+                if response is not None and response.status_code < 400:
+                    return response.json(), attempts_used + outcome.attempt_count - 1
+                status_code = response.status_code if response is not None else 0
+                attempts_used += max(0, outcome.attempt_count - 1)
                 last_exc = ShariaResearchError(
                     "openai_retryable",
                     f"OpenAI returned HTTP {status_code}.",
                     retryable=True,
                 )
-            if retry_count >= self.settings.sharia_ai_max_retries:
-                if (
-                    service_tier == "flex"
-                    and self.settings.sharia_ai_allow_standard_fallback
-                ):
-                    payload = {**payload, "service_tier": "default"}
-                    service_tier = "default"
-                    retry_count = 0
-                    continue
-                raise ShariaResearchError(
-                    "openai_retry_exhausted",
-                    "The queued AI assessment remains unavailable after bounded retries.",
-                    retryable=True,
-                ) from last_exc
-            retry_count += 1
-            await asyncio.sleep(min(60, (2**retry_count) + random.random()))
+            if service_tier == "flex" and self.settings.sharia_ai_allow_standard_fallback:
+                payload = {**payload, "service_tier": "default"}
+                service_tier = "default"
+                continue
+            raise ShariaResearchError(
+                "openai_retry_exhausted",
+                "The queued AI assessment remains unavailable after bounded retries.",
+                retryable=True,
+            ) from last_exc
 
     def _payload(
         self,

@@ -16,11 +16,9 @@ composer call after canonical execution; simple mutations use an evidence-only s
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
-import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -28,8 +26,6 @@ from time import monotonic
 from typing import Any, Final, Literal, cast
 
 import httpx
-from redis.asyncio import Redis
-from redis.exceptions import RedisError
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.engine.active_clarification import (
@@ -598,165 +594,13 @@ class SetupChatAgent:
         self.transport = transport
         self.model_call_count = 0
         self.last_usage: dict[str, Any] = {}
-        self._circuit_redis: Redis | None = (
-            None
-            if settings.app_env == "test"
-            else Redis.from_url(settings.redis_url, decode_responses=True)
-        )
-        self._local_circuit: dict[str, tuple[int, float]] = {}
-        #: When Redis last refused to answer in time. Until this passes, the breaker
-        #: uses its process-local state instead of paying the timeout again.
-        self._redis_unavailable_until: float = 0.0
 
-    def _circuit_key(self, model: str) -> str:
-        provider = f"{str(self.settings.openai_base_url).rstrip('/')}:{model}"
-        digest = hashlib.sha256(provider.encode("utf-8")).hexdigest()[:24]
-        return f"hm:setup-agent:circuit:{digest}"
-
-    async def _circuit_redis_call(
-        self,
-        operation: Callable[[Redis], Awaitable[Any]],
-    ) -> tuple[bool, Any]:
-        """Ask Redis, briefly, and never let the question cost more than the answer.
-
-        The breaker exists to stop the turn wasting time on a provider already known to
-        be failing. Measured on this machine, an unreachable Redis took **2.7 seconds**
-        to say so, on every provider call — four times on a repaired turn. The diagnostic
-        was costing far more than the outage it was watching for.
-
-        Two bounds. Each attempt is capped, so a hung socket cannot hold the turn. And a
-        miss is remembered for a cooldown, so one turn pays the cap once instead of once
-        per call. Both failure paths return "unknown", and an unknown breaker permits the
-        call exactly as `RedisError` already did — coordination is an optimisation here,
-        never the authority.
-        """
-
-        client = self._circuit_redis
-        if client is None or monotonic() < self._redis_unavailable_until:
-            return False, None
-        try:
-            return True, await asyncio.wait_for(
-                operation(client),
-                timeout=_CIRCUIT_REDIS_TIMEOUT_SECONDS,
-            )
-        except (RedisError, TimeoutError, OSError):
-            self._redis_unavailable_until = monotonic() + _CIRCUIT_REDIS_COOLDOWN_SECONDS
-            return False, None
-
-    async def _before_provider_call(self, model: str) -> None:
-        if self._circuit_redis is None:
-            self._before_local_provider_call(model)
-            return
-        cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
-        script = """
-        local state = redis.call('HGET', KEYS[1], 'state') or 'CLOSED'
-        if state == 'CLOSED' then
-          return 1
-        end
-        if state == 'HALF_OPEN' then
-          return 0
-        end
-        local opened_at = tonumber(redis.call('HGET', KEYS[1], 'opened_at') or '0')
-        if (tonumber(ARGV[1]) - opened_at) < tonumber(ARGV[2]) then
-          return 0
-        end
-        redis.call('HSET', KEYS[1], 'state', 'HALF_OPEN')
-        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
-        return 1
-        """
-        answered, allowed = await self._circuit_redis_call(
-            lambda client: cast(
-                Awaitable[Any],
-                client.eval(
-                    script,
-                    1,
-                    self._circuit_key(model),
-                    str(time.time()),
-                    str(cooldown),
-                    str(max(cooldown * 3, 300)),
-                ),
-            )
-        )
-        if not answered:
-            # Redis coordinates workers but is not semantic authority. A cache outage
-            # falls back to a conservative process-local breaker and still permits a
-            # healthy provider call.
-            self._before_local_provider_call(model)
-            return
-        if not bool(allowed):
-            raise StructuredCallError(
-                "SETUP_AGENT_CIRCUIT_OPEN",
-                "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
-                retryable=True,
-                stage="provider",
-            )
-
-    def _before_local_provider_call(self, model: str) -> None:
-        local_key = self._circuit_key(model)
-        failures, opened_at = self._local_circuit.get(local_key, (0, 0.0))
-        cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
-        if (
-            failures >= self.settings.setup_agent_circuit_breaker_failures
-            and time.time() - opened_at < cooldown
-        ):
-            raise StructuredCallError(
-                "SETUP_AGENT_CIRCUIT_OPEN",
-                "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
-                retryable=True,
-                stage="provider",
-            )
-
-    async def _provider_succeeded(self, model: str) -> None:
-        self._local_circuit.pop(self._circuit_key(model), None)
-        # The provider result is already complete and authoritative. Losing the success
-        # marker may leave the circuit conservative for a later turn, but must never
-        # discard this result, cause a second paid model call, or delay the reply.
-        await self._circuit_redis_call(
-            lambda client: cast(Awaitable[Any], client.delete(self._circuit_key(model)))
-        )
-
-    async def _provider_failed(self, exc: StructuredCallError, model: str) -> None:
-        if not exc.retryable:
-            return
-        local_key = self._circuit_key(model)
-        failures, _opened_at = self._local_circuit.get(local_key, (0, 0.0))
-        self._local_circuit[local_key] = (failures + 1, time.time())
-        if self._circuit_redis is None:
-            return
-        threshold = self.settings.setup_agent_circuit_breaker_failures
-        cooldown = self.settings.setup_agent_circuit_breaker_cooldown_seconds
-        script = """
-        local failures = redis.call('HINCRBY', KEYS[1], 'failures', 1)
-        local state = redis.call('HGET', KEYS[1], 'state') or 'CLOSED'
-        if state == 'HALF_OPEN' or failures >= tonumber(ARGV[1]) then
-          redis.call(
-            'HSET',
-            KEYS[1],
-            'state',
-            'OPEN',
-            'opened_at',
-            ARGV[2]
-          )
-        end
-        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
-        return failures
-        """
-        # Preserve the original provider classification. Redis health is diagnosed
-        # separately and must not turn a provider timeout into another error, nor add
-        # its own wait to a turn that has already failed.
-        await self._circuit_redis_call(
-            lambda client: cast(
-                Awaitable[Any],
-                client.eval(
-                    script,
-                    1,
-                    self._circuit_key(model),
-                    str(threshold),
-                    str(time.time()),
-                    str(max(cooldown * 3, 300)),
-                ),
-            )
-        )
+    # The circuit breaker used to live here: its own state, its own Redis coordination,
+    # its own key scheme. That made two breakers for one provider — this one and the
+    # shared one inside every guarded provider call — so a failure one of them saw was a
+    # failure the other had never heard of. There is one breaker now, in
+    # ``provider_reliability``, consulted by the call itself, and its refusal arrives here
+    # as ``SETUP_AGENT_CIRCUIT_OPEN`` exactly as before.
 
     def _conversational_route(
         self,
@@ -3404,7 +3248,6 @@ class SetupChatAgent:
             # spent getting a provider answer, and measuring only the HTTP call is how
             # 2.7 seconds of it stayed invisible.
             with telemetry.stage("planner_provider_wait"):
-                await self._before_provider_call(route.model)
                 provider_attempted = True
                 telemetry.record_provider_call()
                 telemetry.record_model_call("planning")
@@ -3438,15 +3281,8 @@ class SetupChatAgent:
                     int((prior_usage or {}).get("_setup_planner_attempts") or 0) + 1
                 )
                 _record_cost_telemetry(telemetry, exc.usage, self.settings, route.model)
-            with telemetry.stage("planner_provider_wait"):
-                if _counts_toward_circuit(exc):
-                    await self._provider_failed(exc, route.model)
-                else:
-                    await self._provider_succeeded(route.model)
             raise
         self.model_call_count += 1
-        with telemetry.stage("planner_provider_wait"):
-            await self._provider_succeeded(route.model)
         with telemetry.stage("intent_deserialization"):
             telemetry.record_output(
                 "plan_envelope",
@@ -3545,11 +3381,8 @@ class SetupChatAgent:
                 stage="planner_repair",
                 usage=prior_usage,
             )
-        provider_attempted = False
         try:
             with telemetry.stage("repair_provider_wait"):
-                await self._before_provider_call(route.model)
-                provider_attempted = True
                 telemetry.record_provider_call()
                 telemetry.record_model_call("planner_repair")
                 deltas, usage = await structured_call(
@@ -3582,15 +3415,8 @@ class SetupChatAgent:
                 },
             )
             _record_cost_telemetry(telemetry, exc.usage, self.settings, route.model)
-            with telemetry.stage("repair_provider_wait"):
-                if provider_attempted and _counts_toward_circuit(exc):
-                    await self._provider_failed(exc, route.model)
-                elif provider_attempted:
-                    await self._provider_succeeded(route.model)
             raise
         self.model_call_count += 1
-        with telemetry.stage("repair_provider_wait"):
-            await self._provider_succeeded(route.model)
         merged = _merged_usage(prior_usage, usage)
         merged["_setup_reserved_cost_usd"] = prior_reserved + reserved
         merged["_setup_repair_attempts"] = 1
@@ -3806,7 +3632,6 @@ class SetupChatAgent:
             )
         try:
             with telemetry.stage("response_composition"):
-                await self._before_provider_call(model)
                 telemetry.record_provider_call()
                 telemetry.record_model_call("response_composition")
                 reply, usage = await structured_call(
@@ -3829,17 +3654,10 @@ class SetupChatAgent:
                     stage="response_composition",
                     transport=self.transport,
                 )
-        except StructuredCallError as exc:
+        except StructuredCallError:
             self.model_call_count += 1
-            with telemetry.stage("response_composition"):
-                if _counts_toward_circuit(exc):
-                    await self._provider_failed(exc, model)
-                else:
-                    await self._provider_succeeded(model)
             raise
         self.model_call_count += 1
-        with telemetry.stage("response_composition"):
-            await self._provider_succeeded(model)
         # Structural check first, and it decides. Every factual claim has to state a
         # proposition that matches the evidence; anything that does not is replaced by
         # deterministic text built from the evidence. Reading ids and values rather than

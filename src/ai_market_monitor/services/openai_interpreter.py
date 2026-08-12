@@ -20,6 +20,7 @@ from ai_market_monitor.services.ai_setup_evaluator_control import (
 )
 from ai_market_monitor.services.interfaces import StrategyInterpreter
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class AIInterpretationClient(Protocol):
@@ -92,12 +93,22 @@ class OpenAIResponsesInterpretationClient:
         }
         response_payload = consume_evaluator_llm_fault()
         if response_payload is None:
-            async with httpx.AsyncClient(
-                base_url=str(self.settings.openai_base_url).rstrip("/"),
+            response = await provider_request(
+                self.settings,
+                "POST",
+                f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+                provider="openai",
+                operation="interpret_strategy",
+                # One paid answer per turn: this call is not repeated.
+                retry=False,
+                model=str(payload.get("model") or ""),
                 timeout=self.settings.openai_timeout_seconds,
+                deadline_seconds=float(self.settings.openai_timeout_seconds),
+                mutation_committed=False,
                 transport=self.transport,
-            ) as client:
-                response = await client.post("/responses", headers=headers, json=payload)
+                headers=headers,
+                json=payload,
+            )
             response.raise_for_status()
             response_payload = response.json()
         self.last_usage = {

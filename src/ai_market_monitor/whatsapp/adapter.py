@@ -5,6 +5,8 @@ from typing import Any
 import httpx
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.whatsapp.types import (
     WhatsAppDeliveryResult,
     WhatsAppInteractiveButtons,
@@ -63,6 +65,7 @@ class WhatsAppCloudAdapter:
                 "WhatsApp Graph API version or phone-number identifier is missing.",
                 retryable=False,
             )
+        self.settings = settings
         self.base_url = f"https://graph.facebook.com/{settings.whatsapp_graph_api_version}"
         self.phone_number_id = settings.whatsapp_phone_number_id
         self.timeout_seconds = settings.whatsapp_http_timeout_seconds
@@ -192,17 +195,24 @@ class WhatsAppCloudAdapter:
 
     async def _call(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(
-                base_url=self.base_url,
+            response = await provider_request(
+                self.settings,
+                method,
+                f"{self.base_url.rstrip('/')}/{path.lstrip('/')}",
+                provider="whatsapp",
+                operation=path.strip("/").replace("/", "_") or "call",
                 timeout=self.timeout_seconds,
+                # A message that reached the person and then timed out looks exactly like
+                # one that did not. Sending it again would deliver it twice.
+                mutation_committed=method.upper() != "GET",
                 transport=self.transport,
                 headers={
                     "Authorization": f"Bearer {self._access_token}",
                     "Content-Type": "application/json",
                 },
-            ) as client:
-                response = await client.request(method, path, json=payload)
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                json=payload,
+            )
+        except (httpx.TimeoutException, httpx.NetworkError, ProviderCallError) as exc:
             raise WhatsAppDeliveryError(
                 "whatsapp_network_error",
                 "Meta WhatsApp Cloud API could not be reached.",

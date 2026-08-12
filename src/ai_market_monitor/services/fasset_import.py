@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
-import httpx
 from curl_cffi import requests as curl_requests
 from scrapling.parser import Selector
 from sqlalchemy import select
@@ -22,6 +21,7 @@ from ai_market_monitor.db.models import (
     ShariaMonitoringRun,
     SourceSnapshot,
 )
+from ai_market_monitor.services.provider_runtime import provider_request
 
 FASSET_AUTHORITY = "Fasset published Shariah Reports"
 FASSET_SCOPE = (
@@ -145,12 +145,17 @@ class FassetSourceFetcher:
     async def _assert_robots_allowed(self, url: str) -> None:
         parsed = urlparse(url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-        async with httpx.AsyncClient(
+        response = await provider_request(
+            self.settings,
+            "GET",
+            robots_url,
+            provider="fasset",
+            operation="robots",
             timeout=20,
+            mutation_committed=False,
             follow_redirects=True,
             headers={"User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"},
-        ) as client:
-            response = await client.get(robots_url)
+        )
         if response.status_code == 404:
             return
         if response.status_code >= 400:

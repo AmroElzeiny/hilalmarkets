@@ -1,0 +1,24 @@
+{
+  "note": [
+    "Extra permission rules for this repository.",
+    "",
+    "This file can only ADD rules, and can only make an existing rule STRICTER. It",
+    "cannot switch a built-in rule off or downgrade a refusal to an allow.",
+    "",
+    "That is deliberate, and it is not about distrusting the engineer: the assistant",
+    "itself has write access to this file. A safety file that a session can edit its way",
+    "out of is not a safety file. The built-in rules live in src/hm_oi/permissions.py",
+    "and are always applied on top of whatever is written here.",
+    "",
+    "Each rule needs:",
+    "  rule_id   a short name, shown to the person when the rule stops something",
+    "  pattern   a Python regular expression, matched case-insensitively",
+    "  decision  allow | confirm | deny",
+    "  reason    plain words, printed when the rule fires - write it for someone",
+    "            mid-task who does not know why they were stopped",
+    "",
+    "Check a rule without starting a session:",
+    "  .venv/Scripts/python -m hm_oi check \"<the command>\""
+  ],
+  "rules": []
+}

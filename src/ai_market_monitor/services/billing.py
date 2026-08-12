@@ -30,6 +30,8 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.trials import TrialLifecycleService
 
 SENSITIVE_KEYS = {
@@ -322,15 +324,22 @@ class StripeBillingProvider:
         secret = self.settings.stripe_secret_key
         if secret is None:
             raise BillingError("stripe_secret_missing", "Stripe secret key is missing.")
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.stripe_api_base).rstrip("/"),
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.stripe_api_base).rstrip('/')}{path}",
+            provider="stripe",
+            operation=path.strip("/").replace("/", "_"),
             timeout=15,
+            # Money. A checkout that was created and then timed out looks exactly like one
+            # that was not, and a retry would charge a customer twice. Never repeated.
+            mutation_committed=True,
             headers={
                 "Authorization": f"Bearer {secret.get_secret_value()}",
                 "User-Agent": "AI-Market-Monitor/0.1",
             },
-        ) as client:
-            response = await client.post(path, data=data)
+            data=data,
+        )
         if response.is_error:
             request_id = response.headers.get("request-id")
             raise BillingError(
@@ -386,16 +395,22 @@ class NowPaymentsBillingProvider:
             "cancel_url": cancel_url,
             "is_fee_paid_by_user": False,
         }
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.nowpayments_base_url).rstrip("/"),
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.nowpayments_base_url).rstrip('/')}/v1/invoice",
+            provider="nowpayments",
+            operation="create_invoice",
             timeout=20,
+            # An invoice that exists on the provider's side must not be created twice.
+            mutation_committed=True,
             headers={
                 "x-api-key": api_key.get_secret_value(),
                 "Content-Type": "application/json",
                 "User-Agent": "AI-Market-Monitor/0.1",
             },
-        ) as client:
-            response = await client.post("/v1/invoice", json=payload)
+            json=payload,
+        )
         body = self._json_response(response)
         invoice_url = body.get("invoice_url") or body.get("url")
         invoice_id = body.get("id") or body.get("invoice_id") or order_id
@@ -542,27 +557,34 @@ class CreemBillingProvider:
         secret = self.settings.creem_api_key
         if secret is None:
             raise BillingError("creem_api_key_missing", "Creem API access is not configured.")
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.creem_api_base).rstrip("/"),
-            timeout=self.settings.creem_timeout_seconds,
-            headers={
-                "x-api-key": secret.get_secret_value(),
-                "Content-Type": "application/json",
-                "User-Agent": "HilalMarkets/1.0",
-            },
-        ) as client:
-            try:
-                response = await client.post(path, json=dict(payload))
-            except httpx.TimeoutException as exc:
-                raise BillingError(
-                    "creem_timeout",
-                    "Creem checkout did not respond in time. No payment was created.",
-                ) from exc
-            except httpx.RequestError as exc:
-                raise BillingError(
-                    "creem_unavailable",
-                    "Creem checkout is temporarily unavailable.",
-                ) from exc
+        try:
+            response = await provider_request(
+                self.settings,
+                "POST",
+                f"{str(self.settings.creem_api_base).rstrip('/')}{path}",
+                provider="creem",
+                operation=path.strip("/").replace("/", "_"),
+                timeout=self.settings.creem_timeout_seconds,
+                # Money again. The message below already promises "no payment was
+                # created", and only a call that is never repeated can keep that promise.
+                mutation_committed=True,
+                headers={
+                    "x-api-key": secret.get_secret_value(),
+                    "Content-Type": "application/json",
+                    "User-Agent": "HilalMarkets/1.0",
+                },
+                json=dict(payload),
+            )
+        except httpx.TimeoutException as exc:
+            raise BillingError(
+                "creem_timeout",
+                "Creem checkout did not respond in time. No payment was created.",
+            ) from exc
+        except (httpx.RequestError, ProviderCallError) as exc:
+            raise BillingError(
+                "creem_unavailable",
+                "Creem checkout is temporarily unavailable.",
+            ) from exc
         try:
             body = response.json()
         except ValueError as exc:

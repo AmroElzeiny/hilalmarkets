@@ -36,6 +36,12 @@ app.conf.update(
             "task": "ai_market_monitor.repair_trial_cycle_counters",
             "schedule": 6 * 60 * 60,
         },
+        # More often than the reservation lifetime, so a crashed worker's promise is
+        # returned within one window rather than held until somebody restarts everything.
+        "sweep-expired-ai-reservations-every-five-minutes": {
+            "task": "ai_market_monitor.sweep_expired_ai_reservations",
+            "schedule": 5 * 60,
+        },
         "retry-telegram-deliveries-every-minute": {
             "task": "ai_market_monitor.retry_telegram_deliveries",
             "schedule": 60,
@@ -225,6 +231,11 @@ def reconcile_trial_alert_deliveries() -> dict:
 @app.task(name="ai_market_monitor.repair_trial_cycle_counters")
 def repair_trial_cycle_counters() -> dict:
     return _run_async_task(_repair_trial_cycle_counters())
+
+
+@app.task(name="ai_market_monitor.sweep_expired_ai_reservations")
+def sweep_expired_ai_reservations() -> dict:
+    return _run_async_task(_sweep_expired_ai_reservations())
 
 
 @app.task(name="ai_market_monitor.expire_trials")
@@ -426,6 +437,23 @@ async def _repair_trial_cycle_counters() -> dict:
         result = await TrialLifecycleService(session, settings).repair_cycle_counters()
         await session.commit()
         return result
+
+
+async def _sweep_expired_ai_reservations() -> dict:
+    """Return budget promised by workers that never came back.
+
+    Without this a crashed worker's reservation holds capacity for ever: the allowance
+    shrinks a little with every crash, nobody notices until people start being refused,
+    and the only cure is restarting everything.
+    """
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.ai_budget import AIBudgetService, limits_from_settings
+
+    async with SessionFactory() as session:
+        swept = await AIBudgetService(session, limits_from_settings(settings)).sweep_expired()
+        await session.commit()
+        return {"swept": swept}
 
 
 async def _retry_telegram_deliveries() -> dict:

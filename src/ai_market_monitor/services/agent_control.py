@@ -48,6 +48,7 @@ from ai_market_monitor.services.ai_setup_evaluator_control import (
 from ai_market_monitor.services.ai_usage_context import (
     current_ai_usage_correlation_id,
 )
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.system_brain import (
     CapabilityCoverageService,
     estimate_usage_cost,
@@ -83,12 +84,22 @@ class OpenAIAgentResponsesClient:
             "Authorization": f"Bearer {self.settings.openai_api_key.get_secret_value()}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.openai_base_url).rstrip("/"),
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+            provider="openai",
+            operation="agent_turn",
+            # One paid answer per turn: this call is not repeated.
+            retry=False,
+            model=str(payload.get("model") or ""),
             timeout=max(1.0, timeout_seconds),
+            deadline_seconds=max(1.0, timeout_seconds),
+            mutation_committed=False,
             transport=self.transport,
-        ) as client:
-            response = await client.post("/responses", headers=headers, json=payload)
+            headers=headers,
+            json=payload,
+        )
         response.raise_for_status()
         body = response.json()
         if not isinstance(body, dict):

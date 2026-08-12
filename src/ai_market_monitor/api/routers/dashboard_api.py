@@ -74,15 +74,20 @@ from ai_market_monitor.db.models.enums import (
     StrategyVersionStatus,
     UserStatus,
 )
+from ai_market_monitor.engine.builder_boolean import boolean_limits
 from ai_market_monitor.engine.builder_contract import (
     LOGIC_CHOICES,
     MODE_CHOICES,
     UNIVERSE_CHOICES,
     BuilderChoice,
+    disabled_capabilities_from,
 )
 from ai_market_monitor.engine.builder_operations import mechanic_catalog
 from ai_market_monitor.engine.builder_starters import STARTERS
 from ai_market_monitor.engine.builder_state import builder_state
+from ai_market_monitor.engine.capability_shortlist import (
+    configured_runtime_provider_requirements,
+)
 from ai_market_monitor.engine.condition_registry import condition_registry_payload
 from ai_market_monitor.engine.models import ensure_aware
 from ai_market_monitor.engine.setup_lifecycle import (
@@ -122,6 +127,7 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.schemas.strategy_draft_v2 import ConditionNodeType, StrategyDraftV2
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.ai_availability import availability_for
+from ai_market_monitor.services.ai_budget import AIBudgetService, limits_from_settings
 from ai_market_monitor.services.ai_setup_chat import (
     AISetupChatService,
     SetupChatError,
@@ -134,6 +140,7 @@ from ai_market_monitor.services.ai_setup_evaluator_control import (
     evaluator_turn,
 )
 from ai_market_monitor.services.ai_usage_context import ai_usage_correlation
+from ai_market_monitor.services.builder_universe import builder_universe_options
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService, export_file_path
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
@@ -1446,6 +1453,64 @@ async def get_ai_setup_chat_session(
     return await _setup_chat_response(service, session, chat)
 
 
+@router.get("/ai-usage")
+async def ai_usage_summary(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """This person's own assistant allowance: what it is, what is left, when it resets.
+
+    Read from the same authority that enforces it, so the number shown and the number
+    applied cannot disagree — a summary computed separately would make every refusal look
+    like a bug.
+
+    Carries no provider secret, no internal identifier and nobody else's usage.
+    """
+
+    service = AIBudgetService(session, limits_from_settings(settings))
+    availability = availability_for(settings, user_id=principal.user_id)
+    summary = await service.summary_for(
+        principal.user_id,
+        ai_available=availability.assistant_available,
+        unavailable_reason=availability.message,
+    )
+    payload = summary.to_dict()
+    # Authoring never depends on the allowance. Saying so here means the client can show
+    # "assistant paused" without also greying out the Builder.
+    payload["guided_builder_available"] = True
+    return payload
+
+
+@router.get("/setup-chat/sessions/{chat_id}/universe-options")
+async def ai_setup_chat_universe_options(
+    chat_id: UUID,
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    service: AISetupChatService = Depends(get_ai_setup_chat_service),
+) -> dict[str, Any]:
+    """The governed choices for "which coins" and "under which screening method".
+
+    Served separately from the Builder contract because these are per-person and
+    per-draft: the contract is the same for everybody and is cached, while a watchlist
+    belongs to one account and the selected method belongs to one draft.
+
+    The Builder previously had the actions for these but no list of legal answers, so a
+    client had to either hard-code the ids — a Sharia decision made in JavaScript — or
+    ask the assistant, which is the AI-only dependency the Builder exists to remove.
+    """
+
+    try:
+        chat = await service.owned_session(session, principal.user_id, chat_id)
+    except SetupChatError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    draft = load_strategy_draft_v2(chat) or StrategyDraftV2()
+    options = await builder_universe_options(
+        session, user_id=principal.user_id, draft=draft
+    )
+    return options.to_dict()
+
+
 @router.post(
     "/setup-chat/sessions/{chat_id}/messages",
     response_model=SetupChatSessionResponse,
@@ -1680,6 +1745,13 @@ async def ai_setup_chat_builder_contract(
     """
 
     availability = availability_for(settings, user_id=principal.user_id)
+    # Availability is decided against the feeds the configured adapter actually
+    # implements, so a mechanic is never offered whose data would never arrive — and one
+    # that is waiting on a feed says which feed, instead of being dropped from the list.
+    configured_providers = configured_runtime_provider_requirements(
+        settings.market_data_provider
+    )
+    disabled_capabilities = disabled_capabilities_from(settings.builder_capabilities_disabled)
     return {
         "mechanics": [
             {
@@ -1692,6 +1764,10 @@ async def ai_setup_chat_builder_contract(
                 "available": item.available,
                 "unavailable_reason": item.unavailable_reason,
                 "provider_requirements": list(item.provider_requirements),
+                "provider_requirements_met": item.provider_requirements_met,
+                # A hint for grouping the list, never a filter on it. Authoring any
+                # launch-supported mechanic must be possible with no assistant.
+                "beginner_friendly": item.beginner_friendly,
                 "timeframes": list(item.timeframes),
                 "examples": list(item.examples),
                 "operators": [_choice_payload(choice) for choice in item.operators],
@@ -1713,12 +1789,16 @@ async def ai_setup_chat_builder_contract(
                     for parameter in item.parameters
                 ],
             }
-            for item in mechanic_catalog()
+            for item in mechanic_catalog(configured_providers, disabled_capabilities)
         ],
         "starters": [item.to_dict() for item in STARTERS],
         "modes": [_choice_payload(item) for item in MODE_CHOICES],
         "universes": [_choice_payload(item) for item in UNIVERSE_CHOICES],
         "logic": [_choice_payload(item) for item in LOGIC_CHOICES],
+        # How deep and how wide an expression the compiler will actually run, plus how
+        # many rules each grouping takes. Read from the compiler's own constants so the
+        # Builder cannot offer a shape that would be refused after the person built it.
+        "boolean_limits": boolean_limits().to_dict(),
         "lifecycle_states": [describe_lifecycle(state) for state in LifecycleState],
         "ai_availability": availability.to_dict(),
     }
@@ -1760,6 +1840,10 @@ async def run_ai_setup_chat_builder_action(
             required=payload.required,
             order=payload.order,
             join=payload.join,
+            node_ids=payload.node_ids,
+            operator=payload.operator,
+            group_id=payload.group_id,
+            position=payload.position,
         )
         await session.commit()
         await session.refresh(chat)

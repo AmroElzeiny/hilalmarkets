@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import hashlib
@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from time import monotonic
 from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID, uuid4
@@ -48,12 +49,16 @@ from ai_market_monitor.engine.active_question import (
     labels_for,
     resolve_active_answer,
 )
-from ai_market_monitor.engine.builder_contract import find_mechanic
+from ai_market_monitor.engine.builder_contract import disabled_capabilities_from, find_mechanic
 from ai_market_monitor.engine.builder_operations import (
     BuilderActionError,
     add_condition_plan,
     arrange_plan,
+    group_conditions_plan,
+    move_condition_plan,
     remove_condition_plan,
+    set_group_operator_plan,
+    ungroup_conditions_plan,
     update_condition_plan,
 )
 from ai_market_monitor.engine.builder_starters import find_starter
@@ -152,6 +157,8 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     UnresolvedFieldV2,
 )
+from ai_market_monitor.services.ai_spend import AISpendGuard, AISpendRefused, TurnSpend
+from ai_market_monitor.services.feature_control import Feature
 from ai_market_monitor.services.market_preview import (
     assess_candle_data_quality,
     timeframe_duration,
@@ -709,6 +716,10 @@ class SetupChatLaunchService:
         required: bool = True,
         order: list[str] | None = None,
         join: str | None = None,
+        node_ids: list[str] | None = None,
+        operator: str | None = None,
+        group_id: str | None = None,
+        position: int | None = None,
     ) -> AISetupChatSession:
         """One guided change, applied through the same authority a chat turn uses.
 
@@ -776,6 +787,10 @@ class SetupChatLaunchService:
                 required=required,
                 order=order or [],
                 join=join,
+                node_ids=node_ids or [],
+                operator=operator,
+                group_id=group_id,
+                position=position,
                 source_turn_id=source_turn_id,
             )
             if not operations:
@@ -844,6 +859,10 @@ class SetupChatLaunchService:
         required: bool,
         order: list[str],
         join: str | None,
+        node_ids: list[str],
+        operator: str | None,
+        group_id: str | None,
+        position: int | None,
         source_turn_id: str,
     ) -> tuple[list[AuthorizedPatchOperation], str, frozenset[str]]:
         """Build the canonical operations for one guided action."""
@@ -874,6 +893,8 @@ class SetupChatLaunchService:
                 source_turn_id=source_turn_id,
                 segment_id=_DRAFT_ACTION_SEGMENT_ID,
                 required=required,
+                configured_providers=self._configured_providers(),
+                disabled_capabilities=self._disabled_capabilities(),
             )
             return list(plan.operations), plan.rendered, _capability_keys_of(mechanic_key)
 
@@ -886,6 +907,8 @@ class SetupChatLaunchService:
                 source_turn_id=source_turn_id,
                 segment_id=_DRAFT_ACTION_SEGMENT_ID,
                 required=required,
+                configured_providers=self._configured_providers(),
+                disabled_capabilities=self._disabled_capabilities(),
             )
             return list(plan.operations), plan.rendered, _capability_keys_of(mechanic_key)
 
@@ -902,6 +925,47 @@ class SetupChatLaunchService:
                 root=draft.condition_ast,
                 order=order,
                 join=join or "and",
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            )
+            return list(plan.operations), plan.rendered, frozenset()
+
+        # Boolean structure. Each of these targets exact stored nodes by id and rebuilds
+        # the tree around them, so nested logic survives the edit. ``arrange_conditions``
+        # above can only express one flat root join; on its own it flattened every group
+        # a person had built.
+        if action == "group_conditions":
+            plan = group_conditions_plan(
+                root=draft.condition_ast,
+                node_ids=node_ids,
+                operator=operator or "and",
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            )
+            return list(plan.operations), plan.rendered, frozenset()
+
+        if action == "ungroup_conditions":
+            plan = ungroup_conditions_plan(
+                root=draft.condition_ast,
+                group_id=group_id or "",
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            )
+            return list(plan.operations), plan.rendered, frozenset()
+
+        if action == "set_group_operator":
+            plan = set_group_operator_plan(
+                root=draft.condition_ast,
+                group_id=group_id or "",
+                operator=operator or "and",
+                segment_id=_DRAFT_ACTION_SEGMENT_ID,
+            )
+            return list(plan.operations), plan.rendered, frozenset()
+
+        if action == "move_condition":
+            self._require_existing_condition(draft, node_id or "")
+            plan = move_condition_plan(
+                root=draft.condition_ast,
+                node_id=node_id or "",
+                group_id=group_id or "",
+                position=position,
                 segment_id=_DRAFT_ACTION_SEGMENT_ID,
             )
             return list(plan.operations), plan.rendered, frozenset()
@@ -938,7 +1002,7 @@ class SetupChatLaunchService:
         if node_id not in existing:
             raise SetupLaunchError(
                 "CONDITION_NOT_FOUND",
-                "That rule is no longer part of this Watch Plan. Reload and try again.",
+                "That rule is no longer part of this Watchlist. Reload and try again.",
                 stage="patch",
                 status_code=409,
             )
@@ -988,6 +1052,8 @@ class SetupChatLaunchService:
                 source_turn_id=source_turn_id,
                 segment_id=_DRAFT_ACTION_SEGMENT_ID,
                 required=rule.required,
+                configured_providers=self._configured_providers(),
+                disabled_capabilities=self._disabled_capabilities(),
             )
             operations.extend(
                 item.model_copy(update={"operation_id": f"{item.operation_id}_{index}"[:80]})
@@ -3491,6 +3557,101 @@ return tostring(next_value)
             for item in rows
         ]
 
+    async def _open_ai_spend(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        *,
+        source_turn_id: str,
+    ) -> TurnSpend:
+        """Ask permission to spend on this turn, before anything paid happens.
+
+        The reservation is the *per-turn ceiling* the product already enforces, not a
+        guess at what this particular message will cost. Reserved money is real money: a
+        burst of simultaneous turns must each see the ones before them, and only a
+        pessimistic hold makes that true. Reconciling afterwards puts the difference back.
+        """
+
+        guard = AISpendGuard(session, self.settings)
+        try:
+            return await guard.open_turn(
+                user_id=chat.user_id,
+                feature=Feature.PLANNER,
+                # The turn id, so a retried request finds its own reservation instead of
+                # taking a second one and charging the same work twice.
+                idempotency_key=f"setup_turn:{source_turn_id}",
+                model=self.settings.openai_model,
+                service_tier=self.settings.setup_agent_complex_service_tier,
+                estimated_cost_usd=Decimal(
+                    str(self.settings.setup_agent_max_estimated_cost_usd_per_turn)
+                ),
+            )
+        except AISpendRefused as refused:
+            raise SetupLaunchError(
+                refused.code,
+                refused.message,
+                stage="interpret",
+                # Retryable when the reason will pass on its own — a busy platform, a
+                # daily window. Never retryable when a person has to change something.
+                retryable=refused.scope in {"global_daily", "global_monthly", "concurrency"},
+                status_code=429 if refused.scope == "concurrency" else 503,
+            ) from refused
+
+    async def _settle_ai_spend(
+        self,
+        session: AsyncSession,
+        chat: AISetupChatSession,
+        spend: TurnSpend,
+        *,
+        usage: dict[str, Any] | None,
+        outcome: str,
+    ) -> None:
+        """Record what the turn really cost, in the budget and in the ledger, once.
+
+        Both records are written from the same numbers and the ledger row points back at
+        the reservation, so the two can be checked against each other. Before this they
+        were two independent accounts of the same money with nothing joining them.
+        """
+
+        coverage = CapabilityCoverageService(self.settings)
+        event = await coverage.record_usage(
+            session,
+            chat=chat,
+            operation="setup_agent_turn",
+            # Every decision that was in force travels with the turn. "It was on" does not
+            # let anybody reproduce an incident; knowing the person was allowlisted, or in
+            # a cohort, or inside the percentage, does.
+            usage=({**usage, "_rollout": spend.features} if usage else None),
+            reservation_id=spend.reservation_id,
+            outcome=outcome,
+            rollout_version=spend.rollout_version,
+        )
+        actual = (
+            Decimal(str(event.estimated_cost_usd))
+            if event is not None
+            # No usage at all still settles the reservation, at the amount that was held.
+            # Releasing it as free would let a paid attempt that reported nothing look
+            # like a turn that never happened.
+            else (
+                spend.reservation.estimated_cost_usd
+                if spend.reservation is not None and outcome not in {"cancelled", "refused"}
+                else Decimal("0")
+            )
+        )
+        await AISpendGuard(session, self.settings).settle_turn(
+            spend,
+            actual_cost_usd=actual,
+            input_tokens=int(event.input_tokens) if event is not None else 0,
+            output_tokens=int(event.output_tokens) if event is not None else 0,
+            provider_request_id=event.provider_request_id if event is not None else None,
+            outcome=outcome,
+        )
+
+    async def _release_ai_spend(self, session: AsyncSession, spend: TurnSpend) -> None:
+        """Hand back a promise for a turn that never produced anything."""
+
+        await AISpendGuard(session, self.settings).release_turn(spend, outcome="cancelled")
+
     async def _fail_db_turn(
         self,
         session: AsyncSession,
@@ -4076,12 +4237,42 @@ return tostring(next_value)
             preflight_manifest=self._read_preflight_manifest,
             stage_callback=stage_callback,
         )
+        # Nothing paid happens until the assistant is both switched on for this person and
+        # has budget. Both refusals are a *degraded* product: the draft is untouched, the
+        # Builder still authors, and the person is told in plain words what is available.
+        try:
+            spend = await self._open_ai_spend(session, chat, source_turn_id=source_turn_id)
+        except SetupLaunchError as refused:
+            # The turn row is already open at this point. Leaving it open would make the
+            # chat look busy for ever, and the next Builder click would be told "your
+            # previous message is still being worked on" — turning a budget limit into a
+            # person locked out of the one thing that still works.
+            await self._fail_db_turn(
+                session,
+                chat,
+                turn_record,
+                code=refused.code,
+                stage=refused.stage,
+                retryable=refused.retryable,
+                details=(),
+                started=started,
+                telemetry=telemetry,
+            )
+            raise
+        settled = False
         try:
             outcome = await self.agent.run_turn(turn)
         except _PendingChangeRequired as pending:
             # The change was understood and priced, and then not applied. The draft is
             # untouched, the proposal is stored, and the user decides. No second model
             # call happens on confirm — the operations are already written down.
+            #
+            # The planner call still happened and was still paid for, so the reservation
+            # settles at what was held rather than being released as free.
+            settled = True
+            await self._settle_ai_spend(
+                session, chat, spend, usage=None, outcome="completed"
+            )
             return await self._answer_with_proposal(
                 session,
                 chat,
@@ -4095,11 +4286,13 @@ return tostring(next_value)
             # rejects an ungrounded operation. Usage belongs to the attempted turn,
             # not only to successful mutations, and must be recorded before the
             # classified failure is returned.
-            await CapabilityCoverageService(self.settings).record_usage(
+            settled = True
+            await self._settle_ai_spend(
                 session,
-                chat=chat,
-                operation="setup_agent_turn",
+                chat,
+                spend,
                 usage=exc.usage or None,
+                outcome="provider_failed",
             )
             # The draft is untouched and stays exactly as it was. The turn is reported
             # as the failure it is, never as small talk, and the same idempotency key
@@ -4185,12 +4378,23 @@ return tostring(next_value)
                 retryable=exc.retryable,
                 status_code=503 if exc.retryable else 422,
             ) from exc
+        except BaseException:
+            # Anything that escapes here — a cancelled request, a bug, a shutdown — must
+            # not leave budget held for a turn nobody will ever settle. Without this the
+            # allowance shrinks a little with every crash until somebody restarts
+            # everything, and the sweep only notices fifteen minutes later.
+            if not settled:
+                settled = True
+                await self._release_ai_spend(session, spend)
+            raise
 
-        await CapabilityCoverageService(self.settings).record_usage(
+        settled = True
+        await self._settle_ai_spend(
             session,
-            chat=chat,
-            operation="setup_agent_turn",
+            chat,
+            spend,
             usage=outcome.usage or None,
+            outcome="completed",
         )
 
         if outcome.read_only_scan_request is not None:
@@ -4440,14 +4644,33 @@ return tostring(next_value)
 
         return gate
 
+    def _configured_providers(self) -> frozenset[str]:
+        """The data feeds the configured adapter implements.
+
+        One answer, used by the Builder catalogue, by the mutation path and by the
+        approval gate. When these disagreed the Builder could offer a mechanic that the
+        action then refused, which reads to the person as the product breaking.
+        """
+
+        return configured_runtime_provider_requirements(self.settings.market_data_provider)
+
+    def _disabled_capabilities(self) -> frozenset[str]:
+        """Capabilities paused by configuration, read from the one owner.
+
+        Used by the mutation path as well as the catalogue, so a capability that the
+        Builder shows as paused is also refused when an action reaches the server. If only
+        the catalogue knew, a stale browser tab could still write the paused rule.
+        """
+
+        return disabled_capabilities_from(self.settings.builder_capabilities_disabled)
+
     def _provider_available(self, provider: str) -> bool:
         """Only candle data is wired. Anything else blocks approval, visibly.
 
         Claiming an unwired feed is available would compile a rule that can never be
         evaluated, and the alert would simply never fire with no explanation.
         """
-        name = provider.strip().casefold()
-        return name in configured_runtime_provider_requirements(self.settings.market_data_provider)
+        return provider.strip().casefold() in self._configured_providers()
 
     def _runtime_preflight(self) -> RuntimePreflight:
         """Verify the configured adapter for this exact exchange/symbol/timeframe set.

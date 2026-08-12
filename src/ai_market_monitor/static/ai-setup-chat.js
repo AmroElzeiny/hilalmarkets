@@ -135,6 +135,21 @@
       const error = new Error(message || "The request could not be completed.");
       error.status = response.status;
       error.payload = payload?.id ? payload : null;
+      // Whether trying again could possibly help. The server already knows — a busy
+      // platform will clear, an exhausted daily allowance will not — and telling somebody
+      // to "retry below" when the answer can only be the same is how a beginner ends up
+      // clicking a dead button instead of using the Builder that still works.
+      //
+      // The server says so in two shapes: a turn envelope carries `error.retryable`, an
+      // ordinary refusal carries it on the detail. Read both, and only fall back to the
+      // status code when neither said anything.
+      const stated = payload?.error?.retryable ?? (
+        typeof detail === "object" && detail !== null ? detail.retryable : undefined
+      );
+      error.retryable = stated === undefined
+        ? response.status >= 500 || response.status === 429
+        : stated !== false;
+      if (payload?.error?.message) error.message = payload.error.message;
       throw error;
     }
     return payload;
@@ -924,6 +939,12 @@
       chat = await send();
       openRuleForm = null;
       render();
+      // The selected list and method live on the draft this action just changed, so the
+      // options are re-read rather than assumed. Assuming would leave the previous
+      // choice highlighted after a change, which is worse than not highlighting at all.
+      if (UNIVERSE_ACTIONS.has(action)) {
+        await loadUniverseOptions();
+      }
     } catch (error) {
       if (error.payload?.id) { chat = error.payload; render(); }
       showError(error);
@@ -933,6 +954,14 @@
       updateApprovalState();
     }
   }
+
+  //: Actions that change what the "which coins" step should show.
+  const UNIVERSE_ACTIONS = new Set([
+    "select_universe",
+    "select_watchlist",
+    "select_methodology",
+    "set_explicit_assets",
+  ]);
 
   function builderActionLabel(action) {
     return {
@@ -946,6 +975,10 @@
       update_condition: "Saving your rule",
       remove_condition: "Removing that rule",
       arrange_conditions: "Rearranging your rules",
+      group_conditions: "Grouping those rules",
+      ungroup_conditions: "Removing that grouping",
+      set_group_operator: "Changing how that group works",
+      move_condition: "Moving that rule",
       apply_starter: "Setting up your starting point",
     }[action] || "Saving";
   }
@@ -1023,6 +1056,23 @@
     return box;
   }
 
+  //: The governed answers for "which coins" and "under which method", read from the
+  //  server. Never a list written in this file: a methodology id hard-coded here would
+  //  be a Sharia decision made in JavaScript.
+  let universeOptions = null;
+
+  async function loadUniverseOptions() {
+    if (!chat?.id) return null;
+    try {
+      universeOptions = await request(`/sessions/${chat.id}/universe-options`);
+    } catch (error) {
+      // A failed read must not blank the step. The choices simply stay as they were,
+      // and the person is told rather than shown an empty list they cannot act on.
+      universeOptions = universeOptions || {load_failed: true};
+    }
+    return universeOptions;
+  }
+
   function renderBuilderAssets(state) {
     const box = section(
       "Which coins should it watch?",
@@ -1039,6 +1089,23 @@
       ));
     }
     box.append(row);
+
+    for (const notice of universeOptions?.notices || []) {
+      box.append(element("p", "gb-section-hint", notice));
+    }
+    if (universeOptions?.load_failed) {
+      box.append(element(
+        "p",
+        "gb-section-hint",
+        "Your lists and screening methods could not be loaded just now. Reload to try again.",
+      ));
+    }
+
+    if (state.universe_mode === "approved_watchlist") {
+      box.append(renderWatchlistPicker());
+    }
+    box.append(renderMethodologyPicker(state));
+
     if (state.universe_mode === "explicit_assets") {
       const field = element("div", "gb-inline-field");
       const entry = document.createElement("input");
@@ -1054,6 +1121,79 @@
       });
       field.append(entry, save);
       box.append(field);
+      const chosen = universeOptions?.explicit_assets || [];
+      if (chosen.length) {
+        box.append(element(
+          "p",
+          "gb-section-hint",
+          `Watching: ${chosen.join(", ")}. These are still screened before anything runs.`,
+        ));
+      }
+    }
+    return box;
+  }
+
+  function renderWatchlistPicker() {
+    const box = element("div", "gb-subsection");
+    box.dataset.testid = "guided-builder-watchlists";
+    box.append(element("p", "gb-field-label", "Which of your lists?"));
+    const lists = universeOptions?.watchlists || [];
+    if (!lists.length) {
+      box.append(element(
+        "p",
+        "gb-section-hint",
+        "You have no Favorites lists yet. Make one from Halal Assets, "
+        + "or choose every eligible coin instead.",
+      ));
+      return box;
+    }
+    const row = element("div", "gb-chip-row");
+    for (const list of lists) {
+      const count = list.asset_count === 1 ? "1 coin" : `${list.asset_count} coins`;
+      row.append(chipButton(
+        `${list.name} (${count})`,
+        list.empty_reason || (list.is_default ? "Your default list." : null),
+        Boolean(list.selected),
+        () => sendBuilderAction("select_watchlist", {value: list.watchlist_id}),
+      ));
+    }
+    box.append(row);
+    return box;
+  }
+
+  function renderMethodologyPicker(state) {
+    const box = element("div", "gb-subsection");
+    box.dataset.testid = "guided-builder-methodology";
+    box.append(element("p", "gb-field-label", "Which screening method?"));
+    const methods = universeOptions?.methodologies || [];
+    if (!methods.length) {
+      box.append(element(
+        "p",
+        "gb-section-hint",
+        state.methodology_summary
+        || "No screening method is published yet, so nothing can be monitored until one is.",
+      ));
+      return box;
+    }
+    const row = element("div", "gb-chip-row");
+    for (const method of methods) {
+      row.append(chipButton(
+        method.label,
+        method.explanation,
+        Boolean(method.selected),
+        () => sendBuilderAction("select_methodology", {value: method.methodology_id}),
+      ));
+    }
+    box.append(row);
+    // Who stands behind the chosen method. Shown because a screening result means
+    // nothing without the authority and the date attached to it.
+    const chosen = methods.find((item) => item.selected);
+    if (chosen) {
+      const parts = [];
+      if (chosen.governing_body) parts.push(chosen.governing_body);
+      if (chosen.reviewer_group) parts.push(`reviewed by ${chosen.reviewer_group}`);
+      if (chosen.effective_from) parts.push(`in effect from ${chosen.effective_from}`);
+      if (parts.length) box.append(element("p", "gb-section-hint", `${parts.join(" · ")}.`));
     }
     return box;
   }
@@ -1317,25 +1457,187 @@
     }[unit] || "";
   }
 
+  //: Which rules the person has ticked for grouping. Kept out of the draft on purpose:
+  //  a selection is not a change to the strategy, and storing it would put a scratch
+  //  value on the object every approval hash is taken over.
+  let groupSelection = new Set();
+
+  function logicLabel(operator) {
+    const choice = (builderContract?.logic || []).find((item) => item.value === operator);
+    return choice ? choice.label : operator;
+  }
+
+  function conditionLabel(state, nodeId) {
+    const found = (state.conditions || []).find((item) => item.node_id === nodeId);
+    return found?.summary || found?.rendered || "This rule";
+  }
+
   function renderBuilderLogic(state) {
     const box = section(
       "How do these rules go together?",
-      "All of them at once, or any one on its own.",
+      "Tick two or more rules to put them in a group. A group can sit inside another one.",
     );
     box.dataset.testid = "guided-builder-logic";
+
+    const rows = state.structure || [];
+    if (!rows.length) {
+      // No stored shape yet: fall back to the flat join so the step is never empty.
+      const row = element("div", "gb-chip-row");
+      for (const choice of (builderContract?.logic || []).filter((i) => i.value !== "not")) {
+        row.append(chipButton(
+          choice.label,
+          choice.explanation,
+          (state.join || "and") === choice.value,
+          () => sendBuilderAction("arrange_conditions", {
+            order: (state.conditions || []).map((item) => item.node_id),
+            join: choice.value,
+          }),
+        ));
+      }
+      box.append(row);
+      return box;
+    }
+
+    groupSelection = new Set(
+      [...groupSelection].filter((id) => rows.some((row) => row.node_id === id)),
+    );
+
+    box.append(renderLogicTree(state, rows));
+    box.append(renderGroupControls(state, rows));
+    return box;
+  }
+
+  function renderLogicTree(state, rows) {
+    const tree = element("div", "gb-logic-tree");
+    tree.dataset.testid = "guided-builder-logic-tree";
+    for (const row of rows) {
+      tree.append(renderLogicRow(state, row));
+    }
+    return tree;
+  }
+
+  function renderLogicRow(state, row) {
+    const line = element("div", "gb-logic-row");
+    line.dataset.nodeId = row.node_id;
+    line.dataset.kind = row.kind;
+    line.dataset.depth = String(row.depth);
+    // Indentation is the whole point of the view: it is how a person sees that one rule
+    // sits inside a group rather than beside it.
+    line.style.marginInlineStart = `${(row.depth - 1) * 18}px`;
+
+    if (row.kind === "group") {
+      line.append(element("span", "gb-logic-badge", logicLabel(row.operator)));
+      const controls = element("div", "gb-chip-row");
+      for (const choice of builderContract?.logic || []) {
+        const arity = builderContract?.boolean_limits?.arity?.[choice.value];
+        const max = Array.isArray(arity) ? arity[1] : null;
+        if (max !== null && max !== undefined && row.child_ids.length > max) continue;
+        controls.append(chipButton(
+          choice.label,
+          choice.explanation,
+          row.operator === choice.value,
+          () => sendBuilderAction("set_group_operator", {
+            group_id: row.node_id,
+            operator: choice.value,
+          }),
+        ));
+      }
+      if (row.parent_id) {
+        const remove = element("button", "gb-chip gb-chip-quiet", "Remove grouping");
+        remove.type = "button";
+        remove.addEventListener("click", () =>
+          sendBuilderAction("ungroup_conditions", { group_id: row.node_id }));
+        controls.append(remove);
+      }
+      line.append(controls);
+      return line;
+    }
+
+    const label = element("label", "gb-logic-rule");
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    tick.checked = groupSelection.has(row.node_id);
+    tick.addEventListener("change", () => {
+      if (tick.checked) groupSelection.add(row.node_id);
+      else groupSelection.delete(row.node_id);
+      renderGuidedBuilder();
+    });
+    label.append(tick);
+    label.append(element("span", null, conditionLabel(state, row.node_id)));
+    line.append(label);
+
+    // Somewhere to move this rule to. Only groups it is not already inside are offered,
+    // so the list never contains a move that would do nothing or fail.
+    const targets = (state.structure || []).filter(
+      (item) => item.kind === "group" && item.node_id !== row.parent_id,
+    );
+    if (targets.length) {
+      const move = element("div", "gb-chip-row");
+      for (const target of targets) {
+        move.append(chipButton(
+          `Move into “${logicLabel(target.operator)}”`,
+          null,
+          false,
+          () => sendBuilderAction("move_condition", {
+            node_id: row.node_id,
+            group_id: target.node_id,
+          }),
+        ));
+      }
+      line.append(move);
+    }
+    return line;
+  }
+
+  function renderGroupControls(state, rows) {
+    const box = element("div", "gb-logic-actions");
+    box.dataset.testid = "guided-builder-group-actions";
+    const chosen = [...groupSelection];
+    const limits = builderContract?.boolean_limits;
+
+    const hint = element("p", "gb-section-hint");
+    if (!chosen.length) {
+      hint.textContent = "Tick rules above to group them together.";
+      box.append(hint);
+      return box;
+    }
+
     const row = element("div", "gb-chip-row");
-    for (const choice of (builderContract?.logic || []).filter((item) => item.value !== "not")) {
+    for (const choice of builderContract?.logic || []) {
+      const arity = limits?.arity?.[choice.value];
+      const min = Array.isArray(arity) ? arity[0] : 2;
+      const max = Array.isArray(arity) ? arity[1] : null;
+      // The button is only offered when the selection is a size this grouping accepts.
+      // "None of these" takes exactly one rule, so it appears only for a single tick.
+      if (chosen.length < min) continue;
+      if (max !== null && max !== undefined && chosen.length > max) continue;
       row.append(chipButton(
-        choice.label,
+        `Group as “${choice.label}”`,
         choice.explanation,
-        (state.join || "and") === choice.value,
-        () => sendBuilderAction("arrange_conditions", {
-          order: (state.conditions || []).map((item) => item.node_id),
-          join: choice.value,
-        }),
+        false,
+        () => {
+          groupSelection = new Set();
+          sendBuilderAction("group_conditions", {
+            node_ids: chosen,
+            operator: choice.value,
+          });
+        },
       ));
     }
+    if (!row.childElementCount) {
+      hint.textContent = "Tick two or more rules that sit together to group them.";
+      box.append(hint);
+      return box;
+    }
     box.append(row);
+    if (limits) {
+      box.append(element(
+        "p",
+        "gb-section-hint",
+        `You can nest groups up to ${limits.max_depth} levels deep, `
+        + `with ${limits.max_nodes} parts in total.`,
+      ));
+    }
     return box;
   }
 
@@ -1438,7 +1740,13 @@
       }
       const failed = optimisticMessages.get(requestPayload.client_message_id);
       if (failed) optimisticMessages.set(requestPayload.client_message_id, {
-        ...failed, pending: false, failed: true,
+        ...failed,
+        pending: false,
+        failed: true,
+        // Carried through so the bubble can say what actually happened instead of
+        // promising a retry that cannot work.
+        failure_reason: error.message || "",
+        failure_retryable: error.retryable !== false,
       });
       showError(error);
     } finally {
@@ -1576,6 +1884,10 @@
     // whether or not the assistant is reachable.
     await loadBuilderContract();
     await loadOrCreate();
+    // The person's own lists and the published screening methods. Loaded before the
+    // first render so the "which coins" step is complete from the start, with no
+    // assistant involved in filling it.
+    await loadUniverseOptions();
     render();
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     if (

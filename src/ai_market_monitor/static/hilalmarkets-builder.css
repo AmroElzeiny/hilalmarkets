@@ -131,6 +131,96 @@ body.ai-canvas-active .builder-shell{margin-right:370px}
   gap: 8px;
 }
 
+/* The Watchlist and screening-method pickers sit inside the "which coins" step rather
+   than beside it, because choosing a list and choosing the method it is screened under
+   are one decision to the person making it. */
+.gb-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--dash-line);
+}
+
+/* The Boolean shape, drawn as an indented tree.
+
+   A person needs to see that a rule sits *inside* a group rather than beside it, or the
+   difference between "A and B or C" and "A and (B or C)" is invisible — and those are
+   two different strategies. Indentation carries the nesting, the left rule carries the
+   eye down the group, and the badge names the join in the same words as the buttons. */
+.gb-logic-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gb-logic-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--dash-line);
+  background: var(--dash-panel);
+}
+
+.gb-logic-row[data-kind="group"] {
+  border-style: dashed;
+  background: transparent;
+}
+
+.gb-logic-row[data-depth="1"] {
+  border-left-width: 3px;
+}
+
+.gb-logic-badge {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--dash-line);
+  color: var(--dash-text);
+}
+
+.gb-logic-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.gb-logic-rule input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.gb-logic-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.gb-chip-quiet {
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  /* Deep nesting cannot indent forever on a phone, so the indent stops growing and the
+     dashed group border keeps carrying the structure. */
+  .gb-logic-row {
+    margin-inline-start: 0 !important;
+    border-left-width: 3px;
+  }
+}
+
 .gb-chip,
 .gb-button,
 .gb-starter {

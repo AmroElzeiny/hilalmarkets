@@ -18,6 +18,8 @@ from pydantic import BaseModel, ValidationError
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.services.agent_tools import strict_json_schema
 from ai_market_monitor.services.ai_setup_evaluator_control import consume_evaluator_llm_fault
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class StructuredCallError(ValueError):
@@ -229,16 +231,36 @@ async def structured_call[ModelT: BaseModel](
     try:
         response_payload = consume_evaluator_llm_fault()
         if response_payload is None:
-            async with httpx.AsyncClient(
-                base_url=str(settings.openai_base_url).rstrip("/"),
-                timeout=httpx.Timeout(
+            response = await provider_request(
+                settings,
+                "POST",
+                f"{str(settings.openai_base_url).rstrip('/')}/responses",
+                provider="openai",
+                operation="responses",
+                # One paid answer per turn: this call is not repeated.
+                retry=False,
+                model=model,
+                timeout=(
                     timeout_seconds
                     if timeout_seconds is not None
                     else settings.openai_timeout_seconds
                 ),
+                # The turn owns the clock. Retrying past the caller's own timeout would
+                # buy a paid answer that arrives after the turn has already been
+                # abandoned, so the whole guarded call fits inside the one bound.
+                deadline_seconds=float(
+                    timeout_seconds
+                    if timeout_seconds is not None
+                    else settings.openai_timeout_seconds
+                ),
+                # ``store=false`` above means the provider keeps nothing, so a repeat is
+                # a fresh generation rather than a duplicated record. It still costs
+                # money, which is why the deadline, not optimism, bounds it.
+                mutation_committed=False,
                 transport=transport,
-            ) as client:
-                response = await client.post("/responses", headers=headers, json=request)
+                headers=headers,
+                json=request,
+            )
             response.raise_for_status()
             response_payload = response.json()
         usage = dict(response_payload.get("usage") or {})
@@ -247,6 +269,18 @@ async def structured_call[ModelT: BaseModel](
             usage["_setup_service_tier"] = returned_service_tier
         raw_output = response_output_text(response_payload)
         parsed = schema_model.model_validate_json(raw_output)
+    except ProviderCallError as exc:
+        # The shared circuit breaker refused before anything was sent. This used to be a
+        # second breaker living inside the agent, with its own Redis coordination and its
+        # own state — so one code path could believe the provider was down while another
+        # kept calling it. There is one breaker now, and this is how its refusal reaches
+        # the turn in the vocabulary the turn already understands.
+        raise StructuredCallError(
+            "SETUP_AGENT_CIRCUIT_OPEN",
+            "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
+            retryable=True,
+            stage=stage,
+        ) from exc
     except httpx.ConnectTimeout as exc:
         raise StructuredCallError(
             "TARGET_CONNECT_TIMEOUT",

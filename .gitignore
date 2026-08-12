@@ -6,6 +6,11 @@
 
 # Python environments and caches
 .venv/
+# Open Interpreter's own environment. Deliberately separate from .venv: it needs Python
+# 3.11 while the product uses 3.12, and it pulls in litellm, selenium and matplotlib,
+# which would change what the release gate's `pip check` and check_dependency_lock.py
+# see. Rebuild it with tools/oi/bootstrap.ps1 or tools/oi/bootstrap.sh.
+.oi-venv/
 venv/
 env/
 **/__pycache__/

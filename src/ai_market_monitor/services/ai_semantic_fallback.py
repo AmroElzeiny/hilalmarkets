@@ -22,6 +22,7 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.services.interpreter import RuleBasedStrategyInterpreter
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class AISemanticFallbackClient(Protocol):
@@ -123,12 +124,22 @@ class OpenAISemanticFallbackClient:
             "Authorization": f"Bearer {api_key.get_secret_value()}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.openai_base_url).rstrip("/"),
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+            provider="openai",
+            operation="semantic_fallback",
+            # One paid answer per turn: this call is not repeated.
+            retry=False,
+            model=str(request_payload.get("model") or ""),
             timeout=self.settings.openai_timeout_seconds,
+            deadline_seconds=float(self.settings.openai_timeout_seconds),
+            mutation_committed=False,
             transport=self.transport,
-        ) as client:
-            response = await client.post("/responses", headers=headers, json=request_payload)
+            headers=headers,
+            json=request_payload,
+        )
         response.raise_for_status()
         return _loads_json_object(_extract_output_text(response.json()))
 

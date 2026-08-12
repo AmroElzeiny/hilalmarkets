@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -12,6 +11,8 @@ from ai_market_monitor.schemas.capability_extensions import (
     MechanicRepair,
     MechanicReview,
 )
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class CapabilityExtensionAIError(RuntimeError):
@@ -157,41 +158,41 @@ class CapabilityExtensionAI:
             if service_tier == "flex"
             else max(120, self.settings.openai_timeout_seconds)
         )
-        last_error: Exception | None = None
-        for attempt in range(1, self.settings.capability_extension_ai_max_attempts + 1):
-            try:
-                async with httpx.AsyncClient(
-                    base_url=str(self.settings.openai_base_url).rstrip("/"),
-                    timeout=timeout,
-                    transport=self.transport,
-                ) as client:
-                    response = await client.post("/responses", headers=headers, json=request)
-                if response.status_code in {408, 429, 500, 502, 503, 504}:
-                    response.raise_for_status()
-                response.raise_for_status()
-                body = response.json()
-                self.last_usage = dict(body.get("usage") or {})
-                return json.loads(_output_text(body))
-            except httpx.HTTPStatusError as exc:
-                last_error = exc
-                if (
-                    exc.response.status_code not in {408, 429, 500, 502, 503, 504}
-                    or attempt >= self.settings.capability_extension_ai_max_attempts
-                ):
-                    break
-                retry_after = exc.response.headers.get("Retry-After")
-                delay = (
-                    float(retry_after)
-                    if retry_after and retry_after.isdigit()
-                    else 2 ** (attempt - 1)
-                )
-                await asyncio.sleep(min(10, delay))
-            except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                last_error = exc
-                break
-        raise CapabilityExtensionAIError(
-            str(last_error or "OpenAI mechanic request failed")
-        ) from last_error
+        # The retry decision is not made here. This module used to carry its own copy of
+        # "which statuses are worth another go" and its own Retry-After parser, and a
+        # second copy of a rule like that is a rule that drifts: the shared matrix knew
+        # about 409 and 507 and both forms of the Retry-After header, this one did not.
+        attempts = max(1, self.settings.capability_extension_ai_max_attempts)
+        try:
+            response = await provider_request(
+                self.settings,
+                "POST",
+                f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+                provider="openai",
+                operation="capability_extension",
+                model=model,
+                timeout=timeout,
+                deadline_seconds=float(timeout) * attempts,
+                mutation_committed=False,
+                transport=self.transport,
+                headers=headers,
+                json=request,
+            )
+            response.raise_for_status()
+            body = response.json()
+            self.last_usage = dict(body.get("usage") or {})
+            return json.loads(_output_text(body))
+        except (
+            httpx.HTTPError,
+            ProviderCallError,
+            KeyError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise CapabilityExtensionAIError(
+                str(exc or "OpenAI mechanic request failed")
+            ) from exc
 
 
 def _draft_instructions() -> str:

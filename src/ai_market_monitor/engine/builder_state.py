@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ai_market_monitor.engine.builder_boolean import describe_structure
 from ai_market_monitor.engine.builder_operations import (
     condition_nodes,
     current_join,
@@ -46,6 +47,11 @@ def builder_state(draft: StrategyDraftV2, *, editable: bool = True) -> dict[str,
         "methodology_summary": _methodology_summary(draft),
         "conditions": conditions,
         "join": current_join(draft.condition_ast),
+        # The shape of the logic, so the Builder can draw the groups a person built
+        # instead of a flat list. ``join`` alone describes only the outermost join, which
+        # is why nested logic used to be invisible in the Builder and got flattened by
+        # the next rearrange. One row per node, each naming its parent.
+        "structure": describe_structure(draft.condition_ast),
         "steps": _steps(draft, nodes_count=len(nodes)),
         "open_questions": [
             {

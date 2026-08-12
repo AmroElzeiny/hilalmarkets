@@ -474,9 +474,19 @@ class CapabilityCoverageService:
         chat: AISetupChatSession,
         operation: str,
         usage: dict[str, Any] | None,
-    ) -> None:
+        reservation_id: UUID | None = None,
+        outcome: str | None = None,
+        rollout_version: str | None = None,
+    ) -> AIUsageEvent | None:
+        """Write one ledger row, and hand it back so the caller can settle against it.
+
+        Returns ``None`` when the provider reported nothing at all, which is not the same
+        as "cost nothing" — the caller decides what an attempt with no usage means, and
+        the budget settles at the amount that was held rather than at zero.
+        """
+
         if not usage:
-            return
+            return None
         input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
         output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
         input_details = (
@@ -515,31 +525,39 @@ class CapabilityCoverageService:
         correlation_id = current_ai_usage_correlation_id()
         if correlation_id:
             recorded_usage["_traceedge_correlation_id"] = correlation_id
-        session.add(
-            AIUsageEvent(
-                user_id=chat.user_id,
-                chat_session_id=chat.id,
-                operation=operation,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                input_tokens=input_tokens,
-                cached_input_tokens=cached,
-                output_tokens=output_tokens,
-                reasoning_tokens=reasoning,
-                estimated_cost_usd=cost,
-                pricing_source=(
-                    "reserved_from_openai_fast_pricing"
-                    if used_reserved_cost and service_tier in {"fast", "priority"}
-                    else "reserved_from_openai_pricing"
-                    if used_reserved_cost
-                    else "configured_from_openai_fast_pricing"
-                    if service_tier in {"fast", "priority"}
-                    else "configured_from_openai_pricing"
-                ),
-                raw_usage=recorded_usage,
-                created_at=datetime.now(UTC),
-            )
+        event = AIUsageEvent(
+            user_id=chat.user_id,
+            chat_session_id=chat.id,
+            operation=operation,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            input_tokens=input_tokens,
+            cached_input_tokens=cached,
+            output_tokens=output_tokens,
+            reasoning_tokens=reasoning,
+            estimated_cost_usd=cost,
+            pricing_source=(
+                "reserved_from_openai_fast_pricing"
+                if used_reserved_cost and service_tier in {"fast", "priority"}
+                else "reserved_from_openai_pricing"
+                if used_reserved_cost
+                else "configured_from_openai_fast_pricing"
+                if service_tier in {"fast", "priority"}
+                else "configured_from_openai_pricing"
+            ),
+            reservation_id=reservation_id,
+            provider_request_id=str(
+                usage.get("_setup_provider_request_id") or ""
+            )[:160]
+            or None,
+            service_tier=service_tier,
+            outcome=outcome,
+            rollout_version=rollout_version,
+            raw_usage=recorded_usage,
+            created_at=datetime.now(UTC),
         )
+        session.add(event)
+        return event
 
     async def record_clarification_evidence(
         self,

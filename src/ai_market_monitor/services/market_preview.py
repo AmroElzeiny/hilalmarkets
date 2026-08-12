@@ -15,6 +15,8 @@ from ai_market_monitor.provider_context import ProviderContextService
 from ai_market_monitor.schemas.onboarding import MarketPreviewResponse
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.interfaces import Candle, MarketDataProvider
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 
 DEFAULT_PREVIEW_SYMBOLS_BY_QUOTE = {
     "USDT": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
@@ -616,17 +618,22 @@ class CcxtMarketDataProvider:
                 f"Bearer {self.settings.market_metadata_api_key.get_secret_value()}"
             )
         try:
-            async with httpx.AsyncClient(
-                timeout=self.settings.market_metadata_timeout_seconds
-            ) as client:
-                response = await client.post(
-                    str(self.settings.market_metadata_api_url),
-                    headers=headers,
-                    json={"exchange": exchange, "symbols": symbols},
-                )
+            response = await provider_request(
+                self.settings,
+                "POST",
+                str(self.settings.market_metadata_api_url),
+                provider="market_metadata",
+                operation="symbol_metadata",
+                timeout=self.settings.market_metadata_timeout_seconds,
+                # A metadata lookup changes nothing, so a transient failure is worth
+                # another attempt.
+                mutation_committed=False,
+                headers=headers,
+                json={"exchange": exchange, "symbols": symbols},
+            )
             response.raise_for_status()
             payload = response.json()
-        except (httpx.HTTPError, ValueError, TypeError):
+        except (httpx.HTTPError, ProviderCallError, ValueError, TypeError):
             return {}
         rows = payload.get("symbols", {}) if isinstance(payload, dict) else {}
         if not isinstance(rows, dict):

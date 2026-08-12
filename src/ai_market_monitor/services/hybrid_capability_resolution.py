@@ -16,6 +16,7 @@ from ai_market_monitor.engine.capability_resolver import (
     ResolutionStatus,
 )
 from ai_market_monitor.services.capability_registry import OpenAIEmbeddingClient
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class CapabilityRerankDecision(BaseModel):
@@ -76,12 +77,22 @@ class OpenAICapabilityReranker:
             "Authorization": f"Bearer {self.settings.openai_api_key.get_secret_value()}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.openai_base_url).rstrip("/"),
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+            provider="openai",
+            operation="capability_rerank",
+            # One paid answer per turn: this call is not repeated.
+            retry=False,
+            model=str(request_payload.get("model") or ""),
             timeout=self.settings.openai_timeout_seconds,
+            deadline_seconds=float(self.settings.openai_timeout_seconds),
+            mutation_committed=False,
             transport=self.transport,
-        ) as client:
-            response = await client.post("/responses", headers=headers, json=request_payload)
+            headers=headers,
+            json=request_payload,
+        )
         response.raise_for_status()
         body = response.json()
         self.last_usage = dict(body.get("usage") or {})

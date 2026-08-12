@@ -95,6 +95,15 @@ class BuilderMechanic:
     #: a person sees "not yet" instead of wondering where it went.
     available: bool = True
     unavailable_reason: str | None = None
+    #: Whether a beginner can pick this without extra explanation. A hint for how the
+    #: Builder groups its list — never a gate. It used to decide which capabilities the
+    #: Builder offered at all, which left 455 of the 502 launch-supported mechanics
+    #: reachable only by asking the assistant. Authoring must never require the AI.
+    beginner_friendly: bool = False
+    #: The data feeds this needs beyond candles, and whether the configured adapter
+    #: actually provides them. Sent so the form can say which feed is missing instead of
+    #: offering a rule that would compile and then never evaluate.
+    provider_requirements_met: bool = True
     examples: tuple[str, ...] = field(default_factory=tuple)
     #: Which of the fields above belong to the capability's own registry schema. The
     #: comparison, the side and the candle size live on the rule itself, not inside the
@@ -586,16 +595,50 @@ def _number_or_none(value: Any) -> float | None:
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
-def _capability_mechanic(spec: CapabilitySpec) -> BuilderMechanic:
-    available = spec.executable and spec.availability == "available"
-    reason: str | None = None
-    if not spec.executable:
-        reason = "HilalMarkets can read this rule but cannot run it yet."
-    elif spec.availability != "available":
-        reason = "This rule is not switched on for your account yet."
+def _capability_mechanic(
+    spec: CapabilitySpec,
+    *,
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> BuilderMechanic:
     providers = spec.provider_requirements or (
         (spec.provider_required,) if spec.provider_required else ()
     )
+    # A feed the configured adapter does not implement is the third way a rule can be
+    # unrunnable, alongside "cannot execute" and "not switched on". It used to be handled
+    # by hiding the capability from the Builder entirely, which is why 142 launch
+    # capabilities could only be authored by asking the assistant. Saying which feed is
+    # missing is both honest and something a person can act on.
+    missing_providers = tuple(
+        item for item in providers if item.strip().casefold() not in configured_providers
+    )
+    providers_met = not missing_providers
+    # One capability can be switched off on its own — a formula found to be wrong, a feed
+    # that started returning nonsense — without taking the Builder, the assistant or the
+    # other 501 capabilities down with it. Switched off still means *shown* with a reason,
+    # never hidden: a person who used this rule yesterday needs to know why it stopped,
+    # and a capability that silently disappears looks like lost work.
+    switched_off = spec.key in disabled_capabilities
+    available = (
+        spec.executable
+        and spec.availability == "available"
+        and providers_met
+        and not switched_off
+    )
+    reason: str | None = None
+    if switched_off:
+        reason = "This rule is paused right now. Everything else still works."
+    elif not spec.executable:
+        reason = "HilalMarkets can read this rule but cannot run it yet."
+    elif spec.availability != "available":
+        reason = "This rule is not switched on for your account yet."
+    elif missing_providers:
+        feeds = ", ".join(sorted(missing_providers))
+        reason = (
+            f"This rule needs market data HilalMarkets does not receive yet ({feeds}). "
+            "You can still set it up; it cannot be approved for monitoring until the "
+            "data feed is connected."
+        )
     operators = tuple(
         BuilderChoice(item.value, COMPARATOR_LABELS[item][0], COMPARATOR_LABELS[item][1])
         for item in Comparator
@@ -688,42 +731,89 @@ def _capability_mechanic(spec: CapabilitySpec) -> BuilderMechanic:
         provider_requirements=tuple(providers),
         available=available,
         unavailable_reason=reason,
+        beginner_friendly=bool(spec.beginner_friendly),
+        provider_requirements_met=providers_met,
         examples=tuple(spec.examples[:2]),
         registry_parameter_names=frozenset(item.name for item in registry_fields),
     )
 
 
-@lru_cache(maxsize=1)
-def capability_mechanics() -> tuple[BuilderMechanic, ...]:
-    """Registered capabilities, as Builder forms.
+def disabled_capabilities_from(raw: str) -> frozenset[str]:
+    """Read the paused-capability list from configuration.
 
-    Only capabilities a beginner can pick without extra explanation are offered, and
-    only when they need no separate data feed. The rest stay reachable through Setup
-    Chat, where the assistant can explain them — they are reported as AI-assisted rather
-    than hidden.
+    One reader, so the catalogue the Builder shows and the check that refuses an action
+    can never disagree about which capabilities are paused. Two readers would eventually
+    let a person build a rule the server then refuses, with no explanation on either side.
     """
 
-    return tuple(
-        _capability_mechanic(spec)
-        for spec in sorted(all_capabilities(), key=lambda item: item.label)
-        if spec.beginner_friendly and not spec.provider_required
+    return frozenset(
+        item.strip()
+        for item in str(raw or "").replace(";", ",").split(",")
+        if item.strip()
     )
 
 
-@lru_cache(maxsize=1)
-def builder_mechanics() -> tuple[BuilderMechanic, ...]:
+@lru_cache(maxsize=32)
+def capability_mechanics(
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> tuple[BuilderMechanic, ...]:
+    """Every launch-supported capability, as a Builder form.
+
+    All of them, not a beginner-friendly subset. The Builder previously offered only
+    capabilities marked ``beginner_friendly`` that needed no extra data feed — 47 of the
+    502 that the platform actually supports — and pointed at Setup Chat for the rest.
+    That made the assistant the only way to author 90% of the product, so an AI outage,
+    an exhausted budget or a disabled flag took most of the feature set with it.
+
+    Difficulty and missing data feeds are now *described* rather than used to hide a
+    capability: ``beginner_friendly`` groups the list, ``provider_requirements`` and
+    ``unavailable_reason`` say what is needed and what is missing. Nothing here loosens
+    approval — an unavailable mechanic still cannot pass the provider gate.
+    """
+
+    return tuple(
+        _capability_mechanic(
+            spec,
+            configured_providers=configured_providers,
+            disabled_capabilities=disabled_capabilities,
+        )
+        for spec in sorted(all_capabilities(), key=lambda item: item.label)
+        if spec.executable and spec.availability == "available"
+    )
+
+
+@lru_cache(maxsize=32)
+def builder_mechanics(
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> tuple[BuilderMechanic, ...]:
     """Everything the Builder may offer, core grammar first."""
 
-    return (*core_mechanics(), *capability_mechanics())
+    return (
+        *core_mechanics(),
+        *capability_mechanics(configured_providers, disabled_capabilities),
+    )
 
 
-@lru_cache(maxsize=1)
-def mechanics_by_key() -> dict[str, BuilderMechanic]:
-    return {item.key: item for item in builder_mechanics()}
+@lru_cache(maxsize=32)
+def mechanics_by_key(
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> dict[str, BuilderMechanic]:
+    return {
+        item.key: item
+        for item in builder_mechanics(configured_providers, disabled_capabilities)
+    }
 
 
-def find_mechanic(key: str) -> BuilderMechanic | None:
-    return mechanics_by_key().get(key)
+def find_mechanic(
+    key: str,
+    *,
+    configured_providers: frozenset[str] = frozenset(),
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> BuilderMechanic | None:
+    return mechanics_by_key(configured_providers, disabled_capabilities).get(key)
 
 
 #: The screened-universe choices, in the platform's own vocabulary. The Builder never

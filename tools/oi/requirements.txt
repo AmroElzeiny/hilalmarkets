@@ -1,0 +1,85 @@
+# Open Interpreter for the HilalMarkets engineering assistant.
+#
+# These install into their OWN virtual environment (.oi-venv), never into the project's
+# .venv. Open Interpreter pulls in litellm, anthropic, google-generativeai, selenium and
+# matplotlib; putting those beside the product's pinned dependencies would change what
+# `pip check` and scripts/check_dependency_lock.py see, and the release gate checks both.
+#
+# Python 3.11 is required. open-interpreter 0.4.3 declares `python >=3.9,<3.12`, and the
+# project's own .venv is 3.12. That is a second reason the two environments are separate.
+#
+# Two of Open Interpreter's own pins cannot be satisfied as written. Both are relaxed on
+# purpose and recorded here rather than silently worked around:
+#
+#   html2text  Open Interpreter asks for >=2024.2.26,<2025.0.0. No release in that range
+#              is on PyPI any more - only 2018-2020 and 2025.4.15 remain. 2025.4.15 is
+#              used. Open Interpreter uses html2text only to turn a fetched web page into
+#              text, which this assistant does not do.
+#
+#   wget       Ships as a source archive only, so it cannot be installed with
+#              --only-binary. It is pure Python and needs no compiler; install it in a
+#              second step without that flag. It is imported at start-up by
+#              interpreter/terminal_interface/local_setup.py, so it cannot be skipped
+#              even though local models are never used.
+#
+# litellm must also be installed with --only-binary=:all:. Left to build from source it
+# demands a Rust toolchain that is neither needed nor present.
+#
+# litellm is pinned ABOVE Open Interpreter's floor, at 1.96.2, and this is required
+# rather than tidy. Open Interpreter always sets `max_tokens` (interpreter/core/llm/
+# llm.py sets it from the model's own limits when it is None), and current OpenAI
+# reasoning models reject that parameter outright:
+#
+#     Unsupported parameter: 'max_tokens' is not supported with this model.
+#     Use 'max_completion_tokens' instead.
+#
+# litellm 1.41.26 forwards `max_tokens` unchanged, so every single turn fails with HTTP
+# 400. 1.96.2 translates it. Verified with one live call on all three tiers.
+#
+# tiktoken is likewise above Open Interpreter's declared ceiling (<0.8.0): litellm 1.96
+# requires a newer one, and Open Interpreter only uses tiktoken to count tokens.
+#
+# The `local`, `os`, `server` and `safe` extras are deliberately NOT installed:
+#   local   would pull torch and transformers - a local model, explicitly out of scope
+#           for a small VPS.
+#   os      would give the assistant the screen, mouse and clipboard. It works on a
+#           repository and has no use for them.
+#   server  would expose an HTTP surface. There is no reason for one.
+
+open-interpreter==0.4.3
+
+# Installed with --only-binary=:all:
+litellm==1.96.2
+openai==2.54.0
+anthropic==0.37.1
+astor==0.8.1
+git-python==1.0.3
+google-generativeai==0.7.2
+html2image==2.0.7
+html2text==2025.4.15
+inquirer==3.4.1
+ipykernel==6.31.0
+jupyter-client==8.6.3
+matplotlib==3.11.1
+nltk==3.10.2
+platformdirs==4.11.2
+psutil==5.9.8
+pydantic==2.13.4
+pyperclip==1.11.0
+pyreadline3==3.5.6
+rich==13.9.4
+selenium==4.47.0
+Send2Trash==1.8.3
+setuptools
+shortuuid==1.0.13
+six==1.17.0
+starlette==0.37.2
+tiktoken==0.7.0
+tokentrim==0.1.13
+toml==0.10.2
+typer==0.12.5
+webdriver-manager==4.1.2
+yaspin==3.4.0
+
+# Installed WITHOUT --only-binary (source archive, pure Python, no compiler needed)
+wget==3.2

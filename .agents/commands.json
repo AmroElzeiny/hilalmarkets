@@ -1,0 +1,415 @@
+{
+  "version": 1,
+  "note": [
+    "The authoritative list of engineering commands for this repository.",
+    "",
+    "Discovered from .github/workflows/release-gate.yml, scripts/, CLAUDE.md and",
+    "docs/LOCAL_DEVELOPMENT.md. The release gate is the source of truth for what must",
+    "pass; where a local command differs from the gate, 'ci_equivalent' records the",
+    "gate's own wording so the two cannot drift apart unnoticed.",
+    "",
+    "scripts/check_oi_command_catalog.py fails if a gate step is missing from here.",
+    "",
+    "safety classes:",
+    "  safe_local        - reads or checks only. No paid call, no service, no state change.",
+    "  test_only         - runs against a local or throwaway database. Changes local state.",
+    "  credentialed_paid - makes real calls to a paid provider. Never run without a reason.",
+    "  staging_only      - points at a deployed non-production environment.",
+    "  production        - operator action. The engineering assistant never runs these."
+  ],
+  "python": ".venv/Scripts/python",
+  "commands": [
+    {
+      "id": "lint",
+      "title": "Lint every Python file",
+      "command": ".venv/Scripts/python -m ruff check .",
+      "ci_equivalent": "ruff check .",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all"],
+      "notes": "The release gate lints the whole repository, not only src/tests/scripts."
+    },
+    {
+      "id": "lint-fix",
+      "title": "Apply the safe lint fixes",
+      "command": ".venv/Scripts/python -m ruff check --fix .",
+      "safety": "safe_local",
+      "auto_run": false,
+      "areas": ["all"],
+      "notes": "Edits files. Read the diff before keeping it."
+    },
+    {
+      "id": "types",
+      "title": "Type-check both shipped packages",
+      "command": ".venv/Scripts/python -m mypy src/ai_market_monitor src/hm_chatbot_eval",
+      "ci_equivalent": "mypy src/ai_market_monitor src/hm_chatbot_eval",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all"],
+      "notes": "CLAUDE.md says 'mypy src', which also covers src/hm_oi. Both pass."
+    },
+    {
+      "id": "types-all",
+      "title": "Type-check everything under src, including engineering tooling",
+      "command": ".venv/Scripts/python -m mypy src",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all"]
+    },
+    {
+      "id": "offline-suites",
+      "title": "The fast offline suites",
+      "command": ".venv/Scripts/python -m pytest tests/unit tests/engine tests/interpreter tests/services -q -p no:randomly",
+      "safety": "test_only",
+      "auto_run": true,
+      "areas": ["engine", "services", "setup_chat", "compiler", "unit"],
+      "notes": "First thing to run for almost any change. No network, no provider."
+    },
+    {
+      "id": "targeted-test",
+      "title": "One test file or one test",
+      "command": ".venv/Scripts/python -m pytest <PATH>::<TEST> -q -p no:randomly",
+      "safety": "test_only",
+      "auto_run": true,
+      "areas": ["all"],
+      "notes": "Always start here. pytest-timeout is not installed - never pass --timeout."
+    },
+    {
+      "id": "integration",
+      "title": "Integration suite",
+      "command": ".venv/Scripts/python -m pytest tests/integration -q",
+      "safety": "test_only",
+      "auto_run": true,
+      "areas": ["api", "services", "setup_chat", "billing", "integration"]
+    },
+    {
+      "id": "backend-all",
+      "title": "Everything the release gate runs except the browser",
+      "command": ".venv/Scripts/python -m pytest --ignore=tests/browser",
+      "ci_equivalent": "pytest --ignore=tests/browser --junitxml=reports/backend-results.xml",
+      "safety": "test_only",
+      "auto_run": false,
+      "areas": ["all"],
+      "notes": "Slow. Run it before claiming a change is finished, not while iterating."
+    },
+    {
+      "id": "evaluator-tests",
+      "title": "Deterministic evaluator tests",
+      "command": ".venv/Scripts/python -m pytest tests/evaluator -q",
+      "ci_equivalent": "pytest tests/evaluator",
+      "safety": "test_only",
+      "auto_run": true,
+      "areas": ["evaluator", "setup_chat"],
+      "notes": "These are offline. The paid evaluator is 'eval-run' below."
+    },
+    {
+      "id": "browser",
+      "title": "Playwright browser suite",
+      "command": ".venv/Scripts/python -m pytest tests/browser -q",
+      "ci_equivalent": "pytest tests/browser --junitxml=reports/playwright/playwright-results.xml",
+      "safety": "test_only",
+      "auto_run": false,
+      "areas": ["frontend", "browser", "dashboard"],
+      "requires": ["chromium"],
+      "notes": "Needs 'browser-install' once. Starts a local server; nothing external."
+    },
+    {
+      "id": "browser-install",
+      "title": "Install the Chromium build Playwright uses",
+      "command": ".venv/Scripts/python -m playwright install chromium",
+      "ci_equivalent": "python -m playwright install --with-deps chromium",
+      "safety": "test_only",
+      "auto_run": false,
+      "areas": ["browser"]
+    },
+    {
+      "id": "replay",
+      "title": "Compiler regression probe on recorded turns",
+      "command": ".venv/Scripts/python scripts/replay_recorded_turns.py --run <RUN_ID>",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["setup_chat", "compiler", "engine"],
+      "notes": "Replays recorded user turns through the real interpreter. No model call, no cost. The best first check for any compiler change."
+    },
+    {
+      "id": "probe-envelope",
+      "title": "Replay one captured planner envelope through the compiler",
+      "command": ".venv/Scripts/python scripts/probe_planner_turn.py --envelope <FILE> --message \"<TEXT>\"",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["setup_chat", "compiler"],
+      "notes": "Offline. Shows the compiler's own typed reason for refusing a turn, which the evaluator artifacts do not record."
+    },
+    {
+      "id": "route-security",
+      "title": "Check every versioned API route is authenticated",
+      "command": ".venv/Scripts/python scripts/check_api_route_security.py",
+      "ci_equivalent": "python scripts/check_api_route_security.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["api", "security"]
+    },
+    {
+      "id": "release-invariants",
+      "title": "Check the release invariants",
+      "command": ".venv/Scripts/python scripts/check_release_invariants.py",
+      "ci_equivalent": "python scripts/check_release_invariants.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all", "release"],
+      "notes": "Plan catalog, customer wording, and files that must never be committed."
+    },
+    {
+      "id": "jinja",
+      "title": "Check the Jinja templates parse and use known blocks",
+      "command": ".venv/Scripts/python scripts/check_jinja_templates.py",
+      "ci_equivalent": "python scripts/check_jinja_templates.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["frontend", "templates"]
+    },
+    {
+      "id": "javascript",
+      "title": "Check the browser JavaScript",
+      "command": ".venv/Scripts/python scripts/check_javascript.py",
+      "ci_equivalent": "python scripts/check_javascript.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["frontend"]
+    },
+    {
+      "id": "dependency-lock",
+      "title": "Check dependency pins",
+      "command": ".venv/Scripts/python scripts/check_dependency_lock.py",
+      "ci_equivalent": "python scripts/check_dependency_lock.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["dependencies"]
+    },
+    {
+      "id": "pip-check",
+      "title": "Check the installed environment is consistent",
+      "command": ".venv/Scripts/python -m pip check",
+      "ci_equivalent": "python -m pip check",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["dependencies"]
+    },
+    {
+      "id": "eval-contracts",
+      "title": "Check the exported evaluator contracts still match the models",
+      "command": ".venv/Scripts/python scripts/export_setup_chat_eval_contracts.py --check",
+      "ci_equivalent": "python scripts/export_setup_chat_eval_contracts.py --check",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["evaluator", "schemas"]
+    },
+    {
+      "id": "charting-library",
+      "title": "Check the TradingView charting library placement",
+      "command": ".venv/Scripts/python scripts/check_tradingview_charting_library.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["frontend"]
+    },
+    {
+      "id": "oi-boundary",
+      "title": "Check the engineering assistant stays out of the product",
+      "command": ".venv/Scripts/python scripts/check_oi_boundary.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all", "release", "security"],
+      "notes": "Fails if any product module imports hm_oi, or if hm_oi imports the product."
+    },
+    {
+      "id": "oi-catalog",
+      "title": "Check this catalog still matches the release gate",
+      "command": ".venv/Scripts/python scripts/check_oi_command_catalog.py",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all", "release"]
+    },
+    {
+      "id": "migration-heads",
+      "title": "Check there is exactly one migration head",
+      "command": ".venv/Scripts/python -m alembic heads",
+      "ci_equivalent": "test \"$(alembic heads | wc -l)\" -eq 1",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["database"],
+      "notes": "More than one line means two migrations claim to be last. That breaks deploys."
+    },
+    {
+      "id": "migration-upgrade",
+      "title": "Apply migrations to the local database",
+      "command": ".venv/Scripts/python -m alembic upgrade head",
+      "ci_equivalent": "alembic upgrade 1acbd2e3f405 && alembic upgrade head",
+      "safety": "test_only",
+      "auto_run": false,
+      "areas": ["database"],
+      "notes": "Changes the local database. The gate also checks the upgrade path from an older revision."
+    },
+    {
+      "id": "git-status",
+      "title": "What is changed in the working tree",
+      "command": "git status --porcelain",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all"],
+      "notes": "This tree usually carries unrelated uncommitted work. Check before blaming a change for a failure."
+    },
+    {
+      "id": "git-diff",
+      "title": "The diff of one file or the whole tree",
+      "command": "git diff -- <PATH>",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all"]
+    },
+    {
+      "id": "artifact-drift",
+      "title": "Check the tests did not modify tracked files",
+      "command": "git diff --exit-code",
+      "ci_equivalent": "git diff --exit-code",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["all", "release"],
+      "notes": "The gate fails if running the tests changed a tracked file."
+    },
+    {
+      "id": "serve",
+      "title": "Run the application locally",
+      "command": ".venv/Scripts/python -m uvicorn ai_market_monitor.main:app --reload",
+      "safety": "test_only",
+      "auto_run": false,
+      "areas": ["api", "frontend"],
+      "requires": ["local .env"],
+      "notes": "Long-running. Needs a local .env, which this assistant may not read."
+    },
+    {
+      "id": "worker-smoke",
+      "title": "Smoke-test the background worker",
+      "command": ".venv/Scripts/python scripts/smoke_worker.py",
+      "safety": "test_only",
+      "auto_run": false,
+      "areas": ["worker"]
+    },
+    {
+      "id": "eval-doctor",
+      "title": "Check the paid evaluator is configured, without spending anything",
+      "command": ".venv/Scripts/hm-chatbot-eval doctor",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["evaluator"]
+    },
+    {
+      "id": "eval-plan",
+      "title": "Show what an evaluator run would cost before running it",
+      "command": ".venv/Scripts/hm-chatbot-eval plan --mode budget",
+      "safety": "safe_local",
+      "auto_run": true,
+      "areas": ["evaluator"],
+      "notes": "Always run this before 'eval-run'."
+    },
+    {
+      "id": "eval-run",
+      "title": "Run the paid Setup Chat evaluator",
+      "command": ".venv/Scripts/hm-chatbot-eval run --mode smoke",
+      "safety": "credentialed_paid",
+      "auto_run": false,
+      "areas": ["evaluator", "setup_chat"],
+      "requires": ["OPENAI_API_KEY", "budget approval"],
+      "notes": "Real money. Needs a stated reason and a budget. Prefer 'replay' and 'probe-envelope' first."
+    },
+    {
+      "id": "eval-isolated-smoke",
+      "title": "Paid end-to-end Setup Chat smoke against an isolated server",
+      "command": "powershell -File scripts/run_isolated_setup_chat_smoke.ps1 -Mode smoke -BudgetUsd 0.25",
+      "safety": "credentialed_paid",
+      "auto_run": false,
+      "areas": ["setup_chat", "evaluator"],
+      "requires": ["OPENAI_API_KEY", "budget approval"]
+    },
+    {
+      "id": "probe-live",
+      "title": "One real planner call, captured for offline replay afterwards",
+      "command": ".venv/Scripts/python scripts/probe_planner_turn.py --live --message \"<TEXT>\" --save <FILE>",
+      "safety": "credentialed_paid",
+      "auto_run": false,
+      "areas": ["setup_chat", "compiler"],
+      "requires": ["OPENAI_API_KEY"],
+      "notes": "A few tenths of a cent. Saves the envelope so the same turn is free from then on."
+    },
+    {
+      "id": "deployment-smoke",
+      "title": "Smoke-check a deployed environment",
+      "command": ".venv/Scripts/python scripts/deployment_smoke.py --base-url <URL>",
+      "safety": "staging_only",
+      "auto_run": false,
+      "areas": ["deployment"],
+      "notes": "Points at a running deployment. Never aim it at production from here."
+    },
+    {
+      "id": "beta-soak-audit",
+      "title": "Audit a private-beta soak window",
+      "command": ".venv/Scripts/python scripts/audit_private_beta_soak.py",
+      "safety": "staging_only",
+      "auto_run": false,
+      "areas": ["deployment", "release"]
+    },
+    {
+      "id": "prod-compose",
+      "title": "Production container stack",
+      "command": "docker compose -f docker-compose.prod.yml up -d",
+      "safety": "production",
+      "auto_run": false,
+      "areas": ["deployment"],
+      "notes": "Operator action. The engineering assistant refuses this."
+    }
+  ],
+  "test_selection": {
+    "note": "Smallest authoritative set first, then the adjacent regressions.",
+    "areas": {
+      "engine": {
+        "first": ["tests/engine", "tests/unit"],
+        "then": ["tests/interpreter", "tests/services", "replay"]
+      },
+      "compiler": {
+        "first": ["tests/unit", "tests/engine"],
+        "then": ["tests/interpreter", "tests/integration", "replay"]
+      },
+      "setup_chat": {
+        "first": ["tests/interpreter", "tests/unit"],
+        "then": ["tests/services", "tests/integration", "tests/evaluator", "replay"]
+      },
+      "services": {
+        "first": ["tests/services", "tests/unit"],
+        "then": ["tests/integration"]
+      },
+      "api": {
+        "first": ["tests/integration"],
+        "then": ["tests/services", "route-security"]
+      },
+      "database": {
+        "first": ["tests/integration"],
+        "then": ["migration-heads", "tests/unit"]
+      },
+      "frontend": {
+        "first": ["jinja", "javascript"],
+        "then": ["tests/browser"]
+      },
+      "worker": {
+        "first": ["tests/unit"],
+        "then": ["tests/integration", "worker-smoke"]
+      },
+      "evaluator": {
+        "first": ["tests/evaluator"],
+        "then": ["eval-contracts"]
+      },
+      "engineering_tooling": {
+        "first": ["tests/oi"],
+        "then": ["oi-boundary", "oi-catalog"]
+      }
+    }
+  }
+}

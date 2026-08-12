@@ -29,10 +29,11 @@ from ai_market_monitor.engine.turn_timing import (
     estimated_tokens,
     null_telemetry,
 )
-from ai_market_monitor.services.setup_chat_agent import (
-    _CIRCUIT_REDIS_COOLDOWN_SECONDS,
-    _CIRCUIT_REDIS_TIMEOUT_SECONDS,
-    SetupChatAgent,
+from ai_market_monitor.services.provider_reliability import (
+    REDIS_CIRCUIT_COOLDOWN_SECONDS,
+    REDIS_CIRCUIT_TIMEOUT_SECONDS,
+    CircuitBreaker,
+    RedisCircuitStateStore,
 )
 
 
@@ -204,6 +205,22 @@ class _FailingRedis:
         return self._fail()
 
 
+def _breaker(client: object) -> CircuitBreaker:
+    """The one breaker, coordinating through a Redis that is about to misbehave.
+
+    These tests used to reach into a second breaker that lived inside the Setup agent.
+    That breaker is gone — one provider had two of them, each with its own state, so a
+    failure one saw was a failure the other had never heard of. The rules being asserted
+    are unchanged; they are now asserted against the one owner.
+    """
+
+    return CircuitBreaker(
+        failure_threshold=5,
+        recovery_seconds=60.0,
+        store=RedisCircuitStateStore(client),
+    )
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("client_factory", (_HangingRedis, _FailingRedis))
 async def test_an_unreachable_breaker_is_bounded_and_permits_the_call(
@@ -215,29 +232,27 @@ async def test_an_unreachable_breaker_is_bounded_and_permits_the_call(
     permits the provider call exactly as a RedisError already did.
     """
 
-    agent = SetupChatAgent(_settings())
-    agent._circuit_redis = client_factory()  # type: ignore[assignment]  # noqa: SLF001
+    breaker = _breaker(client_factory())
     began = time.monotonic()
-    await agent._before_provider_call("m")  # noqa: SLF001
+    assert await breaker.allow("openai") is True
     elapsed = time.monotonic() - began
-    assert elapsed < _CIRCUIT_REDIS_TIMEOUT_SECONDS + 0.5
+    assert elapsed < REDIS_CIRCUIT_TIMEOUT_SECONDS + 0.5
 
 
 @pytest.mark.anyio
 async def test_one_turn_pays_the_breaker_timeout_once_not_once_per_call() -> None:
-    """Four calls × one timeout each is how an unreachable cache became ten seconds."""
+    """Four calls x one timeout each is how an unreachable cache became ten seconds."""
 
-    agent = SetupChatAgent(_settings())
     client = _HangingRedis()
-    agent._circuit_redis = client  # type: ignore[assignment]  # noqa: SLF001
+    breaker = _breaker(client)
 
-    await agent._before_provider_call("m")  # noqa: SLF001
+    assert await breaker.allow("openai") is True
     assert client.calls == 1
 
     began = time.monotonic()
     for _ in range(6):
-        await agent._before_provider_call("m")  # noqa: SLF001
-        await agent._provider_succeeded("m")  # noqa: SLF001
+        await breaker.allow("openai")
+        await breaker.record_success("openai")
     elapsed = time.monotonic() - began
     # Remembered as unavailable, so no further attempt is made at all.
     assert client.calls == 1
@@ -248,14 +263,15 @@ async def test_one_turn_pays_the_breaker_timeout_once_not_once_per_call() -> Non
 async def test_the_breaker_starts_asking_again_after_the_cooldown() -> None:
     """A permanent memo would turn a brief outage into a permanently local breaker."""
 
-    agent = SetupChatAgent(_settings())
     client = _HangingRedis()
-    agent._circuit_redis = client  # type: ignore[assignment]  # noqa: SLF001
-    await agent._before_provider_call("m")  # noqa: SLF001
+    store = RedisCircuitStateStore(client)
+    breaker = CircuitBreaker(failure_threshold=5, recovery_seconds=60.0, store=store)
+
+    await breaker.allow("openai")
     assert client.calls == 1
-    assert _CIRCUIT_REDIS_COOLDOWN_SECONDS > 0
-    agent._redis_unavailable_until = 0.0  # noqa: SLF001  # cooldown elapsed
-    await agent._before_provider_call("m")  # noqa: SLF001
+    assert REDIS_CIRCUIT_COOLDOWN_SECONDS > 0
+    store._unavailable_until = 0.0  # noqa: SLF001  # cooldown elapsed
+    await breaker.allow("openai")
     assert client.calls == 2
 
 
@@ -263,8 +279,32 @@ async def test_the_breaker_starts_asking_again_after_the_cooldown() -> None:
 async def test_recording_a_provider_result_never_waits_on_the_breaker() -> None:
     """The provider result is already authoritative; the marker must not delay it."""
 
-    agent = SetupChatAgent(_settings())
-    agent._circuit_redis = _HangingRedis()  # type: ignore[assignment]  # noqa: SLF001
+    breaker = _breaker(_HangingRedis())
     began = time.monotonic()
-    await agent._provider_succeeded("m")  # noqa: SLF001
-    assert time.monotonic() - began < _CIRCUIT_REDIS_TIMEOUT_SECONDS + 0.5
+    await breaker.record_success("openai")
+    assert time.monotonic() - began < REDIS_CIRCUIT_TIMEOUT_SECONDS + 0.5
+
+
+@pytest.mark.anyio
+async def test_a_shared_store_that_cannot_answer_never_refuses_the_call() -> None:
+    """The dangerous failure is the opposite one: refusing because bookkeeping is down.
+
+    Parametrised over every way the store can misbehave, because the one that was not
+    thought of is the one that turns a monitoring outage into a product outage.
+    """
+
+    class _Exploding:
+        def eval(self, *args: object, **kwargs: object):  # noqa: ANN201
+            raise RuntimeError("boom")
+
+        def delete(self, *args: object, **kwargs: object):  # noqa: ANN201
+            raise RuntimeError("boom")
+
+    class _Missing:
+        """A store that does not implement the read side at all."""
+
+    for client in (_HangingRedis(), _FailingRedis(), _Exploding()):
+        assert await _breaker(client).allow("openai") is True
+
+    partial = CircuitBreaker(failure_threshold=5, store=_Missing())
+    assert await partial.allow("openai") is True

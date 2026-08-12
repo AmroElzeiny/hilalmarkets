@@ -6,6 +6,8 @@ from typing import Any
 import httpx
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 
 PROHIBITED_CLAIMS = (
     "guaranteed profit",
@@ -85,15 +87,25 @@ class OpenAISuggestionNarrator:
             "Content-Type": "application/json",
         }
         try:
-            async with httpx.AsyncClient(
-                base_url=str(self.settings.openai_base_url).rstrip("/"),
+            response = await provider_request(
+                self.settings,
+                "POST",
+                f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+                provider="openai",
+                operation="explanation",
+                # One paid answer per turn: this call is not repeated.
+                retry=False,
+                model=str(payload.get("model") or ""),
                 timeout=self.settings.openai_timeout_seconds,
+                deadline_seconds=float(self.settings.openai_timeout_seconds),
+                mutation_committed=False,
                 transport=self.transport,
-            ) as client:
-                response = await client.post("/responses", headers=headers, json=payload)
+                headers=headers,
+                json=payload,
+            )
             response.raise_for_status()
             message = str(json.loads(_output_text(response.json())).get("message") or "").strip()
-        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+        except (httpx.HTTPError, ProviderCallError, ValueError, TypeError, json.JSONDecodeError):
             return None
         lowered = message.lower()
         if not message or any(claim in lowered for claim in PROHIBITED_CLAIMS):

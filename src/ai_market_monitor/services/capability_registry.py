@@ -12,6 +12,7 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import CapabilityAliasProposal, CapabilityRegistryArtifact
 from ai_market_monitor.engine.capabilities import all_capabilities
 from ai_market_monitor.engine.capability_index import CapabilityIndex, get_capability_index
+from ai_market_monitor.services.provider_runtime import provider_request
 
 
 class OpenAIEmbeddingClient:
@@ -39,12 +40,19 @@ class OpenAIEmbeddingClient:
             "dimensions": self.settings.capability_embedding_dimensions,
             "encoding_format": "float",
         }
-        async with httpx.AsyncClient(
-            base_url=str(self.settings.openai_base_url).rstrip("/"),
+        response = await provider_request(
+            self.settings,
+            "POST",
+            f"{str(self.settings.openai_base_url).rstrip('/')}/embeddings",
+            provider="openai",
+            operation="embeddings",
+            model=self.settings.capability_embedding_model,
             timeout=max(60, self.settings.openai_timeout_seconds),
+            mutation_committed=False,
             transport=self.transport,
-        ) as client:
-            response = await client.post("/embeddings", headers=headers, json=payload)
+            headers=headers,
+            json=payload,
+        )
         response.raise_for_status()
         rows = sorted(response.json().get("data") or [], key=lambda item: int(item["index"]))
         vectors = [list(map(float, row["embedding"])) for row in rows]

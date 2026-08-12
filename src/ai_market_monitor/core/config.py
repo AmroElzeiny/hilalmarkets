@@ -366,6 +366,55 @@ class Settings(BaseSettings):
     setup_agent_circuit_breaker_failures: int = Field(default=5, ge=1, le=20)
     setup_agent_circuit_breaker_cooldown_seconds: int = Field(default=60, ge=5, le=900)
     setup_provider_preflight_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+
+    # -- Provider reliability -------------------------------------------------
+    # Bounds on the shared HTTP pool. Every one of them is finite on purpose: an
+    # unbounded pool opens as many sockets as there are concurrent calls, and an
+    # unbounded wait makes a saturated pool hang every caller instead of failing in a
+    # way the turn can report.
+    provider_pool_max_connections: int = Field(default=40, ge=1, le=500)
+    provider_pool_max_keepalive: int = Field(default=20, ge=0, le=500)
+    provider_pool_keepalive_seconds: float = Field(default=30.0, ge=0.0, le=600.0)
+    provider_connect_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    provider_read_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    provider_write_timeout_seconds: float = Field(default=10.0, gt=0.0, le=120.0)
+    provider_pool_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    #: The ceiling on provider calls in flight across the whole process, so one slow
+    #: upstream cannot consume the worker.
+    provider_max_concurrency: int = Field(default=24, ge=1, le=500)
+    provider_retry_max_attempts: int = Field(default=3, ge=1, le=6)
+    provider_retry_base_delay_seconds: float = Field(default=0.5, gt=0.0, le=30.0)
+    provider_retry_max_delay_seconds: float = Field(default=8.0, gt=0.0, le=120.0)
+    provider_circuit_failure_threshold: int = Field(default=5, ge=1, le=100)
+    provider_circuit_recovery_seconds: float = Field(default=30.0, gt=0.0, le=3600.0)
+    #: Share circuit state between workers through Redis. Coordination only: when Redis
+    #: cannot answer, each worker falls back to its own breaker and calls still go out.
+    #: Switching this off costs cross-worker knowledge, never correctness.
+    provider_circuit_share_state: bool = True
+
+    # -- AI budget ceilings ---------------------------------------------------
+    # Money. Every one of these is enforced by the same authority, and a call whose cost
+    # cannot be estimated is refused rather than guessed at.
+    ai_budget_per_turn_max_usd: float = Field(default=1.0, ge=0.0)
+    ai_budget_user_daily_usd: float | None = Field(default=5.0, ge=0.0)
+    ai_budget_user_monthly_usd: float | None = Field(default=50.0, ge=0.0)
+    ai_budget_global_daily_usd: float | None = Field(default=200.0, ge=0.0)
+    ai_budget_global_monthly_usd: float | None = Field(default=2000.0, ge=0.0)
+    ai_budget_max_concurrent_reservations: int = Field(default=3, ge=0, le=50)
+
+    # -- Runtime rollout ------------------------------------------------------
+    #: Features forced off by configuration, comma separated. A hard emergency ceiling:
+    #: a runtime control can never switch these back on.
+    ai_features_disabled: str = Field(default="")
+    #: Stamped onto every AI turn so a past decision can be replayed against the same
+    #: rollout rather than against whatever the configuration says afterwards.
+    ai_rollout_version: str = Field(default="0", max_length=40)
+    #: Individual capability keys to pause, comma separated. One wrong formula or one
+    #: misbehaving feed can be switched off on its own, without taking the Builder, the
+    #: assistant or the other capabilities with it. A paused capability is still *shown*,
+    #: with a reason — one that vanished from the list would look like lost work to the
+    #: person who used it yesterday.
+    builder_capabilities_disabled: str = Field(default="")
     #: How many resolved symbols one turn may check against the data provider before the
     #: preflight stops promising per-symbol coverage and says so.
     #:

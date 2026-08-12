@@ -18,6 +18,8 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.services.interfaces import Candle, MarketDataProvider
+from ai_market_monitor.services.provider_reliability import ProviderCallError
+from ai_market_monitor.services.provider_runtime import provider_request
 
 EXTERNAL_CONTEXT_CATEGORIES = {
     "crypto_index",
@@ -462,26 +464,30 @@ class ProviderContextService:
         if key is not None:
             headers["Authorization"] = f"Bearer {key.get_secret_value()}"
         try:
-            async with httpx.AsyncClient(
+            response = await provider_request(
+                self.settings,
+                "POST",
+                str(url),
+                provider="context_provider",
+                operation=category,
                 timeout=self.settings.context_provider_timeout_seconds,
+                # Reading context values changes nothing on the far side.
+                mutation_committed=False,
                 transport=self.transport,
-            ) as client:
-                response = await client.post(
-                    str(url),
-                    headers=headers,
-                    json={
-                        "category": category,
-                        "requested_keys": requested_keys,
-                        "exchange": exchange,
-                        "symbol": symbol,
-                        "timeframe": timeframe,
-                        "quote_assets": quote_assets,
-                        "evaluated_at": evaluated_at.isoformat(),
-                    },
-                )
+                headers=headers,
+                json={
+                    "category": category,
+                    "requested_keys": requested_keys,
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "quote_assets": quote_assets,
+                    "evaluated_at": evaluated_at.isoformat(),
+                },
+            )
             response.raise_for_status()
             payload = response.json()
-        except (httpx.HTTPError, ValueError, TypeError):
+        except (httpx.HTTPError, ProviderCallError, ValueError, TypeError):
             return {}
         values = payload.get("values", {}) if isinstance(payload, dict) else {}
         if not isinstance(values, dict):

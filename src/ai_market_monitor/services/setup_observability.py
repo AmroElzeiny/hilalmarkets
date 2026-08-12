@@ -46,6 +46,7 @@ from ai_market_monitor.db.models.enums import (
 from ai_market_monitor.engine.models import EvaluationResult
 from ai_market_monitor.schemas.strategy import ConditionGroup, ConditionRule, StrategyDefinition
 from ai_market_monitor.services.market_preview import timeframe_duration
+from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.strategy_cockpit import validate_strategy_conflicts
 
 SUCCESSFUL_DELIVERY = {DeliveryStatus.SENT, DeliveryStatus.DELIVERED}
@@ -1454,22 +1455,28 @@ class GroundedObservabilityExplainer:
             "input": json.dumps(bounded, sort_keys=True, default=str),
         }
         try:
-            async with httpx.AsyncClient(
-                base_url=str(self.settings.openai_base_url).rstrip("/"),
+            response = await provider_request(
+                self.settings,
+                "POST",
+                f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
+                provider="openai",
+                operation="lifecycle_explanation",
+                # One paid answer per turn: this call is not repeated.
+                retry=False,
+                model=str(request.get("model") or ""),
                 timeout=self.settings.openai_timeout_seconds,
+                deadline_seconds=float(self.settings.openai_timeout_seconds),
+                mutation_committed=False,
                 transport=self.transport,
-            ) as client:
-                response = await client.post(
-                    "/responses",
-                    headers={
-                        "Authorization": (
-                            "Bearer "
-                            f"{self.settings.openai_api_key.get_secret_value()}"
-                        ),
-                        "Content-Type": "application/json",
-                    },
-                    json=request,
-                )
+                headers={
+                    "Authorization": (
+                        "Bearer "
+                        f"{self.settings.openai_api_key.get_secret_value()}"
+                    ),
+                    "Content-Type": "application/json",
+                },
+                json=request,
+            )
             response.raise_for_status()
             text = self._output_text(response.json()).strip()
             return text[:1200] if text else fallback
