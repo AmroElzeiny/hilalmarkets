@@ -580,7 +580,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
         await session.commit()
         setup_id = setup.id
 
-    page = await test_context["client"].get("/dashboard/lifecycles")
+    page = await test_context["client"].get("/dashboard/opportunities")
     assert page.status_code == 200
     assert "What is closest right now?" in page.text
     assert "SOL/USDT" in page.text
@@ -684,7 +684,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
         f"/api/v1/dashboard/lifecycles/{setup_id}/mute"
     )
     assert muted.status_code == 200
-    muted_page = await test_context["client"].get("/dashboard/lifecycles")
+    muted_page = await test_context["client"].get("/dashboard/opportunities")
     assert "SOL/USDT" not in muted_page.text
     async with test_context["session_factory"]() as session:
         assert await session.scalar(select(func.count(ChartSnapshot.id))) == 2
@@ -1429,7 +1429,7 @@ async def test_advanced_dashboard_pages_render(test_context):
         ("/dashboard/strategies/new", "Proof &amp; Review"),
         ("/dashboard/strategies/new", "Six-Month High Breakout"),
         ("/dashboard/integrations", "Notifications"),
-        ("/dashboard/lifecycles", "What is closest right now?"),
+        ("/dashboard/opportunities", "What is closest right now?"),
         ("/dashboard/settings", "America/New_York"),
         ("/dashboard/settings", 'data-schedule-options="hours"'),
     ]:
