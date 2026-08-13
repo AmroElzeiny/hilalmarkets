@@ -681,10 +681,16 @@ def test_the_hero_illustration_is_shown_at_every_screen_size():
             assert hiding not in source, (name, hiding)
 
     # One column on a phone, two on a tablet, the original three on a desktop.
-    assert "md:grid-cols-2" in hero_flow
+    #
+    # Two columns start at 900px, not at Tailwind's 768px `md`. The rest of the page
+    # collapses to a single column below 900 — the `@media (max-width: 899px)` block in
+    # index.css — and while the hero used `md` it alone stood two-across between 768 and
+    # 899 while everything under it was full width.
+    assert "min-[900px]:grid-cols-2" in hero_flow
+    assert "md:grid-cols-2" not in hero_flow, "the hero must not break at a width nothing else does"
     assert "lg:grid-cols-[1fr_1.15fr_1fr]" in hero_flow
     # The three state cards follow the same grid instead of staying a tall column.
-    assert "md:col-span-2 md:grid md:grid-cols-3" in hero_flow
+    assert "min-[900px]:col-span-2 min-[900px]:grid min-[900px]:grid-cols-3" in hero_flow
     assert "lg:col-span-1 lg:flex lg:flex-col" in hero_flow
     # The phone gutter is the hero text's own gutter, so the picture lines up with it.
     assert "px-[15px]" in hero_flow

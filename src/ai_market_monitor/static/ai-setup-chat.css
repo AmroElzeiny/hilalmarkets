@@ -46,3 +46,11 @@ body.ai-canvas-active .builder-shell{display:block!important;margin-right:370px;
 .ai-setup-chat-shell.canvas-open .ai-chat-hero,.ai-setup-chat-shell.canvas-open .ai-preview-panel{display:none}.ai-setup-chat-shell.canvas-open .ai-chat-layout{display:block;min-height:0}.ai-setup-chat-shell.canvas-open .ai-chat-panel{height:100%;grid-template-rows:auto minmax(120px,1fr) auto auto auto}.ai-setup-chat-shell.canvas-open .ai-chat-panel-head{padding:12px}.ai-setup-chat-shell.canvas-open .ai-chat-messages{padding:14px;max-height:none}.ai-setup-chat-shell.canvas-open .ai-chat-suggestions{padding:0 12px 10px}.ai-setup-chat-shell.canvas-open .ai-chat-start-modes{grid-template-columns:1fr}.ai-setup-chat-shell.canvas-open .ai-chat-composer{padding:10px}.ai-setup-chat-shell.canvas-open [data-ai-chat-new]{display:none}
 .ai-chat-minimize-button{width:40px;justify-content:center;font-size:20px;line-height:1}.ai-setup-chat-shell.canvas-open.assistant-minimized{width:250px;height:auto;min-height:0}.ai-setup-chat-shell.canvas-open.assistant-minimized .ai-chat-panel{height:auto;grid-template-rows:auto}.ai-setup-chat-shell.canvas-open.assistant-minimized :is(.ai-chat-messages,.ai-chat-suggestions,.ai-chat-error,.ai-chat-composer,[data-ai-return-chat]){display:none!important}.ai-setup-chat-shell.canvas-open.assistant-minimized .ai-chat-agent small{display:none}body.ai-chat-minimized .builder-shell{margin-right:0!important}
 @media(max-width:700px){.ai-chat-start-modes{grid-template-columns:1fr;min-width:260px}body.ai-canvas-active .builder-shell{margin-right:0}.ai-setup-chat-shell.canvas-open{right:0;bottom:0;left:0;width:auto;height:48dvh;border-radius:24px 24px 0 0}.ai-setup-chat-shell.canvas-open .ai-chat-panel{min-height:0}}
+
+/* The guided fields when they sit under the conversation on a phone. They are moved
+   here by the script because the AI Sheet column they normally live in is not shown
+   at this width; without a top rule they would butt straight against the last
+   message. */
+.guided-builder-phone-slot:empty{display:none}
+.guided-builder-phone-slot{margin:0 18px 12px;overflow:auto}
+@media(min-width:701px){.guided-builder-phone-slot{display:none}}

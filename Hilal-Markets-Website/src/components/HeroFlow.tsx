@@ -51,10 +51,17 @@ function Sparkline() {
  * padding, so on a screen between 1024 and 1180 wide the cards touched both edges. The
  * box is 1228 wide with a 24px gutter instead: the same 1180 of content on a wide screen,
  * and a margin that survives on a narrow laptop.
+ *
+ * The two-column arrangement starts at 900px, not at Tailwind's 768px `md`. The rest
+ * of the page collapses to a single column below 900 — that is the
+ * `@media (max-width: 899px)` block in index.css, which every other row obeys. While
+ * the hero used `md` it alone stood two-across between 768 and 899 while everything
+ * under it was full width, so on a tablet the first thing a visitor saw was the one
+ * row that did not line up.
  */
 export function HeroFlow() {
   return (
-    <div className="relative mx-auto grid w-full max-w-[560px] items-stretch gap-3 px-[15px] sm:max-w-[820px] sm:gap-4 sm:px-5 md:grid-cols-2 lg:max-w-[1228px] lg:grid-cols-[1fr_1.15fr_1fr] lg:gap-3 lg:px-6" data-name="Hero flow">
+    <div className="relative mx-auto grid w-full max-w-[560px] items-stretch gap-3 px-[15px] sm:max-w-[820px] sm:gap-4 sm:px-5 min-[900px]:grid-cols-2 lg:max-w-[1228px] lg:grid-cols-[1fr_1.15fr_1fr] lg:gap-3 lg:px-6" data-name="Hero flow">
 {/* Panel 1 — screened watchlist */}
       <div className="rounded-[22px] border border-hairline bg-surface p-4 shadow-[0_18px_40px_-28px_rgba(43,46,53,0.35)]">
         <div className="space-y-2.5">
@@ -139,8 +146,10 @@ export function HeroFlow() {
       </div>
 
       {/* Panel 3 — monitoring states. Three cards: stacked on a phone, a row across the
-          full width on a tablet, back to a column beside the other panels on a desktop. */}
-      <div className="flex flex-col gap-2.5 md:col-span-2 md:grid md:grid-cols-3 md:gap-3 lg:col-span-1 lg:flex lg:flex-col lg:gap-2.5">
+          full width on a tablet, back to a column beside the other panels on a desktop.
+          The tablet arrangement starts at 900px, the same width the rest of the page
+          stops being a single column. */}
+      <div className="flex flex-col gap-2.5 min-[900px]:col-span-2 min-[900px]:grid min-[900px]:grid-cols-3 min-[900px]:gap-3 lg:col-span-1 lg:flex lg:flex-col lg:gap-2.5">
         <div className="rounded-2xl border border-hairline bg-surface p-3.5">
           <StatusPill tone="blue" dot>forming</StatusPill>
           <p className="mt-2 text-[13px] font-bold text-ink tnum">BTC/USDT recovery: +2.3% of +5%</p>

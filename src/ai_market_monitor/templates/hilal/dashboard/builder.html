@@ -51,6 +51,12 @@
          or clearing the draft. Hidden until there is something to show. #}
       <div class="ai-last-change" data-ai-last-change aria-label="What changed" hidden></div>
       <div class="ai-draft-history" data-ai-draft-history aria-label="Go back" hidden></div>
+      {# Where the Guided Watchlist Builder sits on a phone.
+         The AI Sheet beside the chat is hidden below 700px, and the guided fields
+         live inside it, so a phone had no way to finish a setup when the assistant
+         was unavailable — the one situation the guided fields exist for. On a phone
+         the script moves them here instead, under the conversation. #}
+      <div class="guided-builder-phone-slot" data-ai-guided-slot="phone"></div>
       <form class="ai-chat-composer" data-ai-chat-form>
         <label class="sr-only" for="ai-setup-chat-input">Describe your setup</label>
         <textarea id="ai-setup-chat-input" data-ai-chat-input rows="1" maxlength="5000" placeholder="Describe your setup…"></textarea>
@@ -66,7 +72,7 @@
       {# The Guided Watchlist Builder. Every field in here is drawn from the server's
          own contract, and every change goes through the same authority a chat message
          does. It is the way to finish a setup when the assistant cannot help. #}
-      <section class="guided-builder" data-ai-guided-builder aria-label="Guided setup" hidden></section>
+      <div class="guided-builder-wide-slot" data-ai-guided-slot="wide"><section class="guided-builder" data-ai-guided-builder aria-label="Guided setup" hidden></section></div>
       <div class="ai-preview-actions" data-ai-preview-actions hidden><p data-ai-approval-note>Review every rule before approval.</p><button class="button button-primary" type="button" data-ai-chat-approve data-testid="ai-setup-approval" disabled>Approve Watchlist</button><button class="button button-primary" type="button" data-ai-chat-scan data-testid="ai-setup-run-scanner" hidden>Run Scanner</button><button class="button button-secondary" type="button" data-ai-chat-refine>Refine in chat</button></div>
     </aside>
   </div>
