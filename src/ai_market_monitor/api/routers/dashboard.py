@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -2584,12 +2584,46 @@ async def setups_page(
     raise HTTPException(status_code=404, detail="Latest Setups was removed. Use Lifecycles.")
 
 
-# One page, three paths. Decorators register bottom-up, so the bottom one is the path
-# `url_for('lifecycles_page')` produces — that is the address the product shows. The two
-# above it stay registered so older links and bookmarks keep working instead of 404ing.
+#: The one address for this page. Everything else that used to serve it now sends the
+#: browser here.
+LIFECYCLES_PATH: Final[str] = "/dashboard/opportunities"
+
+#: The two addresses that used to serve the same page from a second and third route.
+#: They stayed registered so old bookmarks would not 404, but serving one page from
+#: three URLs meant the address bar disagreed with itself: the in-product guide keys
+#: its steps on the path, so whichever URL the customer arrived on decided whether
+#: they got a guide at all. They are permanent redirects now, so there is one address
+#: the guide, the links and the tests can all agree on.
+LIFECYCLES_LEGACY_PATHS: Final[tuple[str, ...]] = (
+    "/dashboard/activity",
+    "/dashboard/lifecycles",
+)
+
+
+def _permanent_redirect(request: Request, path: str) -> RedirectResponse:
+    """308 to ``path``, carrying the query string through unchanged.
+
+    308 rather than 301: it is the one permanent redirect that browsers and proxies
+    may not rewrite to a GET, so a link that is later reused for a form keeps working.
+    Dropping the query string would silently change the request — `?tab=alerts` would
+    land on the default tab and look like the page ignored the customer.
+    """
+
+    query = request.url.query
+    return RedirectResponse(f"{path}?{query}" if query else path, status_code=308)
+
+
 @router.get("/dashboard/activity", response_class=HTMLResponse, include_in_schema=False)
+async def activity_page_redirect(request: Request) -> RedirectResponse:
+    return _permanent_redirect(request, LIFECYCLES_PATH)
+
+
 @router.get("/dashboard/lifecycles", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/dashboard/opportunities", response_class=HTMLResponse, include_in_schema=False)
+async def lifecycles_page_redirect(request: Request) -> RedirectResponse:
+    return _permanent_redirect(request, LIFECYCLES_PATH)
+
+
+@router.get(LIFECYCLES_PATH, response_class=HTMLResponse, include_in_schema=False)
 async def lifecycles_page(
     request: Request,
     user: User = Depends(_require_user),

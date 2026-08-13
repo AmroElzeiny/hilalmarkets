@@ -12,6 +12,7 @@ from tests.browser.conftest import (
     assert_hilal_brand_palette,
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
+    close_any_open_guide,
     seed_alert_proof,
     seed_disclaimer_acceptance,
     seed_paid_monitor_access,
@@ -642,6 +643,10 @@ def test_public_product_chat_renders_safe_bold_without_executable_html(
 
 def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("dashboard-load"))
+    # A new account lands on Home with the guide already open, and the guide's overlay
+    # takes the clicks aimed at the page under it. That is the guide working. Anything
+    # that then drives the dashboard has to close it first.
+    close_any_open_guide(page)
 
     expect(page.get_by_test_id("dashboard-root")).to_be_attached()
     expect(page.get_by_test_id("dashboard-nav")).to_be_visible()
@@ -1249,19 +1254,23 @@ def test_ai_setup_chat_refresh_does_not_duplicate_a_turn(page: Page, base_url: s
 
     signup(page, base_url, unique_email("ai-chat-refresh"))
     _open_builder(page, base_url)
+    messages = page.get_by_test_id("ai-setup-assistant-message")
+    # The welcome message is already the last one, so waiting for "the last message is
+    # visible" was satisfied before the reply had arrived. The count was then taken
+    # mid-turn, and the refresh — which correctly showed the finished conversation —
+    # looked like it had duplicated a turn. Wait for the conversation to have loaded at
+    # all, then for the reply itself.
+    expect(messages.first).to_be_visible(timeout=20_000)
+    opening = messages.count()
     page.locator("[data-ai-chat-input]").fill("alert me when BTC rises 5%")
     page.locator("[data-ai-chat-send]").click()
-    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
-        timeout=20_000
-    )
-    before = page.get_by_test_id("ai-setup-assistant-message").count()
+    expect(messages).to_have_count(opening + 1, timeout=20_000)
+    before = messages.count()
 
     page.reload()
     _open_builder(page, base_url)
-    expect(page.get_by_test_id("ai-setup-assistant-message").last).to_be_visible(
-        timeout=20_000
-    )
-    after = page.get_by_test_id("ai-setup-assistant-message").count()
+    expect(messages).to_have_count(before, timeout=20_000)
+    after = messages.count()
     assert after == before, f"a refresh changed the conversation: {before} -> {after}"
     assert_no_raw_traceback(page)
 
@@ -1678,6 +1687,10 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     repo_root: Path,
 ) -> None:
     email = signup(page, base_url, unique_email("setup-observability"))
+    # The investigation drawer is a Monitor-plan feature, so the template does not
+    # render it at all for a free account. The test reached the point of clicking
+    # "investigate" and then looked for a drawer the page had never been given.
+    seed_paid_monitor_access(browser_app.database_url, email)
     seeded = seed_setup_observability(browser_app.database_url, email)
     visual_dir = repo_root / "reports" / "playwright" / "visual-qa"
     visual_dir.mkdir(parents=True, exist_ok=True)

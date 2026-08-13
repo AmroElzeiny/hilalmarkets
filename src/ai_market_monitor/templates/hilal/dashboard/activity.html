@@ -52,7 +52,11 @@
   {% endif %}
 </article>
 {% else %}
-<article class="panel readiness-command" data-observability-root data-poll-seconds="{{ observability_poll_seconds }}">
+{# Carries the same guide marker as the panel in the other branch. Exactly one of the
+   two ever renders, so the guide step still resolves once — but before this, the
+   marker existed only on the non-default tabs, and the guide on the page a customer
+   actually lands on pointed at nothing. #}
+<article class="panel readiness-command" data-hm-guide-target="activity-updates-panel" data-observability-root data-poll-seconds="{{ observability_poll_seconds }}">
   <div class="panel-head"><div><h2>What is closest right now?</h2><p>Progress comes from approved deterministic rules, never an AI confidence score.</p></div><div class="activity-panel-actions"><span class="badge badge-eligible">Live evidence</span><a class="btn btn-primary btn-sm" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon-sm"></span>New Watchlist</a></div></div>
   <div class="radar-filter-row readiness-filters">
     {{ monitor_filter() }}

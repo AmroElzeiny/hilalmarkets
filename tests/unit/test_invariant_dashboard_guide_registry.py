@@ -85,13 +85,40 @@ def _markers() -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _separated_by_a_branch(target: str) -> bool:
+    """Whether every declaration of ``target`` in one template is in its own branch.
+
+    A page with two layouts — an empty account and a populated one — has to carry the
+    marker in both, or the guide points at nothing in whichever layout is missing it.
+    Only one of them is ever rendered, so that is still exactly one element on screen.
+
+    What is checked is that an ``{% else %}`` stands between the declarations. Two
+    markers inside the same branch would both render, and the guide would highlight
+    whichever came first.
+    """
+
+    for path in TEMPLATES.rglob("*.html"):
+        text = path.read_text(encoding="utf-8")
+        found = [match.start() for match in re.finditer(rf'{MARKER_ATTRIBUTE}="{target}"', text)]
+        if len(found) < 2:
+            continue
+        for left, right in zip(found, found[1:], strict=False):
+            if "{% else %}" not in text[left:right]:
+                return False
+    return True
+
+
 @pytest.mark.parametrize("target", sorted({item[0] for item in _steps()}))
 def test_every_configured_target_is_placed_exactly_once(target: str) -> None:
-    """Zero matches shows nothing; two matches would point at the wrong one."""
+    """Zero matches shows nothing; two rendered matches point at the wrong one."""
 
     placed = _markers().get(target, [])
     assert placed, f"'{target}' is configured but no template carries the marker"
-    assert len(placed) == 1, f"'{target}' is on {len(placed)} elements: {placed}"
+    assert len(set(placed)) == 1, f"'{target}' is in several templates: {sorted(set(placed))}"
+    assert _separated_by_a_branch(target), (
+        f"'{target}' is declared more than once in the same branch, so two elements "
+        "would render and the guide would point at whichever came first"
+    )
 
 
 def test_no_marker_is_placed_without_a_step_to_use_it() -> None:

@@ -310,14 +310,45 @@ def test_every_alert_answers_the_four_questions(rule) -> None:
 
 @pytest.mark.parametrize("rule", ALERT_RULES, ids=lambda item: item.name)
 def test_no_alert_travels_through_the_thing_it_watches(rule) -> None:
-    dependencies = DELIVERY_ROUTE_DEPENDENCIES[rule.delivery_route]
-    assert rule.watched_service not in dependencies
+    for route in (rule.primary_route, rule.fallback_route):
+        if route is None:
+            continue
+        assert rule.watched_service not in DELIVERY_ROUTE_DEPENDENCIES[route], (
+            f"{rule.name} would be delivered through {route}, which depends on "
+            f"{rule.watched_service}"
+        )
 
 
 @pytest.mark.parametrize("rule", ALERT_RULES, ids=lambda item: item.name)
-def test_a_page_never_depends_on_the_application_to_be_delivered(rule) -> None:
-    if rule.severity == "page":
-        assert DELIVERY_ROUTE_DEPENDENCIES[rule.delivery_route] == frozenset()
+def test_a_page_has_two_paths_that_cannot_fail_together(rule) -> None:
+    """There is no dependency-free route in this product, so a page needs two.
+
+    This test used to demand a route that depends on nothing. Only `pagerduty`
+    satisfied that, and `pagerduty` was never wired to anything — the rule was met by
+    naming a transport that did not exist. Every route this product really has depends
+    on part of this product, so what has to be true instead is that a page names two
+    routes whose dependencies do not overlap.
+    """
+
+    if rule.severity != "page":
+        return
+    assert rule.primary_route is not None, f"{rule.name} is a page with no route"
+    assert rule.fallback_route is not None, f"{rule.name} is a page with no fallback"
+    primary = DELIVERY_ROUTE_DEPENDENCIES[rule.primary_route]
+    fallback = DELIVERY_ROUTE_DEPENDENCIES[rule.fallback_route]
+    assert not (primary & fallback), (
+        f"{rule.name}: both routes depend on {sorted(primary & fallback)}, so one "
+        "failure there silences the page completely"
+    )
+
+
+@pytest.mark.parametrize("rule", ALERT_RULES, ids=lambda item: item.name)
+def test_a_ticket_names_no_route_at_all(rule) -> None:
+    """A ticket is recorded and waited on. A route on it promises a message."""
+
+    if rule.severity == "ticket":
+        assert rule.primary_route is None
+        assert rule.fallback_route is None
 
 
 @pytest.mark.parametrize("rule", ALERT_RULES, ids=lambda item: item.name)
@@ -341,7 +372,8 @@ def test_an_alert_routed_through_its_own_subsystem_is_refused() -> None:
         blast_radius="Customers stop receiving alerts.",
         first_mitigation="Check the bot token.",
         runbook_anchor="#alert-delivery-failing",
-        delivery_route="ops_telegram",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     )
     with pytest.raises(AlertRuleError, match="depends on it"):
         validate_alert_rules((broken,))

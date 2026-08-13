@@ -125,8 +125,33 @@
       headers: {"Content-Type": "application/json", ...(options.headers || {})},
       ...options,
     });
+    // Read the body once, then decide what it was. A reply that cannot be read is not
+    // a success, whatever status came with it.
+    //
+    // This used to swallow the parse failure and return `{}` on any 2xx. A proxy error
+    // page, a captive portal, or a truncated response therefore replaced the whole
+    // conversation with an empty object: the message the person had just sent
+    // disappeared from the screen with no error, the conversation id was gone, and
+    // every later send addressed `/sessions/undefined/messages`. The turn had not
+    // succeeded — it had not been read.
+    //
+    // An empty body is left alone. Some endpoints answer with nothing on purpose, and
+    // treating "no content" as "unreadable content" would turn those into failures.
+    const raw = await response.text();
     let payload = {};
-    try { payload = await response.json(); } catch (_) { payload = {}; }
+    let unreadable = false;
+    if (raw.trim()) {
+      try { payload = JSON.parse(raw); } catch (_) { unreadable = true; payload = {}; }
+    }
+    if (response.ok && unreadable) {
+      const error = new Error(
+        "The reply could not be read, so nothing was changed. Please try again.",
+      );
+      error.status = response.status;
+      error.payload = null;
+      error.retryable = true;
+      throw error;
+    }
     if (!response.ok) {
       const detail = payload.detail;
       const message = typeof detail === "object"
@@ -176,7 +201,7 @@
   function setLoading(value, label = "Thinking through your setup") {
     loading = value;
     input.disabled = value;
-    sendButton.disabled = value || !input.value.trim();
+    sendButton.disabled = !canSend();
     statusTarget.textContent = value ? label : statusLabel(chat?.status);
     root.querySelector("[data-ai-chat-new]").disabled = value;
     if (!root.hidden) renderConversation();
@@ -653,12 +678,30 @@
     return state && state.active ? state : null;
   }
 
+  // The one rule for whether pressing Send does anything at all.
+  //
+  // It used to be written twice, in `setLoading` and in `updateSendState`, and
+  // neither copy carried the condition `sendMessage` checks before anything else:
+  // that the conversation exists. Until it has loaded, `chat` is null. The button
+  // was enabled the moment the person typed a character, and pressing it returned
+  // silently — their words left the box, nothing was sent, and no reason was given.
+  // A beginner reads that as "the product ignored me".
+  //
+  // So the button is disabled exactly when a send would refuse, and both callers ask
+  // this one function instead of each keeping a partial copy of the answer.
+  function canSend() {
+    if (!chat || loading) return false;
+    if (activeTurn()) return false;
+    if (chat?.ai_availability?.assistant_available === false) return false;
+    return Boolean(input.value.trim());
+  }
+
   function updateSendState() {
     const running = activeTurn();
     // The assistant being unavailable closes the composer and nothing else. The guided
     // fields stay live underneath, so the person carries on rather than being stuck.
     const assistantOff = chat?.ai_availability?.assistant_available === false;
-    sendButton.disabled = loading || Boolean(running) || assistantOff || !input.value.trim();
+    sendButton.disabled = !canSend();
     input.disabled = Boolean(running) || assistantOff;
     root.dataset.turnActive = running ? "true" : "false";
     root.dataset.turnStage = running?.stage || "";
@@ -1000,9 +1043,29 @@
     return button;
   }
 
+  //: Below this width the AI Sheet beside the chat is not shown at all.
+  const PHONE_WIDTH_PX = 700;
+
+  /** Put the guided fields where this screen can actually show them.
+   *
+   * They belong beside the chat on a wide screen. On a phone that column is hidden,
+   * and the guided fields were hidden with it — so the one route that still works
+   * when the assistant is unavailable was missing on exactly the device most likely
+   * to have a poor connection. On a phone they move under the conversation instead.
+   *
+   * Moving rather than duplicating. Two copies of the same fields would each hold
+   * their own idea of the draft, and the person would edit the one that is not read.
+   */
+  function placeGuidedBuilder(target) {
+    const phone = window.matchMedia(`(max-width: ${PHONE_WIDTH_PX}px)`).matches;
+    const slot = root.querySelector(`[data-ai-guided-slot="${phone ? "phone" : "wide"}"]`);
+    if (slot && target.parentElement !== slot) slot.append(target);
+  }
+
   function renderGuidedBuilder() {
     const target = root.querySelector("[data-ai-guided-builder]");
     if (!target) return;
+    placeGuidedBuilder(target);
     const state = chat?.builder;
     const availability = chat?.ai_availability || {};
     target.hidden = !state || availability.builder === false;
@@ -1760,6 +1823,12 @@
     event.preventDefault();
     const message = input.value.trim();
     if (message) sendMessage({message});
+  });
+  // Rotating a phone, or dragging a desktop window narrow, changes which column can
+  // show the guided fields. Without this they would stay in the hidden one.
+  window.addEventListener("resize", () => {
+    const target = root.querySelector("[data-ai-guided-builder]");
+    if (target) placeGuidedBuilder(target);
   });
   input.addEventListener("input", () => { resizeInput(); updateSendState(); });
   input.addEventListener("keydown", (event) => {

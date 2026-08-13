@@ -37,7 +37,10 @@ def test_every_message_is_sent_through_one_function() -> None:
     """One send path is what makes "always attach the identity" checkable at all."""
 
     assert SOURCE.count("async function sendMessage(") == 1
-    posts = re.findall(r"/messages`", SOURCE)
+    # Match the call, not the words. Counting every occurrence of the path also counted
+    # the comment that explains what goes wrong when the conversation id is lost, so a
+    # sentence about the send path read as a second send path.
+    posts = re.findall(r"request\(`/sessions/\$\{[^`]+\}/messages`", SOURCE)
     assert len(posts) == 1, "messages must be posted from exactly one place"
 
 

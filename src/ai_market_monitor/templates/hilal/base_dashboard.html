@@ -38,12 +38,18 @@
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. Where one
     route owns two workflows, the mode is part of the key so the right guide is loaded. -#}
+{#- `check_market` is the Scanner half of the builder. The route names it that so the
+    side menu highlights "Check market", and this map has to agree: while it did not,
+    the Scanner page carried no guide identity at all and the Scanner guide could
+    never open. One route, two workflows, and two files that each named them
+    differently. -#}
 {%- set guide_page_key = {
   'home': 'dashboard-home',
   'screened_market': 'screened-market',
   'asset_passport': 'asset-passport',
   'watchlists': 'watch-plans',
   'activity': 'activity',
+  'check_market': 'strategy-builder-scanner',
   'integrations': 'integrations',
   'billing': 'billing',
   'settings': 'settings'

@@ -20,6 +20,7 @@ from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import (
     assert_no_raw_traceback,
+    close_any_open_guide,
     seed_sharia_screened_market,
     signup,
     unique_email,
@@ -54,16 +55,14 @@ def _page_key(page: Page) -> str | None:
 
 
 def _close_any_open_guide(page: Page) -> None:
-    """Home auto-starts for a new account, and the overlay would eat the click.
+    """One implementation, shared with the rest of the browser suite.
 
-    The overlay blocking the page is the guide behaving correctly, so anything that
-    clicks the page underneath has to close it first rather than force the click.
+    Home auto-starts for a new account and the overlay would eat the click. The
+    overlay blocking the page is the guide behaving correctly, so anything that clicks
+    the page underneath has to close it first rather than force the click.
     """
 
-    page.wait_for_timeout(400)
-    if page.locator("[data-hm-guide-popover]").is_visible():
-        page.keyboard.press("Escape")
-        expect(page.locator("[data-hm-guide-popover]")).to_be_hidden()
+    close_any_open_guide(page)
 
 
 def _start_guide(page: Page) -> None:
@@ -505,7 +504,7 @@ def test_the_compliance_changes_view_is_reached_through_activity(
     page.set_viewport_size(DESKTOP)
     page.goto(f"{base_url}/dashboard/compliance", wait_until="domcontentloaded")
 
-    assert "/dashboard/activity" in page.url
+    assert "/dashboard/opportunities" in page.url
     assert "compliance_changes" in page.url
     assert _page_key(page) == "activity"
     _start_guide(page)
@@ -701,7 +700,17 @@ def test_the_spotlight_matches_the_target_rectangle_after_scrolling(
     for index in range(total):
         if index:
             page.locator("[data-hm-guide-next]").click()
-        page.wait_for_timeout(250)
+        # Wait for the guide to say it has finished moving, not for a fixed number of
+        # milliseconds. A step can involve a smooth scroll of unknown length, and a
+        # guessed wait measures the outline while the page is still gliding — which
+        # reports the guide as misaligned when it is simply not finished.
+        page.wait_for_selector(
+            '[data-hm-guide-root][data-hm-guide-busy="false"]', timeout=10_000
+        )
+        # The outline then glides to its new box over the shared 120ms motion token.
+        # That part has a known length, so a short fixed wait is honest here; the
+        # unknown-length part is the scroll, and the signal above covers that.
+        page.wait_for_timeout(200)
         measured = page.evaluate(
             "() => { const t = window.HilalMarketsGuide.engine.target;"
             " const r = t.getBoundingClientRect();"
@@ -853,20 +862,34 @@ def test_the_guide_leaves_the_page_and_its_scrolling_untouched(
     page.set_viewport_size(DESKTOP)
     page.goto(f"{base_url}/dashboard/settings", wait_until="domcontentloaded")
 
+    # Read the element the guide will actually point at, not merely the first marked
+    # element in the document. The side menu is rendered before the page content and
+    # carries markers of its own, so `querySelector('[data-hm-guide-target]')` returned
+    # a nav link while the guide highlighted a settings panel — and the test then
+    # reported a difference between two different elements as damage done by the guide.
+    first_target = page.evaluate(
+        "() => { const key = document.querySelector('[data-hm-guide-page]')"
+        "   .getAttribute('data-hm-guide-page');"
+        " return window.HilalMarketsGuide.registry[key].steps[0].target; }"
+    )
     before = page.evaluate(
-        "() => { const t = document.querySelector('[data-hm-guide-target]');"
+        "(name) => { const t = document.querySelector(`[data-hm-guide-target=\"${name}\"]`);"
         " const r = t.getBoundingClientRect();"
         " const s = getComputedStyle(t);"
         " return { w: document.body.scrollWidth, h: r.height,"
-        "          position: s.position, zIndex: s.zIndex, filter: s.filter }; }"
+        "          position: s.position, zIndex: s.zIndex, filter: s.filter }; }",
+        first_target,
     )
     _start_guide(page)
     during = page.evaluate(
-        "() => { const t = window.HilalMarketsGuide.engine.target;"
+        "(name) => { const t = window.HilalMarketsGuide.engine.target;"
         " const s = getComputedStyle(t);"
-        " return { h: t.getBoundingClientRect().height, position: s.position,"
-        "          zIndex: s.zIndex, filter: s.filter }; }"
+        " return { same: t === document.querySelector(`[data-hm-guide-target=\"${name}\"]`),"
+        "          h: t.getBoundingClientRect().height, position: s.position,"
+        "          zIndex: s.zIndex, filter: s.filter }; }",
+        first_target,
     )
+    assert during["same"], "the guide did not start on the step the registry declares first"
     assert during["position"] == before["position"], "the target's position was changed"
     assert during["zIndex"] == before["zIndex"], "the target's stacking context was changed"
     assert during["filter"] == before["filter"], "the target itself was filtered"
@@ -919,7 +942,14 @@ def test_a_dismissed_invitation_stays_dismissed_but_the_launcher_does_not(
     signup(page, base_url, unique_email("guide-dismiss"))
     page.set_viewport_size(DESKTOP)
     page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
-    page.evaluate("() => window.localStorage.setItem('hm-guide:dashboard-home:v1', 'skipped')")
+    # The key carries the guide's version, so writing a literal `v1` stopped
+    # suppressing anything the moment the Home guide was revised — the test then
+    # measured an auto-started guide instead of a dismissed one. Read the version the
+    # page is really running so this cannot drift again.
+    page.evaluate(
+        "() => { const g = window.HilalMarketsGuide.registry['dashboard-home'];"
+        " window.localStorage.setItem(`hm-guide:${g.id}:v${g.version}`, 'skipped'); }"
+    )
     page.reload(wait_until="domcontentloaded")
 
     expect(page.locator("[data-hm-guide-popover]")).to_be_hidden()

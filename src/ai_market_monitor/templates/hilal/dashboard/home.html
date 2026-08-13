@@ -29,6 +29,14 @@
   <article class="stat-card" data-hm-guide-target="home-compliance-attention"><div class="stat-head"><div class="icon-box is-amber"><span data-icon="compliance" data-icon-class="icon"></span></div></div><div class="value">{{ overview.compliance_attention_count }}</div><div class="caption">Compliance changes in 30 days</div></article>
   <article class="stat-card"><div class="stat-head"><div class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></div><span class="sr-only">Active monitors</span></div><div class="value">{{ counts.active }}</div><div class="caption">Active Watchlists</div></article>
 </section>
+{# The way to start another Watchlist, for an account that already has one.
+   It existed only in the empty state above, so the moment a customer had any
+   activity, home offered no way to build a second one — and the guide's "Build a
+   Watchlist" step pointed at an element that was no longer on the page. The two
+   branches are mutually exclusive, so the marker still resolves exactly once. #}
+<div class="home-start-actions">
+  <a class="btn btn-primary" href="/dashboard/strategies/new" data-hm-guide-target="home-create-watchlist"><span data-icon="plus" data-icon-class="icon"></span>Create Watchlist</a>
+</div>
 {% endif %}
 
 <section class="dashboard-grid">

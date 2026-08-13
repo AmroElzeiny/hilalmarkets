@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import json
 import os
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
@@ -22,7 +24,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, expect, sync_playwright
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -56,7 +58,49 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
     """
 
     class Handler(BaseHTTPRequestHandler):
+        # The stdlib default is HTTP/1.0, which means "I close this connection when I
+        # am done". The application's HTTP client keeps connections alive and pools
+        # them, so it would hand the next planner call a socket the stub had already
+        # closed. That surfaced as `httpx.RemoteProtocolError`, which the setup path
+        # correctly reports as TARGET_PARTIAL_STREAM — a provider outage. The outage
+        # was the fixture's, not the product's, and it hit whichever test happened to
+        # reuse a stale socket, so the browser failures moved around between runs.
+        # Every response below sends Content-Length, which is what HTTP/1.1 keep-alive
+        # requires.
+        protocol_version = "HTTP/1.1"
+
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            """Answer, whatever happens.
+
+            An exception raised in here does not produce an error response. The
+            stdlib handler lets it escape, the thread dies, and the socket closes
+            with nothing written — which the application reads as
+            ``httpx.RemoteProtocolError`` and reports, correctly, as a provider that
+            dropped the connection mid-answer. That is how a `KeyError` in this
+            fixture spent its life disguised as a HilalMarkets outage. Any failure
+            now becomes a 500 with a readable body, so the fixture's own bugs look
+            like the fixture's own bugs.
+            """
+
+            try:
+                self._answer()
+            except Exception as exc:  # noqa: BLE001 - a stub must always reply
+                body = json.dumps(
+                    {
+                        "error": {
+                            "type": "browser_stub_failure",
+                            "message": f"{exc.__class__.__name__}: {exc}",
+                        }
+                    }
+                ).encode()
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                traceback.print_exc()
+
+        def _answer(self) -> None:
             from ai_market_monitor.schemas.setup_agent import (
                 SegmentKind,
                 SetupAgentPlanEnvelope,
@@ -80,7 +124,18 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
             payload = json.loads(request["input"])
             if schema_name == "hilalmarkets_setup_turn_intent":
                 message = str(payload["current_user_turn"])
-                turn_id = str(payload["source_turn_id"])
+                # The planner payload does not carry the turn id. It used to, and this
+                # fixture still read it as if it did, so every browser test that typed
+                # free text crashed the stub and read back a provider outage.
+                #
+                # The id is only a provenance seed for the plan the stub returns, so
+                # any stable, per-turn value works. The payload's own digest is that:
+                # it changes with each turn and is identical for every retry of the
+                # same one, which keeps the generated node ids stable across a retry.
+                turn_id = str(
+                    payload.get("source_turn_id")
+                    or "stub-" + hashlib.sha256(request["input"].encode()).hexdigest()[:16]
+                )
                 patch = deterministic_strategy_patch(
                     StrategyDraftV2(),
                     message,
@@ -705,6 +760,25 @@ def signup(page: Page, base_url: str, email: str | None = None) -> str:
     page.get_by_test_id("dashboard-root").wait_for(state="attached", timeout=10_000)
     assert_no_raw_traceback(page)
     return email
+
+
+def close_any_open_guide(page: Page) -> None:
+    """Close the in-product guide if it opened itself, and wait until it is gone.
+
+    Home auto-starts the guide for a brand-new account, and the guide's overlay
+    deliberately swallows clicks on the page beneath it — that is the guide working,
+    not a bug. Any test that signs up and then interacts with the dashboard has to
+    close it first, or every click lands on the overlay.
+
+    One implementation, used by both browser test files. Two copies of "close the
+    guide" is exactly how they end up disagreeing about what closing means.
+    """
+
+    page.wait_for_timeout(400)
+    popover = page.locator("[data-hm-guide-popover]")
+    if popover.count() and popover.is_visible():
+        page.keyboard.press("Escape")
+        expect(popover).to_be_hidden()
 
 
 def seed_system_brain_reviewer(

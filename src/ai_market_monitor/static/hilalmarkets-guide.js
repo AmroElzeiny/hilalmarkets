@@ -473,6 +473,12 @@
 
     async go(index) {
       if (!this.active) return;
+      // Say out loud that a step is being prepared. Moving to a step can involve a
+      // smooth scroll, and until it has stopped the outline is still drawn around the
+      // previous step. Anything that reads the outline — a test, or a future feature
+      // that waits for the guide — needs a way to know the difference between "not
+      // moved yet" and "finished moving" that is not a guessed number of milliseconds.
+      this.root.dataset.hmGuideBusy = "true";
       const bounded = Math.max(0, Math.min(index, this.steps.length - 1));
       const step = this.steps[bounded];
       if (typeof step.prepare === "function") {
@@ -517,6 +523,8 @@
       this.watchTarget(element);
       this.reposition();
       this.popover.focus({ preventScroll: true });
+      // The outline is now around this step's element and the page has stopped moving.
+      this.root.dataset.hmGuideBusy = "false";
     }
 
     /** Scroll only when the target is not already comfortably on screen.
@@ -579,8 +587,14 @@
       if (!this.active || !this.target || !this.target.isConnected) return;
       const rect = this.target.getBoundingClientRect();
       const pad = SPOTLIGHT_PADDING;
-      const top = Math.max(0, rect.top - pad);
-      const left = Math.max(0, rect.left - pad);
+      // Not clamped to the viewport. The outline is a claim about where the element is,
+      // and clamping it made that claim false the moment the reader scrolled the
+      // element off the top: the element kept going and the outline stopped at zero,
+      // so the guide pointed at a piece of the page that had nothing to do with the
+      // step. The panels below take their size through `setBox`, which floors width and
+      // height at zero, so a negative edge simply closes the panel on that side.
+      const top = rect.top - pad;
+      const left = rect.left - pad;
       const width = rect.width + pad * 2;
       const height = rect.height + pad * 2;
       const viewportWidth = document.documentElement.clientWidth;
@@ -774,11 +788,32 @@
       const deadline = performance.now() + SCROLL_REST_TIMEOUT_MS;
       let previous = element.getBoundingClientRect().top;
       let stillFrames = 0;
+      // A scroll that has been asked for but has not begun looks exactly like a scroll
+      // that has finished: nothing is moving. Counting still frames alone therefore
+      // declared the page settled on the very first frame, before the browser had taken
+      // a single step — the outline was drawn around where the element used to be, and
+      // then the page slid out from under it. Waiting for real movement first is what
+      // tells the two apart.
+      let moved = false;
+      let finished = false;
+      const stop = () => {
+        if (finished) return;
+        finished = true;
+        window.removeEventListener("scrollend", stop, true);
+        resolve();
+      };
+      // Where the browser reports the end of its own scroll, believe it.
+      window.addEventListener("scrollend", stop, true);
       const check = () => {
+        if (finished) return;
         const current = element.getBoundingClientRect().top;
-        stillFrames = Math.abs(current - previous) < 0.5 ? stillFrames + 1 : 0;
+        const still = Math.abs(current - previous) < 0.5;
+        if (!still) moved = true;
+        stillFrames = still ? stillFrames + 1 : 0;
         previous = current;
-        if (stillFrames >= 3 || performance.now() > deadline) resolve();
+        // The deadline is the safety net: a scroll that never starts, because the
+        // element was already where it needed to be, must not hold the guide for ever.
+        if ((moved && stillFrames >= 3) || performance.now() > deadline) stop();
         else window.requestAnimationFrame(check);
       };
       window.requestAnimationFrame(check);

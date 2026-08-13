@@ -60,6 +60,17 @@
   transition: top 120ms ease, left 120ms ease;
 }
 
+/* The popover takes focus when a step opens, so a keyboard or screen-reader user
+   lands inside the explanation instead of behind it. It is not a control, so no rule
+   claimed it and the browser painted its own default ring in near-black — the one
+   colour on the page that is not ours. The ring has to stay visible, so it is given
+   the brand colour rather than removed. */
+.hm-guide-popover:focus,
+.hm-guide-popover:focus-visible {
+  outline: 2px solid var(--hm-apple-deep, #55712a);
+  outline-offset: 3px;
+}
+
 .hm-guide-popover-counter {
   display: block;
   font-size: 0.75rem;
