@@ -19,6 +19,7 @@ from ai_market_monitor.core.launch_stage import (
     StageExposure,
     resolve_launch_stage,
 )
+from ai_market_monitor.observability.metrics import MetricRetentionPolicy
 
 WHATSAPP_TEMPLATE_EVENTS = frozenset(
     {
@@ -564,6 +565,23 @@ class Settings(BaseSettings):
     public_chat_notion_max_characters: int = Field(default=12000, ge=1000, le=50000)
     public_chat_notion_max_file_bytes: int = Field(default=262144, ge=1024, le=2_000_000)
     public_forms_enabled: bool = True
+    # -- Durable operational measurements ---------------------------------------
+    #
+    # Measurements are held in memory for speed and written down periodically, so
+    # they survive a restart and add up across the API, the workers and the
+    # scheduler. These four settings decide how coarse the stored windows are, how
+    # often each process writes, when per-process rows are folded into one, and when
+    # they are deleted. See `observability/durable_metrics.py`.
+    #: Width of one stored window. Wider means fewer rows and a blunter timeline.
+    observability_window_seconds: int = Field(default=300, ge=10, le=3600)
+    #: How often a process writes its outstanding movement down. Never longer than a
+    #: window, or a whole window can pass with nothing recorded from a quiet process.
+    observability_flush_interval_seconds: int = Field(default=60, ge=5, le=900)
+    #: After this age, every process's rows for one window become a single row.
+    observability_rollup_after_hours: int = Field(default=6, ge=1, le=168)
+    #: After this age, stored measurements are deleted. This is the only bound on
+    #: growth, so it is required rather than optional.
+    observability_retention_hours: int = Field(default=72, ge=2, le=8760)
     #: How open the product is. The authority for what every public surface shows:
     #: advertised routes, calls to action, pricing and checkout exposure, offered
     #: channels, and what the public assistant may claim. See
@@ -822,6 +840,18 @@ class Settings(BaseSettings):
         merged.setdefault("public_waitlist", {"limit": 5, "window_seconds": 3600})
         merged.setdefault("public_contact", {"limit": 5, "window_seconds": 3600})
         return merged
+
+    @property
+    def metric_retention_policy(self) -> MetricRetentionPolicy:
+        """How long stored measurements live. Validated, so an incoherent pair fails."""
+
+        policy = MetricRetentionPolicy(
+            window_seconds=self.observability_window_seconds,
+            rollup_after_hours=self.observability_rollup_after_hours,
+            retention_hours=self.observability_retention_hours,
+        )
+        policy.validate()
+        return policy
 
     @property
     def resolved_launch_stage(self) -> ResolvedStage:

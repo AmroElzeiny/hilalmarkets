@@ -103,6 +103,7 @@ from ai_market_monitor.db.models.observability import (
 from ai_market_monitor.db.models.operations import (
     OperationalIssue,
     OperationalIssueEvent,
+    OperationalMetricDelta,
 )
 from ai_market_monitor.db.models.public_chat import (
     PublicChatAnswerEvent,
@@ -291,6 +292,7 @@ __all__ = [
     "OnboardingSession",
     "OperationalIssue",
     "OperationalIssueEvent",
+    "OperationalMetricDelta",
     "OperationalMetric",
     "OfficialSource",
     "ObservabilityExplanation",

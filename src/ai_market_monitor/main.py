@@ -1,4 +1,6 @@
-from contextlib import asynccontextmanager
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from time import perf_counter
 
@@ -32,6 +34,36 @@ from ai_market_monitor.observability.asgi import record_http_request
 PACKAGE_DIR = Path(__file__).resolve().parent
 
 
+async def _write_measurements_down(settings: Settings) -> None:
+    """Periodically store this web process's measurements, for as long as it runs.
+
+    Recording stays in memory so that it cannot slow a request down or fail one. That
+    only becomes durable if something writes it out, and a web process has no
+    scheduler of its own — so it keeps this one timer.
+
+    Every failure is swallowed on purpose. Losing the database for a minute must cost
+    a delayed measurement, never a dead web process; the numbers stay in memory and go
+    out on the next pass.
+    """
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.observability.durable_metrics import flush_metrics_once
+
+    interval = max(settings.observability_flush_interval_seconds, 5)
+    policy = settings.metric_retention_policy
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            async with SessionFactory() as session:
+                await flush_metrics_once(session, policy=policy)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Could not write operational measurements down", exc_info=True
+            )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
@@ -40,9 +72,13 @@ async def lifespan(_: FastAPI):
     from ai_market_monitor.services.capability_registry import initialize_capability_registry
 
     await initialize_capability_registry(settings)
+    flusher = asyncio.create_task(_write_measurements_down(settings))
     try:
         yield
     finally:
+        flusher.cancel()
+        with suppress(asyncio.CancelledError):
+            await flusher
         from ai_market_monitor.api.dependencies import get_market_data_provider
         from ai_market_monitor.services.provider_runtime import shutdown_provider_runtime
 

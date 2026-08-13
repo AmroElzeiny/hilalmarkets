@@ -91,6 +91,28 @@ def _weak_database_password(database_url: str) -> str | None:
     return None
 
 
+def _metric_storage_errors(settings: Settings) -> list[str]:
+    """Refuse a retention setup that deletes measurements before it folds them.
+
+    The two ages are independent settings, so nothing else stops somebody setting
+    retention below the rollup age. The result is not an error at any point: rows are
+    simply deleted before they are ever folded together, and the history quietly stops
+    going back as far as the page claims it does.
+    """
+
+    try:
+        _ = settings.metric_retention_policy
+    except ValueError as exc:
+        return [str(exc)]
+    if settings.observability_flush_interval_seconds > settings.observability_window_seconds:
+        return [
+            "OBSERVABILITY_FLUSH_INTERVAL_SECONDS must not be longer than "
+            "OBSERVABILITY_WINDOW_SECONDS, or a quiet process can pass a whole "
+            "window without writing anything down."
+        ]
+    return []
+
+
 def _observability_errors() -> list[str]:
     """Refuse to boot with an objective nothing measures or an alert that cannot arrive.
 
@@ -157,6 +179,7 @@ def _launch_stage_errors(settings: Settings) -> list[str]:
 def validate_runtime_configuration(settings: Settings) -> None:
     errors: list[str] = []
     errors.extend(_observability_errors())
+    errors.extend(_metric_storage_errors(settings))
     errors.extend(_launch_stage_errors(settings))
     if settings.is_deployed:
         if (

@@ -1,10 +1,15 @@
 import logging
+import time
 
 from celery import Celery
+from celery.signals import task_postrun
 
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.logging import configure_logging
 from ai_market_monitor.core.startup import validate_runtime_configuration
+
+#: When this process last wrote its measurements down. Throttles the per-task flush.
+_LAST_METRIC_FLUSH: float = 0.0
 
 settings = get_settings()
 validate_runtime_configuration(settings)
@@ -154,8 +159,58 @@ app.conf.update(
             "task": "ai_market_monitor.monitor_published_sharia_sources",
             "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
         },
+        # The scheduler writes its own measurements down on this beat. Every other
+        # process writes its own after each task it runs, or on the API's own timer —
+        # a scheduled task only ever runs in one process, so it can never flush the
+        # rest of them.
+        "flush-operational-metrics": {
+            "task": "ai_market_monitor.flush_operational_metrics",
+            "schedule": settings.observability_flush_interval_seconds,
+        },
+        # The only thing standing between the measurement table and unbounded growth.
+        "compact-operational-metrics-hourly": {
+            "task": "ai_market_monitor.compact_operational_metrics",
+            "schedule": 60 * 60,
+        },
     },
 )
+
+
+def _flush_metrics_now() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.observability.durable_metrics import flush_metrics_once
+
+    async def _run() -> dict:
+        async with SessionFactory() as session:
+            written = await flush_metrics_once(
+                session, policy=settings.metric_retention_policy
+            )
+            return {"series_written": written}
+
+    return _run_async_task(_run())
+
+
+@task_postrun.connect
+def _write_measurements_down_after_each_task(**_kwargs: object) -> None:
+    """Every worker process writes its own measurements down, on its own schedule.
+
+    A beat entry runs in exactly one worker process. Relying on it alone would have
+    stored the measurements of one process and thrown away every other worker's,
+    which is the same blindness this whole layer exists to remove.
+
+    Throttled, so a burst of short tasks does not turn into a write per task, and
+    wrapped, because a failure to record how the work went must never fail the work.
+    """
+
+    global _LAST_METRIC_FLUSH
+    now = time.monotonic()
+    if now - _LAST_METRIC_FLUSH < settings.observability_flush_interval_seconds:
+        return
+    _LAST_METRIC_FLUSH = now
+    try:
+        _flush_metrics_now()
+    except Exception:  # pragma: no cover - defensive, never fails the task
+        logger.warning("Could not write operational measurements down", exc_info=True)
 
 
 def _run_async_task(coro) -> dict:
@@ -281,6 +336,16 @@ def cleanup_whatsapp_webhook_receipts() -> dict:
 @app.task(name="ai_market_monitor.record_database_health")
 def record_database_health() -> dict:
     return _run_async_task(_record_database_health())
+
+
+@app.task(name="ai_market_monitor.flush_operational_metrics")
+def flush_operational_metrics() -> dict:
+    return _flush_metrics_now()
+
+
+@app.task(name="ai_market_monitor.compact_operational_metrics")
+def compact_operational_metrics() -> dict:
+    return _run_async_task(_compact_operational_metrics())
 
 
 @app.task(name="ai_market_monitor.schedule_due_scans")
@@ -642,6 +707,16 @@ async def _cleanup_whatsapp_webhook_receipts() -> dict:
         )
         await session.commit()
         return {"deleted": int(getattr(result, "rowcount", 0) or 0)}
+
+
+async def _compact_operational_metrics() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.observability.durable_metrics import DurableMetricsStore
+
+    async with SessionFactory() as session:
+        return await DurableMetricsStore(
+            session, policy=settings.metric_retention_policy
+        ).compact()
 
 
 async def _record_database_health() -> dict:

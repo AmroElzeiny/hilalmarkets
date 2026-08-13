@@ -35,7 +35,10 @@ from ai_market_monitor.observability.labels import (
 )
 
 __all__ = [
+    "HISTOGRAM_BUCKETS",
     "METRICS",
+    "MetricDelta",
+    "MetricRetentionPolicy",
     "MetricSample",
     "MetricSpec",
     "MetricsRecorder",
@@ -383,6 +386,66 @@ _HISTOGRAM_BUCKETS: Final[tuple[float, ...]] = (
     600_000.0,
 )
 
+#: The same ladder, published so the durable store can write bucket counts that mean
+#: the same thing after a restart. A stored histogram whose edges no longer match the
+#: reader's is not a slightly wrong quantile; it is a number about nothing.
+HISTOGRAM_BUCKETS: Final[tuple[float, ...]] = _HISTOGRAM_BUCKETS
+
+
+@dataclass(frozen=True, slots=True)
+class MetricRetentionPolicy:
+    """How long stored measurements live, and when they stop being per-process.
+
+    Lives here rather than beside the store that uses it so that the settings object
+    can hold one without importing the database layer.
+    """
+
+    window_seconds: int
+    rollup_after_hours: int
+    retention_hours: int
+
+    def validate(self) -> None:
+        if self.window_seconds <= 0:
+            raise ValueError("OBSERVABILITY_WINDOW_SECONDS must be at least 1.")
+        if self.rollup_after_hours <= 0:
+            raise ValueError("OBSERVABILITY_ROLLUP_AFTER_HOURS must be at least 1.")
+        if self.retention_hours <= self.rollup_after_hours:
+            raise ValueError(
+                "OBSERVABILITY_RETENTION_HOURS must be longer than "
+                "OBSERVABILITY_ROLLUP_AFTER_HOURS, otherwise rows are deleted before "
+                "they are ever folded together."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class MetricDelta:
+    """What one series gained since this process last wrote it down.
+
+    A *delta*, not a total, because several processes record the same metric and none
+    of them can see the others. Each writes only its own movement, and the reader adds
+    them up. Nothing is ever read, changed and written back, so two processes flushing
+    at the same moment cannot lose each other's counts.
+
+    ``snapshot_*`` is the exact reading the delta was taken against. It travels with
+    the delta so that the flush can mark precisely that much as written, even though
+    more observations arrived while the write was in flight.
+    """
+
+    name: str
+    kind: MetricKind
+    labels: tuple[tuple[str, str], ...]
+    #: Counter and histogram: how much was added. Gauge: the current reading.
+    value: float
+    observations: int
+    buckets: tuple[int, ...] | None
+    snapshot_total: float
+    snapshot_count: int
+    snapshot_buckets: tuple[int, ...] | None
+
+    @property
+    def label_map(self) -> dict[str, str]:
+        return dict(self.labels)
+
 
 @dataclass
 class _Series:
@@ -418,6 +481,11 @@ class MetricsRecorder:
         default_factory=lambda: defaultdict(set)
     )
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    #: The last reading successfully written to the durable store, per series. What is
+    #: in memory minus what is here is what still has to be written down.
+    _flushed: dict[str, dict[tuple[tuple[str, str], ...], tuple[float, int, tuple[int, ...]]]] = (
+        field(default_factory=lambda: defaultdict(dict))
+    )
 
     def record(self, name: str, value: float = 1.0, /, **labels: str) -> None:
         """Record one observation, or raise naming what is wrong with it.
@@ -577,10 +645,118 @@ class MetricsRecorder:
                     return float("inf")
         return float("inf")
 
+    def pending_deltas(self) -> tuple[MetricDelta, ...]:
+        """Everything recorded since the last confirmed write, ready to be stored.
+
+        Never clears anything. The in-memory reading stays whole, so a failed write is
+        simply retried on the next pass with the same numbers plus whatever arrived in
+        between — a lost database connection costs latency, not measurements.
+        """
+
+        deltas: list[MetricDelta] = []
+        with self._lock:
+            for name, series_by_labels in self._series.items():
+                spec = METRICS[name]
+                flushed = self._flushed[name]
+                for key, series in series_by_labels.items():
+                    seen_total, seen_count, seen_buckets = flushed.get(
+                        key, (0.0, 0, (0,) * (len(_HISTOGRAM_BUCKETS) + 1))
+                    )
+                    current_buckets = tuple(series.buckets)
+                    if spec.kind == "gauge":
+                        # A gauge is a reading, not an accumulation. Its delta is the
+                        # reading itself; adding gauges across processes would report
+                        # four healthy workers as one very stale one.
+                        if series.total == seen_total and series.count == seen_count:
+                            continue
+                        value = series.total
+                        observations = series.count - seen_count
+                        buckets = None
+                    else:
+                        value = series.total - seen_total
+                        observations = series.count - seen_count
+                        if observations <= 0 and value == 0.0:
+                            continue
+                        buckets = (
+                            tuple(
+                                current - previous
+                                for current, previous in zip(
+                                    current_buckets, seen_buckets, strict=True
+                                )
+                            )
+                            if spec.kind == "histogram"
+                            else None
+                        )
+                    deltas.append(
+                        MetricDelta(
+                            name=name,
+                            kind=spec.kind,
+                            labels=key,
+                            value=value,
+                            observations=observations,
+                            buckets=buckets,
+                            snapshot_total=series.total,
+                            snapshot_count=series.count,
+                            snapshot_buckets=current_buckets,
+                        )
+                    )
+        return tuple(deltas)
+
+    def mark_flushed(self, deltas: tuple[MetricDelta, ...]) -> None:
+        """Record that exactly these readings reached the store.
+
+        Called only after the write is committed, and only for the snapshot the delta
+        was taken against — not for the current reading, which has moved on. Marking
+        the current reading instead would silently discard every observation that
+        landed while the write was in flight.
+        """
+
+        with self._lock:
+            for delta in deltas:
+                self._flushed[delta.name][delta.labels] = (
+                    delta.snapshot_total,
+                    delta.snapshot_count,
+                    delta.snapshot_buckets or (0,) * (len(_HISTOGRAM_BUCKETS) + 1),
+                )
+
+    def merge_stored(
+        self,
+        name: str,
+        labels: Mapping[str, str],
+        *,
+        value: float,
+        observations: int,
+        buckets: tuple[int, ...] | None = None,
+    ) -> None:
+        """Add one stored reading back in, for a recorder built from the database.
+
+        Deliberately skips label validation. These values were validated when they
+        were recorded; re-validating on the way out would count each stored label
+        value against the cardinality ceiling a second time and refuse a legitimate
+        history for looking too varied.
+        """
+
+        spec = METRICS.get(name)
+        if spec is None:
+            raise UnknownMetricError(f"Unknown metric {name!r}.")
+        key = tuple(sorted((str(k), str(v)) for k, v in labels.items()))
+        with self._lock:
+            series = self._series[name].setdefault(key, _Series())
+            if spec.kind == "gauge":
+                series.total = float(value)
+            else:
+                series.total += float(value)
+            series.last = float(value)
+            series.count += int(observations)
+            if spec.kind == "histogram" and buckets is not None:
+                for index, count in enumerate(buckets[: len(series.buckets)]):
+                    series.buckets[index] += int(count)
+
     def reset(self) -> None:
         with self._lock:
             self._series.clear()
             self._seen_label_values.clear()
+            self._flushed.clear()
 
 
 _RECORDER: MetricsRecorder | None = None

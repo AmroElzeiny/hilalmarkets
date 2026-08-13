@@ -19,6 +19,7 @@ that cannot be bypassed by a new caller.
 """
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +29,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
 )
@@ -92,6 +94,65 @@ class OperationalIssue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: The alert-rule and objective version that produced this row, so an issue raised
     #: under an older threshold stays readable after the threshold moves.
     definition_version: Mapped[str | None] = mapped_column(String(40))
+
+
+#: The writer identity used for a row that has been folded together after the fact.
+#: Reserved, so a real process can never be mistaken for a rollup or overwrite one.
+METRIC_ROLLUP_WRITER: str = "rollup"
+
+
+class OperationalMetricDelta(UUIDPrimaryKeyMixin, Base):
+    """One process's movement on one metric during one time window.
+
+    Sits beside :class:`~ai_market_monitor.db.models.monitoring.OperationalMetric`
+    rather than inside it. That table records a *health measurement*: one component,
+    one reading, one ``HealthStatus``, taken at a moment. This one records a
+    *counter's movement*: no health status exists for "the API answered 4,102
+    requests", and a histogram's bucket counts have nowhere to live in a single
+    ``value`` column. Forcing both meanings into one table would have meant inventing
+    a health status for every counter and reading distributions out of a JSON blob.
+    Same database, same session, same migrations — one more table, not a second store.
+
+    **Why concurrent writers cannot lose or double-count.** The unique key includes
+    ``writer``, which is unique per process. No two processes ever touch the same row,
+    so there is no read-modify-write to race on. Each process writes only what *it*
+    added since its own last write, and the reader sums the rows. A process that dies
+    mid-window leaves its counts behind; a process that restarts gets a new ``writer``
+    and starts a new row instead of overwriting the dead one's.
+    """
+
+    __tablename__ = "operational_metric_deltas"
+    __table_args__ = (
+        UniqueConstraint(
+            "metric_name",
+            "label_signature",
+            "window_start",
+            "writer",
+            name="uq_operational_metric_delta_series",
+        ),
+        Index("ix_operational_metric_delta_window", "window_start", "metric_name"),
+        Index("ix_operational_metric_delta_name_window", "metric_name", "window_start"),
+    )
+
+    metric_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    #: ``counter``, ``gauge`` or ``histogram``. Stored so a reader can add up the rows
+    #: correctly without having to trust that the code's registry still says the same.
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)
+    #: ``label=value`` pairs, sorted and joined. The comparable form of ``labels``;
+    #: a JSON column cannot carry a unique constraint on every backend.
+    label_signature: Mapped[str] = mapped_column(String(500), nullable=False)
+    labels: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: Start of the window this row belongs to, floored to the configured width.
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: Which process wrote it: ``host:pid:started``. Low-cardinality by deployment,
+    #: bounded over time by the rollup that folds old rows into one.
+    writer: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: Counter and histogram: the amount added in this window. Gauge: the last reading.
+    total: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
+    observations: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: Histogram only: counts per shared bucket edge, plus one overflow slot.
+    buckets: Mapped[list[int] | None] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class OperationalIssueEvent(UUIDPrimaryKeyMixin, Base):
