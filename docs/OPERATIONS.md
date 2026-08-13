@@ -693,6 +693,51 @@ and forcing it open converts a visible outage into a wrong answer shown to a cus
 - **Verification.** Refusal rate returns to normal after the methodology or publication
   is restored.
 
+## Using the engineering assistant during an incident
+
+The assistant can help you work out *what* broke. It cannot fix anything, and it must not
+be asked to.
+
+**What it can do.** Read sanitized metrics, alert and delivery records, issue records,
+the health and activity endpoints, provider circuit state, AI usage, worker and scanner
+records, and redacted logs. Correlate them, and write a diagnosis that names the failing
+layer with the evidence behind it.
+
+**What it will refuse**, in code and not as a matter of policy:
+
+| Refused | Rule |
+|---|---|
+| Restarting a service or killing a process | `ops.no_production_restart` |
+| Changing a feature flag or the launch stage | `ops.no_feature_flag_change`, `ops.no_launch_stage_change` |
+| Silencing, muting or resolving an alert | `ops.no_alert_suppression` |
+| Writing to any database | `ops.no_production_write` |
+| Connecting to production Postgres or Redis | `ops.no_live_production_connection` |
+| Deploying | `production.deploy` |
+
+Check any command before you rely on it:
+
+```powershell
+.venv\Scripts\python -m hm_oi check "systemctl restart hilalmarkets"
+```
+
+**How to read what it gives you.** Every conclusion carries the environment it applies to
+and the evidence for each claim. Two things to insist on:
+
+- **`INSUFFICIENT EVIDENCE` is a real answer.** It means the signal needed is missing.
+  Treat it as a gap to close, not as a failed attempt — pushing for a conclusion anyway
+  is how an incident gets the wrong fix.
+- **Correlation is not cause.** A diagnosis resting only on two things moving together
+  cannot be stated at high confidence, and the tool will say so. It is a starting point.
+
+**Production evidence is a snapshot.** The assistant never connects to production. It
+reads an exported, sanitized file, so its picture is as fresh as that export and no
+fresher. **Whoever exports the snapshot is responsible for sanitizing it** — nothing in
+the tooling verifies that, and it is the weakest link in the chain.
+
+**When the recommendation is an action**, it comes back as the exact command for you to
+run. Run it yourself, after reading it. Full description and the runbook:
+`docs/OI_OPERATIONAL_INVESTIGATOR.md`.
+
 ## Monitoring Setup
 
 Operational APIs:

@@ -250,14 +250,73 @@ reason.
 
 ---
 
-## 8. What this assistant does not do yet
+## 8. Conversation material — fixtures only
 
-OI-1 is `understand, investigate, route, test, review, recommend`.
+**You may not read a real customer conversation.** Not from the database, not from a
+production log, not from a backup file.
 
-Deliberately not built yet, and not to be improvised: autonomous code-writing workflows,
-automated regression fixing, production observability access, incident-response
-automation, autonomous adversarial browser QA, automatic pull-request creation,
-multi-agent engineering organisation, autonomous deployment, production configuration
-changes.
+The product does not yet remove secrets before a conversation is stored or before it is
+sent to a model provider, and it has no conversation retention or delete path. Until both
+exist, all conversation material comes from these committed synthetic files:
+
+```
+tests/fixtures/setup_chat_language_quality_corpus.jsonl
+tests/fixtures/prompt_understanding_corpus.jsonl
+tests/fixtures/agent_control_corpus.jsonl
+```
+
+This is enforced in code. `hm_oi.conversation_source` refuses everything else, and the
+rule `builder.no_customer_data` refuses commands naming a customer table or a database
+backup. There is no setting that turns it off.
+
+If a task genuinely needs a real conversation, say so and stop.
+
+---
+
+## 9. Autonomous mode
+
+When the assistant runs unattended through the builder (`hm_oi.builder`), the rules are
+tighter than everything above, and the workflow is not optional:
+
+```
+reproduce → a test that fails first → fix → focused tests → adjacent tests → review → done
+```
+
+- A fix with no reproducing test is **rejected by the harness**, not discouraged.
+- A test that already passed before the fix is rejected — it reproduced nothing.
+- Nothing completes while any recorded test run is red.
+- An independent reviewer sees the diff and the test runs, never your reasoning. It
+  rejects weakened assertions, skipped tests, scope creep, governed-authority changes and
+  secrets.
+- All work happens in a separate worktree on an `oi/...` branch. Pushing, merging,
+  rebasing, tagging and deleting branches are refused outright — not "ask a person",
+  because unattended there is nobody to ask.
+- Three ceilings stop a task: 3 attempts, 30 minutes, $2.00.
+
+Full description: `docs/OI_AUTONOMOUS_BUILDER.md`.
+
+---
+
+## 10. What this assistant does not do yet
+
+OI-1 is `understand, investigate, route, test, review, recommend`. OI-2 adds
+`change code in an isolated worktree, under a mandatory workflow with independent review`.
+OI-3 adds `read sanitized operational evidence and write down what a person should do`.
+OI-4 adds `attack a throwaway copy, and report what broke` — and nothing else: it fixes
+nothing, promotes no test of its own into the suite, and has no path to production.
+See `docs/OI_ADVERSARIAL_QA.md`.
+
+Deliberately not built yet, and not to be improvised: production observability access,
+incident-response automation, automatic pull-request creation, multi-agent engineering
+organisation, autonomous deployment, production configuration changes.
+
+**QA is a harness a person starts, not an agent that roams.** OI-4 runs the attacks it is
+told to run, against the target it is given, and stops. It does not choose new targets, it
+does not retry until something fails, and a failing attack is a line in a report rather
+than a change to the code.
+
+**Autonomous merging and deploying are not "not yet". They are never.** The end of a
+successful autonomous task is a branch and a written summary. A person opens the pull
+request and a person merges it.
 
 If a task needs one of those, say so and stop.

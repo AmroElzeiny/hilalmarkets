@@ -1,0 +1,92 @@
+{
+  "_what_this_is": [
+    "The invariant violations the adversarial QA harness found at commit 211aecc5, written",
+    "down so the test suite can stay green while the defects stay visible.",
+    "",
+    "It is a ledger, not an excuse list. The test that reads it fails in BOTH directions:",
+    "an entry here that stops violating fails (somebody fixed it - remove the entry), and a",
+    "violation that is not here fails (something new broke). Neither direction can pass",
+    "quietly, which is the only thing that stops a file like this becoming a place where",
+    "problems go to be forgotten.",
+    "",
+    "This phase fixes nothing. Every entry is reported in docs/OI_ADVERSARIAL_QA_RUN.md",
+    "with its severity, its reproduction command and a regression candidate that a person",
+    "- not the harness - decides whether to promote."
+  ],
+  "recorded_at_sha": "211aecc5",
+  "corpus_version": "1.1.0",
+  "violations": [
+    {
+      "case_id": "adv-qnum-001",
+      "invariant": "a_question_is_never_a_mutation",
+      "finding_id": "OI4-001",
+      "note": "A question containing a timeframe silently repoints the monitor at it."
+    },
+    {
+      "case_id": "adv-corrfriend-002",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-002",
+      "note": "Two timeframes in one correction: the layer fails closed and the rejected value stays in force."
+    },
+    {
+      "case_id": "adv-negtf-001",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-003",
+      "note": "'Not 15m.' sets the timeframe to 15m."
+    },
+    {
+      "case_id": "adv-negtf-002",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-003",
+      "note": "'Never use 15m.' sets the timeframe to 15m."
+    },
+    {
+      "case_id": "adv-negtf-003",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-003",
+      "note": "'Don't use 15m for this.' sets the timeframe to 15m."
+    },
+    {
+      "case_id": "adv-negtf-004",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-003",
+      "note": "'Anything but 15m please.' sets the timeframe to 15m."
+    },
+    {
+      "case_id": "adv-negtf-005",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-003",
+      "note": "'Stop using 15m.' sets the timeframe to 15m."
+    },
+    {
+      "case_id": "adv-negdir-001",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-004",
+      "note": "'Not short.' sets the direction to short."
+    },
+    {
+      "case_id": "adv-negdir-002",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-004",
+      "note": "'Never use short.' sets the direction to short."
+    },
+    {
+      "case_id": "adv-negdir-003",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-004",
+      "note": "'Don't use short.' sets the direction to short."
+    },
+    {
+      "case_id": "adv-negsym-001",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-005",
+      "note": "'Never use BTCUSDT.' includes BTC/USDT instead of excluding it."
+    },
+    {
+      "case_id": "adv-negsym-002",
+      "invariant": "a_correction_targets_the_correct_object",
+      "finding_id": "OI4-005",
+      "note": "'Anything but BTCUSDT.' includes BTC/USDT instead of excluding it."
+    }
+  ]
+}

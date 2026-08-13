@@ -2,11 +2,17 @@
 #
 #   tools\oi\bootstrap.ps1
 #
-# Creates .oi-venv using Python 3.11 and installs the pinned set in requirements.txt.
-# The project's own .venv is never touched: Open Interpreter needs Python < 3.12 and
-# pulls in litellm, selenium and matplotlib, and putting any of that beside the product's
-# pinned dependencies would change what the release gate's `pip check` and
+# Creates .oi-venv and installs the pinned set in requirements.txt.
+#
+# The project's own .venv is never touched, because Open Interpreter pulls in litellm,
+# selenium and matplotlib, and putting any of that beside the product's pinned
+# dependencies would change what the release gate's `pip check` and
 # scripts/check_dependency_lock.py see.
+#
+# Python 3.11 is preferred because that is the version this set was installed and
+# verified on. It is not a hard requirement: open-interpreter 0.4.3 declares
+# `>=3.9,<4`. An earlier version of this script claimed `<3.12` and refused to run
+# without 3.11, which sent people hunting for an interpreter they did not need.
 
 param(
     [string]$PythonExe = ""
@@ -18,10 +24,16 @@ $venv = Join-Path $root ".oi-venv"
 $requirements = Join-Path $PSScriptRoot "requirements.txt"
 
 if (-not $PythonExe) {
-    # open-interpreter 0.4.3 declares python >=3.9,<3.12. 3.12 will resolve to nothing.
+    # 3.11 first: the known-good version. Anything >=3.9 satisfies the package.
     $found = & py -3.11 -c "import sys; print(sys.executable)" 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $found) {
-        Write-Error "Python 3.11 was not found. Open Interpreter 0.4.3 requires >=3.9,<3.12. Install it, or pass -PythonExe."
+        $found = & py -3 -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $found) {
+            Write-Error "No Python interpreter was found. Open Interpreter 0.4.3 needs >=3.9. Install one, or pass -PythonExe."
+        }
+        $version = (& $found.Trim() -c "import sys; print('%d.%d' % sys.version_info[:2])").Trim()
+        Write-Host "Python 3.11 was not found; using $version instead."
+        Write-Host "That satisfies the package, but 3.11 is the version this set was verified on."
     }
     $PythonExe = $found.Trim()
 }

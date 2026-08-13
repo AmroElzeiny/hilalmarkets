@@ -5,8 +5,19 @@
 # matplotlib; putting those beside the product's pinned dependencies would change what
 # `pip check` and scripts/check_dependency_lock.py see, and the release gate checks both.
 #
-# Python 3.11 is required. open-interpreter 0.4.3 declares `python >=3.9,<3.12`, and the
-# project's own .venv is 3.12. That is a second reason the two environments are separate.
+# Python 3.11 is what this set was installed and verified on. It is NOT a hard
+# requirement, and an earlier version of this comment said it was:
+#
+#   "open-interpreter 0.4.3 declares python >=3.9,<3.12"
+#
+# It does not. The installed metadata declares `>=3.9,<4`, and of the 151 distributions
+# in .oi-venv, none forbids 3.12. Anyone reading the old note would have gone looking for
+# a 3.11 interpreter they did not need.
+#
+# The separate environment is still right, for the reason above on its own: Open
+# Interpreter pulls in litellm, selenium and matplotlib, and putting those beside the
+# product's pinned dependencies changes what `pip check` and
+# scripts/check_dependency_lock.py see. The release gate checks both.
 #
 # Two of Open Interpreter's own pins cannot be satisfied as written. Both are relaxed on
 # purpose and recorded here rather than silently worked around:
@@ -46,6 +57,22 @@
 #           repository and has no use for them.
 #   server  would expose an HTTP surface. There is no reason for one.
 
+# Supply-chain facts for this pin, checked 2026-08-13. See docs/OI_EVALUATION_REPORT.md.
+#
+#   published    2024-10-26, and still the newest release 22 months later
+#   licence      AGPL-3.0 (LICENSE inside the wheel; PyPI carries no licence field)
+#   provenance   none - no PEP 740 attestation, no OpenSSF Scorecard for the repo
+#   sha256 whl   bb694b826b11986a305b7d34acbabae830481bb1180b52fe1b912e882a21b590
+#   sha256 sdist cd81d0a6bc5bc9bed6a3f35010da71421b435dc9479f4ac867db80fdc29fa11b
+#
+# The install is NOT hash-verified: bootstrap installs by version alone, so it trusts
+# whatever PyPI serves at the time. The two hashes above are recorded so an engineer can
+# check by hand. Full `--require-hashes` needs every transitive pin hashed too, which is
+# an OI-1 task, not something to half-do here.
+#
+# AGPL matters for a commercial product. It is safe here only because this tool is never
+# distributed and never linked into the product; `scripts/check_oi_boundary.py` enforces
+# exactly that separation, and it is now a licence boundary as well as a safety one.
 open-interpreter==0.4.3
 
 # Installed with --only-binary=:all:

@@ -57,6 +57,22 @@ tmp/
 *.sql.gz
 *.sql.zip
 
+# The same files with a date or counter stuck on the end. The plain names above
+# did not cover `ai_market_monitor.db.bak-20260803`, so a real database with a
+# real user's password hash in it was committed and shipped. A dated backup is
+# the copy nobody looks at twice, which is exactly why it needs its own line.
+# scripts/check_release_invariants.py enforces the same family; keep the two together.
+*.db.*
+*.db~
+*.sqlite.*
+*.sqlite~
+*.sqlite3.*
+*.sqlite3~
+*.log.*
+*.bak-*
+*.backup-*
+*.dump-*
+
 # Browser, test, and local runtime artifacts
 playwright-report/
 test-results/

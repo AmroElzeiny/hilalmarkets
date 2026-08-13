@@ -174,6 +174,106 @@ def _cmd_instructions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_qa_target(args: argparse.Namespace) -> int:
+    """Say what a target is before anything is sent to it.
+
+    Free, and the first thing anyone should run. It answers the two questions that
+    decide whether a QA pass means anything: is this production, and can it take a fault.
+    """
+
+    from hm_oi.qa_target import TargetRefused, describe_target
+
+    try:
+        profile = describe_target(args.base_url)
+    except TargetRefused as refused:
+        print(f"REFUSED\n{refused}")
+        return 2
+
+    payload = profile.to_dict()
+    lines = [
+        f"target            {profile.base_url}",
+        f"kind              {profile.kind.value}",
+        f"APP_ENV           {profile.app_env}",
+        f"fault injection   {'available' if profile.supports_fault_injection else 'NOT available'}",
+        "why",
+        *[f"  - {item}" for item in profile.evidence],
+    ]
+    _emit(payload, args.json, lines)
+    return 0
+
+
+def _cmd_qa_plan(args: argparse.Namespace) -> int:
+    """List what a pass would attempt against this target, and what it would skip.
+
+    Skips are printed with their reason. An attack that is quietly absent from a report
+    reads as one that passed, which is the most misleading thing this tool could do.
+    """
+
+    from hm_oi.qa_attacks import BOUNDARY_ATTACKS, CATALOGUE_VERSION
+    from hm_oi.qa_harness import attacks_runnable_against
+    from hm_oi.qa_target import TargetRefused, describe_target
+
+    try:
+        profile = describe_target(args.base_url)
+    except TargetRefused as refused:
+        print(f"REFUSED\n{refused}")
+        return 2
+
+    runnable, skipped = attacks_runnable_against(profile, allow_paid=args.allow_paid)
+    payload = {
+        "catalogue_version": CATALOGUE_VERSION,
+        "target": profile.to_dict(),
+        "total": len(BOUNDARY_ATTACKS),
+        "runnable": [item.attack_id for item in runnable],
+        "skipped": [item.to_dict() for item in skipped],
+    }
+    lines = [
+        f"catalogue         {CATALOGUE_VERSION} ({len(BOUNDARY_ATTACKS)} attacks)",
+        f"target            {profile.kind.value} (APP_ENV={profile.app_env})",
+        f"would run         {len(runnable)}",
+        *[f"  + {item.attack_id:<44} {item.title}" for item in runnable],
+        f"would skip        {len(skipped)}",
+        *[f"  - {item.attack_id:<44} {item.status}" for item in skipped],
+    ]
+    _emit(payload, args.json, lines)
+    return 0
+
+
+def _cmd_qa_corpus(args: argparse.Namespace) -> int:
+    """Report the adversarial corpus without running it. Free and offline."""
+
+    from hm_oi.qa_corpus import (
+        CORPUS_VERSION,
+        REQUIRED_SHAPES,
+        load_adversarial_corpus,
+        shapes_covered,
+    )
+
+    cases = load_adversarial_corpus()
+    covered = shapes_covered(cases)
+    missing = sorted(item.value for item in REQUIRED_SHAPES - covered)
+    by_shape: dict[str, int] = {}
+    for case in cases:
+        by_shape[str(case.shape)] = by_shape.get(str(case.shape), 0) + 1
+
+    payload = {
+        "corpus_version": CORPUS_VERSION,
+        "cases": len(cases),
+        "shapes_covered": sorted(item.value for item in covered),
+        "shapes_missing": missing,
+        "cases_by_shape": by_shape,
+    }
+    lines = [
+        f"corpus            {CORPUS_VERSION}  ({len(cases)} cases)",
+        f"shapes covered    {len(covered)}/{len(REQUIRED_SHAPES)}",
+        *[f"  {shape:<34} {count}" for shape, count in sorted(by_shape.items())],
+    ]
+    if missing:
+        lines += ["shapes MISSING", *[f"  ! {item}" for item in missing]]
+    _emit(payload, args.json, lines)
+    return 1 if missing else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m hm_oi",
@@ -228,6 +328,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     instructions.add_argument("--tier", default=Tier.NORMAL.value, choices=[t.value for t in Tier])
     instructions.set_defaults(func=_cmd_instructions)
+
+    # -- Adversarial QA (OI-4). Every subcommand here is free and offline except where
+    # -- it says otherwise; see docs/OI_ADVERSARIAL_QA.md.
+    qa = sub.add_parser("qa", help="the adversarial QA harness").add_subparsers(
+        dest="qa_command", required=True
+    )
+
+    qa_target = qa.add_parser(
+        "target", parents=[shared], help="identify a target and refuse it if it is production"
+    )
+    qa_target.add_argument("base_url", help="for example http://127.0.0.1:8124")
+    qa_target.set_defaults(func=_cmd_qa_target)
+
+    qa_plan = qa.add_parser(
+        "plan", parents=[shared], help="what a pass would attempt, and what it would skip"
+    )
+    qa_plan.add_argument("base_url")
+    qa_plan.add_argument(
+        "--allow-paid",
+        action="store_true",
+        help="include the attacks that call a paid provider",
+    )
+    qa_plan.set_defaults(func=_cmd_qa_plan)
+
+    qa_corpus = qa.add_parser(
+        "corpus", parents=[shared], help="report the adversarial corpus and its shape coverage"
+    )
+    qa_corpus.set_defaults(func=_cmd_qa_corpus)
 
     return parser
 

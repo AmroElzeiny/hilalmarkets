@@ -33,6 +33,19 @@ EXPECTED_SKILLS = {
     "hm-setup-chat-investigator",
     "hm-test-runner",
     "hm-release-reviewer",
+    # Added with the autonomous builder. It takes a failed Setup Chat conversation and
+    # names the layer that broke. Read-only, and restricted to committed synthetic
+    # fixtures until the product can redact and delete conversation data - see
+    # hm_oi.conversation_source and docs/OI_AUTONOMOUS_BUILDER.md.
+    "hm-conversation-regression",
+    # Added with the operational investigator. All five read sanitized, allowlisted
+    # evidence and return a diagnosis or INSUFFICIENT EVIDENCE - never a guess, and
+    # never an action. See docs/OI_OPERATIONAL_INVESTIGATOR.md.
+    "hm-ai-quality-investigator",
+    "hm-provider-incident-investigator",
+    "hm-cost-anomaly-investigator",
+    "hm-worker-investigator",
+    "hm-scanner-incident-investigator",
 }
 
 

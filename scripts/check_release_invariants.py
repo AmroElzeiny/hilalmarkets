@@ -31,7 +31,19 @@ EXPECTED_PURCHASABLE_PLANS = ("trader", "pro")
 FORBIDDEN_TRACKED_PATTERNS = (
     re.compile(r"(^|/)\.venv/"),
     re.compile(r"(^|/)(reports|test-results|playwright-report|exports)/"),
-    re.compile(r"(^|/)(?!VvvebJs/).*\.(db|sqlite|sqlite3|log)$", re.IGNORECASE),
+    # The trailing `(?:[.\-~]\S*)?` is what makes this a rule about databases rather
+    # than a rule about filenames ending in `.db`. Anchored straight to `$`, the pattern
+    # accepted `ai_market_monitor.db.bak-20260803` — a real 7.7 MB database, holding a
+    # real user identity with a live password hash, committed and shipped. A backup is
+    # exactly the copy nobody notices, so it is the one that must be caught: `.db.bak`,
+    # `.sqlite3.backup`, `.db.old`, `.log.1` and `.db~` are all the same mistake.
+    # It stays strict about the extension itself — a separator must follow, so `.dbml`
+    # and `.logic` are still ordinary filenames.
+    # Anchored at `^`, not `(^|/)`, and this matters. With the alternation, `re.search`
+    # simply moved along to the `/` inside `VvvebJs/demo.db` and matched from there, so
+    # the `(?!VvvebJs/)` exemption never once applied to anything nested. It read as a
+    # working exemption and was not one. `^` gives the lookahead a single place to stand.
+    re.compile(r"^(?!VvvebJs/).*\.(db|sqlite|sqlite3|log)(?:[.\-~]\S*)?$", re.IGNORECASE),
     re.compile(r"^PLAYWRIGHT_E2E_REPORT\.md$"),
 )
 # The forbidden-phrase list, the copy sources and the spelling rule now live in
