@@ -18,7 +18,11 @@ from ai_market_monitor.core.plans import (
 )
 from ai_market_monitor.core.product_boundaries import BOUNDARY_REGISTRY, refuse
 from ai_market_monitor.main import app
-from ai_market_monitor.observability.alerts import AlertRuleError, validate_alert_rules
+from ai_market_monitor.observability.alerts import (
+    ALERT_RULES,
+    AlertRuleError,
+    validate_alert_rules,
+)
 from ai_market_monitor.observability.slos import undeclared_metric_names
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +58,14 @@ ACTIVE_DISCORD_SUFFIXES = {".py", ".html", ".js", ".css"}
 REQUIRED_KEY_PARITY = (
     "LAUNCH_STAGE",
     "PUBLIC_WAITLIST_MODE",
+    "OBSERVABILITY_WINDOW_SECONDS",
+    "OBSERVABILITY_FLUSH_INTERVAL_SECONDS",
+    "OBSERVABILITY_ROLLUP_AFTER_HOURS",
+    "OBSERVABILITY_RETENTION_HOURS",
+    "OPERATIONAL_ALERT_TELEGRAM_CHAT_ID",
+    "OPERATIONAL_ALERT_EMAIL",
+    "OPERATIONAL_ALERT_REPEAT_MINUTES",
+    "OPERATIONAL_ALERT_MAX_ATTEMPTS",
 )
 
 
@@ -211,6 +223,39 @@ def main() -> int:
         validate_alert_rules()
     except AlertRuleError as exc:
         failures.append(str(exc))
+
+    # -- Every page-worthy alert has somewhere to go -----------------------
+    #
+    # Not "is a chat id configured" — that is a deployment secret and cannot live in
+    # a committed file. What is checked is that the rules themselves still name two
+    # independent paths, so a rule cannot be added later that pages into nothing.
+    for rule in ALERT_RULES:
+        if not rule.delivered:
+            continue
+        if rule.primary_route is None or rule.fallback_route is None:
+            failures.append(
+                f"Alert {rule.name} is page-worthy but does not name both a primary "
+                "and a fallback route"
+            )
+
+    # -- Measurements are bounded -----------------------------------------
+    #
+    # The stored measurements have exactly one thing stopping them growing for ever.
+    # If the scheduled task that folds and deletes them is ever dropped from the beat
+    # schedule, nothing fails until the table is too large to read.
+    worker_source = (ROOT / "src" / "ai_market_monitor" / "worker.py").read_text(
+        encoding="utf-8"
+    )
+    for task_name in (
+        "ai_market_monitor.compact_operational_metrics",
+        "ai_market_monitor.flush_operational_metrics",
+        "ai_market_monitor.deliver_operational_alerts",
+        "ai_market_monitor.retry_operational_alert_deliveries",
+    ):
+        if worker_source.count(task_name) < 2:
+            failures.append(
+                f"{task_name} is not both defined and scheduled in worker.py"
+            )
 
     # -- The boundary registry is present and complete ---------------------
     if not BOUNDARY_REGISTRY:

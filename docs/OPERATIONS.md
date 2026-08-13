@@ -448,6 +448,8 @@ Everything operational is defined in one place, `src/ai_market_monitor/observabi
 | `metrics.py` | Every metric the product records, and the recorder that writes them |
 | `slos.py` | The objectives. Each names a metric from `metrics.py` |
 | `alerts.py` | The rules that page or raise a ticket when an objective breaks |
+| `alert_delivery.py` | Sends a page, at most once per problem, and falls back |
+| `durable_metrics.py` | Writes the measurements down so they survive a restart |
 | `issues.py` | The deduplicated queue of operational problems |
 | `banners.py` | What a customer is told while something is degraded |
 
@@ -459,6 +461,76 @@ Two rules are enforced by the application itself and will stop a deployment:
 2. **An alert may not travel through what it is watching.** The alert about Telegram
    delivery cannot be a Telegram message. Startup refuses that too, because the failure
    is silent: the alert is generated correctly and never arrives.
+
+### Where the measurements live
+
+Recording happens in memory, because it must never slow a request down or fail one.
+Every process then writes down **only what it added since its own last write**, into a
+row keyed by its own writer identity. Reading adds those rows up.
+
+That is what makes the numbers true for the whole product rather than for one web
+process, and what makes them survive a restart. Because no two processes ever write the
+same row, two of them writing at the same moment cannot lose each other's counts, and a
+retried write cannot count anything twice.
+
+| Setting | What it does | Default |
+|---|---|---|
+| `OBSERVABILITY_WINDOW_SECONDS` | Width of one stored window | 300 |
+| `OBSERVABILITY_FLUSH_INTERVAL_SECONDS` | How often a process writes down | 60 |
+| `OBSERVABILITY_ROLLUP_AFTER_HOURS` | When per-process rows become one row | 6 |
+| `OBSERVABILITY_RETENTION_HOURS` | When stored measurements are deleted | 72 |
+
+Retention must be longer than the rollup age. Startup refuses to boot if it is not,
+because rows would be deleted before they were ever folded together and the history
+would quietly stop going back as far as the page says it does.
+
+Two scheduled tasks keep this working. Both are in the beat schedule in `worker.py`:
+
+| Task | Every | What it does |
+|---|---|---|
+| `ai_market_monitor.flush_operational_metrics` | 60s | The scheduler writes its own measurements down |
+| `ai_market_monitor.compact_operational_metrics` | 1h | Folds old rows into one, then deletes past retention |
+
+The API writes its own on a timer inside the process. Every worker writes its own after
+a task it runs, throttled to the flush interval. A scheduled task only ever runs in one
+process, so it can never write the others down for them.
+
+**`compact_operational_metrics` is the only thing bounding the size of the table.** If
+it stops running, nothing fails until the health page is too slow to open. The release
+gate checks that both tasks are still defined and still scheduled.
+
+### Where a page actually goes
+
+There is no external paging service in this product, so every route depends on part of
+this product. A page-worthy alert therefore names **two** routes whose dependencies do
+not overlap, and the second is used when the first refuses.
+
+| Setting | What it does |
+|---|---|
+| `OPERATIONAL_ALERT_TELEGRAM_CHAT_ID` | The operations Telegram chat |
+| `OPERATIONAL_ALERT_EMAIL` | The operations mailbox |
+| `OPERATIONAL_ALERT_REPEAT_MINUTES` | How long a firing rule stays quiet after paging once |
+| `OPERATIONAL_ALERT_MAX_ATTEMPTS` | Attempts before a delivery is marked failed |
+
+Deliberately **not** the Sharia review chat. Two different audiences; a page dropped
+into a review queue buries both.
+
+While these are unset, a page is still recorded in the operational issue queue and the
+delivery row says plainly that it could not be sent. Nothing is lost. Nobody is woken.
+
+Two more scheduled tasks carry this:
+
+| Task | Every | What it does |
+|---|---|---|
+| `ai_market_monitor.deliver_operational_alerts` | 60s | Evaluates the rules and claims what must be sent |
+| `ai_market_monitor.retry_operational_alert_deliveries` | 60s | Sends what is claimed, falling back if needed |
+
+**A ticket-worthy alert is never delivered.** It goes into the issue queue and waits
+for somebody looking at the queue. Waking a person for a slow page is how they learn to
+ignore the next message, which may be the outage.
+
+`operational_alert_deliveries` holds one row per page. `used_fallback` says whether the
+first route refused; if it is true, find out why before trusting the first route again.
 
 Where to look:
 

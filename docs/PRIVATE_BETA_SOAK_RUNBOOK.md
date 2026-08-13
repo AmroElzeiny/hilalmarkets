@@ -109,6 +109,25 @@ intermittent fault a seven-day window exists to catch.
    Verify `ai_provider_degraded` fires and one issue row is created.
 9. Let the same alert fire on two separate days. Verify the queue holds **one** row with
    `occurrence_count` of two and an audit trail showing the reopen, not two rows.
+10. **Prove a page actually arrives.** Set `OPERATIONAL_ALERT_TELEGRAM_CHAT_ID` and
+    `OPERATIONAL_ALERT_EMAIL`, then cause one page-worthy breach on purpose. A message must
+    reach a phone. No test in this repository proves this — every test uses a stub transport,
+    so until somebody has watched a message arrive, the honest statement is that the code path
+    runs, not that the product pages.
+11. **Prove it pages once, not sixty times.** Leave that breach in place for a full hour with
+    `OPERATIONAL_ALERT_REPEAT_MINUTES=30`. Exactly two messages should arrive, and
+    `operational_alert_deliveries` should hold exactly two rows for that rule.
+12. **Prove the fallback carries it.** Break the primary route on purpose — an invalid Telegram
+    chat id will do — and cause the breach again. The message must arrive by email, and the row
+    must have `used_fallback` set with the primary's refusal recorded in `last_error`.
+13. **Prove the measurements survive a restart.** Note a counter on `/api/v1/admin/health`,
+    restart the API, and read it again. The number must not go back to zero. Then check that
+    `operational_metric_deltas` stops growing once `compact_operational_metrics` has run: rows
+    older than the rollup age should collapse to one per series per window.
+14. **Step the launch stage down on live data.** With real drafts and at least one approved,
+    scheduled monitor present, narrow `LAUNCH_STAGE`. Drafts, approval bindings and scan
+    scheduling must be untouched. The integration drill covers this on a built fixture; this
+    step covers it on data an operator actually cares about.
 
 ## Acceptance
 

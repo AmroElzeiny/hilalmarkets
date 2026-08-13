@@ -185,8 +185,20 @@ Every objective names a metric that something actually emits — startup refuses
 and no alert may be delivered through the subsystem it is reporting on. `docs/OPERATIONS.md` holds
 one runbook section per alert, and a test fails if an alert points at a section that does not exist.
 
-Values are held in one process and read by `/api/v1/admin/health`. There is no exporter and no alert
-transport yet, so nothing survives a restart and nothing is actually sent to a person.
+Measurements are recorded in memory and written down on a timer, so they survive a restart and add
+up across the API, the workers and the scheduler. Each process writes only what it added since its
+own last write, into a row of its own, so two processes writing at the same moment cannot lose each
+other's counts. One scheduled task folds old rows together and deletes them past retention; that
+task is the only bound on the size of the table.
+
+Page-worthy alerts are sent. Each names two routes whose dependencies do not overlap, and the second
+is used when the first refuses. A firing rule pages once per repeat window rather than once per
+evaluation, and a ticket-worthy rule is never sent at all — it waits in the issue queue.
+`OPERATIONAL_ALERT_TELEGRAM_CHAT_ID` and `OPERATIONAL_ALERT_EMAIL` say where a page lands; while
+they are unset the page is recorded and the row says plainly that it could not be delivered.
+
+No message has yet been sent to a real Telegram chat or mailbox from this code, and there is no
+long-term metric store or dashboarding tool over the three days of history it keeps.
 
 How open the product is, is server-owned: `core/launch_stage.py` holds four stages
 (`internal`, `private_beta_invite`, `public_waitlist`, `public_launch`) and one table saying what

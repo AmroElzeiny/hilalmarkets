@@ -288,6 +288,8 @@ provider three different ways and could not answer "is the product healthy" from
 | `issues.py` | The deduplicated operational issue queue |
 | `banners.py` | The customer-facing degradation messages |
 | `asgi.py` | Turning one HTTP request into its two metrics |
+| `durable_metrics.py` | Writing the measurements down, and bounding what is kept |
+| `alert_delivery.py` | Sending a page at most once, through a route that still works |
 
 Four properties are enforced rather than documented:
 
@@ -303,20 +305,46 @@ Four properties are enforced rather than documented:
    objective would otherwise read "no data" forever, which on a dashboard looks like health.
 4. **An alert may not travel through what it watches.** `DELIVERY_ROUTE_DEPENDENCIES` maps each
    route to the components it needs, and `validate_alert_rules()` refuses a rule whose watched
-   service appears there. Page-worthy alerts must use a route with no application dependency at all.
+   service appears there. There is no external paging service in this product, so every route
+   depends on something; a page-worthy alert therefore names a primary **and** a fallback whose
+   dependency sets do not overlap, and a rule that names one route, or two that share a
+   dependency, is refused at startup.
 
-The layer is read-only with respect to the product. It writes only `operational_issues` and
-`operational_issue_events`, and never touches strategy, Passport, entitlement or approval state.
-Recording is in-process and never opens a transaction, so instrumentation cannot fail the request
-that produced it.
+The layer is read-only with respect to the product. It writes only its own four tables —
+`operational_issues`, `operational_issue_events`, `operational_metric_deltas` and
+`operational_alert_deliveries` — and never touches strategy, Passport, entitlement or approval
+state. Recording is in-process and never opens a transaction, so instrumentation cannot fail the
+request that produced it.
+
+**How the measurements survive and add up.** Recording stays in memory for speed; a separate step
+writes each process's *movement since its own last write* into a row keyed by that process's writer
+identity. Reads add the rows up. Nothing is read, modified and written back, so two processes
+flushing at the same moment cannot overwrite each other, and a retried write cannot count twice —
+a delta is marked as stored only after its transaction commits, and only against the exact reading
+it was taken from. A restarted process gets a new writer identity, so it starts a new row instead
+of continuing a dead process's.
+
+Growth is bounded by one scheduled task. `compact_operational_metrics` folds every process's rows
+for an old window into a single row, then deletes rows past retention. Both ages are configured and
+startup refuses a retention shorter than the rollup age, because rows would then be deleted before
+they were ever folded and the history would silently stop going back as far as it claims.
+
+**How a page is sent once.** `dispatch_due` evaluates the rules against the stored measurements and
+claims each page with an `idempotency_key` built from the rule, the issue's dedupe key and the
+current repeat window. The key is unique in the database, so two workers racing on the same firing
+rule produce one message and a one-hour outage sends one page rather than sixty. `process_due` then
+sends it; when the primary route refuses, the row moves to the fallback and records that it had to.
+A ticket-worthy rule is never sent at all — it is recorded in the issue queue and waits.
 
 `OperationalIssue` is deliberately separate from `Incident`. An incident is a declared,
 customer-facing event with impact rows and a published timeline. An issue is the layer underneath:
 one deduplicated row per recurring problem, with an occurrence count and an append-only audit trail,
 before anybody has decided it is an incident.
 
-Not yet built: a metrics exporter and any alert transport. Values live in one process and are read
-by `/api/v1/admin/health`; nothing ships them to a long-term store and nothing actually sends a page.
+Not yet built: an external metric store or dashboarding tool. Three days of history lives in the
+product's own database and is read by `/api/v1/admin/health`; there is no query language over it and
+nothing ships it anywhere else. Delivery has been exercised against stub transports only — no
+message has been sent to a real Telegram chat or mailbox from this code.
 
 ### Launch stage and product boundaries
 

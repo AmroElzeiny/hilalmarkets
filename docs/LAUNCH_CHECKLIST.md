@@ -159,7 +159,7 @@ Docker Engine access was not re-tested and remains unverified.
 | Secrets, prompts, model output and plan text cannot enter a record | IMPLEMENTED | CI PENDING | N/A |
 | Eleven SLOs, every indicator computable from an emitted metric | IMPLEMENTED | CI PENDING | STAGING PENDING |
 | Alerts bound to SLOs; page vs ticket is a field | IMPLEMENTED | CI PENDING | STAGING PENDING |
-| No alert is delivered through the subsystem it watches | IMPLEMENTED | CI PENDING | Configure PagerDuty |
+| No alert is delivered through the subsystem it watches | IMPLEMENTED | CI PENDING | Set the two destinations |
 | Deduplicated operational issue queue with audit trail | IMPLEMENTED | CI PENDING | STAGING PENDING |
 | One runbook section per alert, anchor-checked by a test | IMPLEMENTED | CI PENDING | N/A |
 | Server-owned launch stage; PUBLIC_WAITLIST_MODE is a ceiling | IMPLEMENTED | CI PENDING | STAGING PENDING |
@@ -169,14 +169,33 @@ Docker Engine access was not re-tested and remains unverified.
 | Status banners driven by the same signals as the alerts | IMPLEMENTED | CI PENDING | STAGING PENDING |
 | og:image derives from PUBLIC_BASE_URL over HTTPS | IMPLEMENTED | CI PENDING | Verify with a real scraper |
 
-Not delivered by Phase 5, and still required before external users:
+## Phase 5 closeout: what the four gaps now do
 
-- A metrics **exporter**. Values are held in process and read by the admin surface and
-  the objectives. Nothing ships them to a long-term store yet, so history does not
-  survive a restart and no cross-process aggregation exists.
-- Alert **delivery**. The rules decide what should fire and where it should go. No
-  PagerDuty or ops-Telegram transport is wired, so nothing is actually sent.
-- The 19 pre-existing browser failures.
+| Item | Repository | CI | Staging |
+|---|---|---|---|
+| Measurements survive a restart and add up across processes | IMPLEMENTED | CI PENDING | STAGING PENDING |
+| Concurrent writers cannot lose or double-count a measurement | IMPLEMENTED | CI PENDING | N/A |
+| Stored measurements are rolled up and deleted on a schedule | IMPLEMENTED | CI PENDING | Watch the table size for a week |
+| A page-worthy alert is actually sent | IMPLEMENTED | CI PENDING | Set the two destinations, then fire one |
+| One firing rule pages once per repeat window, not once per tick | IMPLEMENTED | CI PENDING | Confirm over a real hour-long breach |
+| A refused primary route falls back, and the row records it | IMPLEMENTED | CI PENDING | Break Telegram on purpose, confirm the email |
+| Ticket-worthy alerts are queued and never delivered | IMPLEMENTED | CI PENDING | N/A |
+| Narrowing the launch stage damages nothing a customer owns | IMPLEMENTED | CI PENDING | Run the drill on staging data |
+
+**What still has to happen on staging.** Paging is not proved by a test. Two values have
+to be set — `OPERATIONAL_ALERT_TELEGRAM_CHAT_ID` and `OPERATIONAL_ALERT_EMAIL` — and then
+a real breach has to be caused on purpose and the message has to arrive on a phone. Until
+somebody has watched that happen, the honest statement is that the code path runs, not
+that the product pages.
+
+Not delivered, and still required before external users:
+
+- **Sending is not proved.** Every test uses a stub transport. No message has been
+  delivered to a real Telegram chat or a real mailbox from this code.
+- **No long-term metric store.** Three days of history in the product's own database is
+  what exists. There is no dashboarding tool and no query language over it.
+- **The scheduled tasks have not run under a real scheduler.** They are defined and
+  scheduled and tested directly; Celery beat has not been observed running them.
 
 ## Release Decision
 
