@@ -582,6 +582,22 @@ class Settings(BaseSettings):
     #: After this age, stored measurements are deleted. This is the only bound on
     #: growth, so it is required rather than optional.
     observability_retention_hours: int = Field(default=72, ge=2, le=8760)
+    # -- Where a page actually goes ---------------------------------------------
+    #
+    # A page-worthy alert names a primary and a fallback route in
+    # `observability/alerts.py`. These say where those two routes land. Both are
+    # optional and both default to nothing, so a deployment that has not set them
+    # records the page in the operational issue queue and says plainly that it could
+    # not be delivered — rather than pretending it was sent.
+    #: The operations Telegram chat. Kept apart from the Sharia review chat: the two
+    #: audiences are different, and mixing a page into a review queue buries both.
+    operational_alert_telegram_chat_id: str | None = None
+    #: Where an operations page is emailed when Telegram is the wrong path or fails.
+    operational_alert_email: str | None = None
+    #: How long one firing rule stays quiet after it has paged once. Without it an
+    #: hour-long outage sends sixty identical messages and the channel gets muted.
+    operational_alert_repeat_minutes: int = Field(default=30, ge=1, le=1440)
+    operational_alert_max_attempts: int = Field(default=5, ge=1, le=20)
     #: How open the product is. The authority for what every public surface shows:
     #: advertised routes, calls to action, pricing and checkout exposure, offered
     #: channels, and what the public assistant may claim. See

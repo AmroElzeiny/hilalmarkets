@@ -16,6 +16,11 @@ own ``severity_on_breach`` has to agree with it.
 alert cannot be a Telegram message; the email backlog alert cannot be an email.
 :func:`validate_alert_rules` refuses that at import time, because the failure mode
 is silent — the alert is generated correctly and simply never arrives.
+
+There is no external paging service here, so every route this product has depends on
+part of this product. A page therefore names two routes whose dependencies do not
+overlap, and the second is used when the first refuses. A ticket names none: it is
+recorded in the operational issue queue and waits to be read.
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ __all__ = [
 #: the objective it claims to watch is worse than no alert, so they move as one.
 ALERT_RULES_VERSION: Final[str] = SLO_DEFINITION_VERSION
 
-DeliveryRoute = Literal["pagerduty", "ops_email", "ops_telegram", "system_brain"]
+DeliveryRoute = Literal["ops_email", "ops_telegram", "system_brain"]
 
 
 class AlertRuleError(ValueError):
@@ -59,15 +64,15 @@ class AlertRuleError(ValueError):
 
 #: Which application component each delivery route depends on to arrive.
 #:
-#: ``pagerduty`` is an external service reached over plain HTTPS and depends on no
-#: component of this application, which is why it carries the page-worthy alerts.
-#: ``system_brain`` is the in-product admin surface: it always records, but it only
-#: reaches a person who is already looking, so it never carries a page on its own.
+#: There is no external paging service in this product, so every route depends on
+#: something. That is why a page-worthy alert must name two of them whose dependencies
+#: do not overlap: whatever is broken, one of the two paths is still standing.
+#: ``system_brain`` is the in-product admin surface. It always records, but it only
+#: reaches a person who is already looking, so it is a last resort, never a primary.
 #: The service names are finer than "delivery" on purpose. Email and Telegram both
 #: deliver, but they fail independently, and collapsing them would have blocked the
 #: email-backlog alert from using the Telegram route for no real reason.
 DELIVERY_ROUTE_DEPENDENCIES: Final[Mapping[str, frozenset[str]]] = {
-    "pagerduty": frozenset(),
     "ops_email": frozenset({"email_delivery", "worker"}),
     "ops_telegram": frozenset({"alert_delivery", "telegram_delivery"}),
     "system_brain": frozenset({"api"}),
@@ -123,11 +128,22 @@ class AlertRule:
     #: The first move that is safe before the cause is known.
     first_mitigation: str
     runbook_anchor: str
-    delivery_route: DeliveryRoute
+    #: Where a page goes first. ``None`` for a ticket, which is never delivered — it
+    #: waits in the operational issue queue for whoever is looking at the queue.
+    primary_route: DeliveryRoute | None = None
+    #: The second path, used only when the first refuses. Required for a page, and its
+    #: dependencies may not overlap the primary's, or one outage silences both.
+    fallback_route: DeliveryRoute | None = None
 
     @property
     def watched_service(self) -> str:
         return self.trigger.watched_service
+
+    @property
+    def delivered(self) -> bool:
+        """Whether this rule sends anything at all. Only pages do."""
+
+        return self.severity == "page"
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +171,8 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
             "the previous release."
         ),
         runbook_anchor="#api-availability",
-        delivery_route="pagerduty",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     ),
     AlertRule(
         name="api_slow",
@@ -165,9 +182,6 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         blast_radius="Customers see slow pages; nothing is lost or wrong.",
         first_mitigation="Check provider latency and queue depth before changing the API.",
         runbook_anchor="#api-latency",
-        # Not system_brain: that surface is served by the API this alert is about, so a
-        # slow API would deliver the notice about the slow API slowly, or not at all.
-        delivery_route="ops_telegram",
     ),
     AlertRule(
         name="setup_chat_failing",
@@ -183,7 +197,8 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
             "AI-unavailable banner instead of failing mid-turn."
         ),
         runbook_anchor="#setup-chat-turn-failures",
-        delivery_route="pagerduty",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     ),
     AlertRule(
         name="setup_chat_slow",
@@ -193,7 +208,6 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         blast_radius="Chat feels slow. Nothing is lost and no monitor is affected.",
         first_mitigation="Check provider latency before changing routing or timeouts.",
         runbook_anchor="#setup-chat-latency",
-        delivery_route="system_brain",
     ),
     AlertRule(
         name="ai_provider_degraded",
@@ -209,7 +223,8 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
             "showing. Do not disable screening."
         ),
         runbook_anchor="#ai-provider-degraded",
-        delivery_route="pagerduty",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     ),
     AlertRule(
         name="scans_delayed",
@@ -219,7 +234,8 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         blast_radius="Monitors evaluate late, so alerts arrive late or not at all.",
         first_mitigation="Check worker liveness and queue depth before re-queueing anything.",
         runbook_anchor="#scans-delayed",
-        delivery_route="pagerduty",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     ),
     AlertRule(
         name="market_data_stale",
@@ -232,7 +248,8 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         ),
         first_mitigation="Check the exchange connection; do not relax the staleness check.",
         runbook_anchor="#market-data-stale",
-        delivery_route="pagerduty",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     ),
     AlertRule(
         name="alert_delivery_failing",
@@ -245,7 +262,10 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
             "so nothing is lost yet."
         ),
         runbook_anchor="#alert-delivery-failing",
-        delivery_route="pagerduty",
+        # Never Telegram: this rule watches the delivery pipeline Telegram rides on,
+        # so the one message that must arrive would be the one that cannot.
+        primary_route="ops_email",
+        fallback_route="system_brain",
     ),
     AlertRule(
         name="email_outbox_backed_up",
@@ -255,7 +275,6 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         blast_radius="Sign-in codes and payment receipts arrive late.",
         first_mitigation="Check SMTP credentials and the retry task before re-queueing.",
         runbook_anchor="#email-outbox-backed-up",
-        delivery_route="ops_telegram",
     ),
     AlertRule(
         name="worker_or_scheduler_down",
@@ -268,7 +287,9 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         ),
         first_mitigation="Restart the scheduler container; verify one heartbeat before leaving.",
         runbook_anchor="#worker-or-scheduler-down",
-        delivery_route="pagerduty",
+        # Never email: the outbox is drained by the worker this rule watches.
+        primary_route="ops_telegram",
+        fallback_route="system_brain",
     ),
     AlertRule(
         name="review_case_overdue",
@@ -281,7 +302,6 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
         ),
         first_mitigation="Assign the case to the on-duty reviewer. Never publish to clear it.",
         runbook_anchor="#review-case-overdue",
-        delivery_route="ops_telegram",
     ),
     AlertRule(
         name="screening_refusing_everything",
@@ -300,9 +320,73 @@ ALERT_RULES: Final[tuple[AlertRule, ...]] = (
             "rolled back. Never widen the universe to clear the alert."
         ),
         runbook_anchor="#screening-refusing-everything",
-        delivery_route="pagerduty",
+        primary_route="ops_telegram",
+        fallback_route="ops_email",
     ),
 )
+
+
+def _route_errors(rule: AlertRule) -> list[str]:
+    """Everything wrong with where this rule says it will send itself.
+
+    A ticket must not name a route at all: it is not delivered, and a route on it
+    would read like a promise the system does not keep. A page must name two, and the
+    two must be able to fail independently — a primary and a fallback that share a
+    dependency are one route wearing two names, and the outage that breaks one breaks
+    the other at the same moment.
+    """
+
+    errors: list[str] = []
+    if not rule.delivered:
+        if rule.primary_route is not None or rule.fallback_route is not None:
+            errors.append(
+                f"Alert {rule.name!r} is ticket-worthy but names a delivery route. "
+                "Tickets wait in the operational issue queue and are not delivered."
+            )
+        return errors
+    if rule.primary_route is None:
+        errors.append(f"Alert {rule.name!r} is page-worthy but names no delivery route")
+        return errors
+    if rule.fallback_route is None:
+        errors.append(
+            f"Alert {rule.name!r} is page-worthy but names no fallback route, so one "
+            "outage in the wrong place silences it completely"
+        )
+        return errors
+    primary = DELIVERY_ROUTE_DEPENDENCIES.get(rule.primary_route)
+    fallback = DELIVERY_ROUTE_DEPENDENCIES.get(rule.fallback_route)
+    if primary is None:
+        errors.append(f"Alert {rule.name!r} uses unknown route {rule.primary_route!r}")
+    if fallback is None:
+        errors.append(f"Alert {rule.name!r} uses unknown route {rule.fallback_route!r}")
+    if primary is None or fallback is None:
+        return errors
+    if rule.primary_route == rule.fallback_route:
+        errors.append(
+            f"Alert {rule.name!r} names {rule.primary_route!r} as both its primary and "
+            "its fallback, which is one route, not two"
+        )
+    for label, route, dependencies in (
+        ("primary", rule.primary_route, primary),
+        ("fallback", rule.fallback_route, fallback),
+    ):
+        if rule.watched_service in dependencies:
+            errors.append(
+                f"Alert {rule.name!r} watches {rule.watched_service!r} but its {label} "
+                f"route {route!r} depends on it"
+            )
+    shared = primary & fallback
+    if shared:
+        errors.append(
+            f"Alert {rule.name!r} has a primary and a fallback that both depend on "
+            f"{sorted(shared)}, so a single failure there silences both"
+        )
+    if rule.primary_route == "system_brain":
+        errors.append(
+            f"Alert {rule.name!r} pages through {rule.primary_route!r}, which only "
+            "reaches somebody already looking at the admin surface"
+        )
+    return errors
 
 
 def validate_alert_rules(
@@ -334,20 +418,7 @@ def validate_alert_rules(
                     f"Alert {rule.name!r} is {rule.severity!r} but objective "
                     f"{rule.trigger.slo_name!r} declares {declared!r} on breach"
                 )
-        dependencies = DELIVERY_ROUTE_DEPENDENCIES.get(rule.delivery_route)
-        if dependencies is None:
-            errors.append(f"Alert {rule.name!r} uses unknown route {rule.delivery_route!r}")
-            continue
-        if rule.watched_service in dependencies:
-            errors.append(
-                f"Alert {rule.name!r} watches {rule.watched_service!r} but is delivered "
-                f"through {rule.delivery_route!r}, which depends on it"
-            )
-        if rule.severity == "page" and dependencies:
-            errors.append(
-                f"Alert {rule.name!r} is page-worthy but route {rule.delivery_route!r} "
-                "depends on an application component"
-            )
+        errors.extend(_route_errors(rule))
         for text, field_name in (
             (rule.what_broke, "what_broke"),
             (rule.blast_radius, "blast_radius"),

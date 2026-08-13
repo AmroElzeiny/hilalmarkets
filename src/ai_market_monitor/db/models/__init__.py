@@ -101,6 +101,7 @@ from ai_market_monitor.db.models.observability import (
     ObservabilityExplanation,
 )
 from ai_market_monitor.db.models.operations import (
+    OperationalAlertDelivery,
     OperationalIssue,
     OperationalIssueEvent,
     OperationalMetricDelta,
@@ -290,6 +291,7 @@ __all__ = [
     "OnDemandScanMarketRecord",
     "OnDemandScanRun",
     "OnboardingSession",
+    "OperationalAlertDelivery",
     "OperationalIssue",
     "OperationalIssueEvent",
     "OperationalMetricDelta",

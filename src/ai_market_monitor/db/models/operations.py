@@ -155,6 +155,64 @@ class OperationalMetricDelta(UUIDPrimaryKeyMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+#: The states one delivery attempt record can hold. The same words the account and
+#: payment outboxes already use, so an operator reads all three the same way.
+ALERT_DELIVERY_STATES: frozenset[str] = frozenset(
+    {"pending", "sending", "sent", "retryable", "failed"}
+)
+
+
+class OperationalAlertDelivery(UUIDPrimaryKeyMixin, Base):
+    """One page, addressed to one route, delivered at most once.
+
+    Alerts fire from a rule that is re-evaluated every minute. Without this row a
+    single ongoing outage would send a message every minute for as long as it lasted,
+    which trains people to mute the channel — the failure mode where the alerting
+    works perfectly and nobody reads it.
+
+    ``idempotency_key`` is what stops that. It is built from the rule, the issue's
+    dedupe key and the current repeat window, so the same problem inside the same
+    window finds the row that already exists and sends nothing.
+
+    Nothing customer-owned is stored. The body is assembled at send time from the
+    alert rule's own fixed sentences; the columns here hold the rule name, the route
+    and a redacted error, and no strategy text, religious status or secret can reach
+    them.
+    """
+
+    __tablename__ = "operational_alert_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key", name="uq_operational_alert_delivery_idempotency"
+        ),
+        Index("ix_operational_alert_delivery_status", "status", "next_retry_at"),
+        Index("ix_operational_alert_delivery_rule", "rule_name", "created_at"),
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    rule_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: The route this attempt is addressed to right now. It changes to the fallback
+    #: when the primary refuses, and ``used_fallback`` records that it had to.
+    route: Mapped[str] = mapped_column(String(24), nullable=False)
+    primary_route: Mapped[str] = mapped_column(String(24), nullable=False)
+    fallback_route: Mapped[str | None] = mapped_column(String(24))
+    used_fallback: Mapped[bool] = mapped_column(default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: The rule's own four sentences, copied so the page still reads correctly after
+    #: the rule text changes. Written by the dispatcher, never by a caller.
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    issue_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("operational_issues.id", ondelete="SET NULL")
+    )
+    last_error: Mapped[str | None] = mapped_column(String(240))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class OperationalIssueEvent(UUIDPrimaryKeyMixin, Base):
     """One state change on an issue. Append-only; nothing here is ever updated.
 

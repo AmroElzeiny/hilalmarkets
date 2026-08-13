@@ -30,9 +30,11 @@ from ai_market_monitor.db.models.enums import (
     SupportRequestStatus,
     UserRole,
 )
+from ai_market_monitor.observability.alert_delivery import ALERT_EVALUATION_MINUTES
 from ai_market_monitor.observability.alerts import evaluate_alert_rules
+from ai_market_monitor.observability.durable_metrics import load_recorder
 from ai_market_monitor.observability.issues import OperationalIssueService
-from ai_market_monitor.observability.metrics import get_metrics_recorder
+from ai_market_monitor.observability.metrics import MetricsRecorder, get_metrics_recorder
 from ai_market_monitor.observability.slos import SLO_DEFINITION_VERSION, evaluate_all_slos
 from ai_market_monitor.services.admin import AdminCommercialService
 from ai_market_monitor.services.billing import BillingService, BillingWebhookResult
@@ -41,6 +43,25 @@ from ai_market_monitor.services.reliability import HealthSummary, ReliabilitySer
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.support import SupportEscalationService
 from ai_market_monitor.services.trials import TrialLifecycleService
+
+
+def _merge_unwritten(stored: MetricsRecorder, live: MetricsRecorder) -> None:
+    """Add what this process has recorded but not yet written down.
+
+    Without it the health page is always one flush interval behind, and the minute
+    that matters most during an incident is the one that is missing. Uses the same
+    pending deltas the flush would write, so nothing is counted twice: what is
+    already in the table has already been marked as written.
+    """
+
+    for delta in live.pending_deltas():
+        stored.merge_stored(
+            delta.name,
+            delta.label_map,
+            value=delta.value,
+            observations=max(delta.observations, 0),
+            buckets=delta.buckets,
+        )
 
 
 class AdminDashboardError(ValueError):
@@ -171,7 +192,19 @@ class AdminDashboardService:
         # Objectives, firing alerts and the issue queue are added to the dashboard the
         # operator already opens, rather than to a second console. The existing keys
         # are untouched: anything reading this endpoint today keeps working.
-        recorder = get_metrics_recorder()
+        #
+        # Read from the stored measurements, not from this process's memory. Reading
+        # memory answered "how is the web process that happened to serve this page",
+        # which looks like an answer about the product and is not one: it excluded
+        # every worker, every other web process, and everything before the last
+        # restart. Whatever this process has recorded since its own last write is
+        # added on top, so the newest minute is not missing from the page.
+        recorder = await load_recorder(
+            self.session,
+            policy=self.settings.metric_retention_policy,
+            minutes=ALERT_EVALUATION_MINUTES,
+        )
+        _merge_unwritten(recorder, get_metrics_recorder())
         evaluations = evaluate_all_slos(recorder)
         fired = evaluate_alert_rules(recorder)
         issues = await OperationalIssueService(self.session).summary()
@@ -209,7 +242,12 @@ class AdminDashboardService:
                     "blast_radius": item.rule.blast_radius,
                     "first_mitigation": item.rule.first_mitigation,
                     "runbook_anchor": item.rule.runbook_anchor,
-                    "delivery_route": item.rule.delivery_route,
+                    # Both paths, and whether this rule is delivered at all. A ticket
+                    # shows "not delivered" rather than a route it does not use, so
+                    # nobody waits for a message that was never going to arrive.
+                    "delivered": item.rule.delivered,
+                    "primary_route": item.rule.primary_route,
+                    "fallback_route": item.rule.fallback_route,
                     "measured": item.measured,
                 }
                 for item in fired

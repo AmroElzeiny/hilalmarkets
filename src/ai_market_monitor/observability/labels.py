@@ -253,26 +253,38 @@ def validate_labels(
     return validated
 
 
-def assert_no_sensitive_content(value: object, *, field: str) -> None:
+def assert_no_sensitive_content(
+    value: object,
+    *,
+    field: str,
+    max_length: int = _MAX_RECORD_VALUE_LENGTH,
+) -> None:
     """Raise when a value carries a secret, a prompt, model output or customer text.
 
     Applied to everything an operational record holds — label values, numeric units,
     issue summaries, alert bodies. A record is allowed to say *that* a provider call
     failed with an unauthorized status. It is not allowed to say what was sent.
+
+    ``max_length`` exists for the one record that is deliberately several sentences
+    long: the body of a page, which this product writes itself from fixed text. The
+    length rule is a test for prose that arrived from somewhere else, so a caller that
+    knows its own text has a declared, bounded length raises the limit rather than
+    skipping the check — the credential and seed-phrase tests still run on every
+    character. There is no second copy of those tests anywhere.
     """
 
     if isinstance(value, Mapping):
         for key, item in value.items():
             assert_no_sensitive_content(str(key), field=f"{field}.key")
-            assert_no_sensitive_content(item, field=f"{field}.{key}")
+            assert_no_sensitive_content(item, field=f"{field}.{key}", max_length=max_length)
         return
     if isinstance(value, (list, tuple, set, frozenset)):
         for item in value:
-            assert_no_sensitive_content(item, field=field)
+            assert_no_sensitive_content(item, field=field, max_length=max_length)
         return
     if not isinstance(value, str):
         return
-    if len(value) > _MAX_RECORD_VALUE_LENGTH:
+    if len(value) > max_length:
         raise SensitiveValueError(
             f"{field} is {len(value)} characters. An operational record carries codes and "
             "counts, never prose, a prompt or a model reply."

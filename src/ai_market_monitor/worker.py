@@ -172,6 +172,14 @@ app.conf.update(
             "task": "ai_market_monitor.compact_operational_metrics",
             "schedule": 60 * 60,
         },
+        "deliver-operational-alerts-every-minute": {
+            "task": "ai_market_monitor.deliver_operational_alerts",
+            "schedule": 60,
+        },
+        "retry-operational-alert-deliveries-every-minute": {
+            "task": "ai_market_monitor.retry_operational_alert_deliveries",
+            "schedule": 60,
+        },
     },
 )
 
@@ -346,6 +354,16 @@ def flush_operational_metrics() -> dict:
 @app.task(name="ai_market_monitor.compact_operational_metrics")
 def compact_operational_metrics() -> dict:
     return _run_async_task(_compact_operational_metrics())
+
+
+@app.task(name="ai_market_monitor.deliver_operational_alerts")
+def deliver_operational_alerts() -> dict:
+    return _run_async_task(_deliver_operational_alerts())
+
+
+@app.task(name="ai_market_monitor.retry_operational_alert_deliveries")
+def retry_operational_alert_deliveries() -> dict:
+    return _run_async_task(_retry_operational_alert_deliveries())
 
 
 @app.task(name="ai_market_monitor.schedule_due_scans")
@@ -717,6 +735,22 @@ async def _compact_operational_metrics() -> dict:
         return await DurableMetricsStore(
             session, policy=settings.metric_retention_policy
         ).compact()
+
+
+async def _deliver_operational_alerts() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.observability.alert_delivery import OperationalAlertDispatcher
+
+    async with SessionFactory() as session:
+        return await OperationalAlertDispatcher(session, settings).dispatch_due()
+
+
+async def _retry_operational_alert_deliveries() -> dict:
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.observability.alert_delivery import OperationalAlertDispatcher
+
+    async with SessionFactory() as session:
+        return await OperationalAlertDispatcher(session, settings).process_due()
 
 
 async def _record_database_health() -> dict:
