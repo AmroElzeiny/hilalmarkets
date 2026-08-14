@@ -28,13 +28,20 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, cast
 
+from ai_market_monitor.core.product_boundaries import UnsupportedCapability, refuse
 from ai_market_monitor.engine.comparators import detect_comparator
+from ai_market_monitor.engine.rejection import (
+    UNIVERSE_EXCLUSION_ALTERNATION,
+    rejects_following,
+)
 from ai_market_monitor.engine.text_normalization import repair_utf8_mojibake
 from ai_market_monitor.engine.turn_fragments import (
     REVERSION_RE,
     classify_turn,
     extract_explicit_exclusions,
     extract_timeframe_roles,
+    rejected_directions,
+    rejected_timeframes,
     to_pair,
 )
 from ai_market_monitor.schemas.strategy import Comparator, StrategyDirection
@@ -480,9 +487,13 @@ def patches_for_turn(
             _merge_collection(state.value("context_timeframes"), roles.context, lowered=lowered),
         )
     alternatives = _offers_unresolved_alternatives(lowered)
+    # Segment authorization applies to the threshold reader too. This list used to
+    # be built from every fragment in the turn, so `is 5% a lot on a 15m candle?`
+    # set the threshold to 5 — the one path that never asked whether the segment
+    # was allowed to author anything.
     percent_fragments = [
         item
-        for item in report.fragments
+        for item in state_fragments
         if item.threshold_is_percent and item.threshold is not None
     ]
     percent_comparator = next(
@@ -745,7 +756,70 @@ def patches_for_turn(
                 lowered=lowered,
             ),
         )
+    _clear_refused_values(normalized, state, patches=patches, add=add)
     return tuple(patches)
+
+
+#: Fields whose refusal clears the draft rather than only declining to write.
+#: A refusal of a value the draft is *already* holding is the one case where
+#: writing nothing is not enough: silence would leave the trader monitoring the
+#: exact setting they just ruled out.
+_CLEARABLE_ON_REJECTION: tuple[StateField, ...] = ("base_timeframe", "direction")
+
+
+def _clear_refused_values(
+    text: str,
+    state: StrategyDraftState,
+    *,
+    patches: list[FieldPatch],
+    add: Any,
+) -> None:
+    """Take back a value the trader has just refused.
+
+    Declining to write a refused value protects a field the draft does not hold
+    yet. It does nothing for a field that already holds it: ``on 15m`` followed by
+    ``not 15m`` would leave 15m in force, which is the refusal read backwards.
+
+    The field is cleared rather than guessed. No replacement is invented, no
+    previous value is restored, and no default is substituted — the draft simply
+    stops claiming to know, and the caller asks.
+    """
+    refused: dict[StateField, tuple[Any, ...]] = {
+        "base_timeframe": rejected_timeframes(text),
+        "direction": rejected_directions(text),
+    }
+    written = {patch.field for patch in patches}
+    for name in _CLEARABLE_ON_REJECTION:
+        if name in written:
+            # The turn named a replacement; the accepted value already landed.
+            continue
+        current = state.value(name)
+        if current is not None and current in refused[name]:
+            add(name, None)
+
+
+def unsupported_capability_requests(text: str) -> tuple[UnsupportedCapability, ...]:
+    """Every product boundary this turn asks for, as an explicit named refusal.
+
+    Read deterministically from the trader's own words, so the refusal does not
+    depend on the model noticing. The turn's values are refused at the same time
+    by :attr:`ClassifiedFragment.contributes_strategy_state`, so a request the
+    product cannot serve never becomes a draft that looks like it worked.
+    """
+    return tuple(refuse(key) for key in classify_turn(text or "").unsupported_requests)
+
+
+def fields_cleared_by_rejection(patches: tuple[FieldPatch, ...]) -> tuple[StateField, ...]:
+    """Fields this turn emptied because the trader refused what they held.
+
+    The caller needs this to ask the follow-up question. A cleared field is not a
+    settled field, and a draft carrying one must not reach approval.
+    """
+    return tuple(
+        patch.field
+        for patch in patches
+        if patch.value is None and patch.previous_value is not None
+    )
 
 
 def canonical_compiler_text(
@@ -1017,9 +1091,11 @@ def _decode(name: StateField, value: Any) -> Any:
 
 
 def _exchange_from_text(text: str) -> str | None:
+    """The venue this text asks for, never one it refuses."""
     for exchange in ("binance", "bybit", "okx", "kucoin"):
-        if re.search(rf"\b{exchange}\b", text):
-            return exchange
+        for match in re.finditer(rf"\b{exchange}\b", text):
+            if not rejects_following(text[: match.start()]):
+                return exchange
     return None
 
 
@@ -1067,17 +1143,32 @@ def _explicit_bare_asset_exclusions(text: str, *, quote: str) -> tuple[str, ...]
         "WITHOUT",
     }
     patterns = (
-        r"(?<!yes/)\bno\s+[*_`]*(?P<base>[A-Z][A-Z0-9]{1,9})\b",
-        r"\b(?:exclude|excluding|exclusions?)\s*:?\s*(?:only\s+)?"
-        r"[*_`]*(?P<base>[A-Z][A-Z0-9]{1,9})\b",
+        # Any word from the shared universe-exclusion vocabulary, standing in front
+        # of a bare asset. This used to be a hand-written subset — `no`, `exclude`,
+        # `excluding`, `exclusions` — so `drop LTC` and `omit SOL` kept the asset the
+        # trader had just asked to remove, while `exclude LTC` removed it. The
+        # vocabulary now comes from ``engine/rejection.py`` like every other reader's.
+        #
+        # Bare `no` is listed here and deliberately not in the shared universe list.
+        # The difference is distance: read across a clause it excluded the wrong
+        # symbol, but standing directly in front of an asset — which is all this
+        # pattern allows — `no LTC` can only mean one thing. `yes/no` stays guarded:
+        # it is a question prefix, not a universe rule.
+        rf"(?<!yes/)(?<![0-9A-Za-z])(?:no|{UNIVERSE_EXCLUSION_ALTERNATION})\s+"
+        rf"(?:the\s+)?[*_`]*(?P<base>[A-Z][A-Z0-9]{{1,9}})\b",
         r"\b(?P<base>[A-Z][A-Z0-9]{1,9})\b"
         r"\s+(?:is\s+)?(?:excluded|not\s+included)\b",
     )
     results: list[str] = []
     for pattern in patterns:
-        for match in re.finditer(pattern, text):
+        for match in re.finditer(pattern, text, re.IGNORECASE):
             base = match.group("base")
             if base in reserved or base.endswith(quote):
+                continue
+            # `remove the RSI condition` names a mechanic, not an asset. Turning it
+            # into RSI/USDT would silently blocklist a market on the strength of an
+            # indicator's name.
+            if _DISTINCT_MECHANIC_RE.fullmatch(base):
                 continue
             symbol = f"{base}{quote}"
             if symbol not in results:
@@ -1086,10 +1177,14 @@ def _explicit_bare_asset_exclusions(text: str, *, quote: str) -> tuple[str, ...]
 
 
 def _market_type_from_text(text: str) -> str | None:
-    if re.search(r"\b(?:perpetuals?|perps?|futures|future\s+contracts?)\b", text):
-        return "futures"
-    if re.search(r"\bspot\b", text):
-        return "spot"
+    """The market this text asks for, never one it refuses."""
+    for pattern, market in (
+        (r"\b(?:perpetuals?|perps?|futures|future\s+contracts?)\b", "futures"),
+        (r"\bspot\b", "spot"),
+    ):
+        for match in re.finditer(pattern, text):
+            if not rejects_following(text[: match.start()]):
+                return market
     return None
 
 

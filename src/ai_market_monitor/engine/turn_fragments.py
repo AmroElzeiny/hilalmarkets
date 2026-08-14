@@ -19,10 +19,18 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Literal
 
+from ai_market_monitor.core.product_boundaries import requested_boundaries
 from ai_market_monitor.engine.capabilities import all_capabilities
 from ai_market_monitor.engine.comparators import OPERATOR_TERMS, detect_comparator
 from ai_market_monitor.engine.price_movement import PHRASAL_PARTICLE_GUARD
 from ai_market_monitor.engine.prompt_aliases import normalized_phrases
+from ai_market_monitor.engine.rejection import (
+    TRAILING_EXCLUSION_TERMS,
+    UNIVERSE_EXCLUSION_TERMS,
+    mentions_universe_exclusion,
+    opens_with_trailing_exclusion,
+    rejects_following,
+)
 from ai_market_monitor.engine.text_normalization import repair_utf8_mojibake
 from ai_market_monitor.engine.timeframes import (
     WORD_TIMEFRAME_ALIASES,
@@ -151,42 +159,11 @@ _UNIT_ALIASES: dict[str, str] = {
 _PERCENT_RE = re.compile(r"[-+]?\d+(?:\.\d+)?\s*%")
 _NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
-_EXCLUSION_MARKERS = (
-    "exclude",
-    "excluding",
-    "excluded",
-    "never include",
-    "not include",
-    "no ",
-    "without",
-    "omit",
-    "ignore",
-    "skip",
-    "drop",
-    "leave out",
-    "remove",
-    # The subtracting words. `BTC on 15m but not LTC` states an exclusion just as
-    # plainly as `exclude LTC`, and without them LTC was added to the watchlist the
-    # trader had just told us to keep it out of. A bare `not` stays out on purpose:
-    # `not below 30` is a comparison, not a universe rule.
-    "but not",
-    "except for",
-    "except",
-    "apart from",
-    "other than",
-    "aside from",
-    "minus",
-    "استبعاد",
-    "نستبعد",
-    "ما عدا",
-    "ماعدا",
-    "عدا",
-    "باستثناء",
-    "ممنوع",
-    "مش عايز",
-    "مش عايزه",
-    "مش عايزة",
-)
+#: The universe-exclusion wording, owned by ``engine/rejection.py``. It used to be
+#: a tuple here, and that was the whole defect: the timeframe and direction readers
+#: below never consulted it, so ``don't use 15m`` set the timeframe to 15m. There
+#: is now one vocabulary and every reader in this module imports it.
+_EXCLUSION_MARKERS = UNIVERSE_EXCLUSION_TERMS
 _INCLUSION_ONLY_MARKERS = (
     "only",
     "just",
@@ -197,30 +174,9 @@ _INCLUSION_ONLY_MARKERS = (
     "بس",
 )
 
-#: Exclusion wording that follows the symbol (``BTCUSDT never included``). Kept
-#: narrower than the prefix markers because a trailing bare ``no`` is ambiguous.
-_TRAILING_EXCLUSION_MARKERS = (
-    "never included",
-    "never include",
-    "not included",
-    "is excluded",
-    "are excluded",
-    "excluded",
-    "must be excluded",
-    "should be excluded",
-    "must not appear",
-    "must not be present",
-    "must not be included",
-    "removed",
-    "omitted",
-    "ignored",
-    "left out",
-    "ممنوع",
-    "مستبعد",
-    "مش عايز",
-    "مش عايزه",
-    "مش عايزة",
-)
+#: Exclusion wording that follows the symbol (``BTCUSDT never included``), also
+#: owned by ``engine/rejection.py``.
+_TRAILING_EXCLUSION_MARKERS = TRAILING_EXCLUSION_TERMS
 
 #: Approval must be recognised semantically but deterministically. Activation still
 #: requires the server-side authorisation and hash checks; this only detects intent.
@@ -910,6 +866,13 @@ class ClassifiedFragment:
     threshold: float | None = None
     threshold_is_percent: bool = False
     is_sweep: bool = False
+    #: This segment asks a question. Its values describe what is being asked
+    #: about; they are not an instruction to change anything.
+    asks: bool = False
+    #: Product-boundary keys this segment asks for that the product does not have.
+    #: A request the product refuses must not also be half-served from the same
+    #: sentence.
+    requests_unsupported: tuple[str, ...] = ()
 
     @property
     def enters_capability_resolution(self) -> bool:
@@ -917,8 +880,21 @@ class ClassifiedFragment:
 
     @property
     def contributes_strategy_state(self) -> bool:
-        """Whether parsed values from this fragment may mutate the draft."""
+        """Whether parsed values from this fragment may mutate the draft.
 
+        A question never authorises a change, whatever else it looks like. The
+        kinds below are refused because of what the segment *is*; a question is
+        refused because of what it *does* — it asks. Both are the same rule: only
+        a segment that instructs may author a rule.
+        """
+
+        if self.asks:
+            return False
+        if self.requests_unsupported:
+            # `Watch BTCUSDT with 10x leverage on 15m` asked for one thing. Taking
+            # the timeframe and the symbol out of it and dropping the leverage in
+            # silence builds a draft that looks like the request succeeded.
+            return False
         return self.kind not in {
             "approval",
             "approval_policy",
@@ -988,6 +964,13 @@ class TurnFragmentReport:
     @property
     def trading_conditions(self) -> tuple[ClassifiedFragment, ...]:
         return tuple(item for item in self.fragments if item.enters_capability_resolution)
+
+    @property
+    def unsupported_requests(self) -> tuple[str, ...]:
+        """Boundary keys this turn asked for that the product does not have."""
+        return _unique(
+            key for item in self.fragments for key in item.requests_unsupported
+        )
 
     @property
     def symbols(self) -> tuple[str, ...]:
@@ -1113,8 +1096,66 @@ def to_pair(symbol: str) -> str:
     return f"{base}/{quote}"
 
 
+#: National currencies. A stablecoin such as USDT is a crypto asset and is not
+#: here; these are the currencies a country issues.
+#:
+#: A pair whose *base* is one of these is a forex pair, not a crypto market.
+#: ``EURUSD`` has the shape of a symbol this product understands and is not one:
+#: it was accepted as though the platform screened and monitored it, which is a
+#: silent substitution of one market for another. Shares, funds and currencies
+#: are ``stocks_and_forex`` in the boundary registry, and that is what a customer
+#: naming one must be told.
+FIAT_ASSETS: tuple[str, ...] = (
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CHF",
+    "CAD",
+    "AUD",
+    "NZD",
+    "TRY",
+    "AED",
+    "SAR",
+    "EGP",
+    "QAR",
+    "KWD",
+    "BHD",
+    "OMR",
+    "JOD",
+    "MYR",
+    "IDR",
+    "PKR",
+    "INR",
+    "CNY",
+    "RUB",
+    "ZAR",
+    "NGN",
+)
+
+
+def is_forex_pair(base: str, quote: str) -> bool:
+    """True when both sides are national currencies, so this is not a crypto market."""
+    return base.upper() in FIAT_ASSETS and quote.upper() in FIAT_ASSETS
+
+
+def mentions_forex_pair(text: str) -> bool:
+    """True when the text names a currency pair.
+
+    Dropping the pair silently would be its own defect: the trader asked for a
+    market and got a draft that never mentions it again. This is what turns the
+    drop into a refusal the boundary registry can name.
+    """
+    for match in _SYMBOL_RE.finditer((text or "").upper()):
+        base = match.group("base") or match.group("base2")
+        quote = match.group("quote") or match.group("quote2")
+        if not base.endswith(quote) and is_forex_pair(base, quote):
+            return True
+    return False
+
+
 def extract_symbols(text: str) -> tuple[str, ...]:
-    """Return every market symbol named in ``text``, in canonical ``BASEQUOTE`` form."""
+    """Return every crypto market symbol named in ``text``, canonical ``BASEQUOTE``."""
     symbols: list[str] = []
     for match in _SYMBOL_RE.finditer(text.upper()):
         base = match.group("base") or match.group("base2")
@@ -1122,6 +1163,11 @@ def extract_symbols(text: str) -> tuple[str, ...]:
         if base.endswith(quote):
             # Reject malformed repeated quotes such as BTCUSDTUSDT. Treating the
             # first USDT as part of the base created executable phantom markets.
+            continue
+        if is_forex_pair(base, quote):
+            # A currency pair is refused here rather than renamed to a nearby
+            # crypto market. The turn that named it is refused by the boundary
+            # registry, which says so in the customer's own words.
             continue
         symbols.append(normalize_symbol(base, quote))
     return _unique(symbols)
@@ -1336,6 +1382,10 @@ def extract_timeframe_roles(text: str) -> TimeframeRoles:
     # role to the timeframe beside it; measuring raw distance across the comma would
     # let `entry` capture `daily` because it happens to sit two characters away.
     for clause in _split_fragments(_collapse(text)):
+        if is_interrogative(clause):
+            # `is the 4h the context timeframe?` asks which role a timeframe has.
+            # Answering it by assigning that role is the question authoring a rule.
+            continue
         markers = _role_markers(clause)
         if not markers:
             continue
@@ -1438,8 +1488,8 @@ _WORD_TIMEFRAMES = {
 }
 
 
-def _timeframe_spans(text: str) -> list[tuple[int, int, str]]:
-    """Every timeframe mention as ``(start, end, canonical)``, in order."""
+def _all_timeframe_spans(text: str) -> list[tuple[int, int, str]]:
+    """Every timeframe mention as ``(start, end, canonical)``, refused or not."""
     spans: list[tuple[int, int, str]] = []
     for match in _TIMEFRAME_RE.finditer(text):
         canonical = _canonical_timeframe(match.group(1), match.group(2))
@@ -1452,6 +1502,28 @@ def _timeframe_spans(text: str) -> list[tuple[int, int, str]]:
     return sorted(spans)
 
 
+def _timeframe_spans(text: str) -> list[tuple[int, int, str]]:
+    """Every timeframe the rule may be built from.
+
+    A refused timeframe is not one of them. ``don't use 15m`` names 15m and asks
+    for it not to be used; reading the mention and ignoring the refusal is how the
+    product came to run on the one timeframe the trader had ruled out.
+    """
+    return [
+        span for span in _all_timeframe_spans(text) if not rejects_following(text[: span[0]])
+    ]
+
+
+def rejected_timeframes(text: str) -> tuple[str, ...]:
+    """Every timeframe this text refuses."""
+    collapsed = _collapse(text)
+    return _unique(
+        canonical
+        for start, _end, canonical in _all_timeframe_spans(collapsed)
+        if rejects_following(collapsed[:start])
+    )
+
+
 def _distance(position: int, start: int, end: int) -> int:
     if start <= position <= end:
         return 0
@@ -1459,11 +1531,154 @@ def _distance(position: int, start: int, end: int) -> int:
 
 
 def detect_direction(text: str) -> StrategyDirection | None:
+    """The side this text asks for, ignoring any side it refuses.
+
+    ``not short`` names ``short`` and refuses it. Returning SHORT here is what
+    turned a refusal into a short strategy, so a refused term is passed over and
+    the next unrefused one — if there is one — answers instead.
+    """
     lowered = f" {_collapse(text).casefold()} "
     for term, direction in _DIRECTION_TERMS.items():
-        if re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", lowered):
-            return direction
+        for match in re.finditer(rf"(?<![a-z]){re.escape(term)}(?![a-z])", lowered):
+            if not rejects_following(lowered[: match.start()]):
+                return direction
     return None
+
+
+def rejected_directions(text: str) -> tuple[StrategyDirection, ...]:
+    """Every side this text refuses."""
+    lowered = f" {_collapse(text).casefold()} "
+    refused: list[StrategyDirection] = []
+    for term, direction in _DIRECTION_TERMS.items():
+        for match in re.finditer(rf"(?<![a-z]){re.escape(term)}(?![a-z])", lowered):
+            if rejects_following(lowered[: match.start()]) and direction not in refused:
+                refused.append(direction)
+    return tuple(refused)
+
+
+#: Words that open a question outright, in the four languages the product serves.
+_INTERROGATIVE_OPENERS: tuple[str, ...] = (
+    "what",
+    "whats",
+    "what's",
+    "which",
+    "how",
+    "hows",
+    "how's",
+    "why",
+    "when",
+    "who",
+    "whom",
+    "whose",
+    "where",
+    "ما",
+    "ماذا",
+    "لماذا",
+    "كيف",
+    "متى",
+    "أين",
+    "اين",
+    "هل",
+    "كم",
+    "ايه",
+    "إيه",
+    "ليه",
+    "ازاي",
+    "إزاي",
+    "امتى",
+    "إمتى",
+    "فين",
+    "كام",
+    "eh",
+    "leh",
+    "ezay",
+    "izay",
+    "emta",
+    "fen",
+    "feen",
+    "kam",
+    "hal",
+)
+
+#: Auxiliaries that put a question in front of its subject (``is 15m the same…``).
+_INTERROGATIVE_AUXILIARIES: tuple[str, ...] = (
+    "is",
+    "are",
+    "was",
+    "were",
+    "am",
+    "do",
+    "does",
+    "did",
+    "can",
+    "could",
+    "should",
+    "would",
+    "will",
+    "shall",
+    "have",
+    "has",
+    "had",
+    "may",
+    "might",
+    "must",
+)
+
+#: Conjunctions the splitter leaves at the head of a clause.
+_LEADING_CONJUNCTION_RE = re.compile(
+    r"^\W*(?:and|but|or|so|then|also|plus)\b\s*",
+    re.IGNORECASE,
+)
+
+_OPENER_RE = re.compile(
+    rf"^(?:{'|'.join(re.escape(word) for word in _INTERROGATIVE_OPENERS)})"
+    r"(?![0-9A-Za-z؀-ۿ])",
+    re.IGNORECASE,
+)
+_AUXILIARY_RE = re.compile(
+    rf"^(?:{'|'.join(_INTERROGATIVE_AUXILIARIES)})(?![0-9A-Za-z])\s*",
+    re.IGNORECASE,
+)
+#: An operator word directly after an auxiliary makes a predicate, not a question:
+#: the splitter turns ``RSI is above 30 and is below 70`` into a clause beginning
+#: ``is below 70``, which states a condition and must keep authoring the rule.
+_OPERATOR_HEAD_RE = re.compile(
+    rf"^(?:{'|'.join(re.escape(term) for term, _comparator in _OPERATOR_TERMS)})"
+    r"(?![0-9A-Za-z])",
+    re.IGNORECASE,
+)
+
+
+def is_interrogative(text: str) -> bool:
+    """True when this segment **asks** rather than instructs.
+
+    A question can never author a rule. The README states the guarantee with a
+    worked example — in ``drop LTC, and is 5% a lot on a 15m candle?`` the 5% and
+    the 15m belong to the question — and until this reader existed the code did
+    not hold it: the question's values were read straight onto the draft, so
+    asking what a timeframe meant silently moved a live monitor onto it.
+
+    The decision is grammatical, not punctuation. A trader who drops the question
+    mark has still asked a question, and a segment can end in one without the
+    grammar of a question, so three independent readings are used:
+
+    1. an interrogative word opens the segment (``what``, ``ليه``, ``ezay``)
+    2. an auxiliary opens it in front of its subject (``is 15m the same as…``),
+       unless what follows is an operator, which makes it a predicate instead
+    3. the segment ends in a question mark
+    """
+    collapsed = _collapse(text)
+    if not collapsed:
+        return False
+    body = _LEADING_CONJUNCTION_RE.sub("", collapsed).lstrip("\"'“”‘’ \t(-")
+    if not body:
+        return False
+    if _OPENER_RE.match(body):
+        return True
+    auxiliary = _AUXILIARY_RE.match(body)
+    if auxiliary and not _OPERATOR_HEAD_RE.match(body[auxiliary.end() :]):
+        return True
+    return collapsed.rstrip().endswith(("?", "؟"))
 
 
 def detect_sweep(text: str) -> bool:
@@ -1474,15 +1689,24 @@ def detect_sweep(text: str) -> bool:
 
 
 def detect_threshold(text: str) -> tuple[float | None, bool]:
-    """Return ``(value, is_percent)`` for the first numeric threshold in ``text``."""
-    percent = _PERCENT_RE.search(text)
-    if percent is not None:
+    """Return ``(value, is_percent)`` for the first numeric threshold in ``text``.
+
+    A refused number is not a threshold. ``don't use 5%`` names 5% and rules it
+    out; taking it anyway put the exact number the trader rejected on the draft.
+    ``not below 30`` is untouched by this — ``below`` sits between the refusal and
+    the number, so the number is not the thing being refused.
+    """
+    for percent in _PERCENT_RE.finditer(text):
+        if rejects_following(text[: percent.start()]):
+            continue
         number = _NUMBER_RE.search(percent.group(0))
         if number is not None:
             return float(number.group(0)), True
     # A bare timeframe such as `15m` is not a threshold.
     without_timeframes = _TIMEFRAME_RE.sub(" ", text)
     for number in _NUMBER_RE.finditer(without_timeframes):
+        if rejects_following(without_timeframes[: number.start()]):
+            continue
         # Ordered-list labels describe presentation, not thresholds.
         before_number = without_timeframes[: number.start()]
         after_number = without_timeframes[number.end() :]
@@ -1543,6 +1767,15 @@ def classify_fragment(text: str) -> ClassifiedFragment:
     comparator = detect_comparator(collapsed)
     threshold, is_percent = detect_threshold(collapsed)
     sweep = detect_sweep(collapsed)
+    asks = is_interrogative(collapsed)
+    requests_unsupported = tuple(
+        dict.fromkeys(
+            (
+                *(entry.key for entry in requested_boundaries(collapsed)),
+                *(("stocks_and_forex",) if mentions_forex_pair(collapsed) else ()),
+            )
+        )
+    )
     # The direct extractor handles formatting and wider grammatical context (for
     # example `**NOT** LTCUSDT`) that the compact per-symbol reader intentionally
     # does not. Both are deterministic and source-bound.
@@ -1565,6 +1798,8 @@ def classify_fragment(text: str) -> ClassifiedFragment:
             comparator=comparator,
             threshold=threshold,
             threshold_is_percent=is_percent,
+            asks=asks,
+            requests_unsupported=requests_unsupported,
             is_sweep=sweep,
         )
 
@@ -1910,10 +2145,25 @@ def _split_fragments(text: str) -> tuple[str, ...]:
         protected,
         flags=re.IGNORECASE,
     )
+    # `anything but 15m` is one clause. The conjunction belongs to the rejection
+    # phrase, not between two clauses, and splitting there left `15m` standing with
+    # nothing in front of it — so the refusal vanished and 15m was adopted as the
+    # timeframe the trader had just ruled out. `nothing but BTCUSDT` is the same
+    # shape pointing the other way, and lost its narrowing word for the same reason.
+    protected = re.sub(
+        r"(?<!\w)((?:any|every|no)(?:thing|one))\s+(but)\b",
+        "\\1\x01\\2",
+        protected,
+        flags=re.IGNORECASE,
+    )
     parts = re.split(r"[\n.;]+|,\s*|\s+\b(?:and|but|then|also|plus|except)\b\s+", protected)
     cleaned = tuple(
         " ".join(
-            part.replace("\x00", ".").replace("__hm_compound_and__", "and").strip(" -:\t").split()
+            part.replace("\x00", ".")
+            .replace("\x01", " ")
+            .replace("__hm_compound_and__", "and")
+            .strip(" -:\t")
+            .split()
         )
         for part in parts
     )
@@ -1971,21 +2221,20 @@ def _excluded_symbols(text: str, symbols: tuple[str, ...]) -> tuple[str, ...]:
         # `BTC/USDT ... but not LTC/USDT` added LTC to the watchlist, because the
         # fragment reader cuts the sentence at `but` and the pair `but not` was gone
         # by the time this prefix was examined.
-        adjacent_negation = bool(re.search(r"\b(?:not|nor|neither)\W*$", prefix))
-        trailing_exclude = any(
-            re.search(
-                rf"^\W*(?:fully\s+|hard\s+)?{re.escape(marker)}(?!\s*:)",
-                suffix,
-            )
-            for marker in _TRAILING_EXCLUSION_MARKERS
+        # A rejection standing directly in front of the symbol, with only filler
+        # between. `nor` and `neither` are spellings the shared vocabulary does not
+        # carry because they refuse nothing on their own outside a symbol list.
+        adjacent_negation = rejects_following(prefix) or bool(
+            re.search(r"\b(?:nor|neither)\W*$", prefix)
         )
+        trailing_exclude = opens_with_trailing_exclusion(suffix)
         if (
             explicit_exclude
             or keep_out
             or (
                 not explicit_include
                 and (
-                    any(marker in prefix for marker in _EXCLUSION_MARKERS)
+                    mentions_universe_exclusion(prefix)
                     or adjacent_negation
                     or trailing_exclude
                 )
@@ -2326,22 +2575,38 @@ def _residual_vocabulary(
     # from looking like market vocabulary purely because of the percent sign.
     residual = _PERCENT_RE.sub(" ", residual)
     residual = _NUMBER_RE.sub(" ", residual)
-    for term, _comparator in _OPERATOR_TERMS:
-        residual = re.sub(
-            rf"(?<![a-z]){re.escape(term)}(?![a-z])", " ", residual, flags=re.IGNORECASE
-        )
-    for term in _DIRECTION_TERMS:
-        residual = re.sub(
-            rf"(?<![a-z]){re.escape(term)}(?![a-z])", " ", residual, flags=re.IGNORECASE
-        )
-    for marker in (*_EXCLUSION_MARKERS, *_INCLUSION_ONLY_MARKERS):
-        residual = re.sub(
-            rf"(?<![a-z]){re.escape(marker.strip())}(?![a-z])",
-            " ",
-            residual,
-            flags=re.IGNORECASE,
-        )
+    residual = _UNDERSTOOD_VOCABULARY_RE.sub(" ", residual)
     return " ".join(residual.split())
+
+
+def _understood_vocabulary_pattern() -> re.Pattern[str]:
+    """One pattern for every word this module has already read.
+
+    This was three loops running an uncompiled ``re.sub`` per term — roughly a
+    hundred and eighty of them per fragment, each rebuilding its pattern with
+    ``re.escape`` and re-consulting the regex cache. It was already the most
+    expensive thing in fragment classification, and widening the exclusion
+    vocabulary to cover Arabic and Arabizi made it worse: reading one long turn
+    went from milliseconds to a tenth of a second, and the suites that read
+    thousands of them stopped finishing.
+
+    One compiled alternation, longest first, removes exactly the same words.
+    Longest-first is what preserves the old behaviour: the loops ran in table
+    order, and ``at least`` had to win over the ``least`` inside it.
+    """
+
+    terms = {
+        *(term for term, _comparator in _OPERATOR_TERMS),
+        *_DIRECTION_TERMS,
+        *(marker.strip() for marker in (*_EXCLUSION_MARKERS, *_INCLUSION_ONLY_MARKERS)),
+    }
+    alternation = "|".join(
+        re.escape(term) for term in sorted(terms, key=lambda term: (-len(term), term))
+    )
+    return re.compile(rf"(?<![a-z])(?:{alternation})(?![a-z])", re.IGNORECASE)
+
+
+_UNDERSTOOD_VOCABULARY_RE = _understood_vocabulary_pattern()
 
 
 def _canonical_timeframe(amount: str, unit: str) -> str | None:
